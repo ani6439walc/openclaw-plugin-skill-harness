@@ -2,83 +2,25 @@
 id: TYPO
 name: Typo Correction
 triggers:
-- "User's input has obvious typos, garbled text, or truncated/distorted text that makes the meaning unclear"
-- "User's message appears to be a typing error, pinyin mistake, or keyboard mistouch producing gibberish"
+- "User input contains obvious typos, garbled text, or truncated text that makes the intended meaning unclear"
 examples:
 - "Look up how to use opencaw"
-- "What was that thing I told you about yesterday"
-- "Why does this bug keep 出獻 (appearing)"
+- "Why does this bug keep 出獻"
 - "wj/6u ek72;3042k7"
+- "can u hlpe me fix thsi"
 ---
 
-Detected "typo" intent. The user's message contains garbled, misspelled, or unclear text. Re-interpret the corrected intent before proceeding.
+Detected "typo" intent. The user's message likely contains misspellings or damaged text that should be interpreted before responding.
 
-## ⚠️ CRITICAL SAFETY RULES (apply to ALL steps)
+## Guidelines
 
-1. **NEVER mock or embarrass the user** for typos. Treat it as a normal communication friction.
-2. **NEVER guess wildly** when the typo is too ambiguous. Ask for clarification if multiple interpretations exist.
-3. **Preserve the user's original meaning** as closely as possible when correcting.
-4. If the typo is in a technical keyword (function name, API, variable), double-check the corrected form against official docs.
+- Preserve the user's intended meaning as closely as possible.
+- Do not mock or call unnecessary attention to the typo.
+- If the intended meaning is clear, continue using the corrected interpretation.
+- If the message is too ambiguous, ask for a brief clarification.
 
-## Step 1 — Typo Classification
+## Response Strategy
 
-Identify the type of typo to determine correction strategy:
-
-| Typo Type | Example | Correction Strategy |
-|---|---|---|
-| **Phonetic / Pinyin** | "opencaw" → "openclaw" | Map to closest phonetic match in known vocabulary |
-| **Keyboard Adjacent** | "ek72" → "help" | Check QWERTY neighbor keys |
-| **Garbled / Random** | "wj/6u" → ??? | Too ambiguous — ask for clarification |
-| **Mixed Language** | "出獻" → "出現" | Context-aware character substitution |
-| **Truncated** | "3042k7" → (incomplete) | Ask user to complete the word/sentence |
-| **Auto-correct Error** | "defiantly" → "definitely" | Common auto-correct trap detection |
-
-## Step 2 — Correction & Intent Re-interpretation
-
-1. **Generate 1-3 possible corrections** based on context and known vocabulary.
-2. **Score each candidate** by:
-   - Phonetic similarity
-   - Keyboard distance
-   - Contextual fit with recent conversation
-   - Presence in project glossary or memory
-3. **Pick the highest-confidence correction**.
-
-**Example:**
-```
-User: "幫我查一下 opencaw 怎麼用"
-→ Typo: "opencaw"
-→ Candidates: "openclaw" (99%), "opencart" (1%)
-→ Corrected: "幫我查一下 openclaw 怎麼用"
-→ Re-interpreted intent: RESEARCH (OpenClaw plugin SDK)
-```
-
-## Step 3 — Handling Ambiguity
-
-If the corrected text is still ambiguous (confidence < 70%):
-
-```
-"Did you mean (a) openclaw, (b) opencart, or (c) something else?"
-```
-
-If the typo is completely unrecoverable (garbled/random):
-
-```
-"Sorry, I couldn't quite understand that. Could you rephrase?"
-```
-
-## Step 4 — Proceed with Corrected Query
-
-After correction, proceed with the user's intended request using the corrected query. Do **not** mention the typo correction in the final response unless the user explicitly asks.
-
-## Tools Used
-
-| Tool | Purpose | When to Use |
-|---|---|---|
-| *(none)* | Typo correction is done via LLM reasoning | N/A |
-| `memory_search` | Optional: check if the typo resembles a known entity | When the typo might be a known project name or term in memory |
-
-## Skills Referenced
-
-| Skill | Purpose | When to Use |
-|---|---|---|
-| *(none)* | Typo correction requires no external skills | N/A |
+- Correct silently when confidence is high.
+- Ask a concise clarification question when confidence is low.
+- Keep the correction behavior simple and context-aware.

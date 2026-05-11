@@ -314,8 +314,8 @@ describe("buildIntentionPrompt", () => {
       prompt: "Chat hint",
     },
     {
-      id: "RESEARCH",
-      name: "Research Query",
+      id: "RESEARCH_GENERAL",
+      name: "General Research Query",
       enabled: true,
       triggers: ["Technical question"],
       examples: [],
@@ -354,8 +354,8 @@ describe("buildIntentionPrompt", () => {
     });
     expect(prompt).toContain("id: CHAT");
     expect(prompt).toContain("name: Casual Chat");
-    expect(prompt).toContain("id: RESEARCH");
-    expect(prompt).toContain("name: Research Query");
+    expect(prompt).toContain("id: RESEARCH_GENERAL");
+    expect(prompt).toContain("name: General Research Query");
     expect(prompt).toContain("id: TYPO");
     expect(prompt).toContain("name: Typo Correction");
     expect(prompt).not.toContain("id: MEMORY");
@@ -544,8 +544,8 @@ describe("buildPromptPrefix", () => {
       prompt: "Reply naturally.",
     },
     {
-      id: "RESEARCH",
-      name: "Research Query",
+      id: "RESEARCH_GENERAL",
+      name: "General Research Query",
       enabled: true,
       triggers: ["Technical question"],
       examples: [],
@@ -586,7 +586,7 @@ describe("buildPromptPrefix", () => {
   it("includes optional fields when present", () => {
     const result = buildPromptPrefix(
       {
-        intent: "RESEARCH",
+        intent: "RESEARCH_GENERAL",
         reason: "test",
         goal: "search",
         suggestion: "try web_search",
