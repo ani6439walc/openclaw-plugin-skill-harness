@@ -1,7 +1,7 @@
 # Intention Hint Plugin
+
 [![OpenClaw](https://img.shields.io/badge/Platform-OpenClaw-blue.svg)](https://github.com/openclaw/openclaw)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 
 An OpenClaw plugin that pre-scans user intent before main-agent replies and injects routing hints via the `before_prompt_build` hook.
 
@@ -178,3 +178,7 @@ index.ts
 
 - Plugin architecture based on [openclaw/openclaw/extensions/active-memory](https://github.com/openclaw/openclaw/tree/main/extensions/active-memory)
 - Intent classification adapted from `sisyphus` Intent Gate
+
+---
+
+_🌸　Powered by Ａni | [OpenClaw Plugin] © 2026_
