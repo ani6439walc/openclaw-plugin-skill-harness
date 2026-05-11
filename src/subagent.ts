@@ -83,20 +83,16 @@ Do not answer the user directly.
 Classify into ONE of these categories:
 ${intentDescriptions}
 
-Return exactly in this format (one key per line):
-<OUTPUT_FORMAT>
+Return exactly in this format (one key per line, with NO markdown code blocks or xml tags):
 intent: <id> (<name>)
 reason: <brief reason for classification>
 goal: <what the user likely wants to achieve>
 suggestion: <optional correction or recommendation>
 suggestedTools: <optional comma-separated tool names>
 suggestionSkills: <optional comma-separated skill names>
-</OUTPUT_FORMAT>
 
 If you cannot decide, default to:
-<OUTPUT_FORMAT>
 ${fallbackText}
-</OUTPUT_FORMAT>
 
 Conversation context:
 <CONVERSATION>
