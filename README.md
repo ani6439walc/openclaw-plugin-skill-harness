@@ -142,17 +142,16 @@ The plugin ships with these pre-defined intents:
 
 | ID | Name | Description |
 |----|------|-------------|
-| `chat` | Social Chat | Greetings, small talk, or emotional connection. |
-| `code-review` | Code Review | Reviewing code, architecture, or quality concerns. |
-| `memory-chronology` | Memory Chronology | How something changed over time. |
-| `memory-compare` | Memory Compare | Comparing two topics or time periods. |
-| `memory-emotional` | Memory Emotional | Feelings, mood, or emotional state. |
-| `memory-meta` | Memory Meta | System, SOP, or memory structure questions. |
-| `memory-recent` | Memory Recent | Time-bounded queries ("today", "yesterday"). |
-| `memory-standard` | Memory Standard | General memory retrieval. |
-| `research` | Research | Technical questions, facts, library usage. |
-| `typo` | Typo Correction | Obvious typos or unclear phrasing. |
-| `other` | Other / Fallback | Unclassifiable or multi-intent input. |
+| `CHAT` | Casual Chat | Greetings, small talk, or emotional connection. |
+| `CODE_REVIEW` | Code Review | Reviewing code, architecture, or quality concerns. |
+| `MEMORY_CHRONOLOGY` | Memory Chronology | How something changed over time. |
+| `MEMORY_COMPARE` | Memory Compare | Comparing two topics or time periods. |
+| `MEMORY_EMOTIONAL` | Memory Emotional | Feelings, mood, or emotional state. |
+| `MEMORY_META` | Memory Meta | System, SOP, or memory structure questions. |
+| `MEMORY_RECENT` | Memory Recent | Time-bounded queries ("today", "yesterday"). |
+| `MEMORY_STANDARD` | Memory Standard | General memory retrieval. |
+| `RESEARCH` | Research | Technical questions, facts, library usage. |
+| `TYPO` | Typo Correction | Obvious typos or unclear phrasing. |
 
 To customize, edit the files in `intents/` or create new ones. Files are loaded in alphabetical order; duplicate `id`s override previous definitions.
 
