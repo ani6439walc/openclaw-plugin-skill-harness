@@ -73,6 +73,20 @@ The boundary summary should explain:
 
 If the proposed design is still too broad or collides badly with an existing intent, do not force a final draft yet. Say what decision is still unresolved and ask the smallest next question.
 
+When proposing skill or tool hints inside the final draft:
+- use the README's required skill format
+- use the README's required tool-call format
+- do not invent ad-hoc labels or freeform tool prose when a concrete call shape is more appropriate
+
+Examples:
+
+```markdown
+- Read a large Markdown document by section:
+  skill: treemd
+- Search recorded memory:
+  memory_search({ query: "<subject_A_keywords>", corpus: "memory", maxResults: 5, minScore: 0.1 })
+```
+
 ## Output shape after the interview
 
 When enough information is collected, produce a draft in this shape:
