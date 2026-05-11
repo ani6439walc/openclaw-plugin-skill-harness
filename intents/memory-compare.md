@@ -15,17 +15,20 @@ Detected "memory comparison" intent. The user wants two or more remembered subje
 
 ## Guidelines
 
+- Treat the latest user message as the primary retrieval target.
+- Use recent conversation only to disambiguate what the latest message refers to.
 - Retrieve each subject separately before comparing them.
 - Keep the comparison neutral and based on recorded evidence.
 - Do not assume missing details for one side.
-- Use this intent when the user's question is about contrast or similarity rather than a single memory lookup.
 
 ## Response Strategy
 
-- Identify the subjects being compared.
-- Search memory for each subject independently.
+- Reformulate the user's comparison into clear subject A and subject B targets when references are ambiguous.
+- Distill separate high-value keywords for each subject before searching.
+- Search memory for each subject independently instead of using a merged comparison query.
 - Align the most relevant comparable details.
 - Highlight similarities, differences, and obvious data gaps.
+- If one side is weakly supported, say so clearly.
 
 - Read a large Markdown memory note by section:
   skill: treemd

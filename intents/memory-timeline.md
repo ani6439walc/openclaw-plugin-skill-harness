@@ -15,14 +15,17 @@ Detected "memory timeline" intent. The user wants a time-ordered view of how som
 
 ## Guidelines
 
+- Treat the latest user message as the primary retrieval target.
+- Use recent conversation only to disambiguate what the latest message refers to.
 - Focus on progression, milestones, and transitions across time.
 - Keep the answer chronological instead of treating the query as a single-point lookup.
 - Do not invent missing stages; call out gaps when memory is sparse.
-- Use this intent when the user is asking about evolution rather than a single recent event.
 
 ## Response Strategy
 
-- Search memory for multiple points across the timeline.
+- Reformulate the user's request into a timeline-oriented retrieval target when references are ambiguous.
+- Distill the topic into a few high-value timeline keywords before searching.
+- Search memory for multiple points across the timeline instead of relying on a single hit.
 - Reconstruct the sequence from older records to newer ones.
 - Highlight major transitions, milestones, or turning points.
 - If the memory record is sparse, say where the timeline is incomplete.

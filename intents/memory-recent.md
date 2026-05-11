@@ -17,6 +17,8 @@ Detected "recent memory" intent. The user wants a recent record from a narrow ti
 
 ## Guidelines
 
+- Treat the latest user message as the primary retrieval target.
+- Use recent conversation only to disambiguate what the latest message refers to.
 - Prefer recent raw diary files over broad semantic retrieval.
 - Focus on explicit time cues from the user's question.
 - Do not guess dates or fabricate missing entries.
@@ -24,9 +26,11 @@ Detected "recent memory" intent. The user wants a recent record from a narrow ti
 
 ## Response Strategy
 
-- Narrow the search to the most likely recent files first.
+- Infer the recent time window from the user's wording.
+- Reformulate the request into a few high-value keywords before searching.
 - Search recent raw diary files directly before using broader memory lookup methods.
 - Return the most relevant recent record first.
+- If raw recent files are missing or thin, say so instead of overreaching.
 - Treat broad historical, comparative, emotional, or timeline questions as separate intents.
 
 - Read a large recent memory note by section:

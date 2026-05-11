@@ -210,6 +210,49 @@ Examples:
 
 When an intent starts absorbing neighboring use cases, split it instead of making it broader.
 
+### Memory Retrieval Principles
+
+The memory family is slightly different from simple routing intents because it is designed to replace heavier pre-answer memory subagent work with a lighter intent-guided retrieval handoff.
+
+#### 1. Treat the latest user message as primary
+
+- Use the latest user message as the main retrieval target.
+- Use recent conversation only to disambiguate pronouns, relative references, or scope.
+- Do not return memory just because it matches the broader recent topic.
+
+#### 2. Reformulate before retrieving
+
+- Rewrite the user's request into a self-contained retrieval target when references are ambiguous.
+- Distill 3–5 high-value concepts before searching.
+- For Traditional Chinese queries, space-separate key nouns or concepts when it improves matching.
+
+#### 3. Match the retrieval method to the memory intent
+
+- `MEMORY_LOOKUP` should prefer general memory retrieval.
+- `MEMORY_RECENT` should prefer recent raw diary files and direct recent-file search.
+- `MEMORY_TIMELINE` should reconstruct change over multiple points in time.
+- `MEMORY_COMPARE` should retrieve each subject separately before comparison.
+- `MEMORY_EMOTION` should prioritize emotional signals and related context.
+
+#### 4. Favor recorded evidence over guesses
+
+- Return recorded memory only when it materially helps answer the latest user message.
+- If memory is weak, missing, or incomplete, say so clearly.
+- Memory intents may include slightly more retrieval guidance than casual or research intents, but should still avoid turning into full engine specifications.
+
+### Memory Family Summary
+
+Use the memory family to route memory questions into the smallest retrieval strategy that still preserves active-memory-style usefulness.
+
+- `MEMORY_LOOKUP`: Broad past recall for prior records, preferences, habits, routines, or personal facts without a narrow recent, emotional, comparative, or timeline-specific focus.
+- `MEMORY_RECENT`: Narrow recent recall such as today, yesterday, this week, or the last few days; prefer raw diary files and direct recent-file search.
+- `MEMORY_TIMELINE`: Time-ordered recall about change, progress, evolution, or milestones across multiple points in time.
+- `MEMORY_COMPARE`: Side-by-side recall for two or more remembered subjects; retrieve each subject separately before aligning differences and similarities.
+- `MEMORY_EMOTION`: Recall centered on feelings, mood, stress, frustration, happiness, or other emotional reactions; prioritize emotional signals before surrounding context.
+- `SYSTEM_DOCS`: Lookup for recorded system-side notes, SOPs, rules, configs, or project documentation rather than personal diary-style memory.
+
+Use the smallest matching memory intent. If a query primarily asks about recent events, emotion, change over time, or comparison, prefer that specialized intent over `MEMORY_LOOKUP`.
+
 ### Injection Format
 
 When the classifier matches an intent, the plugin injects the following structure as untrusted context:

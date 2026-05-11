@@ -17,16 +17,18 @@ Detected "general memory lookup" intent. The user wants past records or prior in
 
 ## Guidelines
 
+- Treat the latest user message as the primary retrieval target.
+- Use recent conversation only to disambiguate what the latest message refers to.
 - Search recorded memory instead of guessing.
 - Use this intent for broad past recall without a narrow time window.
-- Keep the answer tied to what is actually recorded.
 - If memory is weak or missing, say so clearly.
 
 ## Response Strategy
 
-- Search memory for the most relevant prior records.
-- Use recent context only to disambiguate the user's reference.
-- Return the most relevant memory first.
+- Reformulate the user's request into a self-contained memory target when references are ambiguous.
+- Distill a few high-value keywords before searching.
+- Use a permissive retrieval threshold for preferences, habits, routines, or personal facts.
+- Return the most relevant recorded memory first.
 - Treat recent, emotional, timeline, or comparison questions as separate intents.
 
 - Read a large Markdown memory note by section:

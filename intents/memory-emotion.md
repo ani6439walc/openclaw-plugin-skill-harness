@@ -15,14 +15,16 @@ Detected "emotional memory" intent. The user wants to understand feelings, mood,
 
 ## Guidelines
 
+- Treat the latest user message as the primary retrieval target.
+- Use recent conversation only to disambiguate what the latest message refers to.
 - Focus on emotional signals instead of only technical facts.
 - Do not infer emotions that are not supported by the record.
-- Use this intent when the user's question is about feelings, stress, happiness, frustration, or similar states.
 - If emotional evidence is weak or absent, say so clearly.
 
 ## Response Strategy
 
-- Search memory for emotional signals and relevant context.
+- Reformulate the user's request into an emotional retrieval target when references are ambiguous.
+- Search emotional signals first, then use event or topic context as supporting retrieval.
 - Prioritize records with explicit emotional language or tags.
 - Explain the emotion together with the event or trigger that appears to be related.
 - If the surrounding context matters, read the relevant note before summarizing.
