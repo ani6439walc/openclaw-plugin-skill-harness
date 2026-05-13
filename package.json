@@ -4,6 +4,7 @@
   "type": "module",
   "files": [
     "dist",
+    "intents/**",
     "package.json",
     "openclaw.plugin.json",
     "README.md",
