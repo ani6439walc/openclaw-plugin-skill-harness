@@ -8,7 +8,7 @@ const {
   buildIntentionEmbeddedRunParams,
   parseIntentionResult,
   buildPromptPrefix,
-  buildQuery,
+  applyQueryFilters,
   extractRecentTurns,
   getModelRef,
   clampInt,
@@ -255,49 +255,57 @@ describe("isAllowedChatId", () => {
   });
 });
 
-/* ── Query builder ──────────────────── */
+/* ── Query filtering ────────────────── */
 
-describe("buildQuery", () => {
-  it("returns latest message only in message mode", () => {
+describe("applyQueryFilters", () => {
+  const turns = [
+    { role: "user" as const, text: "first question" },
+    { role: "assistant" as const, text: "first answer" },
+    { role: "user" as const, text: "follow up" },
+    { role: "assistant" as const, text: "follow up answer" },
+  ];
+
+  it("returns empty in message mode (caller provides latest)", () => {
     expect(
-      buildQuery({ latestUserMessage: "hello", queryMode: "message" }),
-    ).toBe("hello");
+      applyQueryFilters(turns, { queryMode: "message" }),
+    ).toEqual([]);
   });
 
-  it("returns latest when no recent turns in recent mode", () => {
-    expect(
-      buildQuery({ latestUserMessage: "hello", queryMode: "recent" }),
-    ).toBe("hello");
+  it("returns all turns in full mode", () => {
+    const result = applyQueryFilters(turns, { queryMode: "full" });
+    expect(result).toEqual(turns);
   });
 
-  it("includes recent conversation tail in recent mode", () => {
-    const result = buildQuery({
-      latestUserMessage: "final question",
-      recentTurns: [
-        { role: "user", text: "first" },
-        { role: "assistant", text: "answer" },
-      ],
+  it("applies turn limits in recent mode", () => {
+    const result = applyQueryFilters(turns, {
       queryMode: "recent",
+      recentUserTurns: 1,
+      recentAssistantTurns: 1,
     });
-    expect(result).toContain("Recent conversation tail:");
-    expect(result).toContain("user: first");
-    expect(result).toContain("assistant: answer");
-    expect(result).toContain("Latest user message:");
-    expect(result).toContain("final question");
+    // Picks last user turn first, then last assistant turn (unshift order)
+    expect(result.length).toBe(2);
+    expect(result[0]).toEqual({ role: "user", text: "follow up" });
+    expect(result[1]).toEqual({ role: "assistant", text: "follow up answer" });
   });
 
-  it("includes full context in full mode", () => {
-    const result = buildQuery({
-      latestUserMessage: "final question",
-      recentTurns: [
-        { role: "user", text: "first" },
-        { role: "assistant", text: "answer" },
-      ],
-      queryMode: "full",
+  it("applies character limits in recent mode", () => {
+    const longTurn = {
+      role: "user" as const,
+      text: "This is a very long message that should be truncated because it exceeds the limit",
+    };
+    const result = applyQueryFilters([longTurn], {
+      queryMode: "recent",
+      recentUserChars: 20,
     });
-    expect(result).toContain("first");
-    expect(result).toContain("answer");
-    expect(result).toContain("final question");
+    expect(result.length).toBe(1);
+    expect(result[0].text.length).toBeLessThanOrEqual(35);
+    expect(result[0].text).toContain("(truncated...)");
+  });
+
+  it("handles empty turns gracefully", () => {
+    expect(
+      applyQueryFilters([], { queryMode: "recent" }),
+    ).toEqual([]);
   });
 });
 

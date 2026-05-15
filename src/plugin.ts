@@ -9,7 +9,7 @@ import { clampInt, normalizePluginConfig } from "./config.js";
 import { loadIntents } from "./intent-loader.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildQuery, extractRecentTurns } from "./query.js";
+import { applyQueryFilters, extractRecentTurns } from "./query.js";
 import {
   isAllowedChatId,
   isAllowedChatType,
@@ -128,8 +128,16 @@ export function createPlugin(api: OpenClawPluginApi) {
               return undefined;
             }
 
-            const recentTurns = extractRecentTurns(event.messages);
+            const allTurns = extractRecentTurns(event.messages);
             const latestUserMessage = event.prompt ?? "";
+
+            const conversation = applyQueryFilters(allTurns, {
+              queryMode: config.queryMode,
+              recentUserTurns: config.recentUserTurns,
+              recentAssistantTurns: config.recentAssistantTurns,
+              recentUserChars: config.recentUserChars,
+              recentAssistantChars: config.recentAssistantChars,
+            });
 
             const modelRef = getModelRef(api, effectiveAgentId, config, {
               modelProviderId: ctx.modelProviderId,
@@ -148,7 +156,7 @@ export function createPlugin(api: OpenClawPluginApi) {
               agentId: effectiveAgentId,
               sessionKey: resolvedSessionKey,
               sessionId: ctx.sessionId,
-              conversation: recentTurns,
+              conversation,
               latest: latestUserMessage,
               messageProvider: ctx.messageProvider,
               channelId: ctx.channelId,
@@ -182,7 +190,7 @@ export const __testing = {
   buildIntentionEmbeddedRunParams,
   parseIntentionResult,
   buildPromptPrefix,
-  buildQuery,
+              applyQueryFilters,
   extractRecentTurns,
   getModelRef,
   isEnabledForAgent,
