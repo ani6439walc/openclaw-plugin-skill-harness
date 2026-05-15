@@ -79,7 +79,7 @@ export function buildIntentionPrompt(params: {
   const conversationXml =
     params.conversation && params.conversation.length > 0
       ? params.conversation
-          .map((turn) => `  <turn role="${turn.role}">${turn.text}</turn>`)
+          .map((turn) => `<turn role="${turn.role}">${turn.text}</turn>`)
           .join("\n")
       : "";
 
