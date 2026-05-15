@@ -56,8 +56,9 @@ export function buildIntentionPrompt(params: {
   intents: IntentDefinition[];
 }): string {
   const enabledIntents = params.intents.filter((i) => i.enabled);
+  const allIntents = [...enabledIntents, FALLBACK_INTENT];
 
-  const intentDescriptions = enabledIntents
+  const intentDescriptions = allIntents
     .map((intent) => {
       const lines = [`<INTENT>`, `id: ${intent.id}`, `name: ${intent.name}`];
       if (intent.triggers.length > 0) {
@@ -73,15 +74,10 @@ export function buildIntentionPrompt(params: {
     })
     .join("\n\n");
 
-  const fallbackText = `intent: OTHER (Unclassified)\nreason: Unable to confidently classify\ngoal: Let the main agent handle the intent determination.`;
-
   return `You are an intention classification agent.
 Another model is preparing the final user-facing answer.
 Your job is to analyze the user's intent and return a structured hint.
 Do not answer the user directly.
-
-Classify the LATEST USER MESSAGE into ONE of these categories:
-${intentDescriptions}
 
 IMPORTANT CLASSIFICATION RULES:
 1. Use the conversation history to understand the latest message in context — pronouns, implicit references, and topic continuations all depend on prior turns.
@@ -107,7 +103,13 @@ complexity: <simple | moderate | complex — how complex the task is>
 
 FALLBACK:
 If none of the provided intents confidently fit, return:
-${fallbackText}
+intent: ${FALLBACK_INTENT.id} (${FALLBACK_INTENT.name})
+reason: <brief reason for classification>
+goal: <what the user likely wants to achieve>
+suggestion: <optional correction or recommendation>
+
+Classify the LATEST USER MESSAGE into ONE of these categories:
+${intentDescriptions}
 
 CONVERSATIONS:
 ${params.query}
@@ -151,12 +153,13 @@ export function parseIntentionResult(
     }
   }
 
-  const fallbackIntent =
-    validIntentIds.find((id) => id === "other") ?? validIntentIds[0] ?? "other";
-
-  let intent = result.intent ?? fallbackIntent;
-  if (!validIntentIds.includes(intent)) {
-    intent = fallbackIntent;
+  let intent = result.intent ?? FALLBACK_INTENT.id;
+  // Case-insensitive OTHER check
+  const isOther =
+    intent.toUpperCase() === FALLBACK_INTENT.id &&
+    validIntentIds.some((id) => id.toUpperCase() === FALLBACK_INTENT.id);
+  if (!validIntentIds.includes(intent) && !isOther) {
+    intent = FALLBACK_INTENT.id;
   }
 
   if (!result.reason || !result.goal) {
@@ -244,14 +247,10 @@ export async function runIntentionSubagent(params: {
       .trim();
 
     const validIds = params.intents.map((i) => i.id);
-    const fallbackIntent =
-      params.intents.find((i) => i.id === "other")?.id ??
-      params.intents[0]?.id ??
-      "other";
 
     return (
       parseIntentionResult(rawReply, validIds) || {
-        intent: fallbackIntent,
+        intent: FALLBACK_INTENT.id,
         reason: "Parse failed",
         goal: "Fallback",
         confidence: "low",
@@ -259,12 +258,8 @@ export async function runIntentionSubagent(params: {
       }
     );
   } catch {
-    const fallbackIntent =
-      params.intents.find((i) => i.id === "other")?.id ??
-      params.intents[0]?.id ??
-      "other";
     return {
-      intent: fallbackIntent,
+      intent: FALLBACK_INTENT.id,
       reason: "Subagent error",
       goal: "Fallback",
       confidence: "low",

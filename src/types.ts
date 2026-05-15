@@ -35,9 +35,9 @@ export type ResolvedIntentionHintPluginConfig = {
 };
 
 export type IntentDefinition = {
+  enabled: boolean;
   id: string;
   name: string;
-  enabled: boolean;
   triggers: string[];
   examples: string[];
   prompt: string;
