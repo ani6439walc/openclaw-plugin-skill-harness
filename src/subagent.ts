@@ -71,9 +71,7 @@ export function buildIntentionPrompt(params: {
   const intentCatalog = allIntents
     .map((intent) => {
       const lines = [
-        `<intent>`,
-        `id: ${escapeXml(intent.id)}`,
-        `name: ${escapeXml(intent.name)}`,
+        `<intent id="${escapeXml(intent.id)}" name="${escapeXml(intent.name)}">`,
       ];
       if (intent.triggers.length > 0) {
         lines.push(`triggers:`);
@@ -140,7 +138,9 @@ ${intentCatalog}
 <conversation>
 ${conversationXml}
 </conversation>
-<latest>${escapeXml(params.latest)}</latest>
+<latest>
+${escapeXml(params.latest)}
+</latest>
 </input>`;
 }
 

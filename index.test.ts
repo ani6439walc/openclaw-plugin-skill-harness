@@ -360,13 +360,13 @@ describe("buildIntentionPrompt", () => {
       latest: "test",
       intents: mockIntents,
     });
-    expect(prompt).toContain("id: CHAT");
-    expect(prompt).toContain("name: Casual Chat");
-    expect(prompt).toContain("id: RESEARCH_GENERAL");
-    expect(prompt).toContain("name: General Research Query");
-    expect(prompt).toContain("id: TYPO");
-    expect(prompt).toContain("name: Typo Correction");
-    expect(prompt).not.toContain("id: MEMORY");
+    expect(prompt).toContain('id="CHAT"');
+    expect(prompt).toContain('name="Casual Chat"');
+    expect(prompt).toContain('id="RESEARCH_GENERAL"');
+    expect(prompt).toContain('name="General Research Query"');
+    expect(prompt).toContain('id="TYPO"');
+    expect(prompt).toContain('name="Typo Correction"');
+    expect(prompt).not.toContain('id="MEMORY"');
   });
 
   it("formats intent with triggers and examples", () => {
@@ -381,9 +381,7 @@ describe("buildIntentionPrompt", () => {
       },
     ];
     const prompt = buildIntentionPrompt({ latest: "test", intents });
-    expect(prompt).toContain("<intent>");
-    expect(prompt).toContain("id: CHAT");
-    expect(prompt).toContain("name: Casual Chat");
+    expect(prompt).toContain('<intent id="CHAT" name="Casual Chat">');
     expect(prompt).toContain("triggers:");
     expect(prompt).toContain("- Greetings");
     expect(prompt).toContain("- Small talk");
@@ -437,7 +435,7 @@ describe("buildIntentionPrompt", () => {
       });
       expect(prompt).toContain("<intent_catalog>");
       expect(prompt).toContain("</intent_catalog>");
-      expect(prompt).toContain("<intent>");
+      expect(prompt).toMatch(/<intent\s+id=/);
       expect(prompt).toContain("</intent>");
       expect(prompt).not.toContain("<INTENT>");
       expect(prompt).not.toContain("</INTENT>");
