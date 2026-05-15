@@ -612,6 +612,14 @@ describe("parseIntentionResult", () => {
     expect(result?.suggestion).toBeUndefined();
   });
 
+  it("skips whitespace-only suggestion", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: greeting\ngoal: social\nsuggestion:    ",
+      ["CHAT", "OTHER"],
+    );
+    expect(result?.suggestion).toBeUndefined();
+  });
+
   it("parses confidence when valid", () => {
     const result = parseIntentionResult(
       "intent: CHAT\nreason: test\ngoal: social\nconfidence: 0.85",
