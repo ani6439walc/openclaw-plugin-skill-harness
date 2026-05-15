@@ -14,6 +14,7 @@ import { resolveCanonicalSessionKeyFromSessionId } from "./session.js";
 import type {
   IntentDefinition,
   IntentionResult,
+  RecentTurn,
   ResolvedIntentionHintPluginConfig,
 } from "./types.js";
 
@@ -52,15 +53,16 @@ export function getModelRef(
 }
 
 export function buildIntentionPrompt(params: {
-  query: string;
+  conversation?: RecentTurn[];
+  latest: string;
   intents: IntentDefinition[];
 }): string {
   const enabledIntents = params.intents.filter((i) => i.enabled);
   const allIntents = [...enabledIntents, FALLBACK_INTENT];
 
-  const intentDescriptions = allIntents
+  const intentCatalog = allIntents
     .map((intent) => {
-      const lines = [`<INTENT>`, `id: ${intent.id}`, `name: ${intent.name}`];
+      const lines = [`<intent>`, `id: ${intent.id}`, `name: ${intent.name}`];
       if (intent.triggers.length > 0) {
         lines.push(`triggers:`);
         lines.push(...intent.triggers.map((t) => `- ${t}`));
@@ -69,51 +71,63 @@ export function buildIntentionPrompt(params: {
         lines.push(`examples:`);
         lines.push(...intent.examples.map((ex) => `- ${ex}`));
       }
-      lines.push(`</INTENT>`);
+      lines.push(`</intent>`);
       return lines.join("\n");
     })
-    .join("\n\n");
+    .join("\n");
 
-  return `You are an intention classification agent.
-Another model is preparing the final user-facing answer.
-Your job is to analyze the user's intent and return a structured hint.
-Do not answer the user directly.
+  const conversationXml = params.conversation && params.conversation.length > 0
+    ? params.conversation
+        .map((turn) => `  <turn role="${turn.role}">${turn.text}</turn>`)
+        .join("\n")
+    : "";
 
-IMPORTANT CLASSIFICATION RULES:
-1. Use the conversation history to understand the latest message in context — pronouns, implicit references, and topic continuations all depend on prior turns.
-2. If the latest message is a follow-up to an ongoing topic (e.g., discussing design then asking to create a related file), classify based on the OVERALL conversational goal, not just the surface action.
-3. When in doubt, prefer the intent that best explains WHY the user said this given what came before.
-4. DO NOT FORCE a classification. If you are not highly confident in any single intent, default to OTHER. A correct "other" is better than a wrong specific label.
+  return `<input_context>
+Three input types are provided:
+1. conversation: Recent conversation turns between user and assistant
+2. latest: The latest user message to classify
+3. intents: Available intent definitions with triggers and examples
+</input_context>
 
-CONFIDENCE & COMPLEXITY CLASSIFICATION:
-- confidence: "high" — clear intent match, unambiguous language, obvious topic
-- confidence: "medium" — reasonably clear but some ambiguity or mixed signals
-- confidence: "low" — ambiguous, unclear, or multiple conflicting intents possible
-- complexity: "simple" — single-step, well-defined, trivial (Trivial + Explicit in OmO terms)
-- complexity: "moderate" — some investigation needed, bounded scope (Exploratory in OmO terms)
-- complexity: "complex" — open-ended, multi-step, ambiguous scope, needs clarification (Open-ended + Ambiguous in OmO terms)
+<classification_rules>
+1. Use conversation history to understand context
+2. Classify based on overall conversational goal
+3. Prefer intent that explains WHY user said this
+4. DO NOT FORCE classification - default to OTHER if uncertain
+5. Memory intents: classify first if triggers match
+</classification_rules>
 
-Return exactly in this format (one key per line, with NO markdown code blocks or xml tags):
+<output_format>
+Return exactly 6 lines:
 intent: <id> (<name>)
-reason: <brief reason for classification>
-goal: <what the user likely wants to achieve>
-suggestion: <optional correction or recommendation>
-confidence: <low | medium | high — how certain you are about the classification>
-complexity: <simple | moderate | complex — how complex the task is>
+reason: <brief reason>
+goal: <what user wants>
+suggestion: <optional correction>
+confidence: <0.0-1.0>
+complexity: <low|medium|high>
+
+Definitions:
+- confidence: 0.0-1.0 numerical scale
+- complexity: low (simple), medium (moderate), high (complex)
 
 FALLBACK:
 If none of the provided intents confidently fit, return:
 intent: ${FALLBACK_INTENT.id} (${FALLBACK_INTENT.name})
-reason: <brief reason for classification>
+reason: Unable to confidently classify
 goal: <what the user likely wants to achieve>
 suggestion: <optional correction or recommendation>
+</output_format>
 
-Classify the LATEST USER MESSAGE into ONE of these categories:
-${intentDescriptions}
+<intent_catalog>
+${intentCatalog}
+</intent_catalog>
 
-CONVERSATIONS:
-${params.query}
-`;
+<input>
+<conversation>
+${conversationXml}
+</conversation>
+<latest>${params.latest}</latest>
+</input>`;
 }
 
 export function parseIntentionResult(
@@ -154,12 +168,19 @@ export function parseIntentionResult(
   }
 
   let intent = result.intent ?? FALLBACK_INTENT.id;
-  // Case-insensitive OTHER check
-  const isOther =
-    intent.toUpperCase() === FALLBACK_INTENT.id &&
-    validIntentIds.some((id) => id.toUpperCase() === FALLBACK_INTENT.id);
-  if (!validIntentIds.includes(intent) && !isOther) {
-    intent = FALLBACK_INTENT.id;
+  
+  // Find case-insensitive match in validIntentIds
+  const caseInsensitiveMatch = validIntentIds.find(
+    (id) => id.toLowerCase() === intent.toLowerCase()
+  );
+  if (caseInsensitiveMatch) {
+    intent = caseInsensitiveMatch;
+  } else if (!validIntentIds.includes(intent)) {
+    // Fallback: look for "other" case-insensitively, otherwise use first valid intent
+    const otherMatch = validIntentIds.find(
+      (id) => id.toLowerCase() === FALLBACK_INTENT.id.toLowerCase()
+    );
+    intent = otherMatch ?? validIntentIds[0] ?? FALLBACK_INTENT.id;
   }
 
   if (!result.reason || !result.goal) {
@@ -204,7 +225,8 @@ export async function runIntentionSubagent(params: {
   agentId: string;
   sessionKey?: string;
   sessionId?: string;
-  query: string;
+  conversation?: RecentTurn[];
+  latest: string;
   messageProvider?: string;
   channelId?: string;
   modelRef: { provider: string; model: string };
@@ -220,13 +242,14 @@ export async function runIntentionSubagent(params: {
     });
   const subagentScope =
     parentSessionKey ?? params.sessionId ?? crypto.randomUUID();
-  const subagentSuffix = `intention-hint:${crypto.createHash("sha1").update(`${subagentScope}:${params.query}`).digest("hex").slice(0, 12)}`;
+  const subagentSuffix = `intention-hint:${crypto.createHash("sha1").update(`${subagentScope}:${params.latest}`).digest("hex").slice(0, 12)}`;
   const subagentSessionKey = parentSessionKey
     ? `${parentSessionKey}:${subagentSuffix}`
     : `agent:${params.agentId}:${subagentSuffix}`;
 
   const prompt = buildIntentionPrompt({
-    query: params.query,
+    conversation: params.conversation,
+    latest: params.latest,
     intents: params.intents,
   });
   const embeddedRunParams = buildIntentionEmbeddedRunParams({

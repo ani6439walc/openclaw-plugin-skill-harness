@@ -128,15 +128,8 @@ export function createPlugin(api: OpenClawPluginApi) {
               return undefined;
             }
 
-            const query = buildQuery({
-              latestUserMessage: event.prompt ?? "",
-              recentTurns: extractRecentTurns(event.messages),
-              queryMode: config.queryMode,
-              recentUserTurns: config.recentUserTurns,
-              recentAssistantTurns: config.recentAssistantTurns,
-              recentUserChars: config.recentUserChars,
-              recentAssistantChars: config.recentAssistantChars,
-            });
+            const recentTurns = extractRecentTurns(event.messages);
+            const latestUserMessage = event.prompt ?? "";
 
             const modelRef = getModelRef(api, effectiveAgentId, config, {
               modelProviderId: ctx.modelProviderId,
@@ -155,7 +148,8 @@ export function createPlugin(api: OpenClawPluginApi) {
               agentId: effectiveAgentId,
               sessionKey: resolvedSessionKey,
               sessionId: ctx.sessionId,
-              query,
+              conversation: recentTurns,
+              latest: latestUserMessage,
               messageProvider: ctx.messageProvider,
               channelId: ctx.channelId,
               modelRef,

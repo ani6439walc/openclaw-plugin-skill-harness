@@ -341,7 +341,7 @@ describe("buildIntentionPrompt", () => {
 
   it("contains query text", () => {
     const prompt = buildIntentionPrompt({
-      query: "how are you?",
+      latest: "how are you?",
       intents: mockIntents,
     });
     expect(prompt).toContain("how are you?");
@@ -349,7 +349,7 @@ describe("buildIntentionPrompt", () => {
 
   it("contains only enabled intent categories", () => {
     const prompt = buildIntentionPrompt({
-      query: "test",
+      latest: "test",
       intents: mockIntents,
     });
     expect(prompt).toContain("id: CHAT");
@@ -372,8 +372,8 @@ describe("buildIntentionPrompt", () => {
         prompt: "chat hint",
       },
     ];
-    const prompt = buildIntentionPrompt({ query: "test", intents });
-    expect(prompt).toContain("<INTENT>");
+    const prompt = buildIntentionPrompt({ latest: "test", intents });
+    expect(prompt).toContain("<intent>");
     expect(prompt).toContain("id: CHAT");
     expect(prompt).toContain("name: Casual Chat");
     expect(prompt).toContain("triggers:");
@@ -382,7 +382,87 @@ describe("buildIntentionPrompt", () => {
     expect(prompt).toContain("examples:");
     expect(prompt).toContain("- Good morning");
     expect(prompt).toContain("- Hello");
-    expect(prompt).toContain("</INTENT>");
+    expect(prompt).toContain("</intent>");
+  });
+
+  // XML-style prompt format tests (new signature)
+  describe("XML format", () => {
+    it("contains <input_context> section", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "how are you?",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<input_context>");
+      expect(prompt).toContain("</input_context>");
+    });
+
+    it("contains <classification_rules> section with Memory priority rule", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "test",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<classification_rules>");
+      expect(prompt).toContain("</classification_rules>");
+      expect(prompt).toContain("Memory intents");
+      expect(prompt).toContain("classify first if triggers match");
+    });
+
+    it("contains <output_format> section with confidence and complexity definitions", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "test",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<output_format>");
+      expect(prompt).toContain("</output_format>");
+      expect(prompt).toContain("confidence");
+      expect(prompt).toContain("0.0-1.0");
+      expect(prompt).toContain("complexity");
+      expect(prompt).toContain("low");
+      expect(prompt).toContain("medium");
+      expect(prompt).toContain("high");
+    });
+
+    it("contains <intent_catalog> section with lowercase <intent> tags", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "test",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<intent_catalog>");
+      expect(prompt).toContain("</intent_catalog>");
+      expect(prompt).toContain("<intent>");
+      expect(prompt).toContain("</intent>");
+      expect(prompt).not.toContain("<INTENT>");
+      expect(prompt).not.toContain("</INTENT>");
+    });
+
+    it("contains <input> section with <conversation> and <latest>", () => {
+      const conversation: RecentTurn[] = [
+        { role: "user", text: "hello there" },
+        { role: "assistant", text: "hi back" },
+      ];
+      const prompt = buildIntentionPrompt({
+        conversation,
+        latest: "how are you?",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<input>");
+      expect(prompt).toContain("</input>");
+      expect(prompt).toContain("<conversation>");
+      expect(prompt).toContain("</conversation>");
+      expect(prompt).toContain('<turn role="user">hello there</turn>');
+      expect(prompt).toContain('<turn role="assistant">hi back</turn>');
+      expect(prompt).toContain("<latest>how are you?</latest>");
+    });
+
+    it("handles empty conversation (only <latest>)", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "hello",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<conversation>");
+      expect(prompt).toContain("</conversation>");
+      expect(prompt).toContain("<latest>hello</latest>");
+    });
   });
 
   it("uses hard-coded other as fallback", () => {
@@ -396,7 +476,7 @@ describe("buildIntentionPrompt", () => {
         prompt: "",
       },
     ];
-    const prompt = buildIntentionPrompt({ query: "test", intents });
+    const prompt = buildIntentionPrompt({ latest: "test", intents });
     expect(prompt).toContain("intent: OTHER (Unclassified)");
     expect(prompt).toContain("Unable to confidently classify");
   });
@@ -755,7 +835,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
     expect(result.modelRun).toBe(true);
     expect(result.promptMode).toBe("none");
     expect(result.disableTools).toBe(true);
-    expect(result.toolsAllow).toBe([]);
+    expect(result.toolsAllow).toEqual([]);
     expect(result.disableMessageTool).toBe(true);
     expect(result.sessionFile).toBe("/tmp/session.jsonl");
     expect(result.workspaceDir).toBe("/tmp");
