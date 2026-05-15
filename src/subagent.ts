@@ -99,12 +99,12 @@ Three input types are provided:
 </classification_rules>
 
 <output_format>
-Return exactly 6 lines:
+Return only defined fields, one per line:
 <field_definitions>
 intent: <id> (<name>)
 reason: <brief reason>
 goal: <what user wants>
-suggestion: <optional correction>
+suggestion: <optional correction — omit if empty>
 confidence: <0.0-1.0>
 complexity: <low|medium|high>
 </field_definitions>
@@ -118,7 +118,6 @@ If none of the provided intents confidently fit, return:
 intent: ${FALLBACK_INTENT.id} (${FALLBACK_INTENT.name})
 reason: Unable to confidently classify
 goal: <what the user likely wants to achieve>
-suggestion: <optional correction or recommendation>
 </output_format>
 
 <intent_catalog>
