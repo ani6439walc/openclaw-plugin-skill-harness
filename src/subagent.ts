@@ -168,7 +168,11 @@ export function parseIntentionResult(
     } else if (key === "complexity") {
       // Expecting low|medium|high per prompt definition
       const normalized = value.trim().toLowerCase();
-      if (["low", "medium", "high"].includes(normalized as "low" | "medium" | "high")) {
+      if (
+        ["low", "medium", "high"].includes(
+          normalized as "low" | "medium" | "high",
+        )
+      ) {
         result.complexity = normalized as "low" | "medium" | "high";
       }
     }
@@ -190,7 +194,12 @@ export function parseIntentionResult(
     intent = otherMatch ?? validIntentIds[0] ?? FALLBACK_INTENT.id;
   }
 
-  if (!result.reason || !result.goal || result.confidence === undefined || !result.complexity) {
+  if (
+    !result.reason ||
+    !result.goal ||
+    result.confidence === undefined ||
+    !result.complexity
+  ) {
     return undefined;
   }
 
@@ -280,7 +289,10 @@ export async function runIntentionSubagent(params: {
 
     const parsed = parseIntentionResult(rawReply, validIds);
     if (!parsed) {
-      logger.warn("Intention result parse failed", { rawReply, intents: validIds });
+      logger.warn("Intention result parse failed", {
+        rawReply,
+        intents: validIds,
+      });
     }
     return parsed;
   } catch (err) {

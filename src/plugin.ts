@@ -157,11 +157,15 @@ export function createPlugin(api: OpenClawPluginApi) {
             });
 
             if (!result) {
-              logger.debug("Intention subagent failed; skipping hint injection.");
+              logger.debug(
+                "Intention subagent failed; skipping hint injection.",
+              );
               return undefined;
             }
 
-            logger.debug(`Intention subagent result: ${JSON.stringify(result)}`);
+            logger.debug(
+              `Intention subagent result: ${JSON.stringify(result)}`,
+            );
 
             const promptPrefix = buildPromptPrefix(result, intentCatalog.get());
             if (!promptPrefix) return undefined;
@@ -171,7 +175,7 @@ export function createPlugin(api: OpenClawPluginApi) {
             return undefined;
           }
         },
-        { timeoutMs: config.timeoutMs + 250 },
+        { timeoutMs: config.timeoutMs * 1.1 + 500 },
       );
 
       logger.debug("registering intention-hint before_prompt_build hook");

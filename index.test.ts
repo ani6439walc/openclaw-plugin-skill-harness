@@ -756,7 +756,13 @@ describe("buildPromptPrefix", () => {
 
   it("defaults confidence to 0.5 when absent", () => {
     const result = buildPromptPrefix(
-      { intent: "CHAT", reason: "test", goal: "social", confidence: 0.5, complexity: "medium" },
+      {
+        intent: "CHAT",
+        reason: "test",
+        goal: "social",
+        confidence: 0.5,
+        complexity: "medium",
+      },
       mockIntents,
     );
     expect(result).toBeDefined();
@@ -765,7 +771,13 @@ describe("buildPromptPrefix", () => {
 
   it("defaults complexity to medium when absent", () => {
     const result = buildPromptPrefix(
-      { intent: "CHAT", reason: "test", goal: "social", confidence: 0.5, complexity: "medium" },
+      {
+        intent: "CHAT",
+        reason: "test",
+        goal: "social",
+        confidence: 0.5,
+        complexity: "medium",
+      },
       mockIntents,
     );
     expect(result).toBeDefined();
@@ -790,7 +802,13 @@ describe("buildPromptPrefix", () => {
 
   it("omits optional fields when absent", () => {
     const result = buildPromptPrefix(
-      { intent: "CHAT", reason: "test", goal: "social", confidence: 0.8, complexity: "low" },
+      {
+        intent: "CHAT",
+        reason: "test",
+        goal: "social",
+        confidence: 0.8,
+        complexity: "low",
+      },
       mockIntents,
     );
     expect(result).toBeDefined();
