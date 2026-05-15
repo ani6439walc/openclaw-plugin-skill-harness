@@ -237,7 +237,7 @@ export async function runIntentionSubagent(params: {
   channelId?: string;
   modelRef: { provider: string; model: string };
   intents: readonly IntentDefinition[];
-}): Promise<IntentionResult> {
+}): Promise<IntentionResult | undefined> {
   const subagentSessionId = `intention-hint-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const parentSessionKey =
     params.sessionKey ??
@@ -277,23 +277,9 @@ export async function runIntentionSubagent(params: {
 
     const validIds = params.intents.map((i) => i.id);
 
-    return (
-      parseIntentionResult(rawReply, validIds) || {
-        intent: FALLBACK_INTENT.id,
-        reason: "Parse failed",
-        goal: "Fallback",
-        confidence: 0.5,
-        complexity: "medium" as const,
-      }
-    );
+    return parseIntentionResult(rawReply, validIds) ?? undefined;
   } catch {
-    return {
-      intent: FALLBACK_INTENT.id,
-      reason: "Subagent error",
-      goal: "Fallback",
-      confidence: 0.5,
-      complexity: "medium" as const,
-    };
+    return undefined;
   }
 }
 

@@ -154,9 +154,11 @@ export function createPlugin(api: OpenClawPluginApi) {
               modelRef,
               intents: intentCatalog.get(),
             });
-            logger.debug(
-              `Intention subagent result: ${JSON.stringify(result)}`,
-            );
+
+            if (!result) {
+              logger.debug("Intention subagent failed; skipping hint injection.");
+              return undefined;
+            }
 
             const promptPrefix = buildPromptPrefix(result, intentCatalog.get());
             if (!promptPrefix) return undefined;
