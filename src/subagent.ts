@@ -189,17 +189,17 @@ export function parseIntentionResult(
     intent = otherMatch ?? validIntentIds[0] ?? FALLBACK_INTENT.id;
   }
 
-  if (!result.reason || !result.goal) {
+  if (!result.reason || !result.goal || result.confidence === undefined || !result.complexity) {
     return undefined;
   }
 
   return {
     intent,
-    reason: result.reason!,
-    goal: result.goal!,
+    reason: result.reason,
+    goal: result.goal,
     ...(result.suggestion ? { suggestion: result.suggestion } : {}),
-    confidence: result.confidence ?? 0.5,
-    complexity: result.complexity ?? "medium",
+    confidence: result.confidence,
+    complexity: result.complexity,
   };
 }
 
@@ -214,8 +214,8 @@ export function buildPromptPrefix(
   lines.push(`reason: ${result.reason}`);
   lines.push(`goal: ${result.goal}`);
   if (result.suggestion) lines.push(`suggestion: ${result.suggestion}`);
-  lines.push(`confidence: ${result.confidence ?? "0.5"}`);
-  lines.push(`complexity: ${result.complexity ?? "medium"}`);
+  lines.push(`confidence: ${result.confidence}`);
+  lines.push(`complexity: ${result.complexity}`);
   lines.push("");
   lines.push(effectiveDef.prompt);
 
