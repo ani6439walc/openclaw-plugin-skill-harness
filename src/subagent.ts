@@ -63,7 +63,7 @@ function escapeXml(s: string): string {
 export function buildIntentionPrompt(params: {
   conversation?: RecentTurn[];
   latest: string;
-  intents: IntentDefinition[];
+  intents: readonly IntentDefinition[];
 }): string {
   const enabledIntents = params.intents.filter((i) => i.enabled);
   const allIntents = [...enabledIntents, FALLBACK_INTENT];
@@ -215,7 +215,7 @@ export function parseIntentionResult(
 
 export function buildPromptPrefix(
   result: IntentionResult,
-  intents: IntentDefinition[],
+  intents: readonly IntentDefinition[],
 ): string | undefined {
   const intentDef = intents.find((i) => i.id === result.intent && i.enabled);
   const effectiveDef = intentDef ?? FALLBACK_INTENT;
@@ -246,7 +246,7 @@ export async function runIntentionSubagent(params: {
   messageProvider?: string;
   channelId?: string;
   modelRef: { provider: string; model: string };
-  intents: IntentDefinition[];
+  intents: readonly IntentDefinition[];
 }): Promise<IntentionResult> {
   const subagentSessionId = `intention-hint-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const parentSessionKey =

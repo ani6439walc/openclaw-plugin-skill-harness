@@ -6,7 +6,7 @@ import {
 } from "../api.js";
 import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { clampInt, normalizePluginConfig } from "./config.js";
-import { loadIntents } from "./intent-loader.js";
+import { intentCatalog } from "./intent-loader.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyQueryFilters, extractRecentTurns } from "./query.js";
@@ -27,7 +27,6 @@ import {
   parseIntentionResult,
   runIntentionSubagent,
 } from "./subagent.js";
-import type { IntentDefinition } from "./types.js";
 
 export function createPlugin(api: OpenClawPluginApi) {
   return definePluginEntry({
@@ -53,17 +52,13 @@ export function createPlugin(api: OpenClawPluginApi) {
         path.dirname(fileURLToPath(import.meta.url)),
         "..",
       );
-      let intents: IntentDefinition[] = [];
       const refreshIntents = () => {
         const dir = config.intentsDir;
         if (dir) {
-          const resolvedDir = path.resolve(pluginRoot, dir);
-          intents = loadIntents(resolvedDir);
-          logger.debug(
-            `Loaded ${intents.length} dynamic intents from ${resolvedDir}`,
-          );
+          const count = intentCatalog.load(dir, pluginRoot);
+          logger.debug(`Loaded ${count} dynamic intents`);
         } else {
-          intents = [];
+          intentCatalog.reset();
         }
       };
       refreshIntents();
@@ -138,7 +133,7 @@ export function createPlugin(api: OpenClawPluginApi) {
             });
             if (!modelRef) return undefined;
 
-            if (intents.length === 0) {
+            if (intentCatalog.count === 0) {
               logger.debug("No intents loaded; skipping intention scan.");
               return undefined;
             }
@@ -154,13 +149,13 @@ export function createPlugin(api: OpenClawPluginApi) {
               messageProvider: ctx.messageProvider,
               channelId: ctx.channelId,
               modelRef,
-              intents,
+              intents: intentCatalog.get(),
             });
             logger.debug(
               `Intention subagent result: ${JSON.stringify(result)}`,
             );
 
-            const promptPrefix = buildPromptPrefix(result, intents);
+            const promptPrefix = buildPromptPrefix(result, intentCatalog.get());
             if (!promptPrefix) return undefined;
 
             return { prependContext: promptPrefix };
