@@ -198,8 +198,8 @@ export function parseIntentionResult(
     reason: result.reason!,
     goal: result.goal!,
     ...(result.suggestion ? { suggestion: result.suggestion } : {}),
-    ...(result.confidence ? { confidence: result.confidence } : {}),
-    ...(result.complexity ? { complexity: result.complexity } : {}),
+    confidence: result.confidence ?? 0.5,
+    complexity: result.complexity ?? "medium",
   };
 }
 
@@ -282,6 +282,8 @@ export async function runIntentionSubagent(params: {
         intent: FALLBACK_INTENT.id,
         reason: "Parse failed",
         goal: "Fallback",
+        confidence: 0.5,
+        complexity: "medium" as const,
       }
     );
   } catch {
@@ -289,6 +291,8 @@ export async function runIntentionSubagent(params: {
       intent: FALLBACK_INTENT.id,
       reason: "Subagent error",
       goal: "Fallback",
+      confidence: 0.5,
+      complexity: "medium" as const,
     };
   }
 }

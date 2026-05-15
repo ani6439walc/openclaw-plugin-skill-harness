@@ -636,36 +636,36 @@ describe("parseIntentionResult", () => {
     expect(result?.complexity).toBe("high");
   });
 
-  it("omits confidence when absent", () => {
+  it("defaults confidence to 0.5 when absent", () => {
     const result = parseIntentionResult(
       "intent: CHAT\nreason: test\ngoal: social",
       ["CHAT", "OTHER"],
     );
-    expect(result?.confidence).toBeUndefined();
+    expect(result?.confidence).toBe(0.5);
   });
 
-  it("omits complexity when absent", () => {
+  it("defaults complexity to medium when absent", () => {
     const result = parseIntentionResult(
       "intent: CHAT\nreason: test\ngoal: social",
       ["CHAT", "OTHER"],
     );
-    expect(result?.complexity).toBeUndefined();
+    expect(result?.complexity).toBe("medium");
   });
 
-  it("normalizes confidence to undefined when invalid", () => {
+  it("defaults confidence to 0.5 when invalid", () => {
     const result = parseIntentionResult(
       "intent: CHAT\nreason: test\ngoal: social\nconfidence: unsure",
       ["CHAT", "OTHER"],
     );
-    expect(result?.confidence).toBeUndefined();
+    expect(result?.confidence).toBe(0.5);
   });
 
-  it("normalizes complexity to undefined when invalid", () => {
+  it("defaults complexity to medium when invalid", () => {
     const result = parseIntentionResult(
       "intent: CHAT\nreason: test\ngoal: social\ncomplexity: hard",
       ["CHAT", "OTHER"],
     );
-    expect(result?.complexity).toBeUndefined();
+    expect(result?.complexity).toBe("medium");
   });
 
   it("parses both confidence and complexity when both valid", () => {
@@ -677,13 +677,13 @@ describe("parseIntentionResult", () => {
     expect(result?.complexity).toBe("medium");
   });
 
-  it("parses mixed valid/invalid — valid included, invalid excluded", () => {
+  it("parses mixed valid/invalid — valid included, invalid gets default", () => {
     const result = parseIntentionResult(
       "intent: CHAT\nreason: test\ngoal: social\nconfidence: 0.9\ncomplexity: weird",
       ["CHAT", "OTHER"],
     );
     expect(result?.confidence).toBe(0.9);
-    expect(result?.complexity).toBeUndefined();
+    expect(result?.complexity).toBe("medium");
   });
 });
 
@@ -780,6 +780,8 @@ describe("buildPromptPrefix", () => {
         reason: "test",
         goal: "search",
         suggestion: "try web_search",
+        confidence: 0.9,
+        complexity: "high",
       },
       mockIntents,
     );
@@ -789,7 +791,7 @@ describe("buildPromptPrefix", () => {
 
   it("omits optional fields when absent", () => {
     const result = buildPromptPrefix(
-      { intent: "CHAT", reason: "test", goal: "social" },
+      { intent: "CHAT", reason: "test", goal: "social", confidence: 0.7, complexity: "low" },
       mockIntents,
     );
     expect(result).toBeDefined();
