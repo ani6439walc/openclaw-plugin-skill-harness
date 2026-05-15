@@ -6,11 +6,17 @@ import { logger } from "../api.js";
 
 export class IntentCatalog {
   private intents: IntentDefinition[] = [];
+  private pluginRoot: string;
 
-  load(intentsDir: string, pluginRoot: string): number {
-    const resolvedDir = path.resolve(pluginRoot, intentsDir);
+  constructor(pluginRoot: string) {
+    this.pluginRoot = pluginRoot;
+  }
+
+  load(intentsDir: string): number {
+    const resolvedDir = path.resolve(this.pluginRoot, intentsDir);
     const loaded = this.loadFromDir(resolvedDir);
     this.intents = loaded;
+    logger.debug(`Loaded ${loaded.length} dynamic intents from ${resolvedDir}`);
     return loaded.length;
   }
 
@@ -58,7 +64,9 @@ export class IntentCatalog {
         : [];
 
       if (!id || !triggers.length) {
-        logger.warn(`Skipping invalid intent file: ${entry} (missing id or triggers)`);
+        logger.warn(
+          `Skipping invalid intent file: ${entry} (missing id or triggers)`,
+        );
         continue;
       }
 
@@ -82,5 +90,3 @@ export class IntentCatalog {
     return result;
   }
 }
-
-export const intentCatalog = new IntentCatalog();

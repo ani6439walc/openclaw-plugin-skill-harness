@@ -86,11 +86,15 @@ export function buildIntentionPrompt(params: {
     })
     .join("\n");
 
-  const conversationXml = params.conversation && params.conversation.length > 0
-    ? params.conversation
-        .map((turn) => `  <turn role="${escapeXml(turn.role)}">${escapeXml(turn.text)}</turn>`)
-        .join("\n")
-    : "";
+  const conversationXml =
+    params.conversation && params.conversation.length > 0
+      ? params.conversation
+          .map(
+            (turn) =>
+              `  <turn role="${escapeXml(turn.role)}">${escapeXml(turn.text)}</turn>`,
+          )
+          .join("\n")
+      : "";
 
   return `<input_context>
 Three input types are provided:
@@ -184,17 +188,17 @@ export function parseIntentionResult(
   }
 
   let intent = result.intent ?? FALLBACK_INTENT.id;
-  
+
   // Find case-insensitive match in validIntentIds
   const caseInsensitiveMatch = validIntentIds.find(
-    (id) => id.toLowerCase() === intent.toLowerCase()
+    (id) => id.toLowerCase() === intent.toLowerCase(),
   );
   if (caseInsensitiveMatch) {
     intent = caseInsensitiveMatch;
   } else if (!validIntentIds.includes(intent)) {
     // Fallback: look for "other" case-insensitively, otherwise use first valid intent
     const otherMatch = validIntentIds.find(
-      (id) => id.toLowerCase() === FALLBACK_INTENT.id.toLowerCase()
+      (id) => id.toLowerCase() === FALLBACK_INTENT.id.toLowerCase(),
     );
     intent = otherMatch ?? validIntentIds[0] ?? FALLBACK_INTENT.id;
   }
@@ -291,14 +295,14 @@ export async function runIntentionSubagent(params: {
       parseIntentionResult(rawReply, validIds) || {
         intent: FALLBACK_INTENT.id,
         reason: "Parse failed",
-        goal: "Fallback"
+        goal: "Fallback",
       }
     );
   } catch {
     return {
       intent: FALLBACK_INTENT.id,
       reason: "Subagent error",
-      goal: "Fallback"
+      goal: "Fallback",
     };
   }
 }

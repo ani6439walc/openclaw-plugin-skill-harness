@@ -266,9 +266,7 @@ describe("applyQueryFilters", () => {
   ];
 
   it("returns empty in message mode (caller provides latest)", () => {
-    expect(
-      applyQueryFilters(turns, { queryMode: "message" }),
-    ).toEqual([]);
+    expect(applyQueryFilters(turns, { queryMode: "message" })).toEqual([]);
   });
 
   it("returns all turns in full mode", () => {
@@ -303,9 +301,7 @@ describe("applyQueryFilters", () => {
   });
 
   it("handles empty turns gracefully", () => {
-    expect(
-      applyQueryFilters([], { queryMode: "recent" }),
-    ).toEqual([]);
+    expect(applyQueryFilters([], { queryMode: "recent" })).toEqual([]);
   });
 });
 

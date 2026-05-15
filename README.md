@@ -58,8 +58,8 @@ bun run build
           deniedChatIds: [],
           queryMode: "recent",
           timeoutMs: 3000,
-          intentsDir: "./intents",          // relative to plugin root
-          intentsHotReload: true,           // auto-reload on change
+          intentsDir: "./intents", // relative to plugin root
+          intentsHotReload: true, // auto-reload on change
           intentsHotReloadIntervalMs: 5000, // poll interval
         },
       },
@@ -70,19 +70,19 @@ bun run build
 
 ### Config Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `agents` | `string[]` | `["main"]` | Agent IDs eligible for intention scanning. |
-| `model` | `string` | — | Lightweight model for the intention scanner. Falls back to the agent's default if empty. |
-| `modelFallback` | `string` | — | Fallback model when `config.model` cannot be resolved. |
-| `allowedChatTypes` | `string[]` | `["direct"]` | Which chat types are eligible (`direct`, `group`, `channel`, `explicit`). |
-| `allowedChatIds` | `string[]` | `[]` | Allow-list of chat IDs. |
-| `deniedChatIds` | `string[]` | `[]` | Deny-list of chat IDs. |
-| `queryMode` | `string` | `"recent"` | Context sent to scanner: `message` (latest only), `recent` (recent turns), or `full` (full history). |
-| `timeoutMs` | `number` | `3000` | Budget in milliseconds for the intention scanner sub-agent. |
-| `intentsDir` | `string` | `"./intents"` | Directory containing dynamic intent `.md` files. Resolved relative to the plugin installation directory. |
-| `intentsHotReload` | `boolean` | `true` | Automatically reload intent definitions when files change. |
-| `intentsHotReloadIntervalMs` | `number` | `5000` | How often to check for intent file changes (clamped to 1000–300000 ms). |
+| Option                       | Type       | Default       | Description                                                                                              |
+| ---------------------------- | ---------- | ------------- | -------------------------------------------------------------------------------------------------------- |
+| `agents`                     | `string[]` | `["main"]`    | Agent IDs eligible for intention scanning.                                                               |
+| `model`                      | `string`   | —             | Lightweight model for the intention scanner. Falls back to the agent's default if empty.                 |
+| `modelFallback`              | `string`   | —             | Fallback model when `config.model` cannot be resolved.                                                   |
+| `allowedChatTypes`           | `string[]` | `["direct"]`  | Which chat types are eligible (`direct`, `group`, `channel`, `explicit`).                                |
+| `allowedChatIds`             | `string[]` | `[]`          | Allow-list of chat IDs.                                                                                  |
+| `deniedChatIds`              | `string[]` | `[]`          | Deny-list of chat IDs.                                                                                   |
+| `queryMode`                  | `string`   | `"recent"`    | Context sent to scanner: `message` (latest only), `recent` (recent turns), or `full` (full history).     |
+| `timeoutMs`                  | `number`   | `3000`        | Budget in milliseconds for the intention scanner sub-agent.                                              |
+| `intentsDir`                 | `string`   | `"./intents"` | Directory containing dynamic intent `.md` files. Resolved relative to the plugin installation directory. |
+| `intentsHotReload`           | `boolean`  | `true`        | Automatically reload intent definitions when files change.                                               |
+| `intentsHotReloadIntervalMs` | `number`   | `5000`        | How often to check for intent file changes (clamped to 1000–300000 ms).                                  |
 
 ## Intent Definition Format
 
@@ -99,6 +99,7 @@ examples:
   - "Tell me about quantum computing"
   - "Explain blockchain consensus mechanisms"
 ---
+
 Detected "general research" intent. The user wants factual or explanatory information supported by external sources.
 
 ## Guidelines
@@ -122,13 +123,13 @@ Detected "general research" intent. The user wants factual or explanatory inform
 
 ### Frontmatter Fields
 
-| Field | Required | Type | Description |
-|-------|----------|------|-------------|
-| `id` | **yes** | `string` | Unique identifier (letters, numbers, hyphens, underscores). |
-| `name` | no | `string` | Human-readable label (defaults to `id`). |
-| `enabled` | no | `boolean` | Whether this intent is active (defaults to `true`). |
-| `triggers` | **yes** | `string[]` | Natural-language descriptions that guide the classifier. |
-| `examples` | no | `string[]` | Few-shot examples for the classifier. |
+| Field      | Required | Type       | Description                                                 |
+| ---------- | -------- | ---------- | ----------------------------------------------------------- |
+| `id`       | **yes**  | `string`   | Unique identifier (letters, numbers, hyphens, underscores). |
+| `name`     | no       | `string`   | Human-readable label (defaults to `id`).                    |
+| `enabled`  | no       | `boolean`  | Whether this intent is active (defaults to `true`).         |
+| `triggers` | **yes**  | `string[]` | Natural-language descriptions that guide the classifier.    |
+| `examples` | no       | `string[]` | Few-shot examples for the classifier.                       |
 
 ### Intent Writing Rules
 
@@ -298,24 +299,24 @@ The subagent output fields (`reason`, `goal`, `suggestion`) are placed **above**
 
 The plugin ships with these pre-defined intents:
 
-| ID | Name | Description |
-|----|------|-------------|
-| `CHAT` | Casual Chat | Greetings, small talk, or emotional connection. |
-| `CODE_REVIEW` | Code Review | Reviewing code, architecture, or quality concerns. |
-| `MEMORY_TIMELINE` | Memory Timeline Query | How something changed, progressed, or evolved over time. |
-| `MEMORY_COMPARE` | Memory Compare | Comparing two topics or time periods. |
-| `MEMORY_EMOTION` | Emotional Memory Query | Feelings, mood, emotional state, or subjective reactions in past records. |
-| `SYSTEM_DOCS` | System Docs / SOP Lookup | Locating recorded system rules, SOPs, configs, or project-side documentation. |
-| `PROMPT_DESIGN` | Prompt / Intent / Skill Design | Designing or refining prompts, intents, skills, or routing behavior. |
-| `MEMORY_RECENT` | Memory Recent | Time-bounded queries ("today", "yesterday"). |
-| `MEMORY_LOOKUP` | General Memory Lookup | Broad past-record lookup without a recent, comparative, emotional, or timeline-specific focus. |
-| `RESEARCH_GENERAL` | General Research | Factual or explanatory questions supported by external sources. |
-| `BROWSER_AUTOMATION` | Browser Automation / Web App Task | Interactive or authenticated browser tasks delegated to the browser agent. |
-| `RESEARCH_GOOGLE_DEV` | Google Developer Products Query | Google developer products and documentation covered by the Google developer corpus. |
+| ID                    | Name                                              | Description                                                                                                                                   |
+| --------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CHAT`                | Casual Chat                                       | Greetings, small talk, or emotional connection.                                                                                               |
+| `CODE_REVIEW`         | Code Review                                       | Reviewing code, architecture, or quality concerns.                                                                                            |
+| `MEMORY_TIMELINE`     | Memory Timeline Query                             | How something changed, progressed, or evolved over time.                                                                                      |
+| `MEMORY_COMPARE`      | Memory Compare                                    | Comparing two topics or time periods.                                                                                                         |
+| `MEMORY_EMOTION`      | Emotional Memory Query                            | Feelings, mood, emotional state, or subjective reactions in past records.                                                                     |
+| `SYSTEM_DOCS`         | System Docs / SOP Lookup                          | Locating recorded system rules, SOPs, configs, or project-side documentation.                                                                 |
+| `PROMPT_DESIGN`       | Prompt / Intent / Skill Design                    | Designing or refining prompts, intents, skills, or routing behavior.                                                                          |
+| `MEMORY_RECENT`       | Memory Recent                                     | Time-bounded queries ("today", "yesterday").                                                                                                  |
+| `MEMORY_LOOKUP`       | General Memory Lookup                             | Broad past-record lookup without a recent, comparative, emotional, or timeline-specific focus.                                                |
+| `RESEARCH_GENERAL`    | General Research                                  | Factual or explanatory questions supported by external sources.                                                                               |
+| `BROWSER_AUTOMATION`  | Browser Automation / Web App Task                 | Interactive or authenticated browser tasks delegated to the browser agent.                                                                    |
+| `RESEARCH_GOOGLE_DEV` | Google Developer Products Query                   | Google developer products and documentation covered by the Google developer corpus.                                                           |
 | `RESEARCH_OPENSOURCE` | Open-Source Library / Framework / Repo Docs Query | Version-sensitive information about third-party open-source libraries, frameworks, SDKs, APIs, GitHub repositories, or project documentation. |
-| `RESEARCH_REALTIME` | Real-Time / Current Data Query | Time-sensitive, fast-changing, or current real-world information. |
-| `SUMMARIZATION` | Content Summary / Transcript Query | Summarizing or transcribing a provided source such as a URL, video, PDF, transcript, or file. |
-| `TYPO` | Typo Correction | Obvious typos or unclear phrasing. |
+| `RESEARCH_REALTIME`   | Real-Time / Current Data Query                    | Time-sensitive, fast-changing, or current real-world information.                                                                             |
+| `SUMMARIZATION`       | Content Summary / Transcript Query                | Summarizing or transcribing a provided source such as a URL, video, PDF, transcript, or file.                                                 |
+| `TYPO`                | Typo Correction                                   | Obvious typos or unclear phrasing.                                                                                                            |
 
 To customize, edit the files in `intents/` or create new ones. Files are loaded in alphabetical order; duplicate `id`s override previous definitions.
 

@@ -6,7 +6,7 @@ import {
 } from "../api.js";
 import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { clampInt, normalizePluginConfig } from "./config.js";
-import { intentCatalog } from "./intent-loader.js";
+import { IntentCatalog } from "./intent-loader.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyQueryFilters, extractRecentTurns } from "./query.js";
@@ -28,6 +28,12 @@ import {
   runIntentionSubagent,
 } from "./subagent.js";
 
+const pluginRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
+const intentCatalog = new IntentCatalog(pluginRoot);
+
 export function createPlugin(api: OpenClawPluginApi) {
   return definePluginEntry({
     id: "intention-hint",
@@ -48,15 +54,12 @@ export function createPlugin(api: OpenClawPluginApi) {
         config = normalizePluginConfig(livePluginConfig ?? {});
       };
 
-      const pluginRoot = path.resolve(
-        path.dirname(fileURLToPath(import.meta.url)),
-        "..",
-      );
+      refreshLiveConfigFromRuntime();
+
       const refreshIntents = () => {
         const dir = config.intentsDir;
         if (dir) {
-          const count = intentCatalog.load(dir, pluginRoot);
-          logger.debug(`Loaded ${count} dynamic intents`);
+          intentCatalog.load(dir);
         } else {
           intentCatalog.reset();
         }
@@ -167,9 +170,6 @@ export function createPlugin(api: OpenClawPluginApi) {
       );
 
       logger.debug("registering intention-hint before_prompt_build hook");
-
-
-
     },
   });
 }
@@ -181,7 +181,7 @@ export const __testing = {
   buildIntentionEmbeddedRunParams,
   parseIntentionResult,
   buildPromptPrefix,
-              applyQueryFilters,
+  applyQueryFilters,
   extractRecentTurns,
   getModelRef,
   isEnabledForAgent,

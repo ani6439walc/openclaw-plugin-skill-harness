@@ -26,7 +26,8 @@
     "README.md",
     "package.json",
     "openclaw.plugin.json",
-    "dist"
+    "dist",
+    "skills/**"
   ],
   "openclaw": {
     "extensions": [
@@ -37,8 +38,8 @@
       "minGatewayVersion": "2026.5.4"
     },
     "build": {
-      "openclawVersion": "2026.5.12",
-      "pluginSdkVersion": "2026.5.12"
+      "openclawVersion": "2026.5.4",
+      "pluginSdkVersion": "2026.5.4"
     }
   },
   "scripts": {
@@ -46,13 +47,13 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm run typecheck && pnpm run test:unit",
     "test:unit": "vitest run",
-    "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'"
+    "format": "prettier --write 'README.md' '**/*.json' '**/*.ts'"
   },
   "dependencies": {
     "gray-matter": "^4.0.3"
   },
   "devDependencies": {
-    "openclaw": "2026.5.12",
+    "openclaw": "2026.5.4",
     "prettier": "^3.8.3",
     "typebox": "1.1.37",
     "typescript": "^5.8.3",
