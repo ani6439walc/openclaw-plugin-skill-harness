@@ -52,14 +52,6 @@ export function getModelRef(
   return undefined;
 }
 
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 export function buildIntentionPrompt(params: {
   conversation?: RecentTurn[];
   latest: string;
@@ -70,16 +62,14 @@ export function buildIntentionPrompt(params: {
 
   const intentCatalog = allIntents
     .map((intent) => {
-      const lines = [
-        `<intent id="${escapeXml(intent.id)}" name="${escapeXml(intent.name)}">`,
-      ];
+      const lines = [`<intent id="${intent.id}" name="${intent.name}">`];
       if (intent.triggers.length > 0) {
         lines.push(`triggers:`);
-        lines.push(...intent.triggers.map((t) => `- ${escapeXml(t)}`));
+        lines.push(...intent.triggers.map((t) => `- ${t}`));
       }
       if (intent.examples.length > 0) {
         lines.push(`examples:`);
-        lines.push(...intent.examples.map((ex) => `- ${escapeXml(ex)}`));
+        lines.push(...intent.examples.map((ex) => `- ${ex}`));
       }
       lines.push(`</intent>`);
       return lines.join("\n");
@@ -89,10 +79,7 @@ export function buildIntentionPrompt(params: {
   const conversationXml =
     params.conversation && params.conversation.length > 0
       ? params.conversation
-          .map(
-            (turn) =>
-              `  <turn role="${escapeXml(turn.role)}">${escapeXml(turn.text)}</turn>`,
-          )
+          .map((turn) => `  <turn role="${turn.role}">${turn.text}</turn>`)
           .join("\n")
       : "";
 
@@ -143,7 +130,7 @@ ${intentCatalog}
 ${conversationXml}
 </conversation>
 <latest>
-${escapeXml(params.latest)}
+${params.latest}
 </latest>
 </input>`;
 }
@@ -171,7 +158,7 @@ export function parseIntentionResult(
     } else if (key === "goal") {
       result.goal = value || undefined;
     } else if (key === "suggestion") {
-      if (value) result.suggestion = value;
+      if (value) result.suggestion = value || undefined;
     } else if (key === "confidence") {
       // Expecting 0.0-1.0 numerical scale per prompt definition
       const num = parseFloat(value);

@@ -30,7 +30,7 @@ import {
 
 const pluginRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "..",
+  "../..",
 );
 const intentCatalog = new IntentCatalog(pluginRoot);
 
