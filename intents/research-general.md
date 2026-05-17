@@ -39,3 +39,8 @@ Detected "general research" intent. The user wants factual or explanatory inform
 - Analyze a PDF document for text, charts, or structured content:
   pdf({ pdf: "<url_or_path>", prompt: "<what_to_extract>" })
 - Cross-validate claims: prefer 2+ independent authoritative sources before presenting as fact.
+
+## Escalation
+
+- For exhaustive multi-source investigation with methodology tracking, source evaluation, and iterative depth:
+  skill: Deep Research
