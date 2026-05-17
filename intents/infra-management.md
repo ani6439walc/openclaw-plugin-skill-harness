@@ -49,6 +49,8 @@ From `TOOLS.md`:
 | Nginx: reverse proxy, SSL, location blocks, performance | `nginx` skill |
 | Linux system administration: permissions, processes, disks, services | `linux` skill |
 | Home Assistant: device tracking, AC control, automations | `home-assistant` skill |
+| Service health checks, uptime monitoring, automated status verification | `healthcheck` skill |
+| Security audit, workspace integrity check, config drift detection | `exec({ command: "python3 ../skills/soul-guardian/scripts/soul_guardian.py check --actor manual --output-format alert" })` |
 | SSH remote commands | `exec` tool (`ssh root@<host>`) |
 | ArgoCD CLI operations | `argocd login ...` + `argocd app sync/list/...` |
 | Container management (Docker, CasaOS) | `exec` tool (`docker ps/logs/restart`) |
@@ -72,3 +74,10 @@ From `TOOLS.md`:
 - Home-infra runs on Talos Linux — immutable, API-driven.
 - ArgoCD manages GitOps deployments — prefer `argocd sync` over manual `kubectl apply`.
 - Late-night (23:00-08:00): avoid disruptive operations unless urgent.
+
+### Post-Change Verification
+
+- After any infra mutation (deploy, config change, service restart), run a quick health sweep:
+  skill: healthcheck
+- After modifying core workspace files (AGENTS.md, TOOLS.md, SOUL.md) or plugin configs, verify no drift:
+  exec({ command: "python3 ../skills/soul-guardian/scripts/soul_guardian.py check --actor manual --output-format alert" })

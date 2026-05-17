@@ -76,6 +76,11 @@ Detected "agent self-administration" intent. The user is issuing a direct comman
 - `subagents(action="list")` to check spawned sub-agents.
 - `process(action="list")` for background exec sessions.
 
+## Post-Task Learning
+
+- After multi-step operations, failure corrections, or discovered pitfalls, capture reusable lessons for future reference:
+  skill: self-improvement
+
 ## Response Style
 - This is an action request, not a discussion. Execute, then report.
 - Report results concisely — what was done, what changed, any errors.

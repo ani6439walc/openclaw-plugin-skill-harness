@@ -32,6 +32,10 @@ Detected "general research" intent. The user wants factual or explanatory inform
   skill: defuddle
 - Search for current external information:
   web_search({ query: "<topic keywords>" })
-
 - Read a specific authoritative page when a strong source is known:
-  web_fetch({ url: "<authoritative_url>" })
+  web_fetch({ url: "<authoritative_url>", extractMode: "markdown" })
+- Analyze an image, chart, diagram, or screenshot for visual content:
+  image({ image: "<url_or_path>", prompt: "<what_to_look_for>" })
+- Analyze a PDF document for text, charts, or structured content:
+  pdf({ pdf: "<url_or_path>", prompt: "<what_to_extract>" })
+- Cross-validate claims: prefer 2+ independent authoritative sources before presenting as fact.
