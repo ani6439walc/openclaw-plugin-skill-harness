@@ -49,17 +49,11 @@ Detected "wiki management" intent. The user wants to search, read, create, updat
 - Lint wiki vault for contradictions, provenance gaps, open questions:
   wiki_lint()
 
-- Ingest a local file into `sources/` (never manually move files):
-  skill: exec (run `openclaw wiki ingest <path>`)
+- Ingest a local file into `sources/`, compile vault, lint for issues (never manually move files):
+  skill: wiki-maintainer
 
-- Compile vault and refresh indexes:
-  skill: exec (run `openclaw wiki compile`)
-
-- Lint via CLI and review reports:
-  skill: exec (run `openclaw wiki lint`)
-
-- Probe Obsidian CLI status and helpers:
-  skill: exec (run `openclaw wiki obsidian status`)
+- Probe Obsidian CLI status and use Obsidian helpers (`status`, `search`, `open`, `daily`):
+  skill: obsidian-vault-maintainer
 
 - Navigate a large wiki page by heading tree before editing:
   skill: treemd
