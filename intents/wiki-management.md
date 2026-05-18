@@ -16,66 +16,59 @@ examples:
 - "wiki 的整體狀態怎麼樣？"
 - "幫我更新這個實體的資訊"
 - "幫我把這個檔案 ingest 到 wiki sources"
-- "wiki 有沒有需要整理或修補的頁面？"
 ---
 
 Detected "wiki management" intent. The user wants to search, read, create, update, or maintain pages in the memory wiki vault.
 
-## Core Principles
+## Guidelines
 
-- **Sources are evidence, not truth**: Treat raw sources, memory artifacts, and daily notes as evidence. Do not let wiki pages become the only source of truth for new claims.
-- **Page identity stability**: Keep page identity stable. Favor updating existing entities and concepts over spawning duplicates with slightly different names.
-- **Managed markers**: Keep generated sections inside managed markers. Do not overwrite human note blocks.
-- **No manual file moves**: Never manually `mv` wiki files between directories. Always use the proper CLI workflow (`ingest` → `compile` → `lint`).
-
-## Standard Maintenance Loop
-
-When creating, moving, or reorganizing wiki content, **always** follow this sequence:
-
-```bash
-openclaw wiki ingest <path>          # Ingest file into sources/
-openclaw wiki compile                # Compile vault, update indexes
-openclaw wiki lint                   # Surface contradictions, gaps, questions
-```
-
-- In **bridge mode**: run `openclaw wiki bridge import` before relying on search results if you need the latest public memory artifacts.
-- In **unsafe-local mode**: use `openclaw wiki unsafe-local import` only when the user explicitly opted into private local path access.
-
-## Obsidian Compatibility
-
-- Confirm vault mode and Obsidian CLI availability via `openclaw wiki status` before shelling out.
-- Use `openclaw wiki obsidian status` to probe the CLI before depending on it. Do not assume Obsidian is installed, running, or configured.
-- Prefer dedicated helpers: `openclaw wiki obsidian search`, `openclaw wiki obsidian open`, `openclaw wiki obsidian command`, `openclaw wiki obsidian daily`.
-- Use `[[Wikilinks]]` for internal vault connections, standard Markdown `[text](url)` for external URLs only.
-- Preserve Obsidian-friendly wikilinks when creating or refreshing indexes.
-- Use valid Obsidian frontmatter: `title`, `tags`, `aliases`, `cssclasses`.
-- Use callouts (`> [!type]`), embeds (`![[note]]`), and comments (`%%hidden%%`) where appropriate.
+- Do not manually `mv` wiki files between directories. Always use `openclaw wiki ingest` → `openclaw wiki compile` → `openclaw wiki lint`.
+- Treat raw sources, memory artifacts, and daily notes as evidence. Do not let wiki pages become the only source of truth for new claims.
+- Keep page identity stable. Favor updating existing entities and concepts over spawning duplicates.
+- Keep generated sections inside managed markers (`<!-- openclaw:wiki:... -->`). Do not overwrite human note blocks.
+- Use `[[Wikilinks]]` for internal vault connections, `[text](url)` for external URLs only.
 - Avoid destructive renames unless you also have a link-repair plan.
-
-## Tool Routing
-
-### Query & Discovery
-- **First pass (shared memory + wiki)**: `memory_search({ query: "...", corpus: "all" })` — one recall pass across durable memory plus compiled wiki.
-- **Wiki-only discovery**: `wiki_search({ query: "...", corpus: "wiki" })` — wiki-specific ranking and provenance.
-- **Read exact content**: `wiki_get({ lookup: "<page_path_or_id>" })` — always inspect before editing or citing.
-
-### Mutation
-- **Narrow synthesis/metadata**: `wiki_apply({ op: "create_synthesis", ... })` — for targeted updates when a tool-level mutation is enough.
-- **New pages from files**: `openclaw wiki ingest <path>` — places content in `sources/` with proper naming.
-- **Full vault compile**: `openclaw wiki compile` — regenerates indexes and compiled pages.
-- **Health check**: `openclaw wiki lint` — surfaces contradictions, provenance gaps, open questions. Review reports under `reports/`.
-
-### Status & Context
-- **Vault state**: `wiki_status()` — vault mode, path, page counts, Obsidian CLI availability.
-- **Large page surgery**: Use `treemd` skill to survey structure before reading or editing large files.
 
 ## Response Strategy
 
-| User Goal | Action |
-|---|---|
-| Find pages | `memory_search` (corpus=all) → `wiki_search` → `wiki_get` |
-| Create new content | `openclaw wiki ingest <path>` → `openclaw wiki compile` → `openclaw wiki lint` |
-| Update existing page | `wiki_get` → edit within managed markers → `openclaw wiki lint` |
-| Audit vault health | `wiki_lint` → review `reports/` |
-| Check vault state | `wiki_status` |
-| Obsidian operations | `openclaw wiki obsidian status` → dedicated helpers |
+- Check vault mode, path, page counts, and Obsidian CLI availability:
+  wiki_status()
+
+- One-pass recall across durable memory + compiled wiki:
+  memory_search({ query: "<keywords>", corpus: "all", maxResults: 10 })
+
+- Search wiki pages with wiki-specific ranking and provenance:
+  wiki_search({ query: "<keywords>", corpus: "wiki", maxResults: 10 })
+
+- Inspect exact wiki page content before editing or citing:
+  wiki_get({ lookup: "<page_path_or_id>" })
+
+- Create or update wiki synthesis / metadata:
+  wiki_apply({ op: "create_synthesis", title: "<title>", body: "<content>", sourceIds: ["<source_id>"] })
+
+- Lint wiki vault for contradictions, provenance gaps, open questions:
+  wiki_lint()
+
+- Ingest a local file into `sources/` (never manually move files):
+  skill: exec (run `openclaw wiki ingest <path>`)
+
+- Compile vault and refresh indexes:
+  skill: exec (run `openclaw wiki compile`)
+
+- Lint via CLI and review reports:
+  skill: exec (run `openclaw wiki lint`)
+
+- Probe Obsidian CLI status and helpers:
+  skill: exec (run `openclaw wiki obsidian status`)
+
+- Navigate a large wiki page by heading tree before editing:
+  skill: treemd
+
+- Inspect code or plugin implementation details within wiki context:
+  skill: cx
+
+- Search web for authoritative references to cite in wiki pages:
+  web_search({ query: "<topic keywords>" })
+
+- Fetch and extract content from an authoritative URL for wiki sourcing:
+  web_fetch({ url: "<authoritative_url>" })
