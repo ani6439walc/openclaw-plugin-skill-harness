@@ -3,4 +3,5 @@ allowBuilds:
   koffi: true
   openclaw: true
   protobufjs: true
+  sharp: true
   tree-sitter-bash: true

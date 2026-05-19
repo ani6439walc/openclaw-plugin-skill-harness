@@ -27,7 +27,6 @@ import {
   parseIntentionResult,
   runIntentionSubagent,
 } from "./subagent.js";
-import { log } from "node:console";
 
 const pluginRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
