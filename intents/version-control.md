@@ -2,18 +2,15 @@
 id: VERSION_CONTROL
 name: Source Code Version Control
 triggers:
-- "User is asking to commit, push, pull, or manage git operations"
-- "User wants to check git status, view git log, or review git diff"
-- "User is asking about branch management, merging, or rebasing"
-- "User wants to manage submodules or update dependencies"
-- "User is asking to stage files, write commit messages, or handle git conflicts"
+- "User wants to perform git operations: commit, push, pull, branch management, merge, rebase, or submodule updates — including staging files and writing commit messages"
+- "User wants to inspect git history: status, log, diff, blame, or resolve conflicts"
 examples:
 - "幫我 commit"
 - "看看 git 記錄"
 - "git status"
 - "幫我 rebase 到 main"
-- "誰改了這個檔案"
-- "合併這個分支"
+- "git blame 這一行是誰改的"
+- "把 feature 分支合併到 main"
 ---
 
 Detected "version control" intent. The user wants to perform git operations such as commit, push, pull, branch management, or submodule updates.

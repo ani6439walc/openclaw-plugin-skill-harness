@@ -3,22 +3,16 @@ id: PROMPT_DESIGN
 name: Prompt / Intent / Skill Design Query
 enabled: true
 triggers:
-  - "User is discussing how to design, refine, rename, restructure, or improve prompts, custom instructions, skills, plugin intents, or routing behavior"
-  - "User asks how to write, evaluate, or debug a prompt, system instruction, or agent behavior specification"
-  - "User wants help naming, scoping, or setting boundaries for an intent, skill, or plugin"
-  - "User asks about prompt engineering techniques: chain-of-thought, few-shot, XML tags, role-based prompting"
-  - "User is reviewing or auditing existing prompts, intents, or skills for quality, consistency, or anti-patterns"
+  - "User wants to design, refine, rename, audit, or improve prompts, custom instructions, skills, plugin intents, or agent routing behavior — including naming, scoping, and boundary setting"
+  - "User asks about prompt engineering techniques (chain-of-thought, few-shot, XML tags, role-based prompting) or needs help debugging a prompt that produces wrong results"
+  - "User is reviewing or auditing existing prompts, intents, or skills for quality, consistency, overlaps, or anti-patterns"
 examples:
   - "這個 intent 要改名嗎？"
-  - "哪個 skill 比較適合這個 prompt？"
   - "幫我設計一個新的 intent"
-  - "這個 prompt 結構合理嗎？"
   - "這個行為應該放到獨立的 intent 嗎？"
-  - "幫我優化這個系統提示詞"
   - "這個 prompt 一直出不對的結果，怎麼修？"
   - "review 一下現有的 intent 有沒有重疊"
   - "這個 skill 的 scope 太大了，怎麼拆？"
-  - "幫我用 chain-of-thought 改寫這個 prompt"
 ---
 
 Detected "prompt design" intent. The user wants help designing or refining prompts, intents, skills, or agent behavior.

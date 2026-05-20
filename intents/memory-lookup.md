@@ -5,11 +5,8 @@ triggers:
 - "User is asking about past events, records, preferences, habits, or prior discussions without a clearly recent, comparative, emotional, or timeline-oriented focus"
 examples:
 - "之前有聊過那個想法嗎？"
-- "那個專案的相關資訊在哪裡？"
-- "我們以前有討論過這個嗎？"
-- "幫我找一下關於 xxx 的記錄"
 - "我在那家餐廳通常都點什麼？"
-- "我之前的筆電設定是什麼？"
+- "幫我找一下關於 Talos 的設定記錄"
 - "主人之前提過什麼旅行計畫？"
 ---
 

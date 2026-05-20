@@ -3,20 +3,15 @@ id: SYSTEM_DIAGNOSTICS
 name: System Diagnostics & Debugging（系統診斷與除錯）
 enabled: true
 triggers:
-  - "User is dealing with a hard-to-locate bug, performance regression, or system anomaly that needs structured diagnosis — not a simple compile error or one-line fix"
-  - "User asks to debug, diagnose, troubleshoot, trace root cause, or bisect a non-obvious failure"
-  - "User describes symptoms that imply a non-deterministic bug: intermittent crash, flaky behavior, race condition, memory leak, timeout under load"
-  - "User wants to build a reproduction loop, isolation harness, or deterministic feedback signal before attempting a fix"
-  - "User mentions diagnostic tools or techniques: debugger, core dump, profiler, bisect, git bisect, strace, perf, heap dump, flamegraph"
-  - "User's bug report includes multiple failed attempts and needs methodological escalation beyond ad-hoc patching"
+  - "User is dealing with a hard-to-locate bug, performance regression, or non-deterministic anomaly (intermittent crash, flaky behavior, race condition, memory leak, timeout under load) that needs structured diagnosis — not a simple compile error or one-line fix"
+  - "User asks to debug, diagnose, troubleshoot, trace root cause, or bisect; or mentions diagnostic tools: debugger, profiler, strace, perf, core dump, heap dump, flamegraph, git bisect"
+  - "User wants to build a reproduction loop or isolation harness before attempting a fix, or has already made multiple failed attempts and needs methodological escalation"
 examples:
   - "這個 service 不定時 crash，幫我診斷一下 root cause"
   - "API latency 突然爆增兩倍，幫我排查是哪一段造成的"
-  - "這個 race condition 偶發性出現，幫我建立 repro 環境"
   - "memory 一直在漲懷疑 leak，幫我用 profiler 定位"
   - "幫我 git bisect 找出是哪個 commit 引入了這個 bug"
   - "這隻 pod 重啟好幾次了可是 log 看不出來，幫我深入診斷"
-  - "production 隨機 timeout，幫我建立最小可重現場景"
 ---
 
 Detected "system diagnostics" intent. The user has a hard-to-locate bug, performance regression, or system anomaly that needs structured diagnosis.

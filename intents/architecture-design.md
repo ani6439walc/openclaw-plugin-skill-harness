@@ -3,17 +3,13 @@ id: ARCHITECTURE_DESIGN
 name: Architecture Design & Diagramming（架構設計與圖表）
 enabled: true
 triggers:
-  - "User wants to design, diagram, or visualize system architecture: services, components, data flows, network topology, deployment layout"
-  - "User asks to draw or generate diagrams: architecture diagram, C4 model, UML, flowchart, sequence diagram, topology map, CI/CD pipeline"
-  - "User is discussing architectural decisions: service boundaries, integration patterns, trade-offs, component decomposition"
-  - "User wants to document or communicate system structure visually to stakeholders or teammates"
-  - "User mentions diagram types or tools: architecture diagram, 架構圖, C4, UML, flowchart, topology, system design"
+  - "User wants to design, diagram, or visualize system architecture and structural decisions — including services, data flows, network topology, service boundaries, integration patterns, or component decomposition"
+  - "User asks to generate diagrams (architecture, C4, UML, flowchart, sequence, CI/CD pipeline, topology) or mentions diagram keywords: 架構圖, topology, system design"
+  - "User wants to document or communicate system structure visually for stakeholders or team alignment"
 examples:
   - "幫我畫 microservice 架構圖"
-  - "GCP 雲端架構幫我畫成圖"
   - "CI/CD pipeline diagram"
   - "這三個服務要怎麼切比較好？"
-  - "data pipeline 從 ingest 到 storage 圖解"
   - "K8s cluster 拓撲圖"
   - "API gateway → backend → DB 的 flow 幫我畫出來"
   - "這個系統的架構圖幫我生成，我要拿去簡報"

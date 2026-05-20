@@ -3,19 +3,14 @@ id: IMAGE_ANALYSIS
 name: Image Analysis / Visual Understanding
 enabled: true
 triggers:
-  - "User is asking to analyze, understand, describe, or extract information from an image, photo, screenshot, diagram, chart, or PDF"
-  - "User attaches an image and asks a question about its content (what is this, what does this say, what's in this picture)"
-  - "User wants OCR, text extraction, or visual inspection of a screenshot, chart, graph, or document image"
-  - "User asks to 'look at' or 'check out' an attached file that is an image"
+  - "User wants to analyze, describe, or extract information from an image, photo, screenshot, diagram, chart, or PDF — including OCR, text extraction, and visual inspection"
+  - "User attaches an image and asks what it shows, what it says, or what can be found inside it"
 examples:
   - "這張圖裡面有什麼？"
   - "看一下這個截圖，錯誤訊息是什麼？"
-  - "這張照片是在哪裡拍的？"
   - "幫我看看這個圖表的趨勢"
   - "這張梗圖在說什麼？"
   - "這個 PDF 的內容幫我整理一下"
-  - "分析一下這張架構圖"
-  - "看看這個 error log 截圖"
   - "這張圖片上的文字幫我辨識"
 ---
 

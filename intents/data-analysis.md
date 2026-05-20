@@ -3,21 +3,15 @@ id: DATA_ANALYSIS
 name: Data Analysis & Visualization（數據分析與視覺化）
 enabled: true
 triggers:
-  - "User wants to analyze, visualize, or derive insights from structured or semi-structured data — not just look up a single value"
-  - "User asks about SQL queries, spreadsheets, dashboards, BI reports, notebook analysis, or chart generation from data"
-  - "User wants to compare metrics across time periods, groups, segments, cohorts, or experiments (before/after, A/B, funnel, retention)"
-  - "User asks for statistical interpretation: significance, correlation, trends, anomalies, distributions, or regression"
-  - "User mentions data tools or formats: CSV, JSON data, pandas, matplotlib, Excel, Google Sheets, SQL, BigQuery, Metabase, Grafana"
-  - "User's question would benefit from the data-analysis methodology: metric contracts, decision-oriented analysis, robustness checks, or uncertainty quantification"
+  - "User wants to analyze, visualize, or derive insights from structured or semi-structured data — comparing metrics across time/groups, computing statistics, or generating charts from CSV, SQL, spreadsheets, or JSON"
+  - "User asks about BI reports, dashboards, notebook analysis, or data tools: pandas, matplotlib, Excel, Google Sheets, BigQuery, Metabase, Grafana"
+  - "User's question benefits from decision-oriented analysis methodology: metric contracts, robustness checks, or uncertainty quantification"
 examples:
   - "幫我分析一下這個 CSV 的銷售趨勢，畫個圖"
   - "這兩個月的 API latency 差多少？有統計顯著嗎？"
   - "跑一下 BigQuery 看這個 cohort 的 retention"
-  - "這份 Excel 報表的數據幫我整理成視覺化圖表"
-  - "幫我看看這段 pandas code 的分析邏輯對不對"
   - "A/B test 的 conversion rate，哪一組贏了？"
   - "這個 funnel drop 最嚴重的是哪一層？"
-  - "幫我從這個 JSON 匯出一個 summary 圖"
 ---
 
 Detected "data analysis" intent. The user wants to analyze, visualize, or derive insights from structured data to support a decision.

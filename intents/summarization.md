@@ -4,10 +4,8 @@ name: Content Summary / Transcript Query
 triggers:
 - "User wants a provided source to be summarized, condensed, or transcribed, such as a URL, article, video, podcast, PDF, transcript, or local file"
 examples:
-- "幫我總結這篇文章"
 - "這個 YouTube 影片在講什麼？"
 - "幫我聽寫這段影片"
-- "給我這個 PDF 的重點"
 - "總結這集 podcast"
 - "這個網址的內容幫我整理一下"
 ---

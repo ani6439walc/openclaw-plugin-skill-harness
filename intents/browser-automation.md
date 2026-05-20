@@ -5,12 +5,9 @@ triggers:
 - "User is asking for a task that should be executed through browser interaction, such as checking a web app, authenticated console, map, screenshot, navigation flow, or other interactive browser task"
 examples:
 - "幫我查 OpenAI 這個月花了多少"
-- "Google AI Studio 的花費跟 budget"
 - "截圖看一下 dashboard"
 - "開 Google Maps 幫我查營業時間"
-- "幫我查 Ollama Cloud 的額度"
-- "開那個網站幫我看看表單在問什麼"
-- "登入幫我查一下最新狀態"
+- "登入 console 幫我查目前的 quota 剩多少"
 ---
 
 Detected "browser automation" intent. The user wants a browser-capable agent to interact with a website or web app and report the result.

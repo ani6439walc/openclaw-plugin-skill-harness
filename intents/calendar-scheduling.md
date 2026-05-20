@@ -3,21 +3,16 @@ id: CALENDAR_SCHEDULING
 name: Calendar & Scheduling (行事曆與排程)
 enabled: true
 triggers:
-  - "User wants to check, create, update, or manage calendar events, appointments, or schedules"
-  - "User asks about upcoming events, today's agenda, or what's on the calendar"
+  - "User wants to check, create, update, or manage calendar events, appointments, schedules, or upcoming agenda — including adding attendees and sending invitations"
   - "User wants to set a reminder, alarm, or time-based notification (one-off or recurring)"
-  - "User mentions: 行事曆、行程、提醒、鬧鐘、倒數、計時、幾點做什麼、等一下提醒我"
-  - "User wants to add attendees, send calendar invitations, or manage event participants"
+  - "User mentions scheduling keywords: 行事曆、行程、提醒、鬧鐘、倒數、計時、幾點做什麼、等一下提醒我"
 examples:
   - "今天有什麼行程？"
-  - "下週二下午有會議嗎？"
   - "幫我新增一個明天下午三點的會議"
   - "提醒我 20 分鐘後去拿外送"
   - "每天早上九點提醒我做 Duolingo"
   - "這個行事曆活動幫我加 Helen 進來"
-  - "下個月有什麼重要的事？"
   - "幫我查一下這週末有沒有空"
-  - "30 分鐘後叫我站起來活動一下"
 ---
 
 Detected "calendar & scheduling" intent. The user wants to manage events, reminders, or time-based tasks.

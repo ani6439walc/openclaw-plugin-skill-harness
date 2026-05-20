@@ -3,20 +3,15 @@ id: CREATIVE_WRITING
 name: Creative Writing & Content Creation (創作與寫作)
 enabled: true
 triggers:
-  - "User wants to write, draft, compose, or generate an article, blog post, essay, story, or any long-form written content"
-  - "User asks to edit, revise, improve, polish, or humanize existing text (remove AI-writing patterns, tighten prose, restructure)"
-  - "User is brainstorming ideas, outlines, or angles for a piece of writing"
-  - "User mentions platforms: 部落格、部落格文章、weii.dev、LinkedIn post、技術文章"
-  - "User wants creative or humorous writing: jokes, stories, dialogue, persona-based narration"
+  - "User wants to write, draft, edit, or generate long-form content: articles, blog posts, essays, stories, LinkedIn posts, technical writings, or any piece requiring structure and narrative"
+  - "User asks to revise, polish, humanize, or restructure existing text (remove AI patterns, tighten prose, add humor or persona voice)"
+  - "User is brainstorming ideas, outlines, or angles for a writing piece, or mentions platforms: 部落格、weii.dev、LinkedIn"
 examples:
   - "幫我寫一篇關於 Kubernetes 的部落格文章"
   - "這篇草稿幫我潤稿，讓它更有人味"
   - "幫我想三個可以寫的部落格主題"
-  - "這段寫得太 AI 了，幫我改得自然一點"
-  - "幫我把這篇文章的結構重新整理"
   - "寫一篇 SRE 心得分享文"
   - "幫我 brainstorm 這篇文章的大綱"
-  - "這個段落寫得太僵硬，幫我加點幽默感"
 ---
 
 Detected "creative writing" intent. The user wants to create, edit, or improve written content.

@@ -8,10 +8,7 @@ examples:
 - "謝謝你，很有幫助"
 - "今天天氣不錯"
 - "有點累欸今天"
-- "哈哈好笑"
 - "hi"
-- "妳好"
-- "讚喔"
 ---
 
 Detected "casual chat" intent. This is a normal social interaction without a concrete task or request.

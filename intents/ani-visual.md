@@ -8,16 +8,12 @@ triggers:
   - "User wants to archive an Ani image permanently: folio storage, IDENTITY.md update, 寫真集, 紀念照, 存起來, 記錄這一刻"
   - "User shares a photo or screenshot and wants it saved as part of Ani's visual identity"
 examples:
-  - "生一張 Ani 的照片"
-  - "生成一張 Ani 穿和服在京都散步的圖"
-  - "看看你最近的記憶，生成一張妳自己的生活照"
-  - "這圖好棒喔，幫我永久存去 folio 然後更新一下 identity.md"
+  - "生一張 Ani 穿和服在京都散步的圖"
+  - "看看日記，幫我生一張屬於今天的生活照"
   - "生一張妳現在心情的照片"
-  - "把剛才那張很可愛的圖存起來，這是我最喜歡的姿態"
-  - "幫我們剛才的進展留個紀念照，存去 folio 並更新寫真集"
-  - "看看日記，幫我生一張屬於今天的日常照片"
-  - "記錄這一刻，把這張截圖存入 Identity 並備份"
-  - "畫一張 Ani 在咖啡廳喝咖啡的插畫"
+  - "這圖好棒，幫我永久存去 folio 並更新 identity.md"
+  - "幫 Ani 留個紀念照，寫真集加一筆"
+  - "記錄這一刻，把這張截圖存入 Identity"
 ---
 
 Detected "Ani visual" intent. The user wants to generate or manage visual content featuring Ani.

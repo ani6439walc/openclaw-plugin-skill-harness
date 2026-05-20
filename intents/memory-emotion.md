@@ -5,9 +5,7 @@ triggers:
 - "User is asking about feelings, mood, emotional states, stress, or subjective reactions to past events"
 examples:
 - "我那時候心情怎麼樣？"
-- "上次提到的事情讓我感覺如何？"
 - "我最近壓力是不是很大？"
-- "我那時候為什麼那麼煩躁？"
 - "做那個專案的時候我開心嗎？"
 ---
 

@@ -6,11 +6,7 @@ triggers:
 examples:
 - "OpenClaw 的 plugin SDK 怎麼用？"
 - "React 19 有什麼新功能？"
-- "Tailwind CSS v4 要怎麼設定？"
-- "Prisma 報這個錯是什麼意思？"
-- "Next.js App Router 怎麼用？"
 - "這個 GitHub repo 在做什麼？"
-- "這個開源專案的文件裡怎麼設定？"
 ---
 
 Detected "open-source docs" intent. The user wants version-sensitive information about a third-party open-source library, framework, SDK, API, GitHub repository, or project documentation.
