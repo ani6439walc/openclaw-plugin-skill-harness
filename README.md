@@ -37,8 +37,8 @@ Build it with:
 
 ```bash
 cd extensions/intention-hint
-bun install
-bun run build
+pnpm install
+pnpm run build
 ```
 
 ## Configuration (`openclaw.json`)
