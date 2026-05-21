@@ -4,11 +4,11 @@ name: Casual Chat
 triggers:
 - "User is engaging in casual social interaction without a concrete task, such as greeting, thanking, small talk, sharing mood, or making a light reaction"
 examples:
-- "Good morning~"
-- "Thanks, that was helpful"
-- "The weather is nice today"
-- "I'm kinda tired today"
-- "Haha that's funny"
+- "早安～"
+- "謝謝你，很有幫助"
+- "今天天氣不錯"
+- "有點累欸今天"
+- "hi"
 ---
 
 Detected "casual chat" intent. This is a normal social interaction without a concrete task or request.

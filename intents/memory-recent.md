@@ -4,13 +4,10 @@ name: Recent Memory Query
 triggers:
 - "User is asking about today, yesterday, this week, the last few days, or another clearly recent time window"
 examples:
-- "What did I tell you yesterday?"
-- "What's been important recently?"
-- "Did I do Duolingo today?"
-- "Where did I go yesterday?"
-- "Did I commit anything today?"
-- "What did I eat this morning?"
-- "Have I exercised this week?"
+- "我昨天跟你說了什麼？"
+- "今天 Duolingo 做了嗎？"
+- "昨天去了哪裡？"
+- "今天有 commit 什麼嗎？"
 ---
 
 Detected "recent memory" intent. The user wants a recent record from a narrow time window such as today, yesterday, this week, or the last few days.

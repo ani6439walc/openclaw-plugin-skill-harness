@@ -1,41 +1,59 @@
 ---
 id: PROMPT_DESIGN
 name: Prompt / Intent / Skill Design Query
+enabled: true
 triggers:
-- "User is discussing how to design, refine, rename, restructure, or improve prompts, custom instructions, skills, plugin intents, or routing behavior"
+  - "User wants to design, refine, rename, audit, or improve prompts, custom instructions, skills, plugin intents, or agent routing behavior — including naming, scoping, and boundary setting"
+  - "User asks about prompt engineering techniques (chain-of-thought, few-shot, XML tags, role-based prompting) or needs help debugging a prompt that produces wrong results"
+  - "User is reviewing or auditing existing prompts, intents, or skills for quality, consistency, overlaps, or anti-patterns"
 examples:
-- "Should this intent be renamed?"
-- "Which skill fits this prompt better?"
-- "Help me design a new intent for this plugin"
-- "Does this prompt structure make sense?"
-- "Should this behavior belong in a separate intent?"
+  - "這個 intent 要改名嗎？"
+  - "幫我設計一個新的 intent"
+  - "這個行為應該放到獨立的 intent 嗎？"
+  - "這個 prompt 一直出不對的結果，怎麼修？"
+  - "review 一下現有的 intent 有沒有重疊"
+  - "這個 skill 的 scope 太大了，怎麼拆？"
 ---
 
 Detected "prompt design" intent. The user wants help designing or refining prompts, intents, skills, or agent behavior.
 
+## Skill & Tool Routing
+
+| Task | Skill / Tool |
+|---|---|
+| Interactive intent design interview: guided step-by-step to define name, id, triggers, examples, and boundaries for a new or refactored intent | `intent-grill` skill |
+| Prompt structure review, anti-pattern detection, optimization techniques, chain-of-thought / few-shot / role-based design | `prompt-engineering-expert` skill |
+| Navigate a large Markdown file by section (heading tree, extract specific sections) | `treemd` skill (`treemd tree <file>`, `treemd query <file>`) |
+| Inspect code/plugin implementation details (symbols, definitions, references) | `cx` skill (`cx overview`, `cx symbols`, `cx definition`) |
+| Combine multiple design sources into a unified recommendation with conflict resolution | `synthesize` skill |
+| Brainstorm naming alternatives, scoping options, or structural approaches | `brainstorm` skill |
+| Compare two prompt versions, intent definitions, or design options side-by-side | `compare` skill |
+| Search memory for prior design decisions or rationale | `memory_search` (corpus: memory) |
+
 ## Guidelines
 
-- Focus on the design decision the user is asking about.
-- Evaluate naming, scope, boundaries, and prompt structure directly.
-- Keep recommendations simple, specific, and easy to apply.
-- Do not turn design discussion into memory retrieval unless the user explicitly asks to look up prior docs or rules.
+### When the user asks about an existing prompt / intent / skill
+1. **Read the target file first** with `read` — never suggest edits blind.
+2. For large Markdown files (>200 lines), use `treemd` skill first to survey structure before reading.
+3. For code/plugin files, use `cx overview` first, then drill into symbols with `cx definition`.
+4. If the question is about quality or anti-patterns, load `prompt-engineering-expert` skill.
 
-## Response Strategy
+### When the user wants to create something new
+1. Understand the scope boundary: what does this intent/skill own vs what does it delegate.
+2. Use `brainstorm` skill for naming and structural alternatives.
+3. Draft the frontmatter (id, triggers, examples) first — these are the routing surface; the body is operational guidance.
+4. Keep triggers specific enough to avoid false matches, broad enough to capture natural language variations.
+5. Examples should cover both Chinese and English, casual and formal phrasings.
 
-- Review the current prompt, intent, skill mapping, or plugin behavior.
-- Explain the tradeoffs of the available options.
-- Recommend the smallest clean structure that preserves clear boundaries.
-- When needed, suggest concrete edits in the target file.
+### When the user wants to edit / refactor
+1. Map dependencies: search for all files that reference the target (triggers, examples, skill routing tables).
+2. Propose the smallest change that achieves the goal — avoid scope creep.
+3. Show a diff preview before applying.
+4. After editing, verify no stale cross-references remain.
 
-- Review and improve prompt structure:
-  skill: prompt-engineering-expert
-- Read a large Markdown intent or prompt file by section:
-  skill: treemd
-- Read a code or plugin file by symbols when behavior depends on implementation details:
-  skill: cx
-
-- Search memory only when the user explicitly asks about prior design decisions:
-  memory_search({ query: "<subject_A_keywords>", corpus: "memory", maxResults: 5, minScore: 0.1 })
-
-- Read the current prompt or intent file directly when editing is needed:
-  read({ path: "<file>" })
+### Design Principles
+- **Boundaries over overlaps**: when two intents could both match, tighten triggers rather than relying on body-text disclaimers.
+- **Triggers + examples are the contract**: sub-agents only see frontmatter; the body is execution guidance.
+- **Default to the most specific intent**: more targeted triggers take priority over generic catch-all triggers.
+- **Naming**: short, CAPITAL_SNAKE_CASE ids; descriptive Chinese-friendly names.
+- **Tools over memory**: never answer prompt design questions from memory alone — always inspect the actual files.

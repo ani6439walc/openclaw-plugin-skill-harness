@@ -4,11 +4,9 @@ name: Memory Comparison Query
 triggers:
 - "User is asking about differences, similarities, trade-offs, or contrasts between two or more remembered subjects, periods, trips, approaches, or records"
 examples:
-- "Which of these two approaches is better?"
-- "What's the difference between last month's and this month's data?"
-- "What's the difference between method A and method B?"
-- "What's different between the previous version and the current one?"
-- "How does Japan trip compare to the Chiayi trip?"
+- "這兩個方法哪個比較好？"
+- "上個月跟這個月的資料差在哪？"
+- "日本旅行跟嘉義旅行比起來怎麼樣？"
 ---
 
 Detected "memory comparison" intent. The user wants two or more remembered subjects to be compared without merging them into a single recall path.

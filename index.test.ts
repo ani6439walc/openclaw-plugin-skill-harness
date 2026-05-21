@@ -8,7 +8,7 @@ const {
   buildIntentionEmbeddedRunParams,
   parseIntentionResult,
   buildPromptPrefix,
-  buildQuery,
+  applyQueryFilters,
   extractRecentTurns,
   getModelRef,
   clampInt,
@@ -255,49 +255,53 @@ describe("isAllowedChatId", () => {
   });
 });
 
-/* ── Query builder ──────────────────── */
+/* ── Query filtering ────────────────── */
 
-describe("buildQuery", () => {
-  it("returns latest message only in message mode", () => {
-    expect(
-      buildQuery({ latestUserMessage: "hello", queryMode: "message" }),
-    ).toBe("hello");
+describe("applyQueryFilters", () => {
+  const turns = [
+    { role: "user" as const, text: "first question" },
+    { role: "assistant" as const, text: "first answer" },
+    { role: "user" as const, text: "follow up" },
+    { role: "assistant" as const, text: "follow up answer" },
+  ];
+
+  it("returns empty in message mode (caller provides latest)", () => {
+    expect(applyQueryFilters(turns, { queryMode: "message" })).toEqual([]);
   });
 
-  it("returns latest when no recent turns in recent mode", () => {
-    expect(
-      buildQuery({ latestUserMessage: "hello", queryMode: "recent" }),
-    ).toBe("hello");
+  it("returns all turns in full mode", () => {
+    const result = applyQueryFilters(turns, { queryMode: "full" });
+    expect(result).toEqual(turns);
   });
 
-  it("includes recent conversation tail in recent mode", () => {
-    const result = buildQuery({
-      latestUserMessage: "final question",
-      recentTurns: [
-        { role: "user", text: "first" },
-        { role: "assistant", text: "answer" },
-      ],
+  it("applies turn limits in recent mode", () => {
+    const result = applyQueryFilters(turns, {
       queryMode: "recent",
+      recentUserTurns: 1,
+      recentAssistantTurns: 1,
     });
-    expect(result).toContain("Recent conversation tail:");
-    expect(result).toContain("user: first");
-    expect(result).toContain("assistant: answer");
-    expect(result).toContain("Latest user message:");
-    expect(result).toContain("final question");
+    // Picks last user turn first, then last assistant turn (unshift order)
+    expect(result.length).toBe(2);
+    expect(result[0]).toEqual({ role: "user", text: "follow up" });
+    expect(result[1]).toEqual({ role: "assistant", text: "follow up answer" });
   });
 
-  it("includes full context in full mode", () => {
-    const result = buildQuery({
-      latestUserMessage: "final question",
-      recentTurns: [
-        { role: "user", text: "first" },
-        { role: "assistant", text: "answer" },
-      ],
-      queryMode: "full",
+  it("applies character limits in recent mode", () => {
+    const longTurn = {
+      role: "user" as const,
+      text: "This is a very long message that should be truncated because it exceeds the limit",
+    };
+    const result = applyQueryFilters([longTurn], {
+      queryMode: "recent",
+      recentUserChars: 20,
     });
-    expect(result).toContain("first");
-    expect(result).toContain("answer");
-    expect(result).toContain("final question");
+    expect(result.length).toBe(1);
+    expect(result[0].text.length).toBeLessThanOrEqual(35);
+    expect(result[0].text).toContain("(truncated...)");
+  });
+
+  it("handles empty turns gracefully", () => {
+    expect(applyQueryFilters([], { queryMode: "recent" })).toEqual([]);
   });
 });
 
@@ -341,7 +345,7 @@ describe("buildIntentionPrompt", () => {
 
   it("contains query text", () => {
     const prompt = buildIntentionPrompt({
-      query: "how are you?",
+      latest: "how are you?",
       intents: mockIntents,
     });
     expect(prompt).toContain("how are you?");
@@ -349,16 +353,16 @@ describe("buildIntentionPrompt", () => {
 
   it("contains only enabled intent categories", () => {
     const prompt = buildIntentionPrompt({
-      query: "test",
+      latest: "test",
       intents: mockIntents,
     });
-    expect(prompt).toContain("id: CHAT");
-    expect(prompt).toContain("name: Casual Chat");
-    expect(prompt).toContain("id: RESEARCH_GENERAL");
-    expect(prompt).toContain("name: General Research Query");
-    expect(prompt).toContain("id: TYPO");
-    expect(prompt).toContain("name: Typo Correction");
-    expect(prompt).not.toContain("id: MEMORY");
+    expect(prompt).toContain('id="CHAT"');
+    expect(prompt).toContain('name="Casual Chat"');
+    expect(prompt).toContain('id="RESEARCH_GENERAL"');
+    expect(prompt).toContain('name="General Research Query"');
+    expect(prompt).toContain('id="TYPO"');
+    expect(prompt).toContain('name="Typo Correction"');
+    expect(prompt).not.toContain('id="MEMORY"');
   });
 
   it("formats intent with triggers and examples", () => {
@@ -372,17 +376,99 @@ describe("buildIntentionPrompt", () => {
         prompt: "chat hint",
       },
     ];
-    const prompt = buildIntentionPrompt({ query: "test", intents });
-    expect(prompt).toContain("<INTENT>");
-    expect(prompt).toContain("id: CHAT");
-    expect(prompt).toContain("name: Casual Chat");
+    const prompt = buildIntentionPrompt({ latest: "test", intents });
+    expect(prompt).toContain('<intent id="CHAT" name="Casual Chat">');
     expect(prompt).toContain("triggers:");
     expect(prompt).toContain("- Greetings");
     expect(prompt).toContain("- Small talk");
     expect(prompt).toContain("examples:");
     expect(prompt).toContain("- Good morning");
     expect(prompt).toContain("- Hello");
-    expect(prompt).toContain("</INTENT>");
+    expect(prompt).toContain("</intent>");
+  });
+
+  // XML-style prompt format tests (new signature)
+  describe("XML format", () => {
+    it("contains <input_context> section", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "how are you?",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<input_context>");
+      expect(prompt).toContain("</input_context>");
+    });
+
+    it("contains <classification_rules> section with Memory priority rule", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "test",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<classification_rules>");
+      expect(prompt).toContain("</classification_rules>");
+      expect(prompt).toContain("Memory intents");
+      expect(prompt).toContain("classify first if triggers match");
+    });
+
+    it("contains <output_format> section with confidence and complexity definitions", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "test",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<output_format>");
+      expect(prompt).toContain("</output_format>");
+      expect(prompt).toContain("confidence");
+      expect(prompt).toContain("0.0 to 1.0");
+      expect(prompt).toContain("complexity");
+      expect(prompt).toContain("low");
+      expect(prompt).toContain("medium");
+      expect(prompt).toContain("high");
+    });
+
+    it("contains <intent_catalog> section with lowercase <intent> tags", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "test",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<intent_catalog>");
+      expect(prompt).toContain("</intent_catalog>");
+      expect(prompt).toMatch(/<intent\s+id=/);
+      expect(prompt).toContain("</intent>");
+      expect(prompt).not.toContain("<INTENT>");
+      expect(prompt).not.toContain("</INTENT>");
+    });
+
+    it("contains <input> section with <conversation> and <latest>", () => {
+      const conversation: RecentTurn[] = [
+        { role: "user", text: "hello there" },
+        { role: "assistant", text: "hi back" },
+      ];
+      const prompt = buildIntentionPrompt({
+        conversation,
+        latest: "how are you?",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<input>");
+      expect(prompt).toContain("</input>");
+      expect(prompt).toContain("<conversation>");
+      expect(prompt).toContain("</conversation>");
+      expect(prompt).toContain('<turn role="user">hello there</turn>');
+      expect(prompt).toContain('<turn role="assistant">hi back</turn>');
+      expect(prompt).toContain("<latest>");
+      expect(prompt).toContain("how are you?");
+      expect(prompt).toContain("</latest>");
+    });
+
+    it("handles empty conversation (only <latest>)", () => {
+      const prompt = buildIntentionPrompt({
+        latest: "hello",
+        intents: mockIntents,
+      });
+      expect(prompt).toContain("<conversation>");
+      expect(prompt).toContain("</conversation>");
+      expect(prompt).toContain("<latest>");
+      expect(prompt).toContain("hello");
+      expect(prompt).toContain("</latest>");
+    });
   });
 
   it("uses hard-coded other as fallback", () => {
@@ -396,7 +482,7 @@ describe("buildIntentionPrompt", () => {
         prompt: "",
       },
     ];
-    const prompt = buildIntentionPrompt({ query: "test", intents });
+    const prompt = buildIntentionPrompt({ latest: "test", intents });
     expect(prompt).toContain("intent: OTHER (Unclassified)");
     expect(prompt).toContain("Unable to confidently classify");
   });
@@ -451,7 +537,7 @@ describe("extractRecentTurns", () => {
 describe("parseIntentionResult", () => {
   it("parses intent from key-value format", () => {
     const result = parseIntentionResult(
-      "intent: chat (閒聊)\nreason: greeting\ngoal: social",
+      "intent: chat (閒聊)\nreason: greeting\ngoal: social\nconfidence: 0.9\ncomplexity: low",
       ["chat", "other"],
     );
     expect(result?.intent).toBe("chat");
@@ -466,7 +552,7 @@ describe("parseIntentionResult", () => {
 
   it("parses required fields and optional suggestion", () => {
     const result = parseIntentionResult(
-      "intent: research (研究查詢)\nreason: need data\ngoal: check news\nsuggestion: try news",
+      "intent: research (研究查詢)\nreason: need data\ngoal: check news\nsuggestion: try news\nconfidence: 0.8\ncomplexity: medium",
       ["research", "other"],
     );
     expect(result?.intent).toBe("research");
@@ -477,7 +563,7 @@ describe("parseIntentionResult", () => {
 
   it("falls back to other when intent not in valid list", () => {
     const result = parseIntentionResult(
-      "intent: invalid\nreason: test\ngoal: test",
+      "intent: invalid\nreason: test\ngoal: test\nconfidence: 0.3\ncomplexity: medium",
       ["chat", "other"],
     );
     expect(result?.intent).toBe("other");
@@ -485,7 +571,7 @@ describe("parseIntentionResult", () => {
 
   it("falls back to first valid intent when no other available", () => {
     const result = parseIntentionResult(
-      "intent: invalid\nreason: test\ngoal: test",
+      "intent: invalid\nreason: test\ngoal: test\nconfidence: 0.5\ncomplexity: low",
       ["chat"],
     );
     expect(result?.intent).toBe("chat");
@@ -498,7 +584,7 @@ describe("parseIntentionResult", () => {
 
   it("ignores unsupported fields from parsing", () => {
     const raw =
-      "intent: chat\nreason: test\ngoal: test\nmemorySubIntent: recent";
+      "intent: chat\nreason: test\ngoal: test\nconfidence: 0.7\ncomplexity: medium\nmemorySubIntent: recent";
     const result = parseIntentionResult(raw, ["chat"]);
     expect(result).toBeDefined();
     expect(result?.intent).toBe("chat");
@@ -509,7 +595,7 @@ describe("parseIntentionResult", () => {
 
   it("strips OUTPUT_FORMAT XML tags", () => {
     const result = parseIntentionResult(
-      "<OUTPUT_FORMAT>\nintent: CHAT (Casual Chat)\nreason: greeting\ngoal: social\n</OUTPUT_FORMAT>",
+      "<OUTPUT_FORMAT>\nintent: CHAT (Casual Chat)\nreason: greeting\ngoal: social\nconfidence: 0.95\ncomplexity: low\n</OUTPUT_FORMAT>",
       ["CHAT", "OTHER"],
     );
     expect(result?.intent).toBe("CHAT");
@@ -519,11 +605,84 @@ describe("parseIntentionResult", () => {
 
   it("skips empty optional fields", () => {
     const result = parseIntentionResult(
-      "intent: CHAT\nreason: greeting\ngoal: social\nsuggestion: ",
+      "intent: CHAT\nreason: greeting\ngoal: social\nsuggestion: \nconfidence: 0.9\ncomplexity: low",
       ["CHAT", "OTHER"],
     );
     expect(result?.intent).toBe("CHAT");
     expect(result?.suggestion).toBeUndefined();
+  });
+
+  it("skips whitespace-only suggestion", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: greeting\ngoal: social\nsuggestion:    \nconfidence: 0.85\ncomplexity: medium",
+      ["CHAT", "OTHER"],
+    );
+    expect(result?.suggestion).toBeUndefined();
+  });
+
+  it("parses confidence when valid", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: test\ngoal: social\nconfidence: 0.85\ncomplexity: medium",
+      ["CHAT", "OTHER"],
+    );
+    expect(result?.confidence).toBe(0.85);
+  });
+
+  it("parses complexity when valid", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: test\ngoal: social\nconfidence: 0.7\ncomplexity: high",
+      ["CHAT", "OTHER"],
+    );
+    expect(result?.complexity).toBe("high");
+  });
+
+  it("returns undefined when confidence absent", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: test\ngoal: social",
+      ["CHAT", "OTHER"],
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when complexity absent", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: test\ngoal: social",
+      ["CHAT", "OTHER"],
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when confidence invalid", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: test\ngoal: social\nconfidence: unsure",
+      ["CHAT", "OTHER"],
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when complexity invalid", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: test\ngoal: social\ncomplexity: hard",
+      ["CHAT", "OTHER"],
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("parses both confidence and complexity when both valid", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: test\ngoal: social\nconfidence: 0.75\ncomplexity: medium",
+      ["CHAT", "OTHER"],
+    );
+    expect(result?.confidence).toBe(0.75);
+    expect(result?.complexity).toBe("medium");
+  });
+
+  it("parses mixed valid/invalid — returns undefined when complexity invalid", () => {
+    const result = parseIntentionResult(
+      "intent: CHAT\nreason: test\ngoal: social\nconfidence: 0.9\ncomplexity: weird",
+      ["CHAT", "OTHER"],
+    );
+    expect(result).toBeUndefined();
   });
 });
 
@@ -579,6 +738,52 @@ describe("buildPromptPrefix", () => {
     expect(reasonIdx).toBeLessThan(bodyIdx);
   });
 
+  it("includes confidence and complexity when present", () => {
+    const result = buildPromptPrefix(
+      {
+        intent: "CHAT",
+        reason: "test",
+        goal: "social",
+        confidence: 0.9,
+        complexity: "high",
+      },
+      mockIntents,
+    );
+    expect(result).toBeDefined();
+    expect(result).toContain("confidence: 0.9");
+    expect(result).toContain("complexity: high");
+  });
+
+  it("defaults confidence to 0.5 when absent", () => {
+    const result = buildPromptPrefix(
+      {
+        intent: "CHAT",
+        reason: "test",
+        goal: "social",
+        confidence: 0.5,
+        complexity: "medium",
+      },
+      mockIntents,
+    );
+    expect(result).toBeDefined();
+    expect(result).toContain("confidence: 0.5");
+  });
+
+  it("defaults complexity to medium when absent", () => {
+    const result = buildPromptPrefix(
+      {
+        intent: "CHAT",
+        reason: "test",
+        goal: "social",
+        confidence: 0.5,
+        complexity: "medium",
+      },
+      mockIntents,
+    );
+    expect(result).toBeDefined();
+    expect(result).toContain("complexity: medium");
+  });
+
   it("includes optional suggestion when present", () => {
     const result = buildPromptPrefix(
       {
@@ -586,6 +791,8 @@ describe("buildPromptPrefix", () => {
         reason: "test",
         goal: "search",
         suggestion: "try web_search",
+        confidence: 0.9,
+        complexity: "high",
       },
       mockIntents,
     );
@@ -595,7 +802,13 @@ describe("buildPromptPrefix", () => {
 
   it("omits optional fields when absent", () => {
     const result = buildPromptPrefix(
-      { intent: "CHAT", reason: "test", goal: "social" },
+      {
+        intent: "CHAT",
+        reason: "test",
+        goal: "social",
+        confidence: 0.8,
+        complexity: "low",
+      },
       mockIntents,
     );
     expect(result).toBeDefined();
@@ -655,7 +868,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
     expect(result.modelRun).toBe(true);
     expect(result.promptMode).toBe("none");
     expect(result.disableTools).toBe(true);
-    expect(result).not.toHaveProperty("toolsAllow");
+    expect(result.toolsAllow).toEqual([]);
     expect(result.disableMessageTool).toBe(true);
     expect(result.sessionFile).toBe("/tmp/session.jsonl");
     expect(result.workspaceDir).toBe("/tmp");

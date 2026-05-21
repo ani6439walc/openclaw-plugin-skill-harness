@@ -2,21 +2,15 @@
 id: PRODUCTIVITY
 name: Productivity / Task & Project Management
 triggers:
-- "User is asking to view, create, update, or manage tasks, projects, goals, habits, reviews, or kanban cards in the productivity vault (darling/)"
-- "User wants to check current task status, upcoming deadlines, active projects, or goal progress"
-- "User wants to create, move, or complete kanban cards or next-action items"
-- "User is requesting a weekly/monthly review, inbox triage, or vault audit"
+- "User is asking to view, create, update, or manage tasks, projects, goals, habits, kanban cards, or next-action items in the productivity vault (darling/)"
+- "User wants to check current task status, upcoming deadlines, active projects, goal progress, or request a weekly/monthly review, inbox triage, or vault audit"
 examples:
-- "What are my tasks for today"
-- "Show me the active projects on the kanban board"
-- "Create a new project card for the Gitea migration"
-- "Mark this task as done"
-- "Run a weekly review for me"
-- "What's in the inbox that needs triaging"
-- "How is my goal progress looking"
-- "Add a new next action for the Framework Laptop setup"
-- "Show me this week's review"
-- "Duolingo done for today"
+- "今天有什麼任務"
+- "看看 kanban 上有幾個 active project"
+- "建立一個 Gitea 遷移的新專案卡片"
+- "幫我跑一次本週 review"
+- "inbox 裡有什麼要處理的"
+- "新增一個 Framework Laptop 設定的 next action"
 ---
 
 Detected "productivity" intent. The user is interacting with the productivity vault (darling/) for task management, project tracking, goal monitoring, reviews, or organizational workflows.

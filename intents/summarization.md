@@ -4,11 +4,10 @@ name: Content Summary / Transcript Query
 triggers:
 - "User wants a provided source to be summarized, condensed, or transcribed, such as a URL, article, video, podcast, PDF, transcript, or local file"
 examples:
-- "Summarize this article for me"
-- "What's this YouTube video about?"
-- "Can you transcribe this video?"
-- "Give me the key points from this PDF"
-- "Summarize this podcast episode"
+- "這個 YouTube 影片在講什麼？"
+- "幫我聽寫這段影片"
+- "總結這集 podcast"
+- "這個網址的內容幫我整理一下"
 ---
 
 Detected "summarization" intent. The user wants a provided source to be condensed, explained, or transcribed.

@@ -5,6 +5,7 @@ import {
   resolveAgentEffectiveModelPrimary,
 } from "openclaw/plugin-sdk/agent-runtime";
 import type { OpenClawPluginApi } from "../api.js";
+import { logger } from "../api.js";
 import {
   UNTRUSTED_CONTEXT_HEADER,
   FALLBACK_INTENT,
@@ -14,6 +15,7 @@ import { resolveCanonicalSessionKeyFromSessionId } from "./session.js";
 import type {
   IntentDefinition,
   IntentionResult,
+  RecentTurn,
   ResolvedIntentionHintPluginConfig,
 } from "./types.js";
 
@@ -52,14 +54,16 @@ export function getModelRef(
 }
 
 export function buildIntentionPrompt(params: {
-  query: string;
-  intents: IntentDefinition[];
+  conversation?: RecentTurn[];
+  latest: string;
+  intents: readonly IntentDefinition[];
 }): string {
   const enabledIntents = params.intents.filter((i) => i.enabled);
+  const allIntents = [...enabledIntents, FALLBACK_INTENT];
 
-  const intentDescriptions = enabledIntents
+  const intentCatalog = allIntents
     .map((intent) => {
-      const lines = [`<INTENT>`, `id: ${intent.id}`, `name: ${intent.name}`];
+      const lines = [`<intent id="${intent.id}" name="${intent.name}">`];
       if (intent.triggers.length > 0) {
         lines.push(`triggers:`);
         lines.push(...intent.triggers.map((t) => `- ${t}`));
@@ -68,39 +72,69 @@ export function buildIntentionPrompt(params: {
         lines.push(`examples:`);
         lines.push(...intent.examples.map((ex) => `- ${ex}`));
       }
-      lines.push(`</INTENT>`);
+      lines.push(`</intent>`);
       return lines.join("\n");
     })
-    .join("\n\n");
+    .join("\n");
 
-  const fallbackText = `intent: OTHER (Unclassified)\nreason: Unable to confidently classify\ngoal: Let the main agent handle the intent determination.`;
+  const conversationXml =
+    params.conversation && params.conversation.length > 0
+      ? params.conversation
+          .map((turn) => `<turn role="${turn.role}">${turn.text}</turn>`)
+          .join("\n")
+      : "";
 
-  return `You are an intention classification agent.
-Another model is preparing the final user-facing answer.
-Your job is to analyze the user's intent and return a structured hint.
-Do not answer the user directly.
+  return `<input_context>
+Three input types are provided:
+1. conversation: Recent conversation turns between user and assistant
+2. latest: The latest user message to classify
+3. intents: Available intent definitions with triggers and examples
+</input_context>
 
-Classify the LATEST USER MESSAGE into ONE of these categories:
-${intentDescriptions}
+<classification_rules>
+1. Use conversation history to understand context
+2. Classify based on overall conversational goal
+3. Prefer intent that explains WHY user said this
+4. DO NOT FORCE classification - default to OTHER (Fallback) if uncertain
+5. Memory intents: classify first if triggers match
+</classification_rules>
 
-IMPORTANT CLASSIFICATION RULES:
-1. Use the conversation history to understand the latest message in context — pronouns, implicit references, and topic continuations all depend on prior turns.
-2. If the latest message is a follow-up to an ongoing topic (e.g., discussing design then asking to create a related file), classify based on the OVERALL conversational goal, not just the surface action.
-3. When in doubt, prefer the intent that best explains WHY the user said this given what came before.
-4. DO NOT FORCE a classification. If you are not highly confident in any single intent, default to OTHER. A correct "other" is better than a wrong specific label.
+<output_format>
+Return only defined fields, one per line:
 
-Return exactly in this format (one key per line, with NO markdown code blocks or xml tags):
+<field_schema>
 intent: <id> (<name>)
-reason: <brief reason for classification>
+reason: <brief reason>
+goal: <what user wants>
+confidence: <0.0 to 1.0>
+complexity: <low|medium|high>
+suggestion: <optional — only when confidence < 0.65>
+</field_schema>
+
+Field definitions:
+- confidence: 0.0 (guessing) to 1.0 (certain), numerical float
+- complexity: low (simple greeting), medium (normal task), high (multi-step)
+- suggestion: only provide when confidence < 0.65; give general guidance such as clarifying scope, recommending narrower focus, or noting missing context — do NOT mention specific tools or skills
+
+Fallback:
+If none of the provided intents confidently fit, return:
+intent: ${FALLBACK_INTENT.id} (${FALLBACK_INTENT.name})
+reason: Unable to confidently classify
 goal: <what the user likely wants to achieve>
-suggestion: <optional correction or recommendation>
+</output_format>
 
-If you cannot decide, default to:
-${fallbackText}
+<intent_catalog>
+${intentCatalog}
+</intent_catalog>
 
-<CONVERSATION>
-${params.query}
-</CONVERSATION>`;
+<input>
+<conversation>
+${conversationXml}
+</conversation>
+<latest>
+${params.latest}
+</latest>
+</input>`;
 }
 
 export function parseIntentionResult(
@@ -125,34 +159,65 @@ export function parseIntentionResult(
       result.reason = value || undefined;
     } else if (key === "goal") {
       result.goal = value || undefined;
-    } else if (key === "suggestion") {
-      if (value) result.suggestion = value;
+    } else if (key === "suggestion" && value) {
+      result.suggestion = value;
+    } else if (key === "confidence") {
+      // Expecting 0.0-1.0 numerical scale per prompt definition
+      const num = parseFloat(value);
+      if (!isNaN(num) && num >= 0 && num <= 1) {
+        result.confidence = num;
+      }
+    } else if (key === "complexity") {
+      // Expecting low|medium|high per prompt definition
+      const normalized = value.trim().toLowerCase();
+      if (
+        ["low", "medium", "high"].includes(
+          normalized as "low" | "medium" | "high",
+        )
+      ) {
+        result.complexity = normalized as "low" | "medium" | "high";
+      }
     }
   }
 
-  const fallbackIntent =
-    validIntentIds.find((id) => id === "other") ?? validIntentIds[0] ?? "other";
+  let intent = result.intent ?? FALLBACK_INTENT.id;
 
-  let intent = result.intent ?? fallbackIntent;
-  if (!validIntentIds.includes(intent)) {
-    intent = fallbackIntent;
+  // Find case-insensitive match in validIntentIds
+  const caseInsensitiveMatch = validIntentIds.find(
+    (id) => id.toLowerCase() === intent.toLowerCase(),
+  );
+  if (caseInsensitiveMatch) {
+    intent = caseInsensitiveMatch;
+  } else if (!validIntentIds.includes(intent)) {
+    // Fallback: look for "other" case-insensitively, otherwise use first valid intent
+    const otherMatch = validIntentIds.find(
+      (id) => id.toLowerCase() === FALLBACK_INTENT.id.toLowerCase(),
+    );
+    intent = otherMatch ?? validIntentIds[0] ?? FALLBACK_INTENT.id;
   }
 
-  if (!result.reason || !result.goal) {
+  if (
+    !result.reason ||
+    !result.goal ||
+    result.confidence === undefined ||
+    !result.complexity
+  ) {
     return undefined;
   }
 
   return {
     intent,
-    reason: result.reason!,
-    goal: result.goal!,
+    reason: result.reason,
+    goal: result.goal,
     ...(result.suggestion ? { suggestion: result.suggestion } : {}),
+    confidence: result.confidence,
+    complexity: result.complexity,
   };
 }
 
 export function buildPromptPrefix(
   result: IntentionResult,
-  intents: IntentDefinition[],
+  intents: readonly IntentDefinition[],
 ): string | undefined {
   const intentDef = intents.find((i) => i.id === result.intent && i.enabled);
   const effectiveDef = intentDef ?? FALLBACK_INTENT;
@@ -161,6 +226,8 @@ export function buildPromptPrefix(
   lines.push(`reason: ${result.reason}`);
   lines.push(`goal: ${result.goal}`);
   if (result.suggestion) lines.push(`suggestion: ${result.suggestion}`);
+  lines.push(`confidence: ${result.confidence}`);
+  lines.push(`complexity: ${result.complexity}`);
   lines.push("");
   lines.push(effectiveDef.prompt);
 
@@ -176,12 +243,13 @@ export async function runIntentionSubagent(params: {
   agentId: string;
   sessionKey?: string;
   sessionId?: string;
-  query: string;
+  conversation?: RecentTurn[];
+  latest: string;
   messageProvider?: string;
   channelId?: string;
   modelRef: { provider: string; model: string };
-  intents: IntentDefinition[];
-}): Promise<IntentionResult> {
+  intents: readonly IntentDefinition[];
+}): Promise<IntentionResult | undefined> {
   const subagentSessionId = `intention-hint-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const parentSessionKey =
     params.sessionKey ??
@@ -192,13 +260,14 @@ export async function runIntentionSubagent(params: {
     });
   const subagentScope =
     parentSessionKey ?? params.sessionId ?? crypto.randomUUID();
-  const subagentSuffix = `intention-hint:${crypto.createHash("sha1").update(`${subagentScope}:${params.query}`).digest("hex").slice(0, 12)}`;
+  const subagentSuffix = `intention-hint:${crypto.createHash("sha1").update(`${subagentScope}:${params.latest}`).digest("hex").slice(0, 12)}`;
   const subagentSessionKey = parentSessionKey
     ? `${parentSessionKey}:${subagentSuffix}`
     : `agent:${params.agentId}:${subagentSuffix}`;
 
   const prompt = buildIntentionPrompt({
-    query: params.query,
+    conversation: params.conversation,
+    latest: params.latest,
     intents: params.intents,
   });
   const embeddedRunParams = buildIntentionEmbeddedRunParams({
@@ -219,28 +288,18 @@ export async function runIntentionSubagent(params: {
       .trim();
 
     const validIds = params.intents.map((i) => i.id);
-    const fallbackIntent =
-      params.intents.find((i) => i.id === "other")?.id ??
-      params.intents[0]?.id ??
-      "other";
 
-    return (
-      parseIntentionResult(rawReply, validIds) || {
-        intent: fallbackIntent,
-        reason: "Parse failed",
-        goal: "Fallback",
-      }
-    );
-  } catch {
-    const fallbackIntent =
-      params.intents.find((i) => i.id === "other")?.id ??
-      params.intents[0]?.id ??
-      "other";
-    return {
-      intent: fallbackIntent,
-      reason: "Subagent error",
-      goal: "Fallback",
-    };
+    const parsed = parseIntentionResult(rawReply, validIds);
+    if (!parsed) {
+      logger.warn("Intention result parse failed", {
+        rawReply,
+        intents: validIds,
+      });
+    }
+    return parsed;
+  } catch (err) {
+    logger.warn("Intention subagent error", { error: err });
+    return undefined;
   }
 }
 
@@ -273,6 +332,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     trigger: "manual" as const,
     modelRun: true,
     promptMode: "none" as const,
+    toolsAllow: [],
     disableTools: true,
     disableMessageTool: true,
     allowGatewaySubagentBinding: true,

@@ -2,54 +2,61 @@
 id: WIKI_MANAGEMENT
 name: Wiki Management & Query
 triggers:
-- "User is asking to search, read, create, update, or maintain wiki pages in the memory wiki vault"
-- "User wants to check wiki status, lint wiki, or manage wiki content structure"
-- "User is asking about wiki entities, concepts, syntheses, or reports"
-- "User wants to synthesize or organize knowledge into wiki pages"
-- "User is asking where specific knowledge, entities, or concepts are recorded in the wiki"
+- "User is asking to search, read, create, update, or maintain wiki pages in the memory wiki vault (wiki/) — including status checks, linting, structural maintenance, and Obsidian compatibility"
+- "User wants to query wiki entities, concepts, syntheses, or reports, or ingest/reorganize wiki sources"
 examples:
 - "搜尋 wiki 裡有沒有關於 Kubernetes 的記錄"
 - "幫我建立一個新的 wiki 頁面記錄這個專案"
 - "檢查 wiki 有沒有矛盾或問題"
-- "把這份筆記整理到 wiki 裡"
-- "wiki 裡有哪些實體頁面？"
 - "wiki 的整體狀態怎麼樣？"
-- "幫我更新這個實體的資訊"
+- "幫我把這個檔案 ingest 到 wiki sources"
 ---
 
 Detected "wiki management" intent. The user wants to search, read, create, update, or maintain pages in the memory wiki vault.
 
 ## Guidelines
 
-- Always check wiki status first when unsure about vault state or content.
-- Prefer `wiki_search` for discovering relevant pages with wiki-specific ranking and provenance.
-- Use `wiki_get` to inspect exact page content before editing or citing.
-- Use `wiki_apply` for narrow synthesis filing and metadata updates.
-- Run `wiki_lint` after meaningful wiki updates to surface contradictions, provenance gaps, and open questions.
-- Preserve page identity: update existing entities/concepts instead of creating duplicates.
-- Keep generated sections inside managed markers. Do not overwrite human note blocks.
+- Do not manually `mv` wiki files between directories. Always use `openclaw wiki ingest` → `openclaw wiki compile` → `openclaw wiki lint`.
+- Treat raw sources, memory artifacts, and daily notes as evidence. Do not let wiki pages become the only source of truth for new claims.
+- Keep page identity stable. Favor updating existing entities and concepts over spawning duplicates.
+- Keep generated sections inside managed markers (`<!-- openclaw:wiki:... -->`). Do not overwrite human note blocks.
+- Use `[[Wikilinks]]` for internal vault connections, `[text](url)` for external URLs only.
+- Avoid destructive renames unless you also have a link-repair plan.
 
 ## Response Strategy
 
-- **Query**: Use `wiki_search` to find relevant pages, then `wiki_get` to read specific content.
-- **Create/Update**: Use `wiki_apply` for syntheses and metadata updates. For new pages, use `openclaw wiki ingest` or create files directly in the vault.
-- **Audit**: Use `wiki_lint` to check vault health, then review reports under `reports/`.
-- **Status**: Use `wiki_status` to understand vault mode, page counts, and Obsidian CLI availability.
-
-- Check wiki vault status and structure:
+- Check vault mode, path, page counts, and Obsidian CLI availability:
   wiki_status()
 
-- Search wiki pages with wiki-specific ranking:
+- One-pass recall across durable memory + compiled wiki:
+  memory_search({ query: "<keywords>", corpus: "all", maxResults: 10 })
+
+- Search wiki pages with wiki-specific ranking and provenance:
   wiki_search({ query: "<keywords>", corpus: "wiki", maxResults: 10 })
 
-- Get specific wiki page by path or id:
+- Inspect exact wiki page content before editing or citing:
   wiki_get({ lookup: "<page_path_or_id>" })
 
-- Create or update wiki synthesis/metadata:
+- Create or update wiki synthesis / metadata:
   wiki_apply({ op: "create_synthesis", title: "<title>", body: "<content>", sourceIds: ["<source_id>"] })
 
-- Lint wiki vault for issues:
+- Lint wiki vault for contradictions, provenance gaps, open questions:
   wiki_lint()
 
-- Read a large wiki page by section before editing:
+- Ingest a local file into `sources/`, compile vault, lint for issues (never manually move files):
+  skill: wiki-maintainer
+
+- Probe Obsidian CLI status and use Obsidian helpers (`status`, `search`, `open`, `daily`):
+  skill: obsidian-vault-maintainer
+
+- Navigate a large wiki page by heading tree before editing:
   skill: treemd
+
+- Inspect code or plugin implementation details within wiki context:
+  skill: cx
+
+- Search web for authoritative references to cite in wiki pages:
+  web_search({ query: "<topic keywords>" })
+
+- Fetch and extract content from an authoritative URL for wiki sourcing:
+  web_fetch({ url: "<authoritative_url>" })

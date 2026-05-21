@@ -5,31 +5,27 @@ import type {
   RecentTurn,
 } from "./types.js";
 
-export function buildQuery(params: {
-  latestUserMessage: string;
-  recentTurns?: RecentTurn[];
-  queryMode: "message" | "recent" | "full";
-  recentUserTurns?: number;
-  recentAssistantTurns?: number;
-  recentUserChars?: number;
-  recentAssistantChars?: number;
-}): string {
-  const latest = params.latestUserMessage.trim();
+/**
+ * Apply filtering and capping to conversation turns based on query mode settings.
+ * Restores the logic that was previously inside buildQuery().
+ */
+export function applyQueryFilters(
+  allTurns: RecentTurn[],
+  params: {
+    queryMode: "message" | "recent" | "full";
+    recentUserTurns?: number;
+    recentAssistantTurns?: number;
+    recentUserChars?: number;
+    recentAssistantChars?: number;
+  },
+): RecentTurn[] {
   if (params.queryMode === "message") {
-    return latest;
+    // Only return the latest user turn (caller provides latest separately)
+    return [];
   }
   if (params.queryMode === "full") {
-    const allTurns = (params.recentTurns ?? [])
-      .map((turn) => `${turn.role}: ${turn.text.trim().replace(/\s+/g, " ")}`)
-      .filter((turn) => turn.length > 0);
-    if (allTurns.length === 0) return latest;
-    return [
-      "Full conversation context:",
-      ...allTurns,
-      "",
-      "Latest user message:",
-      latest,
-    ].join("\n");
+    // No filtering - return all turns
+    return allTurns;
   }
 
   // recent mode: bounded turns with per-turn char caps
@@ -38,16 +34,14 @@ export function buildQuery(params: {
   const userCharLimit = params.recentUserChars ?? 220;
   const assistantCharLimit = params.recentAssistantChars ?? 180;
 
-  const allTurns = (params.recentTurns ?? []).filter(
-    (turn) => turn.text.trim().length > 0,
-  );
+  const filtered = allTurns.filter((turn) => turn.text.trim().length > 0);
 
   // Walk backwards, picking up to maxUserTurns user + maxAssistantTurns assistant
   let remainingUser = maxUserTurns;
   let remainingAssistant = maxAssistantTurns;
-  const picked: { role: string; text: string }[] = [];
-  for (let i = allTurns.length - 1; i >= 0; i--) {
-    const turn = allTurns[i];
+  const picked: RecentTurn[] = [];
+  for (let i = filtered.length - 1; i >= 0; i--) {
+    const turn = filtered[i];
     if (turn.role === "user" && remainingUser > 0) {
       remainingUser--;
       const cleaned = turn.text.trim().replace(/\s+/g, " ");
@@ -72,14 +66,7 @@ export function buildQuery(params: {
     if (remainingUser === 0 && remainingAssistant === 0) break;
   }
 
-  if (picked.length === 0) return latest;
-  return [
-    "Recent conversation tail:",
-    ...picked.map((turn) => `${turn.role}: ${turn.text}`),
-    "",
-    "Latest user message:",
-    latest,
-  ].join("\n");
+  return picked;
 }
 
 function extractTextContent(

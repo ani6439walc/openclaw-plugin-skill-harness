@@ -4,11 +4,12 @@ name: Google Developer Products Query
 triggers:
 - "User is asking about Google developer products, APIs, SDKs, or documentation such as Google Cloud, Firebase, Android, Chrome, TensorFlow, Go, Gemini, or web.dev"
 examples:
-- "How do I create a Cloud Storage bucket?"
-- "What's the difference between Firebase Realtime Database and Firestore?"
-- "How to set up authentication with JWT in Android?"
-- "What are the best practices for Chrome extensions?"
-- "Explain TensorFlow Lite quantization"
+- "怎麼建立 Cloud Storage bucket？"
+- "Firebase Realtime Database 跟 Firestore 差在哪？"
+- "Android 要怎麼用 JWT 做認證？"
+- "Chrome extension 最佳實踐有哪些？"
+- "解釋 TensorFlow Lite 的量化"
+- "GCP PCA 考試要準備什麼？"
 ---
 
 Detected "Google developer products" intent. The user wants authoritative information about Google developer products, APIs, SDKs, or documentation.

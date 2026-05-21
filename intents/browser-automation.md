@@ -4,13 +4,10 @@ name: Browser Automation / Web App Task
 triggers:
 - "User is asking for a task that should be executed through browser interaction, such as checking a web app, authenticated console, map, screenshot, navigation flow, or other interactive browser task"
 examples:
-- "Check my OpenAI usage this month"
-- "How much have I spent on Google AI Studio?"
-- "Take a screenshot of the dashboard"
-- "Open this Google Maps link and tell me the hours"
-- "Check my Ollama Cloud quota"
-- "Open this site and tell me what the form asks for"
-- "Log in and check the latest status on this web console"
+- "幫我查 OpenAI 這個月花了多少"
+- "截圖看一下 dashboard"
+- "開 Google Maps 幫我查營業時間"
+- "登入 console 幫我查目前的 quota 剩多少"
 ---
 
 Detected "browser automation" intent. The user wants a browser-capable agent to interact with a website or web app and report the result.

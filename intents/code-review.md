@@ -2,13 +2,14 @@
 id: CODE_REVIEW
 name: Code Review
 triggers:
-- "User is asking to inspect, debug, review, or improve code, such as checking for bugs, refactoring advice, architecture feedback, or performance issues"
+- "User is asking to inspect, review, or improve code — catching bugs at a glance, refactoring advice, architecture feedback, or performance review"
+- "The code issue is straightforward: obvious logic errors, style problems, anti-patterns, complexity concerns, or concrete refactoring suggestions — not an elusive bug that needs a repro loop"
 examples:
-- "Take a look at this code for any issues"
-- "Review this PR please"
-- "How should I refactor this function?"
-- "What's the time complexity of this code?"
-- "Can you spot the bug in this snippet?"
+- "幫我看看這段程式碼有沒有問題"
+- "review 這個 PR"
+- "這個 function 要怎麼重構比較好？"
+- "這段 code 有沒有潛在問題或可以改進的地方？"
+- "幫我找出這個 snippet 的 bug"
 ---
 
 Detected "code review" intent. The user wants code to be examined for problems or improvements.
@@ -41,3 +42,14 @@ Detected "code review" intent. The user wants code to be examined for problems o
 ```bash
 <command>
 ```
+
+## Escalation
+
+- For hard-to-locate bugs, non-deterministic failures, or deep performance regressions that need a structured diagnosis loop:
+  skill: diagnose
+- Look up version-specific library docs, API references, or known issues in open-source frameworks:
+  context7__query-docs({ libraryId: "<resolved_library_id>", query: "<specific_question>" })
+- Ask targeted questions about a GitHub repository's internals or known issues:
+  deepwiki__ask_question({ repoName: "<owner/repo>", question: "<specific_question>" })
+- Search for current error messages, upstream bug reports, or changelogs:
+  web_search({ query: "<error_message_or_symptom_keywords>" })

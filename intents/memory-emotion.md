@@ -4,11 +4,9 @@ name: Emotional Memory Query
 triggers:
 - "User is asking about feelings, mood, emotional states, stress, or subjective reactions to past events"
 examples:
-- "How was I feeling at that time?"
-- "How did that thing I mentioned last time make me feel?"
-- "Have I been under a lot of stress lately?"
-- "Why was I so frustrated back then?"
-- "Was I happy when working on that project?"
+- "我那時候心情怎麼樣？"
+- "我最近壓力是不是很大？"
+- "做那個專案的時候我開心嗎？"
 ---
 
 Detected "emotional memory" intent. The user wants to understand feelings, mood, or emotional reactions in past records.

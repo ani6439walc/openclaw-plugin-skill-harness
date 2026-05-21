@@ -4,13 +4,9 @@ name: Open-Source Library / Framework / Repo Docs Query
 triggers:
 - "User is asking about third-party open-source libraries, frameworks, SDKs, APIs, GitHub repositories, or project documentation where the answer may depend on version or implementation details"
 examples:
-- "How does OpenClaw plugin SDK's before_prompt_build hook work?"
-- "What's new in React 19?"
-- "How to configure Tailwind CSS v4?"
-- "What does this error from Prisma mean?"
-- "How to use the new Next.js App Router?"
-- "Can you explain this GitHub repo?"
-- "How do I configure this open-source project from its docs site?"
+- "OpenClaw 的 plugin SDK 怎麼用？"
+- "React 19 有什麼新功能？"
+- "這個 GitHub repo 在做什麼？"
 ---
 
 Detected "open-source docs" intent. The user wants version-sensitive information about a third-party open-source library, framework, SDK, API, GitHub repository, or project documentation.

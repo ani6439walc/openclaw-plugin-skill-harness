@@ -4,13 +4,10 @@ name: General Memory Lookup
 triggers:
 - "User is asking about past events, records, preferences, habits, or prior discussions without a clearly recent, comparative, emotional, or timeline-oriented focus"
 examples:
-- "What was that idea I told you about before?"
-- "Where is the related info for that project?"
-- "Have we discussed this topic before?"
-- "Help me find records about xxx"
-- "What do I usually order at that restaurant?"
-- "Do you remember my flight preferences?"
-- "What was my previous laptop setup?"
+- "之前有聊過那個想法嗎？"
+- "我在那家餐廳通常都點什麼？"
+- "幫我找一下關於 Talos 的設定記錄"
+- "主人之前提過什麼旅行計畫？"
 ---
 
 Detected "general memory lookup" intent. The user wants past records or prior information without a specific recent, comparative, emotional, or timeline focus.

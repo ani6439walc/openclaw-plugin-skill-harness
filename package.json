@@ -1,13 +1,33 @@
 {
   "name": "intention-hint",
-  "version": "2026.5.4",
+  "displayName": "Intention Hint",
+  "description": "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
+  "version": "2026.5.18-beta.1",
   "type": "module",
+  "license": "MIT",
+  "author": "Ani <ani6439walc@gmail.com>",
+  "contributors": [
+    "Wan, Jiun Wei <wei840222@gmail.com>"
+  ],
+  "homepage": "https://github.com/ani6439walc/openclaw-plugin-intention-hint#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ani6439walc/openclaw-plugin-intention-hint.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ani6439walc/openclaw-plugin-intention-hint/issues"
+  },
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "intention-hint"
+  ],
   "files": [
-    "dist",
-    "intents/**",
+    "README.md",
     "package.json",
     "openclaw.plugin.json",
-    "README.md",
+    "dist",
+    "intents/**",
     "skills/**"
   ],
   "openclaw": {
@@ -15,26 +35,30 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.5.4",
-      "minGatewayVersion": "2026.5.4"
+      "pluginApi": ">=2026.5.18",
+      "minGatewayVersion": "2026.5.18"
     },
     "build": {
-      "openclawVersion": "2026.5.4",
-      "pluginSdkVersion": "2026.5.4"
+      "openclawVersion": "2026.5.18",
+      "pluginSdkVersion": "2026.5.18"
     }
   },
   "scripts": {
-    "build": "bun build ./index.ts --outdir ./dist --target node",
-    "test": "vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "format": "bunx prettier --write ."
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm run typecheck && pnpm run test:unit",
+    "test:unit": "vitest run",
+    "format": "prettier --write 'README.md' '**/*.json' '**/*.ts'"
   },
   "dependencies": {
     "gray-matter": "^4.0.3"
   },
+  "peerDependencies": {
+    "openclaw": "2026.5.18"
+  },
   "devDependencies": {
-    "openclaw": "^2026.5.4",
-    "typescript": "^5.8.3",
-    "vitest": "^4.1.5"
+    "prettier": "3.8.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.6"
   }
 }
