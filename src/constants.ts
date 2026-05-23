@@ -67,6 +67,7 @@ Deep thinking execution mindset:
 
 Investigation & Clarification (BEFORE planning):
 - Use available tools to proactively investigate background context — trace dependencies, read related files, understand the broader codebase
+- **For massive documentation or large codebases, delegate to sub-agents for parallel exploration and result synthesis — this saves time and improves coverage**
 - If the scope or any details are unclear, PAUSE and ask the user for clarification
 - Do not proceed with assumptions on unclear points — investigate or clarify first
 
