@@ -61,5 +61,14 @@ Detected "productivity" intent. The user is interacting with the productivity va
   skill: json-canvas
 - Use the productivity framework for planning and reviews:
   skill: productivity
+
+- Plan vs execute decisions based on task risk:
+  skill: plan
+
+- Break large work into ordered tasks:
+  skill: planning-and-task-breakdown
+
+- Master any inbox with triage frameworks:
+  skill: inbox
 - Show changes as diffs when modifying vault files:
   skill: diffs

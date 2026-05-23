@@ -47,3 +47,36 @@ Route based on the specific writing need:
 ### Post-Writing
 - After drafting, offer to run through `humanizer` for a final AI-pattern scrub.
 - If the article is for publication, remind about Folio for image hosting if needed.
+
+- Write a new article from scratch with journalistic standards:
+  skill: article
+
+- Edit or restructure an existing draft:
+  skill: edit-article
+
+- Remove AI-writing patterns and tighten prose:
+  skill: humanizer
+
+- Brainstorm topics, angles, or outlines:
+  skill: brainstorm
+
+- Generate creative or humorous writing:
+  skill: creativity
+
+- Learn the user's humor preferences:
+  skill: humor
+
+- Polish Markdown formatting:
+  skill: markdown
+
+- Survey a large existing draft by heading tree before editing:
+  skill: treemd
+
+- Research facts for technical articles:
+  web_search({ query: "<topic keywords>" })
+
+- Read the owner's writing voice preferences:
+  read({ path: "<workspace>/USER.md" })
+
+- Archive images for publication:
+  skill: folio

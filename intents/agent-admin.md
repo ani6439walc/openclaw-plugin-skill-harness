@@ -37,6 +37,44 @@ Detected "agent self-administration" intent. The user is issuing a direct comman
 - `skill_workshop(action="inspect", id="<id>")` to see details before deciding.
 - Always resolve numbered references: if user says "approve 2", list pending first to map index → id.
 
+- Manage OpenClaw installation, config, gateway, crons, channels:
+  skill: openclaw
+
+- Manage context setup, rules files, and project context:
+  skill: context-engineering
+
+- Route tasks to sub-agents with optimal model selection:
+  skill: delegate
+
+- Manage multi-perspective collaboration patterns:
+  skill: collaborate
+
+- Hand off current conversation to another agent:
+  skill: handoff
+
+- Auto-detect and invoke the right skill for current task:
+  skill: using-agent-skills
+
+- Initialize every task with consistent startup protocol:
+  skill: auto-skill
+
+- Capture learnings, errors, and corrections:
+  skill: self-improvement
+
+- Guard workspace files against drift and baseline changes:
+  skill: soul-guardian
+
+- Vet third-party skills before installation:
+  skill: skill-vetter
+  skill: clawscan
+
+- Run structured workflow cycles for complex multi-step tasks:
+  skill: cycle
+
+- Design and audit prompts, intents, and skills:
+  skill: intent-design-cycle
+  skill: intent-grill
+
 ### Gateway Management
 - **Restart**: `gateway(action="restart")` + provide a `note` so the user gets notified on completion.
 - **Config inspection**: `gateway(action="config.schema.lookup", path="agents.defaults")` to inspect a subtree before editing.

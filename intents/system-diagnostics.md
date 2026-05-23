@@ -33,6 +33,16 @@ Detected "system diagnostics" intent. The user has a hard-to-locate bug, perform
 
 - Full structured diagnosis methodology (feedback loop → reproduce → hypothesise → instrument → fix → regression-test):
   skill: diagnose
+
+- Run system health checks across workspace, config, and integrations:
+  skill: analysis
+
+- Optimize application performance after profiling reveals bottlenecks:
+  skill: performance-optimization
+
+- Harden code against vulnerabilities discovered during diagnosis:
+  skill: security-and-hardening
+
 - Trace and analyze codebase structure before diving into unknown code:
   skill: cx
 - Inspect relevant ADRs or project docs for architectural context around the bug area:

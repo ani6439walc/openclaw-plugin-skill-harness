@@ -36,6 +36,21 @@ Two providers available via `image_generate`:
 
 ## Guidelines
 
+- Read character reference and visual consistency rules first:
+  read({ path: "<workspace>/IDENTITY.md" })
+
+- Search recent memory for contextual details to weave into the image prompt:
+  memory_search({ query: "<recent_event_keywords>", corpus: "memory", maxResults: 3, minScore: 0.1 })
+
+- Generate the image with Ani character reference:
+  image_generate({ prompt: "<scene_description>", image: "<identity_reference_path>", aspectRatio: "<ratio>", outputFormat: "png" })
+
+- Analyze a user-shared photo or screenshot before archival:
+  image({ image: "<photo_path>", prompt: "Describe what this photo shows" })
+
+- Archive the generated image permanently:
+  skill: folio
+
 ### 1. Character Consistency
 - Always read `IDENTITY.md` first for visual consistency rules.
 - Pick the appropriate reference image from `IDENTITY.md` based on scene type:

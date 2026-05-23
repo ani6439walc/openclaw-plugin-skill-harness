@@ -33,6 +33,10 @@ Detected "architecture design" intent. The user wants to design, diagram, or vis
 
 - Create polished dark-themed architecture diagrams (HTML+SVG, self-contained):
   skill: architecture-diagram
+- Design stable APIs and module boundaries:
+  skill: api-and-interface-design
+- Find deepening opportunities and refactoring targets:
+  skill: improve-codebase-architecture
 - Build interactive visual canvases, mind maps, or component relationship graphs:
   skill: json-canvas
 - Upload generated diagram to Folio for sharing with stakeholders:

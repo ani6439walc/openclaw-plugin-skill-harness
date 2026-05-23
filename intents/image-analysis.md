@@ -24,3 +24,18 @@ Detected "image analysis" intent. The user wants visual content to be examined, 
 - Do not answer visual questions from memory or assume image contents without running the tool.
 - For diagrams and architecture charts, focus on structure, relationships, and key entities.
 - For screenshots of errors/logs, extract the exact text and explain the issue.
+
+- Analyze a single image or screenshot:
+  image({ image: "<path_or_url>", prompt: "<what_to_look_for>" })
+
+- Analyze multiple images (up to 20):
+  image({ images: ["<path1>", "<path2>"], prompt: "<what_to_look_for>" })
+
+- Analyze a PDF (supports page ranges):
+  pdf({ pdf: "<path_or_url>", prompt: "<what_to_extract>", pages: "1-5" })
+
+- For error screenshots, search the exact error text for known issues:
+  web_search({ query: "<extracted_error_text>" })
+
+- For diagrams or architecture charts, cross-reference with codebase structure:
+  skill: cx

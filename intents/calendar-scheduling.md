@@ -50,3 +50,16 @@ Detected "calendar & scheduling" intent. The user wants to manage events, remind
 ### Time Boundaries
 - Respect late-night quiet (23:00-08:00 Asia/Taipei): don't schedule reminders in that window unless urgently requested.
 - For reminders < 30 min: `cron` is fine; for ultra-short (< 5 min), just `exec sleep`.
+
+- Read calendar events and manage agenda:
+  skill: gog
+
+- Set a one-off reminder:
+  cron({ action: "add", job: { schedule: { kind: "at", at: "<ISO>" }, payload: { kind: "systemEvent", text: "<reminder_text>" } } })
+
+- Set a recurring reminder:
+  cron({ action: "add", job: { schedule: { kind: "cron", expr: "0 9 * * *", tz: "Asia/Taipei" }, payload: { kind: "systemEvent", text: "<reminder_text>" } } })
+
+- Check or delete existing reminders:
+  cron({ action: "list" })
+  cron({ action: "remove", jobId: "<job_id>" })

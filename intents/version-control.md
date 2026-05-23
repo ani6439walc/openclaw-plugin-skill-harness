@@ -33,6 +33,21 @@ For all git operations, prefer using the **`git-master` skill** for commit, reba
 - For commit/rebase/squash/history search
   skill: git-master
 
+- Structure git workflow for commits, branches, and conflicts:
+  skill: git-workflow-and-versioning
+
+- Manage Gitea issues, PRs, and releases via tea CLI:
+  skill: gitea
+
+- Deliver changes incrementally to avoid giant diffs:
+  skill: incremental-implementation
+
+- Record architectural decisions and migration rationale:
+  skill: documentation-and-adrs
+
+- Handle deprecation and migration of old systems:
+  skill: deprecation-and-migration
+
 ```bash
 # Quick status + log
 git status

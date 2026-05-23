@@ -45,3 +45,18 @@ Two providers available via `image_generate`:
 - JPEG compression tuning: OpenAI with `outputCompression` (0-100) + `outputFormat="jpeg"`.
 - If a generation fails, try the alternate provider.
 - Large reference images (>5MB): compress with Python Pillow first.
+
+- Generate a new image:
+  image_generate({ prompt: "<description>", aspectRatio: "<ratio>", outputFormat: "png" })
+
+- Edit or modify an existing image (up to 5 references):
+  image_generate({ prompt: "<modification_description>", image: "<reference_path>", outputFormat: "png" })
+
+- Generate with transparent background:
+  image_generate({ prompt: "<description>", model: "openai/gpt-image-1.5", outputFormat: "png", background: "transparent" })
+
+- Archive the generated image:
+  skill: folio
+
+- For architecture diagrams, use the dedicated skill instead:
+  skill: architecture-diagram

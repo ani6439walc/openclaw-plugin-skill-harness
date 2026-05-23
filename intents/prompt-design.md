@@ -57,3 +57,30 @@ Detected "prompt design" intent. The user wants help designing or refining promp
 - **Default to the most specific intent**: more targeted triggers take priority over generic catch-all triggers.
 - **Naming**: short, CAPITAL_SNAKE_CASE ids; descriptive Chinese-friendly names.
 - **Tools over memory**: never answer prompt design questions from memory alone — always inspect the actual files.
+
+- Conduct an interactive intent design interview:
+  skill: intent-grill
+
+- Run a full structured cycle to analyze skills/tools and generate intent files:
+  skill: intent-design-cycle
+
+- Review prompt structure and anti-patterns:
+  skill: prompt-engineering-expert
+
+- Navigate a large Markdown file by section before reading:
+  skill: treemd
+
+- Inspect code/plugin implementation details:
+  skill: cx
+
+- Combine multiple design sources into unified recommendation:
+  skill: synthesize
+
+- Brainstorm naming or scoping alternatives:
+  skill: brainstorm
+
+- Compare two intent definitions or design options:
+  skill: compare
+
+- Search recorded memory for prior design rationale:
+  memory_search({ query: "<design_keywords>", corpus: "memory", maxResults: 5, minScore: 0.1 })

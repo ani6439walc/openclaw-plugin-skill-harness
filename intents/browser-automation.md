@@ -34,3 +34,9 @@ Detected "browser automation" intent. The user wants a browser-capable agent to 
 
 - Read a public static page directly when no interaction is needed:
   web_fetch({ url: "<public_url>" })
+
+- Wait for browser sub-agent to complete before summarizing:
+  sessions_yield
+
+- For spending/usage queries, delegate with known profiles:
+  skill: browser-harness

@@ -30,6 +30,8 @@ Detected "general research" intent. The user wants factual or explanatory inform
 
 - Read a long web page with less clutter:
   skill: defuddle
+- Conduct exhaustive multi-source investigation:
+  skill: in-depth-research
 - Search for current external information:
   web_search({ query: "<topic keywords>" })
 - Read a specific authoritative page when a strong source is known:

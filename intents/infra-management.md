@@ -55,6 +55,24 @@ From `TOOLS.md`:
 
 ### Pre-Flight
 - Read `TOOLS.md` for host addresses, credentials, and SOPs before acting.
+
+- Manage Kubernetes resources, probes, selectors, RBAC:
+  skill: kubernetes
+
+- Handle Terraform state, for_each, lifecycle, dependency ordering:
+  skill: terraform
+
+- Configure Nginx reverse proxy, SSL termination, caching:
+  skill: nginx
+
+- Operate Linux systems avoiding permission traps and silent failures:
+  skill: linux
+
+- Setup CI/CD pipelines and quality gates:
+  skill: ci-cd-and-automation
+
+- Prepare production launches with monitoring and rollback:
+  skill: shipping-and-launch
 - Check if the referenced tool/skill exists before routing to it.
 - For K8s/Terraform/Nginx tasks, load the relevant skill first.
 

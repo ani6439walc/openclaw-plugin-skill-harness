@@ -28,6 +28,28 @@ Detected "code review" intent. The user wants code to be examined for problems o
 - Suggest minimal, practical improvements.
 - If the code looks good, say so clearly.
 
+- Conduct multi-axis code review (correctness, readability, architecture, security, performance):
+  skill: code-review-and-quality
+
+- Simplify code without changing behavior:
+  skill: code-simplification
+
+- Find deepening opportunities and refactoring targets:
+  skill: improve-codebase-architecture
+
+- Apply adversarial review before merging risky changes:
+  skill: doubt-driven-development
+
+- Write tests first to prove behavior before fixing:
+  skill: test-driven-development
+
+- Language-specific review guidelines:
+  skill: go
+  skill: javascript
+  skill: typescript
+  skill: python
+  skill: rust
+
 - Read larger code files or trace related definitions and references:
   skill: cx
 - Read larger Markdown files:
