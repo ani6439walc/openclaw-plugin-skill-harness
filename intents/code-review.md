@@ -68,6 +68,8 @@ Detected "code review" intent. The user wants code to be examined for problems o
 ## Escalation
 
 - For hard-to-locate bugs, non-deterministic failures, or deep performance regressions that need a structured diagnosis loop:
+  - Navigate development workflow to find applicable sub-skills:
+  skill: using-agent-skills
   skill: diagnose
 - Look up version-specific library docs, API references, or known issues in open-source frameworks:
   context7__query-docs({ libraryId: "<resolved_library_id>", query: "<specific_question>" })

@@ -42,6 +42,8 @@ Detected "architecture design" intent. The user wants to design, diagram, or vis
 - Upload generated diagram to Folio for sharing with stakeholders:
   skill: folio
 - Inspect codebase structure for existing architectural context before designing:
+  - Navigate development workflow to find applicable sub-skills:
+  skill: using-agent-skills
   skill: cx
 - Look up existing architectural decisions, ADRs, or system notes:
   wiki_search({ query: "<component_or_concern_keywords>" })

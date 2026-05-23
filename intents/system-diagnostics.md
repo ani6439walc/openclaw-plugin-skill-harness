@@ -44,6 +44,8 @@ Detected "system diagnostics" intent. The user has a hard-to-locate bug, perform
   skill: security-and-hardening
 
 - Trace and analyze codebase structure before diving into unknown code:
+  - Navigate development workflow to find applicable sub-skills:
+  skill: using-agent-skills
   skill: cx
 - Inspect relevant ADRs or project docs for architectural context around the bug area:
   wiki_search({ query: "<module_or_bug_area_keywords>" })

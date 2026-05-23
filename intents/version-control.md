@@ -46,6 +46,8 @@ For all git operations, prefer using the **`git-master` skill** for commit, reba
   skill: documentation-and-adrs
 
 - Handle deprecation and migration of old systems:
+  - Navigate development workflow to find applicable sub-skills:
+  skill: using-agent-skills
   skill: deprecation-and-migration
 
 ```bash

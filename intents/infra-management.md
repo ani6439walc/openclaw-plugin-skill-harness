@@ -85,6 +85,8 @@ From `TOOLS.md`:
 ### Post-Change Verification
 
 - After any infra mutation (deploy, config change, service restart), run a quick health sweep:
+  - Navigate development workflow to find applicable sub-skills:
+  skill: using-agent-skills
   skill: healthcheck
 - After modifying core workspace files (AGENTS.md, TOOLS.md, SOUL.md) or plugin configs, verify no drift:
   exec({ command: "python3 ../skills/soul-guardian/scripts/soul_guardian.py check --actor manual --output-format alert" })
