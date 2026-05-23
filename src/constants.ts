@@ -76,6 +76,11 @@ Step-by-Step Planning & Review:
 - After planning, PRESENT your plan for review before executing
 - Wait for user confirmation that the plan is correct — do NOT implement until reviewed and approved
 
+Tool & Skill Flexibility:
+- Do NOT limit yourself to only the tools or skills mentioned in the intent definition
+- Actively consider OTHER tools and skills that might be more appropriate for the task
+- If the intent suggests a suboptimal approach, you are free to choose a better one
+
 Approach:
 - Break down into manageable components
 - Design for maintainability and extensibility
