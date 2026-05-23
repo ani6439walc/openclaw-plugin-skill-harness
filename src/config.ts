@@ -108,17 +108,16 @@ export function normalizePluginConfig(
       1_000,
       300_000,
     ),
-    lowComplexityPrompt:
-      typeof cfg.lowComplexityPrompt === "string" && cfg.lowComplexityPrompt.trim()
-        ? cfg.lowComplexityPrompt
+    complexityPrompts: {
+      low: typeof (cfg.complexityPrompts as Record<string, unknown> | undefined)?.low === "string" && ((cfg.complexityPrompts as Record<string, unknown>)?.low as string).trim()
+        ? (cfg.complexityPrompts as Record<string, unknown>).low as string
         : DEFAULT_LOW_COMPLEXITY_PROMPT,
-    mediumComplexityPrompt:
-      typeof cfg.mediumComplexityPrompt === "string" && cfg.mediumComplexityPrompt.trim()
-        ? cfg.mediumComplexityPrompt
+      medium: typeof (cfg.complexityPrompts as Record<string, unknown> | undefined)?.medium === "string" && ((cfg.complexityPrompts as Record<string, unknown>)?.medium as string).trim()
+        ? (cfg.complexityPrompts as Record<string, unknown>).medium as string
         : DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
-    highComplexityPrompt:
-      typeof cfg.highComplexityPrompt === "string" && cfg.highComplexityPrompt.trim()
-        ? cfg.highComplexityPrompt
+      high: typeof (cfg.complexityPrompts as Record<string, unknown> | undefined)?.high === "string" && ((cfg.complexityPrompts as Record<string, unknown>)?.high as string).trim()
+        ? (cfg.complexityPrompts as Record<string, unknown>).high as string
         : DEFAULT_HIGH_COMPLEXITY_PROMPT,
+    },
   };
 }

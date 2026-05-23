@@ -21,7 +21,7 @@ An OpenClaw plugin that pre-scans user intent before main-agent replies and inje
    intent: <id> (<name>)
    reason: <brief reason for classification>
    goal: <what the user likely wants to achieve>
-   confidence: <low | medium | high>
+   confidence: <0.0 to 1.0>
    complexity: <low | medium | high>
    suggestion: <optional correction or recommendation>
    ```

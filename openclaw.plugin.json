@@ -124,20 +124,28 @@
         "description": "Interval in milliseconds for checking intent definition changes.",
         "default": 180000
       },
-      "lowComplexityPrompt": {
-        "type": "string",
-        "description": "Custom prompt to prepend for low-complexity tasks (simple, quick questions).",
-        "default": null
-      },
-      "mediumComplexityPrompt": {
-        "type": "string",
-        "description": "Custom prompt to prepend for medium-complexity tasks (standard multi-step work).",
-        "default": null
-      },
-      "highComplexityPrompt": {
-        "type": "string",
-        "description": "Custom prompt to prepend for high-complexity tasks (complex multi-file changes, architecture decisions).",
-        "default": null
+      "complexityPrompts": {
+        "type": "object",
+        "description": "Custom prompts for each complexity level.",
+        "properties": {
+          "low": {
+            "type": "string",
+            "description": "Custom prompt for low-complexity tasks (simple, quick questions).",
+            "default": null
+          },
+          "medium": {
+            "type": "string",
+            "description": "Custom prompt for medium-complexity tasks (standard multi-step work).",
+            "default": null
+          },
+          "high": {
+            "type": "string",
+            "description": "Custom prompt for high-complexity tasks (complex multi-file changes, architecture decisions).",
+            "default": null
+          }
+        },
+        "additionalProperties": false,
+        "default": {}
       }
     }
   }

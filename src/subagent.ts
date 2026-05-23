@@ -236,11 +236,12 @@ export function buildPromptPrefix(
   lines.push(effectiveDef.prompt);
 
   const complexityPrompt =
-    result.complexity === "low"
-      ? config.lowComplexityPrompt ?? DEFAULT_LOW_COMPLEXITY_PROMPT
+    config.complexityPrompts[result.complexity] ??
+    (result.complexity === "low"
+      ? DEFAULT_LOW_COMPLEXITY_PROMPT
       : result.complexity === "medium"
-        ? config.mediumComplexityPrompt ?? DEFAULT_MEDIUM_COMPLEXITY_PROMPT
-        : config.highComplexityPrompt ?? DEFAULT_HIGH_COMPLEXITY_PROMPT;
+        ? DEFAULT_MEDIUM_COMPLEXITY_PROMPT
+        : DEFAULT_HIGH_COMPLEXITY_PROMPT);
   lines.push("");
   lines.push(complexityPrompt);
 

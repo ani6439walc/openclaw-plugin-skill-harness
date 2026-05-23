@@ -1,3 +1,15 @@
+export type ComplexityPromptsConfig = {
+  low?: string;
+  medium?: string;
+  high?: string;
+};
+
+export type ResolvedComplexityPromptsConfig = {
+  low: string;
+  medium: string;
+  high: string;
+};
+
 export type IntentionHintPluginConfig = {
   agents?: string[];
   intentDeny?: Record<string, string[]>;
@@ -15,9 +27,7 @@ export type IntentionHintPluginConfig = {
   intentsDir?: string;
   intentsHotReload?: boolean;
   intentsHotReloadIntervalMs?: number;
-  lowComplexityPrompt?: string;
-  mediumComplexityPrompt?: string;
-  highComplexityPrompt?: string;
+  complexityPrompts?: ComplexityPromptsConfig;
 };
 
 export type ResolvedIntentionHintPluginConfig = {
@@ -37,9 +47,7 @@ export type ResolvedIntentionHintPluginConfig = {
   intentsDir: string | undefined;
   intentsHotReload: boolean;
   intentsHotReloadIntervalMs: number;
-  lowComplexityPrompt: string;
-  mediumComplexityPrompt: string;
-  highComplexityPrompt: string;
+  complexityPrompts: ResolvedComplexityPromptsConfig;
 };
 
 export type IntentDefinition = {
