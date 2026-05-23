@@ -131,17 +131,17 @@
           "low": {
             "type": "string",
             "description": "Custom prompt for low-complexity tasks (simple, quick questions).",
-            "default": null
+            "default": ""
           },
           "medium": {
             "type": "string",
             "description": "Custom prompt for medium-complexity tasks (standard multi-step work).",
-            "default": null
+            "default": ""
           },
           "high": {
             "type": "string",
             "description": "Custom prompt for high-complexity tasks (complex multi-file changes, architecture decisions).",
-            "default": null
+            "default": ""
           }
         },
         "additionalProperties": false,
