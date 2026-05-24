@@ -114,15 +114,35 @@ Detected "<intent>" intent. <One-sentence explanation.>
 
 - ...
 
+## Skills & Tools
+
+- Read a large Markdown document by section:
+  skill: treemd
+
+- Search recorded memory:
+  memory_search({ query: "<keywords>", corpus: "memory" })
+
 ## Response Strategy
 
 - ...
+
+## Concrete Workflow
+
+```
+Step 1 → Step 2 → ...
+```
+
+### Step 1 — ...
+...
 ```
 
 **Rules:**
 - No cross-references in body text — boundaries must be expressed through triggers and examples alone.
-- When hinting skills, use the README format: `skill: <name>`.
-- When hinting tools, use explicit call shapes: `web_search({ query: "..." })`.
+- When hinting skills, use the format: `- <description>: skill: <name>`.
+- When hinting tools, use the format: `- <description>: <tool_name>({ ... })`.
+- Body section order: `## Guidelines` → `## Skills & Tools` → `## Response Strategy` → `## Concrete Workflow` (optional).
+- **Concrete Workflow inclusion rule**: add it when the intent requires multi-step execution (e.g., memory retrieval, research, diagnostics). Skip it for simple rule-following intents (e.g., `chat`, `typo`).
+- **Workflow content**: co-design with user during Phase 3 Interview. Structure as numbered steps with actionable bullet points.
 
 **Output:** Draft intent files + diff preview.
 
@@ -140,14 +160,51 @@ Detected "<intent>" intent. <One-sentence explanation.>
 2. Check for intent boundary collisions — ensure triggers between intents are distinct enough.
 3. Verify each file:
    - Frontmatter fields present and correct
-   - Body follows `Detected...` + `## Guidelines` + `## Response Strategy` structure
-   - Skill/tool hints use correct format
+   - Body follows `Detected...` + `## Guidelines` + `## Skills & Tools` + `## Response Strategy` structure
+   - Skill/tool hints use compact format (`- desc: skill: name` / `- desc: tool_name({ ... })`)
    - No cross-references to other intents in body
 4. Ask for final approval. On approval, copy files to `intents/` directory (overwrite existing only with user confirmation).
 
 **Output:** Confirmed intent files in `intents/` + summary of changes.
 
 **Validation:** Files are live in the intents directory. Plugin hot-reload picks them up automatically.
+
+## Concrete Workflow
+
+**User-specified flow override:**
+
+If the user **explicitly specifies a custom step order** during creation:
+
+1. **Follow the user's flow**, overriding this SKILL.md's default Phases.
+2. If the user's flow is incomplete (missing key phases), supplement with calibration or review after completing their steps.
+3. If the user's flow conflicts with intent rules (e.g., skips Interview), warn but comply: "Doing Interview calibration first would be safer, but I'll follow your order."
+4. Record the user's flow preference for reuse in future batch creations.
+
+```
+Step 1 → Step 2 → Step 3 → Step 4 → Step 5
+discovery   clustering  interview   generation   review
+```
+
+### Step 1 — Discovery
+- Scan all skills directories and tool schemas to build a capability inventory.
+- Scan existing intents directory to confirm coverage.
+- Read `README.md` to confirm intent format rules.
+
+### Step 2 — Clustering
+- Group capabilities by "what the user is trying to achieve", not by directory name.
+- Each capability belongs to exactly one cluster.
+- Compare against existing intents, mark as Covered / Gaps / Overlaps.
+
+### Step 3 — Interview
+- Ask one question at a time, wait for reply before continuing.
+- Confirm in order: frequency, pain points, boundaries, gaps, naming.
+
+### Step 4 — Generation
+- Generate intent files following format rules.
+- Write to staging location first, produce diff preview.
+
+### Step 5 — Review
+- Confirm no collisions, write to `intents/` after user approval.
 
 ## Error Recovery
 
