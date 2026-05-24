@@ -27,12 +27,7 @@ Detected "humanities" intent. The user wants to explore moral, philosophical, li
 - For astronomy: ground explanations in observable phenomena before theory.
 - Keep the tone exploratory and respectful of different viewpoints.
 
-## Response Strategy
-
-- Identify the specific domain (ethics, philosophy, literature, astronomy).
-- Load the appropriate skill for that domain.
-- Provide nuanced, evidence-based responses.
-- Suggest follow-up questions or resources for deeper exploration.
+## Skills & Tools
 
 - Navigate moral reasoning and ethical dilemmas:
   skill: ethics
@@ -52,5 +47,12 @@ Detected "humanities" intent. The user wants to explore moral, philosophical, li
 - Search for academic sources or philosophical texts:
   web_search({ query: "<topic> philosophy ethics academic" })
 
-- Look up specific philosophical concepts or arguments:
+- Fetch specific philosophical concepts or arguments from academic sources:
   web_fetch({ url: "<stanford_encyclopedia_or_academic_source>" })
+
+## Response Strategy
+
+- Identify the specific domain (ethics, philosophy, literature, astronomy).
+- Load the appropriate skill for that domain.
+- Provide nuanced, evidence-based responses with multiple perspectives.
+- Suggest follow-up questions or resources for deeper exploration.

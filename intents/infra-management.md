@@ -17,44 +17,21 @@ examples:
 
 Detected "infrastructure management" intent. The user wants to manage home-infra systems, servers, or services.
 
-## Host Quick Reference
-
-From `TOOLS.md`:
-
-| Host | Access | Role |
-|---|---|---|
-| TrueNAS | `ssh root@truenas.local` (192.168.0.118) | NAS, game library, media |
-| CasaOS | `ssh root@casaos.home-infra.weii.cloud` | Docker containers, private cloud |
-| UGOS Router | `ssh root@casaos.home-infra.weii.cloud` (Tailscale 100.108.242.22) | Exit node, NPM, AdGuard, Glances |
-| ArgoCD | `argocd.home-infra.weii.cloud` (admin / `j04rmp4jo3`) | GitOps deployment |
-| Home Assistant | `home-assistant.weii.cloud` | Home automation, device tracking |
-
-## Skill & Tool Routing
-
-| Task | Skill / Tool |
-|---|---|
-| Kubernetes: pods, deployments, services, debugging, best practices | `k8s` skill + `kubectl` |
-| Terraform: state, plan, apply, module structure, pitfalls | `terraform` skill |
-| Nginx: reverse proxy, SSL, location blocks, performance | `nginx` skill |
-| Linux system administration: permissions, processes, disks, services | `linux` skill |
-| Home Assistant: device tracking, AC control, automations | `home-assistant` skill |
-| Service health checks, uptime monitoring, automated status verification | `healthcheck` skill |
-| Security audit, workspace integrity check, config drift detection | `exec({ command: "python3 ../skills/soul-guardian/scripts/soul_guardian.py check --actor manual --output-format alert" })` |
-| SSH remote commands | `exec` tool (`ssh root@<host>`) |
-| ArgoCD CLI operations | `argocd login ...` + `argocd app sync/list/...` |
-| Container management (Docker, CasaOS) | `exec` tool (`docker ps/logs/restart`) |
-| Disk space, processes, system health | `exec` tool (`df -h`, `top`, `systemctl`) |
-
 ## Guidelines
 
-### Safety First
-- **Never run destructive commands without explicit confirmation**: `rm -rf`, `terraform destroy`, `kubectl delete`, `docker rm -f`.
+- Read `TOOLS.md` for host addresses, credentials, and SOPs before acting.
+- Never run destructive commands without explicit confirmation: `rm -rf`, `terraform destroy`, `kubectl delete`, `docker rm -f`.
 - Prefer read-only operations first (`kubectl get`, `terraform plan`, `docker ps`, `df -h`).
 - When in doubt, show the command to the user before executing.
 - SSH credentials are stored in `TOOLS.md` — do not exfiltrate.
+- User is a Google Cloud SRE with CKA/CKAD/CKS — technical depth is expected.
+- Home-infra runs on Talos Linux — immutable, API-driven.
+- ArgoCD manages GitOps deployments — prefer `argocd sync` over manual `kubectl apply`.
+- Late-night (23:00-08:00): avoid disruptive operations unless urgent.
+- After any infra mutation (deploy, config change, service restart), run a quick health sweep.
+- After modifying core workspace files (AGENTS.md, TOOLS.md, SOUL.md) or plugin configs, verify no drift.
 
-### Pre-Flight
-- Read `TOOLS.md` for host addresses, credentials, and SOPs before acting.
+## Skills & Tools
 
 - Manage Kubernetes resources, probes, selectors, RBAC:
   skill: kubernetes
@@ -73,20 +50,50 @@ From `TOOLS.md`:
 
 - Prepare production launches with monitoring and rollback:
   skill: shipping-and-launch
-- Check if the referenced tool/skill exists before routing to it.
-- For K8s/Terraform/Nginx tasks, load the relevant skill first.
 
-### Context Awareness
-- User is a Google Cloud SRE with CKA/CKAD/CKS — technical depth is expected.
-- Home-infra runs on Talos Linux — immutable, API-driven.
-- ArgoCD manages GitOps deployments — prefer `argocd sync` over manual `kubectl apply`.
-- Late-night (23:00-08:00): avoid disruptive operations unless urgent.
-
-### Post-Change Verification
-
-- After any infra mutation (deploy, config change, service restart), run a quick health sweep:
-  - Navigate development workflow to find applicable sub-skills:
+- Check if the referenced tool/skill exists before routing to it:
   skill: using-agent-skills
+
+- Run system health checks across workspace, config, and integrations:
   skill: healthcheck
-- After modifying core workspace files (AGENTS.md, TOOLS.md, SOUL.md) or plugin configs, verify no drift:
+
+- Run security audit, workspace integrity check, config drift detection:
   exec({ command: "python3 ../skills/soul-guardian/scripts/soul_guardian.py check --actor manual --output-format alert" })
+
+## Response Strategy
+
+- Read `TOOLS.md` for host reference (addresses, credentials, SOPs).
+- Identify the target service/system from the user's request.
+- Load the appropriate skill (kubernetes, terraform, nginx, linux, etc.).
+- Execute read-only operations first; confirm before destructive commands.
+- After mutations, run a health sweep to verify stability.
+
+## Concrete Workflow
+
+```
+Step 1 → Step 2 → Step 3 → Step 4 → Step 5
+read       identify    load skill   execute      verify
+TOOLS.md   target      & route      & mutate     health
+```
+
+### Step 1 — Read TOOLS.md
+- Look up host addresses, credentials, and SOPs for the target system.
+- Confirm access method (SSH, CLI, API, web console).
+
+### Step 2 — Identify Target
+- Determine which system the user wants to manage (K8s, Terraform, Nginx, TrueNAS, ArgoCD, etc.).
+- Check if late-night restrictions apply (23:00-08:00).
+
+### Step 3 — Load Skill & Route
+- Load the appropriate skill for the target system.
+- Use `using-agent-skills` to verify the skill exists before routing.
+
+### Step 4 — Execute
+- Start with read-only operations (status checks, plan, ps).
+- For mutations, confirm with the user before executing.
+- Show the command preview for potentially risky operations.
+
+### Step 5 — Verify Health
+- After any mutation, run a health sweep using `healthcheck` skill.
+- For workspace file changes, run `soul-guardian` check.
+- Report the final state to the user.

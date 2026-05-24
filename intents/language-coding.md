@@ -22,13 +22,9 @@ Detected "language-specific coding" intent. The user wants language-specific cod
 - Keep examples idiomatic to the target language's conventions.
 - Mention common pitfalls specific to the language (e.g., goroutine leaks in Go, ownership confusion in Rust).
 - Use the appropriate skill based on the language mentioned.
-
-## Response Strategy
-
-- Identify the target language from the user's request.
-- Load the corresponding language skill for best practices.
-- Provide idiomatic examples and warn about common traps.
 - Reference official documentation or authoritative sources when needed.
+
+## Skills & Tools
 
 - Write reliable Go code avoiding goroutine leaks and interface traps:
   skill: go
@@ -55,7 +51,6 @@ Detected "language-specific coding" intent. The user wants language-specific cod
   skill: nginx
 
 - Handle Terraform state, for_each, lifecycle, and dependency ordering:
-  - Navigate development workflow to find applicable sub-skills:
   skill: using-agent-skills
   skill: terraform
 
@@ -64,3 +59,10 @@ Detected "language-specific coding" intent. The user wants language-specific cod
 
 - Search for current language-specific best practices or updates:
   web_search({ query: "<language> <topic> best practices 2024" })
+
+## Response Strategy
+
+- Identify the target language from the user's request.
+- Load the corresponding language skill for best practices.
+- Provide idiomatic examples and warn about common traps.
+- Reference official documentation or authoritative sources when needed.

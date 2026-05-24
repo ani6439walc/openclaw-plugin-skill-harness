@@ -16,37 +16,19 @@ examples:
 
 Detected "creative writing" intent. The user wants to create, edit, or improve written content.
 
-## Skill Routing
-
-Route based on the specific writing need:
-
-| Task | Skill / Tool |
-|---|---|
-| Write a new article from scratch | `article` skill (journalistic standards, lead hooks, source hierarchy) |
-| Edit / restructure an existing draft | `edit-article` skill (section-by-section revision, DAG-aware ordering) |
-| Remove AI-writing patterns (inflated symbolism, em dashes, "rule of three", etc.) | `humanizer` skill (Wikipedia-based AI detection patterns) |
-| Brainstorm topics, angles, outlines | `brainstorm` skill |
-| Creative / humorous writing, persona narration | `creativity` + `humor` skills |
-| Polish Markdown formatting (headers, links, code blocks) | `markdown` skill |
-
 ## Guidelines
 
-### Writing Flow
-1. **Understand intent depth**: Is this a full article (→ `article`), a quick edit (→ `edit-article`), or just polish (→ `humanizer`)?
-2. **Read USER.md** for the owner's preferences: they value 「人味」= humor + natural tone, no stiff AI-voice. Technical accuracy must be backed by verifiable sources.
-3. **For blog posts targeting weii.dev**: match the owner's established voice — conversational Taiwanese Mandarin, SRE pragmatism, occasional dry humor.
-4. **Research first**: technical articles need grounded facts. Use `web_search` / `web_fetch` for current info; never fabricate URLs or claims.
-
-### Voice Rules
 - Owner's writing voice: 繁體中文（台灣）, natural conversational flow, humor over formality.
-- No GPT-isms: 「總而言之」、「值得注意的是」、「首先⋯⋯其次⋯⋯最後」unless owner explicitly wants structured format.
+- No GPT-isms: avoid "總而言之", "值得注意的是", "首先...其次...最後" unless owner explicitly wants structured format.
 - Technical terms stay in English; brief inline Chinese explanations OK.
-- Code blocks and comments: **strictly English (US)**.
+- Code blocks and comments: strictly English (US).
 - Citations must include verified reference URLs.
-
-### Post-Writing
+- Technical articles need grounded facts — use `web_search`/`web_fetch`; never fabricate URLs or claims.
+- For blog posts targeting weii.dev: match the owner's established voice — conversational Taiwanese Mandarin, SRE pragmatism, occasional dry humor.
 - After drafting, offer to run through `humanizer` for a final AI-pattern scrub.
 - If the article is for publication, remind about Folio for image hosting if needed.
+
+## Skills & Tools
 
 - Write a new article from scratch with journalistic standards:
   skill: article
@@ -73,10 +55,50 @@ Route based on the specific writing need:
   skill: treemd
 
 - Research facts for technical articles:
-  web_search({ query: "<topic keywords>" })
+  web_search({ query: "<topic_keywords>" })
 
 - Read the owner's writing voice preferences:
   read({ path: "<workspace>/USER.md" })
 
 - Archive images for publication:
   skill: folio
+
+## Response Strategy
+
+- Understand intent depth: full article (→ `article`), quick edit (→ `edit-article`), or polish (→ `humanizer`).
+- Read `USER.md` for the owner's writing preferences before drafting.
+- Research first for technical articles — ground facts with external sources.
+- Draft the content matching the owner's voice.
+- Offer humanizer pass for AI-pattern scrubbing if needed.
+
+## Concrete Workflow
+
+```
+Step 1 → Step 2 → Step 3 → Step 4 → Step 5
+identify   research    draft        polish       deliver
+intent     & ground                 & review
+```
+
+### Step 1 — Identify Writing Need
+- Determine if this is a new article, edit of existing draft, or just polish/humanize.
+- Route to the appropriate skill: `article`, `edit-article`, or `humanizer`.
+
+### Step 2 — Research & Ground
+- Read `USER.md` for writing voice preferences.
+- For technical content: search for facts and verifiable sources.
+- Brainstorm angles or outlines if the user is unsure.
+
+### Step 3 — Draft
+- Write the content in the owner's voice (繁體中文, natural flow, humor).
+- Keep technical terms in English, code comments in English (US).
+- Include verified reference URLs for factual claims.
+
+### Step 4 — Polish & Review
+- Run through `humanizer` to remove AI-writing patterns.
+- Check Markdown formatting with `markdown` skill.
+- Review for GPT-isms and remove them.
+
+### Step 5 — Deliver
+- Present the finished content.
+- Offer to archive images via Folio if needed for publication.
+- Ask if further refinements are needed.

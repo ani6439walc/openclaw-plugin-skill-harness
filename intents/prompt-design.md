@@ -17,46 +17,25 @@ examples:
 
 Detected "prompt design" intent. The user wants help designing or refining prompts, intents, skills, or agent behavior.
 
-## Skill & Tool Routing
-
-| Task | Skill / Tool |
-|---|---|
-| Interactive intent design interview: guided step-by-step to define name, id, triggers, examples, and boundaries for a new or refactored intent | `intent-grill` skill |
-| Prompt structure review, anti-pattern detection, optimization techniques, chain-of-thought / few-shot / role-based design | `prompt-engineering-expert` skill |
-| Navigate a large Markdown file by section (heading tree, extract specific sections) | `treemd` skill (`treemd tree <file>`, `treemd query <file>`) |
-| Inspect code/plugin implementation details (symbols, definitions, references) | `cx` skill (`cx overview`, `cx symbols`, `cx definition`) |
-| Combine multiple design sources into a unified recommendation with conflict resolution | `synthesize` skill |
-| Brainstorm naming alternatives, scoping options, or structural approaches | `brainstorm` skill |
-| Compare two prompt versions, intent definitions, or design options side-by-side | `compare` skill |
-| Search memory for prior design decisions or rationale | `memory_search` (corpus: memory) |
-
 ## Guidelines
 
-### When the user asks about an existing prompt / intent / skill
-1. **Read the target file first** with `read` — never suggest edits blind.
-2. For large Markdown files (>200 lines), use `treemd` skill first to survey structure before reading.
-3. For code/plugin files, use `cx overview` first, then drill into symbols with `cx definition`.
-4. If the question is about quality or anti-patterns, load `prompt-engineering-expert` skill.
+- When working with existing prompts/intents/skills: read the target file first with `read` — never suggest edits blind.
+- For large Markdown files (>200 lines), use `treemd` skill first to survey structure before reading.
+- For code/plugin files, use `cx overview` first, then drill into symbols with `cx definition`.
+- Understand the scope boundary: what does this intent/skill own vs what does it delegate.
+- Keep triggers specific enough to avoid false matches, broad enough to capture natural language variations.
+- Examples should cover both Chinese and English, casual and formal phrasings.
+- Boundaries over overlaps: when two intents could both match, tighten triggers rather than relying on body-text disclaimers.
+- Triggers + examples are the contract: sub-agents only see frontmatter; the body is execution guidance.
+- Default to the most specific intent: more targeted triggers take priority over generic catch-all triggers.
+- Naming: short, CAPITAL_SNAKE_CASE ids; descriptive Chinese-friendly names.
+- Never answer prompt design questions from memory alone — always inspect the actual files.
+- Map dependencies before refactoring: search for all files that reference the target.
+- Propose the smallest change that achieves the goal — avoid scope creep.
+- Show a diff preview before applying any edits.
+- After editing, verify no stale cross-references remain.
 
-### When the user wants to create something new
-1. Understand the scope boundary: what does this intent/skill own vs what does it delegate.
-2. Use `brainstorm` skill for naming and structural alternatives.
-3. Draft the frontmatter (id, triggers, examples) first — these are the routing surface; the body is operational guidance.
-4. Keep triggers specific enough to avoid false matches, broad enough to capture natural language variations.
-5. Examples should cover both Chinese and English, casual and formal phrasings.
-
-### When the user wants to edit / refactor
-1. Map dependencies: search for all files that reference the target (triggers, examples, skill routing tables).
-2. Propose the smallest change that achieves the goal — avoid scope creep.
-3. Show a diff preview before applying.
-4. After editing, verify no stale cross-references remain.
-
-### Design Principles
-- **Boundaries over overlaps**: when two intents could both match, tighten triggers rather than relying on body-text disclaimers.
-- **Triggers + examples are the contract**: sub-agents only see frontmatter; the body is execution guidance.
-- **Default to the most specific intent**: more targeted triggers take priority over generic catch-all triggers.
-- **Naming**: short, CAPITAL_SNAKE_CASE ids; descriptive Chinese-friendly names.
-- **Tools over memory**: never answer prompt design questions from memory alone — always inspect the actual files.
+## Skills & Tools
 
 - Conduct an interactive intent design interview:
   skill: intent-grill
@@ -80,9 +59,53 @@ Detected "prompt design" intent. The user wants help designing or refining promp
   skill: brainstorm
 
 - Compare two intent definitions or design options:
-  - Navigate development workflow to find applicable sub-skills:
   skill: using-agent-skills
   skill: compare
 
 - Search recorded memory for prior design rationale:
   memory_search({ query: "<design_keywords>", corpus: "memory", maxResults: 5, minScore: 0.1 })
+
+## Response Strategy
+
+- Determine the user's goal: design new, refine existing, audit, or debug.
+- For existing items: read the file first, then analyze.
+- For new designs: use `intent-grill` for interactive interview.
+- For audits: check for overlaps, anti-patterns, inconsistencies.
+- For debugging: inspect the prompt/skill, identify the failure mode, suggest fixes.
+
+## Concrete Workflow
+
+```
+Step 1 → Step 2 → Step 3 → Step 4 → Step 5
+classify   ground      analyze      draft/fix    verify
+goal       files       & compare    & edit       & diff
+```
+
+### Step 1 — Classify Goal
+- Create new intent/skill/prompt.
+- Refine existing (rename, split, merge, tighten).
+- Audit for quality, overlaps, anti-patterns.
+- Debug a prompt that produces wrong results.
+
+### Step 2 — Ground in Existing Files
+- Read the target file(s) — never edit blind.
+- For large files: use `treemd` to survey structure first.
+- For code files: use `cx overview` then `cx definition`.
+- Search memory for prior design decisions or rationale.
+
+### Step 3 — Analyze & Compare
+- Check for overlaps with neighboring intents.
+- Identify anti-patterns or scope creep.
+- Use `compare` skill to evaluate design options side-by-side.
+- Use `brainstorm` for naming or scoping alternatives.
+
+### Step 4 — Draft or Fix
+- For new designs: use `intent-grill` interactive interview.
+- For refinements: propose the smallest change.
+- For debugging: identify failure mode and suggest targeted fixes.
+- Show a diff preview before applying.
+
+### Step 5 — Verify
+- After editing, verify no stale cross-references remain.
+- Check triggers are specific enough to avoid false matches.
+- Confirm examples cover both Chinese and English phrasings.

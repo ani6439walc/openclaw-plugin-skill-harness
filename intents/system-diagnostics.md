@@ -22,14 +22,11 @@ Detected "system diagnostics" intent. The user has a hard-to-locate bug, perform
 - Reproduce the exact failure the user described before hypothesizing.
 - Generate 3-5 ranked, falsifiable hypotheses before testing any; each must predict what change would confirm or rule it out.
 - Change one variable at a time when instrumenting. Tag all debug logs with unique prefixes for easy cleanup.
-- If no good test seam exists to lock down the bug, flag that architectural gap — don't fake a regression test.
+- If no good test seam exists to lock down the bug, flag that architectural gap — do not fake a regression test.
 - For non-deterministic bugs, the goal is to raise the reproduction rate until debuggable, not to find a clean repro.
-
-## Response Strategy
-
-- Lead with the feedback loop design before diving into code.
-- State which hypothesis turned out correct in any fix summary.
 - After the fix: re-run the original repro, remove all debug instrumentation, and recommend architectural improvements if the bug revealed a missing test seam.
+
+## Skills & Tools
 
 - Full structured diagnosis methodology (feedback loop → reproduce → hypothesise → instrument → fix → regression-test):
   skill: diagnose
@@ -44,24 +41,79 @@ Detected "system diagnostics" intent. The user has a hard-to-locate bug, perform
   skill: security-and-hardening
 
 - Trace and analyze codebase structure before diving into unknown code:
-  - Navigate development workflow to find applicable sub-skills:
   skill: using-agent-skills
   skill: cx
+
 - Inspect relevant ADRs or project docs for architectural context around the bug area:
   wiki_search({ query: "<module_or_bug_area_keywords>" })
+
 - Look up version-specific open-source library docs, API references, or framework behavior:
   context7__query-docs({ libraryId: "<resolved_library_id>", query: "<specific_question>" })
+
 - Ask targeted questions about a GitHub repository's internals, architecture, or known issues:
   deepwiki__ask_question({ repoName: "<owner/repo>", question: "<specific_question>" })
+
 - Search for current external information, changelogs, upstream issues, or related bug reports:
   web_search({ query: "<error_message_or_symptom_keywords>" })
+
 - Run a targeted test or harness to reproduce the failure:
   exec({ command: "<repro_command>" })
+
 - Capture live system state during diagnosis (processes, memory, disk, network):
   exec({ command: "htop -p <pid>" })
+
 - Profile a running process or analyze a core dump / heap dump:
   exec({ command: "perf record -p <pid> --call-graph dwarf -- <duration>" })
+
 - Bisect git history to locate the commit that introduced the regression:
   exec({ command: "git bisect start && git bisect bad <HEAD> && git bisect good <known_good>" })
-- After the fix, clean all temporary debug instrumentation:
+
+- Clean all temporary debug instrumentation after the fix:
   exec({ command: "grep -r '\\[DEBUG-' <codebase> && echo 'Remove the tagged lines above'" })
+
+## Response Strategy
+
+- Lead with the feedback loop design before diving into code.
+- Generate ranked hypotheses; test them one at a time.
+- State which hypothesis turned out correct in any fix summary.
+- After the fix: re-run the original repro, remove debug instrumentation, recommend architectural improvements.
+
+## Concrete Workflow
+
+```
+Step 1 → Step 2 → Step 3 → Step 4 → Step 5 → Step 6
+feedback   reproduce   hypothesise  instrument   fix        clean up
+loop                                    & test
+```
+
+### Step 1 — Build Feedback Loop
+- Design a deterministic feedback loop to observe the failure.
+- This is the single most important step — do not skip.
+- Instrument the system to capture the exact failure mode.
+
+### Step 2 — Reproduce the Failure
+- Reproduce the exact failure the user described.
+- For non-deterministic bugs: raise the reproduction rate until debuggable.
+- Capture logs, stack traces, and system state at failure time.
+
+### Step 3 — Generate Hypotheses
+- Generate 3-5 ranked, falsifiable hypotheses.
+- Each hypothesis must predict what change would confirm or rule it out.
+- Rank by likelihood and test effort.
+
+### Step 4 — Instrument & Test
+- Change one variable at a time when instrumenting.
+- Tag all debug logs with unique prefixes for easy cleanup.
+- Run targeted tests or harnesses to confirm/rule out each hypothesis.
+- Use profiling tools (`perf`, `htop`) for performance regressions.
+
+### Step 5 — Fix & Regression-Test
+- Apply the minimal fix for the confirmed hypothesis.
+- Re-run the original reproduction to verify the fix.
+- Run regression tests to ensure no side effects.
+- State which hypothesis was correct in the fix summary.
+
+### Step 6 — Clean Up
+- Remove all temporary debug instrumentation.
+- Use `grep -r '\[DEBUG-' <codebase>` to find tagged lines.
+- Recommend architectural improvements if the bug revealed a missing test seam.

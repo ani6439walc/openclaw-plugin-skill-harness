@@ -2,15 +2,15 @@
 id: VERSION_CONTROL
 name: Source Code Version Control
 triggers:
-- "User wants to perform git operations: commit, push, pull, branch management, merge, rebase, or submodule updates — including staging files and writing commit messages"
-- "User wants to inspect git history: status, log, diff, blame, or resolve conflicts"
+  - "User wants to perform git operations: commit, push, pull, branch management, merge, rebase, or submodule updates — including staging files and writing commit messages"
+  - "User wants to inspect git history: status, log, diff, blame, or resolve conflicts"
 examples:
-- "幫我 commit"
-- "看看 git 記錄"
-- "git status"
-- "幫我 rebase 到 main"
-- "git blame 這一行是誰改的"
-- "把 feature 分支合併到 main"
+  - "幫我 commit"
+  - "看看 git 記錄"
+  - "git status"
+  - "幫我 rebase 到 main"
+  - "git blame 這一行是誰改的"
+  - "把 feature 分支合併到 main"
 ---
 
 Detected "version control" intent. The user wants to perform git operations such as commit, push, pull, branch management, or submodule updates.
@@ -23,14 +23,12 @@ Detected "version control" intent. The user wants to perform git operations such
 - Verify staged changes with `git diff --cached --stat` before committing.
 - For submodule updates, enter the submodule directory first before performing git operations.
 - Keep commit messages concise and follow Conventional Commit format with emoji.
+- Deliver changes incrementally to avoid giant diffs.
+- Record architectural decisions and migration rationale.
 
-## Response Strategy
+## Skills & Tools
 
-For all git operations, prefer using the **`git-master` skill** for commit, rebase, squash, and history search tasks. It provides atomic commits, style detection, conflict resolution, and blame/bisect workflows.
-
-- For simple operations (status, log, pull, push)
-  exec({command: "git etc..."})
-- For commit/rebase/squash/history search
+- Atomic commits, rebase, squash, and git history search:
   skill: git-master
 
 - Structure git workflow for commits, branches, and conflicts:
@@ -46,18 +44,50 @@ For all git operations, prefer using the **`git-master` skill** for commit, reba
   skill: documentation-and-adrs
 
 - Handle deprecation and migration of old systems:
-  - Navigate development workflow to find applicable sub-skills:
   skill: using-agent-skills
   skill: deprecation-and-migration
 
-```bash
-# Quick status + log
-git status
-git log --oneline -10
+- Check git status:
+  exec({ command: "git status" })
 
-# Push to remote
-git push origin <branch>
+- View recent git log:
+  exec({ command: "git log --oneline -10" })
 
-# Pull from remote
-git pull origin <branch>
+- Push to remote:
+  exec({ command: "git push origin <branch>" })
+
+- Pull from remote:
+  exec({ command: "git pull origin <branch>" })
+
+## Response Strategy
+
+- For simple operations (status, log, pull, push): use `exec` directly.
+- For commit/rebase/squash/history search: use `git-master` skill.
+- Always check status first, then stage specific files, verify, and commit.
+- Report the result with commit hash or branch state.
+
+## Concrete Workflow
+
 ```
+Step 1 → Step 2 → Step 3 → Step 4
+check      stage       commit       report
+status     files                   & push
+```
+
+### Step 1 — Check Status
+- Run `git status` to understand the current state.
+- Identify which files have changed and need staging.
+
+### Step 2 — Stage Files
+- Use `git add` with specific files (never `git add .`).
+- Verify staged changes with `git diff --cached --stat`.
+
+### Step 3 — Commit
+- Use `gaic` for standardized emoji-style commits.
+- Keep commit messages concise with Conventional Commit format.
+- For complex operations (rebase, squash): use `git-master` skill.
+
+### Step 4 — Report & Push
+- Report the commit hash and summary.
+- Push to remote if requested.
+- For PRs: use `gitea` skill to create and manage.

@@ -16,35 +16,21 @@ examples:
 
 Detected "image generation" intent. The user wants a non-persona image created or edited.
 
-## Endpoints & Providers
-
-Two providers available via `image_generate`:
-
-### Google (default: `gemini-3.1-flash-image-preview`)
-- Models: `gemini-3.1-flash-image-preview` (fast), `gemini-3-pro-image-preview` (quality)
-- Resolutions: 1K, 2K, 4K
-- Aspect ratios: 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
-- Editing: up to 5 reference images
-
-### OpenAI (default: `gpt-image-2`)
-- Models: `gpt-image-2` (latest), `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`
-- Sizes: 1024x1024, 1536x1024, 1024x1536, 2048x2048, 2048x1152, 3840x2160, 2160x3840
-- Formats: png, jpeg, webp
-- Backgrounds: transparent, opaque, auto
-
 ## Guidelines
 
 - Always use the `image_generate` tool.
 - Provider: Google primary; fall back to OpenAI for transparent backgrounds or specific size constraints.
 - When editing, pass references via `image` (single) or `images` (up to 5).
 - Infer aspect ratio from scene:
-  - Diagrams / architecture → 16:9
-  - Scenery / landscapes → 16:9 or 3:2
-  - Logos / thumbnails → 1:1
+  - Diagrams/architecture → 16:9
+  - Scenery/landscapes → 16:9 or 3:2
+  - Logos/thumbnails → 1:1
 - Transparent outputs: route to `openai/gpt-image-1.5` with `outputFormat="png"` + `background="transparent"`.
 - JPEG compression tuning: OpenAI with `outputCompression` (0-100) + `outputFormat="jpeg"`.
 - If a generation fails, try the alternate provider.
 - Large reference images (>5MB): compress with Python Pillow first.
+
+## Skills & Tools
 
 - Generate a new image:
   image_generate({ prompt: "<description>", aspectRatio: "<ratio>", outputFormat: "png" })
@@ -60,3 +46,11 @@ Two providers available via `image_generate`:
 
 - For architecture diagrams, use the dedicated skill instead:
   skill: architecture-diagram
+
+## Response Strategy
+
+- Determine whether this is a new generation or an edit.
+- Choose the appropriate provider (Google default, OpenAI for transparent/specific sizes).
+- Select aspect ratio based on scene type.
+- Generate the image and deliver it to the user.
+- Offer archival via Folio if requested.

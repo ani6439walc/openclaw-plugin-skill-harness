@@ -17,39 +17,21 @@ examples:
 
 Detected "calendar & scheduling" intent. The user wants to manage events, reminders, or time-based tasks.
 
-## Skill & Tool Routing
-
-| Task | Skill / Tool |
-|---|---|
-| Google Calendar: read events, create, update, add attendees, send invites | `gog` skill (`gog calendar` CLI) |
-| One-off reminder (flexible timing, ±30s OK) | `cron` tool (action: add, schedule: at) |
-| Recurring reminder (daily/weekly/cron-pattern) | `cron` tool (action: add, schedule: cron or every) |
-| Check existing reminders | `cron` tool (action: list) |
-| Delete a reminder | `cron` tool (action: remove) |
-| Quick timer / countdown (< 30 min) | `exec` with `sleep` + notification (keep it simple) |
-| Email-based scheduling (check Gmail for invites) | `gog` skill (`gog mail`) |
-
 ## Guidelines
 
-### Calendar Operations (via `gog`)
-- Read events: `gog calendar list primary --from <date> --to <date>`
-- Create event: `gog calendar create primary --summary "..." --start "<ISO>" --end "<ISO>" [--attendees "..."]`
-- Add attendee: `gog calendar update primary <eventId> --add-attendee "<email>" --send-updates all`
 - Always check today + tomorrow by default when user asks "what's on my calendar".
 - For event creation, confirm timezone (Asia/Taipei) is correct before creating.
-
-### Reminders (via `cron`)
-- **One-shot**: use `schedule.kind="at"` with ISO timestamp.
-- **Recurring**: use `schedule.kind="cron"` with `tz="Asia/Taipei"`.
+- One-shot reminders: use `schedule.kind="at"` with ISO timestamp.
+- Recurring reminders: use `schedule.kind="cron"` with `tz="Asia/Taipei"`.
   - "Every day at 9am" → `{ kind: "cron", expr: "0 9 * * *", tz: "Asia/Taipei" }`
   - "Every Monday 10am" → `{ kind: "cron", expr: "0 10 * * 1", tz: "Asia/Taipei" }`
 - Reminder payload: use `agentTurn` with a message that includes what to remind about + relevant context.
 - Use `sessionTarget="main"` with `payload.kind="systemEvent"` to inject into current session; or `"isolated"` for standalone jobs.
 - Always describe the reminder clearly in `payload.text` so it reads naturally when fired.
-
-### Time Boundaries
 - Respect late-night quiet (23:00-08:00 Asia/Taipei): don't schedule reminders in that window unless urgently requested.
 - For reminders < 30 min: `cron` is fine; for ultra-short (< 5 min), just `exec sleep`.
+
+## Skills & Tools
 
 - Read calendar events and manage agenda:
   skill: gog
@@ -63,3 +45,45 @@ Detected "calendar & scheduling" intent. The user wants to manage events, remind
 - Check or delete existing reminders:
   cron({ action: "list" })
   cron({ action: "remove", jobId: "<job_id>" })
+
+- Add attendee and send calendar invitation:
+  exec({ command: "gog calendar update primary <eventId> --add-attendee \"<email>\" --send-updates all" })
+
+- List calendar events:
+  exec({ command: "gog calendar list primary --from <date> --to <date>" })
+
+- Create calendar event:
+  exec({ command: "gog calendar create primary --summary \"...\" --start \"<ISO>\" --end \"<ISO>\" [--attendees \"...\"]" })
+
+## Response Strategy
+
+- Identify whether the request is calendar-related (gog) or reminder-related (cron).
+- For calendar reads: check today + tomorrow by default.
+- For calendar writes: confirm details (time, timezone, attendees) before creating.
+- For reminders: choose one-shot vs recurring based on user request.
+- Report the result concisely with event IDs or reminder IDs.
+
+## Concrete Workflow
+
+```
+Step 1 → Step 2 → Step 3 → Step 4
+classify  execute     confirm      report
+```
+
+### Step 1 — Classify Request Type
+- Calendar operation: read, create, update, add attendees.
+- Reminder operation: one-off, recurring, list, delete.
+- Quick timer: < 5 min → `exec sleep`.
+
+### Step 2 — Execute
+- Calendar: use `gog` CLI commands (list, create, update).
+- Reminder: use `cron` tool with appropriate schedule kind.
+- Add attendees with `--add-attendee` and `--send-updates all`.
+
+### Step 3 — Confirm
+- For event creation: verify timezone and attendee list.
+- For reminders: confirm the payload text reads naturally.
+
+### Step 4 — Report
+- Report event details, reminder IDs, or calendar availability.
+- Keep it concise.

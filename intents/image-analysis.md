@@ -25,6 +25,8 @@ Detected "image analysis" intent. The user wants visual content to be examined, 
 - For diagrams and architecture charts, focus on structure, relationships, and key entities.
 - For screenshots of errors/logs, extract the exact text and explain the issue.
 
+## Skills & Tools
+
 - Analyze a single image or screenshot:
   image({ image: "<path_or_url>", prompt: "<what_to_look_for>" })
 
@@ -39,3 +41,10 @@ Detected "image analysis" intent. The user wants visual content to be examined, 
 
 - For diagrams or architecture charts, cross-reference with codebase structure:
   skill: cx
+
+## Response Strategy
+
+- Identify the type of visual content (single image, multiple images, PDF, error screenshot, diagram).
+- Run the appropriate tool (`image`, `images`, or `pdf`).
+- For error screenshots: extract the error text, then search for known issues.
+- Present findings clearly with source context.
