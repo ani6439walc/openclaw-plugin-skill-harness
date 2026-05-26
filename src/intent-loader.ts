@@ -132,7 +132,7 @@ export class IntentCatalog {
 
       if (!id || !triggers.length) {
         logger.warn(
-          `Skipping invalid intent file: ${entry} (missing id or triggers)`,
+          `skipping invalid intent file: ${entry}. (missing id or triggers)`,
         );
         continue;
       }

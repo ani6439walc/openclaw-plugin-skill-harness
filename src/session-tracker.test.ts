@@ -301,6 +301,131 @@ describe("SessionTracker", () => {
   });
 
   describe("edge cases", () => {
+    it("should deduplicate skillsUsed across multiple toolCalls", () => {
+      const tracker2 = SessionTracker.create(tempDir);
+      tracker2.record({
+        sessionId: "skill-dedup",
+        toolCalls: [
+          {
+            toolName: "read",
+            params: { path: "/path/to/gemini/SKILL.md" },
+            result: "---\nname: gemini\n---\ncontent",
+            durationMs: 100,
+          },
+          {
+            toolName: "read",
+            params: { path: "/path/to/gemini/SKILL.md" },
+            result: "---\nname: gemini\n---\ncontent",
+            durationMs: 100,
+          },
+        ],
+      });
+      tracker2.write();
+
+      const sessionsDir = path.join(tempDir, "sessions");
+      const files = fs.readdirSync(sessionsDir);
+      const content = fs.readFileSync(
+        path.join(sessionsDir, files[0]),
+        "utf-8",
+      );
+      const parsed = JSON.parse(content);
+
+      expect(parsed.skillsUsed).toEqual([
+        { name: "gemini", path: "/path/to/gemini/SKILL.md" },
+      ]);
+      expect(parsed.skillsUsed.length).toBe(1);
+    });
+
+    it("should track multiple unique skills", () => {
+      const tracker3 = SessionTracker.create(tempDir);
+      tracker3.record({
+        sessionId: "multi-skills",
+        toolCalls: [
+          {
+            toolName: "read",
+            params: { path: "/path/to/gemini/SKILL.md" },
+            result: "---\nname: gemini\n---\nc",
+            durationMs: 100,
+          },
+          {
+            toolName: "read",
+            params: { path: "/path/to/frontend-ui-engineering/SKILL.md" },
+            result: "---\nname: frontend-ui-engineering\n---\nc",
+            durationMs: 200,
+          },
+        ],
+      });
+      tracker3.write();
+
+      const sessionsDir = path.join(tempDir, "sessions");
+      const files = fs.readdirSync(sessionsDir);
+      const content = fs.readFileSync(
+        path.join(sessionsDir, files[0]),
+        "utf-8",
+      );
+      const parsed = JSON.parse(content);
+
+      expect(parsed.skillsUsed).toEqual([
+        { name: "gemini", path: "/path/to/gemini/SKILL.md" },
+        {
+          name: "frontend-ui-engineering",
+          path: "/path/to/frontend-ui-engineering/SKILL.md",
+        },
+      ]);
+    });
+
+    it("should ignore non-SKILL.md read calls", () => {
+      const tracker4 = SessionTracker.create(tempDir);
+      tracker4.record({
+        sessionId: "no-skill-read",
+        toolCalls: [
+          {
+            toolName: "read",
+            params: { path: "/path/to/README.md" },
+            result: "---\nname: test\n---\nc",
+            durationMs: 100,
+          },
+        ],
+      });
+      tracker4.write();
+
+      const sessionsDir = path.join(tempDir, "sessions");
+      const files = fs.readdirSync(sessionsDir);
+      const content = fs.readFileSync(
+        path.join(sessionsDir, files[0]),
+        "utf-8",
+      );
+      const parsed = JSON.parse(content);
+
+      expect(parsed.skillsUsed).toBeUndefined();
+    });
+
+    it("should ignore non-read tool calls", () => {
+      const tracker5 = SessionTracker.create(tempDir);
+      tracker5.record({
+        sessionId: "no-skill-tool",
+        toolCalls: [
+          {
+            toolName: "exec",
+            params: { command: "echo test" },
+            result: "test",
+            durationMs: 100,
+          },
+        ],
+      });
+      tracker5.write();
+
+      const sessionsDir = path.join(tempDir, "sessions");
+      const files = fs.readdirSync(sessionsDir);
+      const content = fs.readFileSync(
+        path.join(sessionsDir, files[0]),
+        "utf-8",
+      );
+      const parsed = JSON.parse(content);
+
+      expect(parsed.skillsUsed).toBeUndefined();
+    });
+
     it("should handle special characters in session data", () => {
       tracker.record({
         sessionId: "special-chars-test",

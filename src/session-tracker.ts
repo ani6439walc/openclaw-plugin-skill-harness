@@ -2,6 +2,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import type { RecentTurn, IntentionResult } from "./types.js";
+import matter from "gray-matter";
+
+export interface SkillRecord {
+  name: string;
+  path: string;
+}
 
 export interface SessionData {
   sessionId: string;
@@ -10,6 +16,7 @@ export interface SessionData {
   prompt?: string;
   intentInput?: RecentTurn[];
   intentResult?: IntentionResult;
+  skillsUsed?: SkillRecord[];
   toolCalls?: Array<{
     toolName: string;
     params: Record<string, unknown>;
@@ -24,6 +31,29 @@ export interface SessionData {
     start?: string;
     end?: string;
   };
+}
+
+function extractSkillInfo(
+  toolName: string,
+  toolParams: Record<string, unknown>,
+  toolResult: unknown,
+): { name: string; path: string } | undefined {
+  if (toolName !== "read") return undefined;
+  const filePath = toolParams.path;
+  if (typeof filePath !== "string" || !filePath.endsWith("SKILL.md"))
+    return undefined;
+  const text = typeof toolResult === "string" ? toolResult : null;
+  if (text === null) return undefined;
+
+  try {
+    const parsed = matter(text);
+    if (parsed.data?.name && typeof parsed.data.name === "string") {
+      return { name: parsed.data.name, path: filePath };
+    }
+  } catch {
+    // not valid markdown with frontmatter
+  }
+  return undefined;
 }
 
 export class SessionTracker {
@@ -68,6 +98,19 @@ export class SessionTracker {
     if (data.toolCalls && data.toolCalls.length > 0) {
       const existingToolCalls = this.sessionData.toolCalls || [];
       processedData.toolCalls = [...existingToolCalls, ...data.toolCalls];
+
+      const existing = this.sessionData.skillsUsed || [];
+      const seenNames = new Set(existing.map((s) => s.name));
+      for (const tc of data.toolCalls) {
+        const skill = extractSkillInfo(tc.toolName, tc.params, tc.result);
+        if (skill && !seenNames.has(skill.name)) {
+          seenNames.add(skill.name);
+          existing.push(skill);
+        }
+      }
+      if (existing.length > 0) {
+        processedData.skillsUsed = [...existing];
+      }
     }
 
     if (data.timestamps) {

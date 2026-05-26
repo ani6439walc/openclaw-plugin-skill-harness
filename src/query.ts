@@ -131,22 +131,33 @@ function stripMetadataBlocks(text: string): string {
     .trim();
 }
 
+const HEARTBEAT_POLL = "heartbeat poll";
+
 function isHeartbeatMessage(role: string, text: string): boolean {
   const trimmed = text.trim();
   if (role === "assistant" && trimmed === "HEARTBEAT_OK") return true;
-  if (role === "user" && trimmed.toLowerCase().includes("heartbeat poll"))
+  if (role === "user" && trimmed.toLowerCase().includes(HEARTBEAT_POLL))
     return true;
   return false;
 }
 
+/**
+ * Extract user-assistant conversation turns from raw messages.
+ * Each turn is defined as user→assistant pair.
+ * Intermediate content (thinking, tool_use, system messages) is discarded.
+ * Only complete pairs and the latest standalone user message are kept.
+ */
 export function extractRecentTurns(
   messages: unknown[] | undefined,
 ): RecentTurn[] {
   if (!Array.isArray(messages)) return [];
 
   const turns: RecentTurn[] = [];
+  let pendingUser: RecentTurn | undefined;
+
   for (const message of messages) {
     if (!message || typeof message !== "object") continue;
+
     const typed = message as PromptMessageLike;
     const role =
       typed.role === "user" || typed.role === "assistant"
@@ -155,9 +166,25 @@ export function extractRecentTurns(
     if (!role) continue;
 
     const text = stripMetadataBlocks(extractTextContent(typed.content));
-    if (!text) continue;
-    if (isHeartbeatMessage(role, text)) continue;
-    turns.push({ role, text });
+    if (!text || isHeartbeatMessage(role, text)) continue;
+
+    if (role === "user") {
+      // If we already have a pending user without assistant, the previous
+      // user turn is incomplete. Keep it and replace with the new one.
+      pendingUser = { role: "user", text };
+    } else if (role === "assistant" && pendingUser) {
+      // Complete the pair.
+      turns.push(pendingUser);
+      turns.push({ role: "assistant", text });
+      pendingUser = undefined;
+    }
   }
+
+  // If there's a trailing user message with no assistant response, include it
+  // (the conversation is still in progress).
+  if (pendingUser) {
+    turns.push(pendingUser);
+  }
+
   return turns;
 }
