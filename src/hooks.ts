@@ -4,9 +4,12 @@ import type {
   PluginHookBeforePromptBuildEvent,
   PluginHookAgentContext,
   PluginHookBeforePromptBuildResult,
+  PluginHookAfterToolCallEvent,
+  PluginHookAgentEndEvent,
 } from "openclaw/plugin-sdk/types";
 import { logger } from "../api.js";
 import { defaultCatalog } from "./intent-loader.js";
+import { defaultTracker } from "./session-tracker.js";
 import { applyQueryFilters, extractRecentTurns } from "./query.js";
 import {
   isAllowedChatId,
@@ -131,6 +134,20 @@ export function createHookHandlers(deps: HookDeps) {
 
       logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
 
+      // Record session data for tracking
+      const sessionId = ctx.sessionId;
+      if (sessionId) {
+        defaultTracker.record({
+          sessionId,
+          sessionKey: resolvedSessionKey ?? ctx.sessionKey,
+          agentId: effectiveAgentId,
+          prompt: latestUserMessage,
+          intentInput: conversation,
+          intentResult: result,
+        });
+        defaultTracker.write();
+      }
+
       const promptPrefix = buildPromptPrefix(
         result,
         availableIntents,
@@ -144,7 +161,62 @@ export function createHookHandlers(deps: HookDeps) {
     }
   }
 
+  async function onAfterToolCall(
+    event: PluginHookAfterToolCallEvent,
+    ctx: { sessionId?: string; agentId?: string; sessionKey?: string },
+  ): Promise<void> {
+    const sessionId = ctx.sessionId;
+    if (!sessionId) return;
+    if (!defaultTracker.hasIntentData(sessionId)) return;
+
+    const output = event.result ?? event.error ?? "";
+    const truncatedOutput = String(output).slice(0, 200) + " (truncated...)";
+
+    defaultTracker.record({
+      sessionId,
+      toolCalls: [
+        {
+          toolName: event.toolName,
+          params: event.params,
+          result: event.error ? undefined : truncatedOutput,
+          error: event.error ? truncatedOutput : undefined,
+          durationMs: event.durationMs,
+        },
+      ],
+    });
+    defaultTracker.write();
+  }
+
+  async function onAgentEnd(
+    event: PluginHookAgentEndEvent,
+    ctx: { sessionId?: string; agentId?: string; sessionKey?: string },
+  ): Promise<void> {
+    const sessionId = ctx.sessionId;
+    if (!sessionId) return;
+    if (!defaultTracker.hasIntentData(sessionId)) return;
+
+    const messages = event.messages as Array<{
+      role?: string;
+      content?: string;
+    }>;
+    const lastAssistant = messages
+      .slice()
+      .reverse()
+      .find((m) => m.role === "assistant");
+
+    defaultTracker.record({
+      sessionId,
+      finalResponse: lastAssistant?.content,
+      success: event.success,
+      error: event.error,
+      timestamps: { end: new Date().toISOString() },
+    });
+    defaultTracker.write();
+  }
+
   return {
     onBeforePromptBuild,
+    onAfterToolCall,
+    onAgentEnd,
   };
 }

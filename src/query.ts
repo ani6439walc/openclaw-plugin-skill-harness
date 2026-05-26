@@ -93,10 +93,15 @@ function extractTextContent(
   return parts.join(" ").trim();
 }
 
-function stripIntentionHintBlocks(text: string): string {
+function stripMetadataBlocks(text: string): string {
   return text
     .replace(/<intention_hint_plugin>[\s\S]*?<\/intention_hint_plugin>/gi, " ")
     .replace(/<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>/gi, " ")
+    .replace(
+      /Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi,
+      " ",
+    )
+    .replace(/Sender \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi, " ")
     .split(UNTRUSTED_CONTEXT_HEADER)
     .join(" ")
     .replace(/\s+/g, " ")
@@ -118,7 +123,7 @@ export function extractRecentTurns(
         : undefined;
     if (!role) continue;
 
-    const text = stripIntentionHintBlocks(extractTextContent(typed.content));
+    const text = stripMetadataBlocks(extractTextContent(typed.content));
     if (!text) continue;
     turns.push({ role, text });
   }
