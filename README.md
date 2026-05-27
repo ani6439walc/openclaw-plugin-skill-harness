@@ -13,19 +13,27 @@ index.ts
        │
        ├─ intent-loader.ts → defaultCatalog (loads intent .md files from intentsDir)
        ├─ subagent.ts → runIntentionSubagent() (classifies intent via lightweight sub-agent)
+       │    └─ resolveCurrentTime() — timezone-aware local time formatting
+       │    └─ buildIntentionEmbeddedRunParams() — builds isolated sub-agent run config
        │
        ├─ hooks.ts → createHookHandlers()
        │    ├─ onBeforePromptBuild → rotate() → record() → write() → inject hint
        │    ├─ onAfterToolCall → record() → write() (tracks tool usage)
        │    └─ onAgentEnd → record() → write() (tracks final result)
        │
+       ├─ prompt.ts → buildIntentionPrompt() (pure function — no API dependency)
+       │    ├─ JSON output format with <id> (<name>) intent style
+       │    ├─ parseIntentionResult() — JSON parser with code-block tolerance
+       │    ├─ <intent_categories> — auto-derived from ID prefixes
+       │    ├─ <current_time> — injects local timezone time
+       │    ├─ <conversation> — omitted when empty
+       │    └─ buildPromptPrefix() — builds injected hint text
+       │
        ├─ hooks.ts → limitConversationTurns() → extract recent user/assistant turns
        │    └─ conversation-extract.ts (turn extraction + text processing)
        │
        ├─ session-tracker.ts → SessionTracker (JSON session persistence)
        │    └─ sessions/<sessionId>.json
-       │
-       ├─ prompt-builder.ts → buildPromptPrefix() (builds injected hint text)
        │
        ├─ session.ts → session guards (isEnabledForAgent, isEligibleInteractiveSession, etc.)
        │
@@ -43,7 +51,7 @@ index.ts
 | `intent-loader.ts`        | Loads and catalogs intent definitions from YAML-frontmatter `.md` files          |
 | `session-tracker.ts`      | Persist session data (intents, tools, skills) to `sessions/` JSON files          |
 | `conversation-extract.ts` | Extract and truncate recent conversation turns for intent context                |
-| `prompt-builder.ts`       | Construct the untrusted context hint injected into the main agent prompt         |
+| `prompt.ts`               | **Core prompt & parser** — builds classification prompt, parses JSON result      |
 | `session.ts`              | Session eligibility guards (agent allow-list, chat type, internal run detection) |
 | `config.ts`               | Zod schema validation with defaults and clamping for plugin configuration        |
 
@@ -52,56 +60,21 @@ index.ts
 ```mermaid
 graph LR
     A[before_prompt_build] --> B{session eligible?}
-    B -->|no| X[skip]
-    B -->|yes| C[extract conversation]
-    C --> D[run intention subagent]
-    D --> E[rotate previous session]
-    E --> F[record current intent]
-    F --> G[inject hint prompt]
-    G --> H[return prependContext]
-
-    I[after_tool_call] --> J{has intent data?}
-    J -->|no| X
-    J -->|yes| K[record tool call]
-
-    L[agent_end] --> M{has intent data?}
-    M -->|no| X
-    M -->|yes| N[record final response + error]
+    B -->|yes| C[rotate → clear previous data]
+    B -->|no| Z[skip]
+    C --> D[record input + conversation]
+    D --> E[runIntentionSubagent]
+    E --> F[parse intention result]
+    F --> G{parsed?}
+    G -->|yes| H[write session data]
+    G -->|no| I[warn parse failed]
+    H --> J[inject hint into prompt]
+    I --> K[skip hint injection]
+    J --> L[main agent generates]
+    K --> L
 ```
 
-## How it works
-
-1. **Before Prompt Build** — When the user sends a message, the plugin intercepts the prompt construction.
-2. **Fast Sub-agent** — A lightweight sub-agent classifies the intent by matching against dynamically loaded intent definitions.
-3. **Dynamic Intents** — Intent definitions live in YAML-frontmatter Markdown files under `intents/`. Add, remove, or edit intents without rebuilding the plugin. Each intent file specifies:
-   - `id` — unique identifier (e.g. `chat`, `memory-recent`)
-   - `name` — human-readable label
-   - `enabled` — whether the intent is active
-   - `triggers` — natural-language descriptions that guide the classifier
-   - `examples` — few-shot examples for the classifier
-   - Markdown body — the injection prompt body shown to the main agent after classification
-4. **Structured Output** — The classifier returns a key-value format:
-   ```
-   intent: <id> (<name>)
-   reason: <brief reason for classification>
-   goal: <what the user likely wants to achieve>
-   confidence: <0.0 to 1.0>
-   complexity: <low | medium | high>
-   suggestion: <optional correction or recommendation>
-   ```
-   The plugin parses this into an `IntentionResult` and injects the matching intent's body as untrusted context.
-5. **Recent Context Support** — In `queryMode: "recent"`, the plugin extracts recent `user` / `assistant` turns from `event.messages`, strips previously injected plugin metadata blocks, and builds a recent conversation tail for the classifier.
-6. **Internal Run Guard** — The classifier skips internal runs for `active-memory`, `intention-hint`, and generic `:subagent:` session keys.
-7. **Session Tracking** — When intent classification succeeds, the plugin records session data (`sessions/<sessionId>.json`):
-   - `current.input` — the user's latest message
-   - `current.intent` — classification results (`IntentState`)
-   - `current.toolCalls` — tool invocations captured via `after_tool_call`
-   - `current.skillsUsed` — auto-detected skills from `read` calls to `SKILL.md` files
-   - `current.result` / `current.error` — agent response and error info from `agent_end`
-   - `current.timestamps` — start/end timestamps
-   - `history` — reserved for storing past turn snapshots
-
-## Session Data Structure
+### Session Data Structure
 
 ```typescript
 interface SessionData {
@@ -132,8 +105,7 @@ interface SessionData {
 
 ## Installation
 
-This plugin is a workspace package inside `/home/wei/Projects/openclaw/extensions/`.
-Build it with:
+This plugin is a workspace package inside the OpenClaw extensions directory. Build it with:
 
 ```bash
 cd extensions/intention-hint
@@ -182,212 +154,106 @@ pnpm run build
 
 ### Configuration Reference
 
-| Option              | Type       | Default       | Description                                                                                              |
-| ------------------- | ---------- | ------------- | -------------------------------------------------------------------------------------------------------- |
-| `agents`            | `string[]` | `["*"]`       | Which agents trigger the plugin. Use `["*"]` for all agents.                                             |
-| `intentDeny`        | `object`   | `{}`          | Per-agent deny list of intent IDs. Keys support `*` glob patterns.                                       |
-| `model`             | `string`   | —             | Lightweight model for the intention scanner. Falls back to the agent's default if empty.                 |
-| `modelFallback`     | `string`   | —             | Fallback model when `config.model` cannot be resolved.                                                   |
-| `allowedChatTypes`  | `string[]` | `["direct"]`  | Which chat types are eligible (`direct`, `group`, `channel`, `explicit`).                                |
-| `allowedChatIds`    | `string[]` | `[]`          | Allow-list of chat IDs.                                                                                  |
-| `deniedChatIds`     | `string[]` | `[]`          | Deny-list of chat IDs.                                                                                   |
-| `queryMode`         | `string`   | `"recent"`    | Context sent to scanner: `message` (latest only), `recent` (recent turns), or `full` (full history).     |
-| `timeoutMs`         | `number`   | `3000`        | Budget in milliseconds for the intention scanner sub-agent.                                              |
-| `intentsDir`        | `string`   | `"./intents"` | Directory containing dynamic intent `.md` files. Resolved relative to the plugin installation directory. |
-| `complexityPrompts` | `object`   | `{}`          | Custom prompts per complexity level. Overrides built-in defaults for `low`, `medium`, or `high`.         |
+| Option              | Type       | Default       | Description                                                                                           |
+| ------------------- | ---------- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| `agents`            | `string[]` | `["*"]`       | Which agents trigger the plugin. Use `["*"]` for all agents.                                          |
+| `intentDeny`        | `object`   | `{}`          | Per-agent deny list of intent IDs. Keys support `*` glob patterns.                                    |
+| `model`             | `string`   | —             | Lightweight model for the intention scanner. Falls back to the agent's default if empty.              |
+| `modelFallback`     | `string`   | —             | Fallback model when `config.model` cannot be resolved.                                                |
+| `allowedChatTypes`  | `string[]` | `["direct"]`  | Chat types (direct, group, channel) that allow intent analysis.                                       |
+| `allowedChatIds`    | `string[]` | `[]`          | Allowlist of chat IDs. Empty means no allowlist restriction.                                          |
+| `deniedChatIds`     | `string[]` | `[]`          | Blocklist of chat IDs. Plugin skips intent analysis for listed IDs.                                   |
+| `queryMode`         | `string`   | `"recent"`    | Context window mode: `recent` (recent turns), `message` (latest message only), `full` (full history). |
+| `contextWindow`     | `object`   | see below     | Turn/char limits for conversation extraction.                                                         |
+| `timeoutMs`         | `number`   | `3000`        | Max wait time for subagent response. Clamped to 500–60000ms.                                          |
+| `intentsDir`        | `string`   | `"./intents"` | Directory containing intent definition `.md` files with YAML frontmatter.                             |
+| `complexityPrompts` | `object`   | built-in      | Custom classification prompt overrides per complexity level.                                          |
 
-#### `complexityPrompts` Object
+## Key Design Decisions
 
-The plugin injects a complexity-specific guidance prompt **after** the intent definition prompt. Each key is optional; unset keys use the built-in default.
+### Pure Function Prompt Building
 
-```json
-{
-  "complexityPrompts": {
-    "low": "Custom low-complexity prompt...",
-    "medium": "Custom medium-complexity prompt...",
-    "high": "Custom high-complexity prompt..."
-  }
-}
-```
+`buildIntentionPrompt()` takes no API dependency. Timezone resolution and time formatting happen in `subagent.ts` via `resolveCurrentTime()`. The pure function receives `currentTime?: string` and injects it directly into the prompt.
 
-Built-in behavior (configurable via `complexityPrompts`):
+### JSON Output Format
 
-- **`low`** — Fast, concise, minimal overhead. For quick tasks and simple questions.
-- **`medium`** — Balanced execution with step-by-step planning and clarification. Pauses to ask when details are ambiguous.
-- **`high`** — Deep investigation using sub-agents for large codebases, structured multi-step planning with user review before execution.
-
-## Intent Definition Format
-
-Create a `.md` file in the `intents/` directory:
-
-```markdown
----
-id: RESEARCH_GENERAL
-name: General Research Query
-enabled: true
-triggers:
-  - "User is asking for factual or explanatory information that should be researched from external sources"
-examples:
-  - "Tell me about quantum computing"
-  - "Explain blockchain consensus mechanisms"
----
-
-Detected "general research" intent. The user wants factual or explanatory information supported by external sources.
-
-## Guidelines
-
-- Do not answer factual questions from memory alone.
-- Prefer authoritative and directly relevant sources.
-- Search for current external information:
-  web_search({ query: "<topic keywords>" })
-```
-
-### Frontmatter Fields
-
-| Field      | Required | Type       | Description                                                 |
-| ---------- | -------- | ---------- | ----------------------------------------------------------- |
-| `id`       | **yes**  | `string`   | Unique identifier (letters, numbers, hyphens, underscores). |
-| `name`     | no       | `string`   | Human-readable label (defaults to `id`).                    |
-| `enabled`  | no       | `boolean`  | Whether this intent is active (defaults to `true`).         |
-| `triggers` | **yes**  | `string[]` | Natural-language descriptions that guide the classifier.    |
-| `examples` | no       | `string[]` | Few-shot examples for the classifier.                       |
-
-### Intent Writing Rules
-
-#### 1. Split responsibilities clearly
-
-- **Frontmatter** is for **classification**.
-- **Markdown body** is for the **main agent hint** injected after classification.
-
-#### 2. Keep frontmatter narrow and classifier-friendly
-
-- Use `triggers` to describe the **boundary** of the intent.
-- Merge similar trigger descriptions instead of listing many near-duplicates.
-- Use `examples` to preserve diversity without expanding the scope.
-- Do not put tool instructions, workflows, or long reasoning guides in frontmatter.
-
-#### 3. Keep the body short and single-intent
-
-- Only describe behavior that belongs to that intent.
-- Do not restate broad system rules that already exist elsewhere.
-- Do not mix multiple intent families into one file.
-- Prefer a small, direct prompt over a long SOP-style document.
-
-#### 4. Use a consistent body structure
-
-Recommended shape:
-
-```markdown
-Detected "<intent>" intent. <One-sentence explanation.>
-
-## Guidelines
-
-- ...
-- ...
-
-## Response Strategy
-
-- ...
-- ...
-```
-
-#### 5. Describe skill usage with timing or purpose
-
-When a skill is relevant, prefer this format:
-
-```markdown
-- Read a large Markdown document by section:
-  `skill: treemd`
-- Read a code file by symbols before summarizing implementation details:
-  `skill: cx`
-```
-
-Use short, intent-specific purpose lines. Avoid long skill descriptions.
-
-#### 6. Describe tool usage with exact formats
-
-For direct tool hints, use the explicit call shape:
-
-```markdown
-memory_search({ query: "<subject_A_keywords>", corpus: "memory", maxResults: 5, minScore: 0.1 })
-read({ path: "<file>" })
-web_search({ query: "<topic keywords>" })
-web_fetch({ url: "<authoritative_url>" })
-```
-
-If the intent needs CLI usage through `exec`, show it as a shell block:
-
-```bash
-git status
-git diff
-```
-
-## Plugin Hooks
-
-| Hook                  | Handler               | Purpose                                           | Condition                                          |
-| --------------------- | --------------------- | ------------------------------------------------- | -------------------------------------------------- |
-| `before_prompt_build` | `onBeforePromptBuild` | Runs intention classifier, injects hint prompt    | Only for eligible sessions; skips internal runs    |
-| `after_tool_call`     | `onAfterToolCall`     | Records tool invocation metrics                   | Only for sessions with prior intent classification |
-| `agent_end`           | `onAgentEnd`          | Records final response, errors, and end timestamp | Only for sessions with prior intent classification |
-
-The `after_tool_call` and `agent_end` hooks are guarded by `hasIntentData()` — they only record if `before_prompt_build` successfully classified an intent for that session.
-
-## Session Tracking
-
-Session data is persisted to JSON files under `sessions/` within the plugin root directory.
-Files are named `<sessionId>.json` and overwritten on each session completion.
-
-Example `sessions/abc-123.json`:
+The classification sub-agent returns JSON:
 
 ```json
 {
-  "sessionId": "abc-123",
-  "sessionKey": "main:direct:user123",
-  "agentId": "main",
-  "current": {
-    "input": "How does the memory system work?",
-    "intent": {
-      "input": [{ "role": "user", "text": "How does the memory system work?" }],
-      "result": {
-        "intent": "RESEARCH_GENERAL",
-        "reason": "User is asking about system internals",
-        "goal": "Understand memory architecture",
-        "confidence": 0.85,
-        "complexity": "medium"
-      }
-    },
-    "toolCalls": [
-      {
-        "name": "read",
-        "params": {
-          "path": "/home/wei/.config/opencode/skills/memory/SKILL.md"
-        },
-        "result": "Memory system documentation...",
-        "durationMs": 120
-      }
-    ],
-    "skillsUsed": [
-      {
-        "name": "memory",
-        "path": "/home/wei/.config/opencode/skills/memory/SKILL.md"
-      }
-    ],
-    "result": "The memory system uses a graph-based...",
-    "timestamps": {
-      "start": "2026-05-27T02:00:00.000Z",
-      "end": "2026-05-27T02:00:15.000Z"
-    }
-  }
+  "intent": "MEMORY_LOOKUP (Memory Lookup)",
+  "reason": "User asked to recall previous conversation",
+  "goal": "Retrieve memory of past discussion",
+  "confidence": 0.9,
+  "complexity": "medium",
+  "suggestion": "Only present when confidence < 0.8"
 }
 ```
 
-## Development
+- `intent` format: `<id> (<name>)` e.g. `MEMORY_LOOKUP (Memory Lookup)` or `OTHER (Fallback)`
+- Parser extracts ID via regex `^([A-Za-z0-9_-]+)\s*\(` and normalizes case-insensitively against valid intent IDs
+- Fallbacks to `OTHER` if parsed intent not found in catalog
 
-```bash
-pnpm install
-pnpm run build
-pnpm run typecheck
-pnpm test
+### Intent Categories
+
+The classification prompt auto-derives categories from intent ID prefixes:
+
+- **2+ intents with same prefix** → `<PREFIX>\_\*: <id1>, <id2>, ...)
+- **Standalone intents** → `STANDALONE: <id1>, <id2>, (...)
+
+Example:
+
+```
+<intent_categories>
+The following categories group intents by their ID prefix:
+- MEMORY_*: MEMORY_COMPARE, MEMORY_EMOTION, MEMORY_LOOKUP, MEMORY_META, MEMORY_RECENT, MEMORY_TIMELINE
+- RESEARCH_*: RESEARCH_GENERAL, RESEARCH_GOOGLE_DEV, RESEARCH_OPENSOURCE, RESEARCH_REALTIME
+- OTHER_*: CHAT, HUMANITIES, PRODUCTIVITY, SUMMARIZATION, TYPO, OTHER
+- STANDALONE: ANI_VISUAL, IMAGE_ANALYSIS, IMAGE_GENERATION
+</intent_categories>
 ```
 
-Tests use Vitest. Run `pnpm test` to execute the full test suite with type checking.
+### Time Injection
+
+`<current_time>` block is injected into the classification prompt using the user's configured timezone:
+
+- Resolves timezone via `api.runtime.config?.current?.()?.agents?.defaults?.userTimezone`
+- Fallbacks to `Intl.DateTimeFormat().resolvedOptions().timeZone` then `UTC`
+- Format: `YYYY-MM-DDTHH:mm:ss (timezone: Asia/Taipei)` — **local time**, not UTC
+
+### Conversation Handling
+
+- `<conversation>` block is **omitted entirely** when conversation is empty or undefined
+- When present, wraps turns XML inside `<conversation>...</conversation>` tags
+- Extracted via `conversation-extract.ts` with configurable turn/char limits from `contextWindow` config
+
+### Output Parsing
+
+`parseIntentionResult()` handles:
+
+- Plain JSON (no markers)
+- JSON wrapped in \`\`\`json ... \`\`\` code blocks (tolerant stripping)
+- JSON wrapped in stray \`\`\` markers
+- Required field validation (`intent`, `reason`, `goal`, `confidence`, `complexity`)
+- Confidence range validation (0.0–1.0)
+- Complexity enum validation (`low`, `medium`, `high`)
+- Optional `suggestion` field (only included when present in JSON)
+- Graceful fallback to `undefined` on any parse failure
+
+### Testing
+
+```bash
+pnpm test          # typecheck + vitest run
+pnpm run typecheck # tsc --noEmit
+pnpm run test:unit # vitest run
+```
+
+179 tests covering:
+
+- `buildIntentionPrompt()` prompt structure
+- `parseIntentionResult()` JSON parsing (plain, code blocks, malformed, missing fields)
+- Intent ID extraction and normalization from `<id> (<name>)` format
+- Timezone-aware time formatting
+- Config resolution and clamping
+- Session tracker persistence
+- Intent filtering via deny patterns
