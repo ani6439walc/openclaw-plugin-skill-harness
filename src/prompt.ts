@@ -85,9 +85,9 @@ You receive conversation history, the latest user message, and available intent 
 
 <input_context>
 Three input types are provided:
-1. conversation: Recent conversation turns between user and assistant
-2. latest: The latest user message to classify
-3. intents: Available intent definitions with triggers and examples
+1. intent_catalog: Available intent definitions with triggers and examples
+2. conversation: Recent conversation turns between user and assistant
+3. latest: The latest user message to classify
 </input_context>
 
 <classification_rules>
