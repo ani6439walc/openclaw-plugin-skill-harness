@@ -41,7 +41,7 @@ Detected "system diagnostics" intent. The user has a hard-to-locate bug, perform
   skill: security-and-hardening
 
 - Trace and analyze codebase structure before diving into unknown code:
-  skill: using-agent-skills
+  skill: dev-lifecycle
   skill: cx
 
 - Inspect relevant ADRs or project docs for architectural context around the bug area:

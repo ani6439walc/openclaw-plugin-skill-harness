@@ -56,7 +56,7 @@ Detected "prompt design" intent. The user wants help designing or refining promp
   skill: brainstorm
 
 - Compare two intent definitions or design options:
-  skill: using-agent-skills
+  skill: dev-lifecycle
   skill: compare
 
 - Search recorded memory for prior design rationale:

@@ -46,7 +46,7 @@ Detected "architecture design" intent. The user wants to design, diagram, or vis
   skill: folio
 
 - Inspect codebase structure for existing architectural context:
-  skill: using-agent-skills
+  skill: dev-lifecycle
   skill: cx
 
 - Look up existing architectural decisions, ADRs, or system notes:
@@ -79,7 +79,7 @@ scope      codebase    wiki/refs    diagram      & iterate
 
 ### Step 2 — Inspect Codebase
 - Use `cx` to understand existing codebase structure.
-- Navigate with `using-agent-skills` to find applicable sub-skills for context.
+- Navigate with `dev-lifecycle` to find applicable sub-skills for context.
 
 ### Step 3 — Search for Existing Docs
 - Search wiki for existing ADRs or architecture notes.

@@ -52,7 +52,7 @@ Detected "infrastructure management" intent. The user wants to manage home-infra
   skill: shipping-and-launch
 
 - Check if the referenced tool/skill exists before routing to it:
-  skill: using-agent-skills
+  skill: dev-lifecycle
 
 - Run system health checks across workspace, config, and integrations:
   skill: healthcheck
@@ -86,7 +86,7 @@ TOOLS.md   target      & route      & mutate     health
 
 ### Step 3 — Load Skill & Route
 - Load the appropriate skill for the target system.
-- Use `using-agent-skills` to verify the skill exists before routing.
+- Use `dev-lifecycle` to verify the skill exists before routing.
 
 ### Step 4 — Execute
 - Start with read-only operations (status checks, plan, ps).

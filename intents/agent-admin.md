@@ -50,7 +50,7 @@ Detected "agent self-administration" intent. The user is issuing a direct comman
   skill: handoff
 
 - Auto-detect and invoke the right skill for current task:
-  skill: using-agent-skills
+  skill: dev-lifecycle
 
 - Initialize every task with consistent startup protocol:
   skill: auto-skill

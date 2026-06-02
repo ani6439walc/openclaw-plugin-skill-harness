@@ -44,7 +44,7 @@ Detected "version control" intent. The user wants to perform git operations such
   skill: documentation-and-adrs
 
 - Handle deprecation and migration of old systems:
-  skill: using-agent-skills
+  skill: dev-lifecycle
   skill: deprecation-and-migration
 
 - Check git status:

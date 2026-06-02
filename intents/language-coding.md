@@ -51,7 +51,7 @@ Detected "language-specific coding" intent. The user wants language-specific cod
   skill: nginx
 
 - Handle Terraform state, for_each, lifecycle, and dependency ordering:
-  skill: using-agent-skills
+  skill: dev-lifecycle
   skill: terraform
 
 - Look up version-specific library docs or API references:
