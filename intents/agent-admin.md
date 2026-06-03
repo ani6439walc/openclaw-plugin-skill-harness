@@ -3,8 +3,8 @@ id: AGENT_ADMIN
 name: Agent Self-Administration (代理人自我管理)
 enabled: true
 triggers:
-  - "User issues a direct command for agent self-management or workspace operations: skill workshop (approve/reject/list), gateway restart, config inspection, cron jobs, shell commands, dependency management (pnpm, npm, pip, brew, apt, uv), or script execution"
-  - "User references a numbered item from a prior list (e.g. 'approve 2', 'delete the third one') or confirms/rejects a pending proposal from a workshop or similar queue"
+  - "User issues a direct command for agent self-management or workspace operations: skill management (vet/scan/clean), gateway restart, config inspection, cron jobs, shell commands, dependency management (pnpm, npm, pip, brew, apt, uv), or script execution"
+  - "User references a numbered item from a prior list (e.g. 'approve 2', 'delete the third one') or confirms/rejects a pending proposal from a skill queue"
   - "User wants to check agent status, session info, model config, or runtime diagnostics"
 examples:
   - "approve 2"
@@ -65,23 +65,14 @@ Detected "agent self-administration" intent. The user is issuing a direct comman
   skill: skill-vetter
   skill: clawscan
 
+- Scan, audit, and clean skills (budget, duplicates, unused):
+  skill: skill-cleaner
+
 - Run structured workflow cycles for complex multi-step tasks:
   skill: cycle
 
 - Design and audit prompts, intents, and skills:
   skill: intent-craft
-
-- List pending skill workshop items:
-  skill_workshop({ action: "list_pending" })
-
-- Approve a skill workshop suggestion:
-  skill_workshop({ action: "approve", id: "<id>" })
-
-- Reject a skill workshop suggestion:
-  skill_workshop({ action: "reject", id: "<id>" })
-
-- Inspect a skill workshop item before deciding:
-  skill_workshop({ action: "inspect", id: "<id>" })
 
 - Restart the gateway with notification:
   gateway({ action: "restart", note: "..." })
@@ -121,7 +112,7 @@ Detected "agent self-administration" intent. The user is issuing a direct comman
 
 ## Response Strategy
 
-- Identify the action type from the user's request (skill workshop, gateway, cron, shell, session).
+- Identify the action type from the user's request (gateway, cron, shell, session, skill management).
 - Execute the appropriate tool with the correct parameters.
 - Report the result concisely — what was done, what changed, any errors.
 
