@@ -67,6 +67,41 @@ function extractSkillInfo(
   return;
 }
 
+function mergeUniqueSkills(
+  existing: SkillRecord[] | undefined,
+  additions: Iterable<SkillRecord | undefined>,
+): SkillRecord[] | undefined {
+  const merged = existing ? [...existing] : [];
+  const seenNames = new Set(merged.map((skill) => skill.name));
+
+  for (const skill of additions) {
+    if (!skill || seenNames.has(skill.name)) continue;
+    seenNames.add(skill.name);
+    merged.push(skill);
+  }
+
+  return merged.length > 0 ? merged : undefined;
+}
+
+function appendToolCalls(
+  current: SessionState,
+  toolCalls: NonNullable<SessionState["toolCalls"]>,
+): void {
+  if (toolCalls.length === 0) {
+    current.toolCalls = [];
+    return;
+  }
+
+  current.toolCalls = [...(current.toolCalls || []), ...toolCalls];
+  const skillsFromToolCalls = toolCalls.map((toolCall) =>
+    extractSkillInfo(toolCall.name, toolCall.params, toolCall.result),
+  );
+  const skillsUsed = mergeUniqueSkills(current.skillsUsed, skillsFromToolCalls);
+  if (skillsUsed) {
+    current.skillsUsed = skillsUsed;
+  }
+}
+
 export class SessionTracker {
   private pluginRoot: string;
   private sessionData: Map<string, SessionData> = new Map();
@@ -177,36 +212,13 @@ export class SessionTracker {
       }
 
       if (data.current.toolCalls) {
-        if (data.current.toolCalls.length === 0) {
-          current.toolCalls = [];
-        } else {
-          const existingToolCalls = current.toolCalls || [];
-          current.toolCalls = [...existingToolCalls, ...data.current.toolCalls];
-
-          const existing = current.skillsUsed || [];
-          const seenNames = new Set(existing.map((s) => s.name));
-          for (const tc of data.current.toolCalls) {
-            const skill = extractSkillInfo(tc.name, tc.params, tc.result);
-            if (skill && !seenNames.has(skill.name)) {
-              seenNames.add(skill.name);
-              existing.push(skill);
-            }
-          }
-          if (existing.length > 0) {
-            current.skillsUsed = [...existing];
-          }
-        }
+        appendToolCalls(current, data.current.toolCalls);
       }
       if (data.current.skillsUsed) {
-        const existing = current.skillsUsed || [];
-        const seenNames = new Set(existing.map((s) => s.name));
-        for (const skill of data.current.skillsUsed) {
-          if (!seenNames.has(skill.name)) {
-            seenNames.add(skill.name);
-            existing.push(skill);
-          }
-        }
-        current.skillsUsed = existing;
+        current.skillsUsed = mergeUniqueSkills(
+          current.skillsUsed,
+          data.current.skillsUsed,
+        );
       }
     }
 

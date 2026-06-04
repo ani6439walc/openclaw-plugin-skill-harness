@@ -39,6 +39,17 @@ describe("resolveConfig", () => {
       expect(result.model).toBeUndefined();
       expect(result.modelFallback).toBeUndefined();
     });
+
+    it("should use default values for non-object config", () => {
+      for (const raw of [undefined, null, "invalid", []]) {
+        const result = resolveConfig(raw);
+        expect(result.agents).toEqual(["main"]);
+        expect(result.allowedChatTypes).toEqual(["direct"]);
+        expect(result.intentDeny).toEqual({});
+        expect(result.queryMode).toBe(DEFAULT_QUERY_MODE);
+        expect(result.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+      }
+    });
   });
 
   describe("enum validation", () => {
@@ -200,6 +211,25 @@ describe("resolveConfig", () => {
       const result = resolveConfig({ timeoutMs: undefined });
       expect(result.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
     });
+
+    it("should use default for invalid primitive numeric values", () => {
+      const result = resolveConfig({
+        timeoutMs: "5000",
+        contextWindow: {
+          user: { turns: "3", chars: false },
+          assistant: { turns: {}, chars: [] },
+        },
+      });
+      expect(result.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+      expect(result.contextWindow.user.turns).toBe(DEFAULT_RECENT_USER_TURNS);
+      expect(result.contextWindow.user.chars).toBe(DEFAULT_RECENT_USER_CHARS);
+      expect(result.contextWindow.assistant.turns).toBe(
+        DEFAULT_RECENT_ASSISTANT_TURNS,
+      );
+      expect(result.contextWindow.assistant.chars).toBe(
+        DEFAULT_RECENT_ASSISTANT_CHARS,
+      );
+    });
   });
 
   describe("string array fields", () => {
@@ -238,6 +268,25 @@ describe("resolveConfig", () => {
     it("should parse allowedChatTypes as string array", () => {
       const result = resolveConfig({ allowedChatTypes: ["direct", "group"] });
       expect(result.allowedChatTypes).toEqual(["direct", "group"]);
+    });
+
+    it("should fall back for invalid primitive string and array fields", () => {
+      const result = resolveConfig({
+        agents: 123,
+        allowedChatTypes: false,
+        allowedChatIds: {},
+        deniedChatIds: 0,
+        model: {},
+        modelFallback: [],
+        intentsDir: 123,
+      });
+      expect(result.agents).toEqual(["main"]);
+      expect(result.allowedChatTypes).toEqual(["direct"]);
+      expect(result.allowedChatIds).toEqual([]);
+      expect(result.deniedChatIds).toEqual([]);
+      expect(result.model).toBeUndefined();
+      expect(result.modelFallback).toBeUndefined();
+      expect(result.intentsDir).toBe("./intents");
     });
   });
 
@@ -279,6 +328,37 @@ describe("resolveConfig", () => {
         DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
       );
       expect(result.complexityPrompts.high).toBe("Valid prompt");
+    });
+
+    it("should support missing nested config and partial overrides", () => {
+      const emptyNested = resolveConfig({
+        contextWindow: {},
+        complexityPrompts: {},
+      });
+      expect(emptyNested.contextWindow.user.turns).toBe(
+        DEFAULT_RECENT_USER_TURNS,
+      );
+      expect(emptyNested.contextWindow.assistant.turns).toBe(
+        DEFAULT_RECENT_ASSISTANT_TURNS,
+      );
+      expect(emptyNested.complexityPrompts.low).toBe(
+        DEFAULT_LOW_COMPLEXITY_PROMPT,
+      );
+
+      const partial = resolveConfig({
+        contextWindow: { user: { turns: 7 } },
+        complexityPrompts: { medium: "Custom medium only" },
+      } as never);
+      expect(partial.contextWindow.user.turns).toBe(7);
+      expect(partial.contextWindow.user.chars).toBe(DEFAULT_RECENT_USER_CHARS);
+      expect(partial.contextWindow.assistant.turns).toBe(
+        DEFAULT_RECENT_ASSISTANT_TURNS,
+      );
+      expect(partial.complexityPrompts.low).toBe(DEFAULT_LOW_COMPLEXITY_PROMPT);
+      expect(partial.complexityPrompts.medium).toBe("Custom medium only");
+      expect(partial.complexityPrompts.high).toBe(
+        DEFAULT_HIGH_COMPLEXITY_PROMPT,
+      );
     });
   });
 

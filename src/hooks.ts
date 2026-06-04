@@ -34,6 +34,17 @@ export type HookDeps = {
   refreshIntents: () => void;
 };
 
+function recordTrackedSession(
+  sessionId: string | undefined,
+  data: Parameters<typeof defaultTracker.record>[1],
+): void {
+  if (!sessionId) return;
+  if (!defaultTracker.hasIntentData(sessionId)) return;
+
+  defaultTracker.record(sessionId, data);
+  defaultTracker.write(sessionId);
+}
+
 export function createHookHandlers(deps: HookDeps) {
   const { api, config, refreshLiveConfigFromRuntime, refreshIntents } = deps;
 
@@ -173,16 +184,12 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookAfterToolCallEvent,
     ctx: { sessionId?: string; agentId?: string; sessionKey?: string },
   ): Promise<void> {
-    const sessionId = ctx.sessionId;
-    if (!sessionId) return;
-    if (!defaultTracker.hasIntentData(sessionId)) return;
-
     const output = event.result ?? event.error ?? "";
     const outputStr =
       typeof output === "string" ? output : extractToolText(output);
     const truncatedOutput = outputStr.slice(0, 200);
 
-    defaultTracker.record(sessionId, {
+    recordTrackedSession(ctx.sessionId, {
       current: {
         toolCalls: [
           {
@@ -195,17 +202,12 @@ export function createHookHandlers(deps: HookDeps) {
         ],
       },
     });
-    defaultTracker.write(sessionId);
   }
 
   async function onAgentEnd(
     event: PluginHookAgentEndEvent,
     ctx: { sessionId?: string; agentId?: string; sessionKey?: string },
   ): Promise<void> {
-    const sessionId = ctx.sessionId;
-    if (!sessionId) return;
-    if (!defaultTracker.hasIntentData(sessionId)) return;
-
     const turns = extractRecentTurns(
       event.messages as Array<{
         role?: string;
@@ -217,14 +219,13 @@ export function createHookHandlers(deps: HookDeps) {
       .reverse()
       .find((t) => t.role === "assistant");
 
-    defaultTracker.record(sessionId, {
+    recordTrackedSession(ctx.sessionId, {
       current: {
         result: lastAssistantTurn?.text,
         error: event.error,
         timestamps: { end: new Date().toISOString() },
       },
     });
-    defaultTracker.write(sessionId);
   }
 
   return {

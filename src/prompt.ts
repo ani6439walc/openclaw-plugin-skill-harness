@@ -13,37 +13,33 @@ import type {
   ResolvedIntentionHintPluginConfig,
 } from "./types.js";
 
-export function buildIntentionPrompt(params: {
-  conversation?: RecentTurn[];
-  latest: string;
-  intents: readonly IntentDefinition[];
-  currentTime?: string;
-}): string {
-  const timeTag = params.currentTime
-    ? `<current_time>\n${params.currentTime}\n</current_time>\n`
-    : "";
+function getEnabledIntentsWithFallback(
+  intents: readonly IntentDefinition[],
+): IntentDefinition[] {
+  return [...intents.filter((intent) => intent.enabled), FALLBACK_INTENT];
+}
 
-  const enabledIntents = params.intents.filter((i) => i.enabled);
-  const allIntents = [...enabledIntents, FALLBACK_INTENT];
-
-  const intentCatalog = allIntents
+function buildIntentCatalog(intents: readonly IntentDefinition[]): string {
+  return getEnabledIntentsWithFallback(intents)
     .map((intent) => {
       const lines = [`<intent id="${intent.id}" name="${intent.name}">`];
       if (intent.triggers.length > 0) {
         lines.push(`triggers:`);
-        lines.push(...intent.triggers.map((t) => `- ${t}`));
+        lines.push(...intent.triggers.map((trigger) => `- ${trigger}`));
       }
       if (intent.examples.length > 0) {
         lines.push(`examples:`);
-        lines.push(...intent.examples.map((ex) => `- ${ex}`));
+        lines.push(...intent.examples.map((example) => `- ${example}`));
       }
       lines.push(`</intent>`);
       return lines.join("\n");
     })
     .join("\n");
+}
 
+function buildIntentCategories(intents: readonly IntentDefinition[]): string {
   const categoryMap = new Map<string, string[]>();
-  for (const intent of allIntents) {
+  for (const intent of getEnabledIntentsWithFallback(intents)) {
     const underscoreIndex = intent.id.indexOf("_");
     const prefix =
       underscoreIndex > 0 ? intent.id.slice(0, underscoreIndex) : "OTHER";
@@ -52,6 +48,7 @@ export function buildIntentionPrompt(params: {
     }
     categoryMap.get(prefix)!.push(intent.id);
   }
+
   const categoryLines: string[] = [];
   const standaloneIntents: string[] = [];
   for (const [prefix, ids] of categoryMap) {
@@ -64,18 +61,34 @@ export function buildIntentionPrompt(params: {
   if (standaloneIntents.length > 0) {
     categoryLines.push(`- STANDALONE: ${standaloneIntents.join(", ")}`);
   }
-  const intentCategories =
-    categoryLines.length > 0
-      ? categoryLines.join("\n")
-      : "- No categories with 2+ intents";
 
-  const conversationXml =
-    params.conversation && params.conversation.length > 0
-      ? `<conversation>\n${params.conversation
-          .map((turn) => `<turn role="${turn.role}">\n${turn.text}\n</turn>`)
-          .join("\n")}\n</conversation>`
-      : "";
+  return categoryLines.length > 0
+    ? categoryLines.join("\n")
+    : "- No categories with 2+ intents";
+}
 
+function buildConversationXml(conversation: RecentTurn[] | undefined): string {
+  if (!conversation || conversation.length === 0) return "";
+
+  const turns = conversation
+    .map((turn) => `<turn role="${turn.role}">\n${turn.text}\n</turn>`)
+    .join("\n");
+  return `<conversation>\n${turns}\n</conversation>`;
+}
+
+export function buildIntentionPrompt(params: {
+  conversation?: RecentTurn[];
+  latest: string;
+  intents: readonly IntentDefinition[];
+  currentTime?: string;
+}): string {
+  const timeTag = params.currentTime
+    ? `<current_time>\n${params.currentTime}\n</current_time>\n`
+    : "";
+
+  const intentCatalog = buildIntentCatalog(params.intents);
+  const intentCategories = buildIntentCategories(params.intents);
+  const conversationXml = buildConversationXml(params.conversation);
   const conversationSection = conversationXml ? `\n${conversationXml}\n` : "";
 
   return `You are an intent classification agent.
@@ -232,14 +245,25 @@ export function parseIntentionResult(
   }
 }
 
-export function buildPromptPrefix(
+function resolveComplexityPrompt(
   result: IntentionResult,
-  intents: readonly IntentDefinition[],
   config: ResolvedIntentionHintPluginConfig,
-): string | undefined {
-  const intentDef = intents.find((i) => i.id === result.intent && i.enabled);
-  const effectiveDef = intentDef ?? FALLBACK_INTENT;
+): string {
+  return (
+    config.complexityPrompts[result.complexity] ??
+    (result.complexity === "low"
+      ? DEFAULT_LOW_COMPLEXITY_PROMPT
+      : result.complexity === "medium"
+        ? DEFAULT_MEDIUM_COMPLEXITY_PROMPT
+        : DEFAULT_HIGH_COMPLEXITY_PROMPT)
+  );
+}
 
+function buildPromptPrefixLines(
+  result: IntentionResult,
+  intentDef: IntentDefinition,
+  config: ResolvedIntentionHintPluginConfig,
+): string[] {
   const lines: string[] = [];
   lines.push(`reason: ${result.reason}`);
   lines.push(`goal: ${result.goal}`);
@@ -247,17 +271,20 @@ export function buildPromptPrefix(
   lines.push(`confidence: ${result.confidence}`);
   lines.push(`complexity: ${result.complexity}`);
   lines.push("");
-  lines.push(effectiveDef.prompt);
-
-  const complexityPrompt =
-    config.complexityPrompts[result.complexity] ??
-    (result.complexity === "low"
-      ? DEFAULT_LOW_COMPLEXITY_PROMPT
-      : result.complexity === "medium"
-        ? DEFAULT_MEDIUM_COMPLEXITY_PROMPT
-        : DEFAULT_HIGH_COMPLEXITY_PROMPT);
+  lines.push(intentDef.prompt);
   lines.push("");
-  lines.push(complexityPrompt);
+  lines.push(resolveComplexityPrompt(result, config));
+  return lines;
+}
+
+export function buildPromptPrefix(
+  result: IntentionResult,
+  intents: readonly IntentDefinition[],
+  config: ResolvedIntentionHintPluginConfig,
+): string | undefined {
+  const intentDef = intents.find((i) => i.id === result.intent && i.enabled);
+  const effectiveDef = intentDef ?? FALLBACK_INTENT;
+  const lines = buildPromptPrefixLines(result, effectiveDef, config);
 
   return `${UNTRUSTED_CONTEXT_HEADER}
 <${INTENTION_HINT_PLUGIN_TAG}>

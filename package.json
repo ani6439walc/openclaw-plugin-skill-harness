@@ -2,7 +2,7 @@
   "name": "intention-hint",
   "displayName": "Intention Hint",
   "description": "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
-  "version": "2026.5.20",
+  "version": "2026.5.28",
   "type": "module",
   "license": "MIT",
   "author": "Ani <ani6439walc@gmail.com>",
@@ -35,12 +35,12 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.5.20",
-      "minGatewayVersion": "2026.5.20"
+      "pluginApi": ">=2026.5.28",
+      "minGatewayVersion": "2026.5.28"
     },
     "build": {
-      "openclawVersion": "2026.5.20",
-      "pluginSdkVersion": "2026.5.20"
+      "openclawVersion": "2026.5.28",
+      "pluginSdkVersion": "2026.5.28"
     }
   },
   "scripts": {
@@ -51,10 +51,11 @@
     "format": "prettier --write 'README.md' '**/*.json' '**/*.ts'"
   },
   "dependencies": {
-    "gray-matter": "^4.0.3"
+    "gray-matter": "^4.0.3",
+    "zod": "4.4.3"
   },
   "peerDependencies": {
-    "openclaw": "2026.5.20"
+    "openclaw": "2026.5.28"
   },
   "devDependencies": {
     "prettier": "3.8.3",
