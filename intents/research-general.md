@@ -4,6 +4,8 @@ name: General Research Query
 triggers:
   - "User is asking for factual or explanatory information that should be researched from external sources"
   - "User wants general explanations of concepts, history, or how things work (not version-sensitive, not Google developer products, not open-source library docs)"
+  - "User wants to understand, interpret, or get an explanation of a concept, idea, or phenomenon at an adaptive depth"
+  - "User wants a rigorous comparison between two or more options, tools, or concepts with weighted criteria and confidence assessment"
 examples:
   - "量子運算是什麼？"
   - "艾菲爾鐵塔的歷史"
@@ -28,6 +30,12 @@ Detected "general research" intent. The user wants factual or explanatory inform
 
 - Conduct exhaustive multi-source investigation:
   skill: in-depth-research
+
+- Adaptively explain concepts at the right depth for the user:
+  skill: explain
+
+- Rigorous comparison with confidence parity and weighted criteria:
+  skill: compare
 
 - Search for current external information:
   web_search({ query: "<topic_keywords>" })

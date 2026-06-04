@@ -6,6 +6,9 @@ triggers:
   - "User wants to design, refine, rename, audit, or improve prompts, custom instructions, skills, plugin intents, or agent routing behavior — including naming, scoping, and boundary setting"
   - "User asks about prompt engineering techniques (chain-of-thought, few-shot, XML tags, role-based prompting) or needs help debugging a prompt that produces wrong results"
   - "User is reviewing or auditing existing prompts, intents, or skills for quality, consistency, overlaps, or anti-patterns"
+  - "User wants to be interviewed one-question-at-a-time to discover their real underlying intent behind an underspecified request"
+  - "User wants to stress-test, grill, or adversarially review a plan, design, or decision until reaching shared understanding"
+  - "User wants to challenge their plan against existing domain models, CONTEXT.md, or ADRs"
 examples:
   - "這個 intent 要改名嗎？"
   - "幫我設計一個新的 intent"
@@ -39,6 +42,15 @@ Detected "prompt design" intent. The user wants help designing or refining promp
 
 - Design, refine, or audit intent definitions (single-intent interview or full bootstrap audit):
   skill: intent-craft
+
+- Interview the user one-question-at-a-time to discover real intent:
+  skill: interview-me
+
+- Stress-test a plan or design through adversarial questioning:
+  skill: grill-me
+
+- Stress-test a plan against existing domain models and ADRs:
+  skill: grill-with-docs
 
 - Review prompt structure and anti-patterns:
   skill: prompt-engineering-expert

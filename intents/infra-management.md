@@ -6,6 +6,9 @@ triggers:
   - "User wants to manage, inspect, debug, or operate home-infra services and servers — including SSH access, remote commands, service restarts, and status checks"
   - "User references specific infra hosts by name: truenas, casaos, argocd, home-infra-router, proxmox, unifi, talos, or mentions K8s/Terraform/Nginx/Home Assistant operations"
   - "User needs Linux system administration: process management, disk usage, permissions, service management, or device/automation state checks"
+  - "User wants to manage the OpenClaw gateway: restart, config inspection/patch, update"
+  - "User wants to manage cron jobs: add, list, remove, run, or check scheduled tasks"
+  - "User wants to execute shell commands, install dependencies (pnpm, npm, pip, brew, apt, uv), or run scripts"
 examples:
   - "看一下 K8s cluster 狀態"
   - "ArgoCD 幫我 sync 一下"
@@ -13,6 +16,10 @@ examples:
   - "幫我跑 terraform plan 看看要改什麼"
   - "router 的 Tailscale 有正常跑嗎？"
   - "Home Assistant 幫我找一下主人的手機在哪"
+  - "幫我 restart gateway"
+  - "加個每天早上 9 點的 cron"
+  - "幫我執行 pnpm add -g sharp"
+  - "uv run --with paho-mqtt python3 script.py"
 ---
 
 Detected "infrastructure management" intent. The user wants to manage home-infra systems, servers, or services.
@@ -32,6 +39,9 @@ Detected "infrastructure management" intent. The user wants to manage home-infra
 - After modifying core workspace files (AGENTS.md, TOOLS.md, SOUL.md) or plugin configs, verify no drift.
 
 ## Skills & Tools
+
+- Manage OpenClaw installation, config, gateway, crons, channels:
+  skill: openclaw
 
 - Manage Kubernetes resources, probes, selectors, RBAC:
   skill: kubernetes
@@ -56,6 +66,27 @@ Detected "infrastructure management" intent. The user wants to manage home-infra
 
 - Run system health checks across workspace, config, and integrations:
   skill: healthcheck
+
+- Restart the gateway with notification:
+  gateway({ action: "restart", note: "..." })
+
+- Inspect a config subtree before editing:
+  gateway({ action: "config.schema.lookup", path: "agents.defaults" })
+
+- Apply a partial config change:
+  gateway({ action: "config.patch", path: "...", raw: "..." })
+
+- List cron jobs:
+  cron({ action: "list" })
+
+- Add a cron job:
+  cron({ action: "add", job: { schedule: { kind: "cron", expr: "...", tz: "Asia/Taipei" }, payload: { ... } } })
+
+- Remove a cron job:
+  cron({ action: "remove", jobId: "<id>" })
+
+- Execute a shell command:
+  exec({ command: "...", background: true })
 
 - Run security audit, workspace integrity check, config drift detection:
   exec({ command: "python3 ../skills/soul-guardian/scripts/soul_guardian.py check --actor manual --output-format alert" })

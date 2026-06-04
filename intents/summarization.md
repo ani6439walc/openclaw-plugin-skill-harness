@@ -3,6 +3,7 @@ id: SUMMARIZATION
 name: Content Summary / Transcript Query
 triggers:
   - "User wants a provided source to be summarized, condensed, or transcribed, such as a URL, article, video, podcast, PDF, transcript, or local file"
+  - "User wants to convert a book, document, or PDF into a structured agent skill, extracting frameworks and mental models"
 examples:
   - "這個 YouTube 影片在講什麼？"
   - "幫我聽寫這段影片"
