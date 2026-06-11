@@ -67,7 +67,7 @@ This mode handles automated improvement suggestions discovered by the self-evolu
 
 Read order:
 
-1. `references/process-backlog.md`
+1. `references/evolve-workflow.md`
 2. `references/format-rules.md`
 3. Other design/inventory references only when the selected finding requires them
 
@@ -169,7 +169,7 @@ Output: cluster map with `cluster name | capabilities | existing intent match | 
 
 ### Evolve mode — transactional workflow
 
-Follow the transactional workflow in `references/process-backlog.md`.
+Follow the transactional workflow in `references/evolve-workflow.md`.
 
 ## Failure modes
 
