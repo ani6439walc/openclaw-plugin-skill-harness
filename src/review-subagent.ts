@@ -184,7 +184,7 @@ export async function runReviewSubagent(params: {
       runId,
       workspaceDir: "/tmp",
       agentDir: "/tmp",
-      sessionFile: "/tmp/session.jsonl",
+      sessionFile: `/tmp/${runId}.session.jsonl`,
       trigger: "manual",
       modelRun: true,
       promptMode: "none",

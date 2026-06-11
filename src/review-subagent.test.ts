@@ -227,6 +227,9 @@ describe("runReviewSubagent", () => {
         promptMode: "none",
         disableTools: true,
         toolsAllow: [],
+        sessionFile: expect.stringMatching(
+          /^\/tmp\/intention-hint-review-.+\.session\.jsonl$/,
+        ),
       }),
     );
   });

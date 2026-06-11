@@ -164,7 +164,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     runId: params.subagentSessionId,
     workspaceDir: "/tmp",
     agentDir: "/tmp",
-    sessionFile: "/tmp/session.jsonl",
+    sessionFile: `/tmp/${params.subagentSessionId}.session.jsonl`,
     trigger: "manual" as const,
     modelRun: true,
     promptMode: "none" as const,
