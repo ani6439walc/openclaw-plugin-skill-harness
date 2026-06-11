@@ -5,6 +5,7 @@ import { logger } from "../api.js";
 import type { EvolutionFinding, ReviewSnapshot } from "./evolution-types.js";
 import type { EvolutionTrigger } from "./trigger-checker.js";
 import type { ResolvedIntentionHintPluginConfig } from "./types.js";
+import { EVOLUTION_OPERATIONS } from "./evolution-backlog.js";
 
 const REVIEW_INSTRUCTIONS: Record<
   EvolutionTrigger,
@@ -28,7 +29,7 @@ const REVIEW_INSTRUCTIONS: Record<
   missing_intent: {
     focus:
       "Extract the uncategorized user goal, its distinguishing boundary, representative trigger descriptions, examples, required skills/tools, and execution strategy. Check that it is not merely a refinement of an existing intent.",
-    goal: "Draft a new, narrowly scoped intent Markdown definition that follows the intent-craft format.",
+    goal: "Draft a new, narrowly scoped intent Markdown definition that follows the bundled intention-hint Skill format.",
   },
   weak_intent: {
     focus:
@@ -61,6 +62,8 @@ const FindingSchema = z.discriminatedUnion("hasFinding", [
   z.object({
     trigger: z.string(),
     hasFinding: z.literal(true),
+    operation: z.enum(EVOLUTION_OPERATIONS),
+    targetIntentIds: z.array(z.string().trim().min(1)).min(1).max(10),
     dedupeKey: z.string().trim().min(1).max(120),
     summary: z.string().trim().min(1).max(500),
     evidence: z.array(z.string().trim().min(1).max(1000)).max(10),
@@ -105,10 +108,12 @@ Requested trigger reviews:
 ${triggerPrompts}
 
 Return JSON only:
-{"findings":[{"trigger":"skill_candidate","hasFinding":true,"dedupeKey":"stable-short-key","summary":"...","evidence":["..."],"correctionGoal":"...","suggestedChange":"..."},{"trigger":"process_gap","hasFinding":false}]}
+{"findings":[{"trigger":"skill_candidate","hasFinding":true,"operation":"refine","targetIntentIds":["PRODUCTIVITY"],"dedupeKey":"stable-short-key","summary":"...","evidence":["..."],"correctionGoal":"...","suggestedChange":"..."},{"trigger":"process_gap","hasFinding":false}]}
 
 For every hasFinding=true item:
 - correctionGoal must name the intent Markdown outcome.
+- operation must be create, refine, split, or merge.
+- targetIntentIds must list every existing or proposed intent ID affected by the change.
 - suggestedChange must be a concrete intent Markdown draft or patch instruction, including the exact frontmatter fields or body sections to add/change.
 
 Review snapshot:
@@ -130,6 +135,8 @@ export function parseReviewFindings(
       return [
         {
           trigger: finding.trigger as EvolutionTrigger,
+          operation: finding.operation,
+          targetIntentIds: finding.targetIntentIds,
           dedupeKey: finding.dedupeKey,
           summary: finding.summary,
           evidence: finding.evidence,

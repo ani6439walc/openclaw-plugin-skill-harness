@@ -40,7 +40,10 @@ index.ts
        │    └─ sessions/stats.json
        │
        ├─ trigger-checker.ts + review-subagent.ts → Intent Self-Evolution review
-       │    └─ backlog-writer.ts → sessions/evolution.json
+       │    └─ backlog-writer.ts + evolution-backlog.ts → sessions/evolution.json
+       │
+       ├─ backlog-cli.ts + intent-validation.ts → transactional backlog processing support
+       │    └─ skills/intention-hint/references/process-backlog.md
        │
        ├─ session.ts → session guards (isEnabledForAgent, isEligibleInteractiveSession, etc.)
        │
@@ -61,6 +64,9 @@ index.ts
 | `trigger-checker.ts`      | Detect six configurable Self-Evolution triggers from completed turns             |
 | `review-subagent.ts`      | Build trigger-specific review prompts and run the tool-free review sub-agent     |
 | `backlog-writer.ts`       | Merge review findings atomically into `sessions/evolution.json`                  |
+| `evolution-backlog.ts`    | Validate/migrate backlog schema and provide atomic mutation primitives           |
+| `backlog-cli.ts`          | List, target, validate, and optimistically complete pending backlog items        |
+| `intent-validation.ts`    | Validate Intent Markdown structure, IDs, targets, and catalog loading            |
 | `conversation-extract.ts` | Extract and truncate recent conversation turns for intent context                |
 | `prompt.ts`               | **Core prompt & parser** — builds classification prompt, parses JSON result      |
 | `session.ts`              | Session eligibility guards (agent allow-list, chat type, internal run detection) |
@@ -239,7 +245,7 @@ atomic, event-idempotent `sessions/evolution.json` backlog. Review failures are
 fail-open and never block or alter the main reply.
 
 The reviewer is intentionally scoped to improving `intents/*.md`, following the
-bundled `intent-craft` rules. It receives the full matched intent definition and
+bundled `intention-hint` Skill rules. It receives the full matched intent definition and
 a compact frontmatter catalog for collision checks, plus the current turn and up
 to nine previous tracked turns with truncated content. Depending on the trigger,
 it proposes a new intent draft or targeted changes to frontmatter, Guidelines,
@@ -248,8 +254,35 @@ changes to skills, tools, AGENTS.md, SOUL.md, or other production files.
 
 `sessions/evolution.json` is protected like `sessions/stats.json`: it is not
 loaded as session state and is never removed by session lifecycle or 14-day
-retention cleanup. Backlog items start as `pending` for the future
-`Process-Backlog Skill` to consume.
+retention cleanup. Schema v2 findings include `operation` (`create`, `refine`,
+`split`, or `merge`) and all affected `targetIntentIds`. Existing schema v1
+items migrate to `operation: "unknown"` and empty targets until they can be
+grounded safely.
+
+### Intention-Hint Backlog Mode
+
+The bundled `intention-hint` Skill has an explicit-only `backlog` mode that
+processes exactly one pending finding per invocation. The mode treats current
+Intent Markdown as the source of truth, backs up affected files under `/tmp`,
+validates the result, and only then marks the item `processed`. Validation or
+optimistic-concurrency failures restore the pre-processing files and leave the
+item `pending`. `split`, `merge`, and deletions require user confirmation. The
+mode never commits, pushes, dismisses items, or edits the backlog JSON directly.
+Detailed transactional steps live in
+`skills/intention-hint/references/process-backlog.md`.
+
+Backlog CLI:
+
+```bash
+pnpm run backlog -- list --json
+pnpm run backlog -- show --id IMP-...
+pnpm run backlog -- set-target --id IMP-... --operation refine --target-intent PRODUCTIVITY
+pnpm run backlog -- validate-intents --id PRODUCTIVITY
+pnpm run backlog -- mark-processed --id IMP-... --expected-updated-at <timestamp>
+```
+
+All mutations validate schema v2 and use a same-directory temporary file plus
+atomic rename. `mark-processed` rejects a stale item `updatedAt`.
 
 ## Key Design Decisions
 
@@ -369,6 +402,8 @@ The test suites cover:
 - Internal/inter-session turn detection and conversation-history filtering
 - Per-turn historical intent matching, duplicate handling, and prompt injection
 - Six Self-Evolution triggers, thresholds, and multi-trigger turns
-- Intent-craft review prompts, response parsing, and tool-free reviewer runs
+- Intention-hint Skill review prompts, response parsing, and tool-free reviewer runs
 - Serialized background reviews and atomic, idempotent evolution backlog writes
+- Schema v1-to-v2 migration, structured finding targets, and backlog CLI concurrency checks
+- Intent Markdown structure/catalog validation and explicit-only intention-hint backlog mode
 - Protection of `sessions/evolution.json` from session loading and retention cleanup

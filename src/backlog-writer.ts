@@ -1,80 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
 import { logger } from "../api.js";
 import type { EvolutionFinding, EvolutionSource } from "./evolution-types.js";
 import {
-  EVOLUTION_TRIGGER_TYPES,
-  type EvolutionTrigger,
-} from "./trigger-checker.js";
-
-type BacklogItem = {
-  id: string;
-  type: EvolutionTrigger;
-  dedupeKey: string;
-  summary: string;
-  correctionGoal: string;
-  details: {
-    evidence: string[];
-    suggestedChange: string;
-  };
-  frequency: number;
-  sources: EvolutionSource[];
-  createdAt: string;
-  updatedAt: string;
-  status: "pending" | "processed" | "dismissed";
-};
-
-type EvolutionBacklog = {
-  schemaVersion: 1;
-  createdAt: string;
-  updatedAt: string;
-  processedEvents: Record<string, string>;
-  items: BacklogItem[];
-};
-
-const EvolutionSourceSchema = z.object({
-  sessionId: z.string(),
-  sessionKey: z.string().optional(),
-  agentId: z.string().optional(),
-  turnStart: z.string(),
-});
-
-const EvolutionBacklogSchema = z.object({
-  schemaVersion: z.literal(1),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  processedEvents: z.record(z.string(), z.string()),
-  items: z.array(
-    z.object({
-      id: z.string(),
-      type: z.enum(EVOLUTION_TRIGGER_TYPES),
-      dedupeKey: z.string(),
-      summary: z.string(),
-      correctionGoal: z.string(),
-      details: z.object({
-        evidence: z.array(z.string()),
-        suggestedChange: z.string(),
-      }),
-      frequency: z.number().int().positive(),
-      sources: z.array(EvolutionSourceSchema),
-      createdAt: z.string(),
-      updatedAt: z.string(),
-      status: z.enum(["pending", "processed", "dismissed"]),
-    }),
-  ),
-});
-
-function createBacklog(nowIso: string): EvolutionBacklog {
-  return {
-    schemaVersion: 1,
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    processedEvents: {},
-    items: [],
-  };
-}
+  createBacklog,
+  readBacklog,
+  writeBacklogAtomic,
+  type EvolutionBacklog,
+} from "./evolution-backlog.js";
 
 function nextItemId(backlog: EvolutionBacklog, nowIso: string): string {
   const date = nowIso.slice(0, 10).replaceAll("-", "");
@@ -115,9 +49,7 @@ export class BacklogWriter {
     try {
       const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
       const backlog = fs.existsSync(backlogPath)
-        ? EvolutionBacklogSchema.parse(
-            JSON.parse(fs.readFileSync(backlogPath, "utf-8")),
-          )
+        ? readBacklog(backlogPath)
         : createBacklog(nowIso);
       if (backlog.processedEvents[eventId]) return false;
 
@@ -132,6 +64,8 @@ export class BacklogWriter {
           existing.frequency += 1;
           existing.sources.push(source);
           existing.updatedAt = nowIso;
+          existing.operation = finding.operation;
+          existing.targetIntentIds = [...finding.targetIntentIds];
           existing.summary = finding.summary;
           existing.correctionGoal = finding.correctionGoal;
           existing.details = {
@@ -144,6 +78,8 @@ export class BacklogWriter {
         backlog.items.push({
           id: nextItemId(backlog, nowIso),
           type: finding.trigger,
+          operation: finding.operation,
+          targetIntentIds: [...finding.targetIntentIds],
           dedupeKey: finding.dedupeKey,
           summary: finding.summary,
           correctionGoal: finding.correctionGoal,
@@ -172,21 +108,14 @@ export class BacklogWriter {
   }
 
   private write(backlogPath: string, backlog: EvolutionBacklog): boolean {
-    const sessionsDir = path.dirname(backlogPath);
-    const tempPath = `${backlogPath}.tmp-${process.pid}-${Date.now()}`;
     try {
-      fs.mkdirSync(sessionsDir, { recursive: true });
-      fs.writeFileSync(tempPath, JSON.stringify(backlog, null, 2));
-      fs.renameSync(tempPath, backlogPath);
+      writeBacklogAtomic(backlogPath, backlog);
       return true;
     } catch (err) {
       logger.warn("failed to write evolution backlog", {
         error: err,
         path: backlogPath,
       });
-      try {
-        fs.rmSync(tempPath, { force: true });
-      } catch {}
       return false;
     }
   }

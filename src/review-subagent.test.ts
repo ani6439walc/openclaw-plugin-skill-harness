@@ -46,7 +46,7 @@ const snapshot: ReviewSnapshot = {
 };
 
 describe("buildReviewPrompt", () => {
-  it("grounds every review in intent-craft Markdown rules", () => {
+  it("grounds every review in bundled intention-hint Markdown rules", () => {
     const prompt = buildReviewPrompt(snapshot, ["weak_intent"]);
 
     expect(prompt).toContain(
@@ -134,6 +134,8 @@ describe("parseReviewFindings", () => {
           {
             trigger: "skill_candidate",
             hasFinding: true,
+            operation: "refine",
+            targetIntentIds: ["PRODUCTIVITY"],
             dedupeKey: "deploy-flow",
             summary: "Deployment flow is reusable",
             evidence: ["Five related tool calls"],
@@ -149,6 +151,8 @@ describe("parseReviewFindings", () => {
     expect(parsed).toEqual([
       {
         trigger: "skill_candidate",
+        operation: "refine",
+        targetIntentIds: ["PRODUCTIVITY"],
         dedupeKey: "deploy-flow",
         summary: "Deployment flow is reusable",
         evidence: ["Five related tool calls"],
@@ -161,8 +165,8 @@ describe("parseReviewFindings", () => {
   it("accepts fenced JSON and rejects unknown or unrequested triggers", () => {
     const raw = `\`\`\`json
 {"findings":[
-  {"trigger":"unknown","hasFinding":true,"dedupeKey":"x","summary":"x","evidence":[],"correctionGoal":"x","suggestedChange":"x"},
-  {"trigger":"weak_intent","hasFinding":true,"dedupeKey":"weak","summary":"weak","evidence":[],"correctionGoal":"improve","suggestedChange":"add examples"}
+  {"trigger":"unknown","hasFinding":true,"operation":"refine","targetIntentIds":["X"],"dedupeKey":"x","summary":"x","evidence":[],"correctionGoal":"x","suggestedChange":"x"},
+  {"trigger":"weak_intent","hasFinding":true,"operation":"refine","targetIntentIds":["PRODUCTIVITY"],"dedupeKey":"weak","summary":"weak","evidence":[],"correctionGoal":"improve","suggestedChange":"add examples"}
 ]}
 \`\`\``;
 
@@ -170,6 +174,26 @@ describe("parseReviewFindings", () => {
     expect(
       parseReviewFindings("not json", ["skill_candidate"]),
     ).toBeUndefined();
+  });
+
+  it("rejects findings without a valid operation and target intents", () => {
+    const raw = JSON.stringify({
+      findings: [
+        {
+          trigger: "weak_intent",
+          hasFinding: true,
+          operation: "unknown",
+          targetIntentIds: [],
+          dedupeKey: "weak",
+          summary: "weak",
+          evidence: [],
+          correctionGoal: "improve",
+          suggestedChange: "add examples",
+        },
+      ],
+    });
+
+    expect(parseReviewFindings(raw, ["weak_intent"])).toEqual([]);
   });
 });
 

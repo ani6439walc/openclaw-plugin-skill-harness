@@ -48,6 +48,7 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm run typecheck && pnpm run test:unit",
     "test:unit": "vitest run",
+    "backlog": "pnpm --silent run build && node dist/src/backlog-cli.js",
     "format": "prettier --write 'README.md' '**/*.json' '**/*.ts'"
   },
   "dependencies": {

@@ -41,7 +41,7 @@ Detected "prompt design" intent. The user wants help designing or refining promp
 ## Skills & Tools
 
 - Design, refine, or audit intent definitions (single-intent interview or full bootstrap audit):
-  skill: intent-craft
+  skill: intention-hint
 
 - Interview the user one-question-at-a-time to discover real intent:
   skill: interview-me
@@ -78,7 +78,7 @@ Detected "prompt design" intent. The user wants help designing or refining promp
 
 - Determine the user's goal: design new, refine existing, audit, or debug.
 - For existing items: read the file first, then analyze.
-- For new designs: use `intent-craft` for interactive interview.
+- For new designs: use `intention-hint` for interactive interview.
 - For audits: check for overlaps, anti-patterns, inconsistencies.
 - For debugging: inspect the prompt/skill, identify the failure mode, suggest fixes.
 
@@ -109,7 +109,7 @@ goal       files       & compare    & edit       & diff
 - Use `brainstorm` for naming or scoping alternatives.
 
 ### Step 4 — Draft or Fix
-- For new designs: use `intent-craft` interactive interview.
+- For new designs: use `intention-hint` interactive interview.
 - For refinements: propose the smallest change.
 - For debugging: identify failure mode and suggest targeted fixes.
 - Show a diff preview before applying.

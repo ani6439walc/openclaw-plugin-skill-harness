@@ -1,4 +1,5 @@
 import type { EvolutionTrigger } from "./trigger-checker.js";
+import type { EvolutionOperation } from "./evolution-backlog.js";
 import type { IntentDefinition, IntentionResult } from "./types.js";
 
 export type ReviewState = {
@@ -31,6 +32,8 @@ export type ReviewSnapshot = {
 
 export type EvolutionFinding = {
   trigger: EvolutionTrigger;
+  operation: EvolutionOperation;
+  targetIntentIds: string[];
   dedupeKey: string;
   summary: string;
   evidence: string[];

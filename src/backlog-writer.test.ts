@@ -14,6 +14,8 @@ describe("BacklogWriter", () => {
   };
   const finding = {
     trigger: "skill_candidate" as const,
+    operation: "refine" as const,
+    targetIntentIds: ["PRODUCTIVITY"],
     dedupeKey: "deploy-flow",
     summary: "Reusable deployment flow",
     evidence: ["Five related tool calls"],
@@ -44,7 +46,7 @@ describe("BacklogWriter", () => {
     ).toBe(true);
 
     expect(readBacklog()).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       updatedAt: "2026-06-11T00:01:00.000Z",
       processedEvents: {
         "session-1:turn-1": "2026-06-11T00:01:00.000Z",
@@ -53,6 +55,8 @@ describe("BacklogWriter", () => {
         {
           id: "IMP-20260611-001",
           type: "skill_candidate",
+          operation: "refine",
+          targetIntentIds: ["PRODUCTIVITY"],
           dedupeKey: "deploy-flow",
           frequency: 1,
           status: "pending",
@@ -71,6 +75,48 @@ describe("BacklogWriter", () => {
     expect(backlog.items).toHaveLength(1);
     expect(backlog.items[0].frequency).toBe(2);
     expect(backlog.items[0].sources).toHaveLength(2);
+  });
+
+  it("migrates v1 backlogs and updates operation and targets on merge", () => {
+    const sessions = path.join(root, "sessions");
+    fs.mkdirSync(sessions);
+    const backlogPath = path.join(sessions, "evolution.json");
+    fs.writeFileSync(
+      backlogPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        createdAt: "2026-06-10T00:00:00.000Z",
+        updatedAt: "2026-06-10T00:00:00.000Z",
+        processedEvents: {},
+        items: [
+          {
+            id: "IMP-20260610-001",
+            type: finding.trigger,
+            dedupeKey: finding.dedupeKey,
+            summary: "old",
+            correctionGoal: "old",
+            details: { evidence: [], suggestedChange: "old" },
+            frequency: 1,
+            sources: [source],
+            createdAt: "2026-06-10T00:00:00.000Z",
+            updatedAt: "2026-06-10T00:00:00.000Z",
+            status: "pending",
+          },
+        ],
+      }),
+    );
+
+    expect(writer.record("event-2", source, [finding])).toBe(true);
+    expect(readBacklog()).toMatchObject({
+      schemaVersion: 2,
+      items: [
+        {
+          frequency: 2,
+          operation: "refine",
+          targetIntentIds: ["PRODUCTIVITY"],
+        },
+      ],
+    });
   });
 
   it("preserves corrupt existing evolution.json", () => {

@@ -66,13 +66,15 @@ export class IntentCatalog {
     return new IntentCatalog(pluginRoot);
   }
 
-  load(intentsDir: string): number {
+  load(intentsDir: string, options: { silent?: boolean } = {}): number {
     const resolvedDir = path.resolve(this.pluginRoot, intentsDir);
-    const loaded = this.loadFromDir(resolvedDir);
+    const loaded = this.loadFromDir(resolvedDir, options.silent ?? false);
     this.intents = loaded;
-    logger.debug(
-      `loaded ${loaded.length} dynamic intents from ${resolvedDir}.`,
-    );
+    if (!options.silent) {
+      logger.debug(
+        `loaded ${loaded.length} dynamic intents from ${resolvedDir}.`,
+      );
+    }
     return loaded.length;
   }
 
@@ -99,7 +101,7 @@ export class IntentCatalog {
     return filterIntentsForAgent(this.intents, config, agentId);
   }
 
-  private loadFromDir(intentsDir: string): IntentDefinition[] {
+  private loadFromDir(intentsDir: string, silent: boolean): IntentDefinition[] {
     const result: IntentDefinition[] = [];
 
     if (!fs.existsSync(intentsDir)) {
@@ -131,9 +133,11 @@ export class IntentCatalog {
         : [];
 
       if (!id || !triggers.length) {
-        logger.warn(
-          `skipping invalid intent file: ${entry}. (missing id or triggers)`,
-        );
+        if (!silent) {
+          logger.warn(
+            `skipping invalid intent file: ${entry}. (missing id or triggers)`,
+          );
+        }
         continue;
       }
 
