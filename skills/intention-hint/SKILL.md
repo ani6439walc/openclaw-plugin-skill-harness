@@ -19,6 +19,8 @@ Read order:
 
 Then follow the 5-step workflow: classify → interview → ground → draft → deliver.
 
+**🔴 CHECKPOINT**: After interview, before drafting — confirm boundary summary with user.
+
 ## Mode: audit
 
 User wants to bootstrap or re-audit the entire intent system (first install or after many new skills/tools).
@@ -32,6 +34,8 @@ Read order:
 5. `references/closing.md`
 
 Then follow: discovery → clustering → interview → generate → review.
+
+**🔴 CHECKPOINT**: After clustering, before interview — present cluster map to user for calibration.
 
 ## Mode: backlog
 
@@ -47,6 +51,8 @@ Read order:
 Then follow the transactional workflow in `references/process-backlog.md`.
 Never enter this mode merely because `sessions/evolution.json` contains pending
 items.
+
+**🔴 CHECKPOINT**: After processing, before commit — show diff preview and confirm no conflicts.
 
 ## First-time setup (assets)
 
