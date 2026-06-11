@@ -169,7 +169,51 @@ Output: cluster map with `cluster name | capabilities | existing intent match | 
 
 ### Evolve mode — transactional workflow
 
-Follow the transactional workflow in `references/evolve-workflow.md`.
+**Step 1: Select**
+```bash
+# Show all pending findings (picks highest frequency, oldest createdAt)
+pnpm run backlog -- show
+# Or show a specific finding
+pnpm run backlog -- show --id <item-id>
+```
+Re-read the selected item — it must still be `pending`.
+
+**Step 2: Ground**
+Read the target intent markdown, the compact intent catalog, and relevant references.
+For legacy items with `operation: unknown`, infer metadata:
+```bash
+pnpm run backlog -- set-target --id <item-id> --operation <operation> --target-intent <intent-id>
+```
+
+**Step 3: Backup + Apply**
+```bash
+# Create backup directory
+mkdir -p /tmp/intention-hint-process-backlog/<item-id>-<timestamp>/
+# Backup every file that may be modified or deleted
+```
+Then apply: `create` → new intent, `refine` → update target, `split`/`merge` → only after user confirmation.
+
+**Step 4: Validate**
+```bash
+pnpm run backlog -- validate-intents --id <target-intent-id>
+pnpm run test
+pnpm run build
+```
+
+**Step 5: Commit or Rollback**
+```bash
+# All checks pass → mark processed
+pnpm run backlog -- mark-processed --id <item-id> --expected-updated-at <timestamp>
+# Validation fails → restore from backup, leave item pending
+```
+
+## Test prompts (dry_run)
+
+| # | Prompt | Expected behavior | Mode |
+|---|--------|-------------------|------|
+| 1 | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground against existing intents → draft with correct frontmatter → validate | design |
+| 2 | "Audit the entire intent system from scratch" | Route to **inventory** → discovery scan → clustering → 🔴 CHECKPOINT cluster map → interview gaps → generate → review collisions | inventory |
+| 3 | "Process the next evolution backlog finding" | Route to **evolve** → `pnpm run backlog -- show` → ground → backup → apply → validate → mark processed or rollback | evolve |
 
 ## Failure modes
 
@@ -181,6 +225,9 @@ Follow the transactional workflow in `references/evolve-workflow.md`.
 | **Closing collision warning** — new intent overlaps existing | Suggest split or merge, show collision details | Force-create but tag as `experimental`, flag for next review |
 | **format-rules.md validation fails** | Read error message, fix format and retry | Display full format-rules.md for manual inspection |
 | **Backlog finding already processed** | Skip, mark as `already_processed` | Re-check sessions/evolution.json state |
+| **Evolve: target intent deleted or missing** | Skip finding, log warning with missing intent ID | Leave item `pending`, report to user for manual resolution |
+| **Evolve: validation fails after apply** | Restore from `/tmp/intention-hint-process-backlog/` backup | Leave item `pending`, report validation errors to user |
+| **Evolve: suggested change breaks existing intent format** | Reject the suggestion, keep original intent unchanged | Log rejection reason, leave item `pending` for next cycle |
 
 ## Validation commands
 
