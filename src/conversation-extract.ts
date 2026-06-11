@@ -7,6 +7,19 @@ import type {
   ContextWindow,
 } from "./types.js";
 
+const INTER_SESSION_PROMPT_MARKER = "[Inter-session message]";
+const INTERNAL_RUNTIME_CONTEXT_BEGIN = "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>";
+const INTERNAL_RUNTIME_CONTEXT_END = "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>";
+const INTERNAL_RUNTIME_CONTEXT_HEADER = "OpenClaw runtime context (internal):";
+const INTERNAL_RUNTIME_CONTEXT_NOTICE =
+  "This context is runtime-generated, not user-authored. Keep internal details private.";
+const INTERNAL_TASK_COMPLETION_MARKER = "[Internal task completion event]";
+const INPUT_PROVENANCE_KINDS = new Set([
+  "external_user",
+  "inter_session",
+  "internal_system",
+]);
+
 /**
  * Extract readable text from tool call results.
  * Handles JSON-encoded content blocks (e.g. {"content":[{"type":"text","text":"..."}]}
@@ -121,6 +134,109 @@ function extractTextContent(
   return parts.join(" ").trim();
 }
 
+function getProvenanceKind(message: PromptMessageLike): string | undefined {
+  const kind = message.provenance?.kind;
+  return typeof kind === "string" && INPUT_PROVENANCE_KINDS.has(kind)
+    ? kind
+    : undefined;
+}
+
+function hasInterSessionPromptMarker(text: string): boolean {
+  return text.split(/\r?\n/).some((line) => {
+    const trimmed = line.trim();
+    return (
+      trimmed.startsWith(INTER_SESSION_PROMPT_MARKER) &&
+      /\bisUser=false\b/.test(trimmed)
+    );
+  });
+}
+
+function hasInternalTaskCompletionContext(text: string): boolean {
+  const lines = text.split(/\r?\n/).map((line) => line.trim());
+  let searchFrom = 0;
+
+  for (;;) {
+    const beginIndex = lines.indexOf(
+      INTERNAL_RUNTIME_CONTEXT_BEGIN,
+      searchFrom,
+    );
+    if (beginIndex === -1) return false;
+    const endIndex = lines.indexOf(
+      INTERNAL_RUNTIME_CONTEXT_END,
+      beginIndex + 1,
+    );
+    if (endIndex === -1) return false;
+
+    const block = lines.slice(beginIndex + 1, endIndex);
+    const headerIndex = block.indexOf(INTERNAL_RUNTIME_CONTEXT_HEADER);
+    const noticeIndex = block.indexOf(INTERNAL_RUNTIME_CONTEXT_NOTICE);
+    const completionIndex = block.indexOf(INTERNAL_TASK_COMPLETION_MARKER);
+    if (
+      headerIndex !== -1 &&
+      noticeIndex > headerIndex &&
+      completionIndex > noticeIndex
+    ) {
+      return true;
+    }
+    searchFrom = endIndex + 1;
+  }
+}
+
+function hasInternalUserTurnText(text: string): boolean {
+  return (
+    hasInterSessionPromptMarker(text) || hasInternalTaskCompletionContext(text)
+  );
+}
+
+function isInterSessionUserMessage(message: PromptMessageLike): boolean {
+  const provenanceKind = getProvenanceKind(message);
+  if (provenanceKind) return provenanceKind === "inter_session";
+  return hasInternalUserTurnText(extractTextContent(message.content));
+}
+
+function promptRepresentsMessage(prompt: string, messageText: string): boolean {
+  const normalizedPrompt = prompt.trim();
+  const normalizedMessage = messageText.trim();
+  if (!normalizedPrompt || !normalizedMessage) return false;
+  return (
+    normalizedPrompt === normalizedMessage ||
+    normalizedPrompt.endsWith(normalizedMessage)
+  );
+}
+
+export function isInternalUserTurn(params: {
+  prompt: string;
+  messages: unknown[] | undefined;
+}): boolean {
+  const promptHasInternalTurnSignal = hasInternalUserTurnText(params.prompt);
+  const latestConversationMessage = Array.isArray(params.messages)
+    ? params.messages
+        .slice()
+        .reverse()
+        .find((message): message is PromptMessageLike => {
+          if (!message || typeof message !== "object") return false;
+          const role = (message as PromptMessageLike).role;
+          return role === "user" || role === "assistant";
+        })
+    : undefined;
+
+  if (latestConversationMessage?.role === "user") {
+    const provenanceKind = getProvenanceKind(latestConversationMessage);
+    const latestUserText = extractTextContent(
+      latestConversationMessage.content,
+    );
+    if (!promptRepresentsMessage(params.prompt, latestUserText)) {
+      return promptHasInternalTurnSignal;
+    }
+    if (provenanceKind) return provenanceKind === "inter_session";
+    return (
+      hasInternalUserTurnText(latestUserText) || promptHasInternalTurnSignal
+    );
+  }
+
+  return promptHasInternalTurnSignal;
+}
+
 function stripMetadataBlocks(text: string): string {
   return text
     .replace(/<intention_hint_plugin>[\s\S]*?<\/intention_hint_plugin>/gi, " ")
@@ -155,6 +271,7 @@ export function extractRecentTurns(
 
   const turns: RecentTurn[] = [];
   let pendingUser: RecentTurn | undefined;
+  let skipNextAssistant = false;
 
   for (const message of messages) {
     if (!message || typeof message !== "object") continue;
@@ -167,9 +284,16 @@ export function extractRecentTurns(
     if (!text || isHeartbeatMessage(role, text)) continue;
 
     if (role === "user") {
+      if (isInterSessionUserMessage(typed)) {
+        skipNextAssistant = true;
+        continue;
+      }
+      skipNextAssistant = false;
       // If we already have a pending user without assistant, the previous
       // user turn is incomplete. Keep it and replace with the new one.
       pendingUser = { role: "user", text };
+    } else if (skipNextAssistant) {
+      skipNextAssistant = false;
     } else if (role === "assistant" && pendingUser) {
       // Complete the pair.
       turns.push(pendingUser);

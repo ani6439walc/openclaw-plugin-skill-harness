@@ -123,6 +123,17 @@ Three input types are provided:
 3. Prefer intent that explains WHY user said this
 4. DO NOT FORCE classification - default to OTHER (Fallback) if uncertain
 5. Validate output: ensure all required JSON fields are present, intent exists in catalog (or OTHER), confidence is 0.0-1.0, complexity is low|medium|high
+6. **Previous Intent Continuity**: If "previous_intent_result" is provided and the latest message appears to be a follow-up (short, action-oriented, or contextually linked), prefer the previous intent unless there's a clear topic switch.
+7. **Topic Continuity vs Switch**:
+   - **Continuity**: Latest message references entities/topics from conversation history
+   - **Switch**: Latest message introduces new topic, uses transition phrases (現在來說、換個話題、另外), or is a standalone action command
+   - When uncertain, prefer continuity if conversation context is recent (< 3 turns ago)
+8. **Follow-up Detection**: If the latest message is short (< 15 chars) or contains continuation markers (那、再、然後、還有、先這樣、看起來、好、ok), check if it's a follow-up to the previous turn. If yes, inherit the previous intent rather than classifying fresh.
+9. **Short Message Handling**: For messages < 15 characters:
+   - First check: Is this a follow-up to previous turn? → Inherit previous intent
+   - Second check: Is this a simple action command (commit, push, run, check)? → ACTION_REQUEST or similar action intent
+   - Third check: Is this an acknowledgment (ok, good, thanks)? → CONVERSATIONAL
+   - Avoid classifying short messages as complex intents unless explicitly clear
 </classification_rules>
 
 <output_format>

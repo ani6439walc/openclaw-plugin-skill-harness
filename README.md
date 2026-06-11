@@ -30,7 +30,7 @@ index.ts
        │    └─ buildPromptPrefix() — builds injected hint text
        │
        ├─ hooks.ts → limitConversationTurns() → extract recent user/assistant turns
-       │    └─ conversation-extract.ts (turn extraction + text processing)
+       │    └─ conversation-extract.ts (internal-turn detection + turn extraction)
        │
        ├─ session-tracker.ts → SessionTracker (JSON session persistence)
        │    └─ sessions/<sessionId>.json
@@ -60,9 +60,10 @@ index.ts
 ```mermaid
 graph LR
     A[before_prompt_build] --> B{session eligible?}
-    B -->|yes| C[rotate → clear previous data]
+    B -->|yes| C{internal user turn?}
     B -->|no| Z[skip]
-    C --> D[record input + conversation]
+    C -->|yes| Z
+    C -->|no| D[record input + conversation]
     D --> E[runIntentionSubagent]
     E --> F[parse intention result]
     F --> G{parsed?}
@@ -227,6 +228,30 @@ The following categories group intents by their ID prefix:
 - When present, wraps turns XML inside `<conversation>...</conversation>` tags
 - Extracted via `conversation-extract.ts` with configurable turn/char limits from `contextWindow` config
 
+### Internal User Turns
+
+OpenClaw-generated inter-session turns, such as subagent completion announcements
+and `sessions_send` messages, are not direct end-user intent. The
+`before_prompt_build` hook skips them before refreshing config, running the intent
+scanner, recording intent data, or returning `prependContext`.
+
+Detection uses the following priority:
+
+1. Structured `message.provenance.kind === "inter_session"` on the latest matching
+   user message.
+2. OpenClaw's `[Inter-session message] ... isUser=false` marker when provenance is
+   unavailable.
+3. A complete protected OpenClaw runtime-context envelope containing
+   `[Internal task completion event]`.
+
+An explicit `external_user` or `internal_system` provenance is not skipped. A
+standalone internal-context delimiter or an incomplete protected envelope is also
+not enough to classify a normal user message as internal.
+
+Inter-session user turns and their corresponding assistant replies are excluded
+from extracted conversation history, so later direct-user intent scans are not
+influenced by internal task-completion traffic.
+
 ### Output Parsing
 
 `parseIntentionResult()` handles:
@@ -257,3 +282,4 @@ pnpm run test:unit # vitest run
 - Config resolution and clamping
 - Session tracker persistence
 - Intent filtering via deny patterns
+- Internal/inter-session turn detection and conversation-history filtering

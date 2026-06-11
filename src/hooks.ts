@@ -14,6 +14,7 @@ import {
   limitConversationTurns,
   extractRecentTurns,
   extractToolText,
+  isInternalUserTurn,
 } from "./conversation-extract.js";
 import {
   isAllowedChatId,
@@ -55,6 +56,7 @@ export function createHookHandlers(deps: HookDeps) {
     try {
       // Early return checks FIRST (before refresh calls)
       if (shouldSkipIntentAnalysis(ctx)) return;
+      if (isInternalUserTurn(event)) return;
 
       const resolvedAgentId = resolveStatusUpdateAgentId(ctx);
       const resolvedSessionKey =

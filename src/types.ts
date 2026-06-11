@@ -77,4 +77,8 @@ export type MessageContentPart = {
 export type PromptMessageLike = {
   role?: string;
   content?: string | Array<string | MessageContentPart>;
+  provenance?: {
+    kind?: string;
+    sourceTool?: string;
+  };
 };
