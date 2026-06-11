@@ -109,6 +109,109 @@ describe("createHookHandlers tracking guards", () => {
 
     expect(recordStats).not.toHaveBeenCalled();
   });
+
+  it("enqueues enabled multi-trigger evolution review without awaiting it", async () => {
+    const snapshot = {
+      sessionId: "session-1",
+      agentId: "main",
+      eventId: "session-1:2026-06-11T00:00:00.000Z",
+      turnNumber: 10,
+      current: {
+        input: "不對，應該是別的做法",
+        intent: {
+          intent: "OTHER",
+          reason: "test",
+          goal: "Correct behavior",
+          confidence: 0.2,
+          complexity: "high" as const,
+        },
+        toolCalls: Array.from({ length: 5 }, () => ({
+          name: "exec",
+        })),
+        timestamps: { start: "2026-06-11T00:00:00.000Z" },
+      },
+      recent: [],
+      intentCatalog: [],
+    };
+    vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
+    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue({
+      input: snapshot.current.input,
+      intent: { result: snapshot.current.intent },
+      toolCalls: snapshot.current.toolCalls?.map((call) => ({
+        ...call,
+        params: {},
+      })),
+      timestamps: snapshot.current.timestamps,
+    });
+    vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue(snapshot);
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+    const definition = {
+      id: "OTHER",
+      name: "Fallback",
+      enabled: true,
+      triggers: ["Unmatched requests"],
+      examples: ["help"],
+      prompt:
+        "Detected fallback intent.\n\n## Guidelines\n\n- Ask for context.",
+    };
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
+    const enqueue = vi.fn();
+    const reviewer = vi.fn().mockResolvedValue([]);
+    const backlogWriter = { record: vi.fn() };
+    const handlers = createHookHandlers({
+      api: { config: {} } as OpenClawPluginApi,
+      config: () =>
+        resolveConfig({
+          selfEvolution: {
+            enabled: true,
+            reviewModel: "google/test-review",
+          },
+        }),
+      refreshLiveConfigFromRuntime: vi.fn(),
+      refreshIntents: vi.fn(),
+      reviewQueue: { enqueue },
+      reviewer,
+      backlogWriter,
+    });
+
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "session-1",
+      agentId: "main",
+    });
+
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(reviewer).not.toHaveBeenCalled();
+    await enqueue.mock.calls[0][0]();
+    expect(reviewer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: expect.objectContaining({
+          matchedIntent: definition,
+          intentCatalog: [
+            {
+              id: "OTHER",
+              name: "Fallback",
+              triggers: ["Unmatched requests"],
+              examples: ["help"],
+            },
+          ],
+        }),
+        triggers: [
+          "skill_candidate",
+          "satisfaction_check",
+          "missing_intent",
+          "weak_intent",
+          "behavior_fix",
+        ],
+      }),
+    );
+    expect(backlogWriter.record).toHaveBeenCalledWith(
+      snapshot.eventId,
+      expect.objectContaining({ sessionId: "session-1" }),
+      [],
+    );
+  });
 });
 
 describe("createHookHandlers session cleanup", () => {

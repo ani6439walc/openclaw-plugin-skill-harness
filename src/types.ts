@@ -15,6 +15,38 @@ export type ContextWindow = {
   assistant: { turns: number; chars: number };
 };
 
+export type SelfEvolutionTriggersConfig = {
+  skillCandidate?: { enabled?: boolean; toolCalls?: number };
+  processGap?: { enabled?: boolean; toolFailures?: number };
+  satisfactionCheck?: { enabled?: boolean; everyTurns?: number };
+  missingIntent?: { enabled?: boolean };
+  weakIntent?: { enabled?: boolean; confidenceBelow?: number };
+  behaviorFix?: { enabled?: boolean; keywords?: string[] };
+};
+
+export type SelfEvolutionConfig = {
+  enabled?: boolean;
+  reviewModel?: string;
+  reviewModelFallback?: string;
+  reviewTimeoutMs?: number;
+  triggers?: SelfEvolutionTriggersConfig;
+};
+
+export type ResolvedSelfEvolutionConfig = {
+  enabled: boolean;
+  reviewModel: string | undefined;
+  reviewModelFallback: string | undefined;
+  reviewTimeoutMs: number;
+  triggers: {
+    skillCandidate: { enabled: boolean; toolCalls: number };
+    processGap: { enabled: boolean; toolFailures: number };
+    satisfactionCheck: { enabled: boolean; everyTurns: number };
+    missingIntent: { enabled: boolean };
+    weakIntent: { enabled: boolean; confidenceBelow: number };
+    behaviorFix: { enabled: boolean; keywords: string[] };
+  };
+};
+
 export type IntentionHintPluginConfig = {
   agents?: string[];
   intentDeny?: Record<string, string[]>;
@@ -28,6 +60,7 @@ export type IntentionHintPluginConfig = {
   timeoutMs?: number;
   intentsDir?: string;
   complexityPrompts?: ComplexityPromptsConfig;
+  selfEvolution?: SelfEvolutionConfig;
 };
 
 export type ResolvedIntentionHintPluginConfig = {
@@ -43,6 +76,7 @@ export type ResolvedIntentionHintPluginConfig = {
   timeoutMs: number;
   intentsDir: string | undefined;
   complexityPrompts: ResolvedComplexityPromptsConfig;
+  selfEvolution: ResolvedSelfEvolutionConfig;
 };
 
 export type IntentDefinition = {

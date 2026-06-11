@@ -19,7 +19,7 @@ index.ts
        ├─ hooks.ts → createHookHandlers()
        │    ├─ onBeforePromptBuild → rotate() → record() → write() → inject hint
        │    ├─ onAfterToolCall → record() → write() (tracks tool usage)
-       │    ├─ onAgentEnd → record() → write() → aggregate stats
+       │    ├─ onAgentEnd → record() → aggregate stats → enqueue evolution review
        │    └─ onSessionEnd → cleanup() + cleanupExpired() (lifecycle cleanup + 14-day retention)
        │
        ├─ prompt.ts → buildIntentionPrompt() (pure function — no API dependency)
@@ -39,6 +39,9 @@ index.ts
        ├─ stats-aggregator.ts → StatsAggregator (atomic runtime usage aggregation)
        │    └─ sessions/stats.json
        │
+       ├─ trigger-checker.ts + review-subagent.ts → Intent Self-Evolution review
+       │    └─ backlog-writer.ts → sessions/evolution.json
+       │
        ├─ session.ts → session guards (isEnabledForAgent, isEligibleInteractiveSession, etc.)
        │
        └─ config.ts → resolveConfig() (zod schema validation with contextWindow)
@@ -55,12 +58,15 @@ index.ts
 | `intent-loader.ts`        | Loads and catalogs intent definitions from YAML-frontmatter `.md` files          |
 | `session-tracker.ts`      | Persist and clean up session data in `sessions/` JSON files                      |
 | `stats-aggregator.ts`     | Aggregate idempotent runtime usage statistics into `sessions/stats.json`         |
+| `trigger-checker.ts`      | Detect six configurable Self-Evolution triggers from completed turns             |
+| `review-subagent.ts`      | Build trigger-specific review prompts and run the tool-free review sub-agent     |
+| `backlog-writer.ts`       | Merge review findings atomically into `sessions/evolution.json`                  |
 | `conversation-extract.ts` | Extract and truncate recent conversation turns for intent context                |
 | `prompt.ts`               | **Core prompt & parser** — builds classification prompt, parses JSON result      |
 | `session.ts`              | Session eligibility guards (agent allow-list, chat type, internal run detection) |
 | `config.ts`               | Zod schema validation with defaults and clamping for plugin configuration        |
 
-Every `session_end` removes the ended session from tracker memory. Final lifecycle reasons (`new`, `reset`, `idle`, `daily`, `compaction`, and `deleted`) also delete that session's JSON; restart-oriented reasons preserve it for reload. Each `session_end` additionally removes top-level session JSON files whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch `stats.json`, transcripts, or other plugin data.
+Every `session_end` removes the ended session from tracker memory. Final lifecycle reasons (`new`, `reset`, `idle`, `daily`, `compaction`, and `deleted`) also delete that session's JSON; restart-oriented reasons preserve it for reload. Each `session_end` additionally removes top-level session JSON files whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch `stats.json`, `evolution.json`, transcripts, or other plugin data.
 
 ### Hook Execution Flow
 
@@ -125,7 +131,7 @@ The versioned stats document contains:
 - `daily`: UTC daily buckets retained for 90 days
 - `processedEvents`: event IDs retained for 90 days to prevent duplicate `agent_end` counting
 
-Rates use `0.0–1.0`. Skill lifecycle is `active` within 30 days, `stale` after 30 days, `archive` after 90 days, or `never_used` when recommended but never used. `needsReview` becomes true after at least five recommendations with adoption below `0.7`. All-time counters do not decrease when rolling data is pruned. Weekly Cron aggregation and evolution proposal writing are not implemented.
+Rates use `0.0–1.0`. Skill lifecycle is `active` within 30 days, `stale` after 30 days, `archive` after 90 days, or `never_used` when recommended but never used. `needsReview` becomes true after at least five recommendations with adoption below `0.7`. All-time counters do not decrease when rolling data is pruned. Weekly Cron aggregation is not implemented.
 
 ## Installation
 
@@ -169,6 +175,23 @@ pnpm run build
             medium: "Custom medium-complexity prompt...",
             high: "Custom high-complexity prompt...",
           },
+          selfEvolution: {
+            enabled: false,
+            reviewModel: "google/gemini-3-flash",
+            reviewModelFallback: "openai/gpt-5-mini",
+            reviewTimeoutMs: 30000,
+            triggers: {
+              skillCandidate: { enabled: true, toolCalls: 5 },
+              processGap: { enabled: true, toolFailures: 2 },
+              satisfactionCheck: { enabled: true, everyTurns: 10 },
+              missingIntent: { enabled: true },
+              weakIntent: { enabled: true, confidenceBelow: 0.5 },
+              behaviorFix: {
+                enabled: true,
+                keywords: ["不對", "應該是", "wrong", "should be"],
+              },
+            },
+          },
         },
       },
     },
@@ -192,6 +215,41 @@ pnpm run build
 | `timeoutMs`         | `number`   | `3000`        | Max wait time for subagent response. Clamped to 250–120000ms.                                         |
 | `intentsDir`        | `string`   | `"./intents"` | Directory containing intent definition `.md` files with YAML frontmatter.                             |
 | `complexityPrompts` | `object`   | built-in      | Custom classification prompt overrides per complexity level.                                          |
+| `selfEvolution`     | `object`   | disabled      | Post-turn trigger review configuration. Findings are stored in `sessions/evolution.json`.             |
+
+### Intent Self-Evolution
+
+Intent Self-Evolution is an opt-in observation and proposal pipeline. It does
+not edit intent files automatically. When enabled, each completed tracked turn
+is checked for six trigger types:
+
+| Trigger              | Default condition                                      | Intent Markdown correction target                         |
+| -------------------- | ------------------------------------------------------ | --------------------------------------------------------- |
+| `skill_candidate`    | Current turn has at least 5 tool calls                 | `Skills & Tools` and repeatable `Concrete Workflow` steps |
+| `process_gap`        | Current turn has at least 2 tool errors                | Guidelines, tool examples, and recovery workflow          |
+| `satisfaction_check` | Every 10th tracked turn                                | Boundaries, examples, Guidelines, or Response Strategy    |
+| `missing_intent`     | Classified intent is `OTHER`                           | A narrowly scoped new intent draft                        |
+| `weak_intent`        | Classification confidence is below 0.5                 | Frontmatter triggers/examples and boundary clarity        |
+| `behavior_fix`       | Current input contains a configured correction keyword | Guidance or workflow that encodes the corrected behavior  |
+
+All matching triggers are reviewed in one background, tool-free sub-agent run.
+Each trigger receives a distinct review focus and correction goal, and may return
+no finding. Valid findings are merged by pending `type + dedupeKey` into the
+atomic, event-idempotent `sessions/evolution.json` backlog. Review failures are
+fail-open and never block or alter the main reply.
+
+The reviewer is intentionally scoped to improving `intents/*.md`, following the
+bundled `intent-craft` rules. It receives the full matched intent definition and
+a compact frontmatter catalog for collision checks, plus the current turn and up
+to nine previous tracked turns with truncated content. Depending on the trigger,
+it proposes a new intent draft or targeted changes to frontmatter, Guidelines,
+Skills & Tools, Response Strategy, or Concrete Workflow. It never proposes
+changes to skills, tools, AGENTS.md, SOUL.md, or other production files.
+
+`sessions/evolution.json` is protected like `sessions/stats.json`: it is not
+loaded as session state and is never removed by session lifecycle or 14-day
+retention cleanup. Backlog items start as `pending`; reviewing, dismissing, or
+applying them is currently a manual workflow.
 
 ## Key Design Decisions
 
@@ -299,7 +357,7 @@ pnpm run typecheck # tsc --noEmit
 pnpm run test:unit # vitest run
 ```
 
-207 tests covering:
+The test suites cover:
 
 - `buildIntentionPrompt()` prompt structure
 - `parseIntentionResult()` JSON parsing (plain, code blocks, malformed, missing fields)
@@ -310,3 +368,7 @@ pnpm run test:unit # vitest run
 - Intent filtering via deny patterns
 - Internal/inter-session turn detection and conversation-history filtering
 - Per-turn historical intent matching, duplicate handling, and prompt injection
+- Six Self-Evolution triggers, thresholds, and multi-trigger turns
+- Intent-craft review prompts, response parsing, and tool-free reviewer runs
+- Serialized background reviews and atomic, idempotent evolution backlog writes
+- Protection of `sessions/evolution.json` from session loading and retention cleanup

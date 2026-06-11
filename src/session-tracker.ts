@@ -6,11 +6,12 @@ import type {
   IntentionResult,
   HistoricalIntentRecord,
 } from "./types.js";
+import type { ReviewSnapshot, ReviewState } from "./evolution-types.js";
 import matter from "gray-matter";
 import { logger } from "../api.js";
 
 const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
-const RESERVED_SESSION_FILENAMES = new Set(["stats.json"]);
+const RESERVED_SESSION_FILENAMES = new Set(["stats.json", "evolution.json"]);
 
 export interface SkillRecord {
   name: string;
@@ -47,6 +48,26 @@ export interface SessionData {
   agentId?: string;
   current: SessionState;
   history?: SessionState[];
+}
+
+function truncate(value: string | undefined, maxChars: number) {
+  return value?.slice(0, maxChars);
+}
+
+function createReviewState(state: SessionState): ReviewState {
+  return {
+    input: truncate(state.input, 1000),
+    intent: state.intent?.result ? { ...state.intent.result } : undefined,
+    skillsUsed: state.skillsUsed?.map((skill) => skill.name),
+    toolCalls: state.toolCalls?.map((call) => ({
+      name: call.name,
+      error: truncate(call.error, 500),
+      durationMs: call.durationMs,
+    })),
+    result: truncate(state.result, 1500),
+    error: truncate(state.error, 500),
+    timestamps: state.timestamps ? { ...state.timestamps } : undefined,
+  };
 }
 
 function extractSkillInfo(
@@ -158,6 +179,27 @@ export class SessionTracker {
     return this.sessionData.get(sessionId)?.current;
   }
 
+  getReviewSnapshot(sessionId: string): ReviewSnapshot | undefined {
+    const session = this.sessionData.get(sessionId);
+    const start = session?.current.timestamps?.start;
+    if (!session || !start || !session.current.intent?.result) return;
+
+    const completedStates = [
+      ...(session.history ?? []),
+      session.current,
+    ].filter((state) => state.intent?.result);
+    return {
+      sessionId,
+      sessionKey: session.sessionKey,
+      agentId: session.agentId,
+      eventId: `${sessionId}:${start}`,
+      turnNumber: completedStates.length,
+      current: createReviewState(session.current),
+      recent: completedStates.slice(-10, -1).map(createReviewState),
+      intentCatalog: [],
+    };
+  }
+
   getHistoricalIntentRecords(sessionId: string): HistoricalIntentRecord[] {
     const session = this.sessionData.get(sessionId);
     if (!session) return [];
@@ -267,6 +309,10 @@ export class SessionTracker {
     }
 
     const filename = `${sessionId}.json`;
+    if (RESERVED_SESSION_FILENAMES.has(filename)) {
+      logger.warn("refusing to overwrite reserved session file", { filename });
+      return;
+    }
     const filePath = path.join(sessionsDir, filename);
 
     fs.writeFileSync(filePath, JSON.stringify(session, null, 2));
@@ -277,7 +323,10 @@ export class SessionTracker {
     if (!options.deleteFile) return;
 
     const filename = `${sessionId}.json`;
-    if (path.basename(filename) !== filename) {
+    if (
+      path.basename(filename) !== filename ||
+      RESERVED_SESSION_FILENAMES.has(filename)
+    ) {
       logger.warn("refusing to delete invalid session file path", {
         sessionId,
       });

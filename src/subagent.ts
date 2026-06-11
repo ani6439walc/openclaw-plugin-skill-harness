@@ -53,6 +53,25 @@ export function getModelRef(
   return;
 }
 
+export function getReviewModelRef(
+  api: OpenClawPluginApi,
+  agentId: string,
+  config: ResolvedIntentionHintPluginConfig,
+  currentRun: { modelProviderId?: string; modelId?: string },
+): { provider: string; model: string } | undefined {
+  return getModelRef(
+    api,
+    agentId,
+    {
+      ...config,
+      model: config.selfEvolution.reviewModel ?? config.model,
+      modelFallback:
+        config.selfEvolution.reviewModelFallback ?? config.modelFallback,
+    },
+    currentRun,
+  );
+}
+
 export async function runIntentionSubagent(params: {
   api: OpenClawPluginApi;
   config: ResolvedIntentionHintPluginConfig;

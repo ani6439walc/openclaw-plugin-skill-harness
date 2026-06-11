@@ -13,6 +13,10 @@ import { logger } from "../api.js";
 import { defaultCatalog } from "./intent-loader.js";
 import { defaultTracker } from "./session-tracker.js";
 import { defaultStatsAggregator } from "./stats-aggregator.js";
+import { defaultBacklogWriter, type BacklogWriter } from "./backlog-writer.js";
+import { defaultReviewQueue, type ReviewQueue } from "./review-queue.js";
+import { checkEvolutionTriggers } from "./trigger-checker.js";
+import { runReviewSubagent } from "./review-subagent.js";
 import {
   limitConversationTurns,
   extractRecentTurns,
@@ -29,7 +33,11 @@ import {
   shouldSkipIntentAnalysis,
   resolveCanonicalSessionKeyFromSessionId,
 } from "./session.js";
-import { getModelRef, runIntentionSubagent } from "./subagent.js";
+import {
+  getModelRef,
+  getReviewModelRef,
+  runIntentionSubagent,
+} from "./subagent.js";
 import { buildPromptPrefix } from "./prompt.js";
 
 export type HookDeps = {
@@ -37,6 +45,9 @@ export type HookDeps = {
   config: () => ResolvedIntentionHintPluginConfig;
   refreshLiveConfigFromRuntime: () => void;
   refreshIntents: () => void;
+  reviewQueue?: Pick<ReviewQueue, "enqueue">;
+  reviewer?: typeof runReviewSubagent;
+  backlogWriter?: Pick<BacklogWriter, "record">;
 };
 
 function recordTrackedSession(
@@ -71,6 +82,9 @@ const SESSION_END_REASONS_THAT_DELETE_FILE = new Set([
 
 export function createHookHandlers(deps: HookDeps) {
   const { api, config, refreshLiveConfigFromRuntime, refreshIntents } = deps;
+  const reviewQueue = deps.reviewQueue ?? defaultReviewQueue;
+  const reviewer = deps.reviewer ?? runReviewSubagent;
+  const backlogWriter = deps.backlogWriter ?? defaultBacklogWriter;
 
   async function onBeforePromptBuild(
     event: PluginHookBeforePromptBuildEvent,
@@ -237,7 +251,7 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function onAgentEnd(
     event: PluginHookAgentEndEvent,
-    ctx: { sessionId?: string; agentId?: string; sessionKey?: string },
+    ctx: PluginHookAgentContext,
   ): Promise<void> {
     const turns = extractRecentTurns(
       event.messages as Array<{
@@ -261,11 +275,67 @@ export function createHookHandlers(deps: HookDeps) {
     if (!ctx.sessionId) return;
     const state = defaultTracker.getCurrentState(ctx.sessionId);
     if (!state) return;
-    defaultStatsAggregator.record(
-      ctx.sessionId,
-      state,
-      findIntentDefinition(state.intent?.result?.intent),
+    const intentDefinition = findIntentDefinition(state.intent?.result?.intent);
+    defaultStatsAggregator.record(ctx.sessionId, state, intentDefinition);
+
+    const resolvedConfig = config();
+    const evolutionConfig = resolvedConfig.selfEvolution;
+    if (!evolutionConfig.enabled) return;
+    const baseSnapshot = defaultTracker.getReviewSnapshot(ctx.sessionId);
+    if (!baseSnapshot) return;
+    const snapshot = {
+      ...baseSnapshot,
+      matchedIntent: intentDefinition
+        ? {
+            ...intentDefinition,
+            triggers: [...intentDefinition.triggers],
+            examples: [...intentDefinition.examples],
+          }
+        : undefined,
+      intentCatalog: defaultCatalog.get().map((definition) => ({
+        id: definition.id,
+        name: definition.name,
+        triggers: [...definition.triggers],
+        examples: [...definition.examples],
+      })),
+    };
+    const triggers = checkEvolutionTriggers(
+      snapshot.current,
+      snapshot.turnNumber,
+      evolutionConfig.triggers,
     );
+    if (triggers.length === 0) return;
+
+    const agentId = ctx.agentId ?? snapshot.agentId ?? "main";
+    const modelRef = getReviewModelRef(api, agentId, resolvedConfig, {
+      modelProviderId: ctx.modelProviderId,
+      modelId: ctx.modelId,
+    });
+    if (!modelRef) return;
+
+    reviewQueue.enqueue(async () => {
+      const findings = await reviewer({
+        api,
+        config: resolvedConfig,
+        agentId,
+        sessionKey: ctx.sessionKey ?? snapshot.sessionKey,
+        messageProvider: ctx.messageProvider,
+        modelRef,
+        snapshot,
+        triggers,
+      });
+      if (!findings) return;
+      backlogWriter.record(
+        snapshot.eventId,
+        {
+          sessionId: snapshot.sessionId,
+          sessionKey: snapshot.sessionKey,
+          agentId: snapshot.agentId,
+          turnStart: snapshot.current.timestamps!.start!,
+        },
+        findings,
+      );
+    });
   }
 
   async function onSessionEnd(

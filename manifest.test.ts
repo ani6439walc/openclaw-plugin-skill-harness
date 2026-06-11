@@ -54,4 +54,22 @@ describe("intention-hint manifest", () => {
     expect(timeoutMs.minimum).toBe(250);
     expect(timeoutMs.maximum).toBe(120000);
   });
+
+  it("exposes disabled-by-default Self-Evolution settings", () => {
+    const selfEvolution = manifest.configSchema.properties.selfEvolution;
+    expect(selfEvolution.properties.enabled.default).toBe(false);
+    expect(selfEvolution.properties.reviewTimeoutMs).toMatchObject({
+      minimum: 250,
+      maximum: 120000,
+      default: 30000,
+    });
+    expect(
+      selfEvolution.properties.triggers.properties.skillCandidate.properties
+        .toolCalls.default,
+    ).toBe(5);
+    expect(
+      selfEvolution.properties.triggers.properties.weakIntent.properties
+        .confidenceBelow.default,
+    ).toBe(0.5);
+  });
 });

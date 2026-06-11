@@ -90,20 +90,23 @@ describe("SessionTracker", () => {
       expect(trackerNoSessions).toBeInstanceOf(SessionTracker);
     });
 
-    it("should never load stats.json as session data", () => {
-      const sessionsDir = path.join(tempDir, "sessions");
-      fs.mkdirSync(sessionsDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(sessionsDir, "stats.json"),
-        JSON.stringify({
-          sessionId: "stats-session",
-          current: { intent: { result: { intent: "fake" } } },
-        }),
-      );
+    it.each(["stats.json", "evolution.json"])(
+      "should never load %s as session data",
+      (reservedFilename) => {
+        const sessionsDir = path.join(tempDir, "sessions");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(sessionsDir, reservedFilename),
+          JSON.stringify({
+            sessionId: "reserved-session",
+            current: { intent: { result: { intent: "fake" } } },
+          }),
+        );
 
-      const loadedTracker = SessionTracker.create(tempDir);
-      expect(loadedTracker.hasIntentData("stats-session")).toBe(false);
-    });
+        const loadedTracker = SessionTracker.create(tempDir);
+        expect(loadedTracker.hasIntentData("reserved-session")).toBe(false);
+      },
+    );
   });
 
   describe("record", () => {
@@ -287,6 +290,21 @@ describe("SessionTracker", () => {
       expect(fs.existsSync(sessionsDir)).toBe(true);
     });
 
+    it.each(["stats", "evolution"])(
+      "should never overwrite reserved %s.json",
+      (sessionId) => {
+        const sessionsDir = path.join(tempDir, "sessions");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        const reservedPath = path.join(sessionsDir, `${sessionId}.json`);
+        fs.writeFileSync(reservedPath, "keep");
+
+        tracker.record(sessionId, { current: { input: "overwrite" } });
+        tracker.write(sessionId);
+
+        expect(fs.readFileSync(reservedPath, "utf-8")).toBe("keep");
+      },
+    );
+
     it("should handle toolCalls array persistence", () => {
       tracker.record("tool-persist-test", {
         current: {
@@ -447,6 +465,20 @@ describe("SessionTracker", () => {
       expect(fs.existsSync(outsideFile)).toBe(true);
     });
 
+    it.each(["stats", "evolution"])(
+      "should never delete reserved %s.json",
+      (sessionId) => {
+        const sessionsDir = path.join(tempDir, "sessions");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        const reservedPath = path.join(sessionsDir, `${sessionId}.json`);
+        fs.writeFileSync(reservedPath, "keep");
+
+        tracker.cleanup(sessionId, { deleteFile: true });
+
+        expect(fs.readFileSync(reservedPath, "utf-8")).toBe("keep");
+      },
+    );
+
     it("should delete expired session JSON and memory only", () => {
       const nowMs = Date.UTC(2026, 5, 11);
       const dayMs = 24 * 60 * 60 * 1000;
@@ -503,17 +535,20 @@ describe("SessionTracker", () => {
       expect(tracker.cleanupExpired()).toBe(0);
     });
 
-    it("should never remove stats.json during retention cleanup", () => {
-      const sessionsDir = path.join(tempDir, "sessions");
-      fs.mkdirSync(sessionsDir, { recursive: true });
-      const statsPath = path.join(sessionsDir, "stats.json");
-      fs.writeFileSync(statsPath, "{}");
-      fs.utimesSync(statsPath, new Date(0), new Date(0));
+    it.each(["stats.json", "evolution.json"])(
+      "should never remove %s during retention cleanup",
+      (reservedFilename) => {
+        const sessionsDir = path.join(tempDir, "sessions");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        const reservedPath = path.join(sessionsDir, reservedFilename);
+        fs.writeFileSync(reservedPath, "{}");
+        fs.utimesSync(reservedPath, new Date(0), new Date(0));
 
-      tracker.cleanupExpired(Date.now());
+        tracker.cleanupExpired(Date.now());
 
-      expect(fs.existsSync(statsPath)).toBe(true);
-    });
+        expect(fs.existsSync(reservedPath)).toBe(true);
+      },
+    );
   });
 
   describe("edge cases", () => {
@@ -811,6 +846,64 @@ describe("SessionTracker", () => {
 
       expect(tracker.getCurrentState("current-session")?.input).toBe("hello");
       expect(tracker.getCurrentState("missing-session")).toBeUndefined();
+    });
+  });
+
+  describe("getReviewSnapshot", () => {
+    it("returns a detached, truncated snapshot with a tracked turn number", () => {
+      for (let index = 1; index <= 11; index += 1) {
+        tracker.record("review-session", {
+          agentId: "main",
+          current: {
+            input: `input-${index}-${"x".repeat(1200)}`,
+            intent: {
+              result: {
+                intent: "CODE_REVIEW",
+                reason: "test",
+                goal: "Review",
+                confidence: 0.9,
+                complexity: "medium",
+              },
+            },
+            toolCalls: [
+              {
+                name: "exec",
+                params: { secret: "do-not-copy" },
+                result: "do-not-copy",
+                error: "e".repeat(600),
+              },
+            ],
+            result: "r".repeat(2000),
+            timestamps: {
+              start: `2026-06-11T00:${String(index).padStart(2, "0")}:00.000Z`,
+            },
+          },
+        });
+        if (index < 11) tracker.rotate("review-session");
+      }
+
+      const snapshot = tracker.getReviewSnapshot("review-session");
+      expect(snapshot).toMatchObject({
+        sessionId: "review-session",
+        agentId: "main",
+        turnNumber: 11,
+        eventId: "review-session:2026-06-11T00:11:00.000Z",
+      });
+      expect(snapshot?.recent).toHaveLength(9);
+      expect(snapshot?.current.input).toHaveLength(1000);
+      expect(snapshot?.current.result).toHaveLength(1500);
+      expect(snapshot?.current.toolCalls?.[0]).toEqual({
+        name: "exec",
+        error: "e".repeat(500),
+      });
+
+      tracker.record("review-session", { current: { input: "changed" } });
+      expect(snapshot?.current.input).not.toBe("changed");
+    });
+
+    it("skips incomplete current turns", () => {
+      tracker.record("incomplete", { current: { input: "hello" } });
+      expect(tracker.getReviewSnapshot("incomplete")).toBeUndefined();
     });
   });
 });

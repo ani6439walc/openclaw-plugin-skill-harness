@@ -29,6 +29,19 @@ describe("resolveConfig", () => {
       expect(result.contextWindow.assistant.chars).toBe(
         DEFAULT_RECENT_ASSISTANT_CHARS,
       );
+      expect(result.selfEvolution).toMatchObject({
+        enabled: false,
+        reviewModel: undefined,
+        reviewModelFallback: undefined,
+        reviewTimeoutMs: 30000,
+        triggers: {
+          skillCandidate: { enabled: true, toolCalls: 5 },
+          processGap: { enabled: true, toolFailures: 2 },
+          satisfactionCheck: { enabled: true, everyTurns: 10 },
+          missingIntent: { enabled: true },
+          weakIntent: { enabled: true, confidenceBelow: 0.5 },
+        },
+      });
     });
 
     it("should handle empty object loading", () => {
@@ -49,6 +62,42 @@ describe("resolveConfig", () => {
         expect(result.queryMode).toBe(DEFAULT_QUERY_MODE);
         expect(result.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
       }
+    });
+  });
+
+  describe("selfEvolution", () => {
+    it("parses and clamps review and trigger settings", () => {
+      const result = resolveConfig({
+        selfEvolution: {
+          enabled: true,
+          reviewModel: "google/gemini-3-flash",
+          reviewModelFallback: "openai/gpt-5-mini",
+          reviewTimeoutMs: 200000,
+          triggers: {
+            skillCandidate: { enabled: false, toolCalls: 0 },
+            processGap: { toolFailures: 500 },
+            satisfactionCheck: { everyTurns: 3 },
+            missingIntent: { enabled: false },
+            weakIntent: { confidenceBelow: 2 },
+            behaviorFix: { keywords: [" redo ", "", "wrong"] },
+          },
+        },
+      });
+
+      expect(result.selfEvolution).toMatchObject({
+        enabled: true,
+        reviewModel: "google/gemini-3-flash",
+        reviewModelFallback: "openai/gpt-5-mini",
+        reviewTimeoutMs: 120000,
+        triggers: {
+          skillCandidate: { enabled: false, toolCalls: 1 },
+          processGap: { enabled: true, toolFailures: 100 },
+          satisfactionCheck: { enabled: true, everyTurns: 3 },
+          missingIntent: { enabled: false },
+          weakIntent: { enabled: true, confidenceBelow: 1 },
+          behaviorFix: { enabled: true, keywords: ["redo", "wrong"] },
+        },
+      });
     });
   });
 

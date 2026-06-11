@@ -1,0 +1,209 @@
+import { describe, expect, it, vi } from "vitest";
+import type { OpenClawPluginApi } from "../api.js";
+import { resolveConfig } from "./config.js";
+import {
+  buildReviewPrompt,
+  parseReviewFindings,
+  runReviewSubagent,
+} from "./review-subagent.js";
+import type { ReviewSnapshot } from "./evolution-types.js";
+
+const snapshot: ReviewSnapshot = {
+  sessionId: "session-1",
+  agentId: "main",
+  eventId: "session-1:2026-06-11T00:00:00.000Z",
+  turnNumber: 10,
+  current: {
+    input: "No, use the existing helper",
+    intent: {
+      intent: "OTHER",
+      reason: "unclear",
+      goal: "Fix code",
+      confidence: 0.2,
+      complexity: "high",
+    },
+    toolCalls: [{ name: "exec", error: "failed" }],
+    result: "Done",
+    timestamps: { start: "2026-06-11T00:00:00.000Z" },
+  },
+  recent: [],
+  matchedIntent: {
+    id: "OTHER",
+    name: "Fallback",
+    enabled: true,
+    triggers: ["Requests that do not match a defined intent"],
+    examples: ["help with this"],
+    prompt: "Detected fallback intent.\n\n## Guidelines\n\n- Ask for context.",
+  },
+  intentCatalog: [
+    {
+      id: "OTHER",
+      name: "Fallback",
+      triggers: ["Requests that do not match a defined intent"],
+      examples: ["help with this"],
+    },
+  ],
+};
+
+describe("buildReviewPrompt", () => {
+  it("grounds every review in intent-craft Markdown rules", () => {
+    const prompt = buildReviewPrompt(snapshot, ["weak_intent"]);
+
+    expect(prompt).toContain(
+      "sole purpose is to improve the content and routing quality of intention-hint intents/*.md files",
+    );
+    expect(prompt).toContain(
+      "Frontmatter is classification-only: id, name, enabled: true, triggers[], and examples[]",
+    );
+    expect(prompt).toContain(
+      "detection line, ## Guidelines, ## Skills & Tools, ## Response Strategy",
+    );
+    expect(prompt).toContain('indented "skill: <name>" line');
+    expect(prompt).toContain("Concrete Workflow");
+    expect(prompt).toContain(
+      "Never mention another intent name or id inside an intent body",
+    );
+    expect(prompt).toContain(
+      "The only correction target is intent Markdown content",
+    );
+    expect(prompt).toContain(
+      "suggestedChange must be a concrete intent Markdown draft or patch instruction",
+    );
+    expect(prompt).toContain(
+      "matchedIntent as the source of truth for the current intent Markdown",
+    );
+    expect(prompt).toContain(
+      "intentCatalog only to detect coverage gaps, overlaps, and boundary collisions",
+    );
+  });
+
+  it.each([
+    [
+      "skill_candidate",
+      "matched intent Markdown should route to",
+      "Skills & Tools section",
+    ],
+    [
+      "process_gap",
+      "failed execution and recovery path",
+      "Guidelines, Skills & Tools, or Concrete Workflow",
+    ],
+    [
+      "satisfaction_check",
+      "intent boundary, body guidance, or response-strategy problem",
+      "recommend split or merge only when evidence shows a collision",
+    ],
+    [
+      "missing_intent",
+      "uncategorized user goal",
+      "Draft a new, narrowly scoped intent Markdown definition",
+    ],
+    [
+      "weak_intent",
+      "classification ambiguity",
+      "frontmatter triggers/examples",
+    ],
+    [
+      "behavior_fix",
+      "matched intent's routed behavior",
+      "encode the corrected behavior",
+    ],
+  ] as const)(
+    "gives %s a distinct intent Markdown review focus and goal",
+    (trigger, focus, goal) => {
+      const prompt = buildReviewPrompt(snapshot, [trigger]);
+      expect(prompt).toContain(`${trigger}: Review focus:`);
+      expect(prompt).toContain(focus);
+      expect(prompt).toContain(goal);
+    },
+  );
+
+  it("includes only requested trigger-specific instructions", () => {
+    const prompt = buildReviewPrompt(snapshot, ["weak_intent"]);
+    expect(prompt).toContain("weak_intent: Review focus:");
+    expect(prompt).not.toContain("missing_intent: Review focus:");
+  });
+});
+
+describe("parseReviewFindings", () => {
+  it("parses valid findings and drops no_finding entries", () => {
+    const parsed = parseReviewFindings(
+      JSON.stringify({
+        findings: [
+          { trigger: "broken", hasFinding: true },
+          {
+            trigger: "skill_candidate",
+            hasFinding: true,
+            dedupeKey: "deploy-flow",
+            summary: "Deployment flow is reusable",
+            evidence: ["Five related tool calls"],
+            correctionGoal: "Create a deployment skill",
+            suggestedChange: "Draft SKILL.md",
+          },
+          { trigger: "process_gap", hasFinding: false },
+        ],
+      }),
+      ["skill_candidate", "process_gap"],
+    );
+
+    expect(parsed).toEqual([
+      {
+        trigger: "skill_candidate",
+        dedupeKey: "deploy-flow",
+        summary: "Deployment flow is reusable",
+        evidence: ["Five related tool calls"],
+        correctionGoal: "Create a deployment skill",
+        suggestedChange: "Draft SKILL.md",
+      },
+    ]);
+  });
+
+  it("accepts fenced JSON and rejects unknown or unrequested triggers", () => {
+    const raw = `\`\`\`json
+{"findings":[
+  {"trigger":"unknown","hasFinding":true,"dedupeKey":"x","summary":"x","evidence":[],"correctionGoal":"x","suggestedChange":"x"},
+  {"trigger":"weak_intent","hasFinding":true,"dedupeKey":"weak","summary":"weak","evidence":[],"correctionGoal":"improve","suggestedChange":"add examples"}
+]}
+\`\`\``;
+
+    expect(parseReviewFindings(raw, ["skill_candidate"])).toEqual([]);
+    expect(
+      parseReviewFindings("not json", ["skill_candidate"]),
+    ).toBeUndefined();
+  });
+});
+
+describe("runReviewSubagent", () => {
+  it("runs an isolated tool-free review with the review timeout", async () => {
+    const runEmbeddedPiAgent = vi.fn().mockResolvedValue({
+      payloads: [{ text: '{"findings":[]}' }],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedPiAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await runReviewSubagent({
+      api,
+      config: resolveConfig({
+        selfEvolution: { enabled: true, reviewTimeoutMs: 1234 },
+      }),
+      agentId: "main",
+      modelRef: { provider: "google", model: "review" },
+      snapshot,
+      triggers: ["weak_intent"],
+    });
+
+    expect(runEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "google",
+        model: "review",
+        timeoutMs: 1234,
+        trigger: "manual",
+        promptMode: "none",
+        disableTools: true,
+        toolsAllow: [],
+      }),
+    );
+  });
+});

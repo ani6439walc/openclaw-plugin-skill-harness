@@ -150,6 +150,109 @@
         },
         "additionalProperties": false,
         "default": {}
+      },
+      "selfEvolution": {
+        "type": "object",
+        "description": "Optional post-turn Intent Self-Evolution reviews and plugin-local backlog.",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "reviewModel": {
+            "type": "string",
+            "description": "Dedicated model for Self-Evolution reviews."
+          },
+          "reviewModelFallback": {
+            "type": "string",
+            "description": "Fallback model for Self-Evolution reviews."
+          },
+          "reviewTimeoutMs": {
+            "type": "integer",
+            "minimum": 250,
+            "maximum": 120000,
+            "default": 30000
+          },
+          "triggers": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "skillCandidate": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": { "type": "boolean", "default": true },
+                  "toolCalls": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 5
+                  }
+                }
+              },
+              "processGap": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": { "type": "boolean", "default": true },
+                  "toolFailures": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 2
+                  }
+                }
+              },
+              "satisfactionCheck": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": { "type": "boolean", "default": true },
+                  "everyTurns": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 10
+                  }
+                }
+              },
+              "missingIntent": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": { "type": "boolean", "default": true }
+                }
+              },
+              "weakIntent": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": { "type": "boolean", "default": true },
+                  "confidenceBelow": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.5
+                  }
+                }
+              },
+              "behaviorFix": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": { "type": "boolean", "default": true },
+                  "keywords": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "default": {}
+          }
+        },
+        "default": {}
       }
     }
   }
