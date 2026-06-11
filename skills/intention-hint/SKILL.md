@@ -7,53 +7,6 @@ Manage intent definitions and Self-Evolution findings for the intention-hint
 plugin.
 Three modes — pick based on user request scope.
 
-## Mode: single
-
-User wants to create, rename, split, merge, or refine **one** intent.
-
-Read order:
-
-1. `references/interview.md`
-2. `references/format-rules.md`
-3. `references/closing.md`
-
-Then follow the 5-step workflow: classify → interview → ground → draft → deliver.
-
-**🔴 CHECKPOINT**: After interview, before drafting — confirm boundary summary with user.
-
-## Mode: audit
-
-User wants to bootstrap or re-audit the entire intent system (first install or after many new skills/tools).
-
-Read order:
-
-1. `references/discovery.md`
-2. `references/clustering.md`
-3. `references/interview.md`
-4. `references/format-rules.md`
-5. `references/closing.md`
-
-Then follow: discovery → clustering → interview → generate → review.
-
-**🔴 CHECKPOINT**: After clustering, before interview — present cluster map to user for calibration.
-
-## Mode: backlog
-
-Use only when the user explicitly asks to process an Intent Self-Evolution
-backlog finding. Process exactly one pending finding per invocation.
-
-Read order:
-
-1. `references/process-backlog.md`
-2. `references/format-rules.md`
-3. Other single/audit references only when the selected finding requires them
-
-Then follow the transactional workflow in `references/process-backlog.md`.
-Never enter this mode merely because `sessions/evolution.json` contains pending
-items.
-
-**🔴 CHECKPOINT**: After processing, before commit — show diff preview and confirm no conflicts.
-
 ## First-time setup (assets)
 
 When bootstrapping from scratch, copy example intent templates from `assets/` as starting points:
@@ -64,6 +17,55 @@ When bootstrapping from scratch, copy example intent templates from `assets/` as
 
 These are English example templates. Adapt to the project's language and intent scope.
 
+## Mode: design
+
+User wants to create, rename, split, merge, or refine **one** intent.
+
+This mode handles all single-intent CRUD operations. The workflow is:
+classify the action type → interview for requirements → ground against existing intents → draft the definition → deliver with validation.
+
+Read order:
+
+1. `references/interview.md`
+2. `references/format-rules.md`
+3. `references/closing.md`
+
+**🔴 CHECKPOINT**: After interview, before drafting — confirm boundary summary with user.
+
+## Mode: inventory
+
+User wants to bootstrap or re-audit the entire intent system (first install or after many new skills/tools).
+
+This mode performs a full capability inventory: scan all skills and tools → cluster by usage intent → identify gaps and overlaps → interview for missing intents → generate new intent definitions → review for collisions.
+
+Read order:
+
+1. `references/discovery.md`
+2. `references/clustering.md`
+3. `references/interview.md`
+4. `references/format-rules.md`
+5. `references/closing.md`
+
+**🔴 CHECKPOINT**: After clustering, before interview — present cluster map to user for calibration.
+
+## Mode: evolve
+
+Use only when the user explicitly asks to process an Intent Self-Evolution
+backlog finding. Process exactly one pending finding per invocation.
+
+This mode handles automated improvement suggestions discovered by the self-evolution system. It reads the finding, applies the suggested change, validates, and commits.
+
+Read order:
+
+1. `references/process-backlog.md`
+2. `references/format-rules.md`
+3. Other design/inventory references only when the selected finding requires them
+
+**🔴 CHECKPOINT**: After processing, before commit — show diff preview and confirm no conflicts.
+
+Never enter this mode merely because `sessions/evolution.json` contains pending
+items.
+
 ## Decision style
 
 - Recommend defaults confidently; keep cognitive load low.
@@ -71,7 +73,7 @@ These are English example templates. Adapt to the project's language and intent 
 
 ## Concrete workflow examples
 
-### Single mode — 5-step breakdown
+### Design mode — 5-step breakdown
 
 **Step 1: Classify**
 ```bash
@@ -134,6 +136,31 @@ grep -l "<trigger>" extensions/intention-hint/intents/*.md
 mv intent.md extensions/intention-hint/intents/<intent-id>.md
 ```
 
+### Inventory mode — 5-step breakdown
+
+**Step 1: Discovery**
+```bash
+# Scan all skills
+ls -1 ~/.openclaw/skills/ && for d in ~/.openclaw/skills/*/; do [ -f "$d/SKILL.md" ] && basename "$d"; done
+# Scan existing intents
+ls extensions/intention-hint/intents/
+```
+Output: capability table with columns `capability | type(skill/tool) | summary | source`
+
+**Step 2: Clustering**
+Group capabilities by **what the user is trying to achieve**, not by directory name.
+Output: cluster map with `cluster name | capabilities | existing intent match | recommended intent ID`
+
+**Step 3: Interview** — fill gaps identified in clustering
+
+**Step 4: Generate** — draft new intent definitions for uncovered clusters
+
+**Step 5: Review** — validate all new intents, check for collisions
+
+### Evolve mode — transactional workflow
+
+Follow the transactional workflow in `references/process-backlog.md`.
+
 ## Failure modes
 
 | Trigger | First fix | Fallback |
@@ -168,7 +195,7 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy)" <file>
 | 1 | **Ask multiple questions at once** | Confuses user, degrades response quality | interview.md mandates one question at a time |
 | 2 | **Cross-reference other intents in body** | Classification sub-agent only sees triggers/examples; creates circular dependencies | Express boundaries via triggers and examples only; never mention other intent ids/names |
 | 3 | **Skip format-rules.md before writing** | Inconsistent format breaks plugin parsing | Always read format-rules.md before writing any intent |
-| 4 | **Run audit without discovery/clustering** | Misses capabilities, produces orphan intents | Audit mode must follow order: discovery → clustering → interview |
+| 4 | **Run inventory without discovery/clustering** | Misses capabilities, produces orphan intents | Inventory mode must follow order: discovery → clustering → interview |
 | 5 | **Process multiple backlog findings in one invocation** | Mixes context, impossible to track which finding was handled | Exactly one pending finding per invocation |
 | 6 | **Skip validation before commit** | May introduce format errors or collisions | closing.md has safety checks — always execute them |
 | 7 | **Create a new intent when one already exists** | Causes duplication and collision | Check existing intents during interview phase |
