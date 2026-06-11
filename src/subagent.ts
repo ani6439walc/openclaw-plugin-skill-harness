@@ -189,6 +189,12 @@ function resolveCurrentTime(api: OpenClawPluginApi): string {
     "UTC";
 
   const date = new Date();
+
+  const dayOfWeek = new Intl.DateTimeFormat("en-US", {
+    timeZone: userTimezone,
+    weekday: "short",
+  }).format(date);
+
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: userTimezone,
     year: "numeric",
@@ -196,13 +202,28 @@ function resolveCurrentTime(api: OpenClawPluginApi): string {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
     hour12: false,
   });
-
   const parts = formatter.formatToParts(date);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const formatted = `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}:${get("second")}`;
 
-  return `${formatted} (timezone: ${userTimezone})`;
+  const offsetStr = getTimezoneOffset(userTimezone, date);
+
+  return `[${dayOfWeek} ${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")} ${offsetStr}]`;
+}
+
+function getTimezoneOffset(timezone: string, date: Date): string {
+  const utcMs = new Date(
+    date.toLocaleString("en-US", { timeZone: "UTC" }),
+  ).getTime();
+  const tzMs = new Date(
+    date.toLocaleString("en-US", { timeZone: timezone }),
+  ).getTime();
+  const diffMinutes = Math.round((tzMs - utcMs) / 60000);
+  const sign = diffMinutes >= 0 ? "+" : "-";
+  const hours = Math.floor(Math.abs(diffMinutes) / 60);
+  const minutes = Math.abs(diffMinutes) % 60;
+  return minutes > 0
+    ? `GMT${sign}${hours}:${String(minutes).padStart(2, "0")}`
+    : `GMT${sign}${hours}`;
 }

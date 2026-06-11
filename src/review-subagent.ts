@@ -194,7 +194,7 @@ export async function runReviewSubagent(params: {
       allowGatewaySubagentBinding: true,
       bootstrapContextMode: "lightweight",
       verboseLevel: "off",
-      thinkLevel: "off",
+      thinkLevel: "medium",
       reasoningLevel: "off",
       silentExpected: true,
       authProfileFailurePolicy: "local",

@@ -72,12 +72,7 @@ function buildConversationXml(conversation: RecentTurn[] | undefined): string {
 
   const turns = conversation
     .map((turn) => {
-      const lines = [
-        `<turn role="${turn.role}">`,
-        "<message>",
-        turn.text,
-        "</message>",
-      ];
+      const lines = [`<turn role="${turn.role}">`, turn.text];
       if (turn.role === "user" && turn.historicalIntent) {
         lines.push(
           "<historical_intent>",
@@ -98,26 +93,17 @@ export function buildIntentionPrompt(params: {
   intents: readonly IntentDefinition[];
   currentTime?: string;
 }): string {
-  const timeTag = params.currentTime
-    ? `<current_time>\n${params.currentTime}\n</current_time>\n`
-    : "";
+  const timeLine = params.currentTime ? `${params.currentTime}\n\n` : "";
 
   const intentCatalog = buildIntentCatalog(params.intents);
   const intentCategories = buildIntentCategories(params.intents);
   const conversationXml = buildConversationXml(params.conversation);
   const conversationSection = conversationXml ? `\n${conversationXml}\n` : "";
 
-  return `You are an intent classification agent.
+  return `${timeLine}You are an intent classification agent.
 Another model is preparing the final user-facing answer with hints and subagent routing.
 Your job is to analyze conversation context and the user's latest message, then classify which intent best matches.
 You receive conversation history, the latest user message, and available intent definitions with triggers and examples.
-
-<input_context>
-Three input types are provided:
-1. intent_catalog: Available intent definitions with triggers and examples
-2. conversation: Recent conversation turns between user and assistant; historical user turns may include historical_intent with the intent and goal classified at that time
-3. latest: The latest user message to classify
-</input_context>
 
 <classification_rules>
 1. Use conversation history and historical_intent annotations to understand context. Treat historical intents and historical goals as evidence, not answers that must be inherited.
@@ -152,30 +138,22 @@ Example output:
 }
 
 Complexity levels:
-- "low": simple greeting, acknowledgment, or straightforward question
-- "medium": normal task requiring context analysis or single operation
-- "high": multi-step investigation, research, or complex code operations
+- "low": simple greeting, acknowledgment, straightforward question or task with clear/unambiguous scope requiring direct execution. (narrow or standard scope — no additional investigation needed)
+- "medium": task requiring moderate context analysis or broader scope that needs some investigation before execution.
+- "high": multi-step investigation, research, complex code operations, or broad scope requiring full SOP workflow and structural changes.
 
 Fallback: If no intent confidently matches, return intent as "OTHER" (Fallback).
 </output_format>
 
-<intent_categories>
-The following categories group intents by their ID prefix:
-${intentCategories}
-
-When multiple intents have similar triggers, consider the category context.
-</intent_categories>
-
 <intent_catalog>
+Categories (grouped by ID prefix): ${intentCategories}
+
 ${intentCatalog}
 </intent_catalog>
-
-<input>
-${timeTag}${conversationSection}
+${conversationSection}
 <latest>
 ${params.latest}
-</latest>
-</input>`;
+</latest>`;
 }
 
 export function parseIntentionResult(

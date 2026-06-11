@@ -97,10 +97,10 @@ describe("buildIntentionPrompt", () => {
     });
 
     expect(result).toContain(
-      '<turn role="user">\n<message>\nHello there\n</message>\n<historical_intent>\n{"intent":"coding","goal":"Implement the feature"}\n</historical_intent>\n</turn>',
+      '<turn role="user">\nHello there\n<historical_intent>\n{"intent":"coding","goal":"Implement the feature"}\n</historical_intent>\n</turn>',
     );
     expect(result).toContain(
-      '<turn role="assistant">\n<message>\nHi! How can I help?\n</message>\n</turn>',
+      '<turn role="assistant">\nHi! How can I help?\n</turn>',
     );
   });
 
