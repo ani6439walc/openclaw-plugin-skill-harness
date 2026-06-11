@@ -174,7 +174,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     allowGatewaySubagentBinding: true,
     bootstrapContextMode: "lightweight" as const,
     verboseLevel: "off" as const,
-    thinkLevel: "off" as const,
+    thinkLevel: "medium" as const,
     reasoningLevel: "off" as const,
     silentExpected: true,
     authProfileFailurePolicy: "local" as const,

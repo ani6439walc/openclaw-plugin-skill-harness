@@ -93,7 +93,7 @@ export function buildIntentionPrompt(params: {
   intents: readonly IntentDefinition[];
   currentTime?: string;
 }): string {
-  const timeLine = params.currentTime ? `${params.currentTime}\n\n` : "";
+  const timeLine = params.currentTime ? `${params.currentTime} ` : "";
 
   const intentCatalog = buildIntentCatalog(params.intents);
   const intentCategories = buildIntentCategories(params.intents);
@@ -146,7 +146,8 @@ Fallback: If no intent confidently matches, return intent as "OTHER" (Fallback).
 </output_format>
 
 <intent_catalog>
-Categories (grouped by ID prefix): ${intentCategories}
+Categories (grouped by ID prefix):
+${intentCategories}
 
 ${intentCatalog}
 </intent_catalog>
