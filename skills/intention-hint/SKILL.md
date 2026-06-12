@@ -193,6 +193,8 @@ Keywords: "process backlog", "evolve intent", "handle evolution finding", "proce
 
 **Never enter this mode merely because `sessions/evolution.json` contains pending items.**
 
+Read and follow `references/evolve-workflow.md` before processing a finding.
+
 ### Workflow
 
 **Step 1 — Select finding**

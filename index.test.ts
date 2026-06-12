@@ -757,7 +757,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
     expect(result.disableTools).toBe(true);
     expect(result.toolsAllow).toEqual([]);
     expect(result.disableMessageTool).toBe(true);
-    expect(result.sessionFile).toBe("/tmp/session.jsonl");
+    expect(result.sessionFile).toBe("/tmp/subagent-1.session.jsonl");
     expect(result.workspaceDir).toBe("/tmp");
     expect(result.agentDir).toBe("/tmp");
   });
