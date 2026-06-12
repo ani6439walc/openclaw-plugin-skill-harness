@@ -20,7 +20,7 @@ function state(overrides: Partial<SessionState> = {}): SessionState {
 }
 
 describe("checkEvolutionTriggers", () => {
-  const triggers = resolveConfig({}).selfEvolution.triggers;
+  const triggers = resolveConfig({}).evolution.triggers;
 
   it("returns all matching current-turn triggers", () => {
     expect(
@@ -69,7 +69,7 @@ describe("checkEvolutionTriggers", () => {
 
   it("honors custom thresholds and disabled triggers", () => {
     const custom = resolveConfig({
-      selfEvolution: {
+      evolution: {
         triggers: {
           skillCandidate: { enabled: false },
           processGap: { toolFailures: 1 },
@@ -78,7 +78,7 @@ describe("checkEvolutionTriggers", () => {
           behaviorFix: { keywords: ["redo"] },
         },
       },
-    }).selfEvolution.triggers;
+    }).evolution.triggers;
 
     expect(
       checkEvolutionTriggers(

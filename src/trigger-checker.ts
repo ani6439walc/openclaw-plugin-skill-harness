@@ -1,5 +1,5 @@
 import type { IntentionResult } from "./types.js";
-import type { ResolvedSelfEvolutionConfig } from "./types.js";
+import type { ResolvedEvolutionConfig } from "./types.js";
 
 export const EVOLUTION_TRIGGER_TYPES = [
   "skill_candidate",
@@ -21,7 +21,7 @@ type TriggerState = {
 export function checkEvolutionTriggers(
   state: TriggerState,
   turnNumber: number,
-  config: ResolvedSelfEvolutionConfig["triggers"],
+  config: ResolvedEvolutionConfig["triggers"],
 ): EvolutionTrigger[] {
   const matches: EvolutionTrigger[] = [];
   const toolCalls = state.toolCalls ?? [];

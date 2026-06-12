@@ -742,7 +742,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
     const result = buildIntentionEmbeddedRunParams({
       params: {
         api: { config: { plugins: {} } } as unknown as OpenClawPluginApi,
-        config: resolveConfig({ timeoutMs: 4321 }),
+        config: resolveConfig({ timeoutMs: 4321, thinking: "low" }),
         agentId: "main",
         messageProvider: "telegram",
         modelRef: { provider: "openai", model: "gpt-5-mini" },
@@ -757,6 +757,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
     expect(result.disableTools).toBe(true);
     expect(result.toolsAllow).toEqual([]);
     expect(result.disableMessageTool).toBe(true);
+    expect(result.thinkLevel).toBe("low");
     expect(result.sessionFile).toBe("/tmp/subagent-1.session.jsonl");
     expect(result.workspaceDir).toBe("/tmp");
     expect(result.agentDir).toBe("/tmp");

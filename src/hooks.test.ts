@@ -164,9 +164,9 @@ describe("createHookHandlers tracking guards", () => {
       api: { config: {} } as OpenClawPluginApi,
       config: () =>
         resolveConfig({
-          selfEvolution: {
+          evolution: {
             enabled: true,
-            reviewModel: "google/test-review",
+            model: "google/test-review",
           },
         }),
       refreshLiveConfigFromRuntime: vi.fn(),

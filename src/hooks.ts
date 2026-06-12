@@ -279,7 +279,7 @@ export function createHookHandlers(deps: HookDeps) {
     defaultStatsAggregator.record(ctx.sessionId, state, intentDefinition);
 
     const resolvedConfig = config();
-    const evolutionConfig = resolvedConfig.selfEvolution;
+    const evolutionConfig = resolvedConfig.evolution;
     if (!evolutionConfig.enabled) return;
     const baseSnapshot = defaultTracker.getReviewSnapshot(ctx.sessionId);
     if (!baseSnapshot) return;

@@ -166,6 +166,7 @@ pnpm run build
           },
           model: "google/gemini-3-flash", // lightweight scanner model
           modelFallback: "openai/gpt-5-mini",
+          thinking: "medium", // intent classifier subagent thinking level
           allowedChatTypes: ["direct"],
           allowedChatIds: [],
           deniedChatIds: [],
@@ -181,11 +182,12 @@ pnpm run build
             medium: "Custom medium-complexity prompt...",
             high: "Custom high-complexity prompt...",
           },
-          selfEvolution: {
+          evolution: {
             enabled: false,
-            reviewModel: "google/gemini-3-flash",
-            reviewModelFallback: "openai/gpt-5-mini",
-            reviewTimeoutMs: 30000,
+            model: "google/gemini-3-flash",
+            modelFallback: "openai/gpt-5-mini",
+            thinking: "medium", // self-evolution review subagent thinking level
+            timeoutMs: 30000,
             triggers: {
               skillCandidate: { enabled: true, toolCalls: 5 },
               processGap: { enabled: true, toolFailures: 2 },
@@ -213,6 +215,7 @@ pnpm run build
 | `intentDeny`        | `object`   | `{}`          | Per-agent deny list of intent IDs. Keys support `*` glob patterns.                                    |
 | `model`             | `string`   | —             | Lightweight model for the intention scanner. Falls back to the agent's default if empty.              |
 | `modelFallback`     | `string`   | —             | Fallback model when `config.model` cannot be resolved.                                                |
+| `thinking`          | `string`   | `"medium"`    | Thinking level for the intent classifier subagent.                                                    |
 | `allowedChatTypes`  | `string[]` | `["direct"]`  | Chat types (direct, group, channel) that allow intent analysis.                                       |
 | `allowedChatIds`    | `string[]` | `[]`          | Allowlist of chat IDs. Empty means no allowlist restriction.                                          |
 | `deniedChatIds`     | `string[]` | `[]`          | Blocklist of chat IDs. Plugin skips intent analysis for listed IDs.                                   |
@@ -221,7 +224,11 @@ pnpm run build
 | `timeoutMs`         | `number`   | `3000`        | Max wait time for subagent response. Clamped to 250–120000ms.                                         |
 | `intentsDir`        | `string`   | `"./intents"` | Directory containing intent definition `.md` files with YAML frontmatter.                             |
 | `complexityPrompts` | `object`   | built-in      | Custom classification prompt overrides per complexity level.                                          |
-| `selfEvolution`     | `object`   | disabled      | Post-turn trigger review configuration. Findings are stored in `sessions/evolution.json`.             |
+| `evolution`         | `object`   | disabled      | Post-turn trigger review configuration. Findings are stored in `sessions/evolution.json`.             |
+
+`evolution.thinking` independently controls the Self-Evolution review
+subagent's thinking level. Both thinking settings accept `off`, `minimal`,
+`low`, `medium`, `high`, `xhigh`, `adaptive`, or `max`.
 
 ### Intent Self-Evolution
 

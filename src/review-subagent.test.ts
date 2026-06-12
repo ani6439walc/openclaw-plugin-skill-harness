@@ -210,7 +210,11 @@ describe("runReviewSubagent", () => {
     await runReviewSubagent({
       api,
       config: resolveConfig({
-        selfEvolution: { enabled: true, reviewTimeoutMs: 1234 },
+        evolution: {
+          enabled: true,
+          thinking: "high",
+          timeoutMs: 1234,
+        },
       }),
       agentId: "main",
       modelRef: { provider: "google", model: "review" },
@@ -223,6 +227,7 @@ describe("runReviewSubagent", () => {
         provider: "google",
         model: "review",
         timeoutMs: 1234,
+        thinkLevel: "high",
         trigger: "manual",
         promptMode: "none",
         disableTools: true,

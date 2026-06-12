@@ -21,6 +21,7 @@ describe("resolveConfig", () => {
       expect(result.intentsDir).toBe("./intents");
       expect(result.queryMode).toBe(DEFAULT_QUERY_MODE);
       expect(result.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+      expect(result.thinking).toBe("medium");
       expect(result.contextWindow.user.turns).toBe(DEFAULT_RECENT_USER_TURNS);
       expect(result.contextWindow.assistant.turns).toBe(
         DEFAULT_RECENT_ASSISTANT_TURNS,
@@ -29,11 +30,12 @@ describe("resolveConfig", () => {
       expect(result.contextWindow.assistant.chars).toBe(
         DEFAULT_RECENT_ASSISTANT_CHARS,
       );
-      expect(result.selfEvolution).toMatchObject({
+      expect(result.evolution).toMatchObject({
         enabled: false,
-        reviewModel: undefined,
-        reviewModelFallback: undefined,
-        reviewTimeoutMs: 30000,
+        model: undefined,
+        modelFallback: undefined,
+        thinking: "medium",
+        timeoutMs: 30000,
         triggers: {
           skillCandidate: { enabled: true, toolCalls: 5 },
           processGap: { enabled: true, toolFailures: 2 },
@@ -65,14 +67,15 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("selfEvolution", () => {
+  describe("evolution", () => {
     it("parses and clamps review and trigger settings", () => {
       const result = resolveConfig({
-        selfEvolution: {
+        evolution: {
           enabled: true,
-          reviewModel: "google/gemini-3-flash",
-          reviewModelFallback: "openai/gpt-5-mini",
-          reviewTimeoutMs: 200000,
+          model: "google/gemini-3-flash",
+          modelFallback: "openai/gpt-5-mini",
+          thinking: "high",
+          timeoutMs: 200000,
           triggers: {
             skillCandidate: { enabled: false, toolCalls: 0 },
             processGap: { toolFailures: 500 },
@@ -84,11 +87,12 @@ describe("resolveConfig", () => {
         },
       });
 
-      expect(result.selfEvolution).toMatchObject({
+      expect(result.evolution).toMatchObject({
         enabled: true,
-        reviewModel: "google/gemini-3-flash",
-        reviewModelFallback: "openai/gpt-5-mini",
-        reviewTimeoutMs: 120000,
+        model: "google/gemini-3-flash",
+        modelFallback: "openai/gpt-5-mini",
+        thinking: "high",
+        timeoutMs: 120000,
         triggers: {
           skillCandidate: { enabled: false, toolCalls: 1 },
           processGap: { enabled: true, toolFailures: 100 },
@@ -98,6 +102,16 @@ describe("resolveConfig", () => {
           behaviorFix: { enabled: true, keywords: ["redo", "wrong"] },
         },
       });
+    });
+
+    it("falls back for invalid classifier and review thinking levels", () => {
+      const result = resolveConfig({
+        thinking: "invalid",
+        evolution: { thinking: "invalid" },
+      });
+
+      expect(result.thinking).toBe("medium");
+      expect(result.evolution.thinking).toBe("medium");
     });
   });
 

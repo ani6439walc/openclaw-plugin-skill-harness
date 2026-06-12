@@ -11,6 +11,10 @@
       "label": "Scanner Model",
       "help": "Lightweight model for the intention scanner (e.g. google/gemini-3-flash). Leave empty to use the agent's default model."
     },
+    "thinking": {
+      "label": "Scanner Thinking",
+      "help": "Thinking level for the intent classifier sub-agent."
+    },
     "timeoutMs": {
       "label": "Scanner Timeout",
       "help": "Budget in milliseconds for the intention scanner sub-agent."
@@ -44,6 +48,21 @@
         "type": "string",
         "description": "Fallback model when config.model cannot be resolved.",
         "default": null
+      },
+      "thinking": {
+        "type": "string",
+        "enum": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "adaptive",
+          "max"
+        ],
+        "description": "Thinking level for the intent classifier sub-agent.",
+        "default": "medium"
       },
       "allowedChatTypes": {
         "type": "array",
@@ -151,7 +170,7 @@
         "additionalProperties": false,
         "default": {}
       },
-      "selfEvolution": {
+      "evolution": {
         "type": "object",
         "description": "Optional post-turn Intent Self-Evolution reviews and plugin-local backlog.",
         "additionalProperties": false,
@@ -160,15 +179,30 @@
             "type": "boolean",
             "default": false
           },
-          "reviewModel": {
+          "model": {
             "type": "string",
             "description": "Dedicated model for Self-Evolution reviews."
           },
-          "reviewModelFallback": {
+          "modelFallback": {
             "type": "string",
             "description": "Fallback model for Self-Evolution reviews."
           },
-          "reviewTimeoutMs": {
+          "thinking": {
+            "type": "string",
+            "enum": [
+              "off",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "adaptive",
+              "max"
+            ],
+            "description": "Thinking level for the Self-Evolution review sub-agent.",
+            "default": "medium"
+          },
+          "timeoutMs": {
             "type": "integer",
             "minimum": 250,
             "maximum": 120000,

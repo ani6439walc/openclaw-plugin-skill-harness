@@ -64,9 +64,8 @@ export function getReviewModelRef(
     agentId,
     {
       ...config,
-      model: config.selfEvolution.reviewModel ?? config.model,
-      modelFallback:
-        config.selfEvolution.reviewModelFallback ?? config.modelFallback,
+      model: config.evolution.model ?? config.model,
+      modelFallback: config.evolution.modelFallback ?? config.modelFallback,
     },
     currentRun,
   );
@@ -174,7 +173,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     allowGatewaySubagentBinding: true,
     bootstrapContextMode: "lightweight" as const,
     verboseLevel: "off" as const,
-    thinkLevel: "medium" as const,
+    thinkLevel: params.params.config.thinking,
     reasoningLevel: "off" as const,
     silentExpected: true,
     authProfileFailurePolicy: "local" as const,

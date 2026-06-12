@@ -56,19 +56,19 @@ describe("intention-hint manifest", () => {
   });
 
   it("exposes disabled-by-default Self-Evolution settings", () => {
-    const selfEvolution = manifest.configSchema.properties.selfEvolution;
-    expect(selfEvolution.properties.enabled.default).toBe(false);
-    expect(selfEvolution.properties.reviewTimeoutMs).toMatchObject({
+    const evolution = manifest.configSchema.properties.evolution;
+    expect(evolution.properties.enabled.default).toBe(false);
+    expect(evolution.properties.timeoutMs).toMatchObject({
       minimum: 250,
       maximum: 120000,
       default: 30000,
     });
     expect(
-      selfEvolution.properties.triggers.properties.skillCandidate.properties
+      evolution.properties.triggers.properties.skillCandidate.properties
         .toolCalls.default,
     ).toBe(5);
     expect(
-      selfEvolution.properties.triggers.properties.weakIntent.properties
+      evolution.properties.triggers.properties.weakIntent.properties
         .confidenceBelow.default,
     ).toBe(0.5);
   });

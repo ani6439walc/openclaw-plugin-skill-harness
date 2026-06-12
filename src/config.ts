@@ -53,11 +53,12 @@ const DEFAULT_BEHAVIOR_FIX_KEYWORDS = [
   "you misunderstood",
 ];
 
-const DEFAULT_SELF_EVOLUTION = {
+const DEFAULT_EVOLUTION = {
   enabled: false,
-  reviewModel: undefined,
-  reviewModelFallback: undefined,
-  reviewTimeoutMs: 30_000,
+  model: undefined,
+  modelFallback: undefined,
+  thinking: "medium",
+  timeoutMs: 30_000,
   triggers: {
     skillCandidate: { enabled: true, toolCalls: 5 },
     processGap: { enabled: true, toolFailures: 2 },
@@ -73,6 +74,7 @@ const DEFAULT_CONFIG = {
   intentDeny: {},
   model: undefined,
   modelFallback: undefined,
+  thinking: "medium",
   allowedChatTypes: ["direct"],
   allowedChatIds: [],
   deniedChatIds: [],
@@ -81,7 +83,7 @@ const DEFAULT_CONFIG = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   intentsDir: "./intents",
   complexityPrompts: DEFAULT_COMPLEXITY_PROMPTS,
-  selfEvolution: DEFAULT_SELF_EVOLUTION,
+  evolution: DEFAULT_EVOLUTION,
 } satisfies ResolvedIntentionHintPluginConfig;
 
 const StringListSchema = z
@@ -146,12 +148,16 @@ const ComplexityPromptsSchema = z
   .catch(DEFAULT_COMPLEXITY_PROMPTS);
 
 const enabledSchema = z.boolean().catch(true);
-const SelfEvolutionSchema = z
+const ThinkLevelSchema = z
+  .enum(["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"])
+  .catch("medium");
+const EvolutionSchema = z
   .object({
     enabled: z.boolean().catch(false),
-    reviewModel: z.string().optional().catch(undefined),
-    reviewModelFallback: z.string().optional().catch(undefined),
-    reviewTimeoutMs: boundedInt(30_000, 250, 120_000),
+    model: z.string().optional().catch(undefined),
+    modelFallback: z.string().optional().catch(undefined),
+    thinking: ThinkLevelSchema,
+    timeoutMs: boundedInt(30_000, 250, 120_000),
     triggers: z
       .object({
         skillCandidate: z
@@ -159,22 +165,22 @@ const SelfEvolutionSchema = z
             enabled: enabledSchema,
             toolCalls: boundedInt(5, 1, 100),
           })
-          .catch(DEFAULT_SELF_EVOLUTION.triggers.skillCandidate),
+          .catch(DEFAULT_EVOLUTION.triggers.skillCandidate),
         processGap: z
           .object({
             enabled: enabledSchema,
             toolFailures: boundedInt(2, 1, 100),
           })
-          .catch(DEFAULT_SELF_EVOLUTION.triggers.processGap),
+          .catch(DEFAULT_EVOLUTION.triggers.processGap),
         satisfactionCheck: z
           .object({
             enabled: enabledSchema,
             everyTurns: boundedInt(10, 1, 1000),
           })
-          .catch(DEFAULT_SELF_EVOLUTION.triggers.satisfactionCheck),
+          .catch(DEFAULT_EVOLUTION.triggers.satisfactionCheck),
         missingIntent: z
           .object({ enabled: enabledSchema })
-          .catch(DEFAULT_SELF_EVOLUTION.triggers.missingIntent),
+          .catch(DEFAULT_EVOLUTION.triggers.missingIntent),
         weakIntent: z
           .object({
             enabled: enabledSchema,
@@ -183,17 +189,17 @@ const SelfEvolutionSchema = z
               .catch(0.5)
               .transform((value) => Math.max(0, Math.min(1, value))),
           })
-          .catch(DEFAULT_SELF_EVOLUTION.triggers.weakIntent),
+          .catch(DEFAULT_EVOLUTION.triggers.weakIntent),
         behaviorFix: z
           .object({
             enabled: enabledSchema,
             keywords: stringListWithDefault(DEFAULT_BEHAVIOR_FIX_KEYWORDS),
           })
-          .catch(DEFAULT_SELF_EVOLUTION.triggers.behaviorFix),
+          .catch(DEFAULT_EVOLUTION.triggers.behaviorFix),
       })
-      .catch(DEFAULT_SELF_EVOLUTION.triggers),
+      .catch(DEFAULT_EVOLUTION.triggers),
   })
-  .catch(DEFAULT_SELF_EVOLUTION);
+  .catch(DEFAULT_EVOLUTION);
 
 const IntentDenySchema = z
   .record(z.string(), z.unknown())
@@ -217,6 +223,7 @@ const IntentionHintConfigSchema = z
     intentDeny: IntentDenySchema,
     model: z.string().optional().catch(undefined),
     modelFallback: z.string().optional().catch(undefined),
+    thinking: ThinkLevelSchema,
     allowedChatTypes: stringListWithDefault(["direct"]),
     allowedChatIds: StringListSchema,
     deniedChatIds: StringListSchema,
@@ -225,7 +232,7 @@ const IntentionHintConfigSchema = z
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 250, 120_000),
     intentsDir: z.string().catch("./intents"),
     complexityPrompts: ComplexityPromptsSchema,
-    selfEvolution: SelfEvolutionSchema,
+    evolution: EvolutionSchema,
   })
   .catch(DEFAULT_CONFIG);
 

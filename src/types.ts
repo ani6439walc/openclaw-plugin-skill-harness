@@ -15,7 +15,17 @@ export type ContextWindow = {
   assistant: { turns: number; chars: number };
 };
 
-export type SelfEvolutionTriggersConfig = {
+export type ThinkLevel =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "adaptive"
+  | "max";
+
+export type EvolutionTriggersConfig = {
   skillCandidate?: { enabled?: boolean; toolCalls?: number };
   processGap?: { enabled?: boolean; toolFailures?: number };
   satisfactionCheck?: { enabled?: boolean; everyTurns?: number };
@@ -24,19 +34,21 @@ export type SelfEvolutionTriggersConfig = {
   behaviorFix?: { enabled?: boolean; keywords?: string[] };
 };
 
-export type SelfEvolutionConfig = {
+export type EvolutionConfig = {
   enabled?: boolean;
-  reviewModel?: string;
-  reviewModelFallback?: string;
-  reviewTimeoutMs?: number;
-  triggers?: SelfEvolutionTriggersConfig;
+  model?: string;
+  modelFallback?: string;
+  thinking?: ThinkLevel;
+  timeoutMs?: number;
+  triggers?: EvolutionTriggersConfig;
 };
 
-export type ResolvedSelfEvolutionConfig = {
+export type ResolvedEvolutionConfig = {
   enabled: boolean;
-  reviewModel: string | undefined;
-  reviewModelFallback: string | undefined;
-  reviewTimeoutMs: number;
+  model: string | undefined;
+  modelFallback: string | undefined;
+  thinking: ThinkLevel;
+  timeoutMs: number;
   triggers: {
     skillCandidate: { enabled: boolean; toolCalls: number };
     processGap: { enabled: boolean; toolFailures: number };
@@ -52,6 +64,7 @@ export type IntentionHintPluginConfig = {
   intentDeny?: Record<string, string[]>;
   model?: string;
   modelFallback?: string;
+  thinking?: ThinkLevel;
   allowedChatTypes?: string[];
   allowedChatIds?: string[];
   deniedChatIds?: string[];
@@ -60,7 +73,7 @@ export type IntentionHintPluginConfig = {
   timeoutMs?: number;
   intentsDir?: string;
   complexityPrompts?: ComplexityPromptsConfig;
-  selfEvolution?: SelfEvolutionConfig;
+  evolution?: EvolutionConfig;
 };
 
 export type ResolvedIntentionHintPluginConfig = {
@@ -68,6 +81,7 @@ export type ResolvedIntentionHintPluginConfig = {
   intentDeny: Record<string, string[]>;
   model: string | undefined;
   modelFallback: string | undefined;
+  thinking: ThinkLevel;
   allowedChatTypes: string[];
   allowedChatIds: string[];
   deniedChatIds: string[];
@@ -76,7 +90,7 @@ export type ResolvedIntentionHintPluginConfig = {
   timeoutMs: number;
   intentsDir: string | undefined;
   complexityPrompts: ResolvedComplexityPromptsConfig;
-  selfEvolution: ResolvedSelfEvolutionConfig;
+  evolution: ResolvedEvolutionConfig;
 };
 
 export type IntentDefinition = {
