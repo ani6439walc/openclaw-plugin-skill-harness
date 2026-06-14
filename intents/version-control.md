@@ -21,6 +21,7 @@ Detected "version control" intent. The user wants to perform git operations such
 - Use `gaic` for standardized emoji-style commits when available.
 - Prefer `git add` with specific files instead of `git add .` to avoid unintended changes.
 - Verify staged changes with `git diff --cached --stat` before committing.
+- For workspaces with multiple repositories, detect all repos first and handle each independently.
 - For submodule updates, enter the submodule directory first before performing git operations.
 - Keep commit messages concise and follow Conventional Commit format with emoji.
 - Deliver changes incrementally to avoid giant diffs.
@@ -69,13 +70,18 @@ Detected "version control" intent. The user wants to perform git operations such
 ## Concrete Workflow
 
 ```
-Step 1 → Step 2 → Step 3 → Step 4
-check      stage       commit       report
-status     files                   & push
+Step 0 → Step 1 → Step 2 → Step 3 → Step 4
+detect   check     stage     commit    report
+repos    status    files               & push
 ```
 
+### Step 0 — Detect Repositories
+- Identify git repositories in the current workspace context with a bounded discovery command such as `find . -maxdepth 3 -name .git -type d`.
+- If multiple repos are found, list them and handle each separately with its own status, stage, commit, and push cycle.
+- For single-repo contexts, proceed directly to Step 1.
+
 ### Step 1 — Check Status
-- Run `git status` to understand the current state.
+- Run `git status` in each target repository to understand the current state.
 - Identify which files have changed and need staging.
 
 ### Step 2 — Stage Files
@@ -88,6 +94,6 @@ status     files                   & push
 - For complex operations (rebase, squash): use `git-master` skill.
 
 ### Step 4 — Report & Push
-- Report the commit hash and summary.
+- Report the commit hash and summary for each repository handled.
 - Push to remote if requested.
 - For PRs: use `gitea` skill to create and manage.

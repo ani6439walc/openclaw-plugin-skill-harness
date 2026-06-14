@@ -28,6 +28,7 @@ Detected "productivity" intent. The user is interacting with the productivity va
 - All operations should respect the vault's AGENTS.md rules, especially content integrity and canonical tags.
 - Many files in this vault are large. Always use `treemd` to survey a file's structure before reading it in full.
 - Small changes (1-2 files): execute directly. Structural changes (> 5 files): pause and present a plan for approval.
+- Bulk file operations, long-running document processing, or complex multi-step vault updates should be delegated to a sub-agent after the scope and file paths are verified.
 - Always preserve the author's voice; only modify status, links, and metadata.
 - Use canonical tags (`#deep-work`, `#quick-win`, `#low-energy`, domain tags) when creating new items.
 - For `.canvas` files: follow the `json-canvas` skill constraints for node/edge structure.
@@ -60,6 +61,9 @@ Detected "productivity" intent. The user is interacting with the productivity va
 
 - Break large work into ordered tasks:
   skill: planning-and-task-breakdown
+
+- Delegate bulk edits or long-running vault processing to a sub-agent:
+  skill: delegate
 
 - Master any inbox with triage frameworks:
   skill: inbox
@@ -94,6 +98,7 @@ Detected "productivity" intent. The user is interacting with the productivity va
 - For read operations: use `treemd` on large files first, then read only relevant sections.
 - For status reports: cross-check kanban or Workboard status against actual deliverables before responding; do not present metadata status as ground truth without artifact verification.
 - For write operations: execute directly for small changes, plan for structural changes.
+- For bulk edits, hundreds-of-lines updates, or long-running document processing: verify scope first, then delegate with clear file paths and acceptance criteria so the main session stays responsive.
 - For reviews: read relevant period notes, summarize outcomes, draft review file.
 - For inbox triage: classify new notes into PARA structure and update wikilinks.
 - For vault audit: check orphans, broken links, misplaced files; fix minor issues autonomously.
@@ -115,6 +120,7 @@ SOPs       operation   or claim     status
 ### Step 2 — Classify Operation Type and Reconcile Expectations
 - Read: check tasks, projects, goals, reviews, inbox.
 - Write: create new items, update status, add metadata.
+- Bulk/long-running: update many sections, process hundreds of lines, or coordinate a complex multi-step vault update through a sub-agent.
 - Ingest: download external content (PDF, article, or file), store it in the appropriate vault folder, then create related tasks or next actions.
 - Review: weekly/monthly summary, inbox triage, vault audit, kanban cleanup, or recurring SOP-driven maintenance.
 - Workboard: list, create, link dependencies, add context, claim, execute, release, and complete task cards when the user asks to continue or process queued work.
@@ -128,9 +134,10 @@ SOPs       operation   or claim     status
 - If metadata and artifact disagree, trust the verified artifact and update the task tracker when appropriate.
 - Report the verified status, not just the claimed kanban or Workboard status.
 
-### Step 3 — Execute Safely or Claim Workboard Task
+### Step 3 — Execute Safely, Delegate, or Claim Workboard Task
 - For reads: report active items, due dates, blocked items concisely.
 - For writes: preserve author's voice, use canonical tags.
+- For delegated bulk work: provide the sub-agent with exact file paths, relevant excerpts, acceptance criteria, and required verification; record the task as in progress or delegated when the vault workflow tracks execution state.
 - Before using `edit`, immediately read the exact target section or file excerpt and copy the exact text to avoid whitespace or stale-content mismatches.
 - If `edit` fails because text is missing, non-unique, or stale, re-read the target section, expand the context, then retry once with a precise replacement.
 - If precise replacement still fails and the change is safe and local, use `write` only after reconstructing the whole file from the latest read content; otherwise roll back or ask for confirmation.
