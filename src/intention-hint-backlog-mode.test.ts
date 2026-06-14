@@ -34,5 +34,8 @@ describe("intention-hint backlog mode", () => {
     expect(reference).toContain("obtain explicit user confirmation");
     expect(reference).toContain("leave the item `pending`");
     expect(reference).toContain("duplicate, superseded, unsafe");
+    expect(reference).toContain("Body-name Mismatch Decision");
+    expect(reference).toContain("oversized intent");
+    expect(reference).toContain("Propose a\n  rename");
   });
 });

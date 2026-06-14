@@ -213,6 +213,12 @@ Re-read the selected item — it must still be `pending`.
 
 Read the target intent markdown, the compact intent catalog, and relevant references.
 
+Before applying a suggested body edit, compare the target intent's `id`, `name`, triggers, examples, and body:
+- If the name/id are correct and only the body drifted, refine the body back to the declared boundary.
+- If the body is more accurate than the current name/id, propose a rename and ask for explicit confirmation before changing identity fields, filenames, or references.
+- If the body contains multiple responsibilities or an oversized boundary, propose a split plan and ask for explicit confirmation before creating/moving/deleting intent files.
+- If the mismatch comes from a duplicate or superseded finding, dismiss it instead of reshaping a healthy intent.
+
 For legacy items with `operation: unknown`, infer metadata:
 
 ```bash
@@ -231,6 +237,7 @@ mkdir -p /tmp/intention-hint-process-backlog/<item-id>-<timestamp>/
 Then apply:
 - `create` → new intent
 - `refine` → update target intent
+- `rename` → only after user confirmation; update `id`, `name`, filename, and stale references together
 - `split`/`merge` → only after user confirmation
 
 **Step 4 — Validate**

@@ -39,11 +39,34 @@ mode only when the user explicitly asks to process the evolution backlog.
    Repeat `--target-intent` for multiple targets, then re-run `show` and use
    the new `updatedAt`. If inference is not clear, stop without modifying files.
 
+## Body-name Mismatch Decision
+
+Before editing, compare the target intent's `id`, `name`, frontmatter triggers,
+examples, and body guidance:
+
+- If `id`/`name` are correct but the body drifted away from the declared
+  boundary, treat the finding as `refine` and fix the body, triggers, or
+  examples to match the existing intent boundary.
+- If the body consistently describes a better boundary than the current
+  `id`/`name`, do not silently rewrite the body to fit the old name. Propose a
+  rename with the recommended `id`, `name`, filename, and any affected references,
+  then obtain explicit user confirmation before changing identity fields or
+  filenames.
+- If the body mixes multiple responsibilities or has become an oversized intent,
+  propose `split` with the new intent boundaries, affected files, and migration
+  plan, then obtain explicit user confirmation before creating/moving/deleting
+  intent files.
+- If the mismatch is caused by a duplicate or superseded finding, dismiss the
+  finding instead of reshaping a healthy intent.
+
 ## Apply Transactionally
 
 1. Decide whether the finding is already satisfied by current Intent Markdown.
    If so, skip edits and continue to validation.
-2. If the finding is a duplicate of an existing intent, is superseded by a safer
+2. Run the Body-name Mismatch Decision before changing any body section,
+   identity field, or filename. Rename and split plans require explicit user
+   confirmation; do not execute them as an automatic `refine`.
+3. If the finding is a duplicate of an existing intent, is superseded by a safer
    current intent, or would introduce unsafe/conflicting behavior, do not edit
    files. Mark it dismissed using the latest selected `updatedAt`:
 
@@ -52,16 +75,18 @@ mode only when the user explicitly asks to process the evolution backlog.
    ```
 
    Report the dismissal reason and stop processing this item.
-3. Before any edit, create
+4. Before any edit, create
    `/tmp/intention-hint-process-backlog/<item-id>-<timestamp>/` and back up
    every file that may be modified or deleted. Record every file that does not
    yet exist so it can be removed during rollback.
-4. Apply only the grounded Intent Markdown changes:
+5. Apply only the grounded Intent Markdown changes:
    - `create`: create the declared target intent.
    - `refine`: update the declared target intent without broadening unrelated
      behavior.
+   - `rename`: execute only after confirmation, then update `id`, `name`,
+     filename, and stale references together.
    - `split` or `merge`: execute only after the required confirmation.
-5. Validate the resulting files:
+6. Validate the resulting files:
 
    ```bash
    pnpm run backlog -- validate-intents --id <target-intent-id>
@@ -71,14 +96,14 @@ mode only when the user explicitly asks to process the evolution backlog.
 
    Repeat `--id` for every resulting target intent.
 
-6. When all checks pass, mark the item processed using the `updatedAt` from the
+7. When all checks pass, mark the item processed using the `updatedAt` from the
    latest `show` or `set-target` result:
 
    ```bash
    pnpm run backlog -- mark-processed --id <item-id> --expected-updated-at <timestamp>
    ```
 
-7. If an edit, validation, or status update fails, restore only the files in
+8. If an edit, validation, or status update fails, restore only the files in
    this transaction from the backup, remove files recorded as newly created,
    and leave the item `pending`.
 
