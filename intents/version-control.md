@@ -50,6 +50,15 @@ Detected "version control" intent. The user wants to perform git operations such
 - Check git status:
   exec({ command: "git status" })
 
+- Stage specific files for commit:
+  exec({ command: "git add <file1> <file2>" })
+
+- Verify staged changes before committing:
+  exec({ command: "git diff --cached --stat" })
+
+- Generate standardized commit message and commit:
+  exec({ command: "gaic" })
+
 - View recent git log:
   exec({ command: "git log --oneline -10" })
 

@@ -77,6 +77,7 @@ Detected "prompt design" intent. The user wants help designing or refining promp
 ## Response Strategy
 
 - Determine the user's goal: design new, refine existing, audit, or debug.
+- For specific, concrete tweaks (for example changing a format, renaming a tag, or adjusting one value): skip high-level design analysis, directly read the file, apply the exact change, and show the diff. Do not repeat previous design proposals or treat the request as a new design query.
 - For existing items: read the file first, then analyze.
 - For new designs: use `intention-hint` for interactive interview.
 - For audits: check for overlaps, anti-patterns, inconsistencies.

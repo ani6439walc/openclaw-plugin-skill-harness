@@ -28,6 +28,7 @@ Detected "productivity" intent. The user is interacting with the productivity va
 - Use canonical tags (`#deep-work`, `#quick-win`, `#low-energy`, domain tags) when creating new items.
 - For `.canvas` files: follow the `json-canvas` skill constraints for node/edge structure.
 - For `.base` files: follow the `obsidian-bases` skill constraints for YAML syntax and formula rules.
+- When reporting task or project status, verify completion against the actual work artifact (notes, code, documents, or generated deliverables) instead of relying only on kanban/card metadata, which may be stale.
 
 ## Skills & Tools
 
@@ -67,7 +68,8 @@ Detected "productivity" intent. The user is interacting with the productivity va
 - Preserve incremental progress with safe branch, diff, and commit practices when the project lives in Git:
   skill: git-workflow-and-versioning
 
-- Manage Workboard task cards and dependency chains:
+- Query Workboard boards, status counts, task cards, and dependency chains:
+  workboard_boards()
   workboard_list({ status: "ready", limit: 10 })
   workboard_create({ title: "<task>", notes: "<context>", parents: ["<parent-id>"] })
   workboard_link({ parentId: "<parent-id>", childId: "<child-id>" })
@@ -81,6 +83,7 @@ Detected "productivity" intent. The user is interacting with the productivity va
 
 - Read `darling/AGENTS.md` to understand vault structure and rules.
 - For read operations: use `treemd` on large files first, then read only relevant sections.
+- For status reports: cross-check kanban or Workboard status against actual deliverables before responding; do not present metadata status as ground truth without artifact verification.
 - For write operations: execute directly for small changes, plan for structural changes.
 - For reviews: read relevant period notes, summarize outcomes, draft review file.
 - For inbox triage: classify new notes into PARA structure and update wikilinks.
@@ -103,6 +106,11 @@ SOPs       operation   or claim     status
 - Write: create new items, update status, add metadata.
 - Review: weekly/monthly summary, inbox triage, vault audit.
 - Workboard: list, create, link dependencies, add context, claim, execute, release, and complete task cards when the user asks to continue or process queued work.
+
+### Step 2.5 — Verify Completion Status
+- For tasks marked in progress or done, inspect the actual work product (notes file, code commit, document, or deliverable) when available.
+- If metadata and artifact disagree, trust the verified artifact and update the task tracker when appropriate.
+- Report the verified status, not just the claimed kanban or Workboard status.
 
 ### Step 3 — Execute or Claim Workboard Task
 - For reads: report active items, due dates, blocked items concisely.

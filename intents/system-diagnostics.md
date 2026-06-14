@@ -44,6 +44,9 @@ Detected "system diagnostics" intent. The user has a hard-to-locate bug, perform
   skill: dev-lifecycle
   skill: cx
 
+- Generate a document outline to verify file structure, detect misplaced sections, or confirm content ordering during diagnostic inspection:
+  exec({ command: "treemd <file_path>" })
+
 - Inspect relevant ADRs or project docs for architectural context around the bug area:
   wiki_search({ query: "<module_or_bug_area_keywords>" })
 

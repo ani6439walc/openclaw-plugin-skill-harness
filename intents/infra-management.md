@@ -37,6 +37,7 @@ Detected "infrastructure management" intent. The user wants to manage home-infra
 - Late-night (23:00-08:00): avoid disruptive operations unless urgent.
 - After any infra mutation (deploy, config change, service restart), run a quick health sweep.
 - After modifying core workspace files (AGENTS.md, TOOLS.md, SOUL.md) or plugin configs, verify no drift.
+- When inspecting service, plugin, gateway, or scheduler configuration, verify the actual runtime state from the live config file or config inspection tool before relying on source-code or documentation defaults.
 
 ## Skills & Tools
 
@@ -113,6 +114,7 @@ TOOLS.md   target      & route      & mutate     health
 
 ### Step 2 — Identify Target
 - Determine which system the user wants to manage (K8s, Terraform, Nginx, TrueNAS, ArgoCD, etc.).
+- For configuration inspection requests, read the actual runtime config file (for example `openclaw.json`) or use an available config inspection tool before referencing defaults.
 - Check if late-night restrictions apply (23:00-08:00).
 
 ### Step 3 — Load Skill & Route

@@ -22,6 +22,9 @@ Detected "general research" intent. The user wants factual or explanatory inform
 - Prefer authoritative and directly relevant sources.
 - Keep the answer accurate, concise, and source-backed.
 - When sources disagree, reflect the uncertainty clearly.
+- When `web_search` times out or returns an error, retry once with a simpler and broader query; if the retry fails, try `web_fetch` on a known authoritative URL when one is available.
+- If all external retrieval fails for a non-time-sensitive question, answer from general knowledge only with explicit source-limit caveats; for current or mutable facts, state the blocker instead of pretending verification succeeded.
+- Never return only a persona teaser, intro line, or acknowledgement without the substantive researched content or a clear blocker.
 
 ## Skills & Tools
 
@@ -68,6 +71,12 @@ sources    content     findings     & deliver
 ### Step 1 — Search Sources
 - Use `web_search` with topic keywords to find authoritative sources.
 - For exhaustive investigation: use `in-depth-research` skill.
+
+### Step 1b — Recover From Tool Failure
+- If `web_search` times out or returns an error, retry once with fewer, broader keywords.
+- If the retry also fails, use `web_fetch` on a known authoritative source when one is available.
+- If all external search and fetch attempts fail, answer non-time-sensitive questions with explicit source-limit caveats, or report a blocker for current and mutable facts.
+- Always continue to synthesis or deliver a clear blocker; do not stop at an intro line.
 
 ### Step 2 — Extract Content
 - Use `web_fetch` to read authoritative pages directly.
