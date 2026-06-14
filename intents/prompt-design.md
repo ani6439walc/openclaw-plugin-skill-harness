@@ -6,6 +6,7 @@ triggers:
   - "User wants to design, refine, rename, audit, or improve prompts, custom instructions, skills, plugin intents, or agent routing behavior — including naming, scoping, and boundary setting"
   - "User asks about prompt engineering techniques (chain-of-thought, few-shot, XML tags, role-based prompting) or needs help debugging a prompt that produces wrong results"
   - "User is reviewing or auditing existing prompts, intents, or skills for quality, consistency, overlaps, or anti-patterns"
+  - "User wants to edit, modify, or update the content of an existing intent Markdown file — adding or removing sections, changing guidelines, or updating tools in an intent file"
   - "User wants to be interviewed one-question-at-a-time to discover their real underlying intent behind an underspecified request"
   - "User wants to stress-test, grill, or adversarially review a plan, design, or decision until reaching shared understanding"
   - "User wants to challenge their plan against existing domain models, CONTEXT.md, or ADRs"
@@ -16,6 +17,8 @@ examples:
   - "這個 prompt 一直出不對的結果，怎麼修？"
   - "review 一下現有的 intent 有沒有重疊"
   - "這個 skill 的 scope 太大了，怎麼拆？"
+  - "幫我修改 AGENT_ADMIN 這個意圖的 Markdown 檔案內容"
+  - "把 skill-cleaner 加到某個意圖的 Skills & Tools 裡"
 ---
 
 Detected "prompt design" intent. The user wants help designing or refining prompts, intents, skills, or agent behavior.
@@ -81,7 +84,7 @@ Detected "prompt design" intent. The user wants help designing or refining promp
 ## Response Strategy
 
 - Determine the user's goal: design new, refine existing, audit, or debug.
-- For specific, concrete tweaks (for example changing a format, renaming a tag, or adjusting one value): skip high-level design analysis, directly read the file, apply the exact change, and show the diff. Do not repeat previous design proposals or treat the request as a new design query.
+- For specific, concrete tweaks (for example changing a format, renaming a tag, adjusting one value, or updating an intent Markdown section): skip high-level design analysis, directly read the file, apply the exact change, and show the diff. Do not repeat previous design proposals or treat the request as a new design query.
 - For existing items: read the file first, then analyze.
 - For new designs: use `intention-hint` for interactive interview.
 - For audits: check for overlaps, anti-patterns, inconsistencies.

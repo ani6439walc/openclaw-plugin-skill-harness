@@ -2,17 +2,21 @@
 id: CODE_REVIEW
 name: Code Review
 triggers:
-  - "User is asking to inspect, review, or improve code — catching bugs at a glance, refactoring advice, architecture feedback, or performance review"
-  - "The code issue is straightforward: obvious logic errors, style problems, anti-patterns, complexity concerns, or concrete refactoring suggestions — not an elusive bug that needs a repro loop"
+  - "User is asking to inspect, review, improve, or modify existing code — including bug fixes, refactoring advice, architecture feedback, performance review, path/config changes, or implementation of specific changes to a known file"
+  - "The code task is straightforward and local: obvious logic errors, style problems, anti-patterns, complexity concerns, concrete refactoring, updating defaults, adding scan paths, or adjusting script configuration — not an elusive bug that needs a repro loop"
 examples:
   - "幫我看看這段程式碼有沒有問題"
   - "review 這個 PR"
   - "這個 function 要怎麼重構比較好？"
   - "這段 code 有沒有潛在問題或可以改進的地方？"
   - "幫我找出這個 snippet 的 bug"
+  - "幫我改這個腳本的預設路徑"
+  - "把這個 function 的 log 路徑改成 openclaw 的"
+  - "幫我改上面的程式碼，加入 sessions 資料夾的掃描"
+  - "這個腳本怎麼改成只掃特定目錄？"
 ---
 
-Detected "code review" intent. The user wants code to be examined for problems or improvements.
+Detected "code review" intent. The user wants existing code to be examined, improved, refactored, or modified with a concrete local change.
 
 ## Guidelines
 
@@ -21,6 +25,7 @@ Detected "code review" intent. The user wants code to be examined for problems o
 - Keep findings concrete, prioritized, and specific to the code shown.
 - Do not inflate minor style issues above logic or safety issues.
 - If the code looks good, say so clearly.
+- For requested local code edits, implement the smallest safe change, preserve unrelated behavior, and verify with the nearest meaningful test or lint.
 
 ## Skills & Tools
 
@@ -104,9 +109,10 @@ code       findings    (if needed)  changes      (optional)
 - Look up version-specific docs or known issues when the bug may be upstream.
 - Search web for error messages or upstream bug reports.
 
-### Step 4 — Suggest Improvements
-- Propose minimal, practical changes.
-- Show diffs for suggested modifications.
+### Step 4 — Suggest or Apply Improvements
+- Propose minimal, practical changes when the user asks for review or analysis.
+- Apply the smallest safe local edit when the user explicitly asks to modify an existing file or script.
+- Show diffs for suggested or applied modifications.
 - Avoid scope creep — focus on what the user asked about.
 
 ### Step 5 — Verify (Optional)

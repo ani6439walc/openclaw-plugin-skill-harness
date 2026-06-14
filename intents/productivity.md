@@ -123,6 +123,8 @@ SOPs       operation   or claim     status
 
 ### Step 2.5 — Verify Completion Status
 - For tasks marked in progress or done, inspect the actual work product (notes file, code commit, document, or deliverable) when available.
+- When the user asks about file structure, item count, section outline, or completeness, run `treemd <target-file>` or an equivalent outline command before drawing conclusions.
+- Compare counted headings, questions, sections, or deliverable artifacts against the user's expectation and the task tracker.
 - If metadata and artifact disagree, trust the verified artifact and update the task tracker when appropriate.
 - Report the verified status, not just the claimed kanban or Workboard status.
 
