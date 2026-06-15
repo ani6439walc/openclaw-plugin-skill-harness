@@ -140,6 +140,15 @@ def get_jules_activities(session_name):
 
 
 def archive_jules_session(session_name):
+    """Archive the Jules session to stop it from continuing to run."""
+    try:
+        request("POST", f"{JULES_API}/{session_name}:archive", jules_headers())
+        log(f"Archived session {session_name}")
+    except Exception as e:
+        log(f"Warning: Failed to archive session {session_name}: {e}")
+
+
+def archive_jules_session(session_name):
     log(f"Archiving session {session_name}...")
     try:
         request("POST", f"{JULES_API}/{session_name}:archive", jules_headers(), {})
@@ -275,20 +284,21 @@ def main():
                 if has_complete_review(activities):
                     log("Review detected in activities — exiting immediately")
                     early_exit = True
-            except Exception as e:
-                log(f"Could not check activities: {e}")
-            break
+            if state in FINAL_STATES:
+                log(f"Session reached final state: {state}")
+                break
 
-        # Early exit: if IN_PROGRESS and review already complete, don't wait
-        if state == "IN_PROGRESS":
-            try:
-                activities = get_jules_activities(session_name)
-                if has_complete_review(activities):
-                    log("Review detected in activities during IN_PROGRESS — archiving session")
-                    archive_jules_session(session_name)
-                    early_exit = True
-                    break
-            except Exception as e:
+            # Early exit: if IN_PROGRESS and review already complete, archive session
+            if state == "IN_PROGRESS":
+                try:
+                    activities = get_jules_activities(session_name)
+                    if has_complete_review(activities):
+                        log("Review detected in activities during IN_PROGRESS — archiving session")
+                        archive_jules_session(session_name)
+                        early_exit = True
+                        break
+                except Exception as e:
+                    log(f"Could not check activities: {e}")
                 log(f"Could not check activities: {e}")
 
     if not early_exit and state not in FINAL_STATES:
