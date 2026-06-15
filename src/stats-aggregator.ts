@@ -1,9 +1,8 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { logger } from "../api.js";
 import type { SessionState } from "./session-tracker.js";
 import type { IntentDefinition } from "./types.js";
+import { pluginRoot, fileExists, readJsonFile, writeJsonAtomic } from "./file-utils.js";
 
 const STATS_FILENAME = "stats.json";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -275,8 +274,8 @@ export class StatsAggregator {
       const eventId = `${sessionId}:${start}`;
 
       let stats: Stats;
-      if (fs.existsSync(statsPath)) {
-        stats = JSON.parse(fs.readFileSync(statsPath, "utf-8")) as Stats;
+      if (fileExists(statsPath)) {
+        stats = readJsonFile<Stats>(statsPath);
         if (
           stats.schemaVersion !== 1 ||
           !stats.summary ||
@@ -416,7 +415,13 @@ export class StatsAggregator {
 
       pruneRollingData(stats, nowMs);
       recomputeDerivedStats(stats, nowMs);
-      return this.write(statsPath, stats);
+      try {
+        writeJsonAtomic(statsPath, stats);
+        return true;
+      } catch (err) {
+        logger.warn("failed to write stats file", { error: err, path: statsPath });
+        return false;
+      }
     } catch (err) {
       logger.warn("failed to update stats file", {
         error: err,
@@ -425,28 +430,6 @@ export class StatsAggregator {
       return false;
     }
   }
-
-  private write(statsPath: string, stats: Stats): boolean {
-    const sessionsDir = path.dirname(statsPath);
-    const tempPath = `${statsPath}.tmp-${process.pid}-${Date.now()}`;
-    try {
-      fs.mkdirSync(sessionsDir, { recursive: true });
-      fs.writeFileSync(tempPath, JSON.stringify(stats, null, 2));
-      fs.renameSync(tempPath, statsPath);
-      return true;
-    } catch (err) {
-      logger.warn("failed to write stats file", {
-        error: err,
-        path: statsPath,
-      });
-      try {
-        fs.rmSync(tempPath, { force: true });
-      } catch {}
-      return false;
-    }
-  }
 }
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const pluginRoot = path.resolve(currentDir, "..", "..");
 export const defaultStatsAggregator = StatsAggregator.create(pluginRoot);

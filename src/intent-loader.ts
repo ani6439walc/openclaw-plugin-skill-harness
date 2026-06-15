@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import type {
   IntentDefinition,
   ResolvedIntentionHintPluginConfig,
 } from "./types.js";
 import { logger } from "../api.js";
+import { pluginRoot } from "./file-utils.js";
 
 function wildcardToRegExp(pattern: string): RegExp {
   const escaped = pattern
@@ -161,9 +161,5 @@ export class IntentCatalog {
     return result;
   }
 }
-
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-// Compiled code lives in dist/src/, so go up 2 levels to reach plugin root.
-const pluginRoot = path.resolve(currentDir, "..", "..");
 
 export const defaultCatalog = IntentCatalog.create(pluginRoot);

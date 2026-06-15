@@ -1,5 +1,4 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import type {
   RecentTurn,
@@ -9,6 +8,7 @@ import type {
 import type { ReviewSnapshot, ReviewState } from "./evolution-types.js";
 import matter from "gray-matter";
 import { logger } from "../api.js";
+import { pluginRoot, readJsonFile, writeJsonAtomic, fileExists } from "./file-utils.js";
 
 const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const RESERVED_SESSION_FILENAMES = new Set(["stats.json", "evolution.json"]);
@@ -394,8 +394,5 @@ export class SessionTracker {
     return deletedCount;
   }
 }
-
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const pluginRoot = path.resolve(currentDir, "..", "..");
 
 export const defaultTracker = SessionTracker.create(pluginRoot);

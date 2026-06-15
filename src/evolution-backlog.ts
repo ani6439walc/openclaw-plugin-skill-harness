@@ -1,6 +1,5 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { z } from "zod";
+import { readJsonFile, writeJsonAtomic } from "./file-utils.js";
 import type { EvolutionSource } from "./evolution-types.js";
 import {
   EVOLUTION_TRIGGER_TYPES,
@@ -116,7 +115,7 @@ export function parseBacklog(raw: unknown): EvolutionBacklog {
 }
 
 export function readBacklog(backlogPath: string): EvolutionBacklog {
-  return parseBacklog(JSON.parse(fs.readFileSync(backlogPath, "utf-8")));
+  return parseBacklog(readJsonFile<unknown>(backlogPath));
 }
 
 export function writeBacklogAtomic(
@@ -124,18 +123,7 @@ export function writeBacklogAtomic(
   backlog: EvolutionBacklog,
 ): void {
   const parsed = EvolutionBacklogSchema.parse(backlog);
-  const sessionsDir = path.dirname(backlogPath);
-  const tempPath = `${backlogPath}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    fs.mkdirSync(sessionsDir, { recursive: true });
-    fs.writeFileSync(tempPath, JSON.stringify(parsed, null, 2));
-    fs.renameSync(tempPath, backlogPath);
-  } catch (error) {
-    try {
-      fs.rmSync(tempPath, { force: true });
-    } catch {}
-    throw error;
-  }
+  writeJsonAtomic(backlogPath, parsed);
 }
 
 export function selectPendingItem(
