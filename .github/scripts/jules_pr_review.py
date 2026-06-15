@@ -139,16 +139,18 @@ def get_jules_activities(session_name):
     return request("GET", f"{JULES_API}/{session_name}/activities", jules_headers())
 
 
+def pause_jules_session(session_name):
+    """Pause the Jules session."""
+    log(f"Pausing session {session_name}...")
+    try:
+        request("POST", f"{JULES_API}/{session_name}:pause", jules_headers(), {})
+        log("Session paused.")
+    except Exception as e:
+        log(f"Pause failed (non-fatal): {e}")
+
+
 def archive_jules_session(session_name):
     """Archive the Jules session to stop it from continuing to run."""
-    try:
-        request("POST", f"{JULES_API}/{session_name}:archive", jules_headers())
-        log(f"Archived session {session_name}")
-    except Exception as e:
-        log(f"Warning: Failed to archive session {session_name}: {e}")
-
-
-def archive_jules_session(session_name):
     log(f"Archiving session {session_name}...")
     try:
         request("POST", f"{JULES_API}/{session_name}:archive", jules_headers(), {})
@@ -273,32 +275,25 @@ def main():
             try:
                 activities = get_jules_activities(session_name)
                 if has_complete_review(activities):
-                    log("Review detected in activities — archiving session")
+                    log("Review detected in activities — pausing and archiving session")
+                    pause_jules_session(session_name)
                     archive_jules_session(session_name)
                     early_exit = True
             except Exception as e:
                 log(f"Could not check activities: {e}")
             break
+
+        # Early exit: if IN_PROGRESS and review already complete, archive session
+        if state == "IN_PROGRESS":
             try:
                 activities = get_jules_activities(session_name)
                 if has_complete_review(activities):
-                    log("Review detected in activities — exiting immediately")
+                    log("Review detected in activities during IN_PROGRESS — pausing and archiving session")
+                    pause_jules_session(session_name)
+                    archive_jules_session(session_name)
                     early_exit = True
-            if state in FINAL_STATES:
-                log(f"Session reached final state: {state}")
-                break
-
-            # Early exit: if IN_PROGRESS and review already complete, archive session
-            if state == "IN_PROGRESS":
-                try:
-                    activities = get_jules_activities(session_name)
-                    if has_complete_review(activities):
-                        log("Review detected in activities during IN_PROGRESS — archiving session")
-                        archive_jules_session(session_name)
-                        early_exit = True
-                        break
-                except Exception as e:
-                    log(f"Could not check activities: {e}")
+                    break
+            except Exception as e:
                 log(f"Could not check activities: {e}")
 
     if not early_exit and state not in FINAL_STATES:
