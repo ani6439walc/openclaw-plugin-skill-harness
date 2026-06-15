@@ -11,6 +11,8 @@ triggers:
   - "User wants to set up a structured workflow cycle for a complex multi-step task"
   - "User wants to retry, redo, rerun, or repeat the last operation, previous failed action, or current session task without naming a separate target system"
   - "User asks about agent runtime, session info, model config, or active sub-agent status"
+  - "System receives an inter-session sub-agent task completion event that needs to be summarized, validated, and presented to the user"
+  - "User wants to review, approve, continue from, or act on the output of a completed sub-agent task"
 examples:
   - "現在用的是哪個 model？"
   - "幫我分派給子代理去跑"
@@ -30,6 +32,8 @@ examples:
   - "執行提案2"
   - "把第三個刪掉"
   - "跑第 1 個 workflow"
+  - "[Inter-session message] subagent task completed: screenshots captured, files changed, validation passed"
+  - "幫我看剛剛 sub-agent 回來的結果"
 ---
 
 Detected "agent self-administration" intent. The user is managing the agent's session, context, sub-agents, or workflow lifecycle.

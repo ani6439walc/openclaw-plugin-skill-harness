@@ -7,6 +7,7 @@ triggers:
   - "User asks where to place, organize, move, or structure files and content within the productivity vault (darling/), including vault folder conventions and organization rules"
   - "User wants to resume, continue, or pick up unfinished tasks, projects, or workflows from a previous session or context"
   - "User asks to review recent conversation or context specifically to continue executing pending actions"
+  - "User wants to claim, execute, create, complete, verify, or check status of Workboard task cards, including batch task creation and direct queued work execution"
 examples:
   - "今天有什麼任務"
   - "看看 kanban 上有幾個 active project"
@@ -21,6 +22,9 @@ examples:
   - "review 一下剛剛的對話，然後繼續做"
   - "幫我繼續上次沒做完的任務"
   - "看看 workboard 有什麼要接著處理的"
+  - "從 workboard 取任務繼續做"
+  - "幫我追蹤這個任務有沒有完成"
+  - "幫我把這些剩下的章節批次建立成 workboard 任務"
 ---
 
 Detected "productivity" intent. The user is interacting with the productivity vault (darling/) for task management, project tracking, goal monitoring, reviews, or organizational workflows.
@@ -37,6 +41,7 @@ Detected "productivity" intent. The user is interacting with the productivity va
 - Many files in this vault are large. Always use `treemd` to survey a file's structure before reading it in full.
 - Small changes (1-2 files): execute directly. Structural changes (> 5 files): pause and present a plan for approval.
 - Bulk file operations, long-running document processing, or complex multi-step vault updates should be delegated to a sub-agent after the scope and file paths are verified.
+- For long-running tasks, report progress every 2-3 minutes, preserve partial progress, and resume from the last verified artifact after interruptions or timeouts.
 - Always preserve the author's voice; only modify status, links, and metadata.
 - Use canonical tags (`#deep-work`, `#quick-win`, `#low-energy`, domain tags) when creating new items.
 - For `.canvas` files: follow the `json-canvas` skill constraints for node/edge structure.
@@ -97,14 +102,26 @@ Detected "productivity" intent. The user is interacting with the productivity va
 
 - Query Workboard boards, status counts, task cards, and dependency chains:
   workboard_boards()
+  workboard_stats({ boardId: "<board-id>" })
   workboard_list({ status: "ready", limit: 10 })
-  workboard_create({ title: "<task>", notes: "<context>", parents: ["<parent-id>"] })
-  workboard_link({ parentId: "<parent-id>", childId: "<child-id>" })
-  workboard_comment({ id: "<card-id>", body: "<context update>" })
   workboard_read({ id: "<card-id>" })
+
+- Create, link, claim, release, and complete Workboard tasks with proof:
+  workboard_create({ title: "<task>", notes: "<complete SOP or acceptance criteria>", parents: ["<parent-id>"] })
+  workboard_link({ parentId: "<parent-id>", childId: "<child-id>" })
   workboard_claim({ id: "<card-id>" })
   workboard_release({ id: "<card-id>", status: "todo" })
   workboard_complete({ id: "<card-id>", token: "<claim-token>", summary: "<what changed>" })
+  workboard_proof({ id: "<card-id>", token: "<claim-token>", status: "passed", label: "<verification>", note: "<evidence>" })
+  workboard_comment({ id: "<card-id>", body: "<context update>" })
+
+- Draft complete SOPs, task descriptions, acceptance criteria, and handoff notes for delegated or batch-created work:
+  skill: handoff
+
+- Process transcripts, documents, course materials, and other source content into structured notes:
+  read({ path: "<source-file>" })
+  web_fetch({ url: "<source-url>" })
+  exec({ command: "<content extraction or transformation command>" })
 
 ## Response Strategy
 
@@ -166,15 +183,16 @@ SOPs       operation   or claim     status
 - For ingests: download the external file, verify the saved path and size, then create a follow-up task or next action that references the stored file.
 - For reviews: execute the specific SOP from `darling/AGENTS.md` (for example: sync state, triage inbox, update kanban, archive done tasks, and write the review note when that SOP requires it).
 - For workflow research: survey current setup via `memory_search` and targeted vault reads, research external options with `web_search`, evaluate options against existing constraints such as OS, plugins, Git workflow, mobile access, and data ownership, then recommend the safest compatible workflow.
-- For Workboard operations: use `workboard_list` to inspect cards, `workboard_read` for details, `workboard_create` for new tasks, `workboard_link` for dependencies, and `workboard_comment` for added context.
+- For Workboard operations: use `workboard_list` to inspect cards, `workboard_stats` for board counts, `workboard_read` for details, `workboard_create` for new tasks, `workboard_link` for dependencies, and `workboard_comment` for added context.
+- For batch Workboard task creation: use the `handoff` skill to write complete SOPs, acceptance criteria, source links, verification steps, and clear done definitions into each card description.
 - For Workboard task execution: claim the card with `workboard_claim`, execute the task directly, release it with `workboard_release` if pausing or handing off, and do not spawn subagents unless explicitly requested or the task is too large for safe inline execution.
 - For structural changes (> 5 files): present plan for approval.
 
 ### Step 4 — Update Related Artifacts and Verify Status
 - Persist any dependent file updates such as outlines, summaries, project notes, or next-action lists.
 - Run the smallest meaningful verification: readback, diff, grep, lint, test, or artifact inspection.
-- Show diffs for file modifications.
-- Complete the claimed Workboard card with `workboard_complete`, including a concise summary and proof when available.
+- Show diffs for file modifications. If the diff is too large or rendering fails, fall back to a concise text summary of changed files, added/removed line counts, and key modifications instead of repeatedly retrying the same large diff.
+- Complete the claimed Workboard card with `workboard_complete`, including a concise summary, then attach `workboard_proof` when verification evidence is available.
 
 ### Step 5 — Report Status
 - Show what changed or what's active.
@@ -204,3 +222,13 @@ Use this workflow when the user asks to organize a multi-lecture, multi-section,
 4. **Checkpoint with version control** — After each lecture or logical batch, inspect the diff and preserve progress with the repository's approved Git workflow if commits were requested.
 5. **Handle extraction failures clearly** — If browser/CDP/network/platform access fails, report the exact failing step, avoid inventing transcript content, and pause until the access issue is resolved.
 6. **Report progress cadence** — Summarize completed lectures, changed files, remaining range, and any blockers before continuing to the next batch.
+
+### Period Review Workflow
+
+Use this workflow for weekly reviews, monthly reviews, inbox review days, or other period summaries.
+
+1. **Determine range** — Resolve the exact calendar range for the requested period and verify the target review file path.
+2. **Gather evidence** — Read daily notes, period notes, Workboard/card activity, project logs, and relevant task files inside the date range.
+3. **Synthesize outcomes** — Extract completed work, blocked items, decisions, lessons, emotional/energy patterns, and carry-over tasks without inventing missing events.
+4. **Draft or update review** — Follow the productivity vault review template or established PARA structure, preserving the author's voice and canonical tags.
+5. **Verify and report** — Re-read the changed review sections, show diff or fallback summary, and highlight next-period goals or carry-over items.

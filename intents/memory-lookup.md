@@ -20,6 +20,8 @@ Detected "general memory lookup" intent. The user wants past records or prior in
 - Use this intent for broad past recall without a narrow time window.
 - If memory is weak or missing, say so clearly.
 - Enforce scope boundaries: real-time device location, live GPS tracking, and future schedule or itinerary checks are action-oriented lookups, not memory recall.
+- Handle explicit save/record requests only when the primary action is to write memory; if the user bundles memory recording with unrelated external actions, record the memory item only and do not perform the unrelated action in this workflow.
+- Distinguish recall from execution: `上次翻譯到哪裡？` is memory lookup, but `你可以繼續翻譯了` is a command to resume work and should not be handled as memory lookup.
 
 ## Skills & Tools
 
@@ -40,6 +42,12 @@ Detected "general memory lookup" intent. The user wants past records or prior in
 - Read the most relevant memory file when more detail is needed:
   memory_get({ path: "<memory_file>" })
 
+- Append a new record, URL, or summary to today's daily memory note after reading the existing file:
+  edit({ path: "memory/YYYY-MM-DD.md", edits: [{ oldText: "<existing_section_or_tail>", newText: "<existing_section_or_tail>\n<new_memory_entry>" }] })
+
+- Create today's daily memory note when it does not exist:
+  write({ path: "memory/YYYY-MM-DD.md", content: "# YYYY-MM-DD\n\n<new_memory_entry>\n" })
+
 ## Response Strategy
 
 - Reformulate the user's request into a self-contained memory target when references are ambiguous.
@@ -47,24 +55,32 @@ Detected "general memory lookup" intent. The user wants past records or prior in
 - Use a permissive retrieval threshold for preferences, habits, routines, or personal facts.
 - Return the most relevant recorded memory first.
 - Treat recent, emotional, timeline, or comparison questions as separate intents.
+- If the user asks to save or record information, read the target memory file first, append the grounded entry, and confirm what was recorded.
+- If the user commands work to continue or resume, do not perform a memory lookup unless they specifically ask what was recorded about prior progress.
 - If the query requests real-time location tracking or future schedule lookup, say that it is outside memory recall scope and route to the appropriate live lookup workflow instead of guessing from unrelated memory.
 
 ## Concrete Workflow
 
 ```
-Step 1 → Step 2 → Step 3 → Step 4 → Step 5
-extract     semantic      validate      deep-read    synthesize
-keywords    search        results       + expand
+Step 1 → Step 2 → Step 3 → Step 4 → Step 5 → Step 6
+classify   extract     semantic     validate    deep-read    synthesize
+memory     keywords    search       results     + expand     or persist
+action
 ```
 
-### Step 1 — Extract Search Keywords
+### Step 1 — Classify Memory Action
+- If the user asks to save, remember, or record information, identify the target daily note, read the existing file if it exists, and continue to Step 6 for a write/update path.
+- If the user asks to recall, find, or look up past information, continue with semantic retrieval.
+- If the user commands a task to continue or resume, stop this workflow and handle the execution request instead.
+
+### Step 2 — Extract Search Keywords
 - Convert the user's natural language query into 3–5 CJK keywords, **nouns separated by spaces** (trigram optimization).
 - ❌ `查詢 Talos 的設定記錄` → ✅ `Talos 設定 紀錄`
 - ❌ `主人之前提過什麼旅行計畫` → ✅ `旅行 計畫 旅遊`
 - Extract entity names from `[[MEMORY.md]]` entries (people, projects, places): `Talos`, `GCP PCA`, `嘉義`.
 - If the query mentions a specific tool or project, use its canonical name (e.g., `Kubernetes` not `k8s 叢集管理`).
 
-### Step 2 — Semantic Search + HyDE Query Expansion
+### Step 3 — Semantic Search + HyDE Query Expansion
 
 **Basic mode** (single query sufficient):
 ```javascript
@@ -92,7 +108,7 @@ memory_search({
 - **Prefer semantic search** over `rg` for natural language memory content.
 - If semantic search returns 0 hits, fall back to `rg -i "<keyword1>|<keyword2>" memory/*.md` for text matching.
 
-### Step 3 — Validate Results + Adequacy Gate
+### Step 4 — Validate Results + Adequacy Gate
 
 **Adequacy checks**:
 - **Sparse data** (< 2 files, no `score ≥ 0.45` hit) → report "insufficient memory", ask user for time period or context.
@@ -105,7 +121,7 @@ memory_search({
 - If top result `score < 0.3`, broaden keywords (add synonyms) and search once more.
 - If still no hits, clearly tell the user "no relevant records found in memory" — never guess.
 
-### Step 4 — Deep Read + Structural Expansion
+### Step 5 — Deep Read + Structural Expansion
 - Use `memory_get` to read the full content of the 1–2 highest-scoring hits.
 - If the hit is `MEMORY.md`, use `memory_get({ path: "MEMORY.md", from: <line>, lines: <N> })` to read the relevant section.
 - If the hit is `memory/YYYY-MM-DD.md`, read the full daily file for complete context.
@@ -116,7 +132,8 @@ memory_search({
 - If Obsidian is not running, activate **semantic fallback**: search cross-date files for co-occurring entity keywords from the entry node.
 - Traversal depth limit: **2 hops** (no Depth 3), max 15 unique related files.
 
-### Step 5 — Synthesize Response
-- Synthesize the read content into a natural language reply, with source citations (e.g., `Source: memory/2026-04-08.md#L42`).
+### Step 6 — Synthesize or Persist Response
+- For lookup requests, synthesize the read content into a natural language reply, with source citations (e.g., `Source: memory/2026-04-08.md#L42`).
+- For save/record requests, append only grounded user-provided information to the target memory note, then confirm the saved scope.
 - If information spans multiple files, merge and label each segment with its source date.
 - **Never fabricate details** not present in memory. If a gap exists, explicitly say "Ani has no record of this part."

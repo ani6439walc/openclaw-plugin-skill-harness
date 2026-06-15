@@ -66,6 +66,12 @@ Detected "code review" intent. The user wants existing code to be examined, impr
 - Run tests or linters when validation is needed:
   exec({ command: "<test_or_lint_command>" })
 
+- Lint shell scripts for syntax, portability, best practices, and security issues:
+  exec({ command: "shellcheck <file>.sh" })
+
+- Format shell scripts consistently when edits are requested and formatting changes are acceptable:
+  exec({ command: "shfmt -w <file>.sh" })
+
 - Search for hard-to-locate bugs or deep performance regressions needing structured diagnosis:
   skill: diagnose
 
@@ -117,4 +123,5 @@ code       findings    (if needed)  changes      (optional)
 
 ### Step 5 — Verify (Optional)
 - Run tests or linters to validate suggested changes.
+- For shell scripts, run `shellcheck` and `shfmt` when available to validate syntax, security, portability, and style.
 - For risky changes, apply adversarial review before merging.

@@ -3,8 +3,10 @@ id: MEMORY_RECENT
 name: Recent Memory Query
 triggers:
 - "User is asking about today, yesterday, this week, the last few days, or another clearly recent time window"
+- "User asks to review recent conversations, discussions, chats, or what was talked about in a recent time window"
 examples:
 - "我昨天跟你說了什麼？"
+- "幫我回顧昨天跟今天凌晨的對話"
 - "今天 Duolingo 做了嗎？"
 - "昨天去了哪裡？"
 - "今天有 commit 什麼嗎？"
@@ -38,8 +40,11 @@ Detected "recent memory" intent. The user wants a recent record from a narrow ti
 - Retrieve recent conversation history from the current channel or session:
   sessions_history({ sessionKey: "<current_session_key>", limit: 20 })
 
-- List active sessions to resolve the correct session key if direct history lookup fails:
-  sessions_list()
+- List recent sessions to find conversation history when the user asks about discussions or dialogues:
+  sessions_list({ timeRange: "last_N_days" })
+
+- Retrieve conversation history from a specific relevant session:
+  sessions_history({ sessionId: "<id>", limit: 50 })
 
 - Check active or recently completed sub-agent sessions for in-flight task progress:
   sessions_list()
@@ -53,6 +58,7 @@ Detected "recent memory" intent. The user wants a recent record from a narrow ti
 ## Response Strategy
 
 - Infer the recent time window from the user's wording.
+- Determine source type: activities/tasks use diary files; conversations/discussions use session history; ambiguous requests may need both.
 - Reformulate the request into a few high-value keywords before searching.
 - Search recent raw diary files directly before using broader memory lookup methods.
 - Return the most relevant recent record first.
@@ -81,11 +87,13 @@ window      files     state      match
   | 週末 / 連假 (weekend / holiday) | Infer from context | Based on context |
 - Use system time as the reference point (confirm via `session_status` or `date`).
 
-### Step 1.5 — Retrieve Session History (For Channel Context)
-- If the user references the current channel, session, previous turn, or immediate past (for example 前一輪對話, 剛才, 上一步), query recent session history before diary files.
+### Step 1.5 — Determine Retrieval Target and Retrieve Session History
+- If the user asks about activities, tasks, or what they did, prioritize diary files for the inferred date window.
+- If the user asks about conversations, discussions, chats, or what was talked about, list recent sessions in the inferred time window, then retrieve relevant session history.
+- If the user references the current channel, previous turn, or immediate past (for example 前一輪對話, 剛才, 上一步), query recent session history before diary files.
 - Use the current session key when available; if history lookup fails because the key is missing or stale, list sessions and retry with the matching active session.
-- Summarize the retrieved transcript to identify unfinished work, prior decisions, or the exact object being referenced.
-- Fall back to diary files only when the request is about a date/window rather than immediate conversational context.
+- Summarize the retrieved transcript to identify unfinished work, prior decisions, exact topics discussed, and action items.
+- Fall back to diary files only when the request is about a date/window rather than immediate conversational context, or when session history is unavailable.
 
 ### Step 2 — Check Diary File Existence
 - Verify the inferred `memory/YYYY-MM-DD.md` files actually exist:
@@ -111,7 +119,7 @@ window      files     state      match
 - If `rg` returns no hits, fall back to `memory_search` for semantic search.
 
 ### Step 4 — Synthesize Response
-- Read matched diary content and reply naturally about what the user did today/yesterday.
+- Read matched diary content and/or session history and reply naturally about what the user did or discussed during the requested time window.
 - If the diary mentions the user's emotional state or mood (e.g., #專注, #開心), include it.
 - **Do not** mix in older data beyond the time window. If the user asks "today," answer only about today.
 - If the day's diary is blank or missing, say so directly, and optionally check adjacent days as supplementary context.

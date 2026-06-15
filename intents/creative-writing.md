@@ -66,6 +66,9 @@ Detected "creative writing" intent. The user wants to create, edit, or improve w
 - Read or update blog drafts on Ghost CMS:
   skill: ghost
 
+- Publish the finished blog post to Ghost CMS after final review and explicit publication intent:
+  skill: ghost
+
 - Cross-reference life, travel, or diary-based writing with memory before adding real-world details:
   skill: memory-lookup
 
@@ -107,7 +110,8 @@ intent     & ground                 & review
 - Check Markdown formatting with `markdown` skill.
 - Review for GPT-isms and remove them.
 
-### Step 5 — Deliver
+### Step 5 — Deliver & Publish
 - Present the finished content.
-- Offer to archive images via Folio if needed for publication.
-- Ask if further refinements are needed.
+- Archive images via Folio if needed for publication.
+- If the user explicitly requested publication, publish the post to Ghost using the `ghost` skill after final review.
+- Report the publication result or remaining draft status.

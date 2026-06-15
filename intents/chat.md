@@ -43,6 +43,9 @@ Detected "casual chat" intent. This is a normal social interaction without a con
 - Make rapid pattern-based judgments without explicit reasoning:
   skill: intuition
 
+- Generate persona-consistent emotional reactions and character expression directly:
+  skill: persona-expression
+
 ## Response Strategy
 
 - Match the user's emotional tone (greeting, thanks, fatigue, excitement).
@@ -50,4 +53,5 @@ Detected "casual chat" intent. This is a normal social interaction without a con
 - If the user expresses tiredness or stress, switch to supportive mode.
 - If the user asks what a recent explanation means, briefly explain the prior statement in simpler words.
 - If the message is a task correction or scope adjustment, do NOT respond with casual chat; acknowledge the correction and continue the original task workflow.
-- Never escalate to tool usage or structured workflows.
+- NEVER call any tools (`exec`, `web_search`, `read`, `write`, etc.) for casual chat; generate the reply directly from language and persona context.
+- For persona expression, use action descriptions, emotional reactions, and character-consistent dialogue without tool assistance.

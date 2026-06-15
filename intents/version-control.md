@@ -16,6 +16,7 @@ examples:
   - "再試一次 commit"
   - "重新 push"
   - "redo the last push"
+  - "commit push"
 ---
 
 Detected "version control" intent. The user wants to perform git operations such as commit, push, pull, branch management, or submodule updates.
@@ -24,14 +25,14 @@ Detected "version control" intent. The user wants to perform git operations such
 
 - Always check `git status` first to understand the current state.
 - Use `gaic` for standardized emoji-style commits when available.
-- Prefer `git add` with specific files instead of `git add .` to avoid unintended changes.
+- Prefer `git add` with specific files instead of `git add .` to avoid unintended changes, unless the user explicitly requests committing all current changes and status has been verified.
 - Verify staged changes with `git diff --cached --stat` before committing.
 - When `git status` shows unmerged paths, resolve conflicts before staging unrelated files or committing.
 - For workspaces with multiple repositories, detect all repos first and handle each independently.
 - For submodule updates, enter the submodule directory first before performing git operations.
 - Keep commit messages concise and follow Conventional Commit format with emoji.
 - Deliver changes incrementally to avoid giant diffs.
-- Record architectural decisions and migration rationale.
+- Do not attempt to fix code, rewrite files, or perform unrelated implementation work unless the user explicitly asks; keep the scope to the requested git operation.
 
 ## Skills & Tools
 
@@ -41,7 +42,7 @@ Detected "version control" intent. The user wants to perform git operations such
 - Structure git workflow for commits, branches, and conflicts:
   skill: git-workflow-and-versioning
 
-- Manage Gitea issues, PRs, and releases via tea CLI:
+- Manage Gitea issues, PRs, and releases via tea CLI only when PR/release creation is explicitly requested:
   skill: gitea
 
 - Check repository status:
@@ -49,6 +50,9 @@ Detected "version control" intent. The user wants to perform git operations such
 
 - Stage specific files:
   exec({ command: "git add <file1> <file2>" })
+
+- Stage all verified changes only when explicitly requested:
+  exec({ command: "git add ." })
 
 - Verify staged changes before committing:
   exec({ command: "git diff --cached --stat" })
@@ -58,9 +62,11 @@ Detected "version control" intent. The user wants to perform git operations such
   edit({ path: "<conflicted_file>", edits: [{ oldText: "<conflict_block>", newText: "<resolved_content>" }] })
   exec({ command: "git add <conflicted_file>" })
 
-- Commit changes with standardized messages:
+- Generate AI-assisted standardized commit messages:
   exec({ command: "gaic" })
-  exec({ command: "git commit -m "<type>(<scope>): <message>"" })
+
+- Commit changes with an explicit message when needed:
+  exec({ command: "git commit -m \"<type>(<scope>): <message>\"" })
 
 - Push to remote:
   exec({ command: "git push origin <branch>" })
@@ -102,7 +108,7 @@ repos    status    files               & push
 - For submodule problems, enter the affected submodule and resolve its state independently, then return to the parent repository and re-check status.
 
 ### Step 2 — Stage Files & Resolve Conflicts
-- Use `git add` with specific files (never `git add .`).
+- Use `git add` with specific files by default; use `git add .` only when the user explicitly requested all current changes and `git status` has been inspected.
 - If `git status` shows unmerged paths or conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`):
   1. Use `read` to inspect every conflicted file.
   2. Use `edit` to resolve the conflict manually and remove markers.
