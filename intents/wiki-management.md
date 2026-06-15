@@ -26,6 +26,8 @@ Detected "wiki management" intent. The user wants to search, read, create, updat
 - Use `[[Wikilinks]]` for internal vault connections, `[text](url)` for external URLs only.
 - Avoid destructive renames unless you also have a link-repair plan.
 - Distinguish the managed memory wiki vault (`wiki/`) from raw/external wiki directories such as subagent `llm-wiki` workspaces; for raw directories, use filesystem inspection instead of managed vault tools.
+- When archiving, ingesting, or reorganizing source files into the managed wiki, ALWAYS use the wiki-maintainer ingest → compile → lint pipeline so original source content is preserved before deletion.
+- If source files were already deleted, check git history and restore them before running the ingest pipeline.
 
 ## Skills & Tools
 
@@ -41,6 +43,9 @@ Detected "wiki management" intent. The user wants to search, read, create, updat
 - Inspect exact wiki page content before editing or citing:
   wiki_get({ lookup: "<page_path_or_id>" })
 
+- Retrieve wiki page content with the exact accepted shape only; do not pass unsupported fields such as `limit` or `format`:
+  wiki_get({ lookup: "<page_path_or_id>" })
+
 - Create or update wiki synthesis / metadata:
   wiki_apply({ op: "create_synthesis", title: "<title>", body: "<content>", sourceIds: ["<source_id>"] })
 
@@ -48,6 +53,9 @@ Detected "wiki management" intent. The user wants to search, read, create, updat
   wiki_lint()
 
 - Ingest a local file into `sources/`, compile vault, lint for issues (never manually move files):
+  skill: wiki-maintainer
+
+- Preserve original source files through the wiki-maintainer pipeline before deleting source folders:
   skill: wiki-maintainer
 
 - Probe Obsidian CLI status and use Obsidian helpers (`status`, `search`, `open`, `daily`):
@@ -118,3 +126,10 @@ status     wiki        sources      content      or ingest    & compile
 - Run `wiki_lint()` to check for contradictions, provenance gaps, and open questions.
 - Compile the vault with `obsidian-vault-maintainer` if needed.
 - Fix any issues found during linting.
+
+### Step 7 — Reinforce Synthesis Evidence
+
+- Scan for synthesis pages missing evidence or `sourceIds` using wiki tools or narrow filesystem inspection.
+- Retrieve each affected page with `wiki_get({ lookup: "<page_path_or_id>" })` only.
+- Add evidence with `wiki_apply`, including appropriate `sourceIds` or claim evidence references rather than freehand provenance.
+- Run `wiki_lint` after updates to confirm structural integrity and provenance health.

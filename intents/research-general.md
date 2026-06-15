@@ -12,12 +12,18 @@ examples:
   - "解釋區塊鏈的共識機制"
   - "碳捕獲是怎麼運作的？"
   - "第一性原理是什麼？"
+  - "好幫我都換一下"
+  - "全部都幫我改"
+  - "其他的也一樣"
+  - "對，幫我把剩下的都處理掉"
 ---
 
 Detected "general research" intent. The user wants factual or explanatory information supported by external sources.
 
 ## Guidelines
 
+- Directly answer the user's explicit factual question first; do not ignore the current query to react to previous-turn context.
+- If no image or media is attached in the current turn, do not generate image-reaction text or pretend to see a photo, screenshot, or video.
 - Do not answer factual questions from memory alone.
 - Prefer authoritative and directly relevant sources.
 - Keep the answer accurate, concise, and source-backed.
@@ -108,3 +114,12 @@ sources    content     findings     & deliver
 - Include source links for factual claims.
 - Mention time sensitivity if information may change.
 - Keep the answer accurate, concise, and source-backed.
+
+### Step 5 — Batch Link or Reference Conversion
+
+Use this continuation workflow when prior research identified a repeated conversion pattern, such as replacing map links or equivalent references across a document.
+
+1. Read the target Markdown file and identify all matching source links or placeholders.
+2. Research replacements for each unique item with `web_search` or `web_fetch`, caching results to avoid duplicate lookup.
+3. Apply replacements with `edit` using unique `oldText`; if a match is duplicated, include surrounding lines to make the replacement unambiguous.
+4. Read back or diff the target file and summarize replacements, skipped items, and unresolved links.

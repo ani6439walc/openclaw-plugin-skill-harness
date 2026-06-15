@@ -4,17 +4,24 @@ name: Content Summary / Transcript Query
 triggers:
   - "User wants a provided source to be summarized, condensed, or transcribed, such as a URL, article, video, podcast, PDF, transcript, or local file"
   - "User wants to convert a book, document, or PDF into a structured agent skill, extracting frameworks and mental models"
+  - "User wants to take notes, create study materials, or extract key points from educational content such as course lessons, lectures, tutorials, or textbooks"
 examples:
   - "這個 YouTube 影片在講什麼？"
   - "幫我聽寫這段影片"
   - "總結這集 podcast"
   - "這個網址的內容幫我整理一下"
+  - "幫我做這堂課的筆記"
+  - "L59-L61 幫我整理重點"
+  - "把這段課程內容做成學習筆記"
+  - "幫我繼續整理 PostgreSQL 課程筆記"
 ---
 
 Detected "summarization" intent. The user wants a provided source to be condensed, explained, or transcribed.
 
 ## Guidelines
 
+- This intent covers processing existing educational content into notes or summaries; original content creation belongs to `CREATIVE_WRITING`, and storing finished notes in a vault is a downstream file or wiki action.
+- Educational note-taking from course materials, lectures, or lessons is a form of content condensation and belongs here, regardless of whether the source is a video, transcript, textbook, or slide deck.
 - Focus on the content of the provided source.
 - Preserve the original meaning while reducing length or complexity.
 - Adjust the level of detail to match the user's request.

@@ -19,6 +19,7 @@ Detected "open-source docs" intent. The user wants version-sensitive information
 - Keep the answer source-backed and specific to the open-source project in question.
 - If `web_fetch` fails (404, blocked, timeout) or returns incomplete content, fall back to `web_search` to find alternative documentation URLs, release pages, official blog posts, or mirrors.
 - If using `cx` on a GitHub repository, shallow clone it into a temporary workspace subdirectory first to avoid consuming unnecessary disk space.
+- When the user names a specific agent framework, SDK, or tool, verify the exact project identity before fetching docs. Do not assume a similarly named or co-installed framework is the target; confirm from the user wording, official repo, or namespace.
 
 ## Skills & Tools
 
@@ -46,6 +47,9 @@ Detected "open-source docs" intent. The user wants version-sensitive information
 - Search for documentation URLs, release notes, GitHub releases, or supplementary project information when direct fetching fails or more context is needed:
   web_search({ query: "<project> <version> documentation release notes" })
 
+- Search the web to disambiguate misspelled, vague, or colloquial library names and find the official repository or documentation URL:
+  web_search({ query: "<library_name> official github repo or docs" })
+
 - Shallow clone a GitHub repository into a temporary workspace subdirectory before source inspection:
   exec({ command: "git clone --depth 1 <repo_url> ./.tmp/<repo_name>" })
 
@@ -65,8 +69,9 @@ identify   resolve     read docs    source       synthesize
 library    docs                        inspect
 ```
 
-### Step 1 — Identify Library & Version
+### Step 1 — Identify & Disambiguate Library
 - Determine the library/framework name from the user's question.
+- If the name is misspelled, vague, colloquial, or close to another local framework/tool name, use web search or official namespace clues to verify the exact project before proceeding.
 - Check if a specific version is mentioned.
 - Read local dependency/lock files if version pinning is needed.
 

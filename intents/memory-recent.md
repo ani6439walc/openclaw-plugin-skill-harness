@@ -16,10 +16,11 @@ Detected "recent memory" intent. The user wants a recent record from a narrow ti
 
 - Treat the latest user message as the primary retrieval target.
 - Use recent conversation only to disambiguate what the latest message refers to.
-- Prefer recent raw diary files over broad semantic retrieval.
+- Prefer immediate session/channel history for questions about the current channel, previous turn, or "剛剛" context; prefer recent raw diary files for calendar-based day/week questions.
 - Focus on explicit time cues from the user's question.
 - Do not guess dates or fabricate missing entries.
 - If recent raw records are missing or incomplete, say so clearly.
+- When the user asks about progress, status, or where an in-flight task stands, treat active workflow state (sub-agent sessions, recent file edits, and workspace artifacts) as the primary source rather than diary files.
 
 ## Skills & Tools
 
@@ -34,6 +35,21 @@ Detected "recent memory" intent. The user wants a recent record from a narrow ti
 - Read the relevant recent memory note when more detail is needed:
   memory_get({ path: "memory/YYYY-MM-DD.md" })
 
+- Retrieve recent conversation history from the current channel or session:
+  sessions_history({ sessionKey: "<current_session_key>", limit: 20 })
+
+- List active sessions to resolve the correct session key if direct history lookup fails:
+  sessions_list()
+
+- Check active or recently completed sub-agent sessions for in-flight task progress:
+  sessions_list()
+
+- Inspect recent workspace file state to infer completed artifacts:
+  ```bash
+  ls -lt <project-dir> | head -20
+  stat <target-file>
+  ```
+
 ## Response Strategy
 
 - Infer the recent time window from the user's wording.
@@ -46,9 +62,9 @@ Detected "recent memory" intent. The user wants a recent record from a narrow ti
 ## Concrete Workflow
 
 ```
-Step 1 → Step 2 → Step 3 → Step 4
-infer       check         keyword       synthesize
-window      files         match
+Step 1 → Step 2 → Step 2.5 → Step 3 → Step 4
+infer       check     progress   keyword   synthesize
+window      files     state      match
 ```
 
 ### Step 1 — Infer Time Window
@@ -65,6 +81,12 @@ window      files         match
   | 週末 / 連假 (weekend / holiday) | Infer from context | Based on context |
 - Use system time as the reference point (confirm via `session_status` or `date`).
 
+### Step 1.5 — Retrieve Session History (For Channel Context)
+- If the user references the current channel, session, previous turn, or immediate past (for example 前一輪對話, 剛才, 上一步), query recent session history before diary files.
+- Use the current session key when available; if history lookup fails because the key is missing or stale, list sessions and retry with the matching active session.
+- Summarize the retrieved transcript to identify unfinished work, prior decisions, or the exact object being referenced.
+- Fall back to diary files only when the request is about a date/window rather than immediate conversational context.
+
 ### Step 2 — Check Diary File Existence
 - Verify the inferred `memory/YYYY-MM-DD.md` files actually exist:
   ```bash
@@ -72,6 +94,13 @@ window      files         match
   ```
 - If a file does not exist, clearly state "no diary record for that day" — do not fabricate.
 - If the file exists but is small (< 500 bytes), note "the record for that day is brief."
+
+### Step 2.5 — Detect In-Flight Task Progress
+- If the user's question implies an ongoing workflow visible in the current session (for example 進度到哪了, 做到哪了, 完成了嗎):
+  1. Inspect active or recent sessions with `sessions_list()` when available.
+  2. Cross-reference relevant workspace files with `ls -lt` and `stat` to confirm produced artifacts.
+  3. Synthesize a per-item status list (✅ done / ⚠️ partial / ⬜ pending) from actual session and file state.
+  4. Skip diary search unless no active workflow evidence exists.
 
 ### Step 3 — Keyword Match (rg Fallback Search)
 - If the user mentions a specific topic (e.g., Duolingo, coffee, meeting), use `rg` to search within the relevant date's diary:

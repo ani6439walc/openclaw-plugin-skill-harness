@@ -21,6 +21,7 @@ Detected "skill management" intent. The user wants to vet, audit, clean, analyze
 
 ## Guidelines
 
+- When creating, scaffolding, or editing a skill directly, restrict all file read/write operations strictly to the target skill directory (for example `~/.openclaw/skills/<skill-name>/` or an explicitly requested workspace skill path). Never drift into `darling/`, `wiki/`, or unrelated workspace files during skill creation.
 - Always vet skills before installation — security-first approach.
 - Run clawscan or skill-vetter before installing any third-party skill.
 - When cleaning: show what would be removed before deleting.
@@ -60,7 +61,7 @@ Detected "skill management" intent. The user wants to vet, audit, clean, analyze
 - Convert a finalized draft into a local file only when direct file editing is explicitly requested:
   write({ path: "/home/ani/.openclaw/workspace/skills/<skill-name>/SKILL.md", content: "<skill markdown>" })
 
-- Create, edit, audit, tidy, validate, or restructure AgentSkills and SKILL.md files:
+- Create, edit, audit, tidy, validate, restructure, or enrich AgentSkills and SKILL.md files with domain-specific knowledge:
   skill: skill-creator
 
 - Create, update, revise, list, inspect, apply, reject, or quarantine Skill Workshop proposals:
@@ -82,6 +83,8 @@ Detected "skill management" intent. The user wants to vet, audit, clean, analyze
 - For durable skill registration/workshop requests, use `skill_workshop` directly; do not simulate proposal lifecycle with shell edits or unsupported actions.
 - Execute the appropriate skill with the target path or name.
 - For optimization cycles, audit first, apply targeted edits, then re-check the weakest dimensions or failure modes.
+- For domain knowledge enrichment, read the existing skill first, extract source-backed domain content, then integrate only durable patterns, examples, constraints, or references that belong in the skill.
+- When creating or editing skills with multiple file operations, always disclose tool errors or partial failures; do not report blanket success if any step failed.
 - Report findings concisely — what was found, what action is recommended.
 
 ## Concrete Workflow
@@ -97,6 +100,12 @@ Detected "skill management" intent. The user wants to vet, audit, clean, analyze
 - Draft `SKILL.md` with concise frontmatter, progressive disclosure, and long references moved out of the main file.
 - For durable proposal workflows, call `skill_workshop({ action: "create", name: "<skill-name>", description: "<short purpose>", proposal_content: "<SKILL.md markdown>" })` instead of writing proposal files manually.
 - Use `write` for live workspace skill files only when the user explicitly requested direct file creation or editing.
+
+### Step 2.5 — Enrich Existing Skill with Domain Knowledge
+- Read the target `SKILL.md` and relevant reference files to understand current scope, structure, and existing domain notes.
+- Extract domain knowledge from verified sources such as course transcripts, official documentation, reference material, or user-provided examples.
+- Integrate only reusable patterns, examples, constraints, and references that improve future skill execution while keeping `SKILL.md` lean.
+- Validate that frontmatter, progressive disclosure, and reference paths remain intact after edits.
 
 ### Step 3 — Skill Workshop Lifecycle
 - Before approving or rejecting, discover the pending proposal with `skill_workshop({ action: "list", query: "<skill-name>", status: "pending" })` or `skill_workshop({ action: "inspect", proposal_id: "<proposal-id>" })`.
@@ -125,4 +134,32 @@ For each confirmed issue or weak dimension:
 - Re-run reference search for the old skill name and inspect the git diff before reporting completion.
 
 ### Step 6 — Finalize & Report
-When the quality threshold is met, summarize the before/after results, affected files, and remaining risks. Do not commit unless the user explicitly requested a commit.
+When the quality threshold is met, summarize the before/after results, affected files, remaining risks, and any tool errors encountered. Clearly distinguish full success from partial success, and do not commit unless the user explicitly requested a commit.
+
+### Step 2.1 — Scaffold Live Skill Directory
+Use only when the user explicitly asks for direct live-file skill creation instead of a Skill Workshop proposal.
+
+- Confirm the skill name, target directory, and initial triggers before creating files.
+- Create only the target directory, usually `~/.openclaw/skills/<skill-name>/`, with `mkdir -p`.
+- Generate a lean `SKILL.md` from scratch if no template exists; do not search unrelated vaults for templates.
+- Minimal live-file skeleton:
+
+```markdown
+---
+name: <skill-name>
+description: <short purpose>
+---
+
+# <Skill Name>
+
+Use this skill when <activation condition>.
+
+## Workflow
+1. <first step>
+2. <second step>
+
+## Validation
+- <how to verify>
+```
+
+- Validate frontmatter and referenced support paths before reporting completion.

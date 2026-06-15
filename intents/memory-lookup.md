@@ -2,7 +2,7 @@
 id: MEMORY_LOOKUP
 name: General Memory Lookup
 triggers:
-- "User is asking about past events, records, preferences, habits, or prior discussions without a clearly recent, comparative, emotional, or timeline-oriented focus"
+- "User is asking about past events, records, preferences, habits, or prior discussions without a clearly recent, comparative, emotional, or timeline-oriented focus. The query must be about historical information, not real-time device status or future plans."
 examples:
 - "之前有聊過那個想法嗎？"
 - "我在那家餐廳通常都點什麼？"
@@ -19,6 +19,7 @@ Detected "general memory lookup" intent. The user wants past records or prior in
 - Search recorded memory instead of guessing.
 - Use this intent for broad past recall without a narrow time window.
 - If memory is weak or missing, say so clearly.
+- Enforce scope boundaries: real-time device location, live GPS tracking, and future schedule or itinerary checks are action-oriented lookups, not memory recall.
 
 ## Skills & Tools
 
@@ -46,6 +47,7 @@ Detected "general memory lookup" intent. The user wants past records or prior in
 - Use a permissive retrieval threshold for preferences, habits, routines, or personal facts.
 - Return the most relevant recorded memory first.
 - Treat recent, emotional, timeline, or comparison questions as separate intents.
+- If the query requests real-time location tracking or future schedule lookup, say that it is outside memory recall scope and route to the appropriate live lookup workflow instead of guessing from unrelated memory.
 
 ## Concrete Workflow
 

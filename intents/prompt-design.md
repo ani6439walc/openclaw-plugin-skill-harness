@@ -29,6 +29,9 @@ Detected "prompt design" intent. The user wants help designing or refining promp
 - For large Markdown files (>200 lines), use `treemd` skill first to survey structure before reading.
 - For code/plugin files, use `cx overview` first, then drill into symbols with `cx definition`.
 - Understand the scope boundary: what does this intent/skill own vs what does it delegate.
+- **Consolidation-first principle**: when auditing or designing intents, first evaluate whether existing intents can absorb the new scope through trigger/example expansion before proposing a new standalone intent.
+- **Thin routing layer**: intents are minimal routing boundaries, not comprehensive skill catalogs; related skills can share one intent when their triggers or execution context overlap.
+- **Fragmentation check**: before recommending new intents, explicitly document why consolidation is or is not sufficient.
 - Keep triggers specific enough to avoid false matches, broad enough to capture natural language variations.
 - Examples should cover both Chinese and English, casual and formal phrasings.
 - Boundaries over overlaps: when two intents could both match, tighten triggers rather than relying on body-text disclaimers.

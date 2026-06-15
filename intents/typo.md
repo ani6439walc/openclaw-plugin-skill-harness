@@ -9,6 +9,11 @@ examples:
   - "wj/6u ek72;3042k7"
   - "can u hlpe me fix thsi"
   - "看看 git 撞態"
+  - "明天去"
+  - "我想吃"
+  - "幫我"
+  - "yesterday I went to the"
+  - "可以幫我查一下"
 ---
 
 Detected "typo" intent. The user's message likely contains misspellings or damaged text that should be interpreted before responding.

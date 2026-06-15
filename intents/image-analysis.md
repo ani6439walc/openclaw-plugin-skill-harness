@@ -21,12 +21,15 @@ Detected "image analysis" intent. The user wants visual content to be examined, 
 
 ## Guidelines
 
+- For attached media files such as `media://inbound/...`, if `pdf` or `image` fails with "Local media file not found" or "not under an allowed directory", retry with the exact provided media URI or a verified accessible local path within the workspace; do not invent filesystem paths.
 - Use the `image` tool for a single image, or `images` for multiple (up to 20).
 - For PDFs, use the `pdf` tool instead (supports page range selection).
 - Provide a clear, specific prompt to the image model describing what to look for.
 - Do not answer visual questions from memory or assume image contents without running the tool.
 - For diagrams and architecture charts, focus on structure, relationships, and key entities.
 - For screenshots of errors/logs, extract the exact text and explain the issue.
+- When visual analysis needs real-world context, such as identifying people, places, or current events, use `web_search` to supplement visual findings after extracting stable visual clues.
+- If `web_search` fails or times out, retry at most twice with simpler keywords; if it still fails, proceed with available visual information or report the search limitation clearly.
 - When persisting extracted data to files, always read the target file first before using `edit`; exact replacement text must match current file content including whitespace.
 
 ## Skills & Tools
@@ -37,11 +40,12 @@ Detected "image analysis" intent. The user wants visual content to be examined, 
 - Analyze multiple images (up to 20):
   image({ images: ["<path1>", "<path2>"], prompt: "<what_to_look_for>" })
 
-- Analyze a PDF (supports page ranges):
-  pdf({ pdf: "<path_or_url>", prompt: "<what_to_extract>", pages: "1-5" })
+- Analyze a PDF (supports page ranges). Use the exact media URI from the attachment or a verified allowed local path:
+  pdf({ pdf: "<media_uri_or_allowed_local_path>", prompt: "<what_to_extract>", pages: "1-5" })
 
-- For error screenshots, search the exact error text for known issues:
-  web_search({ query: "<extracted_error_text>" })
+- For error screenshots, people, places, events, or other real-time context, search relevant extracted keywords:
+  web_search({ query: "<visual_context_or_error_text>" })
+  # Limit retries to 2 if the tool times out or fails.
 
 - For diagrams or architecture charts, cross-reference with codebase structure:
   skill: cx
@@ -50,7 +54,7 @@ Detected "image analysis" intent. The user wants visual content to be examined, 
 
 - Identify the type of visual content (single image, multiple images, PDF, error screenshot, diagram).
 - Run the appropriate tool (`image`, `images`, or `pdf`).
-- For error screenshots: extract the error text, then search for known issues.
+- For error screenshots or real-world visual context: extract stable keywords, then search once or twice for known issues or current context.
 - Present findings clearly with source context.
 
 ## Concrete Workflow

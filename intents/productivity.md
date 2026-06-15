@@ -5,6 +5,8 @@ triggers:
   - "User is asking to view, create, update, or manage tasks, projects, goals, habits, kanban cards, or next-action items in the productivity vault (darling/)"
   - "User wants to check current task status, upcoming deadlines, active projects, goal progress, or request a weekly/monthly review, inbox triage, or vault audit"
   - "User asks where to place, organize, move, or structure files and content within the productivity vault (darling/), including vault folder conventions and organization rules"
+  - "User wants to resume, continue, or pick up unfinished tasks, projects, or workflows from a previous session or context"
+  - "User asks to review recent conversation or context specifically to continue executing pending actions"
 examples:
   - "今天有什麼任務"
   - "看看 kanban 上有幾個 active project"
@@ -15,12 +17,18 @@ examples:
   - "這個 PDF 放在哪個資料夾比較好？按照 vault 的規範"
   - "幫我下載這個 PDF 存到 productivity 然後建一個任務之後翻譯"
   - "幫我找 iPhone 上同步 Obsidian 的方式，並評估哪個最適合我的 vault workflow"
+  - "接續剛剛未完成的事情繼續執行"
+  - "review 一下剛剛的對話，然後繼續做"
+  - "幫我繼續上次沒做完的任務"
+  - "看看 workboard 有什麼要接著處理的"
 ---
 
 Detected "productivity" intent. The user is interacting with the productivity vault (darling/) for task management, project tracking, goal monitoring, reviews, or organizational workflows.
 
 ## Guidelines
 
+- Keep Kanban boards scope-aware: identify whether the target board is global, project-specific, review-specific, or Workboard-backed before reading or moving cards.
+- When the user asks to resume unfinished work, review recent context only enough to identify pending actions, then continue the task workflow with verified files, Workboard cards, or vault artifacts.
 - Before any operation, read `darling/AGENTS.md` to understand the vault's structure, rules, and SOPs.
 - This intent covers operations on the live productivity vault at `darling/`.
 - It does NOT cover retrieving past events from memory — use a separate memory intent for that.
@@ -81,6 +89,12 @@ Detected "productivity" intent. The user is interacting with the productivity va
 - Preserve incremental progress with safe branch, diff, and commit practices when the project lives in Git:
   skill: git-workflow-and-versioning
 
+- Retrieve git commit history from repositories to enrich productivity artifacts:
+  skill: version-control
+
+- Access internal infrastructure services such as Gitea or Argo CD via CLI when direct web fetching is blocked:
+  skill: infra-management
+
 - Query Workboard boards, status counts, task cards, and dependency chains:
   workboard_boards()
   workboard_list({ status: "ready", limit: 10 })
@@ -113,6 +127,7 @@ SOPs       operation   or claim     status
 ```
 
 ### Step 1 — Read Vault SOPs & Structure
+- Identify the target Kanban board(s) and their specific scope, such as global vs. project-specific, before merging or moving items across boards.
 - Read `darling/AGENTS.md` for vault rules and specific SOPs before any productivity operation.
 - For named routines such as weekly review, monthly review, inbox triage, kanban cleanup, or vault audit, follow the matching SOP in `darling/AGENTS.md` instead of inventing a new sequence.
 - Survey target file structure with `treemd` if the file is large.
@@ -127,7 +142,13 @@ SOPs       operation   or claim     status
 - Research: workflow improvements, third-party integrations, sync methods, plugin choices, or tool evaluations for the productivity system.
 - Status checks: note the user's stated belief such as "should be done" or "already cleared", compare file and artifact evidence against it, and lead with any discrepancy before proceeding.
 
-### Step 2.5 — Verify Completion Status
+### Step 2.5 — Enrich with External Data (When Applicable)
+- For kanban cards or project notes that reference code repositories, inspect recent commit history, branches, or PRs before updating the productivity artifact.
+- If `web_fetch` cannot access an internal or private URL, fall back to authenticated CLI, git, SSH, or browser-based access rather than treating the source as unavailable.
+- Extract only relevant commit messages, dates, authors, and changed components; synthesize them into task/project context without dumping raw logs.
+- Cite the repository path, command used, or verified source in the updated note when useful.
+
+### Step 2.6 — Verify Completion Status
 - For tasks marked in progress or done, inspect the actual work product (notes file, code commit, document, or deliverable) when available.
 - When the user asks about file structure, item count, section outline, or completeness, run `treemd <target-file>` or an equivalent outline command before drawing conclusions.
 - Compare counted headings, questions, sections, or deliverable artifacts against the user's expectation and the task tracker.
@@ -135,6 +156,7 @@ SOPs       operation   or claim     status
 - Report the verified status, not just the claimed kanban or Workboard status.
 
 ### Step 3 — Execute Safely, Delegate, or Claim Workboard Task
+- Respect board boundaries during reads and writes; do not merge separate boards, scopes, or workflows unless the user explicitly asked for consolidation.
 - For reads: report active items, due dates, blocked items concisely.
 - For writes: preserve author's voice, use canonical tags.
 - For delegated bulk work: provide the sub-agent with exact file paths, relevant excerpts, acceptance criteria, and required verification; record the task as in progress or delegated when the vault workflow tracks execution state.

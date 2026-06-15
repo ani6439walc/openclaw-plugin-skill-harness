@@ -49,6 +49,9 @@ Detected "calendar & scheduling" intent. The user wants to manage events, remind
 - Add attendee and send calendar invitation:
   exec({ command: "gog calendar update primary <eventId> --add-attendee \"<email>\" --send-updates all" })
 
+- Update calendar event details such as date, time, or summary:
+  exec({ command: "gog calendar update primary <eventId> --start \"<ISO>\" --end \"<ISO>\" [--summary \"...\"]" })
+
 - List calendar events:
   exec({ command: "gog calendar list primary --from <date> --to <date>" })
 
@@ -77,6 +80,7 @@ classify  execute     confirm      report
 
 ### Step 2 — Execute
 - Calendar: use `gog` CLI commands (list, create, update).
+- For updates: first list or otherwise identify the target event ID, then run `gog calendar update primary <eventId>` with the requested fields.
 - Reminder: use `cron` tool with appropriate schedule kind.
 - Add attendees with `--add-attendee` and `--send-updates all`.
 
