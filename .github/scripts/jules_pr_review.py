@@ -260,6 +260,14 @@ def main():
             except Exception as e:
                 log(f"Could not check activities: {e}")
             break
+            try:
+                activities = get_jules_activities(session_name)
+                if has_complete_review(activities):
+                    log("Review detected in activities — exiting immediately")
+                    early_exit = True
+            except Exception as e:
+                log(f"Could not check activities: {e}")
+            break
 
         # Early exit: if IN_PROGRESS and review already complete, don't wait
         if state == "IN_PROGRESS":
