@@ -8,7 +8,12 @@ import type {
 import type { ReviewSnapshot, ReviewState } from "./evolution-types.js";
 import matter from "gray-matter";
 import { logger } from "../api.js";
-import { pluginRoot, fileExists, readJsonFile, safeWriteJson } from "./file-utils.js";
+import {
+  pluginRoot,
+  fileExists,
+  readJsonFile,
+  safeWriteJson,
+} from "./file-utils.js";
 
 const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const RESERVED_SESSION_FILENAMES = new Set(["stats.json", "evolution.json"]);

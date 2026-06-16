@@ -2,7 +2,12 @@ import * as path from "node:path";
 import { logger } from "../api.js";
 import type { SessionState } from "./session-tracker.js";
 import type { IntentDefinition } from "./types.js";
-import { pluginRoot, fileExists, readJsonFile, safeWriteJson } from "./file-utils.js";
+import {
+  pluginRoot,
+  fileExists,
+  readJsonFile,
+  safeWriteJson,
+} from "./file-utils.js";
 
 const STATS_FILENAME = "stats.json";
 const DAY_MS = 24 * 60 * 60 * 1000;

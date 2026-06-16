@@ -97,7 +97,11 @@ export class BacklogWriter {
       backlog.updatedAt = nowIso;
       backlog.processedEvents[eventId] = nowIso;
       const validated = EvolutionBacklogSchema.parse(backlog);
-      return safeWriteJson(backlogPath, validated, "failed to write evolution backlog");
+      return safeWriteJson(
+        backlogPath,
+        validated,
+        "failed to write evolution backlog",
+      );
     } catch (err) {
       logger.warn("failed to update evolution backlog", {
         error: err,
