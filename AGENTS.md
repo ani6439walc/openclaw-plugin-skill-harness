@@ -43,478 +43,137 @@ skills/                    # Plugin skills
 dist/                      # Compiled output
 ```
 
-## Architecture
+> 架構圖、模組職責、Hook 流程、配置說明詳見 [README.md](./README.md)
 
-```mermaid
-graph TB
-    subgraph OpenClaw Runtime
-        User[User Message]
-        Agent[Main Agent]
-    end
-
-    subgraph Intention Hint Plugin
-        subgraph Hook Entry Point
-            BPB[before_prompt_build Hook]
-        end
-
-        subgraph Intent Classification
-            Loader[Intent Loader<br/>loads intents/*.md]
-            Catalog[Intent Catalog]
-            Subagent[Intent Subagent<br/>Classifies intent]
-            Prompt[Prompt Builder<br/>Pure function]
-            Parser[Result Parser<br/>JSON tolerant]
-        end
-
-        subgraph Session Management
-            Tracker[Session Tracker<br/>JSON persistence]
-            Sessions[(sessions/*.json)]
-        end
-
-        subgraph Self-Evolution Pipeline
-            Aggregator[Stats Aggregator<br/>sessions/stats.json]
-            Triggers[Trigger Checker<br/>6 trigger types]
-            Review[Review Subagent<br/>Tool-free analysis]
-            Queue[Review Queue<br/>Serializes reviews]
-            Backlog[Backlog Writer<br/>sessions/evolution.json]
-        end
-
-        subgraph Lifecycle
-            AgentEnd[agent_end Hook]
-            ToolCall[after_tool_call Hook]
-            SessionEnd[session_end Hook]
-        end
-    end
-
-    User -->|message| BPB
-    BPB -->|1. check| Tracker
-    Tracker -->|load| Sessions
-    BPB -->|2. extract| Subagent
-    Loader -->|load| Catalog
-    Subagent -->|query| Catalog
-    Subagent -->|classify| Prompt
-    Prompt -->|build| Subagent
-    Subagent -->|parse| Parser
-    Parser -->|intent + confidence| Tracker
-    Tracker -->|save| Sessions
-    Tracker -->|return| BPB
-    BPB -->|inject hint| Agent
-
-    AgentEnd -->|track| Aggregator
-    Aggregator -->|stats| Sessions
-    AgentEnd -->|check| Triggers
-    Triggers -->|fire| Review
-    Review -->|queue| Queue
-    Queue -->|process| Backlog
-    Backlog -->|persist| Sessions
-
-    ToolCall -->|record| Tracker
-    SessionEnd -->|cleanup| Sessions
-    SessionEnd -->|retention| Sessions
-```
-
-### Module Responsibilities
-
-| Module | Purpose |
-|--------|---------|
-| `plugin.ts` | Plugin entry point, registers hooks on OpenClaw lifecycle events |
-| `hooks.ts` | Event handlers for prompt building, tool/agent tracking, and session cleanup |
-| `subagent.ts` | Runs the intention classification sub-agent with model selection |
-| `intent-loader.ts` | Loads and catalogs intent definitions from YAML-frontmatter `.md` files |
-| `file-utils.ts` | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution |
-| `constants.ts` | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header |
-| `types.ts` | All shared type definitions for plugin, config, intent, result, and turn shapes |
-| `evolution-types.ts` | Shared types for Self-Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource |
-| `session-tracker.ts` | Persist and clean up session data in `sessions/` JSON files |
-| `stats-aggregator.ts` | Aggregate idempotent runtime usage statistics into `sessions/stats.json` |
-| `trigger-checker.ts` | Detect six configurable Self-Evolution triggers from completed turns |
-| `review-subagent.ts` | Build trigger-specific review prompts and run the tool-free review sub-agent |
-| `review-queue.ts` | Serialized promise queue for background evolution reviews |
-| `backlog-writer.ts` | Merge review findings atomically into `sessions/evolution.json` |
-| `evolution-backlog.ts` | Validate/migrate backlog schema and provide atomic mutation primitives |
-| `backlog-cli.ts` | List, target, validate, and optimistically complete pending backlog items |
-| `intent-validation.ts` | Validate Intent Markdown structure, IDs, targets, and catalog loading |
-| `conversation-extract.ts` | Extract and truncate recent conversation turns for intent context |
-| `prompt.ts` | **Core prompt & parser** — builds classification prompt, parses JSON result |
-| `session.ts` | Session eligibility guards (agent allow-list, chat type, internal run detection) |
-| `config.ts` | Zod schema validation with defaults and clamping for plugin configuration |
-
-## Hook Execution Flow
-
-### `before_prompt_build` Flow
-
-```mermaid
-sequenceDiagram
-    participant OC as OpenClaw
-    participant Hook as before_prompt_build
-    participant Guard as Session Guard
-    participant Conv as Conversation Extractor
-    participant SA as Intent Subagent
-    participant Parser as Result Parser
-    participant Tracker as Session Tracker
-    participant Builder as Prompt Builder
-
-    OC->>Hook: message + session context
-    Hook->>Guard: check eligibility (agent/chat type/config)
-    
-    alt Not eligible
-        Guard-->>Hook: skip
-        Hook-->>OC: no hint
-    else Eligible
-        Guard-->>Hook: proceed
-        
-        Hook->>Conv: extract recent turns
-        Conv-->>Hook: conversation context
-        
-        Hook->>Tracker: load session data
-        Tracker-->>Hook: historical intent
-        
-        Hook->>SA: classify intent
-        SA->>Builder: build classification prompt
-        Builder-->>SA: prompt with context
-        SA-->>Hook: classification response
-        
-        Hook->>Parser: parse JSON result
-        Parser-->>Hook: intent + confidence
-        
-        Hook->>Tracker: save intent to session
-        Tracker-->>Hook: confirmation
-        
-        Hook->>Builder: build injection hint
-        Builder-->>Hook: formatted hint
-        
-        Hook-->>OC: prepend context with hint
-    end
-```
-
-### `agent_end` Flow
-
-```mermaid
-sequenceDiagram
-    participant OC as OpenClaw
-    participant Hook as agent_end
-    participant Tracker as Session Tracker
-    participant Agg as Stats Aggregator
-    participant TC as Trigger Checker
-    participant Review as Review Subagent
-    participant Queue as Review Queue
-
-    OC->>Hook: session completed
-    Hook->>Tracker: update session state
-    Hook->>Agg: aggregate turn stats
-    
-    Hook->>TC: check evolution triggers
-    TC-->>Hook: triggered items
-    
-    alt Triggers fired
-        Hook->>Review: build review prompt
-        Review-->>Hook: review request
-        Hook->>Queue: enqueue review (non-blocking)
-    end
-    
-    Hook-->>OC: done
-```
-
-### `session_end` Flow
-
-```mermaid
-sequenceDiagram
-    participant OC as OpenClaw
-    participant Hook as session_end
-    participant Tracker as Session Tracker
-
-    OC->>Hook: session ending
-    Hook->>Tracker: cleanup memory
-    Hook->>Tracker: apply retention policy (14 days)
-    Tracker-->>Hook: cleanup complete
-    Hook-->>OC: done
-```
-
-## Session Data Structure
-
-```typescript
-interface SessionData {
-  sessionId: string;
-  intent?: {
-    id: string;
-    confidence: number;
-    reasoning?: string;
-  };
-  lastActive: number; // timestamp
-  turnCount: number;
-  toolCalls?: ToolCall[];
-}
-
-interface ToolCall {
-  name: string;
-  timestamp: number;
-  duration?: number;
-}
-
-interface StatsData {
-  totalTurns: number;
-  totalToolCalls: number;
-  intentDistribution: Record<string, number>;
-  toolUsageDistribution: Record<string, number>;
-  averageConfidence: number;
-}
-
-interface EvolutionBacklog {
-  pending: BacklogItem[];
-  processed: BacklogItem[];
-  lastProcessed: number;
-}
-
-interface BacklogItem {
-  sessionId: string;
-  triggerType: string;
-  timestamp: number;
-  data: any;
-  processed?: boolean;
-}
-```
-
-## Runtime Usage Statistics
-
-`sessions/stats.json` structure:
-
-```typescript
-{
-  schemaVersion: 1,
-  lastUpdated: number,
-  stats: {
-    totalTurns: number,
-    totalToolCalls: number,
-    intentDistribution: Record<string, number>,
-    toolUsageDistribution: Record<string, number>,
-    averageConfidence: number,
-    turnsByConfidence: {
-      high: number,    // >= 0.8
-      medium: number,  // >= 0.5
-      low: number      // < 0.5
-    },
-    evolutionReviews: {
-      total: number,
-      byTrigger: Record<string, number>
-    }
-  }
-}
-```
-
-**Stats are:**
-- Idempotent (same turn won't be counted twice)
-- Atomic (temp file + rename)
-- Fire-and-forget (errors logged but don't block)
-
-## Configuration
-
-Plugin config in `openclaw.json`:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "intention-hint": {
-        "enabled": true,
-        "config": {
-          "agents": ["main"],
-          "model": "google/gemini-2.0-flash-exp",
-          "thinking": "low",
-          "contextWindow": {
-            "user": { "turns": 3, "chars": 1500 },
-            "assistant": { "turns": 2, "chars": 1000 }
-          },
-          "intentsDir": "./intents",
-          "confidenceThreshold": 0.7,
-          "evolution": {
-            "enabled": true,
-            "model": "google/gemini-2.0-flash-exp",
-            "thinking": "medium",
-            "timeout": 30000,
-            "triggers": {
-              "lowConfidence": { "enabled": true, "threshold": 0.6 },
-              "highToolUsage": { "enabled": true, "minCalls": 5 },
-              "repeatedIntent": { "enabled": true, "window": 3, "count": 3 },
-              "toolFailure": { "enabled": true, "count": 2 },
-              "longTurn": { "enabled": true, "minDuration": 60000 },
-              "explicitRequest": { "enabled": true }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-### Configuration Reference
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `agents` | `string[]` | `["main"]` | Which agents trigger the plugin |
-| `model` | `string` | `null` | Classification model (null = agent's default) |
-| `thinking` | `string` | `"low"` | Thinking level for classifier |
-| `contextWindow.user.turns` | `number` | `3` | User turns to include |
-| `contextWindow.user.chars` | `number` | `1500` | Max chars for user context |
-| `contextWindow.assistant.turns` | `number` | `2` | Assistant turns to include |
-| `contextWindow.assistant.chars` | `number` | `1000` | Max chars for assistant context |
-| `intentsDir` | `string` | `"./intents"` | Intent definitions directory |
-| `confidenceThreshold` | `number` | `0.7` | Minimum confidence to inject hint |
-| `evolution.enabled` | `boolean` | `false` | Enable Self-Evolution pipeline |
-| `evolution.model` | `string` | `null` | Review subagent model |
-| `evolution.thinking` | `string` | `"medium"` | Review thinking level |
-| `evolution.timeout` | `number` | `30000` | Review timeout (ms) |
-| `evolution.triggers.*` | `object` | varies | Trigger configuration |
-
-### Intent Self-Evolution Triggers
-
-| Trigger | Condition | Action |
-|---------|-----------|--------|
-| `lowConfidence` | Intent confidence < threshold | Review intent definitions |
-| `highToolUsage` | Tool calls >= minCalls | Suggest skill extraction |
-| `repeatedIntent` | Same intent N times in window | Review for consolidation |
-| `toolFailure` | Tool failures >= count | Review tool usage patterns |
-| `longTurn` | Turn duration >= minDuration | Suggest optimization |
-| `explicitRequest` | User explicitly requests | Process user feedback |
-
-## Key Design Decisions
-
-### Pure Function Prompt Building
-
-`prompt.ts` is a pure function — no side effects, no I/O. Makes it testable and predictable.
-
-### JSON Output Format
-
-Subagent returns JSON:
-```json
-{
-  "intent": "file-edit",
-  "confidence": 0.85,
-  "reasoning": "User wants to modify a file"
-}
-```
-
-Parser uses **tolerant JSON** (regex extraction) to handle LLM quirks.
-
-### Intent Categories
-
-Auto-derived from `intents/*.md` filenames:
-```
-intents/
-├── file-edit.md
-├── file-read.md
-└── code-review.md
-```
-
-No manual registration needed.
-
-### Time Injection
-
-Prompts include relative time context ("2 minutes ago") to help the classifier understand temporal relationships.
-
-### Conversation Handling
-
-- Extracts recent turns (configurable window)
-- Truncates by character limit
-- Preserves message order
-- Includes tool call summaries
-
-### Internal User Turns
-
-System/tool messages are filtered out before classification. Only user/assistant messages matter.
-
-### Output Parsing
-
-`parseIntentionResult()` uses regex to extract JSON from potentially malformed LLM output. Tolerant of:
-- Extra whitespace
-- Missing quotes
-- Partial JSON
-- Markdown code blocks
-
-## Key Patterns
+## Code Style & Patterns
 
 ### Atomic File I/O
-All JSON writes use `writeJsonAtomic()` from `file-utils.ts` — write to temp file, then rename. Use `safeWriteJson()` for fire-and-forget with error logging.
 
-### Module Exports
-Each module exports a class + a `default*` singleton instance. Classes take `pluginRoot: string` in constructor/factory.
+**所有 JSON 寫入都必須使用 `file-utils.ts`：**
 
-## Dependencies
+```typescript
+import { writeJsonAtomic, safeWriteJson, readJsonFile, fileExists } from './file-utils.js';
 
-- **zod** — Schema validation
-- **gray-matter** — Parse YAML frontmatter
-- **vitest** — Testing
-- **prettier** — Code formatting
+// 原子寫入（temp file + rename）
+writeJsonAtomic(path, data);
+
+// 帶錯誤日誌的寫入（fire-and-forget）
+safeWriteJson(path, data, 'Failed to write session data');
+
+// 讀取 JSON
+const data = readJsonFile<MyType>(path);
+
+// 檢查檔案存在
+if (fileExists(path)) { ... }
+```
+
+**禁止直接使用 `fs.readFileSync` + `JSON.parse` 或 `fs.writeFileSync` + `JSON.stringify`**
+
+### Module Structure
+
+每個模組遵循以下模式：
+
+1. **匯出 class + default singleton**
+   ```typescript
+   export class SessionTracker { ... }
+   export const defaultTracker = SessionTracker.create(pluginRoot);
+   ```
+
+2. **Class 接受 `pluginRoot: string` 作為建構參數**
+
+3. **使用 `.js` 副檔名進行 ESM import**
+   ```typescript
+   import { logger } from '../api.js';
+   import { fileUtils } from './file-utils.js';
+   ```
+
+### Error Handling
+
+- 使用 `logger.warn()` 記錄非致命錯誤
+- 錯誤處理模式：**fail-open**（記錄錯誤但不阻斷主流程）
+- Stats 和 Evolution 寫入失敗時記錄日誌但不影響使用者體驗
+
+### TypeScript Conventions
+
+- **Strict mode** 啟用
+- 偏好 `interface` 定義物件結構
+- 使用 `type` 定義 union 和複雜型別
+- Import 型別使用 `import type { ... }`
+- 避免使用 `any`，必要時用 `unknown` + type guard
+
+### Testing
+
+- 測試檔案與原始碼共置：`module.ts` → `module.test.ts`
+- 使用 Vitest
+- Mock 外部依賴（OpenClaw API、filesystem）
+- **提交前必須跑 `pnpm run test`，所有測試必須通過**
+
+```bash
+pnpm run test              # 全部測試
+pnpm run test:unit         # 只跑單元測試
+pnpm run test -- --watch   # Watch 模式
+```
 
 ## Protected Files
 
-These files are NOT touched by session cleanup or retention:
-- `sessions/stats.json` — Aggregated statistics
+這些檔案**不會**被 session cleanup 或 retention 刪除：
+- `sessions/stats.json` — 聚合統計
 - `sessions/evolution.json` — Self-Evolution backlog
-
-## Testing
-
-Tests live alongside source files (`*.test.ts`). Run `pnpm run test` before committing. All tests must pass.
-
-```bash
-pnpm run test              # All tests
-pnpm run test:unit         # Unit tests only
-pnpm run test -- --watch   # Watch mode
-```
 
 ## Adding a New Intent
 
-1. Create `intents/<intent-id>.md` with YAML frontmatter:
-```markdown
----
-id: my-intent
-name: My Intent
-description: What this intent detects
-examples:
-  - "example user message 1"
-  - "example user message 2"
----
+1. 建立 `intents/<intent-id>.md`，包含 YAML frontmatter：
+   ```markdown
+   ---
+   id: my-intent
+   name: My Intent
+   description: What this intent detects
+   examples:
+     - "example user message 1"
+     - "example user message 2"
+   ---
+   
+   # Intent Instructions
+   
+   How to handle this intent...
+   ```
 
-# Intent Instructions
-
-How to handle this intent...
-```
-
-2. Restart plugin — `intent-loader` picks it up automatically
-3. No code changes needed for most intents
+2. 重啟 plugin — `intent-loader` 會自動載入
+3. 大部分 intents 不需要修改程式碼
 
 ## Upgrading OpenClaw Dependency
 
-When upgrading the OpenClaw version (e.g., from 2026.6.5 to 2026.6.6):
+升級 OpenClaw 版本時（例如 2026.6.5 → 2026.6.6）：
 
-### 1. Update package.json versions
+### 1. 更新 package.json 版本號
 
-Replace all occurrences of the old version with the new version in `package.json`:
+替換所有 `2026.6.5` 為 `2026.6.6`：
 
-- `version`: Plugin version (e.g., "2026.6.6")
-- `openclaw.compat.pluginApi`: Minimum compatible plugin API version (e.g., ">=2026.6.6")
-- `openclaw.compat.minGatewayVersion`: Minimum gateway version (e.g., "2026.6.6")
-- `openclaw.build.openclawVersion`: Build target OpenClaw version (e.g., "2026.6.6")
-- `openclaw.build.pluginSdkVersion`: Plugin SDK version (e.g., "2026.6.6")
-- `peerDependencies.openclaw`: Peer dependency version (e.g., "2026.6.6")
+- `version` — Plugin 版本
+- `openclaw.compat.pluginApi` — 最低相容 plugin API 版本（帶 `>=` 前綴）
+- `openclaw.compat.minGatewayVersion` — 最低 gateway 版本
+- `openclaw.build.openclawVersion` — Build target OpenClaw 版本
+- `openclaw.build.pluginSdkVersion` — Plugin SDK 版本
+- `peerDependencies.openclaw` — Peer dependency 版本
 
-### 2. Clean and reinstall dependencies
+### 2. 清除並重新安裝依賴
 
 ```bash
 rm -rf node_modules dist
 pnpm i
 ```
 
-### 3. Remove old version constraints from pnpm-workspace.yaml
+### 3. 移除 pnpm-workspace.yaml 的舊版本限制
 
-If `pnpm-workspace.yaml` has `minimumReleaseAgeExclude` entries for the old OpenClaw version, remove them:
+如果有 `minimumReleaseAgeExclude` 指向舊版本，刪除該行：
 
 ```yaml
-# Remove lines like:
+# 刪除類似這行：
 minimumReleaseAgeExclude:
   - openclaw@2026.6.5
 ```
 
-### 4. Commit and push
+### 4. 提交並推送
 
 ```bash
 git add package.json pnpm-lock.yaml pnpm-workspace.yaml
@@ -522,7 +181,7 @@ git commit -m "chore: bump openclaw to 2026.6.6"
 git push origin main
 ```
 
-### 5. Publish to ClawhHub
+### 5. 發布到 ClawhHub
 
 ```bash
 clawhub package publish . --family code-plugin
