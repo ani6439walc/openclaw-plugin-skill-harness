@@ -1,12 +1,11 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { logger } from "../api.js";
+import { pluginRoot, fileExists, safeWriteJson } from "./file-utils.js";
 import type { EvolutionFinding, EvolutionSource } from "./evolution-types.js";
 import {
   createBacklog,
   readBacklog,
-  writeBacklogAtomic,
+  EvolutionBacklogSchema,
   type EvolutionBacklog,
 } from "./evolution-backlog.js";
 
@@ -48,7 +47,7 @@ export class BacklogWriter {
 
     try {
       const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
-      const backlog = fs.existsSync(backlogPath)
+      const backlog = fileExists(backlogPath)
         ? readBacklog(backlogPath)
         : createBacklog(nowIso);
       if (backlog.processedEvents[eventId]) return false;
@@ -97,7 +96,8 @@ export class BacklogWriter {
 
       backlog.updatedAt = nowIso;
       backlog.processedEvents[eventId] = nowIso;
-      return this.write(backlogPath, backlog);
+      const validated = EvolutionBacklogSchema.parse(backlog);
+      return safeWriteJson(backlogPath, validated, "failed to write evolution backlog");
     } catch (err) {
       logger.warn("failed to update evolution backlog", {
         error: err,
@@ -106,21 +106,6 @@ export class BacklogWriter {
       return false;
     }
   }
-
-  private write(backlogPath: string, backlog: EvolutionBacklog): boolean {
-    try {
-      writeBacklogAtomic(backlogPath, backlog);
-      return true;
-    } catch (err) {
-      logger.warn("failed to write evolution backlog", {
-        error: err,
-        path: backlogPath,
-      });
-      return false;
-    }
-  }
 }
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const pluginRoot = path.resolve(currentDir, "..", "..");
 export const defaultBacklogWriter = BacklogWriter.create(pluginRoot);

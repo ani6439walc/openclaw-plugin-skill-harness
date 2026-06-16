@@ -1,5 +1,4 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import type {
   RecentTurn,
@@ -9,6 +8,7 @@ import type {
 import type { ReviewSnapshot, ReviewState } from "./evolution-types.js";
 import matter from "gray-matter";
 import { logger } from "../api.js";
+import { pluginRoot, fileExists, readJsonFile, safeWriteJson } from "./file-utils.js";
 
 const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const RESERVED_SESSION_FILENAMES = new Set(["stats.json", "evolution.json"]);
@@ -152,7 +152,7 @@ export class SessionTracker {
 
   private loadSessionsFromDisk(): void {
     const sessionsDir = path.join(this.pluginRoot, "sessions");
-    if (!fs.existsSync(sessionsDir)) {
+    if (!fileExists(sessionsDir)) {
       return;
     }
 
@@ -164,8 +164,7 @@ export class SessionTracker {
 
       const filePath = path.join(sessionsDir, file);
       try {
-        const content = fs.readFileSync(filePath, "utf-8");
-        const sessionData: SessionData = JSON.parse(content);
+        const sessionData: SessionData = readJsonFile<SessionData>(filePath);
         this.sessionData.set(sessionData.sessionId, sessionData);
       } catch (err) {
         logger.warn("failed to load session file", {
@@ -309,19 +308,14 @@ export class SessionTracker {
     const session = this.sessionData.get(sessionId);
     if (!session) return;
 
-    const sessionsDir = path.join(this.pluginRoot, "sessions");
-    if (!fs.existsSync(sessionsDir)) {
-      fs.mkdirSync(sessionsDir, { recursive: true });
-    }
-
     const filename = `${sessionId}.json`;
     if (RESERVED_SESSION_FILENAMES.has(filename)) {
       logger.warn("refusing to overwrite reserved session file", { filename });
       return;
     }
-    const filePath = path.join(sessionsDir, filename);
+    const filePath = path.join(this.pluginRoot, "sessions", filename);
 
-    fs.writeFileSync(filePath, JSON.stringify(session, null, 2));
+    safeWriteJson(filePath, session, "failed to write session file");
   }
 
   cleanup(sessionId: string, options: { deleteFile: boolean }): void {
@@ -352,7 +346,7 @@ export class SessionTracker {
 
   cleanupExpired(nowMs = Date.now()): number {
     const sessionsDir = path.join(this.pluginRoot, "sessions");
-    if (!fs.existsSync(sessionsDir)) return 0;
+    if (!fileExists(sessionsDir)) return 0;
 
     const cutoffMs = nowMs - SESSION_RETENTION_MS;
     let deletedCount = 0;
@@ -394,8 +388,5 @@ export class SessionTracker {
     return deletedCount;
   }
 }
-
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const pluginRoot = path.resolve(currentDir, "..", "..");
 
 export const defaultTracker = SessionTracker.create(pluginRoot);
