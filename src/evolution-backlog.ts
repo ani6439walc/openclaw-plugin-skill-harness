@@ -5,6 +5,7 @@ import {
   EVOLUTION_TRIGGER_TYPES,
   type EvolutionTrigger,
 } from "./trigger-checker.js";
+import { PROCESSED_EVENTS_RETENTION_DAYS } from "./constants.js";
 
 export const EVOLUTION_OPERATIONS = [
   "create",
@@ -201,4 +202,22 @@ export function markPendingDismissed(
   item.updatedAt = nowIso;
   backlog.updatedAt = nowIso;
   return item;
+}
+
+// ============================================================================
+// processedEvents Retention
+// ============================================================================
+
+/**
+ * Prune processedEvents entries older than retention period.
+ * Modifies the backlog in place.
+ */
+export function pruneProcessedEvents(backlog: EvolutionBacklog): void {
+  const cutoff = Date.now() - PROCESSED_EVENTS_RETENTION_DAYS * 86_400_000;
+  for (const [eventId, timestamp] of Object.entries(backlog.processedEvents)) {
+    const eventTime = new Date(timestamp).getTime();
+    if (eventTime < cutoff) {
+      delete backlog.processedEvents[eventId];
+    }
+  }
 }
