@@ -131,8 +131,17 @@ export class FileLock {
       try {
         fs.mkdirSync(this.lockPath);
         return true;
-      } catch {
-        // Lock exists — check if stale.
+      } catch (err: unknown) {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code !== "EEXIST") {
+          // Non-EEXIST errors (EACCES, ENOENT, etc.) should fail fast
+          logger.warn("failed to acquire file lock", {
+            error: err,
+            path: this.lockPath,
+          });
+          return false;
+        }
+        // EEXIST means lock already exists — check if stale.
         // Known limitation: TOCTOU race condition exists when multiple processes
         // detect staleness simultaneously and both steal the lock. In this plugin's
         // usage pattern (single-process Node.js plugin with occasional background tasks),
