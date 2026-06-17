@@ -182,7 +182,8 @@ export class FileLock {
    */
   private forceRelease(): void {
     try {
-      fs.rmdirSync(this.lockPath);
+      // Use rmSync with recursive+force to handle stray files (e.g., .DS_Store)
+      fs.rmSync(this.lockPath, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
     }
@@ -193,7 +194,8 @@ export class FileLock {
    */
   release(): void {
     try {
-      fs.rmdirSync(this.lockPath);
+      // Use rmSync with recursive+force to handle stray files (e.g., .DS_Store)
+      fs.rmSync(this.lockPath, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
     }
