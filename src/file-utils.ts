@@ -91,6 +91,14 @@ import {
 } from "./constants.js";
 
 /**
+ * Non-blocking sleep using setTimeout + Promise.
+ * Avoids Atomics.wait which blocks the Node.js event loop.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Cross-process file lock using directory creation (atomic on POSIX).
  *
  * Uses `mkdirSync` which is atomic — if the directory already exists,
@@ -104,12 +112,19 @@ export class FileLock {
   }
 
   /**
-   * Acquire the lock with exponential backoff.
+   * Acquire the lock with exponential backoff (async, non-blocking).
    * Returns true if acquired, false if timeout.
    */
-  acquire(): boolean {
+  async acquire(): Promise<boolean> {
     const start = Date.now();
     let backoff = LOCK_INITIAL_BACKOFF_MS;
+
+    // Ensure parent directory exists so mkdir for lock doesn't fail on missing parent
+    try {
+      fs.mkdirSync(path.dirname(this.lockPath), { recursive: true });
+    } catch {
+      // ignore
+    }
 
     while (true) {
       // Try to acquire the lock
@@ -128,14 +143,9 @@ export class FileLock {
       const elapsed = Date.now() - start;
       if (elapsed >= LOCK_MAX_WAIT_MS) return false;
 
-      // Exponential backoff wait
+      // Non-blocking exponential backoff wait
       const sleepTime = Math.min(backoff, LOCK_MAX_WAIT_MS - elapsed);
-      Atomics.wait(
-        new Int32Array(new SharedArrayBuffer(4)),
-        0,
-        0,
-        sleepTime,
-      );
+      await sleep(sleepTime);
       backoff = Math.min(backoff * 2, LOCK_MAX_BACKOFF_MS);
     }
   }
@@ -177,89 +187,17 @@ export class FileLock {
 }
 
 /**
- * Execute a function while holding a file lock.
+ * Execute an async function while holding a file lock.
  * Returns undefined if lock cannot be acquired.
  */
-export function withFileLock<T>(
+export async function withFileLock<T>(
   targetPath: string,
-  fn: () => T,
-): T | undefined {
+  fn: () => Promise<T>,
+): Promise<T | undefined> {
   const lock = new FileLock(targetPath);
-  if (!lock.acquire()) return undefined;
+  if (!(await lock.acquire())) return undefined;
   try {
-    return fn();
-  } finally {
-    lock.release();
-  }
-}
-
-/**
- * Acquire a file lock using directory creation (atomic on POSIX).
- * Uses mkdir which is atomic, preventing race conditions across processes.
- */
-export class FileLock {
-  private readonly lockPath: string;
-  private acquired = false;
-
-  constructor(targetPath: string) {
-    this.lockPath = `${targetPath}.lock`;
-  }
-
-  /**
-   * Try to acquire the lock with timeout.
-   * Returns true if acquired, false if timeout.
-   */
-  acquire(timeoutMs = 5000): boolean {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      try {
-        fs.mkdirSync(this.lockPath);
-        this.acquired = true;
-        return true;
-      } catch {
-        // Lock exists, wait and retry
-        const elapsed = Date.now() - start;
-        if (elapsed >= timeoutMs) break;
-        fs.readdirSync // just to use fs and avoid lint
-        // Busy wait with small sleep
-        Atomics.wait(
-          new Int32Array(new SharedArrayBuffer(4)),
-          0,
-          0,
-          Math.min(50, timeoutMs - elapsed),
-        );
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Release the lock.
-   */
-  release(): void {
-    if (!this.acquired) return;
-    try {
-      fs.rmdirSync(this.lockPath);
-    } catch {
-      // Ignore cleanup errors
-    }
-    this.acquired = false;
-  }
-}
-
-/**
- * Execute a function while holding a file lock.
- * Returns undefined if lock cannot be acquired.
- */
-export function withFileLock<T>(
-  targetPath: string,
-  fn: () => T,
-  timeoutMs = 5000,
-): T | undefined {
-  const lock = new FileLock(targetPath);
-  if (!lock.acquire(timeoutMs)) return undefined;
-  try {
-    return fn();
+    return await fn();
   } finally {
     lock.release();
   }

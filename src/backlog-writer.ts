@@ -38,12 +38,12 @@ export class BacklogWriter {
     return new BacklogWriter(pluginRoot);
   }
 
-  record(
+  async record(
     eventId: string,
     source: EvolutionSource,
     findings: readonly EvolutionFinding[],
     options: { nowMs?: number } = {},
-  ): boolean {
+  ): Promise<boolean> {
     if (!eventId) return false;
     const backlogPath = path.join(
       this.pluginRoot,
@@ -52,7 +52,7 @@ export class BacklogWriter {
     );
 
     // Use file lock for cross-process safety
-    const result = withFileLock(backlogPath, () => {
+    const result = await withFileLock(backlogPath, async () => {
       try {
         const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
         const backlog = fileExists(backlogPath)

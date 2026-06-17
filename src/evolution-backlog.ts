@@ -211,9 +211,14 @@ export function markPendingDismissed(
 /**
  * Prune processedEvents entries older than retention period.
  * Modifies the backlog in place.
+ * @param backlog - The backlog to prune
+ * @param nowMs - Optional current time in ms (defaults to Date.now())
  */
-export function pruneProcessedEvents(backlog: EvolutionBacklog): void {
-  const cutoff = Date.now() - PROCESSED_EVENTS_RETENTION_DAYS * 86_400_000;
+export function pruneProcessedEvents(
+  backlog: EvolutionBacklog,
+  nowMs: number = Date.now(),
+): void {
+  const cutoff = nowMs - PROCESSED_EVENTS_RETENTION_DAYS * 86_400_000;
   for (const [eventId, timestamp] of Object.entries(backlog.processedEvents)) {
     const eventTime = new Date(timestamp).getTime();
     if (eventTime < cutoff) {

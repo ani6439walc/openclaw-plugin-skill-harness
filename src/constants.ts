@@ -1,4 +1,9 @@
 export const DEFAULT_TIMEOUT_MS = 3_000;
+export const PROCESSED_EVENTS_RETENTION_DAYS = 90;
+export const LOCK_STALE_THRESHOLD_MS = 60_000;
+export const LOCK_MAX_WAIT_MS = 10_000;
+export const LOCK_INITIAL_BACKOFF_MS = 10;
+export const LOCK_MAX_BACKOFF_MS = 500;
 export const DEFAULT_QUERY_MODE = "recent" as const;
 export const DEFAULT_RECENT_USER_TURNS = 5;
 export const DEFAULT_RECENT_ASSISTANT_TURNS = 5;
