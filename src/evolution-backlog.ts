@@ -221,7 +221,8 @@ export function pruneProcessedEvents(
   const cutoff = nowMs - PROCESSED_EVENTS_RETENTION_DAYS * 86_400_000;
   for (const eventId in backlog.processedEvents) {
     const eventTime = new Date(backlog.processedEvents[eventId]).getTime();
-    if (eventTime < cutoff) {
+    // Prune expired entries and corrupt data (NaN from invalid dates)
+    if (Number.isNaN(eventTime) || eventTime < cutoff) {
       delete backlog.processedEvents[eventId];
     }
   }

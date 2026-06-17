@@ -171,4 +171,25 @@ describe("evolution backlog", () => {
     pruneProcessedEvents(value);
     expect(value.processedEvents).toEqual({});
   });
+
+  it("prunes entries with invalid/corrupt date strings", () => {
+    const value = parseBacklog({
+      schemaVersion: 2,
+      createdAt: "2026-06-15T00:00:00.000Z",
+      updatedAt: "2026-06-15T00:00:00.000Z",
+      processedEvents: {
+        "valid-event": "2026-06-14T00:00:00.000Z",
+        "invalid-event-1": "not-a-date",
+        "invalid-event-2": "",
+        "invalid-event-3": "2026-13-45T99:99:99",
+      },
+      items: [],
+    });
+
+    pruneProcessedEvents(value, Date.parse("2026-06-15T12:00:00.000Z"));
+
+    expect(value.processedEvents).toEqual({
+      "valid-event": "2026-06-14T00:00:00.000Z",
+    });
+  });
 });
