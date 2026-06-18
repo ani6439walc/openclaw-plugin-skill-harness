@@ -104,6 +104,13 @@ describe("runIntentInstructionSubagent", () => {
         timeoutMs: 4321,
       }),
       agentId: "main",
+      conversation: [
+        {
+          role: "user",
+          text: "continue previous implementation",
+          historicalIntent: { intent: "coding", topic: "continuation" },
+        },
+      ],
       latest: "implement continuation",
       result: {
         intent: "coding",
@@ -135,6 +142,12 @@ describe("runIntentInstructionSubagent", () => {
     );
     expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
       "MEDIUM / STANDARD tasks",
+    );
+    expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
+      "# Conversation context",
+    );
+    expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
+      "topic: continuation",
     );
   });
 });

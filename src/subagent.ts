@@ -215,6 +215,7 @@ export async function runIntentInstructionSubagent(params: {
   agentId: string;
   sessionKey?: string;
   sessionId?: string;
+  conversation?: RecentTurn[];
   latest: string;
   result: IntentionResult;
   intentBody: string;
@@ -242,6 +243,7 @@ export async function runIntentInstructionSubagent(params: {
     intentBody: params.intentBody,
     complexityContext:
       params.config.complexityPrompts[params.result.complexity],
+    conversation: params.conversation,
     currentTime: resolveCurrentTime(params.api),
   });
 

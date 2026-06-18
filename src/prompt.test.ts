@@ -178,6 +178,12 @@ describe("buildTopicSwitchPrompt", () => {
     });
 
     expect(prompt).toContain("topic continuity checker");
+    expect(prompt).toContain(
+      "Another model is preparing the final user-facing answer",
+    );
+    expect(prompt).toContain(
+      "Your job is to decide whether the user's latest message continues",
+    );
     expect(prompt).toContain("intent: coding");
     expect(prompt).toContain("keywords: topic, checker");
     expect(prompt).toContain("## Latest message:");
@@ -259,9 +265,27 @@ describe("buildIntentInstructionPrompt", () => {
         "## Concrete Workflow\n\n- Use test-driven-development.\n\n## Tools\n\n- apply_patch",
       complexityContext:
         "<complexity_context>Use a balanced flow.</complexity_context>",
+      conversation: [
+        {
+          role: "user",
+          text: "先做 topic checker",
+          historicalIntent: {
+            intent: "coding",
+            topic: "topic / checker",
+            keywords: ["topic", "checker"],
+          },
+        },
+        { role: "assistant", text: "我會先接流程" },
+      ],
     });
 
     expect(prompt).toContain("instruction writer");
+    expect(prompt).toContain(
+      "Another model is preparing the final user-facing answer",
+    );
+    expect(prompt).toContain(
+      "Your job is to read the matched intent Markdown and latest user message",
+    );
     expect(prompt).toContain("workflow");
     expect(prompt).toContain("skills and tools");
     expect(prompt).toContain("intent: coding");
@@ -269,6 +293,12 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain(
       "<complexity_context>Use a balanced flow.</complexity_context>",
     );
+    expect(prompt).toContain("# Conversation context");
+    expect(prompt).toContain("- **user**: 先做 topic checker");
+    expect(prompt).toContain(
+      "> *intent: coding; topic: topic / checker; keywords: topic, checker*",
+    );
+    expect(prompt).toContain("- **assistant**: 我會先接流程");
     expect(prompt).toContain("Use test-driven-development");
     expect(prompt).toContain("apply_patch");
     expect(prompt).toContain("繼續實作同題續聊");

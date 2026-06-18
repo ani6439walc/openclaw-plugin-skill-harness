@@ -172,7 +172,8 @@ export function buildTopicSwitchPrompt(params: {
   const history = buildHistoricalTopicContext(params.history);
 
   return `${timeLine}You are a lightweight topic continuity checker.
-Decide whether the user's latest message continues the recent topic or switches to a new one.
+Another model is preparing the final user-facing answer and needs compact topic routing context before intent resolution.
+Your job is to decide whether the user's latest message continues the recent topic or switches to a new one.
 Use only the latest message and recent historical intent metadata. Do not classify intent.
 
 <rules>
@@ -244,12 +245,16 @@ export function buildIntentInstructionPrompt(params: {
   result: IntentionResult;
   intentBody: string;
   complexityContext: string;
+  conversation?: RecentTurn[];
   currentTime?: string;
 }): string {
   const timeLine = params.currentTime ? `${params.currentTime} ` : "";
+  const conversationMd = buildConversationMarkdown(params.conversation);
+  const conversationSection = conversationMd ? `\n${conversationMd}\n` : "";
+
   return `${timeLine}You are an intention-hint instruction writer.
-Read the matched intent Markdown and the latest user message.
-Write concise internal instructions for the main agent.
+Another model is preparing the final user-facing answer.
+Your job is to read the matched intent Markdown and latest user message, then output concise internal instructions for that model.
 
 <rules>
 1. Output plain text only, not JSON and not Markdown fences.
@@ -267,11 +272,12 @@ keywords: ${params.result.keywords?.join(", ") ?? ""}
 intentChange: ${params.result.intentChange ?? true}
 </intent_metadata>
 
-${params.complexityContext}
-
 <matched_intent_markdown>
 ${params.intentBody}
 </matched_intent_markdown>
+${params.complexityContext}
+
+${conversationSection}
 
 ## Latest message:
 ${params.latest}`;
