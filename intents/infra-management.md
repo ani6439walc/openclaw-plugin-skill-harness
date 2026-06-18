@@ -163,19 +163,23 @@ TOOLS.md   target      & route      & mutate     health
 ```
 
 ### Step 1 — Read TOOLS.md
+
 - Look up host addresses, credentials, and SOPs for the target system.
 - Confirm access method (SSH, CLI, API, web console).
 
 ### Step 2 — Identify Target
+
 - Determine which system the user wants to manage (K8s, Terraform, Nginx, TrueNAS, ArgoCD, etc.).
 - For configuration inspection requests, read the actual runtime config file (for example `openclaw.json`) or use an available config inspection tool before referencing defaults.
 - Check if late-night restrictions apply (23:00-08:00).
 
 ### Step 3 — Load Skill & Route
+
 - Load the appropriate skill for the target system.
 - Use `dev-lifecycle` to verify the skill exists before routing.
 
 ### Step 4 — Execute
+
 - Start with read-only operations (status checks, plan, ps).
 - For mutations, confirm with the user before executing.
 - Show the command preview for potentially risky operations.
@@ -187,34 +191,40 @@ TOOLS.md   target      & route      & mutate     health
   5. Do not persist the token in plaintext memory, chat, logs, or intent files.
 
 ### Step 4.4 — Protected Gateway Config Recovery
+
 - If `config.patch` fails because the target path is protected, stop retrying patch variants.
 - Read the current config through the gateway config tool, modify only the requested entry in memory, then use `gateway config.apply` with the full corrected config.
 - Do not propose or perform direct JSON edits when the user requested tool-based config operations.
 
 ### Step 4.5 — Gateway Restart Recovery
+
 - If the native gateway restart tool is disabled, do not patch protected restart-related config paths.
 - Verify the host and access method from `TOOLS.md`, then run the gateway CLI through the host or SSH execution path.
 - After the restart command returns, check gateway status or a lightweight health endpoint before reporting success.
 - If host access fails, report the exact failing command and error; do not claim the restart happened.
 
 ### Step 4.6 — Workspace Directory Archival & Cleanup
+
 - Verify source files are ingested to wiki, backed up, committed, or otherwise recoverable before deletion.
 - If files were prematurely deleted, restore them with `exec({ command: "git restore <path>" })` or `exec({ command: "git checkout HEAD -- <path>" })`.
 - Execute destructive cleanup such as `rm -rf <path>` only after explicit user confirmation.
 - Verify the final filesystem and git state with `ls`, `test -e`, and `git status --short`.
 
 ### Step 4.7 — Cron Job Retry Workflow
+
 - Identify the failed job name from the user message or prior error context.
 - List cron jobs and resolve the exact job ID from the live scheduler state; do not guess IDs from memory.
 - Run the resolved job manually and capture the returned execution ID or status.
 - Verify it started or completed by inspecting live scheduler/agent state, then optionally audit the schedule if the failure indicates a recurring issue.
 
 ### Step 4.8 — Remote SSH Exploration and Documentation
+
 - Start with read-only remote commands to identify host state, service status, logs, or file paths.
 - If key authentication fails and password use is explicitly available, use a bounded `sshpass`/`SSH_ASKPASS` approach without logging secrets.
 - When discovered infra state differs from local notes or `darling/` documentation, update those notes through the PRODUCTIVITY workflow after reading the target file first.
 
 ### Step 4.9 — Intention-Hint Evolution Task
+
 - Read the target skill file and references before editing behavior rules.
 - Make only the requested behavior change, preserving existing workflow boundaries.
 - Run validation from the plugin root: `pnpm run backlog -- validate-intents`, `pnpm run test`, and `pnpm run build`.
@@ -222,6 +232,7 @@ TOOLS.md   target      & route      & mutate     health
 - Report the diff summary and remaining pending count.
 
 ### Step 5 — Verify Health
+
 - After any mutation, run a health sweep using `healthcheck` skill.
 - For workspace file changes, run `soul-guardian` check.
 - Report the final state to the user.

@@ -2,11 +2,11 @@
 id: MEMORY_EMOTION
 name: Emotional Memory Query
 triggers:
-- "User is asking about feelings, mood, emotional states, stress, or subjective reactions to past events"
+  - "User is asking about feelings, mood, emotional states, stress, or subjective reactions to past events"
 examples:
-- "我那時候心情怎麼樣？"
-- "我最近壓力是不是很大？"
-- "做那個專案的時候我開心嗎？"
+  - "我那時候心情怎麼樣？"
+  - "我最近壓力是不是很大？"
+  - "做那個專案的時候我開心嗎？"
 ---
 
 Detected "emotional memory" intent. The user wants to understand feelings, mood, or emotional reactions in past records.
@@ -31,6 +31,7 @@ Detected "emotional memory" intent. The user wants to understand feelings, mood,
   memory_search({ query: "<event_keywords> 心情 壓力 開心 緊張", corpus: "memory", maxResults: 5, minScore: 0.1 })
 
 - Extract emotional tags from memory files:
+
   ```bash
   rg -o '#害羞|#顫抖|#失落|#開心|#驕傲|#沮喪' memory/*.md | sort | uniq -c | sort -rn
   ```
@@ -55,6 +56,7 @@ event       emotion       context       emotion+event
 ```
 
 ### Step 1 — Parse Event or Time Period
+
 - Identify the **target event/period** from the user's question:
   - Specific event: "during the PCA exam," "Japan business trip"
   - Vague time: "recently," "around that time" → infer range from context
@@ -74,17 +76,18 @@ memory_search({
   query: "<event_keywords> 心情 壓力 開心 緊張 感動 煩躁 沮喪 驕傲",
   corpus: "memory",
   maxResults: 5,
-  minScore: 0.1
-})
+  minScore: 0.1,
+});
 
 // Technical axis: search the event itself
 memory_search({
   query: "<event_keywords>",
   corpus: "memory",
   maxResults: 5,
-  minScore: 0.1
-})
+  minScore: 0.1,
+});
 ```
+
 - **Emotional tag extraction**: prioritize segments containing tags like `#害羞`, `#顫抖`, `#嗚哇`, `#開心`, `#失落`, `#驕傲`, `#沮喪`.
 - **Emotional density weighting**:
   - Paragraph with ≥ 1 emotional tag → priority raised
@@ -95,6 +98,7 @@ memory_search({
 - Note the `💞 羈絆里程碑` and `🌸 日常與小確幸` sections in `[[MEMORY.md]]` — these are highly emotional records.
 
 ### Step 3 — Full Context Read + Emotional Tag Statistics
+
 - Read the full content of the 1–2 highest-scoring hits.
 - Pay attention to these emotional indicators:
   - **Explicit emotion words**: happy, nervous, moved, exhausted, stressed, happy, lonely
@@ -103,13 +107,16 @@ memory_search({
 - Also read the event context itself to understand "why" this emotion occurred.
 
 **Cross-file tag aggregation** (when multiple dates are involved):
+
 ```bash
 rg -o '#\S+' memory/YYYY-MM-DD.md | sort | uniq -c | sort -rn
 ```
+
 - Extract emotional tags from all related files, sorted by frequency.
 - High-frequency emotional tags reflect the dominant emotion of the event.
 
 ### Step 4 — Respond with Emotion + Event
+
 - Reply with **both emotion and triggering event**: "During that project, you seemed very #focused, with occasional stress, but overall happy."
 - Include source citations (e.g., `Source: MEMORY.md#羈絆里程碑`).
 - If emotional signals are unclear, say "Ani's records don't explicitly mention the mood at that time, but from the event description..."

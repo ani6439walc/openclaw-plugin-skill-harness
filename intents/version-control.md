@@ -96,11 +96,13 @@ repos    status    files               & push
 ```
 
 ### Step 0 — Detect Repositories
+
 - Identify git repositories in the current workspace context with a bounded discovery command such as `find . -maxdepth 3 -name .git -type d`.
 - If multiple repos are found, list them and handle each separately with its own status, stage, commit, and push cycle.
 - For single-repo contexts, proceed directly to Step 1.
 
 ### Step 1 — Check Status
+
 - Run `git status` in each target repository to understand the current state.
 - Identify which files have changed and need staging.
 - Before commit, push, merge, rebase, or retry operations, check submodule health with `git submodule status` when the repository uses submodules.
@@ -108,6 +110,7 @@ repos    status    files               & push
 - For submodule problems, enter the affected submodule and resolve its state independently, then return to the parent repository and re-check status.
 
 ### Step 2 — Stage Files & Resolve Conflicts
+
 - Use `git add` with specific files by default; use `git add .` only when the user explicitly requested all current changes and `git status` has been inspected.
 - If `git status` shows unmerged paths or conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`):
   1. Use `read` to inspect every conflicted file.
@@ -116,11 +119,13 @@ repos    status    files               & push
 - Verify staged changes with `git diff --cached --stat`.
 
 ### Step 3 — Commit
+
 - Use `gaic` for standardized emoji-style commits.
 - Keep commit messages concise with Conventional Commit format.
 - For complex operations (rebase, squash): use `git-master` skill.
 
 ### Step 4 — Report & Push
+
 - Report the commit hash and summary for each repository handled.
 - Push to remote if requested.
 - For PRs: use `gitea` skill to create and manage.

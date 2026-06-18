@@ -66,25 +66,30 @@ Detected "course notes" intent. The user wants an end-to-end study workflow that
 ## Concrete Workflow
 
 ### Step 1 — Verify Scope and Template
+
 - Confirm the lecture/section identifier, target file, and expected note format from the user request or existing project note.
 - Read the target note and inspect its headings before editing.
 
 ### Step 2 — Extract Course Content
+
 - Use browser automation for authenticated course pages or subtitle panels.
 - Include explicit navigation instructions such as course section, lecture number, title, and sidebar target.
 - Verify the extracted content belongs to the requested lecture before summarizing.
 
 ### Step 3 — Research Supplementary Sources
+
 - Identify key technologies, commands, APIs, or concepts from the transcript.
 - Fetch official docs or authoritative references for those topics.
 - Keep URLs verified and relevant to the lecture content.
 
 ### Step 4 — Synthesize Notes
+
 - Convert transcript and references into the established template.
 - Keep course facts, instructor claims, and external documentation clearly grounded.
 - Avoid adding unsupported activities, examples, or conclusions.
 
 ### Step 5 — Persist and Verify
+
 - Update the target note with precise edits.
 - Re-read the changed section, check formatting, and update progress/status fields when present.
 - If requested, record the repeatable workflow in the designated study-process section after the note update succeeds.

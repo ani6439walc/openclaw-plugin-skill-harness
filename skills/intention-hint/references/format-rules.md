@@ -30,7 +30,7 @@ Rules for generating intent definition files. The canonical format spec lives in
 
 ## Concrete Workflow inclusion rule
 
-- **Always include** for multi-step intents (memory-*, system-diagnostics, browser-automation, research-*)
+- **Always include** for multi-step intents (memory-_, system-diagnostics, browser-automation, research-_)
 - **Include** when the intent requires a specific sequence
 - **Skip** for simple rule-following intents (chat, typo, etc.)
 - **Rule of thumb**: if you can describe execution as "Step 1 → Step 2 → ...", add it

@@ -40,7 +40,7 @@ Detected "calendar & scheduling" intent. The user wants to manage events, remind
   cron({ action: "add", job: { schedule: { kind: "at", at: "<ISO>" }, payload: { kind: "systemEvent", text: "<reminder_text>" } } })
 
 - Set a recurring reminder:
-  cron({ action: "add", job: { schedule: { kind: "cron", expr: "0 9 * * *", tz: "Asia/Taipei" }, payload: { kind: "systemEvent", text: "<reminder_text>" } } })
+  cron({ action: "add", job: { schedule: { kind: "cron", expr: "0 9 \* \* \*", tz: "Asia/Taipei" }, payload: { kind: "systemEvent", text: "<reminder_text>" } } })
 
 - Check or delete existing reminders:
   cron({ action: "list" })
@@ -74,20 +74,24 @@ classify  execute     confirm      report
 ```
 
 ### Step 1 — Classify Request Type
+
 - Calendar operation: read, create, update, add attendees.
 - Reminder operation: one-off, recurring, list, delete.
 - Quick timer: < 5 min → `exec sleep`.
 
 ### Step 2 — Execute
+
 - Calendar: use `gog` CLI commands (list, create, update).
 - For updates: first list or otherwise identify the target event ID, then run `gog calendar update primary <eventId>` with the requested fields.
 - Reminder: use `cron` tool with appropriate schedule kind.
 - Add attendees with `--add-attendee` and `--send-updates all`.
 
 ### Step 3 — Confirm
+
 - For event creation: verify timezone and attendee list.
 - For reminders: confirm the payload text reads naturally.
 
 ### Step 4 — Report
+
 - Report event details, reminder IDs, or calendar availability.
 - Keep it concise.

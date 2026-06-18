@@ -27,6 +27,7 @@ Cluster map table:
 ```
 
 Gap analysis:
+
 - **Covered**: clusters that map to existing intents
 - **Gaps**: clusters with no existing intent → recommend new intent ID
 - **Overlaps**: one cluster maps to multiple existing intents → recommend merge or split

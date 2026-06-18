@@ -2,7 +2,7 @@
   "name": "intention-hint",
   "displayName": "Intention Hint",
   "description": "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
-  "version": "2026.6.6",
+  "version": "2026.6.8",
   "type": "module",
   "license": "MIT",
   "author": "Ani <ani6439walc@gmail.com>",
@@ -35,32 +35,31 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.6.6",
-      "minGatewayVersion": "2026.6.6"
+      "pluginApi": ">=2026.6.8",
+      "minGatewayVersion": "2026.6.8"
     },
     "build": {
-      "openclawVersion": "2026.6.6",
-      "pluginSdkVersion": "2026.6.6"
+      "openclawVersion": "2026.6.8",
+      "pluginSdkVersion": "2026.6.8"
     }
   },
   "scripts": {
-    "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm run typecheck && pnpm run test:unit",
-    "test:unit": "vitest run",
-    "backlog": "pnpm --silent run build && node dist/src/backlog-cli.js",
-    "format": "prettier --write 'README.md' '**/*.json' '**/*.ts'"
+    "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'",
+    "test": "vitest run",
+    "build": "tsc",
+    "backlog": "node dist/src/backlog-cli.js"
   },
   "dependencies": {
     "gray-matter": "4.0.3",
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "openclaw": "2026.6.6"
+    "openclaw": "2026.6.8"
   },
   "devDependencies": {
-    "prettier": "3.8.4",
     "typescript": "6.0.3",
-    "vitest": "4.1.7"
+    "prettier": "3.8.4",
+    "vitest": "4.1.8"
   }
 }

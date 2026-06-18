@@ -55,7 +55,7 @@ Detected "language-specific coding" intent. The user wants language-specific cod
   skill: terraform
 
 - Look up version-specific library docs or API references:
-  context7__query-docs({ libraryId: "<resolved_library_id>", query: "<specific_question>" })
+  context7\_\_query-docs({ libraryId: "<resolved_library_id>", query: "<specific_question>" })
 
 - Search for current language-specific best practices or updates:
   web_search({ query: "<language> <topic> best practices 2024" })

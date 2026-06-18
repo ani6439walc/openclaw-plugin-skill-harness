@@ -24,13 +24,13 @@ Detected "Google developer products" intent. The user wants authoritative inform
 ## Skills & Tools
 
 - Query the primary Google developer corpus first:
-  google_developer_knowledge__answer_query({ query: "<question>" })
+  google_developer_knowledge\_\_answer_query({ query: "<question>" })
 
 - Search Google developer docs when the first-pass answer is unavailable or insufficient:
-  google_developer_knowledge__search_documents({ query: "<question>" })
+  google_developer_knowledge\_\_search_documents({ query: "<question>" })
 
 - Fetch full Google developer documents when search results need expansion:
-  google_developer_knowledge__get_documents({ names: ["<document_name>"] })
+  google_developer_knowledge\_\_get_documents({ names: ["<document_name>"] })
 
 - Read an official Google documentation page directly when a strong source is known:
   web_fetch({ url: "<authoritative_url>" })
@@ -52,17 +52,21 @@ corpus     docs        full docs    & deliver
 ```
 
 ### Step 1 — Query Primary Corpus
+
 - Call `google_developer_knowledge__answer_query` with the user's question.
 - If a grounded answer is returned, proceed to delivery.
 
 ### Step 2 — Search Documents (Fallback)
+
 - If the first-pass answer is unavailable or insufficient, call `google_developer_knowledge__search_documents`.
 - Review returned document chunks for relevance.
 
 ### Step 3 — Fetch Full Documents
+
 - When search results are not detailed enough, use `google_developer_knowledge__get_documents` with document names from the search.
 - Alternatively, `web_fetch` the official documentation URL directly.
 
 ### Step 4 — Cite & Deliver
+
 - Synthesize a source-backed answer specific to the Google product.
 - Include source links for factual and technical claims.

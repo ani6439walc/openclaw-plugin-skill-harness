@@ -76,10 +76,10 @@ Detected "code review" intent. The user wants existing code to be examined, impr
   skill: diagnose
 
 - Look up version-specific library docs, API references, or known issues:
-  context7__query-docs({ libraryId: "<resolved_library_id>", query: "<specific_question>" })
+  context7\_\_query-docs({ libraryId: "<resolved_library_id>", query: "<specific_question>" })
 
 - Ask targeted questions about a GitHub repository's internals or known issues:
-  deepwiki__ask_question({ repoName: "<owner/repo>", question: "<specific_question>" })
+  deepwiki\_\_ask_question({ repoName: "<owner/repo>", question: "<specific_question>" })
 
 - Search for current error messages, upstream bug reports, or changelogs:
   web_search({ query: "<error_message_or_symptom_keywords>" })
@@ -101,27 +101,32 @@ code       findings    (if needed)  changes      (optional)
 ```
 
 ### Step 1 — Read Code in Context
+
 - Read the code snippet or file shown by the user.
 - If the review depends on surrounding context, read related files.
 - For larger codebases, use `treemd` or `cx` to trace definitions and references.
 
 ### Step 2 — Review Findings
+
 - Run multi-axis review: correctness, readability, architecture, security, performance.
 - Prioritize logic and safety issues over style concerns.
 - Use language-specific skills for idiomatic guidance.
 
 ### Step 3 — Escalate (If Needed)
+
 - For elusive bugs, non-deterministic failures, or deep regressions: escalate to `diagnose` skill.
 - Look up version-specific docs or known issues when the bug may be upstream.
 - Search web for error messages or upstream bug reports.
 
 ### Step 4 — Suggest or Apply Improvements
+
 - Propose minimal, practical changes when the user asks for review or analysis.
 - Apply the smallest safe local edit when the user explicitly asks to modify an existing file or script.
 - Show diffs for suggested or applied modifications.
 - Avoid scope creep — focus on what the user asked about.
 
 ### Step 5 — Verify (Optional)
+
 - Run tests or linters to validate suggested changes.
 - For shell scripts, run `shellcheck` and `shfmt` when available to validate syntax, security, portability, and style.
 - For risky changes, apply adversarial review before merging.

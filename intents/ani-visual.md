@@ -71,25 +71,30 @@ identity   context                 (optional)
 ```
 
 ### Step 1 — Read Identity Reference
+
 - Read `IDENTITY.md` to get character consistency rules.
 - Select the appropriate reference image based on the scene type requested.
 
 ### Step 2 — Ground Context from Memory
+
 - Read today's `memory/YYYY-MM-DD.md` for recent events or achievements.
 - If the user references a specific memory, search for additional context.
 - Weave recent context into the image prompt for authenticity.
 
 ### Step 3 — Generate Image
+
 - Call `image_generate` with the scene description, reference image, and appropriate aspect ratio.
 - Use Google provider first; retry with OpenAI if generation fails.
 
 ### Step 4 — Archive (Conditional)
+
 - Only when user explicitly requests persistence.
 - Use `folio` skill for permanent remote storage (prefer `/files/image/` path).
 - Copy to `attachments/identity/` locally.
 - Update `IDENTITY.md` under Photos section with new entry.
 
 ### Step 5 — Respond
+
 - Deliver the image to the user.
 - For archival: verbally reflect on the moment being captured.
 - For one-off: keep it light and natural.

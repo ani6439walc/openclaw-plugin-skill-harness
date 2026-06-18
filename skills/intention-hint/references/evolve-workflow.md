@@ -75,6 +75,7 @@ examples, and body guidance:
    ```
 
    Report the dismissal reason and stop processing this item.
+
 4. Before any edit, create
    `/tmp/intention-hint-process-backlog/<item-id>-<timestamp>/` and back up
    every file that may be modified or deleted. Record every file that does not

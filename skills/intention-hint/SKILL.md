@@ -50,6 +50,7 @@ Q4: "Any existing intent this overlaps with?" → check collision
 ```
 
 **🔴 CHECKPOINT**: Before drafting, confirm boundary summary with user:
+
 - What this intent handles
 - What it doesn't handle
 - Neighboring intents it's close to
@@ -83,12 +84,15 @@ examples:
 ---
 
 ## Guidelines
+
 <2-3 sentences describing when to use this intent>
 
 ## Skills & Tools
+
 - <skill or tool name>: <one-line description>
 
 ## Response Strategy
+
 <bullet list of what the agent should do>
 ```
 
@@ -107,21 +111,21 @@ mv intent.md extensions/intention-hint/intents/<intent-id>.md
 
 ### Failure modes
 
-| Trigger | First fix | Fallback |
-|---------|-----------|----------|
-| **Interview stalls** — user does not reply or gives vague answers | Restate with recommended options ("A or B?") | Mark as `incomplete`, suggest resuming later |
-| **Collision detected** — new intent overlaps existing | Suggest split or merge, show collision details | Force-create but tag as `experimental`, flag for next review |
-| **format-rules.md validation fails** | Read error message, fix format and retry | Display full format-rules.md for manual inspection |
+| Trigger                                                           | First fix                                      | Fallback                                                     |
+| ----------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| **Interview stalls** — user does not reply or gives vague answers | Restate with recommended options ("A or B?")   | Mark as `incomplete`, suggest resuming later                 |
+| **Collision detected** — new intent overlaps existing             | Suggest split or merge, show collision details | Force-create but tag as `experimental`, flag for next review |
+| **format-rules.md validation fails**                              | Read error message, fix format and retry       | Display full format-rules.md for manual inspection           |
 
 ### Anti-patterns
 
-| # | Anti-pattern | Why not | Do instead |
-|---|-------------|---------|------------|
-| 1 | **Ask multiple questions at once** | Confuses user, degrades response quality | Interview one question at a time |
-| 2 | **Cross-reference other intents in body** | Classification sub-agent only sees triggers/examples | Express boundaries via triggers and examples only |
-| 3 | **Skip format-rules.md before writing** | Inconsistent format breaks plugin parsing | Always read format-rules.md first |
-| 4 | **Create a new intent when one already exists** | Causes duplication and collision | Check existing intents during interview |
-| 5 | **Use vague descriptions as triggers** | Classification cannot match accurately | Triggers must be concrete phrases or keywords |
+| #   | Anti-pattern                                    | Why not                                              | Do instead                                        |
+| --- | ----------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------- |
+| 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality             | Interview one question at a time                  |
+| 2   | **Cross-reference other intents in body**       | Classification sub-agent only sees triggers/examples | Express boundaries via triggers and examples only |
+| 3   | **Skip format-rules.md before writing**         | Inconsistent format breaks plugin parsing            | Always read format-rules.md first                 |
+| 4   | **Create a new intent when one already exists** | Causes duplication and collision                     | Check existing intents during interview           |
+| 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately               | Triggers must be concrete phrases or keywords     |
 
 ---
 
@@ -169,17 +173,17 @@ Validate all new intents, check for collisions, and deliver.
 
 ### Failure modes
 
-| Trigger | First fix | Fallback |
-|---------|-----------|----------|
-| **Discovery scan fails** — skills directory missing or empty | Verify path, prompt user to confirm skills location | Accept manual capability list, tag as `manual_input` |
-| **Clustering finds orphan capabilities** | Mark as `unclustered`, recommend creating a new intent | Keep orphan list for next audit cycle |
+| Trigger                                                      | First fix                                              | Fallback                                             |
+| ------------------------------------------------------------ | ------------------------------------------------------ | ---------------------------------------------------- |
+| **Discovery scan fails** — skills directory missing or empty | Verify path, prompt user to confirm skills location    | Accept manual capability list, tag as `manual_input` |
+| **Clustering finds orphan capabilities**                     | Mark as `unclustered`, recommend creating a new intent | Keep orphan list for next audit cycle                |
 
 ### Anti-patterns
 
-| # | Anti-pattern | Why not | Do instead |
-|---|-------------|---------|------------|
-| 1 | **Run inventory without discovery/clustering** | Misses capabilities, produces orphan intents | Must follow order: discovery → clustering → interview |
-| 2 | **Skip cluster map checkpoint** | User cannot calibrate, may miss gaps | Always present cluster map before interview |
+| #   | Anti-pattern                                   | Why not                                      | Do instead                                            |
+| --- | ---------------------------------------------- | -------------------------------------------- | ----------------------------------------------------- |
+| 1   | **Run inventory without discovery/clustering** | Misses capabilities, produces orphan intents | Must follow order: discovery → clustering → interview |
+| 2   | **Skip cluster map checkpoint**                | User cannot calibrate, may miss gaps         | Always present cluster map before interview           |
 
 ---
 
@@ -214,6 +218,7 @@ Re-read the selected item — it must still be `pending`.
 Read the target intent markdown, the compact intent catalog, and relevant references.
 
 Before applying a suggested body edit, compare the target intent's `id`, `name`, triggers, examples, and body:
+
 - If the name/id are correct and only the body drifted, refine the body back to the declared boundary.
 - If the body is more accurate than the current name/id, propose a rename and ask for explicit confirmation before changing identity fields, filenames, or references.
 - If the body contains multiple responsibilities or an oversized boundary, propose a split plan and ask for explicit confirmation before creating/moving/deleting intent files.
@@ -235,6 +240,7 @@ mkdir -p /tmp/intention-hint-process-backlog/<item-id>-<timestamp>/
 ```
 
 Then apply:
+
 - `create` → new intent
 - `refine` → update target intent
 - `rename` → only after user confirmation; update `id`, `name`, filename, and stale references together
@@ -266,20 +272,20 @@ Dismiss instead of leaving pending when the finding is clearly duplicate, supers
 
 ### Failure modes
 
-| Trigger | First fix | Fallback |
-|---------|-----------|----------|
-| **Backlog finding already processed** | Skip, mark as `already_processed` | Re-check sessions/evolution.json state |
-| **Target intent deleted or missing** | Skip finding, log warning with missing intent ID | Leave item `pending`, report to user for manual resolution |
-| **Validation fails after apply** | Restore from `/tmp/intention-hint-process-backlog/` backup | Leave item `pending`, report validation errors to user |
-| **Suggested change breaks existing intent format** | Reject the suggestion, keep original intent unchanged | Mark `dismissed` if clearly invalid; otherwise leave `pending` with blocker |
+| Trigger                                            | First fix                                                  | Fallback                                                                    |
+| -------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **Backlog finding already processed**              | Skip, mark as `already_processed`                          | Re-check sessions/evolution.json state                                      |
+| **Target intent deleted or missing**               | Skip finding, log warning with missing intent ID           | Leave item `pending`, report to user for manual resolution                  |
+| **Validation fails after apply**                   | Restore from `/tmp/intention-hint-process-backlog/` backup | Leave item `pending`, report validation errors to user                      |
+| **Suggested change breaks existing intent format** | Reject the suggestion, keep original intent unchanged      | Mark `dismissed` if clearly invalid; otherwise leave `pending` with blocker |
 
 ### Anti-patterns
 
-| # | Anti-pattern | Why not | Do instead |
-|---|-------------|---------|------------|
-| 1 | **Process multiple backlog findings in one invocation** | Mixes context, impossible to track which finding was handled | Exactly one pending finding per invocation unless user explicitly requests a bounded batch |
-| 2 | **Skip validation before commit** | May introduce format errors or collisions | Always run validate-intents, test, build |
-| 3 | **Enter evolve mode without explicit user request** | Backlog items may be stale or irrelevant | Only enter when user says "process backlog" |
+| #   | Anti-pattern                                            | Why not                                                      | Do instead                                                                                 |
+| --- | ------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| 1   | **Process multiple backlog findings in one invocation** | Mixes context, impossible to track which finding was handled | Exactly one pending finding per invocation unless user explicitly requests a bounded batch |
+| 2   | **Skip validation before commit**                       | May introduce format errors or collisions                    | Always run validate-intents, test, build                                                   |
+| 3   | **Enter evolve mode without explicit user request**     | Backlog items may be stale or irrelevant                     | Only enter when user says "process backlog"                                                |
 
 ---
 
@@ -316,8 +322,8 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy)" <file>
 
 ### Test prompts (dry_run)
 
-| # | Prompt | Expected behavior | Mode |
-|---|--------|-------------------|------|
-| 1 | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate | design |
-| 2 | "Audit the entire intent system from scratch" | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review | inventory |
-| 3 | "Process the next evolution backlog finding" | Route to **evolve** → `pnpm run backlog -- show` → ground → backup → apply → validate → mark/rollback | evolve |
+| #   | Prompt                                           | Expected behavior                                                                                     | Mode      |
+| --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | --------- |
+| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                   | design    |
+| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review       | inventory |
+| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `pnpm run backlog -- show` → ground → backup → apply → validate → mark/rollback | evolve    |

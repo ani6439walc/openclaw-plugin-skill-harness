@@ -66,24 +66,29 @@ question   contract    & transform  & quantify   insight
 ```
 
 ### Step 1 — Formulate the Question
+
 - Reformulate vague requests into a concrete analytical question.
 - Clarify what decision this analysis supports.
 
 ### Step 2 — Define Metric Contract
+
 - Specify: entity, grain, numerator, denominator, time window, filters.
 - Separate extraction, transformation, and interpretation concerns.
 
 ### Step 3 — Extract & Transform
+
 - Read data files (CSV, JSON, spreadsheets) or run queries.
 - Execute Python scripts with `uv run --with` for dependencies.
 - Capture structured output for analysis.
 
 ### Step 4 — Interpret & Quantify Uncertainty
+
 - Compute statistics, comparisons, or trends.
 - Add confidence intervals or ranges — not just point estimates.
 - Flag weak sample sizes or poor data quality.
 
 ### Step 5 — Present Insight
+
 - Lead with the key finding, not the methodology.
 - State limitations clearly.
 - Recommend what would strengthen the conclusion.

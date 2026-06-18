@@ -73,23 +73,28 @@ scope      codebase    wiki/refs    diagram      & iterate
 ```
 
 ### Step 1 — Clarify Scope
+
 - Determine the target audience (internal team doc vs stakeholder pitch).
 - Identify the primary concern to visualize (data flow, topology, sequence, etc.).
 - Decide on diagram conventions (direction, naming).
 
 ### Step 2 — Inspect Codebase
+
 - Use `cx` to understand existing codebase structure.
 - Navigate with `dev-lifecycle` to find applicable sub-skills for context.
 
 ### Step 3 — Search for Existing Docs
+
 - Search wiki for existing ADRs or architecture notes.
 - Search the web for relevant architectural patterns or best practices.
 
 ### Step 4 — Generate Diagram
+
 - Use `architecture-diagram` skill to create a polished HTML+SVG diagram.
 - Match the diagram type to the concern (C4, flowchart, sequence, topology).
 
 ### Step 5 — Review & Iterate
+
 - Verify all components are connected correctly.
 - Check for missing flows or unclear labels.
 - Offer 1-2 refinement rounds if needed.

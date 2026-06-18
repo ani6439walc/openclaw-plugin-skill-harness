@@ -47,6 +47,7 @@ Detected "image analysis" intent. The user wants visual content to be examined, 
 
 - For error screenshots, people, places, events, or other real-time context, search relevant extracted keywords:
   web_search({ query: "<visual_context_or_error_text>" })
+
   # Limit retries to 2 if the tool times out or fails.
 
 - For diagrams or architecture charts, cross-reference with codebase structure:
@@ -65,23 +66,26 @@ Detected "image analysis" intent. The user wants visual content to be examined, 
 ## Concrete Workflow
 
 ### Step 0 — Simple Visual Identification Direct Path
+
 - For prompts like "What is this?", "Describe this image", or basic object/animal/person identification, call `image` once with a focused description prompt.
 - Base the reply only on the visual result unless the user asked for external verification or current real-world context.
 - Do not create Workboard cards, run shell commands, or perform web searches for simple visual recognition.
 
 ### Step 1 — Extract Visual Data
+
 - Use `image`, `images`, or `pdf` to extract the requested content from the visual material.
 - Structure extracted data in a clear format such as key-value pairs, Markdown bullets, JSON, or a table.
 - Preserve uncertainty when OCR or visual interpretation is unclear; do not invent missing values.
 
 ### Step 2 — Prepare Persistence When Saving Is Requested
+
 - If the user asks to save, record, append, or update extracted data in a file or vault, identify the target path and expected format before editing.
 - Read the existing target file or relevant section immediately before using `edit`, so the replacement text matches the current file exactly.
 - If the target is in `darling/`, read `darling/AGENTS.md` first and follow the vault's structure, tags, and author-voice conventions.
 - Use `edit` for precise updates to existing files; use `write` only for new files or after reconstructing the whole target from the latest read content.
 
 ### Step 3 — Verify and Report Persistence
+
 - After writing, verify the saved path and read back or diff the changed content.
 - If an edit fails due to stale or mismatched text, re-read the target section, retry once with corrected exact text, then stop or ask rather than looping.
 - Report what was extracted, where it was saved, and any uncertain fields.
-

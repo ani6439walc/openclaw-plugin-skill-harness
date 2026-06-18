@@ -53,19 +53,23 @@ job        plugin      draft        & await
 ```
 
 ### Step 1 — Confirm the Job
+
 - Identify the exact X/Twitter operation: search, post, export, monitor, giveaway.
 - Confirm target account, query, limits, and desired output format.
 
 ### Step 2 — Check Plugin Status
+
 - Verify if TweetClaw plugin is installed.
 - If not: install with `openclaw plugins install @xquik/tweetclaw` and restart gateway.
 
 ### Step 3 — Fetch or Draft
+
 - For research: fetch data via TweetClaw and summarize findings.
 - For visible actions: draft the post/reply/message and present for approval.
 - Wait for explicit user approval before sending any visible account actions.
 
 ### Step 4 — Report & Await Approval
+
 - Present findings or draft content to the user.
 - For research: include source links or returned IDs.
 - For visible actions: wait for approval before sending.

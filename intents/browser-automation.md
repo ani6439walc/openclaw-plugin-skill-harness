@@ -101,6 +101,7 @@ classify  delegate    yield        summarize  persist
 ```
 
 ### Step 1 — Classify Task Complexity
+
 - Simple (≤3 steps): direct query, single page check, screenshot → use `sessions_send`.
 - Direct download: for PDF/image/file URLs or `web_fetch` security failures, use `exec` with `curl` and verify the saved file path/size instead of forcing a browser workflow.
 - Complex (>3 steps): multi-page navigation, login flows, form filling, authenticated content extraction → use `sessions_spawn`.
@@ -108,6 +109,7 @@ classify  delegate    yield        summarize  persist
 - Notify the user that a browser task has been dispatched.
 
 ### Step 2 — Delegate to Browser Agent
+
 - For simple tasks: `sessions_send` with timeout 180s.
 - For complex or authenticated tasks: `sessions_spawn` with `mode: "run"` and a clear profile hint when saved session state is needed.
 - Include task description plus relevant user-provided profile, account, email, skill, target-site hints, and exact page/section/element navigation target in the delegation.
@@ -121,10 +123,12 @@ classify  delegate    yield        summarize  persist
   ```
 
 ### Step 3 — Wait for Completion
+
 - Use `sessions_yield` to wait for the browser sub-agent result.
 - Do not busy-poll for status.
 
 ### Step 4 — Verify and Summarize Results
+
 - Check whether the browser sub-agent output matches the requested page, account, lecture, section, dashboard, or UI state.
 - If the output is from the wrong location, re-delegate once with explicit navigation steps before summarizing.
 - For sequential extraction workflows, confirm the extracted content matches the requested target before proceeding to the next item.
@@ -133,11 +137,13 @@ classify  delegate    yield        summarize  persist
 - For map URL conversion, identify the source URL format, resolve or extract coordinates/place names, then construct the target service URL and verify it opens to the intended location.
 
 ### Step 4.5 — Recover from Tab Errors
+
 - If a `browser` tool call fails with "tab not found", do not retry blindly.
 - Execute `browser({ action: "tabs" })` to list active tabs.
 - Retry the original action using a valid `targetId`, `tabId`, or `label` from the response.
 
 ### Step 5 — Persist Extracted Data (If Applicable)
+
 - If the task requires updating local files, identify and read the target file immediately before editing.
 - Apply updates using `edit` with exact `oldText`; if matching fails, re-read the relevant section and retry once with corrected text.
 - Report the changed file path and any unresolved browser or source limitations.

@@ -154,12 +154,14 @@ SOPs       operation   or claim     status
 ```
 
 ### Step 1 — Read Vault SOPs & Structure
+
 - Identify the target Kanban board(s) and their specific scope, such as global vs. project-specific, before merging or moving items across boards.
 - Read `darling/AGENTS.md` for vault rules and specific SOPs before any productivity operation.
 - For named routines such as weekly review, monthly review, inbox triage, kanban cleanup, or vault audit, follow the matching SOP in `darling/AGENTS.md` instead of inventing a new sequence.
 - Survey target file structure with `treemd` if the file is large.
 
 ### Step 2 — Classify Operation Type and Reconcile Expectations
+
 - Read: check tasks, projects, goals, reviews, inbox.
 - Write: create new items, update status, add metadata.
 - Bulk/long-running: update many sections, process hundreds of lines, or coordinate a complex multi-step vault update through a sub-agent.
@@ -170,12 +172,14 @@ SOPs       operation   or claim     status
 - Status checks: note the user's stated belief such as "should be done" or "already cleared", compare file and artifact evidence against it, and lead with any discrepancy before proceeding.
 
 ### Step 2.5 — Enrich with External Data (When Applicable)
+
 - For kanban cards or project notes that reference code repositories, inspect recent commit history, branches, or PRs before updating the productivity artifact.
 - If `web_fetch` cannot access an internal or private URL, fall back to authenticated CLI, git, SSH, or browser-based access rather than treating the source as unavailable.
 - Extract only relevant commit messages, dates, authors, and changed components; synthesize them into task/project context without dumping raw logs.
 - Cite the repository path, command used, or verified source in the updated note when useful.
 
 ### Step 2.6 — Verify Completion Status
+
 - For tasks marked in progress or done, inspect the actual work product (notes file, code commit, document, or deliverable) when available.
 - When the user asks about file structure, item count, section outline, or completeness, run `treemd <target-file>` or an equivalent outline command before drawing conclusions.
 - Compare counted headings, questions, sections, or deliverable artifacts against the user's expectation and the task tracker.
@@ -183,6 +187,7 @@ SOPs       operation   or claim     status
 - Report the verified status, not just the claimed kanban or Workboard status.
 
 ### Step 3 — Execute Safely, Delegate, or Claim Workboard Task
+
 - Respect board boundaries during reads and writes; do not merge separate boards, scopes, or workflows unless the user explicitly asked for consolidation.
 - For reads: report active items, due dates, blocked items concisely.
 - For writes: preserve author's voice, use canonical tags.
@@ -199,12 +204,14 @@ SOPs       operation   or claim     status
 - For structural changes (> 5 files): present plan for approval.
 
 ### Step 4 — Update Related Artifacts and Verify Status
+
 - Persist any dependent file updates such as outlines, summaries, project notes, or next-action lists.
 - Run the smallest meaningful verification: readback, diff, grep, lint, test, or artifact inspection.
 - Show diffs for file modifications. If the diff is too large or rendering fails, fall back to a concise text summary of changed files, added/removed line counts, and key modifications instead of repeatedly retrying the same large diff.
 - Complete the claimed Workboard card with `workboard_complete`, including a concise summary, then attach `workboard_proof` when verification evidence is available.
 
 ### Step 5 — Report Status
+
 - Show what changed or what's active.
 - Highlight approaching deadlines, overdue items, blockers, or follow-up tasks.
 - For ingests, include the download size, storage path, and newly created task title.

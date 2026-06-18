@@ -33,10 +33,10 @@ Detected "open-source docs" intent. The user wants version-sensitive information
   skill: defuddle
 
 - Resolve a library name to a Context7 id before querying docs:
-  context7__resolve-library-id({ libraryName: "<library>", query: "<question>" })
+  context7\_\_resolve-library-id({ libraryName: "<library>", query: "<question>" })
 
 - Query version-sensitive library documentation:
-  context7__query-docs({ libraryId: "<context7_library_id>", query: "<question>" })
+  context7\_\_query-docs({ libraryId: "<context7_library_id>", query: "<question>" })
 
 - Read a dependency or lock file when version pinning is needed:
   read({ path: "<dependency_or_lock_file>" })
@@ -79,21 +79,25 @@ library    docs                        inspect
 ```
 
 ### Step 1 — Identify & Disambiguate Library
+
 - Determine the library/framework name from the user's question.
 - If the name is misspelled, vague, colloquial, or close to another local framework/tool name, use web search or official namespace clues to verify the exact project before proceeding.
 - Check if a specific version is mentioned.
 - Read local dependency/lock files if version pinning is needed.
 
 ### Step 2 — Resolve Documentation Source
+
 - Call `context7__resolve-library-id` to get the Context7-compatible library ID.
 - If no Context7 match, fall back to official docs or repo inspection.
 
 ### Step 2.5 — GitHub Actions & Bookmark When Requested
+
 - If the user asks to star, fork, or otherwise interact with the repository, use the GitHub API via `exec` with the appropriate endpoint and token.
 - If the user asks to note it down for later, create a concise research bookmark or tracked next-action with `workboard_create`.
 - Confirm lightweight repository actions before moving to deeper research.
 
 ### Step 3 — Read Documentation
+
 - Query version-sensitive docs via `context7__query-docs`.
 - For large docs: use `treemd` to survey structure first.
 - For long pages: use `defuddle` for cleaner extraction.
@@ -101,10 +105,12 @@ library    docs                        inspect
 - Recovery: if `web_fetch` fails or yields incomplete data, use `web_search` to locate alternative URLs, GitHub release pages, or official announcements, then retry fetching or synthesize from the search results.
 
 ### Step 4 — Source Inspection (Fallback)
+
 - When documentation is insufficient, shallow clone the repo: `git clone --depth 1 <repo_url> ./.tmp/<repo_name>`.
 - Use `cx` to inspect code symbols, definitions, and references.
 
 ### Step 5 — Synthesize Answer
+
 - Provide a source-backed answer specific to the open-source project.
 - Include version context when the answer varies by release.
 - Cite documentation URLs or source file paths.

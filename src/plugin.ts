@@ -70,8 +70,8 @@ export function createPlugin(
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
         timeoutMs: config.timeoutMs * 1.1 + 500,
       });
-      api.on("agent_end", handlers.onAgentEnd);
       api.on("after_tool_call", handlers.onAfterToolCall);
+      api.on("agent_end", handlers.onAgentEnd);
       api.on("session_end", handlers.onSessionEnd);
     },
   });

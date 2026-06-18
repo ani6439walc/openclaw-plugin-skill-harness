@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import json
 import os
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -84,7 +83,7 @@ def create_jules_session(owner, repo, diff_text):
     truncated = len(diff_text) > MAX_DIFF_CHARS
     diff_for_prompt = diff_text[:MAX_DIFF_CHARS]
 
-    prompt = f"""You are reviewing a GitHub pull request. IMPORTANT: This is a review-only task. Do NOT create any plan. Do NOT attempt to modify files. Simply analyze the diff and output your review directly as your response.
+    prompt = f"""You are reviewing a GitHub pull request. IMPORTANT: This is a review-only task. Do NOT create any plan. Do NOT attempt to modify files. Analyze the diff and output review directly as response.
 
 Repository: {owner}/{repo}
 PR: #{pr_number}
@@ -97,23 +96,23 @@ Task:
 - Perform a code review of the PR diff below.
 - Do NOT modify files or create a plan.
 - Do NOT create a pull request.
-- Output your review directly as your final message.
+- Output review directly as final message.
 - Focus on correctness, security, regressions, tests, maintainability, and backwards compatibility.
 - Return a Markdown review suitable for posting as a GitHub PR comment.
 - Use these sections:
   1. Summary
-  2. Blocking issues
-  3. Non-blocking suggestions
-  4. Tests / verification concerns
+  2. All blocking issues
+  3. All non-blocking suggestions
+  4. All tests / verification concerns
   5. Overall recommendation
 - If there are no issues, say so clearly.
 - If the diff is insufficient, state what context is missing.
 
 Diff truncated: {truncated}
 
-```diff
+<diff>
 {diff_for_prompt}
-```
+</diff>
 """
 
     payload = {

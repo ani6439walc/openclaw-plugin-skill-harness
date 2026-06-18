@@ -2,14 +2,14 @@
 id: MEMORY_RECENT
 name: Recent Memory Query
 triggers:
-- "User is asking about today, yesterday, this week, the last few days, or another clearly recent time window"
-- "User asks to review recent conversations, discussions, chats, or what was talked about in a recent time window"
+  - "User is asking about today, yesterday, this week, the last few days, or another clearly recent time window"
+  - "User asks to review recent conversations, discussions, chats, or what was talked about in a recent time window"
 examples:
-- "我昨天跟你說了什麼？"
-- "幫我回顧昨天跟今天凌晨的對話"
-- "今天 Duolingo 做了嗎？"
-- "昨天去了哪裡？"
-- "今天有 commit 什麼嗎？"
+  - "我昨天跟你說了什麼？"
+  - "幫我回顧昨天跟今天凌晨的對話"
+  - "今天 Duolingo 做了嗎？"
+  - "昨天去了哪裡？"
+  - "今天有 commit 什麼嗎？"
 ---
 
 Detected "recent memory" intent. The user wants a recent record from a narrow time window such as today, yesterday, this week, or the last few days.
@@ -30,6 +30,7 @@ Detected "recent memory" intent. The user wants a recent record from a narrow ti
   skill: treemd
 
 - Search recent raw diary files directly when the time window is known:
+
   ```bash
   rg -in "<keyword1>|<keyword2>|<keyword3>" memory/YYYY-MM-DD.md
   ```
@@ -74,6 +75,7 @@ window      files     state      match
 ```
 
 ### Step 1 — Infer Time Window
+
 - Extract time keywords from the user's question → map to specific dates or date ranges.
 - **Time word mapping**:
   | User says | Lookback range | Files to check |
@@ -88,6 +90,7 @@ window      files     state      match
 - Use system time as the reference point (confirm via `session_status` or `date`).
 
 ### Step 1.5 — Determine Retrieval Target and Retrieve Session History
+
 - If the user asks about activities, tasks, or what they did, prioritize diary files for the inferred date window.
 - If the user asks about conversations, discussions, chats, or what was talked about, list recent sessions in the inferred time window, then retrieve relevant session history.
 - If the user references the current channel, previous turn, or immediate past (for example 前一輪對話, 剛才, 上一步), query recent session history before diary files.
@@ -96,6 +99,7 @@ window      files     state      match
 - Fall back to diary files only when the request is about a date/window rather than immediate conversational context, or when session history is unavailable.
 
 ### Step 2 — Check Diary File Existence
+
 - Verify the inferred `memory/YYYY-MM-DD.md` files actually exist:
   ```bash
   ls -la memory/2026-05-24.md memory/2026-05-23.md ...
@@ -104,6 +108,7 @@ window      files     state      match
 - If the file exists but is small (< 500 bytes), note "the record for that day is brief."
 
 ### Step 2.5 — Detect In-Flight Task Progress
+
 - If the user's question implies an ongoing workflow visible in the current session (for example 進度到哪了, 做到哪了, 完成了嗎):
   1. Inspect active or recent sessions with `sessions_list()` when available.
   2. Cross-reference relevant workspace files with `ls -lt` and `stat` to confirm produced artifacts.
@@ -111,6 +116,7 @@ window      files     state      match
   4. Skip diary search unless no active workflow evidence exists.
 
 ### Step 3 — Keyword Match (rg Fallback Search)
+
 - If the user mentions a specific topic (e.g., Duolingo, coffee, meeting), use `rg` to search within the relevant date's diary:
   ```bash
   rg -i "<keyword1>|<keyword2>" memory/2026-05-24.md memory/2026-05-23.md
@@ -119,6 +125,7 @@ window      files     state      match
 - If `rg` returns no hits, fall back to `memory_search` for semantic search.
 
 ### Step 4 — Synthesize Response
+
 - Read matched diary content and/or session history and reply naturally about what the user did or discussed during the requested time window.
 - If the diary mentions the user's emotional state or mood (e.g., #專注, #開心), include it.
 - **Do not** mix in older data beyond the time window. If the user asks "today," answer only about today.

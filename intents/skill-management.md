@@ -90,10 +90,12 @@ Detected "skill management" intent. The user wants to vet, audit, clean, analyze
 ## Concrete Workflow
 
 ### Step 1 — Classify Skill Task
+
 - Determine whether the user wants security vetting, collection audit, skill optimization, or Skill Workshop proposal lifecycle management.
 - If the request is durable (save, propose, revise, apply, reject, quarantine, or list workshop items), route to `skill_workshop` rather than editing workshop files manually.
 
 ### Step 2 — Author Skill Drafts and Proposals
+
 - Clarify the skill domain, target users, lifecycle stages, and success criteria.
 - Use `sequential_thinking` when the skill must cover a multi-step lifecycle or several operating modes.
 - Research official docs and examples with `web_search` and `web_fetch` when domain-specific behavior or commands are required.
@@ -102,25 +104,31 @@ Detected "skill management" intent. The user wants to vet, audit, clean, analyze
 - Use `write` for live workspace skill files only when the user explicitly requested direct file creation or editing.
 
 ### Step 2.5 — Enrich Existing Skill with Domain Knowledge
+
 - Read the target `SKILL.md` and relevant reference files to understand current scope, structure, and existing domain notes.
 - Extract domain knowledge from verified sources such as course transcripts, official documentation, reference material, or user-provided examples.
 - Integrate only reusable patterns, examples, constraints, and references that improve future skill execution while keeping `SKILL.md` lean.
 - Validate that frontmatter, progressive disclosure, and reference paths remain intact after edits.
 
 ### Step 3 — Skill Workshop Lifecycle
+
 - Before approving or rejecting, discover the pending proposal with `skill_workshop({ action: "list", query: "<skill-name>", status: "pending" })` or `skill_workshop({ action: "inspect", proposal_id: "<proposal-id>" })`.
 - Apply, reject, or quarantine only after explicit user approval using the resolved `proposal_id`; if no proposal matches, stop and report the mismatch instead of guessing another action.
 
 ### Step 4 — Audit & Baseline
+
 - Run `darwin-skill` or the relevant audit skill against the target skill. Capture the initial score, critical failures, and lowest-scoring dimensions.
 
 ### Step 5 — Iterative Optimization
+
 For each confirmed issue or weak dimension:
+
 1. Read the relevant `SKILL.md` or reference files.
 2. Apply targeted fixes with the smallest safe file edit.
 3. Re-evaluate the affected dimension when needed.
 
 ### Step 5.5 — Batch Skill Editing or Translation
+
 - Inventory the target skill directory before editing, including `SKILL.md`, references, templates, and metadata files.
 - Read representative files to identify language, structure, frontmatter, JSON, and Markdown constraints before rewriting.
 - For bulk translation or extensive multi-file refactoring, delegate with exact file paths, required language, formatting constraints, and verification requirements.
@@ -128,15 +136,18 @@ For each confirmed issue or weak dimension:
 - Verify modified files after the batch, including YAML frontmatter in `SKILL.md`, JSON syntax in metadata files, and any referenced paths.
 
 ### Step 5.6 — Rename Skills and Patch References
+
 - Rename a live skill only after explicit confirmation of the old name, new name, directory path, and frontmatter updates.
 - Use `exec` to inventory references first, excluding generated or dependency folders such as `node_modules/`, `.git/`, and `dist/`.
 - Prefer scripted, reviewable replacements for broad reference updates; use `read` before `edit` when exact local context matters.
 - Re-run reference search for the old skill name and inspect the git diff before reporting completion.
 
 ### Step 6 — Finalize & Report
+
 When the quality threshold is met, summarize the before/after results, affected files, remaining risks, and any tool errors encountered. Clearly distinguish full success from partial success, and do not commit unless the user explicitly requested a commit.
 
 ### Step 2.1 — Scaffold Live Skill Directory
+
 Use only when the user explicitly asks for direct live-file skill creation instead of a Skill Workshop proposal.
 
 - Confirm the skill name, target directory, and initial triggers before creating files.
@@ -155,10 +166,12 @@ description: <short purpose>
 Use this skill when <activation condition>.
 
 ## Workflow
+
 1. <first step>
 2. <second step>
 
 ## Validation
+
 - <how to verify>
 ```
 

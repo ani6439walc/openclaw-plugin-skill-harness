@@ -84,15 +84,18 @@ sources    content     findings     & deliver
 ```
 
 ### Step 0 — Check Internal Sources for Agent Topics
+
 - If researching agent skills, prompts, or system design, use `memory_search` for prior discussions and decisions.
 - Read relevant `SKILL.md` files from `~/.openclaw/skills/` or plugin skill directories when they exist.
 - Continue to external research when internal sources are insufficient, missing, or not authoritative for the question.
 
 ### Step 1 — Search Sources
+
 - Use `web_search` with topic keywords to find authoritative sources.
 - For exhaustive investigation: use `in-depth-research` skill.
 
 ### Step 1b — Recover From Tool Failure
+
 - If `web_search` times out or returns an error, retry once with fewer, broader keywords.
 - If the retry also fails, use `web_fetch` on a known authoritative source when one is available.
 - If a `read` call fails with `ENOENT`, do not retry the same missing path; use another relevant file, external source, or report the missing-source limitation when it matters.
@@ -101,16 +104,19 @@ sources    content     findings     & deliver
 - Always continue to synthesis or deliver a clear blocker; do not stop at an intro line.
 
 ### Step 2 — Extract Content
+
 - Use `web_fetch` to read authoritative pages directly.
 - Use `defuddle` for cleaner web page extraction.
 - For visual content: use `image` or `pdf` tools as appropriate.
 
 ### Step 3 — Synthesize Findings
+
 - Summarize key findings instead of raw search dumps.
 - Cross-validate: prefer 2+ independent sources.
 - When sources disagree, reflect uncertainty clearly.
 
 ### Step 4 — Cite & Deliver
+
 - Include source links for factual claims.
 - Mention time sensitivity if information may change.
 - Keep the answer accurate, concise, and source-backed.

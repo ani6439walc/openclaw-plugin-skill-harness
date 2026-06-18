@@ -5,6 +5,7 @@ Interview the user one question at a time. Never batch questions.
 ## Opening decision tree
 
 At the start, classify the request into one path:
+
 1. create a brand-new intent
 2. rename an existing intent
 3. split an overloaded intent
@@ -16,6 +17,7 @@ If ambiguous, ask a single routing question first — explain why it matters, re
 ## Interview goals
 
 Confirm these fields in order:
+
 1. intent purpose and boundary
 2. best name and `id`
 3. filename
@@ -38,6 +40,7 @@ Confirm these fields in order:
 ## User-specified flow override
 
 If the user explicitly specifies a custom step order:
+
 1. Follow the user's flow, overriding default steps.
 2. If incomplete, supplement with calibration questions after completing their steps.
 3. If it conflicts with intent rules, warn but comply.

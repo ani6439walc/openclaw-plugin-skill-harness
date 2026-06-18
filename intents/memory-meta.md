@@ -2,16 +2,16 @@
 id: MEMORY_META
 name: Meta-Memory Query (System Corpus)
 triggers:
-- "User is asking about the memory system itself, SOPs, plugin architecture, file structure, workflow improvements, or system-side documentation"
-- "User asks the agent to execute or test a memory tool call to verify its capability, limitation, or behavior (e.g., 'try calling it', 'test if memory_get can read X', 'run memory_search and see what comes back')"
+  - "User is asking about the memory system itself, SOPs, plugin architecture, file structure, workflow improvements, or system-side documentation"
+  - "User asks the agent to execute or test a memory tool call to verify its capability, limitation, or behavior (e.g., 'try calling it', 'test if memory_get can read X', 'run memory_search and see what comes back')"
 examples:
-- "我們的記憶系統有什麼可以改善的？"
-- "這個 SOP 的架構對嗎？"
-- "daily notes 的寫法要怎麼改？"
-- "intention-hint plugin 怎麼運作的？"
-- "你嘗試呼叫看看？"
-- "幫我實際跑一下 memory_get 看會不會成功"
-- "測試看看 memory_search 能不能找到這個"
+  - "我們的記憶系統有什麼可以改善的？"
+  - "這個 SOP 的架構對嗎？"
+  - "daily notes 的寫法要怎麼改？"
+  - "intention-hint plugin 怎麼運作的？"
+  - "你嘗試呼叫看看？"
+  - "幫我實際跑一下 memory_get 看會不會成功"
+  - "測試看看 memory_search 能不能找到這個"
 ---
 
 Detected "meta-memory" intent. The user wants information about the system itself — not life events, but the architecture, SOPs, plugins, and workflows that manage memory and behavior.
@@ -52,11 +52,11 @@ intent      system corpus by path
 
 **Decision rules**:
 
-| Seemingly meta query | Actual intent | Logic | Correct routing |
-|---|---|---|---|
-| "我系統學日文學得怎麼樣了？" | `memory_standard` (learning Japanese progress) | Contains "系統" but no SOP/architecture words | Stay with domain memory |
-| "我們的 Duolingo skill 有沒有改善？" | `memory_meta` (skill design) | "skill" + "改善" = system improvement | System corpus |
-| "幫我整理一下記憶" | Ambiguous | Cannot determine | Ask user: "organize life diary or memory system architecture?" |
+| Seemingly meta query                 | Actual intent                                  | Logic                                         | Correct routing                                                |
+| ------------------------------------ | ---------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------- |
+| "我系統學日文學得怎麼樣了？"         | `memory_standard` (learning Japanese progress) | Contains "系統" but no SOP/architecture words | Stay with domain memory                                        |
+| "我們的 Duolingo skill 有沒有改善？" | `memory_meta` (skill design)                   | "skill" + "改善" = system improvement         | System corpus                                                  |
+| "幫我整理一下記憶"                   | Ambiguous                                      | Cannot determine                              | Ask user: "organize life diary or memory system architecture?" |
 
 **Trigger words**: `系統`, `SOP`, `改善`, `plugin`, `skill`, `架構`, `workflow`, `config`, `vault`, `工具`
 
@@ -78,22 +78,24 @@ rg -i -n -C 2 "SOP|改善|plugin|skill" \
 
 Group rg hits by source path:
 
-| Category | Typical path | Content description |
-|---|---|---|
-| Project docs | `darling/projects/**/*.md` | Project goals, progress, technical architecture |
-| Behavior rules | `AGENTS.md` | Session startup, formatting standards |
-| Tool conventions | `TOOLS.md` | SSH aliases, AC control, Folio |
-| Learning records | `memory/learnings/*.md` | Error lessons, best practices |
-| Personality framework | `SOUL.md` / `IDENTITY.md` | Character settings, state machine |
+| Category              | Typical path               | Content description                             |
+| --------------------- | -------------------------- | ----------------------------------------------- |
+| Project docs          | `darling/projects/**/*.md` | Project goals, progress, technical architecture |
+| Behavior rules        | `AGENTS.md`                | Session startup, formatting standards           |
+| Tool conventions      | `TOOLS.md`                 | SSH aliases, AC control, Folio                  |
+| Learning records      | `memory/learnings/*.md`    | Error lessons, best practices                   |
+| Personality framework | `SOUL.md` / `IDENTITY.md`  | Character settings, state machine               |
 
 ### Step 4 — Format Response
 
 Organize by category, each hit includes:
+
 - File path
 - Line number
 - Content summary
 
 Example:
+
 ```
 Search results for "SOP 改善":
 

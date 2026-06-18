@@ -100,31 +100,37 @@ status     wiki        sources      content      or ingest    & compile
 ```
 
 ### Step 1 — Check Vault Status
+
 - Call `wiki_status()` to understand vault mode, path, page counts, and Obsidian CLI availability.
 - Confirm the vault is accessible before any operation.
 
 ### Step 2 — Search Wiki
+
 - For managed vault queries: use `wiki_search` with relevant keywords.
 - For broader context: use `memory_search` with corpus "all" to span memory + wiki.
 - For raw or external wiki-like directories, first inspect the directory tree with `find`/`rg` and identify the relevant source, summary, concept, or index files directly.
 
 ### Step 3 — Gather Source Material
+
 - For wiki pages based on codebases or local projects, explore repository structure with `tree`, `find`, or `rg` before writing.
 - Read key configuration, README, manifest, deployment, or implementation files needed to support the requested documentation.
 - Capture file organization patterns, important directories, and concrete implementation details; do not invent undocumented behavior.
 
 ### Step 4 — Read Content
+
 - Use `wiki_get` to inspect managed vault page content before editing or citing.
 - Use `read` for raw directory files after confirming the requested path or repository.
 - For large pages: use `treemd` to navigate by heading tree first when available.
 
 ### Step 5 — Edit, Create, or Ingest
+
 - For edits: use `wiki_apply` to create synthesis or update metadata.
 - Before calling `wiki_apply({ op: "create_synthesis" })`, gather and supply a concrete `title` and at least one `sourceIds` entry; do not call it with only `body`.
 - For new pages: ingest the source file via `wiki-maintainer` skill.
 - Never manually move files between directories.
 
 ### Step 6 — Lint & Compile
+
 - Run `wiki_lint()` to check for contradictions, provenance gaps, and open questions.
 - Compile the vault with `obsidian-vault-maintainer` if needed.
 - Fix any issues found during linting.

@@ -5,11 +5,10 @@ An OpenClaw plugin that pre-scans user intent before replies and injects routing
 ## Commands
 
 ```bash
-pnpm run typecheck        # Type check without emitting
-pnpm run test:unit        # Run tests
-pnpm run test             # Type check + tests
-pnpm run format           # Format with prettier
-pnpm run backlog -- <cmd> # Run evolution backlog CLI
+pnpm typecheck        # Type check without emitting
+pnpm test             # Tests
+pnpm format           # Format with prettier
+pnpm run backlog <cmd> # Run evolution backlog CLI
 ```
 
 ## Project Structure
@@ -74,6 +73,7 @@ if (fileExists(path)) { ... }
 每個模組遵循以下模式：
 
 1. **匯出 class + default singleton**
+
    ```typescript
    export class SessionTracker { ... }
    export const defaultTracker = SessionTracker.create(pluginRoot);
@@ -83,8 +83,8 @@ if (fileExists(path)) { ... }
 
 3. **使用 `.js` 副檔名進行 ESM import**
    ```typescript
-   import { logger } from '../api.js';
-   import { fileUtils } from './file-utils.js';
+   import { logger } from "../api.js";
+   import { fileUtils } from "./file-utils.js";
    ```
 
 ### Error Handling
@@ -117,12 +117,14 @@ pnpm run test -- --watch   # Watch 模式
 ## Protected Files
 
 這些檔案**不會**被 session cleanup 或 retention 刪除：
+
 - `sessions/stats.json` — 聚合統計
 - `sessions/evolution.json` — Self-Evolution backlog
 
 ## Adding a New Intent
 
 1. 建立 `intents/<intent-id>.md`，包含 YAML frontmatter：
+
    ```markdown
    ---
    id: my-intent
@@ -132,9 +134,9 @@ pnpm run test -- --watch   # Watch 模式
      - "example user message 1"
      - "example user message 2"
    ---
-   
+
    # Intent Instructions
-   
+
    How to handle this intent...
    ```
 
