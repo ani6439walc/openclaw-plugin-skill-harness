@@ -23,13 +23,13 @@ index.ts
        ├─ intent-loader.ts → runtime catalog
        │    └─ loads intent .md files from $OPENCLAW_STATE_DIR/plugins/intention-hint/intents
        │
-       ├─ subagent.ts → runIntentionSubagent() (classifies intent via lightweight sub-agent)
+       ├─ subagent.ts → topic switch, intent classification, and instruction-writing sub-agents
        │    ├─ resolveCurrentTime() — timezone-aware local time formatting
        │    ├─ buildIntentionEmbeddedRunParams() — builds isolated sub-agent run config
        │    └─ uses constants.ts for FALLBACK_INTENT
        │
        ├─ hooks.ts → createHookHandlers()
-       │    ├─ onBeforePromptBuild → rotate() → record() → write() → inject hint
+       │    ├─ onBeforePromptBuild → resolve intent → write session data → inject generated hint
        │    ├─ onAfterToolCall → record() → write() (tracks tool usage)
        │    ├─ onAgentEnd → record() → aggregate stats → enqueue evolution review
        │    ├─ onSessionEnd → cleanup() + cleanupExpired() (lifecycle cleanup + 14-day retention)
@@ -41,6 +41,7 @@ index.ts
        │    ├─ <intent_categories> — auto-derived from ID prefixes
        │    ├─ <current_time> — injects local timezone time
        │    ├─ <conversation> — omitted when empty
+       │    ├─ buildIntentInstructionPrompt() — condenses matched intent Markdown into main-agent instructions
        │    ├─ buildPromptPrefix() — builds injected hint text
        │    └─ uses constants.ts for complexity prompt defaults
        │
@@ -79,7 +80,7 @@ index.ts
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `plugin.ts`                    | Plugin entry point, initializes runtime data, seeds empty intent catalogs from skill assets, and registers hooks on OpenClaw lifecycle events |
 | `hooks.ts`                     | Event handlers for prompt building, tool/agent tracking, and session cleanup                                                                  |
-| `subagent.ts`                  | Runs the intention classification sub-agent with model selection                                                                              |
+| `subagent.ts`                  | Runs tool-free topic switch, intent classification, and instruction-writing sub-agents with model selection                                   |
 | `intent-loader.ts`             | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                                                       |
 | `file-utils.ts`                | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                            |
 | `constants.ts`                 | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                             |
@@ -95,7 +96,7 @@ index.ts
 | `evolution-backlog-command.ts` | List, target, validate, and optimistically complete pending backlog items                                                                     |
 | `intent-validation.ts`         | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                         |
 | `conversation-extract.ts`      | Extract and truncate recent conversation turns for intent context                                                                             |
-| `prompt.ts`                    | **Core prompt & parser** — builds classification prompt, parses JSON result                                                                   |
+| `prompt.ts`                    | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints                     |
 | `session.ts`                   | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                              |
 | `config.ts`                    | Zod schema validation with defaults and clamping for plugin configuration                                                                     |
 
@@ -109,16 +110,23 @@ graph LR
     B -->|yes| C{internal user turn?}
     B -->|no| Z[skip]
     C -->|yes| Z
-    C -->|no| D[record input + conversation]
-    D --> E[runIntentionSubagent]
-    E --> F[parse intention result]
-    F --> G{parsed?}
-    G -->|yes| H[write session data]
-    G -->|no| I[warn parse failed]
-    H --> J[inject hint into prompt]
-    I --> K[skip hint injection]
-    J --> L[main agent generates]
-    K --> L
+    C -->|no| D[refresh config and intents]
+    D --> E{first tracked turn?}
+    E -->|yes| F[run intent classifier]
+    E -->|no| G[run topic switch checker]
+    G --> H{topic changed?}
+    H -->|yes or checker failed| F
+    H -->|no| I[inherit previous intent]
+    F --> J[parse intention result]
+    I --> J
+    J --> K{resolved?}
+    K -->|yes| L[run instruction writer]
+    K -->|no| M[warn parse failed]
+    L --> N[write session data]
+    N --> O[inject generated instruction hint]
+    M --> P[skip hint injection]
+    O --> Q[main agent generates]
+    P --> Q
 ```
 
 ### Session Data Structure
@@ -330,11 +338,11 @@ The classification sub-agent returns JSON:
 {
   "intent": "memory-lookup",
   "reason": "User asked to recall previous conversation",
-  "goal": "Retrieve memory of past discussion",
   "keywords": ["memory", "past discussion"],
   "topic": "memory / past discussion",
   "topicChanged": false,
   "topicChangeReason": "initial",
+  "intentChange": true,
   "confidence": 0.9,
   "complexity": "medium",
   "suggestion": "Only present when confidence < 0.8"
@@ -346,7 +354,9 @@ The classification sub-agent returns JSON:
 - Fallbacks to `other` if parsed intent not found in catalog
 - `keywords` are normalized core nouns or short phrases from the latest user message
 - `topic` is deterministic from the first 1-3 keywords joined with `/`
+- `intentChange=false` marks same-topic continuation turns that inherited the previous intent
 - Topic switch metadata is stored in session history; no separate cache or experience store is written
+- Durable session goals are managed by OpenClaw `/goal` and goal tools, not by intention-hint
 
 ### Intent Categories
 
@@ -370,9 +380,23 @@ The following categories group intents by their ID prefix:
 
 On the first tracked turn, the plugin runs only the intent classifier. On later
 tracked turns, it first runs a lightweight topic switch checker using the latest
-user message and recent session history (`intent`, `goal`, `keywords`, `topic`),
-then passes that topic context into the classifier. If the checker fails, the
-plugin logs and falls back to classifier-only behavior.
+user message and recent session history (`intent`, `keywords`, `topic`, `complexity`).
+If the checker says the topic changed, that topic context is passed into the
+classifier. If the checker says the topic did not change, the plugin skips
+classification, inherits the latest historical intent/topic/keywords, uses the
+checker complexity for the latest message, and records the current turn with
+`intentChange=false`. If the checker fails, the plugin logs and falls back to
+classifier-only behavior.
+
+### Instruction Generation
+
+After an intent is resolved, the plugin reads the matched intent Markdown body
+and runs a short instruction-writing sub-agent. That sub-agent outputs plain text
+for the main agent: concrete workflow, relevant skills, useful tools, and durable
+Experience notes from the intent when they matter for the latest user message.
+The generated instruction text replaces direct full intent-body injection. If
+instruction generation fails, `buildPromptPrefix()` falls back to the original
+matched intent body.
 
 ### Time Injection
 
@@ -385,9 +409,10 @@ plugin logs and falls back to classifier-only behavior.
 ### Conversation Handling
 
 - The conversation context is omitted entirely when conversation is empty or undefined
-- Matching historical user turns include the prior `intent`, `goal`, `keywords`, and `topic`; assistant, unmatched, and latest user turns do not
+- Matching historical user turns include the prior `intent`, `keywords`, and `topic`; assistant, unmatched, and latest user turns do not
 - Historical records are matched by normalized user-message text, with duplicate messages paired newest-first
-- Classification rules use historical goals as context while requiring fresh classification on topic switches
+- Classification rules use historical intent metadata as context while requiring fresh classification on topic switches
+- Same-topic continuation turns omit `current.intent.input` to avoid duplicating conversation snapshots, while keeping `current.intent.result` for tool tracking, stats, and Evolution
 - Extracted via `conversation-extract.ts` with configurable turn/char limits from `contextWindow` config
 
 ### Internal User Turns
@@ -421,9 +446,10 @@ influenced by internal task-completion traffic.
 - Plain JSON (no markers)
 - JSON wrapped in \`\`\`json ... \`\`\` code blocks (tolerant stripping)
 - JSON wrapped in stray \`\`\` markers
-- Required field validation (`intent`, `reason`, `goal`, `confidence`, `complexity`)
+- Required field validation (`intent`, `reason`, `confidence`, `complexity`)
 - Keyword normalization and deterministic topic derivation when `keywords` are present
 - Topic switch metadata merged from the pre-classification checker when available
+- Intent change metadata used to distinguish fresh classifications from inherited same-topic turns
 - Confidence range validation (0.0–1.0)
 - Complexity enum validation (`low`, `medium`, `high`)
 - Optional `suggestion` field (only included when present in JSON)
@@ -442,6 +468,7 @@ The test suites cover:
 - `buildIntentionPrompt()` prompt structure
 - `parseIntentionResult()` JSON parsing (plain, code blocks, malformed, missing fields)
 - Topic switch prompt parsing and hook ordering before classification
+- Instruction prompt generation and fallback hint wrapping
 - Filename-based intent ID validation and fallback behavior
 - Timezone-aware time formatting
 - Config resolution and clamping

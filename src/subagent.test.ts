@@ -3,6 +3,7 @@ import type { OpenClawPluginApi } from "../api.js";
 import { resolveConfig } from "./config.js";
 import {
   buildIntentionEmbeddedRunParams,
+  runIntentInstructionSubagent,
   runTopicSwitchSubagent,
 } from "./subagent.js";
 
@@ -35,6 +36,7 @@ describe("runTopicSwitchSubagent", () => {
             keywords: [" Topic ", "Checker"],
             topicChanged: false,
             topicChangeReason: "same_topic",
+            complexity: "medium",
           }),
         },
       ],
@@ -57,7 +59,6 @@ describe("runTopicSwitchSubagent", () => {
         {
           input: "plan topic checker",
           intent: "coding",
-          goal: "Plan topic checker",
           keywords: ["topic", "checker"],
           topic: "topic / checker",
         },
@@ -70,6 +71,7 @@ describe("runTopicSwitchSubagent", () => {
       topic: "topic / checker",
       topicChanged: false,
       topicChangeReason: "same_topic",
+      complexity: "medium",
     });
     expect(runEmbeddedPiAgent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -80,6 +82,56 @@ describe("runTopicSwitchSubagent", () => {
         disableTools: true,
         prompt: expect.stringContaining("topic continuity checker"),
       }),
+    );
+  });
+});
+
+describe("runIntentInstructionSubagent", () => {
+  it("runs a tool-free instruction writer with classifier config", async () => {
+    const runEmbeddedPiAgent = vi.fn().mockResolvedValue({
+      payloads: [{ text: "Use test-driven-development, then apply_patch." }],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedPiAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    const result = await runIntentInstructionSubagent({
+      api,
+      config: resolveConfig({
+        model: "google/test-intent",
+        thinking: "low",
+        timeoutMs: 4321,
+      }),
+      agentId: "main",
+      latest: "implement continuation",
+      result: {
+        intent: "coding",
+        reason: "User wants implementation",
+        keywords: ["continuation"],
+        topic: "continuation",
+        intentChange: true,
+        confidence: 0.9,
+        complexity: "medium",
+      },
+      intentBody:
+        "## Concrete Workflow\n\n- Use test-driven-development.\n\n## Tools\n\n- apply_patch",
+      modelRef: { provider: "google", model: "test-intent" },
+    });
+
+    expect(result).toBe("Use test-driven-development, then apply_patch.");
+    expect(runEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "google",
+        model: "test-intent",
+        timeoutMs: 4321,
+        thinkLevel: "low",
+        disableTools: true,
+        prompt: expect.stringContaining("instruction writer"),
+      }),
+    );
+    expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
+      "Use test-driven-development",
     );
   });
 });

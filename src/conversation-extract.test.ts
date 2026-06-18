@@ -16,7 +16,6 @@ describe("attachHistoricalIntents", () => {
       {
         input: "Plan the release",
         intent: "PLANNING",
-        goal: "Create a release plan",
       },
     ];
 
@@ -26,7 +25,6 @@ describe("attachHistoricalIntents", () => {
         text: "Plan the release",
         historicalIntent: {
           intent: "PLANNING",
-          goal: "Create a release plan",
         },
       },
       { role: "assistant", text: "Here is a plan" },
@@ -43,21 +41,21 @@ describe("attachHistoricalIntents", () => {
       { role: "user", text: "same message" },
     ];
     const records: HistoricalIntentRecord[] = [
-      { input: " same message ", intent: "FIRST", goal: "First goal" },
-      { input: "same\nmessage", intent: "SECOND", goal: "Second goal" },
+      { input: " same message ", intent: "FIRST" },
+      { input: "same\nmessage", intent: "SECOND" },
     ];
 
     expect(attachHistoricalIntents(conversation, records)).toEqual([
       {
         role: "user",
         text: "same message",
-        historicalIntent: { intent: "FIRST", goal: "First goal" },
+        historicalIntent: { intent: "FIRST" },
       },
       { role: "assistant", text: "first reply" },
       {
         role: "user",
         text: "same   message",
-        historicalIntent: { intent: "SECOND", goal: "Second goal" },
+        historicalIntent: { intent: "SECOND" },
       },
       { role: "assistant", text: "second reply" },
       { role: "user", text: "same message" },
@@ -75,7 +73,6 @@ describe("attachHistoricalIntents", () => {
         {
           input: "A long historical user message",
           intent: "RESEARCH",
-          goal: "Research the historical topic",
           keywords: ["historical", "topic"],
           topic: "historical / topic",
         },
@@ -92,7 +89,6 @@ describe("attachHistoricalIntents", () => {
       text: "A long his (truncated...)",
       historicalIntent: {
         intent: "RESEARCH",
-        goal: "Research the historical topic",
         keywords: ["historical", "topic"],
         topic: "historical / topic",
       },

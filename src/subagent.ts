@@ -8,6 +8,7 @@ import type { OpenClawPluginApi } from "../api.js";
 import { logger } from "../api.js";
 import { FALLBACK_INTENT_ID } from "./constants.js";
 import {
+  buildIntentInstructionPrompt,
   buildIntentionPrompt,
   buildTopicSwitchPrompt,
   parseIntentionResult,
@@ -204,6 +205,72 @@ export async function runTopicSwitchSubagent(params: {
     return parsed;
   } catch (err) {
     logger.warn("Topic switch subagent error", { error: err });
+    return;
+  }
+}
+
+export async function runIntentInstructionSubagent(params: {
+  api: OpenClawPluginApi;
+  config: ResolvedIntentionHintPluginConfig;
+  agentId: string;
+  sessionKey?: string;
+  sessionId?: string;
+  latest: string;
+  result: IntentionResult;
+  intentBody: string;
+  messageProvider?: string;
+  modelRef: { provider: string; model: string };
+}): Promise<string | undefined> {
+  const subagentSessionId = `intention-hint-instruction-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+  const parentSessionKey =
+    params.sessionKey ??
+    resolveCanonicalSessionKeyFromSessionId({
+      api: params.api,
+      agentId: params.agentId,
+      sessionId: params.sessionId,
+    });
+  const subagentScope =
+    parentSessionKey ?? params.sessionId ?? crypto.randomUUID();
+  const subagentSuffix = `intention-hint-instruction:${crypto.createHash("sha1").update(`${subagentScope}:${params.latest}:${params.result.intent}`).digest("hex").slice(0, 12)}`;
+  const subagentSessionKey = parentSessionKey
+    ? `${parentSessionKey}:${subagentSuffix}`
+    : `agent:${params.agentId}:${subagentSuffix}`;
+
+  const prompt = buildIntentInstructionPrompt({
+    latest: params.latest,
+    result: params.result,
+    intentBody: params.intentBody,
+    currentTime: resolveCurrentTime(params.api),
+  });
+
+  try {
+    const result = await params.api.runtime.agent.runEmbeddedPiAgent(
+      buildIntentionEmbeddedRunParams({
+        params,
+        subagentSessionId,
+        subagentSessionKey,
+        prompt,
+      }),
+    );
+    const rawReply = ((result.payloads ?? []) as { text?: string }[])
+      .map((payload) => payload.text?.trim() ?? "")
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    const instruction = rawReply
+      .replace(/^```(?:markdown|md|text)?\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim();
+
+    if (!instruction) {
+      logger.warn("Intent instruction result was empty", {
+        intent: params.result.intent,
+      });
+      return;
+    }
+    return instruction;
+  } catch (err) {
+    logger.warn("Intent instruction subagent error", { error: err });
     return;
   }
 }

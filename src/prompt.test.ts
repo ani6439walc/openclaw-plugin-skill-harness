@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildIntentInstructionPrompt,
   buildIntentionPrompt,
   buildTopicSwitchPrompt,
   parseIntentionResult,
@@ -90,7 +91,6 @@ describe("buildIntentionPrompt", () => {
         text: "Hello there",
         historicalIntent: {
           intent: "coding",
-          goal: "Implement the feature",
         },
       },
       { role: "assistant", text: "Hi! How can I help?" },
@@ -106,7 +106,7 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("# Conversation context");
     expect(result).toContain("## Recent history");
     expect(result).toContain("- **user**: Hello there");
-    expect(result).toContain("> *intent: coding; Implement the feature*");
+    expect(result).toContain("> *intent: coding*");
     expect(result).toContain("- **assistant**: Hi! How can I help?");
   });
   it("should include latest message in input section", () => {
@@ -153,14 +153,12 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("<output_format>");
     expect(result).toContain('"intent":');
     expect(result).toContain('"reason":');
-    expect(result).toContain('"goal":');
     expect(result).toContain('"keywords":');
     expect(result).toContain('"confidence":');
     expect(result).toContain('"complexity":');
     expect(result).toContain("historical_intent");
-    expect(result).toContain("historical goals");
     expect(result).toContain("Topic switch");
-    expect(result).toContain("refine the relevant historical goal");
+    expect(result).toContain("historical topic");
   });
 });
 
@@ -172,9 +170,9 @@ describe("buildTopicSwitchPrompt", () => {
         {
           input: "規劃 topic checker",
           intent: "coding",
-          goal: "Plan topic checker",
           keywords: ["topic", "checker"],
           topic: "topic / checker",
+          complexity: "medium",
         },
       ],
     });
@@ -194,7 +192,7 @@ describe("parseTopicSwitchResult", () => {
         keywords: [" Topic ", "Checker", "topic", "Flow"],
         topicChanged: false,
         topicChangeReason: "same_topic",
-        previousTopic: "topic / checker",
+        complexity: "medium",
       }),
     );
 
@@ -203,20 +201,21 @@ describe("parseTopicSwitchResult", () => {
       topic: "topic / checker / flow",
       topicChanged: false,
       topicChangeReason: "same_topic",
-      previousTopic: "topic / checker",
+      complexity: "medium",
     });
   });
 
   it("accepts fenced JSON and rejects invalid reasons", () => {
     expect(
       parseTopicSwitchResult(
-        '```json\n{"keywords":["deploy"],"topicChanged":true,"topicChangeReason":"transition_marker"}\n```',
+        '```json\n{"keywords":["deploy"],"topicChanged":true,"topicChangeReason":"transition_marker","complexity":"high"}\n```',
       ),
     ).toMatchObject({
       keywords: ["deploy"],
       topic: "deploy",
       topicChanged: true,
       topicChangeReason: "transition_marker",
+      complexity: "high",
     });
 
     expect(
@@ -225,9 +224,49 @@ describe("parseTopicSwitchResult", () => {
           keywords: ["deploy"],
           topicChanged: true,
           topicChangeReason: "initial",
+          complexity: "medium",
         }),
       ),
     ).toBeUndefined();
+
+    expect(
+      parseTopicSwitchResult(
+        JSON.stringify({
+          keywords: ["deploy"],
+          topicChanged: true,
+          topicChangeReason: "transition_marker",
+          complexity: "huge",
+        }),
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("buildIntentInstructionPrompt", () => {
+  it("includes the matched intent body, latest message, and instruction requirements", () => {
+    const prompt = buildIntentInstructionPrompt({
+      latest: "繼續實作同題續聊",
+      result: {
+        intent: "coding",
+        reason: "User wants implementation",
+        keywords: ["topic", "continuation"],
+        topic: "topic / continuation",
+        intentChange: false,
+        confidence: 0.9,
+        complexity: "medium",
+      },
+      intentBody:
+        "## Concrete Workflow\n\n- Use test-driven-development.\n\n## Tools\n\n- apply_patch",
+    });
+
+    expect(prompt).toContain("instruction writer");
+    expect(prompt).toContain("workflow");
+    expect(prompt).toContain("skills and tools");
+    expect(prompt).toContain("intent: coding");
+    expect(prompt).toContain("intentChange: false");
+    expect(prompt).toContain("Use test-driven-development");
+    expect(prompt).toContain("apply_patch");
+    expect(prompt).toContain("繼續實作同題續聊");
   });
 });
 
@@ -236,7 +275,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "coding",
       reason: "User wants to write code",
-      goal: "Implement a sorting function",
       keywords: [" Sort ", "Array", "sort"],
       confidence: 0.85,
       complexity: "medium",
@@ -247,7 +285,6 @@ describe("parseIntentionResult", () => {
     expect(result).toBeDefined();
     expect(result!.intent).toBe("coding");
     expect(result!.reason).toBe("User wants to write code");
-    expect(result!.goal).toBe("Implement a sorting function");
     expect(result!.keywords).toEqual(["sort", "array"]);
     expect(result!.topic).toBe("sort / array");
     expect(result!.topicChanged).toBe(false);
@@ -261,9 +298,7 @@ describe("parseIntentionResult", () => {
       JSON.stringify({
         intent: "coding",
         reason: "User continues implementation",
-        goal: "Implement topic checker",
         confidence: 0.85,
-        complexity: "medium",
       }),
       ["coding", "other"],
       {
@@ -271,7 +306,7 @@ describe("parseIntentionResult", () => {
         topic: "topic / checker / implementation",
         topicChanged: false,
         topicChangeReason: "same_topic",
-        previousTopic: "topic / checker",
+        complexity: "high",
       },
     );
 
@@ -280,7 +315,7 @@ describe("parseIntentionResult", () => {
       topic: "topic / checker / implementation",
       topicChanged: false,
       topicChangeReason: "same_topic",
-      previousTopic: "topic / checker",
+      complexity: "high",
     });
   });
 
@@ -288,7 +323,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "memory-lookup (Memory Lookup)",
       reason: "User asked to recall previous conversation topic",
-      goal: "Retrieve memory of past discussion",
       confidence: 0.9,
       complexity: "medium",
     });
@@ -304,7 +338,6 @@ describe("parseIntentionResult", () => {
     expect(result!.reason).toBe(
       "User asked to recall previous conversation topic",
     );
-    expect(result!.goal).toBe("Retrieve memory of past discussion");
     expect(result!.confidence).toBe(0.9);
     expect(result!.complexity).toBe("medium");
   });
@@ -313,7 +346,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "other",
       reason: "Unable to confidently classify",
-      goal: "User is asking something unclear",
       confidence: 0.45,
       complexity: "low",
       suggestion: "Please clarify what you need help with",
@@ -330,7 +362,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "CODING",
       reason: "User wants code",
-      goal: "Sort function",
       confidence: 0.8,
       complexity: "medium",
     });
@@ -356,7 +387,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "unknown-intent",
       reason: "Some reason",
-      goal: "Some goal",
       confidence: 0.8,
       complexity: "medium",
     });
@@ -371,7 +401,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "coding",
       reason: "User wants code",
-      goal: "Sort function",
       confidence: 1,
       complexity: "low",
     });
@@ -386,7 +415,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "coding",
       reason: "User wants code",
-      goal: "Sort function",
       confidence: "invalid",
       complexity: "low",
     });
@@ -400,7 +428,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "coding",
       reason: "User wants code",
-      goal: "Sort function",
       confidence: 1.5,
       complexity: "low",
     });
@@ -414,7 +441,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "coding",
       reason: "User wants code",
-      goal: "Sort function",
       confidence: 0.8,
       complexity: "low",
       suggestion: "",
@@ -428,7 +454,7 @@ describe("parseIntentionResult", () => {
 
   it("should parse JSON wrapped in ```json code block", () => {
     const raw =
-      '```json\n{"intent": "coding", "reason": "test", "goal": "build", "confidence": 0.9, "complexity": "medium"}\n```';
+      '```json\n{"intent": "coding", "reason": "test", "confidence": 0.9, "complexity": "medium"}\n```';
     const result = parseIntentionResult(raw, ["coding"]);
     expect(result).toBeDefined();
     expect(result!.intent).toBe("coding");
@@ -436,7 +462,7 @@ describe("parseIntentionResult", () => {
 
   it("should parse JSON wrapped in ``` without json tag", () => {
     const raw =
-      '```\n{"intent": "coding", "reason": "test", "goal": "build", "confidence": 0.9, "complexity": "low"}\n```';
+      '```\n{"intent": "coding", "reason": "test", "confidence": 0.9, "complexity": "low"}\n```';
     const result = parseIntentionResult(raw, ["coding"]);
     expect(result).toBeDefined();
   });
@@ -462,7 +488,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "coding",
       reason: "test",
-      goal: "build",
       confidence: 0.9,
       complexity: "invalid",
     });
@@ -474,7 +499,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "coding",
       reason: "test",
-      goal: "build",
       confidence: 0.5,
       complexity: "high",
       suggestion: "Consider breaking into smaller tasks",
@@ -488,7 +512,6 @@ describe("parseIntentionResult", () => {
     const raw = JSON.stringify({
       intent: "coding",
       reason: "test",
-      goal: "build",
       confidence: 0.9,
       complexity: "low",
     });
@@ -552,7 +575,6 @@ describe("buildPromptPrefix", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants to write code",
-      goal: "Implement a function",
       confidence: 0.9,
       complexity: "medium",
     };
@@ -561,7 +583,6 @@ describe("buildPromptPrefix", () => {
 
     expect(prefix).toBeDefined();
     expect(prefix).toContain("reason: User wants to write code");
-    expect(prefix).toContain("goal: Implement a function");
     expect(prefix).toContain("confidence: 0.9");
     expect(prefix).toContain("complexity: medium");
     expect(prefix).toContain("You are helping with coding tasks");
@@ -572,7 +593,6 @@ describe("buildPromptPrefix", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants code",
-      goal: "Implement topic flow",
       keywords: ["topic", "flow"],
       topic: "topic / flow",
       topicChanged: true,
@@ -591,12 +611,44 @@ describe("buildPromptPrefix", () => {
     expect(prefix).toContain("previousTopic: docs");
   });
 
+  it("includes intent change metadata when present", () => {
+    const result: IntentionResult = {
+      intent: "coding",
+      reason: "User continues the same topic",
+      intentChange: false,
+      confidence: 0.9,
+      complexity: "medium",
+    };
+
+    const prefix = buildPromptPrefix(result, mockIntents, mockConfig);
+
+    expect(prefix).toContain("intentChange: false");
+  });
+
+  it("uses generated instruction text when provided", () => {
+    const result: IntentionResult = {
+      intent: "coding",
+      reason: "User wants code",
+      confidence: 0.9,
+      complexity: "medium",
+    };
+
+    const prefix = buildPromptPrefix(
+      result,
+      mockIntents,
+      mockConfig,
+      "Run tests first, then edit with apply_patch.",
+    );
+
+    expect(prefix).toContain("Run tests first, then edit with apply_patch.");
+    expect(prefix).not.toContain("Write clean, well-tested code.");
+  });
+
   it("should match filename intent ids when result includes display text", () => {
     const result: IntentionResult = {
       intent: "agent-dispatch (Agent Dispatch & Orchestration)",
       reason:
         "User is confirming/approving a prior proposal to organize a file",
-      goal: "Execute the file reorganization plan",
       confidence: 0.75,
       complexity: "medium",
     };
@@ -611,7 +663,6 @@ describe("buildPromptPrefix", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants code",
-      goal: "Implement something",
       suggestion: "Consider breaking this into smaller tasks",
       confidence: 0.6,
       complexity: "high",
@@ -628,7 +679,6 @@ describe("buildPromptPrefix", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "Simple request",
-      goal: "Say hello",
       confidence: 0.95,
       complexity: "low",
     };
@@ -642,7 +692,6 @@ describe("buildPromptPrefix", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "Complex request",
-      goal: "Build entire system",
       confidence: 0.8,
       complexity: "high",
     };
@@ -656,7 +705,6 @@ describe("buildPromptPrefix", () => {
     const result: IntentionResult = {
       intent: "unknown-intent",
       reason: "Unknown request",
-      goal: "Do something",
       confidence: 0.5,
       complexity: "medium",
     };
@@ -670,7 +718,6 @@ describe("buildPromptPrefix", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants code",
-      goal: "Build app",
       confidence: 0.9,
       complexity: "medium",
     };
@@ -685,7 +732,6 @@ describe("buildPromptPrefix", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants code",
-      goal: "Build app",
       confidence: 0.9,
       complexity: "medium",
     };

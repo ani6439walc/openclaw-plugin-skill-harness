@@ -105,11 +105,11 @@ export type IntentCatalogEntry = {
 export type IntentionResult = {
   intent: string;
   reason: string;
-  goal: string;
   suggestion?: string;
   keywords?: string[];
   topic?: string;
   topicChanged?: boolean;
+  intentChange?: boolean;
   topicChangeReason?:
     | "initial"
     | "same_topic"
@@ -123,8 +123,9 @@ export type IntentionResult = {
 
 export type HistoricalIntent = Pick<
   IntentionResult,
-  "intent" | "goal" | "keywords" | "topic"
->;
+  "intent" | "keywords" | "topic"
+> &
+  Partial<Pick<IntentionResult, "confidence" | "complexity">>;
 
 export type HistoricalIntentRecord = HistoricalIntent & {
   input: string;

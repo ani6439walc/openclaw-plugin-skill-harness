@@ -218,15 +218,15 @@ export class SessionTracker {
     return [...(session.history ?? []), session.current].flatMap((state) => {
       const result = state.intent?.result;
       if (!state.input || !result) return [];
-      return [
-        {
-          input: state.input,
-          intent: result.intent,
-          goal: result.goal,
-          keywords: result.keywords ? [...result.keywords] : undefined,
-          topic: result.topic,
-        },
-      ];
+      const record: HistoricalIntentRecord = {
+        input: state.input,
+        intent: result.intent,
+        confidence: result.confidence,
+        complexity: result.complexity,
+      };
+      if (result.keywords?.length) record.keywords = [...result.keywords];
+      if (result.topic) record.topic = result.topic;
+      return [record];
     });
   }
 

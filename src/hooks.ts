@@ -36,10 +36,13 @@ import {
 import {
   getModelRef,
   getReviewModelRef,
+  runIntentInstructionSubagent,
   runIntentionSubagent,
   runTopicSwitchSubagent,
 } from "./subagent.js";
 import { buildPromptPrefix } from "./prompt.js";
+import { FALLBACK_INTENT } from "./constants.js";
+import type { HistoricalIntentRecord, IntentionResult } from "./types.js";
 
 export type HookDeps = {
   api: OpenClawPluginApi;
@@ -53,6 +56,7 @@ export type HookDeps = {
   reviewer?: typeof runReviewSubagent;
   classifier?: typeof runIntentionSubagent;
   topicChecker?: typeof runTopicSwitchSubagent;
+  instructionWriter?: typeof runIntentInstructionSubagent;
   backlogWriter?: Pick<BacklogWriter, "record">;
 };
 
@@ -79,6 +83,36 @@ function findIntentDefinition(
     .find((entry) => entry.id.toLowerCase() === intentId.toLowerCase());
 }
 
+function findIntentBody(
+  intents: readonly { id: string; definition: { prompt: string } }[],
+  intent: string | undefined,
+): string {
+  const intentId = intent?.match(/^([A-Za-z0-9_-]+)/)?.[1];
+  if (!intentId) return FALLBACK_INTENT.prompt;
+  return (
+    intents.find((entry) => entry.id.toLowerCase() === intentId.toLowerCase())
+      ?.definition.prompt ?? FALLBACK_INTENT.prompt
+  );
+}
+
+function buildInheritedIntentResult(
+  latest: HistoricalIntentRecord,
+  topicContext: NonNullable<Awaited<ReturnType<typeof runTopicSwitchSubagent>>>,
+): IntentionResult {
+  return {
+    intent: latest.intent,
+    reason: "Topic unchanged; inherited previous intent",
+    keywords: latest.keywords ? [...latest.keywords] : undefined,
+    topic: latest.topic,
+    topicChanged: false,
+    topicChangeReason: topicContext.topicChangeReason,
+    previousTopic: latest.topic,
+    intentChange: false,
+    confidence: latest.confidence ?? 0.8,
+    complexity: topicContext.complexity,
+  };
+}
+
 const SESSION_END_REASONS_THAT_DELETE_FILE = new Set([
   "new",
   "reset",
@@ -97,6 +131,8 @@ export function createHookHandlers(deps: HookDeps) {
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier ?? runIntentionSubagent;
   const topicChecker = deps.topicChecker ?? runTopicSwitchSubagent;
+  const instructionWriter =
+    deps.instructionWriter ?? runIntentInstructionSubagent;
   const backlogWriter = deps.backlogWriter ?? defaultBacklogWriter;
 
   async function onBeforePromptBuild(
@@ -198,27 +234,54 @@ export function createHookHandlers(deps: HookDeps) {
             })
           : undefined;
 
-      const result = await classifier({
-        api,
-        config: refreshedConfig,
-        agentId: effectiveAgentId,
-        sessionKey: resolvedSessionKey,
-        sessionId: ctx.sessionId,
-        conversation,
-        latest: latestUserMessage,
-        messageProvider: ctx.messageProvider,
-        channelId: ctx.channelId,
-        modelRef,
-        intents: availableIntents,
-        topicContext,
-      });
+      const latestHistoricalIntent =
+        historicalIntents[historicalIntents.length - 1];
+      const isSameTopicContinuation =
+        topicContext?.topicChanged === false && latestHistoricalIntent;
+
+      const result = isSameTopicContinuation
+        ? buildInheritedIntentResult(latestHistoricalIntent, topicContext)
+        : await classifier({
+            api,
+            config: refreshedConfig,
+            agentId: effectiveAgentId,
+            sessionKey: resolvedSessionKey,
+            sessionId: ctx.sessionId,
+            conversation,
+            latest: latestUserMessage,
+            messageProvider: ctx.messageProvider,
+            channelId: ctx.channelId,
+            modelRef,
+            intents: availableIntents,
+            topicContext: topicContext?.topicChanged ? topicContext : undefined,
+          });
 
       if (!result) {
         logger.debug("intention subagent failed; skipping hint injection.");
         return;
       }
+      if (topicContext) {
+        result.complexity = topicContext.complexity;
+        result.previousTopic = latestHistoricalIntent?.topic;
+      }
+      if (result.intentChange === undefined) {
+        result.intentChange = true;
+      }
 
       logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
+
+      const instructionText = await instructionWriter({
+        api,
+        config: refreshedConfig,
+        agentId: effectiveAgentId,
+        sessionKey: resolvedSessionKey,
+        sessionId: ctx.sessionId,
+        latest: latestUserMessage,
+        result,
+        intentBody: findIntentBody(availableIntents, result.intent),
+        messageProvider: ctx.messageProvider,
+        modelRef,
+      });
 
       // Record session data for tracking
       const sessionId = ctx.sessionId;
@@ -230,7 +293,7 @@ export function createHookHandlers(deps: HookDeps) {
           current: {
             input: latestUserMessage,
             intent: {
-              input: conversation,
+              ...(result.intentChange === false ? {} : { input: conversation }),
               result: result,
             },
             timestamps: { start: new Date().toISOString() },
@@ -243,6 +306,7 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         availableIntents,
         refreshedConfig,
+        instructionText,
       );
       if (!promptPrefix) return;
 

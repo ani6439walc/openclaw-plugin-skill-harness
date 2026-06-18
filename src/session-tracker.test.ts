@@ -202,7 +202,6 @@ describe("SessionTracker", () => {
             result: {
               reason: "test reasoning",
               intent: "test-intent",
-              goal: "test goal",
               confidence: 0.9,
               complexity: "low",
             },
@@ -240,7 +239,6 @@ describe("SessionTracker", () => {
       expect(parsed.current.intent.result).toEqual({
         reason: "test reasoning",
         intent: "test-intent",
-        goal: "test goal",
         confidence: 0.9,
         complexity: "low",
       });
@@ -396,7 +394,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "test",
               reason: "test reason",
-              goal: "test goal",
               confidence: 0.9,
               complexity: "low",
             },
@@ -420,7 +417,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "test",
               reason: "test reason",
-              goal: "test goal",
               confidence: 0.9,
               complexity: "low",
             },
@@ -496,7 +492,6 @@ describe("SessionTracker", () => {
               result: {
                 intent: sessionId,
                 reason: "test",
-                goal: "test",
                 confidence: 1,
                 complexity: "low",
               },
@@ -761,7 +756,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "test",
               reason: "test reason",
-              goal: "test goal",
               confidence: 0.9,
               complexity: "low",
             },
@@ -769,6 +763,28 @@ describe("SessionTracker", () => {
         },
       });
       expect(tracker2.hasIntentData("intent-session")).toBe(true);
+    });
+
+    it("should return true for compact continuation records without intent input", () => {
+      tracker.record("compact-session", {
+        current: {
+          input: "continue this",
+          intent: {
+            result: {
+              intent: "coding",
+              reason: "Topic unchanged; inherited previous intent",
+              intentChange: false,
+              confidence: 0.8,
+              complexity: "medium",
+            },
+          },
+        },
+      });
+
+      expect(tracker.hasIntentData("compact-session")).toBe(true);
+      expect(tracker.getCurrentState("compact-session")?.intent?.input).toBe(
+        undefined,
+      );
     });
 
     it("should return false after record without intentResult", () => {
@@ -787,7 +803,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "test",
               reason: "test reason",
-              goal: "test goal",
               confidence: 0.9,
               complexity: "low",
             },
@@ -809,7 +824,6 @@ describe("SessionTracker", () => {
               result: {
                 intent: "PLANNING",
                 reason: "test",
-                goal: "Create a plan",
                 keywords: ["plan", "change"],
                 topic: "plan / change",
                 confidence: 0.8,
@@ -823,7 +837,6 @@ describe("SessionTracker", () => {
               result: {
                 intent: "MISSING_INPUT",
                 reason: "test",
-                goal: "Skip this",
                 confidence: 0.8,
                 complexity: "low",
               },
@@ -836,7 +849,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "CODING",
               reason: "test",
-              goal: "Implement the plan",
               confidence: 0.75,
               complexity: "medium",
             },
@@ -848,14 +860,16 @@ describe("SessionTracker", () => {
         {
           input: "Plan the change",
           intent: "PLANNING",
-          goal: "Create a plan",
           keywords: ["plan", "change"],
           topic: "plan / change",
+          confidence: 0.8,
+          complexity: "medium",
         },
         {
           input: "Implement the change",
           intent: "CODING",
-          goal: "Implement the plan",
+          confidence: 0.75,
+          complexity: "medium",
         },
       ]);
     });
@@ -874,7 +888,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "CHAT",
               reason: "test",
-              goal: "Chat",
               confidence: 0.9,
               complexity: "low",
             },
@@ -898,7 +911,6 @@ describe("SessionTracker", () => {
               result: {
                 intent: "CODE_REVIEW",
                 reason: "test",
-                goal: "Review",
                 confidence: 0.9,
                 complexity: "medium",
               },

@@ -18,7 +18,6 @@ const snapshot: ReviewSnapshot = {
     intent: {
       intent: "other",
       reason: "unclear",
-      goal: "Fix code",
       confidence: 0.2,
       complexity: "high",
     },

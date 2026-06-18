@@ -27,7 +27,6 @@ describe("StatsAggregator", () => {
         result: {
           intent: "version-control",
           reason: "test",
-          goal: "Commit changes",
           confidence: 0.75,
           complexity: "medium",
         },
@@ -210,7 +209,6 @@ describe("StatsAggregator", () => {
           result: {
             intent: "version-control",
             reason: "test",
-            goal: "Commit changes",
             confidence: 0.25,
             complexity: "low",
           },
@@ -246,7 +244,6 @@ describe("StatsAggregator", () => {
         result: {
           intent: "chat",
           reason: "test",
-          goal: "Chat",
           confidence: 0.9,
           complexity: "low",
         },
@@ -319,7 +316,6 @@ describe("StatsAggregator", () => {
           result: {
             intent: "other",
             reason: "test",
-            goal: "Other",
             confidence: 0.4,
             complexity: "low",
           },

@@ -52,12 +52,12 @@ export function attachHistoricalIntents(
     const normalizedText = normalizeTurnText(turn.text);
     const record = recordsByInput.get(normalizedText)?.pop();
     if (!record) continue;
-    turn.historicalIntent = {
+    const historicalIntent: RecentTurn["historicalIntent"] = {
       intent: record.intent,
-      goal: record.goal,
-      keywords: record.keywords,
-      topic: record.topic,
     };
+    if (record.keywords?.length) historicalIntent.keywords = record.keywords;
+    if (record.topic) historicalIntent.topic = record.topic;
+    turn.historicalIntent = historicalIntent;
   }
 
   return enriched;

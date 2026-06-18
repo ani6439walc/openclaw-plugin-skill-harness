@@ -10,7 +10,6 @@ function state(overrides: Partial<SessionState> = {}): SessionState {
       result: {
         intent: "CODE_REVIEW",
         reason: "test",
-        goal: "Review code",
         confidence: 0.9,
         complexity: "medium",
       },
@@ -31,7 +30,6 @@ describe("checkEvolutionTriggers", () => {
             result: {
               intent: "other",
               reason: "unclear",
-              goal: "Unknown",
               confidence: 0.2,
               complexity: "high",
             },

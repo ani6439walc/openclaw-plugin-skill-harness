@@ -25,8 +25,10 @@ export type TopicSwitchResult = {
   topic: string;
   topicChanged: boolean;
   topicChangeReason: Exclude<TopicChangeReason, "initial">;
-  previousTopic?: string;
+  complexity: IntentionResult["complexity"];
 };
+
+const COMPLEXITIES = ["low", "medium", "high"] as const;
 
 const FALLBACK_INTENT_ENTRY: IntentCatalogEntry = {
   id: FALLBACK_INTENT_ID,
@@ -104,8 +106,8 @@ function buildConversationMarkdown(
     const turnLines = [`- ${rolePrefix} ${turn.text}`];
 
     if (turn.role === "user" && turn.historicalIntent) {
-      const { intent, goal, keywords, topic } = turn.historicalIntent;
-      const metadata = [`intent: ${intent}`, goal];
+      const { intent, keywords, topic } = turn.historicalIntent;
+      const metadata = [`intent: ${intent}`];
       if (topic) metadata.push(`topic: ${topic}`);
       if (keywords?.length) metadata.push(`keywords: ${keywords.join(", ")}`);
       turnLines.push(`  > *${metadata.join("; ")}*`);
@@ -153,11 +155,11 @@ function buildHistoricalTopicContext(
     .map((record) =>
       [
         `- intent: ${record.intent}`,
-        `  goal: ${record.goal}`,
         record.topic ? `  topic: ${record.topic}` : undefined,
         record.keywords?.length
           ? `  keywords: ${record.keywords.join(", ")}`
           : undefined,
+        record.complexity ? `  complexity: ${record.complexity}` : undefined,
       ]
         .filter(Boolean)
         .join("\n"),
@@ -181,8 +183,9 @@ Use only the latest message and recent historical intent metadata. Do not classi
 1. Extract 3-8 core nouns or short phrases from the latest user message as keywords.
 2. Normalize keywords to lowercase and remove duplicates.
 3. topic is deterministic: the first 1-3 keywords joined by " / ".
-4. topicChanged=true when the user uses an explicit transition marker, requests a new or modified category, or the latest goal is independent from the previous topic.
+4. topicChanged=true when the user uses an explicit transition marker, requests a new or modified category, or the latest message is independent from the previous topic.
 5. topicChanged=false when the user is continuing, correcting, approving, or implementing the same topic.
+6. Classify the latest message complexity as low, medium, or high.
 </rules>
 
 <output_format>
@@ -191,10 +194,11 @@ Return JSON only:
   "keywords": ["keyword"],
   "topicChanged": false,
   "topicChangeReason": "same_topic",
-  "previousTopic": "optional previous topic"
+  "complexity": "medium"
 }
 
 topicChangeReason must be one of: same_topic, transition_marker, keyword_delta, explicit_change.
+complexity must be one of: low, medium, high.
 </output_format>
 
 <recent_history>
@@ -224,19 +228,54 @@ export function parseTopicSwitchResult(
     ) {
       return;
     }
+    if (!COMPLEXITIES.includes(parsed.complexity)) {
+      return;
+    }
     return {
       keywords,
       topic: buildTopicFromKeywords(keywords),
       topicChanged: parsed.topicChanged,
       topicChangeReason: parsed.topicChangeReason,
-      previousTopic:
-        typeof parsed.previousTopic === "string" && parsed.previousTopic.trim()
-          ? parsed.previousTopic.trim()
-          : undefined,
+      complexity: parsed.complexity,
     };
   } catch {
     return;
   }
+}
+
+export function buildIntentInstructionPrompt(params: {
+  latest: string;
+  result: IntentionResult;
+  intentBody: string;
+  currentTime?: string;
+}): string {
+  const timeLine = params.currentTime ? `${params.currentTime} ` : "";
+  return `${timeLine}You are an intention-hint instruction writer.
+Read the matched intent Markdown and the latest user message.
+Write concise internal instructions for the main agent.
+
+<rules>
+1. Output plain text only, not JSON and not Markdown fences.
+2. Include the concrete workflow the main agent should follow.
+3. Name any relevant skills and tools from the intent Markdown.
+4. Preserve useful pitfalls, parameters, and experience notes when they matter for this turn.
+5. Do not quote the whole intent file. Keep only actionable guidance.
+</rules>
+
+<intent_metadata>
+intent: ${params.result.intent}
+complexity: ${params.result.complexity}
+topic: ${params.result.topic ?? ""}
+keywords: ${params.result.keywords?.join(", ") ?? ""}
+intentChange: ${params.result.intentChange ?? true}
+</intent_metadata>
+
+<matched_intent_markdown>
+${params.intentBody}
+</matched_intent_markdown>
+
+## Latest message:
+${params.latest}`;
 }
 
 export function buildIntentionPrompt(params: {
@@ -259,7 +298,8 @@ keywords: ${params.topicContext.keywords.join(", ")}
 topic: ${params.topicContext.topic}
 topicChanged: ${params.topicContext.topicChanged}
 topicChangeReason: ${params.topicContext.topicChangeReason}
-${params.topicContext.previousTopic ? `previousTopic: ${params.topicContext.previousTopic}\n` : ""}</topic_switch_context>
+complexity: ${params.topicContext.complexity}
+</topic_switch_context>
 `
     : "";
 
@@ -269,12 +309,12 @@ Your job is to analyze conversation context and the user's latest message, then 
 You receive conversation history, the latest user message, and available intent definitions with triggers and examples.
 
 <classification_rules>
-1. Use conversation history and historical_intent annotations to understand context. Treat historical intents and historical goals as evidence, not answers that must be inherited.
-2. Classify the latest message based on the user's current goal and prefer the intent that best explains WHY the user said it.
-3. **Goal continuity**: If the latest message continues, corrects, refines, or asks to execute a relevant historical goal, prefer its related intent and preserve or refine the relevant historical goal in the new output goal.
-4. **Topic switch**: If the latest message introduces an independent topic, a different subject, or a different desired outcome, classify it fresh and replace the output goal with the new goal.
-5. **Short messages**: First determine whether the message points to a specific historical goal. Do not inherit the most recent intent merely because the message is short or contains a continuation marker.
-6. If topic_switch_context is present and topicChanged=true, classify fresh and avoid inheriting the previous goal unless the latest message explicitly asks for it.
+1. Use conversation history and historical_intent annotations to understand context. Treat historical intents as evidence, not answers that must be inherited.
+2. Classify the latest message based on what the user is asking for now and prefer the intent that best explains WHY the user said it.
+3. **Topic switch**: If the latest message introduces an independent topic, a different subject, or a different desired outcome, classify it fresh.
+4. **Short messages**: First determine whether the message points to a specific historical topic. Do not inherit the most recent intent merely because the message is short or contains a continuation marker.
+5. If topic_switch_context is present and topicChanged=true, classify fresh.
+6. If topic_switch_context is present, use its complexity value.
 7. If topic_switch_context is present and topicChanged=false, continuity with the previous topic is allowed but not mandatory.
 8. Extract 3-8 lowercase core nouns or short phrases as keywords.
 9. DO NOT FORCE classification - default to other if uncertain.
@@ -287,7 +327,6 @@ Return classification as a JSON object. Output MUST be plain JSON only — do NO
 Required fields:
 - "intent": string - Intent id exactly as shown in the catalog (e.g., "memory-lookup" or "other")
 - "reason": string - Brief reason for classification
-- "goal": string - What the user wants to achieve
 - "keywords": string[] - 3-8 normalized core nouns or short phrases from the latest message
 - "confidence": number - 0.0 (guessing) to 1.0 (certain)
 - "complexity": string - "low", "medium", or "high"
@@ -299,7 +338,6 @@ Example output:
 {
   "intent": "memory-lookup",
   "reason": "User asked to recall previous conversation topic",
-  "goal": "Retrieve memory of past discussion about Python async",
   "keywords": ["python", "async", "memory"],
   "confidence": 0.9,
   "complexity": "medium"
@@ -341,9 +379,8 @@ export function parseIntentionResult(
     if (
       typeof parsed.intent !== "string" ||
       typeof parsed.reason !== "string" ||
-      typeof parsed.goal !== "string" ||
       typeof parsed.confidence !== "number" ||
-      typeof parsed.complexity !== "string"
+      (topicContext ? false : typeof parsed.complexity !== "string")
     ) {
       return undefined;
     }
@@ -354,7 +391,8 @@ export function parseIntentionResult(
     }
 
     // Validate complexity
-    if (!["low", "medium", "high"].includes(parsed.complexity)) {
+    const complexity = topicContext?.complexity ?? parsed.complexity;
+    if (!COMPLEXITIES.includes(complexity)) {
       return undefined;
     }
 
@@ -385,7 +423,6 @@ export function parseIntentionResult(
     const result: IntentionResult = {
       intent,
       reason: parsed.reason,
-      goal: parsed.goal,
       keywords: effectiveKeywords.length > 0 ? effectiveKeywords : undefined,
       topic:
         effectiveKeywords.length > 0
@@ -393,9 +430,8 @@ export function parseIntentionResult(
           : undefined,
       topicChanged: topicContext?.topicChanged ?? false,
       topicChangeReason: topicContext?.topicChangeReason ?? "initial",
-      previousTopic: topicContext?.previousTopic,
       confidence: parsed.confidence,
-      complexity: parsed.complexity as "low" | "medium" | "high",
+      complexity,
     };
 
     // Optional suggestion
@@ -428,10 +464,10 @@ function buildPromptPrefixLines(
   result: IntentionResult,
   intentDef: IntentDefinition,
   config: ResolvedIntentionHintPluginConfig,
+  instructionText?: string,
 ): string[] {
   const lines: string[] = [];
   lines.push(`reason: ${result.reason}`);
-  lines.push(`goal: ${result.goal}`);
   if (result.suggestion) lines.push(`suggestion: ${result.suggestion}`);
   if (result.topic) lines.push(`topic: ${result.topic}`);
   if (result.keywords?.length)
@@ -440,12 +476,14 @@ function buildPromptPrefixLines(
     lines.push(`topicChanged: ${result.topicChanged ?? false}`);
     lines.push(`topicChangeReason: ${result.topicChangeReason}`);
   }
+  if (result.intentChange !== undefined)
+    lines.push(`intentChange: ${result.intentChange}`);
   if (result.previousTopic)
     lines.push(`previousTopic: ${result.previousTopic}`);
   lines.push(`confidence: ${result.confidence}`);
   lines.push(`complexity: ${result.complexity}`);
   lines.push("");
-  lines.push(intentDef.prompt);
+  lines.push(instructionText?.trim() || intentDef.prompt);
   lines.push("");
   lines.push(resolveComplexityPrompt(result, config));
   return lines;
@@ -470,10 +508,16 @@ export function buildPromptPrefix(
   result: IntentionResult,
   intents: readonly IntentCatalogEntry[],
   config: ResolvedIntentionHintPluginConfig,
+  instructionText?: string,
 ): string | undefined {
   const intentDef = findEnabledIntent(result, intents);
   const effectiveDef = intentDef ?? FALLBACK_INTENT;
-  const lines = buildPromptPrefixLines(result, effectiveDef, config);
+  const lines = buildPromptPrefixLines(
+    result,
+    effectiveDef,
+    config,
+    instructionText,
+  );
 
   return `${UNTRUSTED_CONTEXT_HEADER}
 <${INTENTION_HINT_PLUGIN_TAG}>

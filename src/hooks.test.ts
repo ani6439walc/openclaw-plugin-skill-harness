@@ -69,7 +69,6 @@ describe("createHookHandlers tracking guards", () => {
         result: {
           intent: "version-control",
           reason: "test",
-          goal: "Commit changes",
           confidence: 0.9,
           complexity: "low" as const,
         },
@@ -121,7 +120,6 @@ describe("createHookHandlers tracking guards", () => {
         intent: {
           intent: "other",
           reason: "test",
-          goal: "Correct behavior",
           confidence: 0.2,
           complexity: "high" as const,
         },
@@ -432,6 +430,7 @@ describe("createHookHandlers topic switch flow", () => {
       typeof defaultTracker.getHistoricalIntentRecords
     >;
     topicChecker?: ReturnType<typeof vi.fn>;
+    instructionWriter?: ReturnType<typeof vi.fn>;
   }) {
     const record = vi.fn();
     const tracker = {
@@ -450,7 +449,6 @@ describe("createHookHandlers topic switch flow", () => {
     const classifier = vi.fn().mockResolvedValue({
       intent: "coding",
       reason: "User wants implementation",
-      goal: "Implement topic flow",
       keywords: ["topic", "flow"],
       topic: "topic / flow",
       topicChanged: false,
@@ -459,6 +457,9 @@ describe("createHookHandlers topic switch flow", () => {
       complexity: "medium" as const,
     });
     const topicChecker = params.topicChecker ?? vi.fn();
+    const instructionWriter =
+      params.instructionWriter ??
+      vi.fn().mockResolvedValue("Follow the generated coding instructions.");
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({ model: "google/test-intent" }),
@@ -468,9 +469,17 @@ describe("createHookHandlers topic switch flow", () => {
       tracker: tracker as never,
       classifier,
       topicChecker,
+      instructionWriter,
     });
 
-    return { handlers, tracker, classifier, topicChecker, record };
+    return {
+      handlers,
+      tracker,
+      classifier,
+      topicChecker,
+      instructionWriter,
+      record,
+    };
   }
 
   const event = {
@@ -491,14 +500,24 @@ describe("createHookHandlers topic switch flow", () => {
   };
 
   it("skips topic checker on the first tracked turn", async () => {
-    const { handlers, classifier, topicChecker, record } =
+    const { handlers, classifier, topicChecker, instructionWriter, record } =
       createTopicFlowHarness({ historicalIntents: [] });
 
-    await handlers.onBeforePromptBuild(event, ctx);
+    const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ topicContext: undefined }),
+    );
+    expect(instructionWriter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        latest: "implement topic checker",
+        intentBody: "## Guidelines\n\n- Code carefully.",
+        result: expect.objectContaining({ intentChange: true }),
+      }),
+    );
+    expect(result?.prependContext).toContain(
+      "Follow the generated coding instructions.",
     );
     expect(record).toHaveBeenCalledWith(
       "session-1",
@@ -509,6 +528,7 @@ describe("createHookHandlers topic switch flow", () => {
               keywords: ["topic", "flow"],
               topic: "topic / flow",
               topicChangeReason: "initial",
+              intentChange: true,
             }),
           }),
         }),
@@ -516,26 +536,28 @@ describe("createHookHandlers topic switch flow", () => {
     );
   });
 
-  it("runs topic checker before intent classifier on later turns", async () => {
+  it("runs topic checker before intent classifier on changed later turns", async () => {
     const topicContext = {
-      keywords: ["topic", "checker"],
-      topic: "topic / checker",
-      topicChanged: false,
-      topicChangeReason: "same_topic" as const,
-      previousTopic: "topic / checker",
+      keywords: ["new", "topic"],
+      topic: "new / topic",
+      topicChanged: true,
+      topicChangeReason: "transition_marker" as const,
+      complexity: "high" as const,
     };
-    const { handlers, classifier, topicChecker } = createTopicFlowHarness({
-      historicalIntents: [
-        {
-          input: "plan topic checker",
-          intent: "coding",
-          goal: "Plan topic checker",
-          keywords: ["topic", "checker"],
-          topic: "topic / checker",
-        },
-      ],
-      topicChecker: vi.fn().mockResolvedValue(topicContext),
-    });
+    const { handlers, classifier, topicChecker, instructionWriter } =
+      createTopicFlowHarness({
+        historicalIntents: [
+          {
+            input: "plan topic checker",
+            intent: "coding",
+            keywords: ["topic", "checker"],
+            topic: "topic / checker",
+            confidence: 0.8,
+            complexity: "medium",
+          },
+        ],
+        topicChecker: vi.fn().mockResolvedValue(topicContext),
+      });
 
     await handlers.onBeforePromptBuild(event, ctx);
 
@@ -556,6 +578,14 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ topicContext }),
     );
+    expect(instructionWriter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          complexity: "high",
+          previousTopic: "topic / checker",
+        }),
+      }),
+    );
   });
 
   it("falls back to classifier-only when topic checker returns no result", async () => {
@@ -564,9 +594,10 @@ describe("createHookHandlers topic switch flow", () => {
         {
           input: "plan topic checker",
           intent: "coding",
-          goal: "Plan topic checker",
           keywords: ["topic", "checker"],
           topic: "topic / checker",
+          confidence: 0.8,
+          complexity: "medium",
         },
       ],
       topicChecker: vi.fn().mockResolvedValue(undefined),
@@ -578,5 +609,65 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ topicContext: undefined }),
     );
+  });
+
+  it("skips intent classifier and records compact state on same-topic continuation", async () => {
+    const topicContext = {
+      keywords: ["topic", "checker"],
+      topic: "topic / checker",
+      topicChanged: false,
+      topicChangeReason: "same_topic" as const,
+      complexity: "low" as const,
+    };
+    const { handlers, classifier, topicChecker, instructionWriter, record } =
+      createTopicFlowHarness({
+        historicalIntents: [
+          {
+            input: "plan topic checker",
+            intent: "coding",
+            keywords: ["topic", "checker"],
+            topic: "topic / checker",
+            confidence: 0.85,
+            complexity: "high",
+          },
+        ],
+        topicChecker: vi.fn().mockResolvedValue(topicContext),
+      });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(topicChecker).toHaveBeenCalledOnce();
+    expect(classifier).not.toHaveBeenCalled();
+    expect(instructionWriter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        latest: "implement topic checker",
+        result: expect.objectContaining({
+          intent: "coding",
+          keywords: ["topic", "checker"],
+          topic: "topic / checker",
+          topicChanged: false,
+          topicChangeReason: "same_topic",
+          intentChange: false,
+          confidence: 0.85,
+          complexity: "low",
+        }),
+      }),
+    );
+    expect(result?.prependContext).toContain("intentChange: false");
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          input: "implement topic checker",
+          intent: {
+            result: expect.objectContaining({
+              intent: "coding",
+              intentChange: false,
+            }),
+          },
+        }),
+      }),
+    );
+    expect(record.mock.calls[0][1].current.intent.input).toBeUndefined();
   });
 });
