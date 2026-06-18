@@ -35,8 +35,8 @@ Keep package files and runtime data separate.
 Package root:
 
 - Resolved by `resolvePackageRoot()` in `src/file-utils.ts`.
-- Contains source code, bundled seed intents under `intents/`, plugin skills under `skills/`, and metadata.
-- Bundled `intents/*.md` are seed/default content, not the active writable catalog after startup.
+- Contains source code, plugin skills under `skills/`, skill asset examples, and metadata.
+- Does not contain the active writable intent catalog.
 
 Runtime data root:
 
@@ -52,13 +52,14 @@ Rules:
 
 - The active intent catalog always loads from `~/.openclaw/plugins/intention-hint/intents`.
 - `stats.json` and `evolution.json` are root-level runtime files. They must not be placed under `sessions/`.
-- Startup migration may copy legacy package-root files into the runtime layout, but must not overwrite existing runtime files and must not delete legacy files.
+- Startup initialization may copy example intent files from `skills/intention-hint/assets/*.md` into an absent or empty runtime `intents/` directory.
+- Startup initialization must not overwrite existing runtime intent files.
 
 ## Source Map
 
 Use the existing module boundaries:
 
-- `src/plugin.ts`: assembly layer. Resolve config, resolve runtime data root, initialize/migrate data, instantiate runtime-scoped services, and register OpenClaw hooks.
+- `src/plugin.ts`: assembly layer. Resolve config, resolve runtime data root, initialize runtime directories, seed empty runtime intents from skill assets, instantiate runtime-scoped services, and register OpenClaw hooks.
 - `src/hooks.ts`: hook behavior for prompt building, tracking, stats updates, evolution queueing, and cleanup. Keep OpenClaw event logic here, not in `plugin.ts`.
 - `src/config.ts`: Zod-backed config parsing, defaults, and clamps.
 - `src/file-utils.ts`: shared path helpers and atomic filesystem primitives.
@@ -78,7 +79,7 @@ Use the existing module boundaries:
 - Prefer `interface` for object shapes and `type` for unions or complex aliases.
 - Use `import type` for type-only imports.
 - Avoid `any`; use `unknown` with narrowing when input is untrusted.
-- Keep code fail-open for plugin runtime paths. Log non-fatal problems with `logger.warn()` and avoid blocking the user flow for stats, migration, cleanup, or evolution-review failures.
+- Keep code fail-open for plugin runtime paths. Log non-fatal problems with `logger.warn()` and avoid blocking the user flow for stats, seed copying, cleanup, or evolution-review failures.
 - Keep `src/plugin.ts` thin. If behavior grows, put it in a focused module or existing service and inject it through `createHookHandlers()` when tests need isolation.
 - Do not introduce broad abstractions just to reduce a few repeated lines. This plugin favors explicit lifecycle behavior over framework-style indirection.
 
@@ -112,7 +113,7 @@ Add or update focused tests with the code change.
 Typical mapping:
 
 - Config schema changes: `src/config.test.ts`.
-- Runtime data paths or migration: `src/file-utils.test.ts` and `src/plugin.test.ts`.
+- Runtime data paths or startup seeding: `src/file-utils.test.ts` and `src/plugin.test.ts`.
 - Hook behavior: `src/hooks.test.ts`.
 - Intent loading or validation: `src/intent-loader.ts` consumers and `src/intent-validation.test.ts`.
 - Prompt/parser behavior: `src/prompt.test.ts`.
@@ -121,13 +122,13 @@ Typical mapping:
 - Evolution backlog writes: `src/backlog-writer.test.ts` and `src/evolution-backlog.test.ts`.
 - Evolution backlog command behavior: `src/evolution-backlog-command.test.ts`.
 
-When changing runtime paths, include tests for both the desired new location and non-overwrite migration behavior.
+When changing runtime paths, include tests for both the desired new location and non-overwrite startup behavior.
 
 ## Intent Files
 
-Bundled package intents live in `intents/*.md`. Runtime editable intents live in `~/.openclaw/plugins/intention-hint/intents/*.md`.
+Runtime editable intents live in `~/.openclaw/plugins/intention-hint/intents/*.md`. First-install examples live in `skills/intention-hint/assets/*.md` and are copied only when the runtime intent directory is absent or empty.
 
-When changing the shipped default catalog, edit bundled `intents/*.md` and run validation through the test suite. When changing a live local intent for the user's current OpenClaw environment, edit the runtime intent directory instead.
+When changing first-install examples, edit `skills/intention-hint/assets/*.md` and run validation through the test suite. When changing a live local intent for the user's current OpenClaw environment, edit the runtime intent directory instead.
 
 Intent markdown must keep valid YAML frontmatter and the expected sections used by `intent-validation.ts` and the intention-hint skill references.
 
@@ -165,7 +166,7 @@ Update documentation when behavior or public configuration changes:
 Search for stale names and paths before finishing. For runtime layout changes, at minimum search for:
 
 ```bash
-rg "sessions/(stats|evolution)\\.json|extensions/intention-hint/intents|~/.openclaw/extensions/intention-hint/intents"
+rg "sessions/(stats|evolution)\\.json|extensions/intention-hint/intents|~/.openclaw/extensions/intention-hint/intents|packageRoot.*intents|migrateLegacy|seedBundled"
 ```
 
 ## Finish Checklist

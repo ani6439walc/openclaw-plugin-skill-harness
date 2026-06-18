@@ -30,7 +30,7 @@ Confirm these fields in order:
 ## Rules
 
 - Ask only one question at a time. Wait for reply before proceeding.
-- If the answer can be grounded by reading `README.md` or existing `intents/*.md`, do that instead of asking a vague question.
+- If the answer can be grounded by reading `README.md` or existing runtime intents, do that instead of asking a vague question.
 - Prefer narrowing scope over making a broad catch-all intent.
 - If the user is describing an existing intent, say so directly.
 - If two intents are colliding, recommend the smallest clean split.

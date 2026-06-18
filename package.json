@@ -27,7 +27,6 @@
     "package.json",
     "openclaw.plugin.json",
     "dist",
-    "intents/**",
     "skills/**"
   ],
   "openclaw": {

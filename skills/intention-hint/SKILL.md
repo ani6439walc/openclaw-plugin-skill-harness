@@ -296,8 +296,7 @@ Dismiss instead of leaving pending when the finding is clearly duplicate, supers
 When bootstrapping from scratch, copy example intent templates from `assets/`:
 
 - `assets/chat.md` / `assets/typo.md` — minimal behavior-only intents (no tools)
-- `assets/memory-lookup.md` / `assets/memory-compare.md` / `assets/memory-timeline.md` — memory retrieval SOPs
-- `assets/summarization.md` / `assets/research-general.md` — multi-source routing patterns
+- `assets/memory-lookup.md` / `assets/memory-compare.md` — memory retrieval SOPs
 
 ### Validation commands
 

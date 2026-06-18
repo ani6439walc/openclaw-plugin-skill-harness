@@ -34,4 +34,4 @@ Ask user to confirm resolution before proceeding to final draft.
 1. Write to a staging location first (e.g., `/tmp/intent-drafts/`)
 2. Show diff preview to user
 3. Confirm no conflicts
-4. Write to `intents/` directory on approval
+4. Write to `~/.openclaw/plugins/intention-hint/intents/` on approval

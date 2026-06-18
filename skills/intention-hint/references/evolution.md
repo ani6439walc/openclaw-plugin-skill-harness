@@ -1,11 +1,11 @@
-# Evolve Workflow
+# Evolution Workflow
 
 Process exactly one pending finding from `~/.openclaw/plugins/intention-hint/evolution.json`.
 Enter this mode only when the user explicitly asks to process the evolution backlog.
 
 ## Safety Rules
 
-- Treat current `intents/*.md` and the loaded catalog as the source of truth.
+- Treat current runtime `~/.openclaw/plugins/intention-hint/intents/*.md` and the loaded catalog as the source of truth.
   `suggestedChange` is evidence and advice, not a patch to apply blindly.
 - Follow `references/format.md` and the relevant design/inventory references for intent
   boundaries, collision checks, and workflow quality.

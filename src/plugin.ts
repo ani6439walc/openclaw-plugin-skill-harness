@@ -15,15 +15,18 @@ import { createHookHandlers, type HookDeps } from "./hooks.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  evolutionBacklogPath,
   intentsPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
   sessionsDirPath,
-  statsPath,
 } from "./file-utils.js";
 
 const PLUGIN_ID = "intention-hint";
+const EXAMPLE_INTENT_ASSETS_DIR = path.join(
+  "skills",
+  "intention-hint",
+  "assets",
+);
 
 function copyFileIfMissing(sourcePath: string, targetPath: string): void {
   if (fs.existsSync(targetPath)) return;
@@ -31,43 +34,28 @@ function copyFileIfMissing(sourcePath: string, targetPath: string): void {
   fs.copyFileSync(sourcePath, targetPath);
 }
 
-function seedBundledIntents(dataRoot: string, packageRoot: string): void {
-  const sourceDir = path.join(packageRoot, "intents");
-  const targetDir = intentsPath(dataRoot);
-  if (!fs.existsSync(sourceDir)) return;
-  if (fs.existsSync(targetDir) && fs.readdirSync(targetDir).length > 0) return;
-
-  fs.mkdirSync(targetDir, { recursive: true });
-  for (const entry of fs.readdirSync(sourceDir)) {
-    if (!entry.endsWith(".md")) continue;
-    copyFileIfMissing(path.join(sourceDir, entry), path.join(targetDir, entry));
-  }
+function hasMarkdownFiles(dir: string): boolean {
+  return (
+    fs.existsSync(dir) &&
+    fs
+      .readdirSync(dir, { withFileTypes: true })
+      .some((entry) => entry.isFile() && entry.name.endsWith(".md"))
+  );
 }
 
-function migrateLegacySessions(dataRoot: string, packageRoot: string): void {
-  if (path.resolve(dataRoot) === path.resolve(packageRoot)) return;
+function seedExampleIntents(dataRoot: string, packageRoot: string): void {
+  const sourceDir = path.join(packageRoot, EXAMPLE_INTENT_ASSETS_DIR);
+  const targetDir = intentsPath(dataRoot);
+  if (!fs.existsSync(sourceDir)) return;
+  if (hasMarkdownFiles(targetDir)) return;
 
-  const legacySessionsDir = path.join(packageRoot, "sessions");
-  if (!fs.existsSync(legacySessionsDir)) return;
-
-  const targetSessionsDir = sessionsDirPath(dataRoot);
-  fs.mkdirSync(targetSessionsDir, { recursive: true });
-
-  for (const entry of fs.readdirSync(legacySessionsDir, {
-    withFileTypes: true,
-  })) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-
-    const sourcePath = path.join(legacySessionsDir, entry.name);
-    if (entry.name === "stats.json") {
-      copyFileIfMissing(sourcePath, statsPath(dataRoot));
-      continue;
-    }
-    if (entry.name === "evolution.json") {
-      copyFileIfMissing(sourcePath, evolutionBacklogPath(dataRoot));
-      continue;
-    }
-    copyFileIfMissing(sourcePath, path.join(targetSessionsDir, entry.name));
+  fs.mkdirSync(targetDir, { recursive: true });
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    copyFileIfMissing(
+      path.join(sourceDir, entry.name),
+      path.join(targetDir, entry.name),
+    );
   }
 }
 
@@ -90,20 +78,11 @@ export function initializePluginDataRoot({
   }
 
   try {
-    seedBundledIntents(dataRoot, packageRoot);
+    seedExampleIntents(dataRoot, packageRoot);
   } catch (err) {
-    logger.warn("failed to seed intention-hint intents", {
+    logger.warn("failed to seed intention-hint example intents", {
       error: err,
       path: intentsPath(dataRoot),
-    });
-  }
-
-  try {
-    migrateLegacySessions(dataRoot, packageRoot);
-  } catch (err) {
-    logger.warn("failed to migrate legacy intention-hint data", {
-      error: err,
-      path: path.join(packageRoot, "sessions"),
     });
   }
 }
