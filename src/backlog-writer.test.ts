@@ -38,9 +38,9 @@ describe("BacklogWriter", () => {
     );
   }
 
-  it("creates sessions/evolution.json and records findings", () => {
+  it("creates sessions/evolution.json and records findings", async () => {
     expect(
-      writer.record("session-1:turn-1", source, [finding], {
+      await writer.record("session-1:turn-1", source, [finding], {
         nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
       }),
     ).toBe(true);
@@ -66,10 +66,12 @@ describe("BacklogWriter", () => {
     });
   });
 
-  it("merges matching pending findings and is event-idempotent", () => {
-    writer.record("event-1", source, [finding]);
-    writer.record("event-2", { ...source, sessionId: "session-2" }, [finding]);
-    expect(writer.record("event-2", source, [finding])).toBe(false);
+  it("merges matching pending findings and is event-idempotent", async () => {
+    await writer.record("event-1", source, [finding]);
+    await writer.record("event-2", { ...source, sessionId: "session-2" }, [
+      finding,
+    ]);
+    expect(await writer.record("event-2", source, [finding])).toBe(false);
 
     const backlog = readBacklog();
     expect(backlog.items).toHaveLength(1);
@@ -77,7 +79,7 @@ describe("BacklogWriter", () => {
     expect(backlog.items[0].sources).toHaveLength(2);
   });
 
-  it("migrates v1 backlogs and updates operation and targets on merge", () => {
+  it("migrates v1 backlogs and updates operation and targets on merge", async () => {
     const sessions = path.join(root, "sessions");
     fs.mkdirSync(sessions);
     const backlogPath = path.join(sessions, "evolution.json");
@@ -106,7 +108,7 @@ describe("BacklogWriter", () => {
       }),
     );
 
-    expect(writer.record("event-2", source, [finding])).toBe(true);
+    expect(await writer.record("event-2", source, [finding])).toBe(true);
     expect(readBacklog()).toMatchObject({
       schemaVersion: 2,
       items: [
@@ -119,31 +121,31 @@ describe("BacklogWriter", () => {
     });
   });
 
-  it("preserves corrupt existing evolution.json", () => {
+  it("preserves corrupt existing evolution.json", async () => {
     const sessions = path.join(root, "sessions");
     fs.mkdirSync(sessions);
     const backlogPath = path.join(sessions, "evolution.json");
     fs.writeFileSync(backlogPath, "{ broken");
 
-    expect(writer.record("event-1", source, [finding])).toBe(false);
+    expect(await writer.record("event-1", source, [finding])).toBe(false);
     expect(fs.readFileSync(backlogPath, "utf-8")).toBe("{ broken");
   });
 
-  it("preserves valid JSON with an invalid backlog schema", () => {
+  it("preserves valid JSON with an invalid backlog schema", async () => {
     const sessions = path.join(root, "sessions");
     fs.mkdirSync(sessions);
     const backlogPath = path.join(sessions, "evolution.json");
     fs.writeFileSync(backlogPath, '{"schemaVersion":1,"items":"invalid"}');
 
-    expect(writer.record("event-1", source, [finding])).toBe(false);
+    expect(await writer.record("event-1", source, [finding])).toBe(false);
     expect(fs.readFileSync(backlogPath, "utf-8")).toBe(
       '{"schemaVersion":1,"items":"invalid"}',
     );
   });
 
-  it("records no-finding events for idempotency", () => {
-    expect(writer.record("event-1", source, [])).toBe(true);
-    expect(writer.record("event-1", source, [])).toBe(false);
+  it("records no-finding events for idempotency", async () => {
+    expect(await writer.record("event-1", source, [])).toBe(true);
+    expect(await writer.record("event-1", source, [])).toBe(false);
     expect(readBacklog().items).toEqual([]);
   });
 });

@@ -75,29 +75,29 @@ index.ts
 
 ### Module Responsibilities
 
-| Module                    | Purpose                                                                          |
-| ------------------------- | -------------------------------------------------------------------------------- |
-| `plugin.ts`               | Plugin entry point, registers hooks on OpenClaw lifecycle events                 |
-| `hooks.ts`                | Event handlers for prompt building, tool/agent tracking, and session cleanup     |
-| `subagent.ts`             | Runs the intention classification sub-agent with model selection                 |
-| `intent-loader.ts`        | Loads and catalogs intent definitions from YAML-frontmatter `.md` files          |
-| `file-utils.ts`           | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution |
-| `constants.ts`            | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header |
-| `types.ts`                | All shared type definitions for plugin, config, intent, result, and turn shapes  |
+| Module                    | Purpose                                                                                                   |
+| ------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `plugin.ts`               | Plugin entry point, registers hooks on OpenClaw lifecycle events                                          |
+| `hooks.ts`                | Event handlers for prompt building, tool/agent tracking, and session cleanup                              |
+| `subagent.ts`             | Runs the intention classification sub-agent with model selection                                          |
+| `intent-loader.ts`        | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                   |
+| `file-utils.ts`           | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                        |
+| `constants.ts`            | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                         |
+| `types.ts`                | All shared type definitions for plugin, config, intent, result, and turn shapes                           |
 | `evolution-types.ts`      | Shared types for Self-Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource |
-| `session-tracker.ts`      | Persist and clean up session data in `sessions/` JSON files                      |
-| `stats-aggregator.ts`     | Aggregate idempotent runtime usage statistics into `sessions/stats.json`         |
-| `trigger-checker.ts`      | Detect six configurable Self-Evolution triggers from completed turns             |
-| `review-subagent.ts`      | Build trigger-specific review prompts and run the tool-free review sub-agent     |
-| `review-queue.ts`         | Serialized promise queue for background evolution reviews                        |
-| `backlog-writer.ts`       | Merge review findings atomically into `sessions/evolution.json`                  |
-| `evolution-backlog.ts`    | Validate/migrate backlog schema and provide atomic mutation primitives           |
-| `backlog-cli.ts`          | List, target, validate, and optimistically complete pending backlog items        |
-| `intent-validation.ts`    | Validate Intent Markdown structure, IDs, targets, and catalog loading            |
-| `conversation-extract.ts` | Extract and truncate recent conversation turns for intent context                |
-| `prompt.ts`               | **Core prompt & parser** — builds classification prompt, parses JSON result      |
-| `session.ts`              | Session eligibility guards (agent allow-list, chat type, internal run detection) |
-| `config.ts`               | Zod schema validation with defaults and clamping for plugin configuration        |
+| `session-tracker.ts`      | Persist and clean up session data in `sessions/` JSON files                                               |
+| `stats-aggregator.ts`     | Aggregate idempotent runtime usage statistics into `sessions/stats.json`                                  |
+| `trigger-checker.ts`      | Detect six configurable Self-Evolution triggers from completed turns                                      |
+| `review-subagent.ts`      | Build trigger-specific review prompts and run the tool-free review sub-agent                              |
+| `review-queue.ts`         | Serialized promise queue for background evolution reviews                                                 |
+| `backlog-writer.ts`       | Merge review findings atomically into `sessions/evolution.json`                                           |
+| `evolution-backlog.ts`    | Validate/migrate backlog schema and provide atomic mutation primitives                                    |
+| `backlog-cli.ts`          | List, target, validate, and optimistically complete pending backlog items                                 |
+| `intent-validation.ts`    | Validate Intent Markdown structure, IDs, targets, and catalog loading                                     |
+| `conversation-extract.ts` | Extract and truncate recent conversation turns for intent context                                         |
+| `prompt.ts`               | **Core prompt & parser** — builds classification prompt, parses JSON result                               |
+| `session.ts`              | Session eligibility guards (agent allow-list, chat type, internal run detection)                          |
+| `config.ts`               | Zod schema validation with defaults and clamping for plugin configuration                                 |
 
 Every `session_end` removes the ended session from tracker memory. Final lifecycle reasons (`new`, `reset`, `idle`, `daily`, `compaction`, and `deleted`) also delete that session's JSON; restart-oriented reasons preserve it for reload. Each `session_end` additionally removes top-level session JSON files whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch `stats.json`, `evolution.json`, transcripts, or other plugin data.
 

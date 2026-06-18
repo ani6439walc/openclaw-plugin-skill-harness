@@ -325,7 +325,7 @@ export function createHookHandlers(deps: HookDeps) {
         triggers,
       });
       if (!findings) return;
-      backlogWriter.record(
+      await backlogWriter.record(
         snapshot.eventId,
         {
           sessionId: snapshot.sessionId,

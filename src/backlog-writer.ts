@@ -1,10 +1,16 @@
 import * as path from "node:path";
 import { logger } from "../api.js";
-import { pluginRoot, fileExists, safeWriteJson } from "./file-utils.js";
+import {
+  pluginRoot,
+  fileExists,
+  safeWriteJson,
+  withFileLock,
+} from "./file-utils.js";
 import type { EvolutionFinding, EvolutionSource } from "./evolution-types.js";
 import {
   createBacklog,
   readBacklog,
+  pruneProcessedEvents,
   EvolutionBacklogSchema,
   type EvolutionBacklog,
 } from "./evolution-backlog.js";
@@ -32,12 +38,12 @@ export class BacklogWriter {
     return new BacklogWriter(pluginRoot);
   }
 
-  record(
+  async record(
     eventId: string,
     source: EvolutionSource,
     findings: readonly EvolutionFinding[],
     options: { nowMs?: number } = {},
-  ): boolean {
+  ): Promise<boolean> {
     if (!eventId) return false;
     const backlogPath = path.join(
       this.pluginRoot,
@@ -45,70 +51,87 @@ export class BacklogWriter {
       "evolution.json",
     );
 
-    try {
-      const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
-      const backlog = fileExists(backlogPath)
-        ? readBacklog(backlogPath)
-        : createBacklog(nowIso);
-      if (backlog.processedEvents[eventId]) return false;
+    // Use file lock for cross-process safety
+    const result = await withFileLock(backlogPath, async () => {
+      try {
+        const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
+        const backlog = fileExists(backlogPath)
+          ? readBacklog(backlogPath)
+          : createBacklog(nowIso);
 
-      for (const finding of findings) {
-        const existing = backlog.items.find(
-          (item) =>
-            item.status === "pending" &&
-            item.type === finding.trigger &&
-            item.dedupeKey === finding.dedupeKey,
-        );
-        if (existing) {
-          existing.frequency += 1;
-          existing.sources.push(source);
-          existing.updatedAt = nowIso;
-          existing.operation = finding.operation;
-          existing.targetIntentIds = [...finding.targetIntentIds];
-          existing.summary = finding.summary;
-          existing.correctionGoal = finding.correctionGoal;
-          existing.details = {
-            evidence: finding.evidence,
-            suggestedChange: finding.suggestedChange,
-          };
-          continue;
+        // Prune old processedEvents before any mutation
+        pruneProcessedEvents(backlog, options.nowMs ?? Date.now());
+
+        if (backlog.processedEvents[eventId]) return false;
+
+        for (const finding of findings) {
+          const existing = backlog.items.find(
+            (item) =>
+              item.status === "pending" &&
+              item.type === finding.trigger &&
+              item.dedupeKey === finding.dedupeKey,
+          );
+          if (existing) {
+            existing.frequency += 1;
+            existing.sources.push(source);
+            existing.updatedAt = nowIso;
+            existing.operation = finding.operation;
+            existing.targetIntentIds = [...finding.targetIntentIds];
+            existing.summary = finding.summary;
+            existing.correctionGoal = finding.correctionGoal;
+            existing.details = {
+              evidence: finding.evidence,
+              suggestedChange: finding.suggestedChange,
+            };
+            continue;
+          }
+
+          backlog.items.push({
+            id: nextItemId(backlog, nowIso),
+            type: finding.trigger,
+            operation: finding.operation,
+            targetIntentIds: [...finding.targetIntentIds],
+            dedupeKey: finding.dedupeKey,
+            summary: finding.summary,
+            correctionGoal: finding.correctionGoal,
+            details: {
+              evidence: finding.evidence,
+              suggestedChange: finding.suggestedChange,
+            },
+            frequency: 1,
+            sources: [source],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            status: "pending",
+          });
         }
 
-        backlog.items.push({
-          id: nextItemId(backlog, nowIso),
-          type: finding.trigger,
-          operation: finding.operation,
-          targetIntentIds: [...finding.targetIntentIds],
-          dedupeKey: finding.dedupeKey,
-          summary: finding.summary,
-          correctionGoal: finding.correctionGoal,
-          details: {
-            evidence: finding.evidence,
-            suggestedChange: finding.suggestedChange,
-          },
-          frequency: 1,
-          sources: [source],
-          createdAt: nowIso,
-          updatedAt: nowIso,
-          status: "pending",
+        backlog.updatedAt = nowIso;
+        backlog.processedEvents[eventId] = nowIso;
+        const validated = EvolutionBacklogSchema.parse(backlog);
+        return safeWriteJson(
+          backlogPath,
+          validated,
+          "failed to write evolution backlog",
+        );
+      } catch (err) {
+        logger.warn("failed to update evolution backlog", {
+          error: err,
+          path: backlogPath,
         });
+        return false;
       }
+    });
 
-      backlog.updatedAt = nowIso;
-      backlog.processedEvents[eventId] = nowIso;
-      const validated = EvolutionBacklogSchema.parse(backlog);
-      return safeWriteJson(
-        backlogPath,
-        validated,
-        "failed to write evolution backlog",
-      );
-    } catch (err) {
-      logger.warn("failed to update evolution backlog", {
-        error: err,
+    // withFileLock returns undefined if lock acquisition failed
+    if (result === undefined) {
+      logger.warn("failed to acquire lock for evolution backlog", {
         path: backlogPath,
       });
       return false;
     }
+
+    return result;
   }
 }
 
