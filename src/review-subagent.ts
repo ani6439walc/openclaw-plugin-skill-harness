@@ -151,6 +151,22 @@ function formatToolCalls(
     .join("\n");
 }
 
+function formatSkillsUsed(
+  skillsUsed: ReviewSnapshot["current"]["skillsUsed"],
+): string {
+  if (!skillsUsed?.length) return "- none";
+  return skillsUsed
+    .map((skill) => {
+      const lines = [`- ${escapeSnapshotText(skill.name)}`];
+      if (skill.description) {
+        lines.push(`  - Description: ${escapeSnapshotText(skill.description)}`);
+      }
+      lines.push(`  - Path: ${escapeSnapshotText(skill.path)}`);
+      return lines.join("\n");
+    })
+    .join("\n");
+}
+
 function formatReviewState(
   title: string,
   state: ReviewSnapshot["current"],
@@ -173,7 +189,7 @@ function formatReviewState(
     formatIntentResult(state.intent),
     "",
     "### Skills Used",
-    formatList(state.skillsUsed),
+    formatSkillsUsed(state.skillsUsed),
     "",
     "### Tool Calls",
     formatToolCalls(state.toolCalls),

@@ -22,6 +22,13 @@ const snapshot: ReviewSnapshot = {
       confidence: 0.2,
       complexity: "high",
     },
+    skillsUsed: [
+      {
+        name: "test-driven-development",
+        description: "Drive changes with failing tests first.",
+        path: "/skills/test-driven-development/SKILL.md",
+      },
+    ],
     toolCalls: [{ name: "exec", error: "failed" }],
     result: "Done",
     timestamps: { start: "2026-06-11T00:00:00.000Z" },
@@ -169,6 +176,14 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("### Intent Result");
     expect(prompt).toContain("- Intent: other");
     expect(prompt).toContain("- Confidence: 0.2");
+    expect(prompt).toContain("### Skills Used");
+    expect(prompt).toContain("- test-driven-development");
+    expect(prompt).toContain(
+      "  - Description: Drive changes with failing tests first.",
+    );
+    expect(prompt).toContain(
+      "  - Path: /skills/test-driven-development/SKILL.md",
+    );
     expect(prompt).toContain("### Tool Calls");
     expect(prompt).toContain("- exec: error=failed");
     expect(prompt).toContain("### Assistant Result");

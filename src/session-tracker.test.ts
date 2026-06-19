@@ -561,13 +561,15 @@ describe("SessionTracker", () => {
             {
               name: "read",
               params: { path: "/path/to/gemini/SKILL.md" },
-              result: "---\nname: gemini\n---\ncontent",
+              result:
+                "---\nname: gemini\ndescription: Use Gemini for broad research.\n---\ncontent",
               durationMs: 100,
             },
             {
               name: "read",
               params: { path: "/path/to/gemini/SKILL.md" },
-              result: "---\nname: gemini\n---\ncontent",
+              result:
+                "---\nname: gemini\ndescription: Use Gemini for broad research.\n---\ncontent",
               durationMs: 100,
             },
           ],
@@ -584,7 +586,11 @@ describe("SessionTracker", () => {
       const parsed = JSON.parse(content);
 
       expect(parsed.current.skillsUsed).toEqual([
-        { name: "gemini", path: "/path/to/gemini/SKILL.md" },
+        {
+          name: "gemini",
+          path: "/path/to/gemini/SKILL.md",
+          description: "Use Gemini for broad research.",
+        },
       ]);
       expect(parsed.current.skillsUsed.length).toBe(1);
     });
@@ -598,13 +604,15 @@ describe("SessionTracker", () => {
             {
               name: "read",
               params: { path: "/path/to/gemini/SKILL.md" },
-              result: "---\nname: gemini\n---\nc",
+              result:
+                "---\nname: gemini\ndescription: Use Gemini for broad research.\n---\nc",
               durationMs: 100,
             },
             {
               name: "read",
               params: { path: "/path/to/frontend-ui-engineering/SKILL.md" },
-              result: "---\nname: frontend-ui-engineering\n---\nc",
+              result:
+                "---\nname: frontend-ui-engineering\ndescription: Build production-quality UI.\n---\nc",
               durationMs: 200,
             },
           ],
@@ -621,10 +629,15 @@ describe("SessionTracker", () => {
       const parsed = JSON.parse(content);
 
       expect(parsed.current.skillsUsed).toEqual([
-        { name: "gemini", path: "/path/to/gemini/SKILL.md" },
+        {
+          name: "gemini",
+          path: "/path/to/gemini/SKILL.md",
+          description: "Use Gemini for broad research.",
+        },
         {
           name: "frontend-ui-engineering",
           path: "/path/to/frontend-ui-engineering/SKILL.md",
+          description: "Build production-quality UI.",
         },
       ]);
     });

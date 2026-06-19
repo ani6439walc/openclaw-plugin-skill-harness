@@ -22,6 +22,7 @@ const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 export interface SkillRecord {
   name: string;
   path: string;
+  description?: string;
 }
 
 export interface IntentState {
@@ -64,7 +65,7 @@ function createReviewState(state: SessionState): ReviewState {
   return {
     input: truncate(state.input, 1000),
     intent: state.intent?.result ? { ...state.intent.result } : undefined,
-    skillsUsed: state.skillsUsed?.map((skill) => skill.name),
+    skillsUsed: state.skillsUsed?.map((skill) => ({ ...skill })),
     toolCalls: state.toolCalls?.map((call) => ({
       name: call.name,
       error: truncate(call.error, 500),
@@ -80,7 +81,7 @@ function extractSkillInfo(
   toolName: string,
   toolParams: Record<string, unknown>,
   toolResult: unknown,
-): { name: string; path: string } | undefined {
+): SkillRecord | undefined {
   if (toolName !== "read") return;
   const filePath = toolParams.path;
   if (typeof filePath !== "string" || !filePath.endsWith("SKILL.md")) return;
@@ -96,7 +97,14 @@ function extractSkillInfo(
   try {
     const parsed = matter(text);
     if (parsed.data?.name && typeof parsed.data.name === "string") {
-      return { name: parsed.data.name, path: filePath };
+      return {
+        name: parsed.data.name,
+        path: filePath,
+        description:
+          typeof parsed.data.description === "string"
+            ? parsed.data.description
+            : undefined,
+      };
     }
   } catch (err) {
     logger.warn("not valid skill markdown with frontmatter", {

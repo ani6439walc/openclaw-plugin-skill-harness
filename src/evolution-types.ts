@@ -9,7 +9,11 @@ import type {
 export type ReviewState = {
   input?: string;
   intent?: IntentionResult;
-  skillsUsed?: string[];
+  skillsUsed?: Array<{
+    name: string;
+    description?: string;
+    path: string;
+  }>;
   toolCalls?: Array<{
     name: string;
     error?: string;
