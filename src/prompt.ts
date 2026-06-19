@@ -484,10 +484,7 @@ function formatPromptResult(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return 'result: ""';
 
-  return [
-    "result: |",
-    ...trimmed.split(/\r?\n/).map((line) => `  ${line}`),
-  ].join("\n");
+  return `result: ${trimmed.split(/\r?\n/).join("\n  ")}`;
 }
 
 function resolveIntentId(intent: string): string {
