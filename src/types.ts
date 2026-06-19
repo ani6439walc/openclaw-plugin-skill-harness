@@ -28,6 +28,11 @@ export type ThinkLevel =
 export type EvolutionTriggersConfig = {
   skillCandidate?: { enabled?: boolean; toolCalls?: number };
   processGap?: { enabled?: boolean; toolFailures?: number };
+  successfulPattern?: {
+    enabled?: boolean;
+    toolCalls?: number;
+    keywords?: string[];
+  };
   satisfactionCheck?: { enabled?: boolean; everyTurns?: number };
   missingIntent?: { enabled?: boolean };
   weakIntent?: { enabled?: boolean; confidenceBelow?: number };
@@ -52,6 +57,11 @@ export type ResolvedEvolutionConfig = {
   triggers: {
     skillCandidate: { enabled: boolean; toolCalls: number };
     processGap: { enabled: boolean; toolFailures: number };
+    successfulPattern: {
+      enabled: boolean;
+      toolCalls: number;
+      keywords: string[];
+    };
     satisfactionCheck: { enabled: boolean; everyTurns: number };
     missingIntent: { enabled: boolean };
     weakIntent: { enabled: boolean; confidenceBelow: number };

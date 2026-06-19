@@ -26,6 +26,7 @@ describe("checkEvolutionTriggers", () => {
       checkEvolutionTriggers(
         state({
           input: "不對，應該是另一個做法",
+          result: "完成，驗證通過。",
           intent: {
             result: {
               intent: "other",
@@ -46,6 +47,7 @@ describe("checkEvolutionTriggers", () => {
     ).toEqual([
       "skill_candidate",
       "process_gap",
+      "successful_pattern",
       "satisfaction_check",
       "missing_intent",
       "weak_intent",
@@ -71,6 +73,7 @@ describe("checkEvolutionTriggers", () => {
         triggers: {
           skillCandidate: { enabled: false },
           processGap: { toolFailures: 1 },
+          successfulPattern: { toolCalls: 2, keywords: ["verified"] },
           satisfactionCheck: { everyTurns: 3 },
           weakIntent: { confidenceBelow: 0.95 },
           behaviorFix: { keywords: ["redo"] },
@@ -93,5 +96,55 @@ describe("checkEvolutionTriggers", () => {
       "weak_intent",
       "behavior_fix",
     ]);
+  });
+
+  it("detects successful reusable patterns from completed tool-heavy turns", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({
+          toolCalls: Array.from({ length: 5 }, (_, index) => ({
+            name: `tool-${index}`,
+            params: {},
+          })),
+          result: "Implemented the feature and verified tests passed.",
+        }),
+        1,
+        triggers,
+      ),
+    ).toContain("successful_pattern");
+  });
+
+  it("detects successful reusable patterns from skill-assisted completed turns", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({
+          skillsUsed: [{ name: "test-driven-development", path: "skills/tdd" }],
+          result: "完成，驗證通過。",
+        }),
+        1,
+        triggers,
+      ),
+    ).toContain("successful_pattern");
+  });
+
+  it("does not detect successful patterns for failed turns or completion text without reusable work", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({
+          error: "failed",
+          toolCalls: Array.from({ length: 5 }, (_, index) => ({
+            name: `tool-${index}`,
+            params: {},
+          })),
+          result: "verified",
+        }),
+        1,
+        triggers,
+      ),
+    ).not.toContain("successful_pattern");
+
+    expect(
+      checkEvolutionTriggers(state({ result: "done" }), 1, triggers),
+    ).not.toContain("successful_pattern");
   });
 });

@@ -38,6 +38,11 @@ describe("resolveConfig", () => {
         triggers: {
           skillCandidate: { enabled: true, toolCalls: 5 },
           processGap: { enabled: true, toolFailures: 2 },
+          successfulPattern: {
+            enabled: true,
+            toolCalls: 5,
+            keywords: expect.arrayContaining(["完成", "verified"]),
+          },
           satisfactionCheck: { enabled: true, everyTurns: 10 },
           missingIntent: { enabled: true },
           weakIntent: { enabled: true, confidenceBelow: 0.5 },
@@ -78,6 +83,10 @@ describe("resolveConfig", () => {
           triggers: {
             skillCandidate: { enabled: false, toolCalls: 0 },
             processGap: { toolFailures: 500 },
+            successfulPattern: {
+              toolCalls: 0,
+              keywords: [" verified ", "", "done"],
+            },
             satisfactionCheck: { everyTurns: 3 },
             missingIntent: { enabled: false },
             weakIntent: { confidenceBelow: 2 },
@@ -95,6 +104,11 @@ describe("resolveConfig", () => {
         triggers: {
           skillCandidate: { enabled: false, toolCalls: 1 },
           processGap: { enabled: true, toolFailures: 100 },
+          successfulPattern: {
+            enabled: true,
+            toolCalls: 1,
+            keywords: ["verified", "done"],
+          },
           satisfactionCheck: { enabled: true, everyTurns: 3 },
           missingIntent: { enabled: false },
           weakIntent: { enabled: true, confidenceBelow: 1 },

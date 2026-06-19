@@ -53,6 +53,22 @@ const DEFAULT_BEHAVIOR_FIX_KEYWORDS = [
   "you misunderstood",
 ];
 
+const DEFAULT_SUCCESSFUL_PATTERN_KEYWORDS = [
+  "完成",
+  "解決",
+  "修好",
+  "通過",
+  "驗證",
+  "成功",
+  "可以了",
+  "completed",
+  "fixed",
+  "resolved",
+  "passed",
+  "verified",
+  "done",
+];
+
 const DEFAULT_EVOLUTION = {
   enabled: false,
   model: undefined,
@@ -62,6 +78,11 @@ const DEFAULT_EVOLUTION = {
   triggers: {
     skillCandidate: { enabled: true, toolCalls: 5 },
     processGap: { enabled: true, toolFailures: 2 },
+    successfulPattern: {
+      enabled: true,
+      toolCalls: 5,
+      keywords: DEFAULT_SUCCESSFUL_PATTERN_KEYWORDS,
+    },
     satisfactionCheck: { enabled: true, everyTurns: 10 },
     missingIntent: { enabled: true },
     weakIntent: { enabled: true, confidenceBelow: 0.5 },
@@ -171,6 +192,15 @@ const EvolutionSchema = z
             toolFailures: boundedInt(2, 1, 100),
           })
           .catch(DEFAULT_EVOLUTION.triggers.processGap),
+        successfulPattern: z
+          .object({
+            enabled: enabledSchema,
+            toolCalls: boundedInt(5, 1, 100),
+            keywords: stringListWithDefault(
+              DEFAULT_SUCCESSFUL_PATTERN_KEYWORDS,
+            ),
+          })
+          .catch(DEFAULT_EVOLUTION.triggers.successfulPattern),
         satisfactionCheck: z
           .object({
             enabled: enabledSchema,

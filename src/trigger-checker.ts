@@ -5,6 +5,7 @@ import { FALLBACK_INTENT_ID } from "./constants.js";
 export const EVOLUTION_TRIGGER_TYPES = [
   "skill_candidate",
   "process_gap",
+  "successful_pattern",
   "satisfaction_check",
   "missing_intent",
   "weak_intent",
@@ -16,8 +17,22 @@ export type EvolutionTrigger = (typeof EVOLUTION_TRIGGER_TYPES)[number];
 type TriggerState = {
   input?: string;
   intent?: { result?: IntentionResult } | IntentionResult;
+  skillsUsed?: unknown[];
   toolCalls?: Array<{ error?: string }>;
+  result?: string;
+  error?: string;
 };
+
+function includesAnyKeyword(
+  text: string | undefined,
+  keywords: readonly string[],
+): boolean {
+  if (!text) return false;
+  const normalizedText = text.toLocaleLowerCase();
+  return keywords.some((keyword) =>
+    normalizedText.includes(keyword.toLocaleLowerCase()),
+  );
+}
 
 export function checkEvolutionTriggers(
   state: TriggerState,
@@ -45,6 +60,18 @@ export function checkEvolutionTriggers(
     matches.push("process_gap");
   }
   if (
+    config.successfulPattern.enabled &&
+    !state.error &&
+    (toolCalls.length >= config.successfulPattern.toolCalls ||
+      (state.skillsUsed?.length ?? 0) > 0) &&
+    includesAnyKeyword(
+      `${state.input ?? ""}\n${state.result ?? ""}`,
+      config.successfulPattern.keywords,
+    )
+  ) {
+    matches.push("successful_pattern");
+  }
+  if (
     config.satisfactionCheck.enabled &&
     turnNumber > 0 &&
     turnNumber % config.satisfactionCheck.everyTurns === 0
@@ -67,10 +94,7 @@ export function checkEvolutionTriggers(
   }
   if (
     config.behaviorFix.enabled &&
-    state.input &&
-    config.behaviorFix.keywords.some((keyword) =>
-      state.input!.toLocaleLowerCase().includes(keyword.toLocaleLowerCase()),
-    )
+    includesAnyKeyword(state.input, config.behaviorFix.keywords)
   ) {
     matches.push("behavior_fix");
   }

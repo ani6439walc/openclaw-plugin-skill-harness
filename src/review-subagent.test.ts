@@ -92,6 +92,11 @@ describe("buildReviewPrompt", () => {
       "Guidelines, Skills & Tools, Concrete Workflow, or Experience",
     ],
     [
+      "successful_pattern",
+      "completed successful turn",
+      "preserve the successful pattern",
+    ],
+    [
       "satisfaction_check",
       "intent boundary, body guidance, or response-strategy problem",
       "recommend split or merge only when evidence shows a collision",

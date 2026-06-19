@@ -58,7 +58,7 @@ index.ts
        │    └─ $OPENCLAW_STATE_DIR/plugins/intention-hint/stats.json
        │
        ├─ trigger-checker.ts + review-subagent.ts → Intent Evolution review
-       │    ├─ trigger-checker.ts → checkEvolutionTriggers() (six configurable triggers)
+       │    ├─ trigger-checker.ts → checkEvolutionTriggers() (seven configurable triggers)
        │    ├─ review-subagent.ts → buildReviewPrompt() + parseReviewFindings() + runReviewSubagent()
        │    └─ backlog-writer.ts + evolution-backlog.ts → $OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json
        │         ├─ backlog-writer.ts uses file-utils.ts for safeWriteJson()
@@ -88,7 +88,7 @@ index.ts
 | `evolution-types.ts`           | Shared types for Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource                                          |
 | `session-tracker.ts`           | Persist and clean up session data in runtime `sessions/` JSON files                                                                           |
 | `stats-aggregator.ts`          | Aggregate idempotent runtime usage statistics into `stats.json`                                                                               |
-| `trigger-checker.ts`           | Detect six configurable Evolution triggers from completed turns                                                                               |
+| `trigger-checker.ts`           | Detect seven configurable Evolution triggers from completed turns                                                                             |
 | `review-subagent.ts`           | Build trigger-specific review prompts and run the tool-free review sub-agent                                                                  |
 | `review-queue.ts`              | Serialized promise queue for background evolution reviews                                                                                     |
 | `backlog-writer.ts`            | Merge review findings atomically into `evolution.json`                                                                                        |
@@ -223,6 +223,7 @@ pnpm run build
             triggers: {
               skillCandidate: { enabled: true, toolCalls: 5 },
               processGap: { enabled: true, toolFailures: 2 },
+              successfulPattern: { enabled: true, toolCalls: 5 },
               satisfactionCheck: { enabled: true, everyTurns: 10 },
               missingIntent: { enabled: true },
               weakIntent: { enabled: true, confidenceBelow: 0.5 },
@@ -265,12 +266,13 @@ subagent's thinking level. Both thinking settings accept `off`, `minimal`,
 
 Intent Evolution is an opt-in observation and proposal pipeline. It does
 not edit intent files automatically. When enabled, each completed tracked turn
-is checked for six trigger types:
+is checked for seven trigger types:
 
 | Trigger              | Default condition                                      | Intent Markdown correction target                        |
 | -------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
 | `skill_candidate`    | Current turn has at least 5 tool calls                 | `Skills & Tools`, `Concrete Workflow`, or `Experience`   |
 | `process_gap`        | Current turn has at least 2 tool errors                | Guidelines, tool examples, workflow, or pitfalls         |
+| `successful_pattern` | Successful tool-heavy or skill-assisted completed turn | `Experience`, `Concrete Workflow`, or Response Strategy  |
 | `satisfaction_check` | Every 10th tracked turn                                | Boundaries, examples, Guidelines, or Response Strategy   |
 | `missing_intent`     | Classified intent is `other`                           | A narrowly scoped new intent draft                       |
 | `weak_intent`        | Classification confidence is below 0.5                 | Frontmatter triggers/examples and boundary clarity       |

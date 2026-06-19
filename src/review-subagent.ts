@@ -22,6 +22,11 @@ const REVIEW_INSTRUCTIONS: Record<
       "Trace the failed execution and recovery path, then identify which missing intent guideline, tool call example, workflow step, or Experience pitfall would have prevented the gap.",
     goal: "Refine the matched intent Markdown's Guidelines, Skills & Tools, Concrete Workflow, or Experience so future runs follow the successful path.",
   },
+  successful_pattern: {
+    focus:
+      "Identify reusable workflow, tool sequence, skill usage, parameters, and pitfalls from a completed successful turn. Exclude one-off details and do not propose external knowledge-base or experience file writes.",
+    goal: "Refine the matched intent Markdown's Experience, Concrete Workflow, or Response Strategy so future runs preserve the successful pattern without interrupting the user.",
+  },
   satisfaction_check: {
     focus:
       "Inspect recent turns for dissatisfaction, repeated requests, or routing corrections that reveal an intent boundary, body guidance, or response-strategy problem. Return no_finding without evidence.",
@@ -52,6 +57,7 @@ const INTENT_CRAFT_RUBRIC = `Intent Markdown review rules:
 - Put concrete tool call shapes in Skills & Tools or workflow steps; do not use vague tool prose.
 - Include Concrete Workflow for multi-step or sequence-sensitive intents. Use short numbered "### Step N — <name>" sections.
 - Use Experience for reusable tips, parameters, pitfalls, stable skill/tool lessons, and recovery notes that help future turns with the same intent.
+- For completed reusable workflows, prefer a concise Experience note or Response Strategy reminder that preserves the pattern in future turns; do not ask the user to record it and do not propose external knowledge-base or experience files.
 - Never mention another intent name or id inside an intent body. Express scope boundaries through frontmatter triggers and examples.
 - Do not propose changes to skills, tools, AGENTS.md, SOUL.md, or other production files. The only correction target is intent Markdown content.
 - Return no finding when the evidence does not justify a concrete intent Markdown improvement.`;
