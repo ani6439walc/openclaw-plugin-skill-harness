@@ -57,6 +57,12 @@ export function attachHistoricalIntents(
     };
     if (record.keywords?.length) historicalIntent.keywords = record.keywords;
     if (record.topic) historicalIntent.topic = record.topic;
+    if (record.topicChanged !== undefined) {
+      historicalIntent.topicChanged = record.topicChanged;
+    }
+    if (record.topicChangeReason) {
+      historicalIntent.topicChangeReason = record.topicChangeReason;
+    }
     turn.historicalIntent = historicalIntent;
   }
 

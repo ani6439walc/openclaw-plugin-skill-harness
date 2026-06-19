@@ -16,6 +16,8 @@ describe("attachHistoricalIntents", () => {
       {
         input: "Plan the release",
         intent: "PLANNING",
+        topicChanged: true,
+        topicChangeReason: "keyword_delta",
       },
     ];
 
@@ -25,6 +27,8 @@ describe("attachHistoricalIntents", () => {
         text: "Plan the release",
         historicalIntent: {
           intent: "PLANNING",
+          topicChanged: true,
+          topicChangeReason: "keyword_delta",
         },
       },
       { role: "assistant", text: "Here is a plan" },
@@ -75,6 +79,8 @@ describe("attachHistoricalIntents", () => {
           intent: "RESEARCH",
           keywords: ["historical", "topic"],
           topic: "historical / topic",
+          topicChanged: false,
+          topicChangeReason: "same_topic",
         },
       ],
     );
@@ -91,6 +97,8 @@ describe("attachHistoricalIntents", () => {
         intent: "RESEARCH",
         keywords: ["historical", "topic"],
         topic: "historical / topic",
+        topicChanged: false,
+        topicChangeReason: "same_topic",
       },
     });
   });

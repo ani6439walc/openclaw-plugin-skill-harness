@@ -107,7 +107,6 @@ function runInheritedIntentClassifier(
     topicChanged: false,
     topicChangeReason: topicContext.topicChangeReason,
     previousTopic: latest.topic,
-    intentChange: false,
     confidence: latest.confidence ?? 0.8,
     complexity: topicContext.complexity,
   };
@@ -215,9 +214,6 @@ export function createHookHandlers(deps: HookDeps) {
       result.topicChangeReason = topicContext.topicChangeReason;
       result.previousTopic = latestHistoricalIntent?.topic;
     }
-    if (result.intentChange === undefined) {
-      result.intentChange = true;
-    }
   }
 
   async function classifyPromptBuild(params: {
@@ -290,7 +286,7 @@ export function createHookHandlers(deps: HookDeps) {
       current: {
         input: params.latestUserMessage,
         intent: {
-          ...(params.result.intentChange === false
+          ...(params.result.topicChangeReason === "same_topic"
             ? {}
             : { input: params.conversation }),
           result: params.result,

@@ -537,8 +537,8 @@ describe("createHookHandlers topic switch flow", () => {
         result: expect.objectContaining({
           keywords: ["initial", "topic"],
           topic: "User is starting an initial topic.",
+          topicChanged: false,
           topicChangeReason: "initial",
-          intentChange: true,
           complexity: "low",
         }),
       }),
@@ -554,8 +554,8 @@ describe("createHookHandlers topic switch flow", () => {
             result: expect.objectContaining({
               keywords: ["initial", "topic"],
               topic: "User is starting an initial topic.",
+              topicChanged: false,
               topicChangeReason: "initial",
-              intentChange: true,
             }),
           }),
         }),
@@ -674,13 +674,12 @@ describe("createHookHandlers topic switch flow", () => {
           topic: "User is continuing work on the topic checker.",
           topicChanged: false,
           topicChangeReason: "same_topic",
-          intentChange: false,
           confidence: 0.85,
           complexity: "low",
         }),
       }),
     );
-    expect(result?.prependContext).not.toContain("intentChange: false");
+    expect(result?.prependContext).not.toContain("topicChanged: false");
     expect(result?.prependContext).toContain(
       "Follow the generated coding instructions.",
     );
@@ -692,7 +691,7 @@ describe("createHookHandlers topic switch flow", () => {
           intent: {
             result: expect.objectContaining({
               intent: "coding",
-              intentChange: false,
+              topicChanged: false,
             }),
           },
         }),

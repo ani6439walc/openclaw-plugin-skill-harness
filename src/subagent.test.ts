@@ -92,7 +92,7 @@ describe("runTopicSwitchSubagent", () => {
       }),
     );
     expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
-      "# Conversation context",
+      "<conversation_context>",
     );
     expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
       "topic: topic checker",
@@ -131,7 +131,8 @@ describe("runIntentInstructionSubagent", () => {
         reason: "User wants implementation",
         keywords: ["continuation"],
         topic: "continuation",
-        intentChange: true,
+        topicChanged: true,
+        topicChangeReason: "keyword_delta",
         confidence: 0.9,
         complexity: "medium",
       },
@@ -158,7 +159,7 @@ describe("runIntentInstructionSubagent", () => {
       "MEDIUM / STANDARD tasks",
     );
     expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
-      "# Conversation context",
+      "<conversation_context>",
     );
     expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
       "topic: continuation",

@@ -119,7 +119,6 @@ export type IntentionResult = {
   keywords?: string[];
   topic?: string;
   topicChanged?: boolean;
-  intentChange?: boolean;
   topicChangeReason?:
     | "initial"
     | "same_topic"
@@ -133,7 +132,7 @@ export type IntentionResult = {
 
 export type HistoricalIntent = Pick<
   IntentionResult,
-  "intent" | "keywords" | "topic"
+  "intent" | "keywords" | "topic" | "topicChanged" | "topicChangeReason"
 > &
   Partial<Pick<IntentionResult, "confidence" | "complexity">>;
 

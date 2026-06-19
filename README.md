@@ -342,7 +342,6 @@ The classification sub-agent returns JSON:
   "topic": "memory / past discussion",
   "topicChanged": false,
   "topicChangeReason": "initial",
-  "intentChange": true,
   "confidence": 0.9,
   "complexity": "medium",
   "suggestion": "Only present when confidence < 0.8"
@@ -354,7 +353,7 @@ The classification sub-agent returns JSON:
 - Fallbacks to `other` if parsed intent not found in catalog
 - `keywords` are normalized core nouns or short phrases from the latest user message
 - `topic` is a concise natural-language phrase describing the current topic
-- `intentChange=false` marks same-topic continuation turns that inherited the previous intent
+- `topicChanged=false` with `topicChangeReason="same_topic"` marks same-topic continuation turns that inherited the previous intent
 - Topic switch metadata is stored in session history; no separate cache or experience store is written
 - Durable session goals are managed by OpenClaw `/goal` and goal tools, not by intention-hint
 
@@ -385,7 +384,7 @@ intent to inherit, that topic context is passed into the classifier subagent. If
 the checker says the topic did not change, the plugin runs a local inherited
 intent classifier, reuses the latest historical intent, uses the checker
 complexity for the latest message, and records the current turn with
-`intentChange=false`. If the checker fails, the plugin logs and falls back to
+`topicChangeReason="same_topic"`. If the checker fails, the plugin logs and falls back to
 classifier-only behavior.
 
 ### Instruction Generation

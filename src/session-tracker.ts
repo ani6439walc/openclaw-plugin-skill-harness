@@ -287,6 +287,12 @@ export class SessionTracker {
       };
       if (result.keywords?.length) record.keywords = [...result.keywords];
       if (result.topic) record.topic = result.topic;
+      if (result.topicChanged !== undefined) {
+        record.topicChanged = result.topicChanged;
+      }
+      if (result.topicChangeReason) {
+        record.topicChangeReason = result.topicChangeReason;
+      }
       return [record];
     });
   }
