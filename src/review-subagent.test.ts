@@ -10,6 +10,7 @@ import type { ReviewSnapshot } from "./evolution-types.js";
 
 const snapshot: ReviewSnapshot = {
   sessionId: "session-1",
+  sessionKey: "main-session-key",
   agentId: "main",
   eventId: "session-1:2026-06-11T00:00:00.000Z",
   turnNumber: 10,
@@ -153,6 +154,35 @@ describe("buildReviewPrompt", () => {
     const prompt = buildReviewPrompt(snapshot, ["weak_intent"]);
     expect(prompt).toContain("weak_intent: Review focus:");
     expect(prompt).not.toContain("missing_intent: Review focus:");
+  });
+
+  it("renders a readable XML-wrapped markdown review snapshot without runtime metadata", () => {
+    const prompt = buildReviewPrompt(snapshot, ["weak_intent"]);
+
+    expect(prompt).toContain("Review snapshot:");
+    expect(prompt).toContain("<review_snapshot>");
+    expect(prompt).toContain("</review_snapshot>");
+    expect(prompt).toContain("## Current Turn");
+    expect(prompt).toContain("- Turn number: 10");
+    expect(prompt).toContain("### User Input");
+    expect(prompt).toContain("No, use the existing helper");
+    expect(prompt).toContain("### Intent Result");
+    expect(prompt).toContain("- Intent: other");
+    expect(prompt).toContain("- Confidence: 0.2");
+    expect(prompt).toContain("### Tool Calls");
+    expect(prompt).toContain("- exec: error=failed");
+    expect(prompt).toContain("### Assistant Result");
+    expect(prompt).toContain("Done");
+    expect(prompt).toContain("## Matched Intent");
+    expect(prompt).toContain("- ID: other");
+    expect(prompt).toContain("## Intent Catalog");
+    expect(prompt).toContain("Requests that do not match a defined intent");
+
+    expect(prompt).not.toContain("session-1");
+    expect(prompt).not.toContain("main-session-key");
+    expect(prompt).not.toContain("eventId");
+    expect(prompt).not.toContain("agentId");
+    expect(prompt).not.toContain('"current"');
   });
 });
 

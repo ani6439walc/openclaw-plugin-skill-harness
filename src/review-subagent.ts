@@ -98,6 +98,148 @@ function stripCodeFence(raw: string): string {
     .replace(/\s*```$/, "");
 }
 
+function escapeSnapshotText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function formatList(values: readonly string[] | undefined): string {
+  if (!values?.length) return "- none";
+  return values.map((value) => `- ${escapeSnapshotText(value)}`).join("\n");
+}
+
+function formatIntentResult(
+  intent: ReviewSnapshot["current"]["intent"],
+): string {
+  if (!intent) return "- none";
+  const lines = [
+    `- Intent: ${escapeSnapshotText(intent.intent)}`,
+    `- Confidence: ${escapeSnapshotText(intent.confidence)}`,
+    `- Complexity: ${escapeSnapshotText(intent.complexity)}`,
+    `- Reason: ${escapeSnapshotText(intent.reason)}`,
+  ];
+  if (intent.topic) lines.push(`- Topic: ${escapeSnapshotText(intent.topic)}`);
+  if (intent.keywords?.length) {
+    lines.push(
+      `- Keywords: ${intent.keywords.map(escapeSnapshotText).join(", ")}`,
+    );
+  }
+  if (intent.suggestion) {
+    lines.push(`- Suggestion: ${escapeSnapshotText(intent.suggestion)}`);
+  }
+  return lines.join("\n");
+}
+
+function formatToolCalls(
+  toolCalls: ReviewSnapshot["current"]["toolCalls"],
+): string {
+  if (!toolCalls?.length) return "- none";
+  return toolCalls
+    .map((call) => {
+      const details = [
+        call.error ? `error=${escapeSnapshotText(call.error)}` : undefined,
+        call.durationMs !== undefined
+          ? `durationMs=${call.durationMs}`
+          : undefined,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return `- ${escapeSnapshotText(call.name)}${details ? `: ${details}` : ""}`;
+    })
+    .join("\n");
+}
+
+function formatReviewState(
+  title: string,
+  state: ReviewSnapshot["current"],
+  turnNumber?: number,
+): string {
+  const lines = [`## ${title}`];
+  if (turnNumber !== undefined) lines.push(`- Turn number: ${turnNumber}`);
+  if (state.timestamps?.start) {
+    lines.push(`- Started at: ${escapeSnapshotText(state.timestamps.start)}`);
+  }
+  if (state.timestamps?.end) {
+    lines.push(`- Ended at: ${escapeSnapshotText(state.timestamps.end)}`);
+  }
+  lines.push(
+    "",
+    "### User Input",
+    escapeSnapshotText(state.input || "none"),
+    "",
+    "### Intent Result",
+    formatIntentResult(state.intent),
+    "",
+    "### Skills Used",
+    formatList(state.skillsUsed),
+    "",
+    "### Tool Calls",
+    formatToolCalls(state.toolCalls),
+    "",
+    "### Assistant Result",
+    escapeSnapshotText(state.result || "none"),
+  );
+  if (state.error) {
+    lines.push("", "### Agent Error", escapeSnapshotText(state.error));
+  }
+  return lines.join("\n");
+}
+
+function formatMatchedIntent(snapshot: ReviewSnapshot): string {
+  const intent = snapshot.matchedIntent;
+  if (!intent) return "## Matched Intent\n- none";
+  return [
+    "## Matched Intent",
+    `- ID: ${escapeSnapshotText(intent.id)}`,
+    "",
+    "### Triggers",
+    formatList(intent.definition.triggers),
+    "",
+    "### Examples",
+    formatList(intent.definition.examples),
+    "",
+    "### Body",
+    escapeSnapshotText(intent.definition.prompt || "none"),
+  ].join("\n");
+}
+
+function formatIntentCatalog(snapshot: ReviewSnapshot): string {
+  if (snapshot.intentCatalog.length === 0) return "## Intent Catalog\n- none";
+  return [
+    "## Intent Catalog",
+    ...snapshot.intentCatalog.map((entry) =>
+      [
+        `### ${escapeSnapshotText(entry.id)}`,
+        "Triggers:",
+        formatList(entry.triggers),
+        "Examples:",
+        formatList(entry.examples),
+      ].join("\n"),
+    ),
+  ].join("\n\n");
+}
+
+export function formatReviewSnapshot(snapshot: ReviewSnapshot): string {
+  const recent = snapshot.recent.length
+    ? snapshot.recent
+        .map((state, index) =>
+          formatReviewState(`Recent Turn ${index + 1}`, state),
+        )
+        .join("\n\n")
+    : "## Recent Turns\n- none";
+
+  return [
+    "<review_snapshot>",
+    formatReviewState("Current Turn", snapshot.current, snapshot.turnNumber),
+    recent,
+    formatMatchedIntent(snapshot),
+    formatIntentCatalog(snapshot),
+    "</review_snapshot>",
+  ].join("\n\n");
+}
+
 export function buildReviewPrompt(
   snapshot: ReviewSnapshot,
   triggers: readonly EvolutionTrigger[],
@@ -132,7 +274,7 @@ For every hasFinding=true item:
 - suggestedChange must be a concrete intent Markdown draft or patch instruction, including the exact triggers/examples or body sections to add/change.
 
 Review snapshot:
-${JSON.stringify(snapshot)}`;
+${formatReviewSnapshot(snapshot)}`;
 }
 
 export function parseReviewFindings(
