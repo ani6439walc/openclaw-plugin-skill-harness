@@ -1,6 +1,6 @@
 ---
 name: intention-hint
-description: "Design, inventory, or evolve intent definitions for the intention-hint plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), or processing an evolution backlog finding (evolve)."
+description: "Design, inventory, evolve, or extract intent definitions for the intention-hint plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution backlog finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
 ---
 
 # Intention Hint Skill
@@ -13,10 +13,11 @@ Manage the full lifecycle of intent definitions: from single-intent CRUD (design
 What does the user want?
 ├─ Create/rename/split/merge/refine ONE intent → design
 ├─ Bootstrap or re-audit the ENTIRE catalog → inventory
-└─ Process an evolution backlog finding → evolve
+├─ Process an evolution backlog finding → evolve
+└─ Check intent complexity / upgrade intents to skills → extract
 ```
 
-If ambiguous, ask: "Are you working on a single intent, auditing the whole system, or processing a backlog finding?"
+If ambiguous, ask: "Are you working on a single intent, auditing the whole system, processing a backlog finding, or analyzing intent complexity?"
 
 ---
 
@@ -290,6 +291,60 @@ Dismiss instead of leaving pending when the finding is clearly duplicate, supers
 
 ---
 
+## Mode: extract
+
+### When to use
+
+User wants to analyze intent complexity, find oversized intents, or upgrade intents into standalone skills.
+
+Keywords: "extract intent", "intent too complex", "upgrade to skill", "intent 太長了", "拆分 intent", "check intent complexity", "哪些 intent 該變成技能"
+
+Read and follow `references/extract.md` for the full workflow.
+
+### Workflow
+
+**Step 1 — Complexity scan**
+
+Score every intent using the complexity formula (line count, trigger count, example count, tool refs, sub-responsibility count). Output a ranked table with levels: 🟢 Healthy, 🟡 Monitor, 🟠 Warning, 🔴 Extract.
+
+**Step 2 — Sub-responsibility analysis**
+
+For each 🔴 or high 🟠 intent, identify distinct sub-responsibilities that could become independent skills. Propose an extraction plan showing what to extract and what remains.
+
+**🔴 CHECKPOINT**: Present the extraction plan to the user. Do not proceed without confirmation.
+
+**Step 3 — Draft skill blueprints**
+
+For each confirmed extraction, draft:
+- A `SKILL.md` for the new skill (workflow, tools, failure modes)
+- A slimmed-down intent (<50 lines) retaining only classification triggers + a skill hint
+
+**Step 4 — Deliver**
+
+- If `skill_workshop` tool is available → use `action=create` to create each skill, then update the intent file.
+- If `skill_workshop` tool is NOT available → ask the user whether to write the files or just show the drafts.
+
+Post-delivery: validate frontmatter, check trigger collisions, report results.
+
+### Failure modes
+
+| Trigger | First fix | Fallback |
+|---------|-----------|----------|
+| **No intents above threshold** | Report all scores, confirm system is healthy | Suggest re-running after adding more intents |
+| **Sub-responsibility boundaries unclear** | Ask user to clarify stay vs extract | Keep intent unchanged, flag for next review |
+| **Skill name collision** | Suggest alternative name | Use namespaced name (e.g., `<domain>-ops`) |
+| **User rejects extraction** | Respect decision | Suggest lighter alternative (rewrite guidelines only) |
+
+### Anti-patterns
+
+| # | Anti-pattern | Why not | Do instead |
+|---|---|---|---|
+| 1 | **Auto-extract without confirmation** | Destructive change to routing | Always get explicit approval |
+| 2 | **Extract too aggressively** | Creates skill sprawl | Only extract truly independent sub-responsibilities |
+| 3 | **Leave intent empty after extraction** | Still needed for classification | Keep slimmed intent with triggers + skill hint |
+
+---
+
 ## Shared resources
 
 ### First-time setup (assets)
@@ -327,3 +382,4 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" 
 | 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                             | design    |
 | 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                 | inventory |
 | 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `pnpm run evolution-backlog -- show` → ground → backup → apply → validate → mark/rollback | evolve    |
+| 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract   |
