@@ -561,13 +561,15 @@ describe("SessionTracker", () => {
             {
               name: "read",
               params: { path: "/path/to/gemini/SKILL.md" },
-              result: "---\nname: gemini\n---\ncontent",
+              result:
+                "---\nname: gemini\ndescription: Use Gemini for broad research.\n---\ncontent",
               durationMs: 100,
             },
             {
               name: "read",
               params: { path: "/path/to/gemini/SKILL.md" },
-              result: "---\nname: gemini\n---\ncontent",
+              result:
+                "---\nname: gemini\ndescription: Use Gemini for broad research.\n---\ncontent",
               durationMs: 100,
             },
           ],
@@ -584,7 +586,11 @@ describe("SessionTracker", () => {
       const parsed = JSON.parse(content);
 
       expect(parsed.current.skillsUsed).toEqual([
-        { name: "gemini", path: "/path/to/gemini/SKILL.md" },
+        {
+          name: "gemini",
+          path: "/path/to/gemini/SKILL.md",
+          description: "Use Gemini for broad research.",
+        },
       ]);
       expect(parsed.current.skillsUsed.length).toBe(1);
     });
@@ -598,13 +604,15 @@ describe("SessionTracker", () => {
             {
               name: "read",
               params: { path: "/path/to/gemini/SKILL.md" },
-              result: "---\nname: gemini\n---\nc",
+              result:
+                "---\nname: gemini\ndescription: Use Gemini for broad research.\n---\nc",
               durationMs: 100,
             },
             {
               name: "read",
               params: { path: "/path/to/frontend-ui-engineering/SKILL.md" },
-              result: "---\nname: frontend-ui-engineering\n---\nc",
+              result:
+                "---\nname: frontend-ui-engineering\ndescription: Build production-quality UI.\n---\nc",
               durationMs: 200,
             },
           ],
@@ -621,10 +629,15 @@ describe("SessionTracker", () => {
       const parsed = JSON.parse(content);
 
       expect(parsed.current.skillsUsed).toEqual([
-        { name: "gemini", path: "/path/to/gemini/SKILL.md" },
+        {
+          name: "gemini",
+          path: "/path/to/gemini/SKILL.md",
+          description: "Use Gemini for broad research.",
+        },
         {
           name: "frontend-ui-engineering",
           path: "/path/to/frontend-ui-engineering/SKILL.md",
+          description: "Build production-quality UI.",
         },
       ]);
     });
@@ -918,7 +931,13 @@ describe("SessionTracker", () => {
             toolCalls: [
               {
                 name: "exec",
-                params: { secret: "do-not-copy" },
+                params: {
+                  path: "/repo/src/review-subagent.ts",
+                  command: `pnpm run test ${"x".repeat(600)}`,
+                  urls: ["https://example.com/a", "https://example.com/b"],
+                  secret: "do-not-copy",
+                  content: "do-not-copy-content",
+                },
                 result: "do-not-copy",
                 error: "e".repeat(600),
               },
@@ -944,8 +963,19 @@ describe("SessionTracker", () => {
       expect(snapshot?.current.result).toHaveLength(1500);
       expect(snapshot?.current.toolCalls?.[0]).toEqual({
         name: "exec",
+        params: {
+          path: "/repo/src/review-subagent.ts",
+          command: `pnpm run test ${"x".repeat(486)}`,
+          urls: "https://example.com/a, https://example.com/b",
+        },
         error: "e".repeat(500),
       });
+      expect(snapshot?.current.toolCalls?.[0].params).not.toHaveProperty(
+        "secret",
+      );
+      expect(snapshot?.current.toolCalls?.[0].params).not.toHaveProperty(
+        "content",
+      );
 
       tracker.record("review-session", { current: { input: "changed" } });
       expect(snapshot?.current.input).not.toBe("changed");

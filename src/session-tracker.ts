@@ -22,6 +22,7 @@ const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 export interface SkillRecord {
   name: string;
   path: string;
+  description?: string;
 }
 
 export interface IntentState {
@@ -60,13 +61,66 @@ function truncate(value: string | undefined, maxChars: number) {
   return value?.slice(0, maxChars);
 }
 
+const REVIEW_PARAM_MAX_CHARS = 500;
+
+const SAFE_REVIEW_PARAM_KEYS = new Set([
+  "command",
+  "cwd",
+  "filePath",
+  "file_path",
+  "limit",
+  "name",
+  "offset",
+  "path",
+  "pattern",
+  "query",
+  "skillName",
+  "url",
+  "urls",
+  "workdir",
+]);
+
+const SENSITIVE_REVIEW_PARAM_KEY_PATTERN =
+  /api[_-]?key|authorization|body|content|cookie|credential|headers|password|prompt|secret|text|token/i;
+
+function stringifyReviewParamValue(value: unknown): string | undefined {
+  if (value === null || value === undefined) return;
+  if (["string", "number", "boolean"].includes(typeof value)) {
+    return truncate(String(value), REVIEW_PARAM_MAX_CHARS);
+  }
+  if (Array.isArray(value)) {
+    return truncate(
+      value
+        .map((item) => stringifyReviewParamValue(item))
+        .filter((item): item is string => Boolean(item))
+        .join(", "),
+      REVIEW_PARAM_MAX_CHARS,
+    );
+  }
+  return;
+}
+
+function sanitizeToolParamsForReview(
+  params: Record<string, unknown>,
+): Record<string, string> | undefined {
+  const sanitized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (SENSITIVE_REVIEW_PARAM_KEY_PATTERN.test(key)) continue;
+    if (!SAFE_REVIEW_PARAM_KEYS.has(key)) continue;
+    const stringified = stringifyReviewParamValue(value);
+    if (stringified) sanitized[key] = stringified;
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
 function createReviewState(state: SessionState): ReviewState {
   return {
     input: truncate(state.input, 1000),
     intent: state.intent?.result ? { ...state.intent.result } : undefined,
-    skillsUsed: state.skillsUsed?.map((skill) => skill.name),
+    skillsUsed: state.skillsUsed?.map((skill) => ({ ...skill })),
     toolCalls: state.toolCalls?.map((call) => ({
       name: call.name,
+      params: sanitizeToolParamsForReview(call.params),
       error: truncate(call.error, 500),
       durationMs: call.durationMs,
     })),
@@ -80,7 +134,7 @@ function extractSkillInfo(
   toolName: string,
   toolParams: Record<string, unknown>,
   toolResult: unknown,
-): { name: string; path: string } | undefined {
+): SkillRecord | undefined {
   if (toolName !== "read") return;
   const filePath = toolParams.path;
   if (typeof filePath !== "string" || !filePath.endsWith("SKILL.md")) return;
@@ -96,7 +150,14 @@ function extractSkillInfo(
   try {
     const parsed = matter(text);
     if (parsed.data?.name && typeof parsed.data.name === "string") {
-      return { name: parsed.data.name, path: filePath };
+      return {
+        name: parsed.data.name,
+        path: filePath,
+        description:
+          typeof parsed.data.description === "string"
+            ? parsed.data.description
+            : undefined,
+      };
     }
   } catch (err) {
     logger.warn("not valid skill markdown with frontmatter", {

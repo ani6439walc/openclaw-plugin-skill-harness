@@ -22,7 +22,24 @@ const snapshot: ReviewSnapshot = {
       confidence: 0.2,
       complexity: "high",
     },
-    toolCalls: [{ name: "exec", error: "failed" }],
+    skillsUsed: [
+      {
+        name: "test-driven-development",
+        description: "Drive changes with failing tests first.",
+        path: "/skills/test-driven-development/SKILL.md",
+      },
+    ],
+    toolCalls: [
+      {
+        name: "exec",
+        params: {
+          command: "pnpm run test",
+          workdir: "/repo",
+        },
+        error: "failed",
+        durationMs: 42,
+      },
+    ],
     result: "Done",
     timestamps: { start: "2026-06-11T00:00:00.000Z" },
   },
@@ -64,6 +81,8 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("Concrete Workflow");
     expect(prompt).toContain("optional ## Experience");
     expect(prompt).toContain("reusable tips, parameters, pitfalls");
+    expect(prompt).toContain("may use the read tool to inspect SKILL.md files");
+    expect(prompt).toContain("review snapshot's Skills Used paths");
     expect(prompt).toContain("Recordability filter");
     expect(prompt).toContain("reusable workflows or decision steps");
     expect(prompt).toContain("costly error recovery paths");
@@ -169,8 +188,21 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("### Intent Result");
     expect(prompt).toContain("- Intent: other");
     expect(prompt).toContain("- Confidence: 0.2");
+    expect(prompt).toContain("### Skills Used");
+    expect(prompt).toContain("- test-driven-development");
+    expect(prompt).toContain(
+      "  - Description: Drive changes with failing tests first.",
+    );
+    expect(prompt).toContain(
+      "  - Path: /skills/test-driven-development/SKILL.md",
+    );
     expect(prompt).toContain("### Tool Calls");
-    expect(prompt).toContain("- exec: error=failed");
+    expect(prompt).toContain("- exec");
+    expect(prompt).toContain("  - Params:");
+    expect(prompt).toContain("    - command: pnpm run test");
+    expect(prompt).toContain("    - workdir: /repo");
+    expect(prompt).toContain("  - Error: failed");
+    expect(prompt).toContain("  - Duration: 42ms");
     expect(prompt).toContain("### Assistant Result");
     expect(prompt).toContain("Done");
     expect(prompt).toContain("## Matched Intent");
@@ -259,7 +291,7 @@ describe("parseReviewFindings", () => {
 });
 
 describe("runReviewSubagent", () => {
-  it("runs an isolated tool-free review with the review timeout", async () => {
+  it("runs an isolated read-only review with the review timeout", async () => {
     const runEmbeddedPiAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: '{"findings":[]}' }],
     });
@@ -291,8 +323,9 @@ describe("runReviewSubagent", () => {
         thinkLevel: "high",
         trigger: "manual",
         promptMode: "none",
-        disableTools: true,
-        toolsAllow: [],
+        modelRun: false,
+        disableTools: false,
+        toolsAllow: ["read"],
         sessionFile: expect.stringMatching(
           /^\/tmp\/intention-hint-review-.+\.session\.jsonl$/,
         ),
