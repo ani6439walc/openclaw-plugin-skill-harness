@@ -63,6 +63,16 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("Concrete Workflow");
     expect(prompt).toContain("optional ## Experience");
     expect(prompt).toContain("reusable tips, parameters, pitfalls");
+    expect(prompt).toContain("Recordability filter");
+    expect(prompt).toContain("reusable workflows or decision steps");
+    expect(prompt).toContain("costly error recovery paths");
+    expect(prompt).toContain("critical parameters or prerequisites");
+    expect(prompt).toContain("multi-attempt successful solutions");
+    expect(prompt).toContain("reusable templates/checklists/formats");
+    expect(prompt).toContain("one-off Q&A");
+    expect(prompt).toContain(
+      "general knowledge rather than intent-routing guidance",
+    );
     expect(prompt).toContain(
       "Never mention another intent name or id inside an intent body",
     );

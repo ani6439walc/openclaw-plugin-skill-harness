@@ -58,6 +58,9 @@ const INTENT_CRAFT_RUBRIC = `Intent Markdown review rules:
 - Include Concrete Workflow for multi-step or sequence-sensitive intents. Use short numbered "### Step N — <name>" sections.
 - Use Experience for reusable tips, parameters, pitfalls, stable skill/tool lessons, and recovery notes that help future turns with the same intent.
 - For completed reusable workflows, prefer a concise Experience note or Response Strategy reminder that preserves the pattern in future turns; do not ask the user to record it and do not propose external knowledge-base or experience files.
+- Recordability filter: preserve only lessons that will save future time, such as reusable workflows or decision steps, costly error recovery paths, critical parameters or prerequisites, stable user preference or style rules, multi-attempt successful solutions with failure reasons and success conditions, reusable templates/checklists/formats, and stable external dependency or resource locations.
+- Do not preserve one-off Q&A, pure conceptual explanations without concrete steps or decision criteria, or conclusions without reusable context.
+- When the lesson is general knowledge rather than intent-routing guidance, return no_finding unless it directly improves the matched intent's Guidelines, Response Strategy, Concrete Workflow, or Experience.
 - Never mention another intent name or id inside an intent body. Express scope boundaries through frontmatter triggers and examples.
 - Do not propose changes to skills, tools, AGENTS.md, SOUL.md, or other production files. The only correction target is intent Markdown content.
 - Return no finding when the evidence does not justify a concrete intent Markdown improvement.`;
