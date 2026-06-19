@@ -287,7 +287,7 @@ export function createHookHandlers(deps: HookDeps) {
       current: {
         input: params.latestUserMessage,
         intent: {
-          ...(params.result.topicChangeReason === "same_topic"
+          ...(params.result.topicChangeReason === "same-topic"
             ? {}
             : { input: params.conversation }),
           result: params.result,

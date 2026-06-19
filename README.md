@@ -353,7 +353,7 @@ The classification sub-agent returns JSON:
 - Fallbacks to `other` if parsed intent not found in catalog
 - `keywords` are normalized core nouns or short phrases from the latest user message
 - `topic` is a concise natural-language phrase describing the current topic
-- `topicChanged=false` with `topicChangeReason="same_topic"` marks same-topic continuation turns that inherited the previous intent
+- `topicChanged=false` with `topicChangeReason="same-topic"` marks same-topic continuation turns that inherited the previous intent
 - Topic switch metadata is stored in session history; no separate cache or experience store is written
 - Durable session goals are managed by OpenClaw `/goal` and goal tools, not by intention-hint
 
@@ -385,7 +385,7 @@ intent to inherit, that topic context is passed into the classifier subagent.
 If the checker says the topic did not change, the plugin runs a local inherited
 intent classifier, reuses the latest historical intent, uses the checker
 complexity for the latest message, and records the current turn with
-`topicChanged=false` plus `topicChangeReason="same_topic"`. If the checker
+`topicChanged=false` plus `topicChangeReason="same-topic"`. If the checker
 fails, the plugin logs and falls back to classifier-only behavior.
 
 ### Instruction Generation
@@ -416,7 +416,7 @@ matched intent body.
 - When a historical user turn has `topicChanged=true`, prompt building closes the previous segment, inserts a `<topic_boundary>` with reason/topic metadata, and starts the next `<topic_segment>`
 - Historical records are matched by normalized user-message text, with duplicate messages paired newest-first
 - Classification rules use historical intent metadata as context while requiring fresh classification on topic switches
-- Same-topic continuation turns are identified by `topicChangeReason="same_topic"` and omit `current.intent.input` to avoid duplicating conversation snapshots, while keeping `current.intent.result` for tool tracking, stats, and Evolution
+- Same-topic continuation turns are identified by `topicChangeReason="same-topic"` and omit `current.intent.input` to avoid duplicating conversation snapshots, while keeping `current.intent.result` for tool tracking, stats, and Evolution
 - Extracted via `conversation-extract.ts` with configurable turn/char limits from `contextWindow` config
 
 ### Internal User Turns

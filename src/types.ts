@@ -121,10 +121,10 @@ export type IntentionResult = {
   topicChanged?: boolean;
   topicChangeReason?:
     | "initial"
-    | "same_topic"
-    | "transition_marker"
-    | "keyword_delta"
-    | "explicit_change";
+    | "same-topic"
+    | "transition-marker"
+    | "keyword-delta"
+    | "explicit-change";
   previousTopic?: string;
   confidence: number;
   complexity: "low" | "medium" | "high";

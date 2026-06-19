@@ -292,12 +292,12 @@ describe("parseReviewFindings", () => {
 
 describe("runReviewSubagent", () => {
   it("runs an isolated read-only review with the review timeout", async () => {
-    const runEmbeddedPiAgent = vi.fn().mockResolvedValue({
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: '{"findings":[]}' }],
     });
     const api = {
       config: {},
-      runtime: { agent: { runEmbeddedPiAgent } },
+      runtime: { agent: { runEmbeddedAgent } },
     } as unknown as OpenClawPluginApi;
 
     await runReviewSubagent({
@@ -315,14 +315,14 @@ describe("runReviewSubagent", () => {
       triggers: ["weak_intent"],
     });
 
-    expect(runEmbeddedPiAgent).toHaveBeenCalledWith(
+    expect(runEmbeddedAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "google",
         model: "review",
         timeoutMs: 1234,
         thinkLevel: "high",
         trigger: "manual",
-        promptMode: "none",
+        promptMode: "minimal",
         modelRun: false,
         disableTools: false,
         toolsAllow: ["read"],

@@ -351,7 +351,7 @@ export async function runReviewSubagent(params: {
     : `agent:${params.agentId}:intention-hint-review:${suffix}`;
 
   try {
-    const result = await params.api.runtime.agent.runEmbeddedPiAgent({
+    const result = await params.api.runtime.agent.runEmbeddedAgent({
       sessionId: runId,
       sessionKey,
       agentId: params.agentId,
@@ -367,7 +367,7 @@ export async function runReviewSubagent(params: {
       sessionFile: `/tmp/${runId}.session.jsonl`,
       trigger: "manual",
       modelRun: false,
-      promptMode: "none",
+      promptMode: "minimal",
       toolsAllow: ["read"],
       disableTools: false,
       disableMessageTool: true,

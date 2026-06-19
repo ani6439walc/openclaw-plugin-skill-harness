@@ -17,7 +17,7 @@ describe("attachHistoricalIntents", () => {
         input: "Plan the release",
         intent: "PLANNING",
         topicChanged: true,
-        topicChangeReason: "keyword_delta",
+        topicChangeReason: "keyword-delta",
       },
     ];
 
@@ -28,7 +28,7 @@ describe("attachHistoricalIntents", () => {
         historicalIntent: {
           intent: "PLANNING",
           topicChanged: true,
-          topicChangeReason: "keyword_delta",
+          topicChangeReason: "keyword-delta",
         },
       },
       { role: "assistant", text: "Here is a plan" },
@@ -80,7 +80,7 @@ describe("attachHistoricalIntents", () => {
           keywords: ["historical", "topic"],
           topic: "historical / topic",
           topicChanged: false,
-          topicChangeReason: "same_topic",
+          topicChangeReason: "same-topic",
         },
       ],
     );
@@ -98,7 +98,7 @@ describe("attachHistoricalIntents", () => {
         keywords: ["historical", "topic"],
         topic: "historical / topic",
         topicChanged: false,
-        topicChangeReason: "same_topic",
+        topicChangeReason: "same-topic",
       },
     });
   });
@@ -114,7 +114,7 @@ describe("attachHistoricalIntents", () => {
         intent: "chat",
         topic: "User is tired and wants to sleep.",
         topicChanged: true,
-        topicChangeReason: "keyword_delta",
+        topicChangeReason: "keyword-delta",
       },
     ];
 
@@ -130,7 +130,7 @@ describe("attachHistoricalIntents", () => {
           intent: "chat",
           topic: "User is tired and wants to sleep.",
           topicChanged: true,
-          topicChangeReason: "keyword_delta",
+          topicChangeReason: "keyword-delta",
         },
       },
       { role: "assistant", text: "快去睡吧" },

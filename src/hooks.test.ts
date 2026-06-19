@@ -568,7 +568,7 @@ describe("createHookHandlers topic switch flow", () => {
       keywords: ["new", "topic"],
       topic: "User is switching to a new topic.",
       topicChanged: true,
-      topicChangeReason: "transition_marker" as const,
+      topicChangeReason: "transition-marker" as const,
       complexity: "high" as const,
     };
     const { handlers, classifier, topicChecker, instructionWriter } =
@@ -643,7 +643,7 @@ describe("createHookHandlers topic switch flow", () => {
       keywords: ["topic", "checker"],
       topic: "User is continuing work on the topic checker.",
       topicChanged: false,
-      topicChangeReason: "same_topic" as const,
+      topicChangeReason: "same-topic" as const,
       complexity: "low" as const,
     };
     const { handlers, classifier, topicChecker, instructionWriter, record } =
@@ -673,7 +673,7 @@ describe("createHookHandlers topic switch flow", () => {
           keywords: ["topic", "checker"],
           topic: "User is continuing work on the topic checker.",
           topicChanged: false,
-          topicChangeReason: "same_topic",
+          topicChangeReason: "same-topic",
           confidence: 0.85,
           complexity: "low",
         }),
