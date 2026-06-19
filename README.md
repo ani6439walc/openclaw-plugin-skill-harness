@@ -89,7 +89,7 @@ index.ts
 | `session-tracker.ts`           | Persist and clean up session data in runtime `sessions/` JSON files                                                                           |
 | `stats-aggregator.ts`          | Aggregate idempotent runtime usage statistics into `stats.json`                                                                               |
 | `trigger-checker.ts`           | Detect seven configurable Evolution triggers from completed turns                                                                             |
-| `review-subagent.ts`           | Build trigger-specific review prompts and run the tool-free review sub-agent                                                                  |
+| `review-subagent.ts`           | Build trigger-specific review prompts and run the read-only review sub-agent with a `read` allowlist                                          |
 | `review-queue.ts`              | Serialized promise queue for background evolution reviews                                                                                     |
 | `backlog-writer.ts`            | Merge review findings atomically into `evolution.json`                                                                                        |
 | `evolution-backlog.ts`         | Validate/migrate backlog schema and provide atomic mutation primitives                                                                        |
@@ -278,7 +278,7 @@ is checked for seven trigger types:
 | `weak_intent`        | Classification confidence is below 0.5                 | Frontmatter triggers/examples and boundary clarity       |
 | `behavior_fix`       | Current input contains a configured correction keyword | Guidance or workflow that encodes the corrected behavior |
 
-All matching triggers are reviewed in one background, tool-free sub-agent run.
+All matching triggers are reviewed in one background, read-only sub-agent run.
 Each trigger receives a distinct review focus and correction goal, and may return
 no finding. Valid findings are merged by pending `type + dedupeKey` into the
 atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json` backlog. Review failures are
@@ -291,6 +291,10 @@ to nine previous tracked turns with truncated content. Depending on the trigger,
 it proposes a new intent draft or targeted changes to frontmatter, Guidelines,
 Skills & Tools, Response Strategy, Concrete Workflow, or Experience. It never proposes
 changes to skills, tools, AGENTS.md, SOUL.md, or other production files.
+The review sub-agent uses `runEmbeddedAgent` with `promptMode="minimal"`,
+`modelRun=false`, and `toolsAllow=["read"]` so OpenClaw materializes only the
+core `read` tool. The `read` tool is reserved for inspecting relevant
+`SKILL.md` files referenced by the review snapshot's Skills Used paths.
 
 `evolution.json` is protected like `stats.json`: both live at the runtime data
 root, are not loaded as session state, and are never removed by session
@@ -481,7 +485,7 @@ The test suites cover:
 - Internal/inter-session turn detection and conversation-history filtering
 - Per-turn historical intent matching, duplicate handling, and prompt injection
 - Six Evolution triggers, thresholds, and multi-trigger turns
-- Intention-hint Skill review prompts, response parsing, and tool-free reviewer runs
+- Intention-hint Skill review prompts, response parsing, and read-only reviewer runs
 - Serialized background reviews and atomic, idempotent evolution backlog writes
 - Schema v1-to-v2 migration, structured finding targets, and evolution-backlog command concurrency checks
 - Intent Markdown structure/catalog validation and explicit-only intention-hint backlog mode
