@@ -316,6 +316,7 @@ For each 🔴 or high 🟠 intent, identify distinct sub-responsibilities that c
 **Step 3 — Draft skill blueprints**
 
 For each confirmed extraction, draft:
+
 - A `SKILL.md` for the new skill (workflow, tools, failure modes)
 - A slimmed-down intent (<50 lines) retaining only classification triggers + a skill hint
 
@@ -328,20 +329,20 @@ Post-delivery: validate frontmatter, check trigger collisions, report results.
 
 ### Failure modes
 
-| Trigger | First fix | Fallback |
-|---------|-----------|----------|
-| **No intents above threshold** | Report all scores, confirm system is healthy | Suggest re-running after adding more intents |
-| **Sub-responsibility boundaries unclear** | Ask user to clarify stay vs extract | Keep intent unchanged, flag for next review |
-| **Skill name collision** | Suggest alternative name | Use namespaced name (e.g., `<domain>-ops`) |
-| **User rejects extraction** | Respect decision | Suggest lighter alternative (rewrite guidelines only) |
+| Trigger                                   | First fix                                    | Fallback                                              |
+| ----------------------------------------- | -------------------------------------------- | ----------------------------------------------------- |
+| **No intents above threshold**            | Report all scores, confirm system is healthy | Suggest re-running after adding more intents          |
+| **Sub-responsibility boundaries unclear** | Ask user to clarify stay vs extract          | Keep intent unchanged, flag for next review           |
+| **Skill name collision**                  | Suggest alternative name                     | Use namespaced name (e.g., `<domain>-ops`)            |
+| **User rejects extraction**               | Respect decision                             | Suggest lighter alternative (rewrite guidelines only) |
 
 ### Anti-patterns
 
-| # | Anti-pattern | Why not | Do instead |
-|---|---|---|---|
-| 1 | **Auto-extract without confirmation** | Destructive change to routing | Always get explicit approval |
-| 2 | **Extract too aggressively** | Creates skill sprawl | Only extract truly independent sub-responsibilities |
-| 3 | **Leave intent empty after extraction** | Still needed for classification | Keep slimmed intent with triggers + skill hint |
+| #   | Anti-pattern                            | Why not                         | Do instead                                          |
+| --- | --------------------------------------- | ------------------------------- | --------------------------------------------------- |
+| 1   | **Auto-extract without confirmation**   | Destructive change to routing   | Always get explicit approval                        |
+| 2   | **Extract too aggressively**            | Creates skill sprawl            | Only extract truly independent sub-responsibilities |
+| 3   | **Leave intent empty after extraction** | Still needed for classification | Keep slimmed intent with triggers + skill hint      |
 
 ---
 
@@ -377,9 +378,9 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" 
 
 ### Test prompts (dry_run)
 
-| #   | Prompt                                           | Expected behavior                                                                                               | Mode      |
-| --- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | --------- |
-| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                             | design    |
-| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                 | inventory |
-| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `pnpm run evolution-backlog -- show` → ground → backup → apply → validate → mark/rollback | evolve    |
+| #   | Prompt                                           | Expected behavior                                                                                                 | Mode      |
+| --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------- |
+| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                               | design    |
+| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory |
+| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `pnpm run evolution-backlog -- show` → ground → backup → apply → validate → mark/rollback   | evolve    |
 | 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract   |

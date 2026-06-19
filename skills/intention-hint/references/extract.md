@@ -55,12 +55,12 @@ in the same intent) counts as one.
 
 ### Thresholds
 
-| Score  | Level     | Action                        |
-|--------|-----------|-------------------------------|
-| 0–50   | 🟢 Healthy   | No action needed              |
-| 51–100 | 🟡 Monitor   | Flag in next inventory review |
-| 101–150| 🟠 Warning   | Recommend rewrite or split    |
-| 150+   | 🔴 Extract   | Strongly recommend extraction |
+| Score   | Level      | Action                        |
+| ------- | ---------- | ----------------------------- |
+| 0–50    | 🟢 Healthy | No action needed              |
+| 51–100  | 🟡 Monitor | Flag in next inventory review |
+| 101–150 | 🟠 Warning | Recommend rewrite or split    |
+| 150+    | 🔴 Extract | Strongly recommend extraction |
 
 Output a ranked table: `intent-id | lines | triggers | examples | sub-responsibilities | score | level`
 
@@ -105,12 +105,14 @@ For each confirmed extraction:
 2. Draft the slimmed-down intent:
    - Keep only classification triggers and examples (enough for the classifier to route)
    - Replace detailed guidelines with a skill hint:
+
      ```markdown
      ## Skills & Tools
 
      - skill: <new-skill-name>
        Load and follow the skill workflow for detailed execution.
      ```
+
    - Target: <50 lines for the slimmed intent
 
 3. Show both drafts to the user as a diff preview:
@@ -139,10 +141,12 @@ Then update the original intent file with the slimmed version.
 Ask the user:
 
 > "Ani 已經準備好技能藍圖了！要把這些寫成檔案嗎？
+>
 > - 寫入檔案（Ani 會建立 SKILL.md 並更新 intent）
 > - 先不寫，只看草稿就好"
 
 If the user confirms, write:
+
 1. New skill directory and `SKILL.md` under the appropriate skills path.
 2. Updated (slimmed) intent file in `~/.openclaw/plugins/intention-hint/intents/`.
 
@@ -163,19 +167,19 @@ Report: files created/modified, validation results, and remaining pending extrac
 
 ## Failure Modes
 
-| Trigger | First fix | Fallback |
-|---------|-----------|----------|
-| **No intents above threshold** | Report all scores, confirm system is healthy | Suggest re-running after adding more intents |
-| **Sub-responsibility boundaries unclear** | Ask user to clarify which parts should stay vs extract | Keep intent unchanged, flag for next review |
-| **Skill name collision** | Suggest alternative name, check existing skills | Use namespaced name (e.g., `<domain>-ops`) |
-| **User rejects extraction** | Respect decision, mark as `reviewed` | Suggest lighter alternative (rewrite guidelines only) |
+| Trigger                                   | First fix                                              | Fallback                                              |
+| ----------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------- |
+| **No intents above threshold**            | Report all scores, confirm system is healthy           | Suggest re-running after adding more intents          |
+| **Sub-responsibility boundaries unclear** | Ask user to clarify which parts should stay vs extract | Keep intent unchanged, flag for next review           |
+| **Skill name collision**                  | Suggest alternative name, check existing skills        | Use namespaced name (e.g., `<domain>-ops`)            |
+| **User rejects extraction**               | Respect decision, mark as `reviewed`                   | Suggest lighter alternative (rewrite guidelines only) |
 
 ## Anti-Patterns
 
-| # | Anti-pattern | Why not | Do instead |
-|---|---|---|---|
-| 1 | **Auto-extract without confirmation** | Destructive change to intent routing | Always present plan and get explicit approval |
-| 2 | **Extract too aggressively** | Creates skill sprawl, fragments related logic | Only extract when sub-responsibilities are truly independent |
-| 3 | **Leave intent empty after extraction** | Intent still needed for classification routing | Keep slimmed intent with triggers + skill hint |
-| 4 | **Ignore format.md when drafting skills** | Inconsistent skill structure | Follow standard skill format conventions |
-| 5 | **Skip validation after delivery** | May break classification or skill loading | Always run post-delivery validation checks |
+| #   | Anti-pattern                              | Why not                                        | Do instead                                                   |
+| --- | ----------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| 1   | **Auto-extract without confirmation**     | Destructive change to intent routing           | Always present plan and get explicit approval                |
+| 2   | **Extract too aggressively**              | Creates skill sprawl, fragments related logic  | Only extract when sub-responsibilities are truly independent |
+| 3   | **Leave intent empty after extraction**   | Intent still needed for classification routing | Keep slimmed intent with triggers + skill hint               |
+| 4   | **Ignore format.md when drafting skills** | Inconsistent skill structure                   | Follow standard skill format conventions                     |
+| 5   | **Skip validation after delivery**        | May break classification or skill loading      | Always run post-delivery validation checks                   |
