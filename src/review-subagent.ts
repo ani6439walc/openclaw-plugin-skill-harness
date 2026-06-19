@@ -24,7 +24,7 @@ const REVIEW_INSTRUCTIONS: Record<
   },
   successful_pattern: {
     focus:
-      "Identify reusable workflow, tool sequence, skill usage, parameters, and pitfalls from a completed successful turn. Exclude one-off details and do not propose external knowledge-base or experience file writes.",
+      "Identify reusable workflow, tool sequence, skill usage, parameters, and pitfalls from a completed successful turn. Exclude one-off details and do not propose writes outside runtime intent Markdown.",
     goal: "Refine the matched intent Markdown's Experience, Concrete Workflow, or Response Strategy so future runs preserve the successful pattern without interrupting the user.",
   },
   satisfaction_check: {
@@ -57,7 +57,14 @@ const INTENT_CRAFT_RUBRIC = `Intent Markdown review rules:
 - Put concrete tool call shapes in Skills & Tools or workflow steps; do not use vague tool prose.
 - Include Concrete Workflow for multi-step or sequence-sensitive intents. Use short numbered "### Step N — <name>" sections.
 - Use Experience for reusable tips, parameters, pitfalls, stable skill/tool lessons, and recovery notes that help future turns with the same intent.
-- For completed reusable workflows, prefer a concise Experience note or Response Strategy reminder that preserves the pattern in future turns; do not ask the user to record it and do not propose external knowledge-base or experience files.
+- For completed reusable workflows, prefer a concise intent-local Experience note or Response Strategy reminder that preserves the pattern in future turns; do not ask the user to record it and do not propose writes outside runtime intent Markdown.
+- Recordability filter: the core question is whether the lesson will save future time.
+- General workflow lessons are recordable only when they are reusable workflows or decision steps, costly error recovery paths, critical parameters/settings/prerequisites, stable user preference or style rules, multi-attempt successful solutions with failure reasons and success conditions, reusable templates/checklists/formats, or stable external dependency/resource locations.
+- General workflow lessons are not recordable when they are one-off Q&A, pure conceptual explanations without concrete steps or decision criteria, or conclusions without specific reusable context.
+- Skill/tool experience lessons are recordable only when they capture a skill-specific pitfall and fix, error message or localization path, result-shaping parameter/configuration, reusable prompt/template/workflow, dependency or asset path, project entry point/module location, or required step ordering.
+- Skill/tool experience lessons are not recordable when they are pure theory, conclusions without reproducible steps, or one-time non-reusable operations.
+- When evidence resembles an external learning entry, distill only the reusable title, context, solution steps, key paths, parameters, and keywords that directly improve the matched intent's Guidelines, Response Strategy, Concrete Workflow, or Experience; do not propose external file formats or writes.
+- When the lesson is general knowledge rather than intent-routing guidance, return no_finding unless it directly improves the matched intent's Guidelines, Response Strategy, Concrete Workflow, or Experience.
 - Never mention another intent name or id inside an intent body. Express scope boundaries through frontmatter triggers and examples.
 - Do not propose changes to skills, tools, AGENTS.md, SOUL.md, or other production files. The only correction target is intent Markdown content.
 - Return no finding when the evidence does not justify a concrete intent Markdown improvement.`;
