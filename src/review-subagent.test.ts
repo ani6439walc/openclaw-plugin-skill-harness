@@ -70,7 +70,8 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("multi-attempt successful solutions");
     expect(prompt).toContain("reusable templates/checklists/formats");
     expect(prompt).toContain("specific reusable context");
-    expect(prompt).toContain("Experience/non-auto-skill lessons");
+    expect(prompt).toContain("General workflow lessons");
+    expect(prompt).toContain("Skill/tool experience lessons");
     expect(prompt).toContain("skill-specific pitfall and fix");
     expect(prompt).toContain("error message or localization path");
     expect(prompt).toContain("result-shaping parameter/configuration");
@@ -79,6 +80,8 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("conclusions without reproducible steps");
     expect(prompt).toContain("reusable title, context, solution steps");
     expect(prompt).toContain("key paths, parameters, and keywords");
+    expect(prompt).toContain("external learning entry");
+    expect(prompt).toContain("writes outside runtime intent Markdown");
     expect(prompt).toContain("one-off Q&A");
     expect(prompt).toContain(
       "general knowledge rather than intent-routing guidance",
