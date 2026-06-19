@@ -135,6 +135,172 @@ export function createHookHandlers(deps: HookDeps) {
     deps.instructionWriter ?? runIntentInstructionSubagent;
   const backlogWriter = deps.backlogWriter ?? defaultBacklogWriter;
 
+  function resolvePromptBuildRouting(
+    ctx: PluginHookAgentContext,
+  ): { effectiveAgentId: string; resolvedSessionKey?: string } | undefined {
+    const resolvedAgentId = resolveStatusUpdateAgentId(ctx);
+    const resolvedSessionKey =
+      ctx.sessionKey?.trim() ||
+      (resolvedAgentId
+        ? resolveCanonicalSessionKeyFromSessionId({
+            api,
+            agentId: resolvedAgentId,
+            sessionId: ctx.sessionId,
+          })
+        : undefined);
+
+    // Use current config for early checks. These must run before refreshing live config.
+    const currentConfig = config();
+    if (!isEnabledForAgent(currentConfig, resolvedAgentId)) return;
+    if (!isEligibleInteractiveSession(ctx)) return;
+
+    const resolvedSessionKeyForChecks = resolvedSessionKey ?? ctx.sessionKey;
+    if (
+      !isAllowedChatType(currentConfig, {
+        ...ctx,
+        sessionKey: resolvedSessionKeyForChecks,
+        mainKey: api.config.session?.mainKey,
+      })
+    ) {
+      return;
+    }
+    if (
+      !isAllowedChatId(currentConfig, {
+        sessionKey: resolvedSessionKeyForChecks,
+        messageProvider: ctx.messageProvider,
+      })
+    ) {
+      return;
+    }
+
+    return { effectiveAgentId: resolvedAgentId, resolvedSessionKey };
+  }
+
+  function buildConversationContext(
+    event: PluginHookBeforePromptBuildEvent,
+    ctx: PluginHookAgentContext,
+    refreshedConfig: ResolvedIntentionHintPluginConfig,
+  ): {
+    latestUserMessage: string;
+    historicalIntents: HistoricalIntentRecord[];
+    conversation: ReturnType<typeof limitConversationTurns>;
+  } {
+    const latestUserMessage = event.prompt ?? "";
+    const historicalIntents = ctx.sessionId
+      ? tracker.getHistoricalIntentRecords(ctx.sessionId)
+      : [];
+    const allTurns = attachHistoricalIntents(
+      extractRecentTurns(event.messages),
+      historicalIntents,
+    );
+    const conversation = limitConversationTurns(
+      allTurns,
+      refreshedConfig.queryMode,
+      refreshedConfig.contextWindow,
+    );
+
+    return { latestUserMessage, historicalIntents, conversation };
+  }
+
+  function applyTopicContextToResult(
+    result: IntentionResult,
+    topicContext: Awaited<ReturnType<typeof runTopicSwitchSubagent>>,
+    latestHistoricalIntent: HistoricalIntentRecord | undefined,
+  ): void {
+    if (topicContext) {
+      result.complexity = topicContext.complexity;
+      result.keywords = [...topicContext.keywords];
+      result.topic = topicContext.topic;
+      result.topicChanged = topicContext.topicChanged;
+      result.topicChangeReason = topicContext.topicChangeReason;
+      result.previousTopic = latestHistoricalIntent?.topic;
+    }
+    if (result.intentChange === undefined) {
+      result.intentChange = true;
+    }
+  }
+
+  async function classifyPromptBuild(params: {
+    ctx: PluginHookAgentContext;
+    refreshedConfig: ResolvedIntentionHintPluginConfig;
+    effectiveAgentId: string;
+    resolvedSessionKey?: string;
+    latestUserMessage: string;
+    historicalIntents: HistoricalIntentRecord[];
+    conversation: ReturnType<typeof limitConversationTurns>;
+    modelRef: { provider: string; model: string };
+    availableIntents: ReturnType<typeof catalog.filterForAgent>;
+  }): Promise<IntentionResult | undefined> {
+    const topicContext = await topicChecker({
+      api,
+      config: params.refreshedConfig,
+      agentId: params.effectiveAgentId,
+      sessionKey: params.resolvedSessionKey,
+      sessionId: params.ctx.sessionId,
+      conversation: params.conversation,
+      latest: params.latestUserMessage,
+      history: params.historicalIntents,
+      messageProvider: params.ctx.messageProvider,
+      modelRef: params.modelRef,
+    });
+
+    const latestHistoricalIntent =
+      params.historicalIntents[params.historicalIntents.length - 1];
+    const useInheritedIntentClassifier =
+      topicContext?.topicChanged === false && latestHistoricalIntent;
+
+    const result = useInheritedIntentClassifier
+      ? runInheritedIntentClassifier(latestHistoricalIntent, topicContext)
+      : await classifier({
+          api,
+          config: params.refreshedConfig,
+          agentId: params.effectiveAgentId,
+          sessionKey: params.resolvedSessionKey,
+          sessionId: params.ctx.sessionId,
+          conversation: params.conversation,
+          latest: params.latestUserMessage,
+          messageProvider: params.ctx.messageProvider,
+          channelId: params.ctx.channelId,
+          modelRef: params.modelRef,
+          intents: params.availableIntents,
+          topicContext: topicContext ?? undefined,
+        });
+
+    if (result) {
+      applyTopicContextToResult(result, topicContext, latestHistoricalIntent);
+    }
+    return result;
+  }
+
+  function recordPromptBuildSession(params: {
+    sessionId?: string;
+    resolvedSessionKey?: string;
+    fallbackSessionKey?: string;
+    effectiveAgentId: string;
+    latestUserMessage: string;
+    result: IntentionResult;
+    conversation: ReturnType<typeof limitConversationTurns>;
+  }): void {
+    if (!params.sessionId) return;
+
+    tracker.rotate(params.sessionId);
+    tracker.record(params.sessionId, {
+      sessionKey: params.resolvedSessionKey ?? params.fallbackSessionKey,
+      agentId: params.effectiveAgentId,
+      current: {
+        input: params.latestUserMessage,
+        intent: {
+          ...(params.result.intentChange === false
+            ? {}
+            : { input: params.conversation }),
+          result: params.result,
+        },
+        timestamps: { start: new Date().toISOString() },
+      },
+    });
+    tracker.write(params.sessionId);
+  }
+
   async function onBeforePromptBuild(
     event: PluginHookBeforePromptBuildEvent,
     ctx: PluginHookAgentContext,
@@ -144,65 +310,24 @@ export function createHookHandlers(deps: HookDeps) {
       if (shouldSkipIntentAnalysis(ctx)) return;
       if (isInternalUserTurn(event)) return;
 
-      const resolvedAgentId = resolveStatusUpdateAgentId(ctx);
-      const resolvedSessionKey =
-        ctx.sessionKey?.trim() ||
-        (resolvedAgentId
-          ? resolveCanonicalSessionKeyFromSessionId({
-              api,
-              agentId: resolvedAgentId,
-              sessionId: ctx.sessionId,
-            })
-          : undefined);
-      const effectiveAgentId = resolvedAgentId;
-
-      // Use current config for early checks
-      const currentConfig = config();
-      if (!isEnabledForAgent(currentConfig, effectiveAgentId)) return;
-      if (!isEligibleInteractiveSession(ctx)) return;
-
-      const resolvedSessionKeyForChecks = resolvedSessionKey ?? ctx.sessionKey;
-      if (
-        !isAllowedChatType(currentConfig, {
-          ...ctx,
-          sessionKey: resolvedSessionKeyForChecks,
-          mainKey: api.config.session?.mainKey,
-        })
-      ) {
-        return;
-      }
-      if (
-        !isAllowedChatId(currentConfig, {
-          sessionKey: resolvedSessionKeyForChecks,
-          messageProvider: ctx.messageProvider,
-        })
-      ) {
-        return;
-      }
+      const routing = resolvePromptBuildRouting(ctx);
+      if (!routing) return;
 
       // THEN refresh config and intents
       refreshLiveConfigFromRuntime();
       const refreshedConfig = config();
+      const { latestUserMessage, historicalIntents, conversation } =
+        buildConversationContext(event, ctx, refreshedConfig);
 
-      const latestUserMessage = event.prompt ?? "";
-      const historicalIntents = ctx.sessionId
-        ? tracker.getHistoricalIntentRecords(ctx.sessionId)
-        : [];
-      const allTurns = attachHistoricalIntents(
-        extractRecentTurns(event.messages),
-        historicalIntents,
+      const modelRef = getModelRef(
+        api,
+        routing.effectiveAgentId,
+        refreshedConfig,
+        {
+          modelProviderId: ctx.modelProviderId,
+          modelId: ctx.modelId,
+        },
       );
-
-      const conversation = limitConversationTurns(
-        allTurns,
-        refreshedConfig.queryMode,
-        refreshedConfig.contextWindow,
-      );
-
-      const modelRef = getModelRef(api, effectiveAgentId, refreshedConfig, {
-        modelProviderId: ctx.modelProviderId,
-        modelId: ctx.modelId,
-      });
       if (!modelRef) return;
 
       refreshIntents();
@@ -217,57 +342,23 @@ export function createHookHandlers(deps: HookDeps) {
 
       const availableIntents = catalog.filterForAgent(
         refreshedConfig,
-        effectiveAgentId,
+        routing.effectiveAgentId,
       );
-      const topicContext = await topicChecker({
-        api,
-        config: refreshedConfig,
-        agentId: effectiveAgentId,
-        sessionKey: resolvedSessionKey,
-        sessionId: ctx.sessionId,
+      const result = await classifyPromptBuild({
+        ctx,
+        refreshedConfig,
+        effectiveAgentId: routing.effectiveAgentId,
+        resolvedSessionKey: routing.resolvedSessionKey,
+        latestUserMessage,
+        historicalIntents,
         conversation,
-        latest: latestUserMessage,
-        history: historicalIntents,
-        messageProvider: ctx.messageProvider,
         modelRef,
+        availableIntents,
       });
-
-      const latestHistoricalIntent =
-        historicalIntents[historicalIntents.length - 1];
-      const useInheritedIntentClassifier =
-        topicContext?.topicChanged === false && latestHistoricalIntent;
-
-      const result = useInheritedIntentClassifier
-        ? runInheritedIntentClassifier(latestHistoricalIntent, topicContext)
-        : await classifier({
-            api,
-            config: refreshedConfig,
-            agentId: effectiveAgentId,
-            sessionKey: resolvedSessionKey,
-            sessionId: ctx.sessionId,
-            conversation,
-            latest: latestUserMessage,
-            messageProvider: ctx.messageProvider,
-            channelId: ctx.channelId,
-            modelRef,
-            intents: availableIntents,
-            topicContext: topicContext ?? undefined,
-          });
 
       if (!result) {
         logger.debug("intention subagent failed; skipping hint injection.");
         return;
-      }
-      if (topicContext) {
-        result.complexity = topicContext.complexity;
-        result.keywords = [...topicContext.keywords];
-        result.topic = topicContext.topic;
-        result.topicChanged = topicContext.topicChanged;
-        result.topicChangeReason = topicContext.topicChangeReason;
-        result.previousTopic = latestHistoricalIntent?.topic;
-      }
-      if (result.intentChange === undefined) {
-        result.intentChange = true;
       }
 
       logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
@@ -275,8 +366,8 @@ export function createHookHandlers(deps: HookDeps) {
       const instructionText = await instructionWriter({
         api,
         config: refreshedConfig,
-        agentId: effectiveAgentId,
-        sessionKey: resolvedSessionKey,
+        agentId: routing.effectiveAgentId,
+        sessionKey: routing.resolvedSessionKey,
         sessionId: ctx.sessionId,
         conversation,
         latest: latestUserMessage,
@@ -286,24 +377,15 @@ export function createHookHandlers(deps: HookDeps) {
         modelRef,
       });
 
-      // Record session data for tracking
-      const sessionId = ctx.sessionId;
-      if (sessionId) {
-        tracker.rotate(sessionId);
-        tracker.record(sessionId, {
-          sessionKey: resolvedSessionKey ?? ctx.sessionKey,
-          agentId: effectiveAgentId,
-          current: {
-            input: latestUserMessage,
-            intent: {
-              ...(result.intentChange === false ? {} : { input: conversation }),
-              result: result,
-            },
-            timestamps: { start: new Date().toISOString() },
-          },
-        });
-        tracker.write(sessionId);
-      }
+      recordPromptBuildSession({
+        sessionId: ctx.sessionId,
+        resolvedSessionKey: routing.resolvedSessionKey,
+        fallbackSessionKey: ctx.sessionKey,
+        effectiveAgentId: routing.effectiveAgentId,
+        latestUserMessage,
+        result,
+        conversation,
+      });
 
       const promptPrefix = buildPromptPrefix(
         result,

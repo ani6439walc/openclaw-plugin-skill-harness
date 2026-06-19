@@ -6,6 +6,7 @@ import type { EvolutionFinding, ReviewSnapshot } from "./evolution-types.js";
 import type { EvolutionTrigger } from "./trigger-checker.js";
 import type { ResolvedIntentionHintPluginConfig } from "./types.js";
 import { EVOLUTION_OPERATIONS } from "./evolution-backlog.js";
+import { extractPayloadText } from "./subagent.js";
 
 const REVIEW_INSTRUCTIONS: Record<
   EvolutionTrigger,
@@ -201,11 +202,7 @@ export async function runReviewSubagent(params: {
       authProfileFailurePolicy: "local",
       cleanupBundleMcpOnRunEnd: true,
     });
-    const rawReply = ((result.payloads ?? []) as { text?: string }[])
-      .map((payload) => payload.text?.trim() ?? "")
-      .filter(Boolean)
-      .join("\n")
-      .trim();
+    const rawReply = extractPayloadText(result);
     const findings = parseReviewFindings(rawReply, params.triggers);
     if (!findings) {
       logger.warn("evolution review result parse failed", { rawReply });

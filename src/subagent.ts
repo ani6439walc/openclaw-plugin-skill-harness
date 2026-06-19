@@ -24,6 +24,49 @@ import type {
   ResolvedIntentionHintPluginConfig,
 } from "./types.js";
 
+export type EmbeddedSubagentBaseParams = {
+  api: OpenClawPluginApi;
+  config: ResolvedIntentionHintPluginConfig;
+  agentId: string;
+  sessionKey?: string;
+  sessionId?: string;
+  messageProvider?: string;
+  modelRef: { provider: string; model: string };
+};
+
+function createSubagentSessionIdentity(
+  params: Pick<
+    EmbeddedSubagentBaseParams,
+    "api" | "agentId" | "sessionId" | "sessionKey"
+  >,
+  options: { runPrefix: string; keyPrefix: string; hashInput: string },
+): { subagentSessionId: string; subagentSessionKey: string } {
+  const subagentSessionId = `${options.runPrefix}-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+  const parentSessionKey =
+    params.sessionKey ??
+    resolveCanonicalSessionKeyFromSessionId({
+      api: params.api,
+      agentId: params.agentId,
+      sessionId: params.sessionId,
+    });
+  const subagentScope =
+    parentSessionKey ?? params.sessionId ?? crypto.randomUUID();
+  const subagentSuffix = `${options.keyPrefix}:${crypto.createHash("sha1").update(`${subagentScope}:${options.hashInput}`).digest("hex").slice(0, 12)}`;
+  const subagentSessionKey = parentSessionKey
+    ? `${parentSessionKey}:${subagentSuffix}`
+    : `agent:${params.agentId}:${subagentSuffix}`;
+
+  return { subagentSessionId, subagentSessionKey };
+}
+
+export function extractPayloadText(result: { payloads?: unknown[] }): string {
+  return ((result.payloads ?? []) as { text?: string }[])
+    .map((payload) => payload.text?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
 export function getModelRef(
   api: OpenClawPluginApi,
   agentId: string,
@@ -93,20 +136,12 @@ export async function runIntentionSubagent(params: {
   intents: readonly IntentCatalogEntry[];
   topicContext?: TopicSwitchResult;
 }): Promise<IntentionResult | undefined> {
-  const subagentSessionId = `intention-hint-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-  const parentSessionKey =
-    params.sessionKey ??
-    resolveCanonicalSessionKeyFromSessionId({
-      api: params.api,
-      agentId: params.agentId,
-      sessionId: params.sessionId,
+  const { subagentSessionId, subagentSessionKey } =
+    createSubagentSessionIdentity(params, {
+      runPrefix: "intention-hint",
+      keyPrefix: "intention-hint",
+      hashInput: params.latest,
     });
-  const subagentScope =
-    parentSessionKey ?? params.sessionId ?? crypto.randomUUID();
-  const subagentSuffix = `intention-hint:${crypto.createHash("sha1").update(`${subagentScope}:${params.latest}`).digest("hex").slice(0, 12)}`;
-  const subagentSessionKey = parentSessionKey
-    ? `${parentSessionKey}:${subagentSuffix}`
-    : `agent:${params.agentId}:${subagentSuffix}`;
 
   const prompt = buildIntentionPrompt({
     conversation: params.conversation,
@@ -126,11 +161,7 @@ export async function runIntentionSubagent(params: {
     const result =
       await params.api.runtime.agent.runEmbeddedPiAgent(embeddedRunParams);
 
-    const rawReply = ((result.payloads ?? []) as { text?: string }[])
-      .map((payload) => payload.text?.trim() ?? "")
-      .filter(Boolean)
-      .join("\n")
-      .trim();
+    const rawReply = extractPayloadText(result);
 
     const validIds = [...params.intents.map((i) => i.id), FALLBACK_INTENT_ID];
 
@@ -164,20 +195,12 @@ export async function runTopicSwitchSubagent(params: {
   messageProvider?: string;
   modelRef: { provider: string; model: string };
 }): Promise<TopicSwitchResult | undefined> {
-  const subagentSessionId = `intention-hint-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-  const parentSessionKey =
-    params.sessionKey ??
-    resolveCanonicalSessionKeyFromSessionId({
-      api: params.api,
-      agentId: params.agentId,
-      sessionId: params.sessionId,
+  const { subagentSessionId, subagentSessionKey } =
+    createSubagentSessionIdentity(params, {
+      runPrefix: "intention-hint",
+      keyPrefix: "intention-hint",
+      hashInput: params.latest,
     });
-  const subagentScope =
-    parentSessionKey ?? params.sessionId ?? crypto.randomUUID();
-  const subagentSuffix = `intention-hint:${crypto.createHash("sha1").update(`${subagentScope}:${params.latest}`).digest("hex").slice(0, 12)}`;
-  const subagentSessionKey = parentSessionKey
-    ? `${parentSessionKey}:${subagentSuffix}`
-    : `agent:${params.agentId}:${subagentSuffix}`;
 
   const prompt = buildTopicSwitchPrompt({
     latest: params.latest,
@@ -195,11 +218,7 @@ export async function runTopicSwitchSubagent(params: {
         prompt,
       }),
     );
-    const rawReply = ((result.payloads ?? []) as { text?: string }[])
-      .map((payload) => payload.text?.trim() ?? "")
-      .filter(Boolean)
-      .join("\n")
-      .trim();
+    const rawReply = extractPayloadText(result);
     const parsed = parseTopicSwitchResult(rawReply);
     if (!parsed) {
       logger.warn("Topic switch result parse failed", { rawReply });
@@ -224,20 +243,12 @@ export async function runIntentInstructionSubagent(params: {
   messageProvider?: string;
   modelRef: { provider: string; model: string };
 }): Promise<string | undefined> {
-  const subagentSessionId = `intention-hint-instruction-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-  const parentSessionKey =
-    params.sessionKey ??
-    resolveCanonicalSessionKeyFromSessionId({
-      api: params.api,
-      agentId: params.agentId,
-      sessionId: params.sessionId,
+  const { subagentSessionId, subagentSessionKey } =
+    createSubagentSessionIdentity(params, {
+      runPrefix: "intention-hint",
+      keyPrefix: "intention-hint",
+      hashInput: `${params.latest}:${params.result.intent}`,
     });
-  const subagentScope =
-    parentSessionKey ?? params.sessionId ?? crypto.randomUUID();
-  const subagentSuffix = `intention-hint-instruction:${crypto.createHash("sha1").update(`${subagentScope}:${params.latest}:${params.result.intent}`).digest("hex").slice(0, 12)}`;
-  const subagentSessionKey = parentSessionKey
-    ? `${parentSessionKey}:${subagentSuffix}`
-    : `agent:${params.agentId}:${subagentSuffix}`;
 
   const prompt = buildIntentInstructionPrompt({
     latest: params.latest,
@@ -258,11 +269,7 @@ export async function runIntentInstructionSubagent(params: {
         prompt,
       }),
     );
-    const rawReply = ((result.payloads ?? []) as { text?: string }[])
-      .map((payload) => payload.text?.trim() ?? "")
-      .filter(Boolean)
-      .join("\n")
-      .trim();
+    const rawReply = extractPayloadText(result);
     const instruction = rawReply
       .replace(/^```(?:markdown|md|text)?\s*/i, "")
       .replace(/\s*```$/, "")
@@ -282,13 +289,7 @@ export async function runIntentInstructionSubagent(params: {
 }
 
 export function buildIntentionEmbeddedRunParams(params: {
-  params: {
-    api: OpenClawPluginApi;
-    config: ResolvedIntentionHintPluginConfig;
-    agentId: string;
-    messageProvider?: string;
-    modelRef: { provider: string; model: string };
-  };
+  params: EmbeddedSubagentBaseParams;
   subagentSessionId: string;
   subagentSessionKey: string;
   prompt: string;

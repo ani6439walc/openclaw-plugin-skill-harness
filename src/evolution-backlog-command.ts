@@ -47,6 +47,36 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function markAndWriteItem(params: {
+  args: string[];
+  backlog: ReturnType<typeof readBacklog>;
+  backlogPath: string;
+  io: CliIo;
+  mark: (
+    backlog: ReturnType<typeof readBacklog>,
+    id: string,
+    expectedUpdatedAt: string,
+    nowIso: string,
+  ) => unknown;
+}): number {
+  const id = requireOption(params.args, "--id");
+  params.mark(
+    params.backlog,
+    id,
+    requireOption(params.args, "--expected-updated-at"),
+    nowIso(),
+  );
+  writeBacklogAtomic(params.backlogPath, params.backlog);
+  params.io.stdout(
+    JSON.stringify(
+      params.backlog.items.find((item) => item.id === id),
+      null,
+      2,
+    ),
+  );
+  return 0;
+}
+
 export function resolveDefaultEvolutionBacklogRoot(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
@@ -132,41 +162,23 @@ export function runEvolutionBacklogCommand(
     }
 
     if (command === "mark-processed") {
-      const id = requireOption(args, "--id");
-      markPendingProcessed(
+      return markAndWriteItem({
+        args,
         backlog,
-        id,
-        requireOption(args, "--expected-updated-at"),
-        nowIso(),
-      );
-      writeBacklogAtomic(backlogPath, backlog);
-      io.stdout(
-        JSON.stringify(
-          backlog.items.find((item) => item.id === id),
-          null,
-          2,
-        ),
-      );
-      return 0;
+        backlogPath,
+        io,
+        mark: markPendingProcessed,
+      });
     }
 
     if (command === "mark-dismissed") {
-      const id = requireOption(args, "--id");
-      markPendingDismissed(
+      return markAndWriteItem({
+        args,
         backlog,
-        id,
-        requireOption(args, "--expected-updated-at"),
-        nowIso(),
-      );
-      writeBacklogAtomic(backlogPath, backlog);
-      io.stdout(
-        JSON.stringify(
-          backlog.items.find((item) => item.id === id),
-          null,
-          2,
-        ),
-      );
-      return 0;
+        backlogPath,
+        io,
+        mark: markPendingDismissed,
+      });
     }
 
     throw new Error(`unknown backlog command: ${command}`);

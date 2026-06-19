@@ -18,6 +18,9 @@ const REVIEW_ADOPTION_THRESHOLD = 0.7;
 
 type CountMap = Record<string, number>;
 type ComplexityCounts = { low: number; medium: number; high: number };
+type RecordedIntentResult = NonNullable<
+  NonNullable<SessionState["intent"]>["result"]
+>;
 type RoutingCounts = {
   recommendationTurns: number;
   adoptedTurns: number;
@@ -255,6 +258,208 @@ function pruneRollingData(stats: Stats, nowMs: number): void {
   }
 }
 
+function assertSupportedStatsSchema(stats: Stats): void {
+  if (
+    stats.schemaVersion !== 1 ||
+    !stats.summary ||
+    !stats.intents ||
+    !stats.skills ||
+    !stats.routing ||
+    !stats.tools ||
+    !stats.daily ||
+    !stats.processedEvents
+  ) {
+    throw new Error("unsupported or invalid stats schema");
+  }
+}
+
+function loadStats(statsFilePath: string, eventTime: string): Stats {
+  if (!fileExists(statsFilePath)) return createStats(eventTime);
+
+  const stats = readJsonFile<Stats>(statsFilePath);
+  assertSupportedStatsSchema(stats);
+  return stats;
+}
+
+function recordSummaryStats(params: {
+  stats: Stats;
+  result: RecordedIntentResult;
+  intentId: string;
+  skillsUsed: string[];
+  toolCallCount: number;
+  errored: boolean;
+}): void {
+  const { stats, result, intentId, skillsUsed, toolCallCount, errored } =
+    params;
+
+  stats.summary.averageConfidence = rate(
+    stats.summary.averageConfidence * stats.summary.turns + result.confidence,
+    stats.summary.turns + 1,
+  );
+  stats.summary.turns += 1;
+  stats.summary.completedTurns += errored ? 0 : 1;
+  stats.summary.erroredTurns += errored ? 1 : 0;
+  stats.summary.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
+  stats.summary.toolAssistedTurns += toolCallCount > 0 ? 1 : 0;
+  stats.summary.skillUsageCount += skillsUsed.length;
+  stats.summary.toolCallCount += toolCallCount;
+  stats.summary.otherTurns +=
+    intentId.toLowerCase() === FALLBACK_INTENT_ID ? 1 : 0;
+}
+
+function recordIntentStats(params: {
+  stats: Stats;
+  intentId: string;
+  result: RecordedIntentResult;
+  eventTime: string;
+  skillsUsed: string[];
+  toolCallCount: number;
+  errored: boolean;
+}): void {
+  const {
+    stats,
+    intentId,
+    result,
+    eventTime,
+    skillsUsed,
+    toolCallCount,
+    errored,
+  } = params;
+
+  const intent = (stats.intents[intentId] ??= {
+    turns: 0,
+    share: 0,
+    lastSeenAt: eventTime,
+    last7Days: 0,
+    averageConfidence: 0,
+    lowConfidenceTurns: 0,
+    complexity: { low: 0, medium: 0, high: 0 },
+    skillAssistedTurns: 0,
+    toolAssistedTurns: 0,
+    erroredTurns: 0,
+  });
+  intent.averageConfidence = rate(
+    intent.averageConfidence * intent.turns + result.confidence,
+    intent.turns + 1,
+  );
+  intent.turns += 1;
+  intent.lastSeenAt = eventTime;
+  intent.lowConfidenceTurns += result.confidence < 0.8 ? 1 : 0;
+  intent.complexity[result.complexity] += 1;
+  intent.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
+  intent.toolAssistedTurns += toolCallCount > 0 ? 1 : 0;
+  intent.erroredTurns += errored ? 1 : 0;
+}
+
+function recordSkillStats(params: {
+  stats: Stats;
+  skillsUsed: string[];
+  recommendedSkills: string[];
+  adoptedSkills: string[];
+  eventTime: string;
+}): void {
+  const { stats, skillsUsed, recommendedSkills, adoptedSkills, eventTime } =
+    params;
+  for (const skillName of new Set([...skillsUsed, ...recommendedSkills])) {
+    const skill = (stats.skills[skillName] ??= {
+      usageTurns: 0,
+      recommendedTurns: 0,
+      adoptedTurns: 0,
+      adoptionRate: 0,
+      last7DaysUsage: 0,
+      lifecycle: "never_used",
+      needsReview: false,
+    });
+    if (skillsUsed.includes(skillName)) {
+      skill.usageTurns += 1;
+      skill.lastUsedAt = eventTime;
+    }
+    skill.recommendedTurns += recommendedSkills.includes(skillName) ? 1 : 0;
+    skill.adoptedTurns += adoptedSkills.includes(skillName) ? 1 : 0;
+  }
+}
+
+function incrementRoutingAdoption(
+  routing: Pick<
+    RoutingCounts,
+    | "recommendationTurns"
+    | "adoptedTurns"
+    | "recommendedSkillOpportunities"
+    | "adoptedSkillOpportunities"
+  >,
+  recommendedSkills: number,
+  adoptedSkills: number,
+): void {
+  if (recommendedSkills === 0) return;
+
+  routing.recommendationTurns += 1;
+  routing.adoptedTurns += adoptedSkills > 0 ? 1 : 0;
+  routing.recommendedSkillOpportunities += recommendedSkills;
+  routing.adoptedSkillOpportunities += adoptedSkills;
+}
+
+function recordToolStats(params: {
+  stats: Stats;
+  toolCalls: NonNullable<SessionState["toolCalls"]>;
+  toolNames: string[];
+  eventTime: string;
+}): void {
+  const { stats, toolCalls, toolNames, eventTime } = params;
+  for (const toolName of toolNames) {
+    const calls = toolCalls.filter((tool) => tool.name === toolName);
+    const tool = (stats.tools[toolName] ??= {
+      calls: 0,
+      turns: 0,
+      errorCalls: 0,
+      averageDurationMs: 0,
+      lastUsedAt: eventTime,
+      last7DaysCalls: 0,
+    });
+    tool.averageDurationMs = rate(
+      tool.averageDurationMs * tool.calls +
+        calls.reduce((total, call) => total + (call.durationMs ?? 0), 0),
+      tool.calls + calls.length,
+    );
+    tool.calls += calls.length;
+    tool.turns += 1;
+    tool.errorCalls += calls.filter((call) => call.error !== undefined).length;
+    tool.lastUsedAt = eventTime;
+  }
+}
+
+function recordDailyStats(params: {
+  stats: Stats;
+  date: string;
+  intentId: string;
+  skillsUsed: string[];
+  toolCalls: NonNullable<SessionState["toolCalls"]>;
+  recommendedSkills: string[];
+  adoptedSkills: string[];
+  errored: boolean;
+}): void {
+  const {
+    stats,
+    date,
+    intentId,
+    skillsUsed,
+    toolCalls,
+    recommendedSkills,
+    adoptedSkills,
+    errored,
+  } = params;
+  const daily = (stats.daily[date] ??= createDailyBucket());
+  daily.turns += 1;
+  daily.erroredTurns += errored ? 1 : 0;
+  increment(daily.intents, intentId);
+  for (const skillName of skillsUsed) increment(daily.skills, skillName);
+  for (const call of toolCalls) increment(daily.tools, call.name);
+  incrementRoutingAdoption(
+    daily.routing,
+    recommendedSkills.length,
+    adoptedSkills.length,
+  );
+}
+
 export class StatsAggregator {
   private constructor(private readonly pluginRoot: string) {}
 
@@ -278,24 +483,7 @@ export class StatsAggregator {
       const eventTime = new Date(state.timestamps?.end ?? nowMs).toISOString();
       const eventId = `${sessionId}:${start}`;
 
-      let stats: Stats;
-      if (fileExists(statsFilePath)) {
-        stats = readJsonFile<Stats>(statsFilePath);
-        if (
-          stats.schemaVersion !== 1 ||
-          !stats.summary ||
-          !stats.intents ||
-          !stats.skills ||
-          !stats.routing ||
-          !stats.tools ||
-          !stats.daily ||
-          !stats.processedEvents
-        ) {
-          throw new Error("unsupported or invalid stats schema");
-        }
-      } else {
-        stats = createStats(eventTime);
-      }
+      const stats = loadStats(statsFilePath, eventTime);
       if (stats.processedEvents[eventId]) return false;
 
       const intentId = resolveIntentId(result.intent, intentDefinition);
@@ -313,111 +501,53 @@ export class StatsAggregator {
 
       stats.updatedAt = eventTime;
       stats.processedEvents[eventId] = eventTime;
-      stats.summary.averageConfidence = rate(
-        stats.summary.averageConfidence * stats.summary.turns +
-          result.confidence,
-        stats.summary.turns + 1,
-      );
-      stats.summary.turns += 1;
-      stats.summary.completedTurns += errored ? 0 : 1;
-      stats.summary.erroredTurns += errored ? 1 : 0;
-      stats.summary.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
-      stats.summary.toolAssistedTurns += toolCalls.length > 0 ? 1 : 0;
-      stats.summary.skillUsageCount += skillsUsed.length;
-      stats.summary.toolCallCount += toolCalls.length;
-      stats.summary.otherTurns +=
-        intentId.toLowerCase() === FALLBACK_INTENT_ID ? 1 : 0;
-
-      const intent = (stats.intents[intentId] ??= {
-        turns: 0,
-        share: 0,
-        lastSeenAt: eventTime,
-        last7Days: 0,
-        averageConfidence: 0,
-        lowConfidenceTurns: 0,
-        complexity: { low: 0, medium: 0, high: 0 },
-        skillAssistedTurns: 0,
-        toolAssistedTurns: 0,
-        erroredTurns: 0,
+      recordSummaryStats({
+        stats,
+        result,
+        intentId,
+        skillsUsed,
+        toolCallCount: toolCalls.length,
+        errored,
       });
-      intent.averageConfidence = rate(
-        intent.averageConfidence * intent.turns + result.confidence,
-        intent.turns + 1,
-      );
-      intent.turns += 1;
-      intent.lastSeenAt = eventTime;
-      intent.lowConfidenceTurns += result.confidence < 0.8 ? 1 : 0;
-      intent.complexity[result.complexity] += 1;
-      intent.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
-      intent.toolAssistedTurns += toolCalls.length > 0 ? 1 : 0;
-      intent.erroredTurns += errored ? 1 : 0;
-
-      for (const skillName of new Set([...skillsUsed, ...recommendedSkills])) {
-        const skill = (stats.skills[skillName] ??= {
-          usageTurns: 0,
-          recommendedTurns: 0,
-          adoptedTurns: 0,
-          adoptionRate: 0,
-          last7DaysUsage: 0,
-          lifecycle: "never_used",
-          needsReview: false,
-        });
-        if (skillsUsed.includes(skillName)) {
-          skill.usageTurns += 1;
-          skill.lastUsedAt = eventTime;
-        }
-        skill.recommendedTurns += recommendedSkills.includes(skillName) ? 1 : 0;
-        skill.adoptedTurns += adoptedSkills.includes(skillName) ? 1 : 0;
-      }
-
+      recordIntentStats({
+        stats,
+        intentId,
+        result,
+        eventTime,
+        skillsUsed,
+        toolCallCount: toolCalls.length,
+        errored,
+      });
+      recordSkillStats({
+        stats,
+        skillsUsed,
+        recommendedSkills,
+        adoptedSkills,
+        eventTime,
+      });
       if (recommendedSkills.length > 0) {
-        stats.routing.recommendationTurns += 1;
-        stats.routing.adoptedTurns += adoptedSkills.length > 0 ? 1 : 0;
-        stats.routing.recommendedSkillOpportunities += recommendedSkills.length;
-        stats.routing.adoptedSkillOpportunities += adoptedSkills.length;
-        const intentRouting = (stats.routing.byIntent[intentId] ??=
-          emptyRoutingCounts());
-        intentRouting.recommendationTurns += 1;
-        intentRouting.adoptedTurns += adoptedSkills.length > 0 ? 1 : 0;
-        intentRouting.recommendedSkillOpportunities += recommendedSkills.length;
-        intentRouting.adoptedSkillOpportunities += adoptedSkills.length;
-      }
-
-      for (const toolName of toolNames) {
-        const calls = toolCalls.filter((tool) => tool.name === toolName);
-        const tool = (stats.tools[toolName] ??= {
-          calls: 0,
-          turns: 0,
-          errorCalls: 0,
-          averageDurationMs: 0,
-          lastUsedAt: eventTime,
-          last7DaysCalls: 0,
-        });
-        tool.averageDurationMs = rate(
-          tool.averageDurationMs * tool.calls +
-            calls.reduce((total, call) => total + (call.durationMs ?? 0), 0),
-          tool.calls + calls.length,
+        incrementRoutingAdoption(
+          stats.routing,
+          recommendedSkills.length,
+          adoptedSkills.length,
         );
-        tool.calls += calls.length;
-        tool.turns += 1;
-        tool.errorCalls += calls.filter(
-          (call) => call.error !== undefined,
-        ).length;
-        tool.lastUsedAt = eventTime;
+        incrementRoutingAdoption(
+          (stats.routing.byIntent[intentId] ??= emptyRoutingCounts()),
+          recommendedSkills.length,
+          adoptedSkills.length,
+        );
       }
-
-      const daily = (stats.daily[date] ??= createDailyBucket());
-      daily.turns += 1;
-      daily.erroredTurns += errored ? 1 : 0;
-      increment(daily.intents, intentId);
-      for (const skillName of skillsUsed) increment(daily.skills, skillName);
-      for (const call of toolCalls) increment(daily.tools, call.name);
-      if (recommendedSkills.length > 0) {
-        daily.routing.recommendationTurns += 1;
-        daily.routing.adoptedTurns += adoptedSkills.length > 0 ? 1 : 0;
-        daily.routing.recommendedSkillOpportunities += recommendedSkills.length;
-        daily.routing.adoptedSkillOpportunities += adoptedSkills.length;
-      }
+      recordToolStats({ stats, toolCalls, toolNames, eventTime });
+      recordDailyStats({
+        stats,
+        date,
+        intentId,
+        skillsUsed,
+        toolCalls,
+        recommendedSkills,
+        adoptedSkills,
+        errored,
+      });
 
       pruneRollingData(stats, nowMs);
       recomputeDerivedStats(stats, nowMs);
