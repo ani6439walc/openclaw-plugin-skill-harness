@@ -245,8 +245,8 @@ export async function runIntentInstructionSubagent(params: {
 }): Promise<string | undefined> {
   const { subagentSessionId, subagentSessionKey } =
     createSubagentSessionIdentity(params, {
-      runPrefix: "intention-hint-instruction",
-      keyPrefix: "intention-hint-instruction",
+      runPrefix: "intention-hint",
+      keyPrefix: "intention-hint",
       hashInput: `${params.latest}:${params.result.intent}`,
     });
 
