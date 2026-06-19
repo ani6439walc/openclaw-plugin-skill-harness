@@ -16,7 +16,7 @@ describe("intention-hint backlog mode", () => {
     expect(parsed.data).toMatchObject({
       name: "intention-hint",
       description: expect.stringContaining(
-        "Design, inventory, or evolve intent definitions",
+        "Design, inventory, evolve, or extract intent definitions",
       ),
     });
     expect(parsed.data).not.toHaveProperty("disable-model-invocation");
