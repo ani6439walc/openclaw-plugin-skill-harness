@@ -40,7 +40,7 @@ index.ts
        │    ├─ parseIntentionResult() — JSON parser with code-block tolerance
        │    ├─ <intent_categories> — auto-derived from ID prefixes
        │    ├─ <current_time> — injects local timezone time
-       │    ├─ <conversation> — omitted when empty
+       │    ├─ <conversation_context> — topic-segmented recent turns, omitted when empty
        │    ├─ buildIntentInstructionPrompt() — condenses matched intent Markdown into main-agent instructions
        │    ├─ buildPromptPrefix() — builds injected hint text
        │    └─ uses constants.ts for complexity prompt defaults
@@ -379,13 +379,14 @@ The following categories group intents by their ID prefix:
 
 Every tracked turn first runs a lightweight topic switch checker using the
 latest user message, recent conversation context, and recent session history
-(`intent`, `keywords`, `topic`, `complexity`). If the checker says the topic changed, or there is no historical
-intent to inherit, that topic context is passed into the classifier subagent. If
-the checker says the topic did not change, the plugin runs a local inherited
+(`intent`, `keywords`, `topic`, `topicChanged`, `topicChangeReason`,
+`complexity`). If the checker says the topic changed, or there is no historical
+intent to inherit, that topic context is passed into the classifier subagent.
+If the checker says the topic did not change, the plugin runs a local inherited
 intent classifier, reuses the latest historical intent, uses the checker
 complexity for the latest message, and records the current turn with
-`topicChangeReason="same_topic"`. If the checker fails, the plugin logs and falls back to
-classifier-only behavior.
+`topicChanged=false` plus `topicChangeReason="same_topic"`. If the checker
+fails, the plugin logs and falls back to classifier-only behavior.
 
 ### Instruction Generation
 
@@ -410,10 +411,12 @@ matched intent body.
 ### Conversation Handling
 
 - The conversation context is omitted entirely when conversation is empty or undefined
-- Matching historical user turns include the prior `intent`, `keywords`, and `topic`; assistant, unmatched, and latest user turns do not
+- Non-empty context is emitted as `<conversation_context>` with reference-only instructions, then one or more `<topic_segment index="...">` blocks containing oldest-to-newest turns
+- Matching historical user turns include a `<historical_intent>` block with prior `intent`, `keywords`, `topic`, `topicChanged`, and `topicChangeReason`; assistant, unmatched, and latest user turns do not
+- When a historical user turn has `topicChanged=true`, prompt building closes the previous segment, inserts a `<topic_boundary>` with reason/topic metadata, and starts the next `<topic_segment>`
 - Historical records are matched by normalized user-message text, with duplicate messages paired newest-first
 - Classification rules use historical intent metadata as context while requiring fresh classification on topic switches
-- Same-topic continuation turns omit `current.intent.input` to avoid duplicating conversation snapshots, while keeping `current.intent.result` for tool tracking, stats, and Evolution
+- Same-topic continuation turns are identified by `topicChangeReason="same_topic"` and omit `current.intent.input` to avoid duplicating conversation snapshots, while keeping `current.intent.result` for tool tracking, stats, and Evolution
 - Extracted via `conversation-extract.ts` with configurable turn/char limits from `contextWindow` config
 
 ### Internal User Turns
@@ -450,7 +453,7 @@ influenced by internal task-completion traffic.
 - Required field validation (`intent`, `reason`, `confidence`, `complexity`)
 - Keyword normalization and deterministic topic derivation when `keywords` are present
 - Topic switch metadata merged from the pre-classification checker when available
-- Intent change metadata used to distinguish fresh classifications from inherited same-topic turns
+- `topicChanged` and `topicChangeReason` metadata used to distinguish fresh classifications from inherited same-topic turns
 - Confidence range validation (0.0–1.0)
 - Complexity enum validation (`low`, `medium`, `high`)
 - Optional `suggestion` field (only included when present in JSON)
