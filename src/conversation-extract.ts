@@ -28,14 +28,25 @@ function normalizeTurnText(text: string): string {
 export function attachHistoricalIntents(
   conversation: RecentTurn[],
   records: HistoricalIntentRecord[],
+  options: { latestInput?: string } = {},
 ): RecentTurn[] {
   const enriched = conversation.map((turn) => ({ ...turn }));
-  let latestUserIndex = -1;
+  const normalizedLatestInput = options.latestInput
+    ? normalizeTurnText(options.latestInput)
+    : undefined;
+  let firstAttachableIndex = enriched.length - 1;
+
   for (let index = enriched.length - 1; index >= 0; index--) {
-    if (enriched[index].role === "user") {
-      latestUserIndex = index;
-      break;
+    const turn = enriched[index];
+    if (turn.role !== "user") continue;
+
+    if (
+      !normalizedLatestInput ||
+      normalizeTurnText(turn.text) === normalizedLatestInput
+    ) {
+      firstAttachableIndex = index - 1;
     }
+    break;
   }
   const recordsByInput = new Map<string, HistoricalIntentRecord[]>();
   for (const record of records) {
@@ -45,7 +56,7 @@ export function attachHistoricalIntents(
     recordsByInput.set(normalizedInput, matchingRecords);
   }
 
-  for (let turnIndex = latestUserIndex - 1; turnIndex >= 0; turnIndex--) {
+  for (let turnIndex = firstAttachableIndex; turnIndex >= 0; turnIndex--) {
     const turn = enriched[turnIndex];
     if (turn.role !== "user") continue;
 

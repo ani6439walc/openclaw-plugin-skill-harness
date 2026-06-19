@@ -191,6 +191,7 @@ export function createHookHandlers(deps: HookDeps) {
     const allTurns = attachHistoricalIntents(
       extractRecentTurns(event.messages),
       historicalIntents,
+      { latestInput: latestUserMessage },
     );
     const conversation = limitConversationTurns(
       allTurns,

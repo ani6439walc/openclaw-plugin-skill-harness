@@ -102,4 +102,70 @@ describe("attachHistoricalIntents", () => {
       },
     });
   });
+
+  it("attaches the previous user turn when the latest prompt is not in conversation messages", () => {
+    const conversation: RecentTurn[] = [
+      { role: "user", text: "好累想睡了" },
+      { role: "assistant", text: "快去睡吧" },
+    ];
+    const records: HistoricalIntentRecord[] = [
+      {
+        input: "好累想睡了",
+        intent: "chat",
+        topic: "User is tired and wants to sleep.",
+        topicChanged: true,
+        topicChangeReason: "keyword_delta",
+      },
+    ];
+
+    expect(
+      attachHistoricalIntents(conversation, records, {
+        latestInput: "不然這三個 幫我用意圖提示技能看看怎麼處理最好",
+      }),
+    ).toEqual([
+      {
+        role: "user",
+        text: "好累想睡了",
+        historicalIntent: {
+          intent: "chat",
+          topic: "User is tired and wants to sleep.",
+          topicChanged: true,
+          topicChangeReason: "keyword_delta",
+        },
+      },
+      { role: "assistant", text: "快去睡吧" },
+    ]);
+  });
+
+  it("does not attach historical intent to the current latest prompt when present in conversation messages", () => {
+    const conversation: RecentTurn[] = [
+      { role: "user", text: "好累想睡了" },
+      { role: "assistant", text: "快去睡吧" },
+      { role: "user", text: "不然這三個 幫我看看" },
+    ];
+    const records: HistoricalIntentRecord[] = [
+      {
+        input: "好累想睡了",
+        intent: "chat",
+      },
+      {
+        input: "不然這三個 幫我看看",
+        intent: "prompt-engineering",
+      },
+    ];
+
+    expect(
+      attachHistoricalIntents(conversation, records, {
+        latestInput: "不然這三個 幫我看看",
+      }),
+    ).toEqual([
+      {
+        role: "user",
+        text: "好累想睡了",
+        historicalIntent: { intent: "chat" },
+      },
+      { role: "assistant", text: "快去睡吧" },
+      { role: "user", text: "不然這三個 幫我看看" },
+    ]);
+  });
 });
