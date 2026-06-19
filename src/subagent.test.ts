@@ -36,7 +36,7 @@ describe("runTopicSwitchSubagent", () => {
             keywords: [" Topic ", "Checker"],
             topic: "User is continuing work on the topic checker.",
             topicChanged: false,
-            topicChangeReason: "same_topic",
+            topicChangeReason: "same-topic",
             complexity: "medium",
           }),
         },
@@ -78,7 +78,7 @@ describe("runTopicSwitchSubagent", () => {
       keywords: ["topic", "checker"],
       topic: "User is continuing work on the topic checker.",
       topicChanged: false,
-      topicChangeReason: "same_topic",
+      topicChangeReason: "same-topic",
       complexity: "medium",
     });
     expect(runEmbeddedPiAgent).toHaveBeenCalledWith(
@@ -132,7 +132,7 @@ describe("runIntentInstructionSubagent", () => {
         keywords: ["continuation"],
         topic: "continuation",
         topicChanged: true,
-        topicChangeReason: "keyword_delta",
+        topicChangeReason: "keyword-delta",
         confidence: 0.9,
         complexity: "medium",
       },

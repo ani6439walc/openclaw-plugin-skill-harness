@@ -92,7 +92,7 @@ describe("buildIntentionPrompt", () => {
         historicalIntent: {
           intent: "coding",
           topicChanged: false,
-          topicChangeReason: "same_topic",
+          topicChangeReason: "same-topic",
         },
       },
       { role: "assistant", text: "Hi! How can I help?" },
@@ -111,7 +111,7 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("<historical_intent>");
     expect(result).toContain("intent: coding");
     expect(result).toContain("topicChanged: false");
-    expect(result).toContain("topicChangeReason: same_topic");
+    expect(result).toContain("topicChangeReason: same-topic");
     expect(result).toContain('<turn role="assistant">');
     expect(result).toContain("Hi! How can I help?");
   });
@@ -186,7 +186,7 @@ describe("buildIntentionPrompt", () => {
         keywords: ["topic", "checker"],
         topic: "User is continuing work on the topic checker.",
         topicChanged: false,
-        topicChangeReason: "same_topic",
+        topicChangeReason: "same-topic",
         complexity: "low",
       },
     });
@@ -232,8 +232,8 @@ describe("buildTopicSwitchPrompt", () => {
     expect(prompt).toContain("do not name or choose an intent id");
     expect(prompt).toContain("different semantic domain");
     expect(prompt).toContain("even without an explicit transition marker");
-    expect(prompt).toContain("Do not keep same_topic merely because");
-    expect(prompt).toContain('topicChangeReason="keyword_delta"');
+    expect(prompt).toContain("Do not keep same-topic merely because");
+    expect(prompt).toContain('topicChangeReason="keyword-delta"');
     expect(prompt).toContain("conversation context has no prior user topic");
     expect(prompt).toContain(
       "semantic domain, or interaction mode differ sharply from conversation context",
@@ -293,7 +293,7 @@ describe("buildTopicSwitchPrompt", () => {
             intent: "session-lifecycle",
             topic: "User is processing backlog items.",
             topicChanged: false,
-            topicChangeReason: "same_topic",
+            topicChangeReason: "same-topic",
           },
         },
         { role: "assistant", text: "開始處理 backlog。" },
@@ -304,7 +304,7 @@ describe("buildTopicSwitchPrompt", () => {
             intent: "intimate-roleplay",
             topic: "User is switching to intimate roleplay.",
             topicChanged: true,
-            topicChangeReason: "keyword_delta",
+            topicChangeReason: "keyword-delta",
           },
         },
       ],
@@ -313,7 +313,7 @@ describe("buildTopicSwitchPrompt", () => {
     expect(prompt).toContain('<topic_segment index="1">');
     expect(prompt).toContain("處理 backlog");
     expect(prompt).toContain("<topic_boundary>");
-    expect(prompt).toContain("reason: keyword_delta");
+    expect(prompt).toContain("reason: keyword-delta");
     expect(prompt).toContain("topic: User is switching to intimate roleplay.");
     expect(prompt).toContain('<topic_segment index="2">');
     expect(prompt).toContain("抱抱");
@@ -327,7 +327,7 @@ describe("parseTopicSwitchResult", () => {
         keywords: [" Topic ", "Checker", "topic", "Flow"],
         topic: " User is continuing work on the topic checker flow. ",
         topicChanged: false,
-        topicChangeReason: "same_topic",
+        topicChangeReason: "same-topic",
         complexity: "medium",
       }),
     );
@@ -336,7 +336,7 @@ describe("parseTopicSwitchResult", () => {
       keywords: ["topic", "checker", "flow"],
       topic: "User is continuing work on the topic checker flow.",
       topicChanged: false,
-      topicChangeReason: "same_topic",
+      topicChangeReason: "same-topic",
       complexity: "medium",
     });
   });
@@ -344,13 +344,13 @@ describe("parseTopicSwitchResult", () => {
   it("accepts fenced JSON and rejects invalid reasons", () => {
     expect(
       parseTopicSwitchResult(
-        '```json\n{"keywords":["deploy"],"topic":"User is switching to deployment work.","topicChanged":true,"topicChangeReason":"transition_marker","complexity":"high"}\n```',
+        '```json\n{"keywords":["deploy"],"topic":"User is switching to deployment work.","topicChanged":true,"topicChangeReason":"transition-marker","complexity":"high"}\n```',
       ),
     ).toMatchObject({
       keywords: ["deploy"],
       topic: "User is switching to deployment work.",
       topicChanged: true,
-      topicChangeReason: "transition_marker",
+      topicChangeReason: "transition-marker",
       complexity: "high",
     });
 
@@ -372,7 +372,7 @@ describe("parseTopicSwitchResult", () => {
           keywords: ["deploy"],
           topic: "User is switching to deployment work.",
           topicChanged: true,
-          topicChangeReason: "transition_marker",
+          topicChangeReason: "transition-marker",
           complexity: "huge",
         }),
       ),
@@ -410,7 +410,7 @@ describe("buildIntentInstructionPrompt", () => {
         keywords: ["topic", "continuation"],
         topic: "User is continuing implementation of the same topic.",
         topicChanged: false,
-        topicChangeReason: "same_topic",
+        topicChangeReason: "same-topic",
         confidence: 0.9,
         complexity: "medium",
       },
@@ -457,7 +457,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("<latest_message>");
     expect(prompt).toContain("intent: coding");
     expect(prompt).toContain("topicChanged: false");
-    expect(prompt).toContain("topicChangeReason: same_topic");
+    expect(prompt).toContain("topicChangeReason: same-topic");
     expect(prompt).toContain(
       "<complexity_context>Use a balanced flow.</complexity_context>",
     );
@@ -513,7 +513,7 @@ describe("parseIntentionResult", () => {
         keywords: ["topic", "checker", "implementation"],
         topic: "User is continuing implementation of the topic checker.",
         topicChanged: false,
-        topicChangeReason: "same_topic",
+        topicChangeReason: "same-topic",
         complexity: "high",
       },
     );
@@ -522,7 +522,7 @@ describe("parseIntentionResult", () => {
       keywords: ["topic", "checker", "implementation"],
       topic: "User is continuing implementation of the topic checker.",
       topicChanged: false,
-      topicChangeReason: "same_topic",
+      topicChangeReason: "same-topic",
       complexity: "high",
     });
   });
@@ -844,7 +844,7 @@ describe("buildPromptPrefix", () => {
       keywords: ["topic", "flow"],
       topic: "User is changing the topic flow.",
       topicChanged: true,
-      topicChangeReason: "transition_marker",
+      topicChangeReason: "transition-marker",
       previousTopic: "docs",
       confidence: 0.9,
       complexity: "medium",
@@ -856,7 +856,7 @@ describe("buildPromptPrefix", () => {
     expect(prefix).not.toContain("topic: User is changing the topic flow.");
     expect(prefix).not.toContain("keywords: topic, flow");
     expect(prefix).not.toContain("topicChanged: true");
-    expect(prefix).not.toContain("topicChangeReason: transition_marker");
+    expect(prefix).not.toContain("topicChangeReason: transition-marker");
     expect(prefix).not.toContain("previousTopic: docs");
     expect(prefix).not.toContain("confidence: 0.9");
     expect(prefix).not.toContain("complexity: medium");
