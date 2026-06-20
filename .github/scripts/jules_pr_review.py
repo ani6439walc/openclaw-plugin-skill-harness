@@ -83,32 +83,41 @@ def create_jules_session(owner, repo, diff_text):
     truncated = len(diff_text) > MAX_DIFF_CHARS
     diff_for_prompt = diff_text[:MAX_DIFF_CHARS]
 
-    prompt = f"""You are reviewing a GitHub pull request. IMPORTANT: This is a review-only task. Do NOT create any plan. Do NOT attempt to modify files. Analyze the diff and output review directly as response.
+    prompt = f"""You are a senior staff engineer performing a thorough code review. You focus on correctness, security, regressions, test coverage, maintainability, and backwards compatibility.
 
-Repository: {owner}/{repo}
-PR: #{pr_number}
-PR URL: {pr_url}
-Title: {title}
-Base branch: {base_ref}
-Head SHA: {head_sha}
+## Context
+- Repo: {owner}/{repo}
+- PR: #{pr_number} — {title}
+- Base: {base_ref} → Head: {head_sha}
+- URL: {pr_url}
+- Diff fully provided: {not truncated}
 
-Task:
-- Perform a code review of the PR diff below.
-- Do NOT modify files or create a plan.
-- Do NOT create a pull request.
-- Output review directly as final message.
-- Focus on correctness, security, regressions, tests, maintainability, and backwards compatibility.
-- Return a Markdown review suitable for posting as a GitHub PR comment.
-- Use these sections:
-  1. Summary
-  2. All blocking issues
-  3. All non-blocking suggestions
-  4. All tests / verification concerns
-  5. Overall recommendation
-- If there are no issues, say so clearly.
-- If the diff is insufficient, state what context is missing.
+## Constraints
+- Review-only mode. Do NOT create plans, modify files, or open PRs.
+- Base your review solely on the diff below. If the diff is truncated, explicitly note which areas could not be reviewed.
 
-Diff truncated: {truncated}
+## Output Format
+Return a Markdown review using this exact structure:
+
+### Summary
+One paragraph: what this PR does and overall impression.
+
+### 🔴 Blocking Issues
+List each blocking issue with: file, line range, problem description, and suggested fix.
+Blocking = correctness bugs, security vulnerabilities, data loss risks, broken backwards compatibility.
+If none, write: "No blocking issues found."
+
+### 🟡 Suggestions
+List each non-blocking suggestion with: file, line range, and improvement idea.
+If none, write: "No additional suggestions."
+
+### 🧪 Tests & Verification
+List any missing test scenarios or verification steps the author should perform.
+If tests are adequate, write: "Test coverage looks good."
+
+### Verdict
+One of: ✅ Approve | ⚠️ Approve with comments | ❌ Request changes
+One sentence justification.
 
 <diff>
 {diff_for_prompt}
