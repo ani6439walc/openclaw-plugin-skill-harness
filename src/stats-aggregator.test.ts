@@ -88,6 +88,7 @@ describe("StatsAggregator", () => {
           "MUST read skill: `github-pr-workflow`",
           "REQUIRED skill: test-driven-development.",
           "MUST read skill: code-review-and-quality at /skills/code-review-and-quality/SKILL.md - needed to assess bot feedback",
+          "1. MUST read skill: numbered-skill at /skills/numbered-skill/SKILL.md",
         ].join("\n"),
       ),
     ).toEqual([
@@ -96,6 +97,7 @@ describe("StatsAggregator", () => {
       "treemd",
       "github-pr-workflow",
       "code-review-and-quality",
+      "numbered-skill",
     ]);
   });
 
