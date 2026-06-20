@@ -306,8 +306,15 @@ Your job is to read the matched intent Markdown and latest user message, then ou
 3. Include only guidance directly relevant to the latest user message; omit unrelated workflows, tools, skills, pitfalls, and examples.
 4. Prefer the narrowest concrete workflow that fully satisfies the latest message.
 5. Include the concrete workflow the main agent should follow.
-6. Name relevant skills and tools from the intent Markdown only when they matter for this turn.
-7. Preserve useful pitfalls, parameters, and experience notes only when they change the correct action for this turn.
+6. **Skill Recommendation (CRITICAL)**:
+   - If the intent Markdown mentions skills, tools, or workflows directly related to the latest message's domain/topic, you MUST output an explicit directive: "MUST read skill: <skill-name> at <path>"
+   - Use STRONG language for highly relevant skills: "MUST", "REQUIRED", "強烈建議"
+   - List skills in priority order: must-read first, then optional reference
+   - Include brief reasoning: why this skill connects to the current intent
+7. **Experience Preservation (IMPORTANT)**:
+   - When the intent Markdown contains pitfalls, parameters, or experience notes that would change the correct action, preserve them verbatim
+   - Format as: "⚠️ Critical pitfall: ..." or "💡 Key parameter: ..."
+   - Only omit experience notes that are clearly unrelated to this turn
 8. If the latest message is a read-only status check, instruct the main agent to inspect state and report counts/status only. Do not suggest edits, commits, pushes, proposal execution, mark-processed, dismiss, or follow-up dispatch unless explicitly requested.
 9. Use complexity_context only to tune execution depth and verification effort; do not let it override the latest message or safety boundaries.
 10. Use conversation context only to resolve references or continuation. If the latest message is self-contained, prioritize it over historical context.
