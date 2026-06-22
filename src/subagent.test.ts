@@ -149,7 +149,7 @@ describe("runIntentInstructionSubagent", () => {
         timeoutMs: 4321,
         thinkLevel: "low",
         disableTools: true,
-        prompt: expect.stringContaining("instruction writer"),
+        prompt: expect.stringContaining("intention-hint writer"),
       }),
     );
     expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(

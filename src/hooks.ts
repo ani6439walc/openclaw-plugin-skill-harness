@@ -379,6 +379,23 @@ export function createHookHandlers(deps: HookDeps) {
         return;
       }
 
+      // Skip intent instruction subagent when confidence is too low
+      if ((result.confidence ?? 0) < 0.7) {
+        logger.debug(
+          `confidence ${result.confidence} below 0.7; skipping intent instruction subagent and hint injection.`,
+        );
+        recordPromptBuildSession({
+          sessionId: ctx.sessionId,
+          resolvedSessionKey: routing.resolvedSessionKey,
+          fallbackSessionKey: ctx.sessionKey,
+          effectiveAgentId: routing.effectiveAgentId,
+          latestUserMessage,
+          result,
+          conversation,
+        });
+        return;
+      }
+
       const instructionText = await instructionWriter({
         api,
         config: refreshedConfig,

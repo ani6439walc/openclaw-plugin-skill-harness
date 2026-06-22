@@ -499,6 +499,52 @@ describe("createHookHandlers topic switch flow", () => {
     sessionKey: "agent:main:direct:123",
   };
 
+  it("skips hint injection when confidence is undefined (treated as 0)", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "coding",
+      reason: "User wants implementation",
+      keywords: ["topic", "flow"],
+      topic: "User wants implementation help for the topic flow.",
+      topicChanged: true,
+      topicChangeReason: "initial",
+      // confidence intentionally omitted (undefined)
+      complexity: "medium" as const,
+    });
+    const { handlers, instructionWriter, record } = createTopicFlowHarness({
+      historicalIntents: [],
+      classifier,
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result).toBeUndefined();
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalled();
+  });
+
+  it("skips hint injection when confidence is undefined (treated as 0)", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "coding",
+      reason: "User wants implementation",
+      keywords: ["topic", "flow"],
+      topic: "User wants implementation help for the topic flow.",
+      topicChanged: true,
+      topicChangeReason: "initial",
+      // confidence intentionally omitted (undefined)
+      complexity: "medium" as const,
+    });
+    const { handlers, instructionWriter, record } = createTopicFlowHarness({
+      historicalIntents: [],
+      classifier,
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result).toBeUndefined();
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalled();
+  });
+
   it("runs topic checker on the first tracked turn to seed topic metadata", async () => {
     const topicContext = {
       keywords: ["initial", "topic"],

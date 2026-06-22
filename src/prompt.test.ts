@@ -432,12 +432,16 @@ describe("buildIntentInstructionPrompt", () => {
       ],
     });
 
-    expect(prompt).toContain("instruction writer");
+    expect(prompt).toContain("intention-hint writer");
     expect(prompt).toContain(
       "Another model is preparing the final user-facing answer",
     );
+    expect(prompt).toContain("optional reference, not mandatory instructions");
     expect(prompt).toContain(
-      "Your job is to read the matched intent Markdown and latest user message",
+      "Identify the user's intent from the latest message",
+    );
+    expect(prompt).toContain(
+      "Review the matched intent Markdown for relevant experience",
     );
     expect(prompt).toContain("workflow");
     expect(prompt).toContain("Skill Recommendation");
@@ -953,7 +957,7 @@ describe("buildPromptPrefix", () => {
 
     const prefix = buildPromptPrefix(result, mockIntents, mockConfig);
 
-    expect(prefix).toContain("<intention_hint_plugin>");
+    expect(prefix).toContain('<intention_hint_plugin confidence="90%"');
     expect(prefix).toContain("</intention_hint_plugin>");
   });
 

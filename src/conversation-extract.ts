@@ -301,7 +301,10 @@ export function isInternalUserTurn(params: {
 
 function stripMetadataBlocks(text: string): string {
   return text
-    .replace(/<intention_hint_plugin>[\s\S]*?<\/intention_hint_plugin>/gi, " ")
+    .replace(
+      /<intention_hint_plugin\b[^>]*>[\s\S]*?<\/intention_hint_plugin>/gi,
+      " ",
+    )
     .replace(/<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>/gi, " ")
     .replace(
       /Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi,
