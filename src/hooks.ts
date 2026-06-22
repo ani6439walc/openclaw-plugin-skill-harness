@@ -380,7 +380,7 @@ export function createHookHandlers(deps: HookDeps) {
       }
 
       // Skip intent instruction subagent when confidence is too low
-      if (result.confidence < 0.7) {
+      if ((result.confidence ?? 0) < 0.7) {
         logger.debug(
           `confidence ${result.confidence} below 0.7; skipping intent instruction subagent and hint injection.`,
         );
