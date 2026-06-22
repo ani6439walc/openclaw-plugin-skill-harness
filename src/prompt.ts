@@ -529,7 +529,6 @@ export function parseIntentionResult(
 }
 
 function buildPromptPrefixLines(
-  result: IntentionResult,
   intentDef: IntentDefinition,
   instructionText?: string,
 ): string[] {
@@ -559,7 +558,7 @@ export function buildPromptPrefix(
 ): string | undefined {
   const intentDef = findEnabledIntent(result, intents);
   const effectiveDef = intentDef ?? FALLBACK_INTENT;
-  const lines = buildPromptPrefixLines(result, effectiveDef, instructionText);
+  const lines = buildPromptPrefixLines(effectiveDef, instructionText);
 
   return `${UNTRUSTED_CONTEXT_HEADER}
 <${INTENTION_HINT_PLUGIN_TAG}>

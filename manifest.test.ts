@@ -62,7 +62,7 @@ describe("intention-hint manifest", () => {
     expect(evolution.properties.enabled.default).toBe(false);
     expect(evolution.properties.timeoutMs).toMatchObject({
       minimum: 250,
-      maximum: 120000,
+      maximum: 600000,
       default: 30000,
     });
     expect(

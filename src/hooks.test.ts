@@ -530,22 +530,8 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ topicContext }),
     );
-    expect(instructionWriter).toHaveBeenCalledWith(
-      expect.objectContaining({
-        latest: "implement topic checker",
-        intentBody: "## Guidelines\n\n- Code carefully.",
-        result: expect.objectContaining({
-          keywords: ["initial", "topic"],
-          topic: "User is starting an initial topic.",
-          topicChanged: false,
-          topicChangeReason: "initial",
-          complexity: "low",
-        }),
-      }),
-    );
-    expect(result?.prependContext).toContain(
-      "Follow the generated coding instructions.",
-    );
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(result?.prependContext).toBeUndefined();
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -665,31 +651,14 @@ describe("createHookHandlers topic switch flow", () => {
 
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).toHaveBeenCalledWith(
-      expect.objectContaining({
-        latest: "implement topic checker",
-        result: expect.objectContaining({
-          intent: "coding",
-          keywords: ["topic", "checker"],
-          topic: "User is continuing work on the topic checker.",
-          topicChanged: false,
-          topicChangeReason: "same-topic",
-          confidence: 0.85,
-          complexity: "low",
-        }),
-      }),
-    );
-    expect(result?.prependContext).not.toContain("topicChanged: false");
-    expect(result?.prependContext).toContain(
-      "Follow the generated coding instructions.",
-    );
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(result?.prependContext).toBeUndefined();
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
         current: expect.objectContaining({
           input: "implement topic checker",
           intent: expect.objectContaining({
-            instructionText: "Follow the generated coding instructions.",
             result: expect.objectContaining({
               intent: "coding",
               topicChanged: false,

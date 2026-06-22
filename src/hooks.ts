@@ -362,6 +362,23 @@ export function createHookHandlers(deps: HookDeps) {
 
       logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
 
+      // Skip intent instruction subagent and hint injection when topic unchanged
+      if (result.topicChanged === false) {
+        logger.debug(
+          "topic unchanged; skipping intent instruction subagent and hint injection.",
+        );
+        recordPromptBuildSession({
+          sessionId: ctx.sessionId,
+          resolvedSessionKey: routing.resolvedSessionKey,
+          fallbackSessionKey: ctx.sessionKey,
+          effectiveAgentId: routing.effectiveAgentId,
+          latestUserMessage,
+          result,
+          conversation,
+        });
+        return;
+      }
+
       const instructionText = await instructionWriter({
         api,
         config: refreshedConfig,
