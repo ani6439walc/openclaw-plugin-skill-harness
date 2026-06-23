@@ -43,21 +43,31 @@ function resolveIntentDenyPatterns(
 
 function parseFastpath(
   data: Record<string, unknown>,
+  fileName: string,
+  silent: boolean,
 ): IntentDefinition["fastpath"] {
-  if (
-    !data.fastpath ||
-    typeof data.fastpath !== "object" ||
-    Array.isArray(data.fastpath)
-  ) {
-    return { keywords: [] };
+  const legacyKeywords = Array.isArray(data.keywords)
+    ? data.keywords.filter(
+        (x): x is string => typeof x === "string" && !!x.trim(),
+      )
+    : [];
+  if (legacyKeywords.length && !silent) {
+    logger.warn(
+      `${fileName}: top-level keywords are deprecated; move them to fastpath.keywords.`,
+    );
   }
 
-  const fastpath = data.fastpath as Record<string, unknown>;
+  const fastpath =
+    data.fastpath &&
+    typeof data.fastpath === "object" &&
+    !Array.isArray(data.fastpath)
+      ? (data.fastpath as Record<string, unknown>)
+      : {};
   const keywords = Array.isArray(fastpath.keywords)
     ? fastpath.keywords.filter(
         (x): x is string => typeof x === "string" && !!x.trim(),
       )
-    : [];
+    : legacyKeywords;
   const hint =
     typeof fastpath.hint === "string" && fastpath.hint.trim()
       ? fastpath.hint.trim()
@@ -156,7 +166,7 @@ export class IntentCatalog {
         ? data.examples.filter((x): x is string => typeof x === "string")
         : [];
       const domain = typeof data.domain === "string" ? data.domain.trim() : "";
-      const fastpath = parseFastpath(data);
+      const fastpath = parseFastpath(data, entry, silent);
 
       if (!triggers.length) {
         if (!silent) {

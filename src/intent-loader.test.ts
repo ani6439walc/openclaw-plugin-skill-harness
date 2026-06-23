@@ -80,6 +80,33 @@ domain: "chat"
     expect(catalog.get()[0]?.definition.fastpath).toEqual({ keywords: [] });
   });
 
+  it("maps legacy top-level keywords into fastpath keywords", () => {
+    fs.writeFileSync(
+      path.join(root, "intents", "legacy.md"),
+      `---
+triggers:
+  - "legacy route"
+examples:
+  - "legacy"
+domain: "legacy"
+keywords:
+  - "old"
+  - ""
+  - 123
+---
+## Guidelines
+- Keep old routing alive.
+`,
+    );
+
+    const catalog = IntentCatalog.create(root);
+    expect(catalog.load("intents", { silent: true })).toBe(1);
+
+    expect(catalog.get()[0]?.definition.fastpath).toEqual({
+      keywords: ["old"],
+    });
+  });
+
   it("skips files without triggers or domain", () => {
     fs.writeFileSync(
       path.join(root, "intents", "empty.md"),
