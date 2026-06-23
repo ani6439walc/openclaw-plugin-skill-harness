@@ -42,7 +42,11 @@ import {
 } from "./subagent.js";
 import { buildPromptPrefix } from "./prompt.js";
 import { FALLBACK_INTENT } from "./constants.js";
-import type { HistoricalIntentRecord, IntentionResult } from "./types.js";
+import type {
+  HistoricalIntentRecord,
+  IntentCatalogEntry,
+  IntentionResult,
+} from "./types.js";
 
 export type HookDeps = {
   api: OpenClawPluginApi;
@@ -110,6 +114,32 @@ function runInheritedIntentClassifier(
     confidence: latest.confidence ?? 0.8,
     complexity: topicContext.complexity,
   };
+}
+
+function resolveIntentId(intent: string | undefined): string | undefined {
+  return intent?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
+}
+
+function normalizeFastPathKeyword(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+}
+
+function findFastPathA1Intent(
+  latest: string,
+  intents: readonly IntentCatalogEntry[],
+):
+  | { intent: IntentCatalogEntry; keyword: string }
+  | undefined {
+  const normalizedLatest = normalizeFastPathKeyword(latest);
+  if (!normalizedLatest) return;
+
+  for (const intent of intents) {
+    for (const keyword of intent.definition.keywords) {
+      if (normalizeFastPathKeyword(keyword) === normalizedLatest) {
+        return { intent, keyword: keyword.trim() };
+      }
+    }
+  }
 }
 
 const SESSION_END_REASONS_THAT_DELETE_FILE = new Set([
@@ -318,17 +348,6 @@ export function createHookHandlers(deps: HookDeps) {
       const { latestUserMessage, historicalIntents, conversation } =
         buildConversationContext(event, ctx, refreshedConfig);
 
-      const modelRef = getModelRef(
-        api,
-        routing.effectiveAgentId,
-        refreshedConfig,
-        {
-          modelProviderId: ctx.modelProviderId,
-          modelId: ctx.modelId,
-        },
-      );
-      if (!modelRef) return;
-
       refreshIntents();
       if (catalog.count === 0) {
         logger.debug("no intents loaded; skipping intention scan.");
@@ -343,6 +362,60 @@ export function createHookHandlers(deps: HookDeps) {
         refreshedConfig,
         routing.effectiveAgentId,
       );
+      const fastPathA1Match = findFastPathA1Intent(
+        latestUserMessage,
+        availableIntents,
+      );
+      if (fastPathA1Match) {
+        const latestHistoricalIntent =
+          historicalIntents[historicalIntents.length - 1];
+        const sameIntent =
+          resolveIntentId(latestHistoricalIntent?.intent) ===
+          fastPathA1Match.intent.id.toLowerCase();
+        const result: IntentionResult = {
+          intent: fastPathA1Match.intent.id,
+          reason: `Fast Path A1 keyword exact match: ${fastPathA1Match.keyword}`,
+          keywords: [fastPathA1Match.keyword],
+          topic: `Fast-path exact match for ${fastPathA1Match.intent.id}.`,
+          previousTopic: latestHistoricalIntent?.topic,
+          topicChanged: latestHistoricalIntent ? !sameIntent : true,
+          topicChangeReason: !latestHistoricalIntent
+            ? "initial"
+            : sameIntent
+              ? "same-topic"
+              : "keyword-match",
+          confidence: 1,
+          complexity: "low",
+        };
+        recordPromptBuildSession({
+          sessionId: ctx.sessionId,
+          resolvedSessionKey: routing.resolvedSessionKey,
+          fallbackSessionKey: ctx.sessionKey,
+          effectiveAgentId: routing.effectiveAgentId,
+          latestUserMessage,
+          result,
+          conversation,
+        });
+        const promptPrefix = buildPromptPrefix(
+          result,
+          availableIntents,
+          refreshedConfig,
+        );
+        if (!promptPrefix) return;
+        return { prependContext: promptPrefix };
+      }
+
+      const modelRef = getModelRef(
+        api,
+        routing.effectiveAgentId,
+        refreshedConfig,
+        {
+          modelProviderId: ctx.modelProviderId,
+          modelId: ctx.modelId,
+        },
+      );
+      if (!modelRef) return;
+
       const result = await classifyPromptBuild({
         ctx,
         refreshedConfig,

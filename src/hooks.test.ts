@@ -4,7 +4,7 @@ import { resolveConfig } from "./config.js";
 import { createHookHandlers } from "./hooks.js";
 import { defaultTracker } from "./session-tracker.js";
 import { defaultStatsAggregator } from "./stats-aggregator.js";
-import { defaultCatalog } from "./intent-loader.js";
+import { defaultCatalog, filterIntentsForAgent } from "./intent-loader.js";
 
 function createHandlers() {
   return createHookHandlers({
@@ -417,11 +417,12 @@ describe("createHookHandlers topic switch flow", () => {
   });
 
   const intent = {
-    id: "coding",
+    id: "social-casual",
     definition: {
-      triggers: ["implement"],
-      examples: ["implement this"],
-      prompt: "## Guidelines\n\n- Code carefully.",
+      triggers: ["chat"],
+      examples: ["hi"],
+      keywords: ["hi", "謝謝"],
+      prompt: "## Guidelines\n\n- Reply warmly.",
     },
   };
 
@@ -429,6 +430,8 @@ describe("createHookHandlers topic switch flow", () => {
     historicalIntents: ReturnType<
       typeof defaultTracker.getHistoricalIntentRecords
     >;
+    configRaw?: Parameters<typeof resolveConfig>[0];
+    classifier?: ReturnType<typeof vi.fn>;
     topicChecker?: ReturnType<typeof vi.fn>;
     instructionWriter?: ReturnType<typeof vi.fn>;
   }) {
@@ -443,14 +446,16 @@ describe("createHookHandlers topic switch flow", () => {
     };
     const catalog = {
       count: 1,
-      filterForAgent: vi.fn().mockReturnValue([intent]),
+      filterForAgent: vi.fn((config, agentId) =>
+        filterIntentsForAgent([intent], config, agentId),
+      ),
       get: vi.fn().mockReturnValue([intent]),
     };
-    const classifier = vi.fn().mockResolvedValue({
-      intent: "coding",
-      reason: "User wants implementation",
+    const classifier = params.classifier ?? vi.fn().mockResolvedValue({
+      intent: "social-casual",
+      reason: "User is chatting",
       keywords: ["topic", "flow"],
-      topic: "User wants implementation help for the topic flow.",
+      topic: "User is chatting casually.",
       topicChanged: false,
       topicChangeReason: "initial",
       confidence: 0.9,
@@ -462,7 +467,8 @@ describe("createHookHandlers topic switch flow", () => {
       vi.fn().mockResolvedValue("Follow the generated coding instructions.");
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
-      config: () => resolveConfig({ model: "google/test-intent" }),
+      config: () =>
+        resolveConfig(params.configRaw ?? { model: "google/test-intent" }),
       refreshLiveConfigFromRuntime: vi.fn(),
       refreshIntents: vi.fn(),
       catalog: catalog as never,
@@ -498,6 +504,139 @@ describe("createHookHandlers topic switch flow", () => {
     sessionId: "session-1",
     sessionKey: "agent:main:direct:123",
   };
+
+  it("uses A1 keyword exact match to inject a prompt without subagent calls", async () => {
+    const fastEvent = {
+      prompt: " 謝 謝 ",
+      messages: [
+        {
+          role: "user",
+          content: " 謝 謝 ",
+          provenance: { kind: "external_user" },
+        },
+      ],
+    } as never;
+    const { handlers, classifier, topicChecker, instructionWriter, record } =
+      createTopicFlowHarness({ historicalIntents: [] });
+
+    const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
+
+    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(result?.prependContext).toContain("Reply warmly.");
+    expect(topicChecker).not.toHaveBeenCalled();
+    expect(classifier).not.toHaveBeenCalled();
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              intent: "social-casual",
+              keywords: ["謝謝"],
+              topicChanged: true,
+              topicChangeReason: "initial",
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      name: "same-topic",
+      history: {
+        input: "hi",
+        intent: "social-casual",
+        topic: "User is chatting casually.",
+        confidence: 1,
+        complexity: "low" as const,
+      },
+      expected: {
+        previousTopic: "User is chatting casually.",
+        topicChanged: false,
+        topicChangeReason: "same-topic",
+      },
+    },
+    {
+      name: "keyword-match",
+      history: {
+        input: "fix this",
+        intent: "coding",
+        topic: "User is fixing code.",
+        confidence: 0.8,
+        complexity: "medium" as const,
+      },
+      expected: {
+        previousTopic: "User is fixing code.",
+        topicChanged: true,
+        topicChangeReason: "keyword-match",
+      },
+    },
+  ])("marks A1 keyword matches as $name", async ({ history, expected }) => {
+    const { handlers, record } = createTopicFlowHarness({
+      historicalIntents: [history],
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "hi",
+        messages: [{ role: "user", content: "hi" }],
+      } as never,
+      ctx,
+    );
+
+    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining(expected),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("does not use A1 for unmatched short confirmations", async () => {
+    const { handlers, topicChecker } = createTopicFlowHarness({
+      historicalIntents: [],
+      topicChecker: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "OK",
+        messages: [{ role: "user", content: "OK" }],
+      } as never,
+      ctx,
+    );
+
+    expect(topicChecker).toHaveBeenCalledOnce();
+  });
+
+  it("does not use A1 when the matched intent is denied", async () => {
+    const { handlers, topicChecker } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: {
+        model: "google/test-intent",
+        intentDeny: { main: ["social-casual"] },
+      },
+      topicChecker: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "hi",
+        messages: [{ role: "user", content: "hi" }],
+      } as never,
+      ctx,
+    );
+
+    expect(topicChecker).toHaveBeenCalledOnce();
+  });
 
   it("skips hint injection when confidence is undefined (treated as 0)", async () => {
     const classifier = vi.fn().mockResolvedValue({

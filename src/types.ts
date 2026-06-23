@@ -104,6 +104,7 @@ export type ResolvedIntentionHintPluginConfig = {
 export type IntentDefinition = {
   triggers: string[];
   examples: string[];
+  keywords: string[];
   prompt: string;
 };
 
@@ -124,7 +125,8 @@ export type IntentionResult = {
     | "same-topic"
     | "transition-marker"
     | "keyword-delta"
-    | "explicit-change";
+    | "explicit-change"
+    | "keyword-match";
   previousTopic?: string;
   confidence: number;
   complexity: "low" | "medium" | "high";

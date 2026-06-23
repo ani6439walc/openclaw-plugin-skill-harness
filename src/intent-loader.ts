@@ -130,6 +130,11 @@ export class IntentCatalog {
       const examples = Array.isArray(data.examples)
         ? data.examples.filter((x): x is string => typeof x === "string")
         : [];
+      const keywords = Array.isArray(data.keywords)
+        ? data.keywords.filter(
+            (x): x is string => typeof x === "string" && !!x.trim(),
+          )
+        : [];
 
       if (!triggers.length) {
         if (!silent) {
@@ -143,6 +148,7 @@ export class IntentCatalog {
       const definition: IntentDefinition = {
         triggers,
         examples,
+        keywords,
         prompt: parsed.content.trim(),
       };
 

@@ -8,6 +8,26 @@ examples:
   - "Nice weather today"
   - "Feeling a bit tired today"
   - "hi"
+keywords:
+  - "hi"
+  - "hello"
+  - "hey"
+  - "嗨"
+  - "哈囉"
+  - "你好"
+  - "早"
+  - "早安"
+  - "晚安"
+  - "謝謝"
+  - "感謝"
+  - "thanks"
+  - "thank you"
+  - "thx"
+  - "辛苦了"
+  - "累"
+  - "好累"
+  - "想睡"
+  - "抱抱"
 ---
 
 ## Guidelines
