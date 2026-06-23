@@ -40,19 +40,19 @@ Enter this mode only when the user explicitly asks to process the evolution back
    Repeat `--target-intent` for multiple targets, then re-run `show` and use
    the new `updatedAt`. If inference is not clear, stop without modifying files.
 
-## Body-name Mismatch Decision
+## Body-boundary Mismatch Decision
 
-Before editing, compare the target intent's `id`, `name`, frontmatter triggers,
-examples, and body guidance:
+Before editing, compare the filename-derived intent id, frontmatter triggers,
+examples, domain, fastpath metadata, and body guidance:
 
-- If `id`/`name` are correct but the body drifted away from the declared
+- If filename id and metadata are correct but the body drifted away from the declared
   boundary, treat the finding as `refine` and fix the body, triggers, or
   examples to match the existing intent boundary.
 - If the body consistently describes a better boundary than the current
-  `id`/`name`, do not silently rewrite the body to fit the old name. Propose a
-  rename with the recommended `id`, `name`, filename, and any affected references,
-  then obtain explicit user confirmation before changing identity fields or
-  filenames.
+  filename id or metadata, do not silently rewrite the body to fit stale
+  routing metadata. Propose a rename or metadata update with the recommended
+  filename, domain, fastpath fields, and any affected references, then obtain
+  explicit user confirmation before changing filenames.
 - If the body mixes multiple responsibilities or has become an oversized intent,
   propose `split` with the new intent boundaries, affected files, and migration
   plan, then obtain explicit user confirmation before creating/moving/deleting
@@ -64,8 +64,8 @@ examples, and body guidance:
 
 1. Decide whether the finding is already satisfied by current Intent Markdown.
    If so, skip edits and continue to validation.
-2. Run the Body-name Mismatch Decision before changing any body section,
-   identity field, or filename. Rename and split plans require explicit user
+2. Run the Body-boundary Mismatch Decision before changing any body section,
+   routing metadata, or filename. Rename and split plans require explicit user
    confirmation; do not execute them as an automatic `refine`.
 3. If the finding is a duplicate of an existing intent, is superseded by a safer
    current intent, or would introduce unsafe/conflicting behavior, do not edit
@@ -85,8 +85,8 @@ examples, and body guidance:
    - `create`: create the declared target intent.
    - `refine`: update the declared target intent without broadening unrelated
      behavior.
-   - `rename`: execute only after confirmation, then update `id`, `name`,
-     filename, and stale references together.
+   - `rename`: execute only after confirmation, then update filename-derived id
+     and stale references together.
    - `split` or `merge`: execute only after the required confirmation.
 6. Validate the resulting files:
 

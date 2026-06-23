@@ -5,7 +5,7 @@ When enough information is collected, stop asking discovery questions and switch
 ## Output order
 
 1. **Boundary summary** — what this intent handles, what it doesn't, which neighboring intents it's closest to
-2. **Recommended `id`, `name`, and filename**
+2. **Recommended filename-derived id and filename**
 3. **Collision warning** — if the proposed intent still overlaps an existing one
 4. **Final draft intent file**
 

@@ -19,13 +19,15 @@ If ambiguous, ask a single routing question first — explain why it matters, re
 Confirm these fields in order:
 
 1. intent purpose and boundary
-2. best name and `id`
+2. best filename-derived intent id
 3. filename
-4. `triggers`
-5. `examples`
-6. body scope
-7. skills and tools worth hinting
-8. collision check with existing intents
+4. one required `domain`
+5. `triggers`
+6. `examples`
+7. optional `fastpath.keywords` and short `fastpath.hint`
+8. body scope
+9. skills and tools worth hinting
+10. collision check with existing intents
 
 ## Rules
 
@@ -35,7 +37,7 @@ Confirm these fields in order:
 - If the user is describing an existing intent, say so directly.
 - If two intents are colliding, recommend the smallest clean split.
 - Do not write the final intent file until the boundary is clear.
-- **No cross-references in body**: the markdown body must never mention other intents by name or id. All scope boundaries must be expressed through triggers and examples alone. (See `references/format.md` for full spec.)
+- **No cross-references in body**: the markdown body must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, and fastpath metadata. (See `references/format.md` for full spec.)
 
 ## User-specified flow override
 

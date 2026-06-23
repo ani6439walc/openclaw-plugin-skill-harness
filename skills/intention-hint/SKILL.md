@@ -46,8 +46,10 @@ if user says "refine" or "improve" → action=refine
 ```
 Q1: "What should this intent detect?" → capture purpose
 Q2: "What triggers this intent?" → capture 2-3 trigger phrases
-Q3: "What tools or skills does it need?" → capture tool list
-Q4: "Any existing intent this overlaps with?" → check collision
+Q3: "Which domain should it belong to?" → capture one domain
+Q4: "Any exact-match fastpath phrases or short hint?" → capture optional fastpath
+Q5: "What tools or skills does it need?" → capture tool list
+Q6: "Any existing intent this overlaps with?" → check collision
 ```
 
 **🔴 CHECKPOINT**: Before drafting, confirm boundary summary with user:
@@ -79,6 +81,11 @@ triggers:
 examples:
   - "<example user message 1>"
   - "<example user message 2>"
+domain: "<one domain>"
+fastpath:
+  hint: "<optional short A1 injected hint>"
+  keywords:
+    - "<optional exact or fuzzy keyword>"
 ---
 
 ## Guidelines
@@ -101,14 +108,12 @@ examples:
 **Step 5 — Deliver with validation**
 
 ```bash
-# Validate YAML frontmatter
-python3 -c "import yaml; yaml.safe_load(open('intent.md').read().split('---')[1])"
-
 # Verify required sections exist
 grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" intent.md
 
-# If no collisions, write to target
+# If no collisions, write to target, then validate through the plugin
 mv intent.md ~/.openclaw/plugins/intention-hint/intents/<intent-id>.md
+pnpm run evolution-backlog -- validate-intents --id <intent-id>
 ```
 
 ### Failure modes
@@ -121,13 +126,13 @@ mv intent.md ~/.openclaw/plugins/intention-hint/intents/<intent-id>.md
 
 ### Anti-patterns
 
-| #   | Anti-pattern                                    | Why not                                              | Do instead                                        |
-| --- | ----------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------- |
-| 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality             | Interview one question at a time                  |
-| 2   | **Cross-reference other intents in body**       | Classification sub-agent only sees triggers/examples | Express boundaries via triggers and examples only |
-| 3   | **Skip format.md before writing**               | Inconsistent format breaks plugin parsing            | Always read format.md first                       |
-| 4   | **Create a new intent when one already exists** | Causes duplication and collision                     | Check existing intents during interview           |
-| 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately               | Triggers must be concrete phrases or keywords     |
+| #   | Anti-pattern                                    | Why not                                                        | Do instead                                                           |
+| --- | ----------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality                       | Interview one question at a time                                     |
+| 2   | **Cross-reference other intents in body**       | Classifier only sees frontmatter, while fastpaths use metadata | Express boundaries via triggers, examples, domain, and fastpath only |
+| 3   | **Skip format.md before writing**               | Inconsistent format breaks plugin parsing                      | Always read format.md first                                          |
+| 4   | **Create a new intent when one already exists** | Causes duplication and collision                               | Check existing intents during interview                              |
+| 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately                         | Triggers must be concrete phrases or keywords                        |
 
 ---
 
@@ -219,10 +224,10 @@ Re-read the selected item — it must still be `pending`.
 
 Read the target intent markdown, the compact intent catalog, and relevant references.
 
-Before applying a suggested body edit, compare the target intent's `id`, `name`, triggers, examples, and body:
+Before applying a suggested body edit, compare the filename-derived intent id, frontmatter triggers, examples, domain, fastpath metadata, and body:
 
-- If the name/id are correct and only the body drifted, refine the body back to the declared boundary.
-- If the body is more accurate than the current name/id, propose a rename and ask for explicit confirmation before changing identity fields, filenames, or references.
+- If the filename id and metadata are correct and only the body drifted, refine the body back to the declared boundary.
+- If the body is more accurate than the current filename id or metadata, propose a rename or metadata update and ask for explicit confirmation before changing filenames or references.
 - If the body contains multiple responsibilities or an oversized boundary, propose a split plan and ask for explicit confirmation before creating/moving/deleting intent files.
 - If the mismatch comes from a duplicate or superseded finding, dismiss it instead of reshaping a healthy intent.
 
@@ -245,7 +250,7 @@ Then apply:
 
 - `create` → new intent
 - `refine` → update target intent
-- `rename` → only after user confirmation; update `id`, `name`, filename, and stale references together
+- `rename` → only after user confirmation; update filename-derived id and stale references together
 - `split`/`merge` → only after user confirmation
 
 **Step 4 — Validate**
@@ -358,14 +363,14 @@ When bootstrapping from scratch, copy example intent templates from `assets/`:
 ### Validation commands
 
 ```bash
-# Check YAML frontmatter syntax
-python3 -c "import yaml; yaml.safe_load(open('<file>').read().split('---')[1])"
+# Validate intent schema and body format
+pnpm run evolution-backlog -- validate-intents --id <intent-id>
 
 # Check for trigger collisions
 grep -l "<trigger>" ~/.openclaw/plugins/intention-hint/intents/*.md
 
 # List all existing intent IDs
-cat ~/.openclaw/plugins/intention-hint/intents/*.md | grep "^id:" | cut -d' ' -f2
+find ~/.openclaw/plugins/intention-hint/intents -name '*.md' -exec basename {} .md \; | sort
 
 # Verify required sections exist
 grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" <file>

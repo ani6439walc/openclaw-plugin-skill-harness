@@ -4,9 +4,9 @@ Rules for generating intent definition files. The canonical format spec lives in
 
 ## Required section order
 
-1. YAML frontmatter (`triggers[]`, `examples[]`)
+1. YAML frontmatter (`triggers[]`, `examples[]`, required `domain`, optional `fastpath`)
 2. `## Guidelines`
-3. `## Skills & Tools`
+3. `## Skills & Tools` (optional)
 4. `## Response Strategy`
 5. `## Concrete Workflow` (optional)
 6. `## Experience` (optional)
@@ -27,6 +27,26 @@ Rules for generating intent definition files. The canonical format spec lives in
 - Search recorded memory:
   memory_search({ query: "<keywords>", corpus: "memory", maxResults: 5 })
 ```
+
+## Frontmatter routing fields
+
+```yaml
+---
+triggers:
+  - "Concrete user-goal boundary phrase"
+examples:
+  - "Realistic user message"
+domain: "one-domain"
+fastpath:
+  hint: "Optional short A1 injected hint."
+  keywords:
+    - "optional exact or fuzzy keyword"
+---
+```
+
+- `domain` is required and must be one string.
+- `fastpath.keywords` is optional. A1 uses it for exact-match only when `fastpath.hint` is present; A2 uses it for domain-scoped keyword similarity even without a hint.
+- `fastpath.hint` should be short. It is injected directly on A1 hits instead of the full intent body.
 
 ## Concrete Workflow inclusion rule
 
@@ -50,4 +70,4 @@ Rules for generating intent definition files. The canonical format spec lives in
 
 ## No cross-references
 
-Body must never mention other intents by name or id. Classification sub-agent only sees frontmatter (triggers + examples). See `references/interview.md` for the full rule context.
+Body must never mention other intents by name or id. The classifier sees frontmatter metadata; fastpaths use `domain` and `fastpath`. See `references/interview.md` for the full rule context.
