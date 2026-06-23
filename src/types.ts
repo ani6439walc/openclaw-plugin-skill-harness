@@ -104,6 +104,7 @@ export type ResolvedIntentionHintPluginConfig = {
 export type IntentDefinition = {
   triggers: string[];
   examples: string[];
+  domain: string;
   keywords: string[];
   prompt: string;
 };

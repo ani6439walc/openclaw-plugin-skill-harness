@@ -191,6 +191,7 @@ export async function runTopicSwitchSubagent(params: {
   sessionId?: string;
   conversation?: RecentTurn[];
   latest: string;
+  domains: readonly string[];
   history: readonly HistoricalIntentRecord[];
   messageProvider?: string;
   modelRef: { provider: string; model: string };
@@ -205,6 +206,7 @@ export async function runTopicSwitchSubagent(params: {
   const prompt = buildTopicSwitchPrompt({
     latest: params.latest,
     history: params.history,
+    domains: params.domains,
     conversation: params.conversation,
     currentTime: resolveCurrentTime(params.api),
   });
@@ -219,7 +221,9 @@ export async function runTopicSwitchSubagent(params: {
       }),
     );
     const rawReply = extractPayloadText(result);
-    const parsed = parseTopicSwitchResult(rawReply);
+    const parsed = parseTopicSwitchResult(rawReply, {
+      domains: params.domains,
+    });
     if (!parsed) {
       logger.warn("Topic switch result parse failed", { rawReply });
     }

@@ -412,7 +412,9 @@ fails, the plugin logs and falls back to classifier-only behavior.
 
 ### Fast Path A2 Keyword Similarity
 
-- After the topic checker runs, extracted topic `keywords` are compared with enabled intent frontmatter `keywords`.
+- Intent Markdown must include a single frontmatter `domain`.
+- The topic checker receives the enabled intent domain union and returns the closest domain for the latest message.
+- A2 compares extracted topic `keywords` only with enabled intent frontmatter `keywords` in that selected domain.
 - A clear similarity match skips the intent classifier, then still runs the instruction writer before injection.
 - Ambiguous, low-score, high-risk, or denied-intent matches fall back to the normal classifier.
 - Same-topic inheritance remains earlier than A2, so `topicChanged=false` turns still record only and return.

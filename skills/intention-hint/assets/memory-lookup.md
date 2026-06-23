@@ -7,6 +7,7 @@ examples:
   - "What do I usually order at that restaurant?"
   - "Help me find the settings notes about Talos"
   - "What travel plans did I mention before?"
+domain: "memory"
 ---
 
 ## Guidelines

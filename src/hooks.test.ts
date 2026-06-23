@@ -421,6 +421,7 @@ describe("createHookHandlers topic switch flow", () => {
     definition: {
       triggers: ["chat"],
       examples: ["hi"],
+      domain: "chat",
       keywords: ["hi", "謝謝"],
       prompt: "## Guidelines\n\n- Reply warmly.",
     },
@@ -430,6 +431,7 @@ describe("createHookHandlers topic switch flow", () => {
     definition: {
       triggers: ["git"],
       examples: ["commit this"],
+      domain: "git",
       keywords: ["commit"],
       prompt: "## Guidelines\n\n- Use git carefully.",
     },
@@ -469,6 +471,7 @@ describe("createHookHandlers topic switch flow", () => {
         reason: "User is chatting",
         keywords: ["topic", "flow"],
         topic: "User is chatting casually.",
+        domain: "chat",
         topicChanged: false,
         topicChangeReason: "initial",
         confidence: 0.9,
@@ -655,6 +658,7 @@ describe("createHookHandlers topic switch flow", () => {
     const topicContext = {
       keywords: ["comit"],
       topic: "User wants a git commit.",
+      domain: "git",
       topicChanged: false,
       topicChangeReason: "initial" as const,
       complexity: "low" as const,
@@ -676,6 +680,9 @@ describe("createHookHandlers topic switch flow", () => {
 
     expect(result).toBeUndefined();
     expect(topicChecker).toHaveBeenCalledOnce();
+    expect(topicChecker).toHaveBeenCalledWith(
+      expect.objectContaining({ domains: ["chat", "git"] }),
+    );
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalledWith(
@@ -704,6 +711,7 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["comit"],
         topic: "User wants a git commit.",
+        domain: "git",
         topicChanged: true,
         topicChangeReason: "initial" as const,
         complexity: "low" as const,
@@ -736,6 +744,7 @@ describe("createHookHandlers topic switch flow", () => {
       definition: {
         triggers: ["git-ish"],
         examples: [],
+        domain: "git",
         keywords: ["comitx"],
         prompt: "## Guidelines\n\n- Handle the near match.",
       },
@@ -746,6 +755,7 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["comit"],
         topic: "Ambiguous git-ish request.",
+        domain: "git",
         topicChanged: true,
         topicChangeReason: "initial" as const,
         complexity: "low" as const,
@@ -769,6 +779,7 @@ describe("createHookHandlers topic switch flow", () => {
       definition: {
         triggers: ["deploy"],
         examples: [],
+        domain: "infra",
         keywords: ["deploy"],
         prompt: "## Guidelines\n\n- Be careful with deployment.",
       },
@@ -779,6 +790,7 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["deploy"],
         topic: "User wants deployment.",
+        domain: "infra",
         topicChanged: true,
         topicChangeReason: "initial" as const,
         complexity: "high" as const,
@@ -796,6 +808,46 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).toHaveBeenCalledOnce();
   });
 
+  it("does not compare keywords outside the selected topic domain", async () => {
+    const docsIntent = {
+      id: "docs-commit",
+      definition: {
+        triggers: ["docs"],
+        examples: [],
+        domain: "docs",
+        keywords: ["documentation"],
+        prompt: "## Guidelines\n\n- Write docs.",
+      },
+    };
+    const { handlers, classifier, instructionWriter } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [versionControlIntent, docsIntent],
+      topicChecker: vi.fn().mockResolvedValue({
+        keywords: ["commit"],
+        topic: "User wants docs work.",
+        domain: "docs",
+        topicChanged: true,
+        topicChangeReason: "initial" as const,
+        complexity: "low" as const,
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "commit this",
+        messages: [{ role: "user", content: "commit this" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
+    expect(instructionWriter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ intent: "social-casual" }),
+      }),
+    );
+  });
+
   it("does not use topic keyword similarity when the matched intent is denied", async () => {
     const { handlers, classifier } = createTopicFlowHarness({
       historicalIntents: [],
@@ -807,6 +859,7 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["commit"],
         topic: "User wants a git commit.",
+        domain: "git",
         topicChanged: true,
         topicChangeReason: "initial" as const,
         complexity: "low" as const,
@@ -840,6 +893,7 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["commit"],
         topic: "User is still discussing a git commit.",
+        domain: "git",
         topicChanged: false,
         topicChangeReason: "same-topic" as const,
         complexity: "low" as const,

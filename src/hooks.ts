@@ -202,6 +202,7 @@ function scoreTopicKeywordSimilarity(
 
 function findTopicKeywordSimilarityIntent(
   latest: string,
+  domain: string,
   topicKeywords: readonly string[],
   intents: readonly IntentCatalogEntry[],
 ):
@@ -225,6 +226,8 @@ function findTopicKeywordSimilarityIntent(
   let secondBestScore = 0;
 
   for (const intent of intents) {
+    if (intent.definition.domain !== domain) continue;
+
     let intentBest:
       | { topicKeyword: string; intentKeyword: string; score: number }
       | undefined;
@@ -258,6 +261,12 @@ function findTopicKeywordSimilarityIntent(
   // ponytail: simple ambiguity guard; replace with domain mapper if this grows.
   if (secondBestScore >= 0.8 && best.score - secondBestScore < 0.15) return;
   return best;
+}
+
+function collectIntentDomains(
+  intents: readonly IntentCatalogEntry[],
+): string[] {
+  return [...new Set(intents.map((intent) => intent.definition.domain))].sort();
 }
 
 const SESSION_END_REASONS_THAT_DELETE_FILE = new Set([
@@ -384,6 +393,7 @@ export function createHookHandlers(deps: HookDeps) {
       sessionId: params.ctx.sessionId,
       conversation: params.conversation,
       latest: params.latestUserMessage,
+      domains: collectIntentDomains(params.availableIntents),
       history: params.historicalIntents,
       messageProvider: params.ctx.messageProvider,
       modelRef: params.modelRef,
@@ -405,6 +415,7 @@ export function createHookHandlers(deps: HookDeps) {
       if (topicContext) {
         const topicKeywordSimilarityMatch = findTopicKeywordSimilarityIntent(
           params.latestUserMessage,
+          topicContext.domain,
           topicContext.keywords,
           params.availableIntents,
         );

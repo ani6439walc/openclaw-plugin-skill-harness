@@ -246,6 +246,20 @@ describe("buildTopicSwitchPrompt", () => {
     );
   });
 
+  it("includes domain candidates when provided", () => {
+    const prompt = buildTopicSwitchPrompt({
+      latest: "commit this",
+      history: [],
+      domains: ["chat", "git"],
+    });
+
+    expect(prompt).toContain("<domain_candidates>");
+    expect(prompt).toContain("- chat");
+    expect(prompt).toContain("- git");
+    expect(prompt).toContain('"domain": "git"');
+    expect(prompt).toContain("domain must be one of the candidates");
+  });
+
   it("includes recent conversation context for first-turn topic checks", () => {
     const prompt = buildTopicSwitchPrompt({
       latest: "我之前那個奇怪的想法",
@@ -326,15 +340,18 @@ describe("parseTopicSwitchResult", () => {
       JSON.stringify({
         keywords: [" Topic ", "Checker", "topic", "Flow"],
         topic: " User is continuing work on the topic checker flow. ",
+        domain: "coding",
         topicChanged: false,
         topicChangeReason: "same-topic",
         complexity: "medium",
       }),
+      { domains: ["coding", "chat"] },
     );
 
     expect(result).toEqual({
       keywords: ["topic", "checker", "flow"],
       topic: "User is continuing work on the topic checker flow.",
+      domain: "coding",
       topicChanged: false,
       topicChangeReason: "same-topic",
       complexity: "medium",
@@ -344,11 +361,13 @@ describe("parseTopicSwitchResult", () => {
   it("accepts fenced JSON and rejects invalid reasons", () => {
     expect(
       parseTopicSwitchResult(
-        '```json\n{"keywords":["deploy"],"topic":"User is switching to deployment work.","topicChanged":true,"topicChangeReason":"transition-marker","complexity":"high"}\n```',
+        '```json\n{"keywords":["deploy"],"topic":"User is switching to deployment work.","domain":"infra","topicChanged":true,"topicChangeReason":"transition-marker","complexity":"high"}\n```',
+        { domains: ["infra"] },
       ),
     ).toMatchObject({
       keywords: ["deploy"],
       topic: "User is switching to deployment work.",
+      domain: "infra",
       topicChanged: true,
       topicChangeReason: "transition-marker",
       complexity: "high",
@@ -359,10 +378,12 @@ describe("parseTopicSwitchResult", () => {
         JSON.stringify({
           keywords: ["deploy"],
           topic: "User is switching to deployment work.",
+          domain: "infra",
           topicChanged: true,
           topicChangeReason: "invalid",
           complexity: "medium",
         }),
+        { domains: ["infra"] },
       ),
     ).toBeUndefined();
 
@@ -371,10 +392,41 @@ describe("parseTopicSwitchResult", () => {
         JSON.stringify({
           keywords: ["deploy"],
           topic: "User is switching to deployment work.",
+          domain: "infra",
           topicChanged: true,
           topicChangeReason: "transition-marker",
           complexity: "huge",
         }),
+        { domains: ["infra"] },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("rejects missing or out-of-union domains when domains are required", () => {
+    expect(
+      parseTopicSwitchResult(
+        JSON.stringify({
+          keywords: ["commit"],
+          topic: "User wants a git commit.",
+          topicChanged: true,
+          topicChangeReason: "initial",
+          complexity: "low",
+        }),
+        { domains: ["git"] },
+      ),
+    ).toBeUndefined();
+
+    expect(
+      parseTopicSwitchResult(
+        JSON.stringify({
+          keywords: ["commit"],
+          topic: "User wants a git commit.",
+          domain: "chat",
+          topicChanged: true,
+          topicChangeReason: "initial",
+          complexity: "low",
+        }),
+        { domains: ["git"] },
       ),
     ).toBeUndefined();
   });
@@ -385,14 +437,17 @@ describe("parseTopicSwitchResult", () => {
         JSON.stringify({
           keywords: ["fresh", "topic"],
           topic: "User is starting a fresh topic.",
+          domain: "coding",
           topicChanged: false,
           topicChangeReason: "initial",
           complexity: "low",
         }),
+        { domains: ["coding"] },
       ),
     ).toMatchObject({
       keywords: ["fresh", "topic"],
       topic: "User is starting a fresh topic.",
+      domain: "coding",
       topicChanged: true,
       topicChangeReason: "initial",
       complexity: "low",

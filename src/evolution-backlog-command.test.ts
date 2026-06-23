@@ -203,6 +203,7 @@ describe("evolution-backlog command", () => {
       `---
 triggers: [one]
 examples: [one]
+domain: test
 ---
 ## Guidelines
 - Do it.

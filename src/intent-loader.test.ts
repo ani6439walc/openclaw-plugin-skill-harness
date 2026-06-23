@@ -27,6 +27,7 @@ triggers:
   - "User manages agent workflow"
 examples:
   - "spawn a subagent"
+domain: "agent"
 keywords:
   - "spawn"
   - "派代理"
@@ -45,6 +46,7 @@ keywords:
         definition: {
           triggers: ["User manages agent workflow"],
           examples: ["spawn a subagent"],
+          domain: "agent",
           keywords: ["spawn", "派代理"],
           prompt: "## Guidelines\n- Route by filename.",
         },
@@ -60,6 +62,7 @@ triggers:
   - "User chats casually"
 examples:
   - "hi"
+domain: "chat"
 ---
 ## Guidelines
 - Reply naturally.
@@ -72,15 +75,28 @@ examples:
     expect(catalog.get()[0]?.definition.keywords).toEqual([]);
   });
 
-  it("skips files without triggers", () => {
+  it("skips files without triggers or domain", () => {
     fs.writeFileSync(
       path.join(root, "intents", "empty.md"),
       `---
 examples:
   - "example"
+domain: "test"
 ---
 ## Guidelines
 - Missing triggers.
+`,
+    );
+    fs.writeFileSync(
+      path.join(root, "intents", "missing-domain.md"),
+      `---
+triggers:
+  - "trigger"
+examples:
+  - "example"
+---
+## Guidelines
+- Missing domain.
 `,
     );
 

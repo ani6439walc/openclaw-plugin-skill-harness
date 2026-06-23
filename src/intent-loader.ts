@@ -130,6 +130,7 @@ export class IntentCatalog {
       const examples = Array.isArray(data.examples)
         ? data.examples.filter((x): x is string => typeof x === "string")
         : [];
+      const domain = typeof data.domain === "string" ? data.domain.trim() : "";
       const keywords = Array.isArray(data.keywords)
         ? data.keywords.filter(
             (x): x is string => typeof x === "string" && !!x.trim(),
@@ -144,10 +145,19 @@ export class IntentCatalog {
         }
         continue;
       }
+      if (!domain) {
+        if (!silent) {
+          logger.warn(
+            `skipping invalid intent file: ${entry}. (missing domain)`,
+          );
+        }
+        continue;
+      }
 
       const definition: IntentDefinition = {
         triggers,
         examples,
+        domain,
         keywords,
         prompt: parsed.content.trim(),
       };

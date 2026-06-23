@@ -6,6 +6,7 @@ examples:
   - "Which of these two approaches is better?"
   - "What's the difference between last month's and this month's data?"
   - "How does the Japan trip compare to the Chiayi trip?"
+domain: "memory"
 ---
 
 ## Guidelines

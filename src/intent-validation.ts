@@ -52,6 +52,7 @@ export function validateIntentDirectory(
               typeof value === "string" && !!value.trim(),
           )
         : [];
+      const domainRaw = data.domain;
       const keywordsRaw = data.keywords;
       const body = parsed.content.trim();
 
@@ -64,6 +65,9 @@ export function validateIntentDirectory(
         errors.push(`${file}: triggers must contain at least one string`);
       if (examples.length === 0)
         errors.push(`${file}: examples must contain at least one string`);
+      if (typeof domainRaw !== "string" || !domainRaw.trim()) {
+        errors.push(`${file}: domain must be a non-empty string`);
+      }
       if (
         keywordsRaw !== undefined &&
         (!Array.isArray(keywordsRaw) ||

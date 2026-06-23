@@ -8,6 +8,7 @@ examples:
   - "wj/6u ek72;3042k7"
   - "can u hlpe me fix thsi"
   - "Check the git sttus"
+domain: "text-editing"
 ---
 
 ## Guidelines

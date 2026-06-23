@@ -35,6 +35,7 @@ describe("runTopicSwitchSubagent", () => {
           text: JSON.stringify({
             keywords: [" Topic ", "Checker"],
             topic: "User is continuing work on the topic checker.",
+            domain: "coding",
             topicChanged: false,
             topicChangeReason: "same-topic",
             complexity: "medium",
@@ -63,6 +64,7 @@ describe("runTopicSwitchSubagent", () => {
         },
       ],
       latest: "continue topic checker",
+      domains: ["coding", "chat"],
       history: [
         {
           input: "plan topic checker",
@@ -77,6 +79,7 @@ describe("runTopicSwitchSubagent", () => {
     expect(result).toEqual({
       keywords: ["topic", "checker"],
       topic: "User is continuing work on the topic checker.",
+      domain: "coding",
       topicChanged: false,
       topicChangeReason: "same-topic",
       complexity: "medium",

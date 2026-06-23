@@ -8,6 +8,7 @@ examples:
   - "Nice weather today"
   - "Feeling a bit tired today"
   - "hi"
+domain: "chat"
 keywords:
   - "hi"
   - "hello"

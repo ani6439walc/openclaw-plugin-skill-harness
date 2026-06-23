@@ -18,6 +18,7 @@ triggers:
   - "trigger"
 examples:
   - "example"
+domain: "test"
 keywords:
   - "hi"
 ---
@@ -91,6 +92,7 @@ name: One
 enabled: true
 triggers: ["trigger"]
 examples: ["example"]
+domain: "test"
 ---
 ## Guidelines
 - Do it.
@@ -119,6 +121,7 @@ examples: ["example"]
       `---
 triggers: ["trigger"]
 examples: ["example"]
+domain: "test"
 keywords:
   - "hi"
   - ""
@@ -136,6 +139,62 @@ keywords:
     expect(result.valid).toBe(false);
     expect(result.errors.join("\n")).toContain(
       "one.md: keywords must contain only non-empty strings",
+    );
+  });
+
+  it("rejects missing, non-string, or empty domain", () => {
+    fs.writeFileSync(
+      path.join(dir, "missing.md"),
+      `---
+triggers: ["trigger"]
+examples: ["example"]
+---
+## Guidelines
+- Do it.
+
+## Response Strategy
+- Respond.
+`,
+    );
+    fs.writeFileSync(
+      path.join(dir, "invalid.md"),
+      `---
+triggers: ["trigger"]
+examples: ["example"]
+domain: 123
+---
+## Guidelines
+- Do it.
+
+## Response Strategy
+- Respond.
+`,
+    );
+    fs.writeFileSync(
+      path.join(dir, "empty.md"),
+      `---
+triggers: ["trigger"]
+examples: ["example"]
+domain: ""
+---
+## Guidelines
+- Do it.
+
+## Response Strategy
+- Respond.
+`,
+    );
+
+    const result = validateIntentDirectory(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join("\n")).toContain(
+      "missing.md: domain must be a non-empty string",
+    );
+    expect(result.errors.join("\n")).toContain(
+      "invalid.md: domain must be a non-empty string",
+    );
+    expect(result.errors.join("\n")).toContain(
+      "empty.md: domain must be a non-empty string",
     );
   });
 
