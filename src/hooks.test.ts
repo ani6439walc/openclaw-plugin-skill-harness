@@ -425,16 +425,27 @@ describe("createHookHandlers topic switch flow", () => {
       prompt: "## Guidelines\n\n- Reply warmly.",
     },
   };
+  const versionControlIntent = {
+    id: "version-control",
+    definition: {
+      triggers: ["git"],
+      examples: ["commit this"],
+      keywords: ["commit"],
+      prompt: "## Guidelines\n\n- Use git carefully.",
+    },
+  };
 
   function createTopicFlowHarness(params: {
     historicalIntents: ReturnType<
       typeof defaultTracker.getHistoricalIntentRecords
     >;
     configRaw?: Parameters<typeof resolveConfig>[0];
+    intents?: (typeof intent)[];
     classifier?: ReturnType<typeof vi.fn>;
     topicChecker?: ReturnType<typeof vi.fn>;
     instructionWriter?: ReturnType<typeof vi.fn>;
   }) {
+    const intents = params.intents ?? [intent];
     const record = vi.fn();
     const tracker = {
       getHistoricalIntentRecords: vi
@@ -445,22 +456,24 @@ describe("createHookHandlers topic switch flow", () => {
       write: vi.fn(),
     };
     const catalog = {
-      count: 1,
+      count: intents.length,
       filterForAgent: vi.fn((config, agentId) =>
-        filterIntentsForAgent([intent], config, agentId),
+        filterIntentsForAgent(intents, config, agentId),
       ),
-      get: vi.fn().mockReturnValue([intent]),
+      get: vi.fn().mockReturnValue(intents),
     };
-    const classifier = params.classifier ?? vi.fn().mockResolvedValue({
-      intent: "social-casual",
-      reason: "User is chatting",
-      keywords: ["topic", "flow"],
-      topic: "User is chatting casually.",
-      topicChanged: false,
-      topicChangeReason: "initial",
-      confidence: 0.9,
-      complexity: "medium" as const,
-    });
+    const classifier =
+      params.classifier ??
+      vi.fn().mockResolvedValue({
+        intent: "social-casual",
+        reason: "User is chatting",
+        keywords: ["topic", "flow"],
+        topic: "User is chatting casually.",
+        topicChanged: false,
+        topicChangeReason: "initial",
+        confidence: 0.9,
+        complexity: "medium" as const,
+      });
     const topicChecker = params.topicChecker ?? vi.fn();
     const instructionWriter =
       params.instructionWriter ??
@@ -505,7 +518,7 @@ describe("createHookHandlers topic switch flow", () => {
     sessionKey: "agent:main:direct:123",
   };
 
-  it("uses A1 keyword exact match to inject a prompt without subagent calls", async () => {
+  it("uses exact keyword match to inject a prompt without subagent calls", async () => {
     const fastEvent = {
       prompt: " 謝 謝 ",
       messages: [
@@ -574,7 +587,7 @@ describe("createHookHandlers topic switch flow", () => {
         topicChangeReason: "keyword-match",
       },
     },
-  ])("marks A1 keyword matches as $name", async ({ history, expected }) => {
+  ])("marks exact keyword matches as $name", async ({ history, expected }) => {
     const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [history],
     });
@@ -600,7 +613,7 @@ describe("createHookHandlers topic switch flow", () => {
     );
   });
 
-  it("does not use A1 for unmatched short confirmations", async () => {
+  it("does not use exact keyword match for unmatched short confirmations", async () => {
     const { handlers, topicChecker } = createTopicFlowHarness({
       historicalIntents: [],
       topicChecker: vi.fn().mockResolvedValue(undefined),
@@ -617,7 +630,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(topicChecker).toHaveBeenCalledOnce();
   });
 
-  it("does not use A1 when the matched intent is denied", async () => {
+  it("does not use exact keyword match when the matched intent is denied", async () => {
     const { handlers, topicChecker } = createTopicFlowHarness({
       historicalIntents: [],
       configRaw: {
@@ -636,6 +649,214 @@ describe("createHookHandlers topic switch flow", () => {
     );
 
     expect(topicChecker).toHaveBeenCalledOnce();
+  });
+
+  it("uses topic keyword similarity to skip the intent classifier", async () => {
+    const topicContext = {
+      keywords: ["comit"],
+      topic: "User wants a git commit.",
+      topicChanged: false,
+      topicChangeReason: "initial" as const,
+      complexity: "low" as const,
+    };
+    const { handlers, classifier, topicChecker, instructionWriter, record } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        intents: [intent, versionControlIntent],
+        topicChecker: vi.fn().mockResolvedValue(topicContext),
+      });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "please comit this",
+        messages: [{ role: "user", content: "please comit this" }],
+      } as never,
+      ctx,
+    );
+
+    expect(result).toBeUndefined();
+    expect(topicChecker).toHaveBeenCalledOnce();
+    expect(classifier).not.toHaveBeenCalled();
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              intent: "version-control",
+              reason: "Topic keyword similarity match: comit -> commit",
+              keywords: ["comit", "commit"],
+              topic: "User wants a git commit.",
+              confidence: expect.closeTo(0.833, 0.01),
+              topicChanged: false,
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("uses topic keyword similarity to write an instruction on changed topics", async () => {
+    const { handlers, classifier, instructionWriter } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      topicChecker: vi.fn().mockResolvedValue({
+        keywords: ["comit"],
+        topic: "User wants a git commit.",
+        topicChanged: true,
+        topicChangeReason: "initial" as const,
+        complexity: "low" as const,
+      }),
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "please comit this",
+        messages: [{ role: "user", content: "please comit this" }],
+      } as never,
+      ctx,
+    );
+
+    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(classifier).not.toHaveBeenCalled();
+    expect(instructionWriter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          intent: "version-control",
+          topicChanged: true,
+        }),
+      }),
+    );
+  });
+
+  it("falls back to the classifier when topic keyword similarity is ambiguous", async () => {
+    const secondIntent = {
+      id: "almost-version-control",
+      definition: {
+        triggers: ["git-ish"],
+        examples: [],
+        keywords: ["comitx"],
+        prompt: "## Guidelines\n\n- Handle the near match.",
+      },
+    };
+    const { handlers, classifier } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [versionControlIntent, secondIntent],
+      topicChecker: vi.fn().mockResolvedValue({
+        keywords: ["comit"],
+        topic: "Ambiguous git-ish request.",
+        topicChanged: true,
+        topicChangeReason: "initial" as const,
+        complexity: "low" as const,
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "please comit",
+        messages: [{ role: "user", content: "please comit" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to the classifier for high-risk topic keyword similarity matches", async () => {
+    const deployIntent = {
+      id: "deployment",
+      definition: {
+        triggers: ["deploy"],
+        examples: [],
+        keywords: ["deploy"],
+        prompt: "## Guidelines\n\n- Be careful with deployment.",
+      },
+    };
+    const { handlers, classifier } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [deployIntent],
+      topicChecker: vi.fn().mockResolvedValue({
+        keywords: ["deploy"],
+        topic: "User wants deployment.",
+        topicChanged: true,
+        topicChangeReason: "initial" as const,
+        complexity: "high" as const,
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "deploy production",
+        messages: [{ role: "user", content: "deploy production" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
+  });
+
+  it("does not use topic keyword similarity when the matched intent is denied", async () => {
+    const { handlers, classifier } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [versionControlIntent],
+      configRaw: {
+        model: "google/test-intent",
+        intentDeny: { main: ["version-control"] },
+      },
+      topicChecker: vi.fn().mockResolvedValue({
+        keywords: ["commit"],
+        topic: "User wants a git commit.",
+        topicChanged: true,
+        topicChangeReason: "initial" as const,
+        complexity: "low" as const,
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "commit this",
+        messages: [{ role: "user", content: "commit this" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
+  });
+
+  it("keeps same-topic inheritance ahead of topic keyword similarity", async () => {
+    const { handlers, classifier, instructionWriter } = createTopicFlowHarness({
+      historicalIntents: [
+        {
+          input: "commit this",
+          intent: "version-control",
+          keywords: ["commit"],
+          topic: "User wants a git commit.",
+          confidence: 0.9,
+          complexity: "medium",
+        },
+      ],
+      intents: [versionControlIntent],
+      topicChecker: vi.fn().mockResolvedValue({
+        keywords: ["commit"],
+        topic: "User is still discussing a git commit.",
+        topicChanged: false,
+        topicChangeReason: "same-topic" as const,
+        complexity: "low" as const,
+      }),
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "commit it",
+        messages: [{ role: "user", content: "commit it" }],
+      } as never,
+      ctx,
+    );
+
+    expect(result).toBeUndefined();
+    expect(classifier).not.toHaveBeenCalled();
+    expect(instructionWriter).not.toHaveBeenCalled();
   });
 
   it("skips hint injection when confidence is undefined (treated as 0)", async () => {

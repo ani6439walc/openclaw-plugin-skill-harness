@@ -120,45 +120,144 @@ function resolveIntentId(intent: string | undefined): string | undefined {
   return intent?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
 }
 
-function normalizeFastPathKeyword(value: string): string {
+function normalizeKeywordForMatching(value: string): string {
   return value.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
 }
 
-const normalizedFastPathKeywords = new WeakMap<
+const normalizedIntentKeywords = new WeakMap<
   IntentCatalogEntry,
   Array<{ normalized: string; keyword: string }>
 >();
+const HIGH_RISK_KEYWORDS_REGEX =
+  /\b(delete|remove|rm|deploy|publish|production|prod|credential|token|secret|key)\b/i;
 
-function getNormalizedFastPathKeywords(
+function getNormalizedIntentKeywords(
   intent: IntentCatalogEntry,
 ): Array<{ normalized: string; keyword: string }> {
-  const cached = normalizedFastPathKeywords.get(intent);
+  const cached = normalizedIntentKeywords.get(intent);
   if (cached) return cached;
 
   const keywords = intent.definition.keywords.map((keyword) => ({
-    normalized: normalizeFastPathKeyword(keyword),
+    normalized: normalizeKeywordForMatching(keyword),
     keyword: keyword.trim(),
   }));
-  normalizedFastPathKeywords.set(intent, keywords);
+  normalizedIntentKeywords.set(intent, keywords);
   return keywords;
 }
 
-function findFastPathA1Intent(
+function findExactKeywordIntent(
   latest: string,
   intents: readonly IntentCatalogEntry[],
-):
-  | { intent: IntentCatalogEntry; keyword: string }
-  | undefined {
-  const normalizedLatest = normalizeFastPathKeyword(latest);
+): { intent: IntentCatalogEntry; keyword: string } | undefined {
+  const normalizedLatest = normalizeKeywordForMatching(latest);
   if (!normalizedLatest) return;
 
   for (const intent of intents) {
-    for (const keyword of getNormalizedFastPathKeywords(intent)) {
+    for (const keyword of getNormalizedIntentKeywords(intent)) {
       if (keyword.normalized === normalizedLatest) {
         return { intent, keyword: keyword.keyword };
       }
     }
   }
+}
+
+function levenshteinSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (!a || !b) return 0;
+
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 0; i < a.length; i += 1) {
+    const current = [i + 1];
+    for (let j = 0; j < b.length; j += 1) {
+      current[j + 1] =
+        a[i] === b[j]
+          ? previous[j]
+          : Math.min(previous[j], previous[j + 1], current[j]) + 1;
+    }
+    previous = current;
+  }
+
+  return 1 - previous[b.length] / Math.max(a.length, b.length);
+}
+
+function scoreTopicKeywordSimilarity(
+  topicKeyword: string,
+  intentKeyword: string,
+) {
+  const topic = normalizeKeywordForMatching(topicKeyword);
+  const intent = normalizeKeywordForMatching(intentKeyword);
+  if (!topic || !intent) return 0;
+  if (topic === intent) return 1;
+
+  if (
+    Math.min(topic.length, intent.length) >= 4 &&
+    (topic.includes(intent) || intent.includes(topic))
+  ) {
+    return 0.9;
+  }
+  if (topic.length < 4 || intent.length < 4) return 0;
+
+  return levenshteinSimilarity(topic, intent);
+}
+
+function findTopicKeywordSimilarityIntent(
+  latest: string,
+  topicKeywords: readonly string[],
+  intents: readonly IntentCatalogEntry[],
+):
+  | {
+      intent: IntentCatalogEntry;
+      topicKeyword: string;
+      intentKeyword: string;
+      score: number;
+    }
+  | undefined {
+  if (HIGH_RISK_KEYWORDS_REGEX.test(latest)) return;
+
+  let best:
+    | {
+        intent: IntentCatalogEntry;
+        topicKeyword: string;
+        intentKeyword: string;
+        score: number;
+      }
+    | undefined;
+  let secondBestScore = 0;
+
+  for (const intent of intents) {
+    let intentBest:
+      | { topicKeyword: string; intentKeyword: string; score: number }
+      | undefined;
+
+    for (const topicKeyword of topicKeywords) {
+      for (const intentKeyword of getNormalizedIntentKeywords(intent)) {
+        const score = scoreTopicKeywordSimilarity(
+          topicKeyword,
+          intentKeyword.keyword,
+        );
+        if (!intentBest || score > intentBest.score) {
+          intentBest = {
+            topicKeyword,
+            intentKeyword: intentKeyword.keyword,
+            score,
+          };
+        }
+      }
+    }
+
+    if (!intentBest) continue;
+    if (!best || intentBest.score > best.score) {
+      secondBestScore = best?.score ?? 0;
+      best = { intent, ...intentBest };
+    } else {
+      secondBestScore = Math.max(secondBestScore, intentBest.score);
+    }
+  }
+
+  if (!best || best.score < 0.8) return;
+  // ponytail: simple ambiguity guard; replace with domain mapper if this grows.
+  if (secondBestScore >= 0.8 && best.score - secondBestScore < 0.15) return;
+  return best;
 }
 
 const SESSION_END_REASONS_THAT_DELETE_FILE = new Set([
@@ -295,25 +394,58 @@ export function createHookHandlers(deps: HookDeps) {
     const useInheritedIntentClassifier =
       topicContext?.topicChanged === false && latestHistoricalIntent;
 
-    const result = useInheritedIntentClassifier
-      ? runInheritedIntentClassifier(latestHistoricalIntent, topicContext)
-      : await classifier({
-          api,
-          config: params.refreshedConfig,
-          agentId: params.effectiveAgentId,
-          sessionKey: params.resolvedSessionKey,
-          sessionId: params.ctx.sessionId,
-          conversation: params.conversation,
-          latest: params.latestUserMessage,
-          messageProvider: params.ctx.messageProvider,
-          channelId: params.ctx.channelId,
-          modelRef: params.modelRef,
-          intents: params.availableIntents,
-          topicContext: topicContext ?? undefined,
-        });
+    let result: IntentionResult | undefined;
+    let topicKeywordSimilarityMatched = false;
+    if (useInheritedIntentClassifier) {
+      result = runInheritedIntentClassifier(
+        latestHistoricalIntent,
+        topicContext,
+      );
+    } else {
+      if (topicContext) {
+        const topicKeywordSimilarityMatch = findTopicKeywordSimilarityIntent(
+          params.latestUserMessage,
+          topicContext.keywords,
+          params.availableIntents,
+        );
+        if (topicKeywordSimilarityMatch) {
+          topicKeywordSimilarityMatched = true;
+          result = {
+            intent: topicKeywordSimilarityMatch.intent.id,
+            reason: `Topic keyword similarity match: ${topicKeywordSimilarityMatch.topicKeyword} -> ${topicKeywordSimilarityMatch.intentKeyword}`,
+            keywords: [
+              topicKeywordSimilarityMatch.topicKeyword,
+              topicKeywordSimilarityMatch.intentKeyword,
+            ],
+            topic: topicContext.topic,
+            topicChanged: topicContext.topicChanged,
+            topicChangeReason: topicContext.topicChangeReason,
+            previousTopic: latestHistoricalIntent?.topic,
+            confidence: topicKeywordSimilarityMatch.score,
+            complexity: topicContext.complexity,
+          };
+        }
+      }
+      result ??= await classifier({
+        api,
+        config: params.refreshedConfig,
+        agentId: params.effectiveAgentId,
+        sessionKey: params.resolvedSessionKey,
+        sessionId: params.ctx.sessionId,
+        conversation: params.conversation,
+        latest: params.latestUserMessage,
+        messageProvider: params.ctx.messageProvider,
+        channelId: params.ctx.channelId,
+        modelRef: params.modelRef,
+        intents: params.availableIntents,
+        topicContext: topicContext ?? undefined,
+      });
+    }
 
     if (result) {
-      applyTopicContextToResult(result, topicContext, latestHistoricalIntent);
+      if (!topicKeywordSimilarityMatched) {
+        applyTopicContextToResult(result, topicContext, latestHistoricalIntent);
+      }
     }
     return result;
   }
@@ -381,21 +513,21 @@ export function createHookHandlers(deps: HookDeps) {
         refreshedConfig,
         routing.effectiveAgentId,
       );
-      const fastPathA1Match = findFastPathA1Intent(
+      const exactKeywordMatch = findExactKeywordIntent(
         latestUserMessage,
         availableIntents,
       );
-      if (fastPathA1Match) {
+      if (exactKeywordMatch) {
         const latestHistoricalIntent =
           historicalIntents[historicalIntents.length - 1];
         const sameIntent =
           resolveIntentId(latestHistoricalIntent?.intent) ===
-          fastPathA1Match.intent.id.toLowerCase();
+          exactKeywordMatch.intent.id.toLowerCase();
         const result: IntentionResult = {
-          intent: fastPathA1Match.intent.id,
-          reason: `Fast Path A1 keyword exact match: ${fastPathA1Match.keyword}`,
-          keywords: [fastPathA1Match.keyword],
-          topic: `Fast-path exact match for ${fastPathA1Match.intent.id}.`,
+          intent: exactKeywordMatch.intent.id,
+          reason: `Exact keyword match: ${exactKeywordMatch.keyword}`,
+          keywords: [exactKeywordMatch.keyword],
+          topic: `Exact keyword match for ${exactKeywordMatch.intent.id}.`,
           previousTopic: latestHistoricalIntent?.topic,
           topicChanged: latestHistoricalIntent ? !sameIntent : true,
           topicChangeReason: !latestHistoricalIntent

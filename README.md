@@ -410,6 +410,13 @@ fails, the plugin logs and falls back to classifier-only behavior.
 - A match injects the intent body directly and skips the topic checker, classifier, and instruction writer.
 - Topic reasons are `initial`, `same-topic`, or `keyword-match`; update live runtime intents under `$OPENCLAW_STATE_DIR/plugins/intention-hint/intents`.
 
+### Fast Path A2 Keyword Similarity
+
+- After the topic checker runs, extracted topic `keywords` are compared with enabled intent frontmatter `keywords`.
+- A clear similarity match skips the intent classifier, then still runs the instruction writer before injection.
+- Ambiguous, low-score, high-risk, or denied-intent matches fall back to the normal classifier.
+- Same-topic inheritance remains earlier than A2, so `topicChanged=false` turns still record only and return.
+
 ### Instruction Generation
 
 After an intent is resolved, the plugin reads the matched intent Markdown body
