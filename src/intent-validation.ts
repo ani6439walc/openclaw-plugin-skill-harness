@@ -52,6 +52,7 @@ export function validateIntentDirectory(
               typeof value === "string" && !!value.trim(),
           )
         : [];
+      const keywordsRaw = data.keywords;
       const body = parsed.content.trim();
 
       for (const staleField of ["id", "name", "enabled"]) {
@@ -63,6 +64,15 @@ export function validateIntentDirectory(
         errors.push(`${file}: triggers must contain at least one string`);
       if (examples.length === 0)
         errors.push(`${file}: examples must contain at least one string`);
+      if (
+        keywordsRaw !== undefined &&
+        (!Array.isArray(keywordsRaw) ||
+          keywordsRaw.some(
+            (value) => typeof value !== "string" || !value.trim(),
+          ))
+      ) {
+        errors.push(`${file}: keywords must contain only non-empty strings`);
+      }
       if (!body) errors.push(`${file}: Markdown body is empty`);
 
       const key = id.toLowerCase();

@@ -27,6 +27,9 @@ triggers:
   - "User manages agent workflow"
 examples:
   - "spawn a subagent"
+keywords:
+  - "spawn"
+  - "派代理"
 ---
 ## Guidelines
 - Route by filename.
@@ -42,10 +45,31 @@ examples:
         definition: {
           triggers: ["User manages agent workflow"],
           examples: ["spawn a subagent"],
+          keywords: ["spawn", "派代理"],
           prompt: "## Guidelines\n- Route by filename.",
         },
       },
     ]);
+  });
+
+  it("defaults missing keyword metadata to an empty list", () => {
+    fs.writeFileSync(
+      path.join(root, "intents", "chat.md"),
+      `---
+triggers:
+  - "User chats casually"
+examples:
+  - "hi"
+---
+## Guidelines
+- Reply naturally.
+`,
+    );
+
+    const catalog = IntentCatalog.create(root);
+    expect(catalog.load("intents", { silent: true })).toBe(1);
+
+    expect(catalog.get()[0]?.definition.keywords).toEqual([]);
   });
 
   it("skips files without triggers", () => {

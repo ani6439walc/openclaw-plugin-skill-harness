@@ -177,7 +177,7 @@ const EvolutionSchema = z
     model: z.string().optional().catch(undefined),
     modelFallback: z.string().optional().catch(undefined),
     thinking: ThinkLevelSchema,
-    timeoutMs: boundedInt(30_000, 250, 120_000),
+    timeoutMs: boundedInt(30_000, 250, 600_000),
     triggers: z
       .object({
         skillCandidate: z

@@ -895,6 +895,38 @@ describe("SessionTracker", () => {
     it("should return an empty array when the session does not exist", () => {
       expect(tracker.getHistoricalIntentRecords("missing-session")).toEqual([]);
     });
+
+    it("should preserve keyword-match topic change metadata", () => {
+      tracker.record("keyword-match-session", {
+        current: {
+          input: "hi",
+          intent: {
+            result: {
+              intent: "social-casual",
+              reason: "Fast Path A1 keyword exact match: hi",
+              keywords: ["hi"],
+              topic: "Fast-path exact match for social-casual.",
+              topicChanged: true,
+              topicChangeReason: "keyword-match",
+              confidence: 1,
+              complexity: "low",
+            },
+          },
+        },
+      });
+
+      expect(tracker.getHistoricalIntentRecords("keyword-match-session")).toEqual(
+        [
+          expect.objectContaining({
+            input: "hi",
+            intent: "social-casual",
+            keywords: ["hi"],
+            topicChanged: true,
+            topicChangeReason: "keyword-match",
+          }),
+        ],
+      );
+    });
   });
 
   describe("getCurrentState", () => {

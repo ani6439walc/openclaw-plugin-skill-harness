@@ -368,6 +368,7 @@ The classification sub-agent returns JSON:
 - `keywords` are normalized core nouns or short phrases from the latest user message
 - `topic` is a concise natural-language phrase describing the current topic
 - `topicChanged=false` with `topicChangeReason="same-topic"` marks same-topic continuation turns that inherited the previous intent
+- `topicChangeReason="keyword-match"` marks a deterministic frontmatter keyword fast-path match that switched from a previous intent
 - Topic switch metadata is stored in session history; no separate cache or experience store is written
 - Durable session goals are managed by OpenClaw `/goal` and goal tools, not by intention-hint
 
@@ -401,6 +402,13 @@ intent classifier, reuses the latest historical intent, uses the checker
 complexity for the latest message, and records the current turn with
 `topicChanged=false` plus `topicChangeReason="same-topic"`. If the checker
 fails, the plugin logs and falls back to classifier-only behavior.
+
+### Fast Path A1 Keyword Matching
+
+- Intent Markdown may include optional frontmatter `keywords` for exact-match fast paths.
+- Matching normalizes Unicode, removes whitespace, and lowercases before comparison.
+- A match injects the intent body directly and skips the topic checker, classifier, and instruction writer.
+- Topic reasons are `initial`, `same-topic`, or `keyword-match`; update live runtime intents under `$OPENCLAW_STATE_DIR/plugins/intention-hint/intents`.
 
 ### Instruction Generation
 

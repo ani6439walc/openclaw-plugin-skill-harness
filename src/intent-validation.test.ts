@@ -18,6 +18,8 @@ triggers:
   - "trigger"
 examples:
   - "example"
+keywords:
+  - "hi"
 ---
 ## Guidelines
 - Do it.
@@ -108,6 +110,32 @@ examples: ["example"]
     );
     expect(result.errors.join("\n")).toContain(
       "one.md: stale frontmatter field enabled",
+    );
+  });
+
+  it("rejects non-string or empty keywords", () => {
+    fs.writeFileSync(
+      path.join(dir, "one.md"),
+      `---
+triggers: ["trigger"]
+examples: ["example"]
+keywords:
+  - "hi"
+  - ""
+  - 123
+---
+## Guidelines
+- Do it.
+
+## Response Strategy
+- Respond.
+`,
+    );
+
+    const result = validateIntentDirectory(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join("\n")).toContain(
+      "one.md: keywords must contain only non-empty strings",
     );
   });
 

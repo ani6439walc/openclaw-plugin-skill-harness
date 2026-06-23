@@ -79,7 +79,7 @@ describe("resolveConfig", () => {
           model: "google/gemini-3-flash",
           modelFallback: "openai/gpt-5-mini",
           thinking: "high",
-          timeoutMs: 200000,
+          timeoutMs: 600000,
           triggers: {
             skillCandidate: { enabled: false, toolCalls: 0 },
             processGap: { toolFailures: 500 },
@@ -100,7 +100,7 @@ describe("resolveConfig", () => {
         model: "google/gemini-3-flash",
         modelFallback: "openai/gpt-5-mini",
         thinking: "high",
-        timeoutMs: 120000,
+        timeoutMs: 600000,
         triggers: {
           skillCandidate: { enabled: false, toolCalls: 1 },
           processGap: { enabled: true, toolFailures: 100 },
