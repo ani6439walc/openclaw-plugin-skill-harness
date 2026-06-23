@@ -28,9 +28,11 @@ triggers:
 examples:
   - "spawn a subagent"
 domain: "agent"
-keywords:
-  - "spawn"
-  - "派代理"
+fastpath:
+  hint: "Route lightweight agent dispatch requests directly."
+  keywords:
+    - "spawn"
+    - "派代理"
 ---
 ## Guidelines
 - Route by filename.
@@ -47,14 +49,17 @@ keywords:
           triggers: ["User manages agent workflow"],
           examples: ["spawn a subagent"],
           domain: "agent",
-          keywords: ["spawn", "派代理"],
+          fastpath: {
+            keywords: ["spawn", "派代理"],
+            hint: "Route lightweight agent dispatch requests directly.",
+          },
           prompt: "## Guidelines\n- Route by filename.",
         },
       },
     ]);
   });
 
-  it("defaults missing keyword metadata to an empty list", () => {
+  it("defaults missing fastpath metadata to an empty keyword list", () => {
     fs.writeFileSync(
       path.join(root, "intents", "chat.md"),
       `---
@@ -72,7 +77,7 @@ domain: "chat"
     const catalog = IntentCatalog.create(root);
     expect(catalog.load("intents", { silent: true })).toBe(1);
 
-    expect(catalog.get()[0]?.definition.keywords).toEqual([]);
+    expect(catalog.get()[0]?.definition.fastpath).toEqual({ keywords: [] });
   });
 
   it("skips files without triggers or domain", () => {

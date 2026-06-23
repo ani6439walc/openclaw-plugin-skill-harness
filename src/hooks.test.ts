@@ -80,6 +80,8 @@ describe("createHookHandlers tracking guards", () => {
       definition: {
         triggers: ["commit"],
         examples: [],
+        domain: "git",
+        fastpath: { keywords: [] },
         prompt: "skill: git-master",
       },
     };
@@ -150,6 +152,8 @@ describe("createHookHandlers tracking guards", () => {
       definition: {
         triggers: ["Unmatched requests"],
         examples: ["help"],
+        domain: "other",
+        fastpath: { keywords: [] },
         prompt: "## Guidelines\n\n- Ask for context.",
       },
     };
@@ -422,7 +426,10 @@ describe("createHookHandlers topic switch flow", () => {
       triggers: ["chat"],
       examples: ["hi"],
       domain: "chat",
-      keywords: ["hi", "謝謝"],
+      fastpath: {
+        hint: "Reply warmly.",
+        keywords: ["hi", "謝謝"],
+      },
       prompt: "## Guidelines\n\n- Reply warmly.",
     },
   };
@@ -432,7 +439,7 @@ describe("createHookHandlers topic switch flow", () => {
       triggers: ["git"],
       examples: ["commit this"],
       domain: "git",
-      keywords: ["commit"],
+      fastpath: { keywords: ["commit"] },
       prompt: "## Guidelines\n\n- Use git carefully.",
     },
   };
@@ -539,6 +546,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     expect(result?.prependContext).toContain("<intention_hint_plugin");
     expect(result?.prependContext).toContain("Reply warmly.");
+    expect(result?.prependContext).not.toContain("## Guidelines");
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
@@ -553,10 +561,39 @@ describe("createHookHandlers topic switch flow", () => {
               topicChanged: true,
               topicChangeReason: "initial",
             }),
+            instructionText: "Reply warmly.",
           }),
         }),
       }),
     );
+  });
+
+  it("requires a fastpath hint for exact keyword injection", async () => {
+    const exactOnlyIntent = {
+      id: "social-casual",
+      definition: {
+        triggers: ["chat"],
+        examples: ["hi"],
+        domain: "chat",
+        fastpath: { keywords: ["hi"] },
+        prompt: "## Guidelines\n\n- Reply warmly.",
+      },
+    };
+    const { handlers, topicChecker } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [exactOnlyIntent],
+      topicChecker: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "hi",
+        messages: [{ role: "user", content: "hi" }],
+      } as never,
+      ctx,
+    );
+
+    expect(topicChecker).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -745,7 +782,7 @@ describe("createHookHandlers topic switch flow", () => {
         triggers: ["git-ish"],
         examples: [],
         domain: "git",
-        keywords: ["comitx"],
+        fastpath: { keywords: ["comitx"] },
         prompt: "## Guidelines\n\n- Handle the near match.",
       },
     };
@@ -780,7 +817,7 @@ describe("createHookHandlers topic switch flow", () => {
         triggers: ["deploy"],
         examples: [],
         domain: "infra",
-        keywords: ["deploy"],
+        fastpath: { keywords: ["deploy"] },
         prompt: "## Guidelines\n\n- Be careful with deployment.",
       },
     };
@@ -815,7 +852,7 @@ describe("createHookHandlers topic switch flow", () => {
         triggers: ["docs"],
         examples: [],
         domain: "docs",
-        keywords: ["documentation"],
+        fastpath: { keywords: ["documentation"] },
         prompt: "## Guidelines\n\n- Write docs.",
       },
     };

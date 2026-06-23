@@ -25,6 +25,8 @@ describe("buildIntentionPrompt", () => {
           "Write a function to sort an array",
           "Implement a login system",
         ],
+        domain: "coding",
+        fastpath: { keywords: [] },
         prompt: "You are helping with coding tasks.",
       },
     },
@@ -33,6 +35,8 @@ describe("buildIntentionPrompt", () => {
       definition: {
         triggers: ["fix bug", "error", "not working"],
         examples: ["My code throws an error", "Fix this bug"],
+        domain: "coding",
+        fastpath: { keywords: [] },
         prompt: "You are helping debug issues.",
       },
     },
@@ -61,6 +65,8 @@ describe("buildIntentionPrompt", () => {
         definition: {
           triggers: ["test"],
           examples: [],
+          domain: "test",
+          fastpath: { keywords: [] },
           prompt: "This should appear.",
         },
       },
@@ -838,6 +844,8 @@ describe("buildPromptPrefix", () => {
       definition: {
         triggers: [],
         examples: [],
+        domain: "coding",
+        fastpath: { keywords: [] },
         prompt:
           "You are helping with coding tasks. Write clean, well-tested code.",
       },
@@ -847,6 +855,8 @@ describe("buildPromptPrefix", () => {
       definition: {
         triggers: [],
         examples: [],
+        domain: "coding",
+        fastpath: { keywords: [] },
         prompt: "You are helping debug issues. Be thorough in your analysis.",
       },
     },
@@ -855,6 +865,8 @@ describe("buildPromptPrefix", () => {
       definition: {
         triggers: [],
         examples: [],
+        domain: "agent",
+        fastpath: { keywords: [] },
         prompt: "Agent dispatch and orchestration guidance.",
       },
     },

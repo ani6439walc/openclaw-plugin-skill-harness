@@ -19,8 +19,10 @@ triggers:
 examples:
   - "example"
 domain: "test"
-keywords:
-  - "hi"
+fastpath:
+  hint: "Use a tiny direct hint."
+  keywords:
+    - "hi"
 ---
 ## Guidelines
 - Do it.
@@ -93,6 +95,7 @@ enabled: true
 triggers: ["trigger"]
 examples: ["example"]
 domain: "test"
+keywords: ["hi"]
 ---
 ## Guidelines
 - Do it.
@@ -113,19 +116,24 @@ domain: "test"
     expect(result.errors.join("\n")).toContain(
       "one.md: stale frontmatter field enabled",
     );
+    expect(result.errors.join("\n")).toContain(
+      "one.md: stale frontmatter field keywords",
+    );
   });
 
-  it("rejects non-string or empty keywords", () => {
+  it("rejects invalid fastpath metadata", () => {
     fs.writeFileSync(
       path.join(dir, "one.md"),
       `---
 triggers: ["trigger"]
 examples: ["example"]
 domain: "test"
-keywords:
-  - "hi"
-  - ""
-  - 123
+fastpath:
+  hint: ""
+  keywords:
+    - "hi"
+    - ""
+    - 123
 ---
 ## Guidelines
 - Do it.
@@ -138,7 +146,10 @@ keywords:
     const result = validateIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors.join("\n")).toContain(
-      "one.md: keywords must contain only non-empty strings",
+      "one.md: fastpath.keywords must contain only non-empty strings",
+    );
+    expect(result.errors.join("\n")).toContain(
+      "one.md: fastpath.hint must be a non-empty string",
     );
   });
 

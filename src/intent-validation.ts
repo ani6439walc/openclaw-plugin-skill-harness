@@ -53,10 +53,10 @@ export function validateIntentDirectory(
           )
         : [];
       const domainRaw = data.domain;
-      const keywordsRaw = data.keywords;
+      const fastpathRaw = data.fastpath;
       const body = parsed.content.trim();
 
-      for (const staleField of ["id", "name", "enabled"]) {
+      for (const staleField of ["id", "name", "enabled", "keywords"]) {
         if (staleField in data) {
           errors.push(`${file}: stale frontmatter field ${staleField}`);
         }
@@ -68,14 +68,33 @@ export function validateIntentDirectory(
       if (typeof domainRaw !== "string" || !domainRaw.trim()) {
         errors.push(`${file}: domain must be a non-empty string`);
       }
-      if (
-        keywordsRaw !== undefined &&
-        (!Array.isArray(keywordsRaw) ||
-          keywordsRaw.some(
-            (value) => typeof value !== "string" || !value.trim(),
-          ))
-      ) {
-        errors.push(`${file}: keywords must contain only non-empty strings`);
+      if (fastpathRaw !== undefined) {
+        if (
+          typeof fastpathRaw !== "object" ||
+          !fastpathRaw ||
+          Array.isArray(fastpathRaw)
+        ) {
+          errors.push(`${file}: fastpath must be an object`);
+        } else {
+          const fastpath = fastpathRaw as Record<string, unknown>;
+          if (
+            fastpath.keywords !== undefined &&
+            (!Array.isArray(fastpath.keywords) ||
+              fastpath.keywords.some(
+                (value) => typeof value !== "string" || !value.trim(),
+              ))
+          ) {
+            errors.push(
+              `${file}: fastpath.keywords must contain only non-empty strings`,
+            );
+          }
+          if (
+            fastpath.hint !== undefined &&
+            (typeof fastpath.hint !== "string" || !fastpath.hint.trim())
+          ) {
+            errors.push(`${file}: fastpath.hint must be a non-empty string`);
+          }
+        }
       }
       if (!body) errors.push(`${file}: Markdown body is empty`);
 

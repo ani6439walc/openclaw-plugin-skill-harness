@@ -405,16 +405,18 @@ fails, the plugin logs and falls back to classifier-only behavior.
 
 ### Fast Path A1 Keyword Matching
 
-- Intent Markdown may include optional frontmatter `keywords` for exact-match fast paths.
+- Intent Markdown may include optional frontmatter `fastpath.keywords` and `fastpath.hint`.
+- A1 only scans intents with `fastpath.hint`; keyword-only intents are ignored by exact matching.
 - Matching normalizes Unicode, removes whitespace, and lowercases before comparison.
-- A match injects the intent body directly and skips the topic checker, classifier, and instruction writer.
+- A match injects the short `fastpath.hint` and skips the topic checker, classifier, and instruction writer.
 - Topic reasons are `initial`, `same-topic`, or `keyword-match`; update live runtime intents under `$OPENCLAW_STATE_DIR/plugins/intention-hint/intents`.
 
 ### Fast Path A2 Keyword Similarity
 
 - Intent Markdown must include a single frontmatter `domain`.
 - The topic checker receives the enabled intent domain union and returns the closest domain for the latest message.
-- A2 compares extracted topic `keywords` only with enabled intent frontmatter `keywords` in that selected domain.
+- A2 compares extracted topic `keywords` only with enabled intent `fastpath.keywords` in that selected domain.
+- A2 does not require `fastpath.hint`; hint only gates A1 exact-match injection.
 - A clear similarity match skips the intent classifier, then still runs the instruction writer before injection.
 - Ambiguous, low-score, high-risk, or denied-intent matches fall back to the normal classifier.
 - Same-topic inheritance remains earlier than A2, so `topicChanged=false` turns still record only and return.
