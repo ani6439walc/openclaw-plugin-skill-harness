@@ -1,4 +1,5 @@
 ---
+domain: "chat"
 triggers:
   - "The user's message likely contains misspellings or damaged text that should be interpreted before responding."
   - "User input contains obvious typos, garbled text, or truncated text that makes the intended meaning unclear"
@@ -8,7 +9,6 @@ examples:
   - "wj/6u ek72;3042k7"
   - "can u hlpe me fix thsi"
   - "Check the git sttus"
-domain: "text-editing"
 ---
 
 ## Guidelines
