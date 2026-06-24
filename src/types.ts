@@ -105,7 +105,10 @@ export type IntentDefinition = {
   triggers: string[];
   examples: string[];
   domain: string;
-  keywords: string[];
+  fastpath: {
+    keywords: string[];
+    hint?: string;
+  };
   prompt: string;
 };
 

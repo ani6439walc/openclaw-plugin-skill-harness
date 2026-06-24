@@ -124,38 +124,41 @@ function normalizeKeywordForMatching(value: string): string {
   return value.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
 }
 
-const normalizedIntentKeywords = new WeakMap<
+const normalizedFastpathKeywords = new WeakMap<
   IntentCatalogEntry,
   Array<{ normalized: string; keyword: string }>
 >();
 const HIGH_RISK_KEYWORDS_REGEX =
   /\b(delete|remove|rm|deploy|publish|production|prod|credential|token|secret|key)\b/i;
 
-function getNormalizedIntentKeywords(
+function getNormalizedFastpathKeywords(
   intent: IntentCatalogEntry,
 ): Array<{ normalized: string; keyword: string }> {
-  const cached = normalizedIntentKeywords.get(intent);
+  const cached = normalizedFastpathKeywords.get(intent);
   if (cached) return cached;
 
-  const keywords = intent.definition.keywords.map((keyword) => ({
+  const keywords = intent.definition.fastpath.keywords.map((keyword) => ({
     normalized: normalizeKeywordForMatching(keyword),
     keyword: keyword.trim(),
   }));
-  normalizedIntentKeywords.set(intent, keywords);
+  normalizedFastpathKeywords.set(intent, keywords);
   return keywords;
 }
 
 function findExactKeywordIntent(
   latest: string,
   intents: readonly IntentCatalogEntry[],
-): { intent: IntentCatalogEntry; keyword: string } | undefined {
+): { intent: IntentCatalogEntry; keyword: string; hint: string } | undefined {
   const normalizedLatest = normalizeKeywordForMatching(latest);
   if (!normalizedLatest) return;
 
   for (const intent of intents) {
-    for (const keyword of getNormalizedIntentKeywords(intent)) {
+    const hint = intent.definition.fastpath.hint;
+    if (!hint) continue;
+
+    for (const keyword of getNormalizedFastpathKeywords(intent)) {
       if (keyword.normalized === normalizedLatest) {
-        return { intent, keyword: keyword.keyword };
+        return { intent, keyword: keyword.keyword, hint };
       }
     }
   }
@@ -233,7 +236,7 @@ function findTopicKeywordSimilarityIntent(
       | undefined;
 
     for (const topicKeyword of topicKeywords) {
-      for (const intentKeyword of getNormalizedIntentKeywords(intent)) {
+      for (const intentKeyword of getNormalizedFastpathKeywords(intent)) {
         const score = scoreTopicKeywordSimilarity(
           topicKeyword,
           intentKeyword.keyword,
@@ -556,12 +559,14 @@ export function createHookHandlers(deps: HookDeps) {
           effectiveAgentId: routing.effectiveAgentId,
           latestUserMessage,
           result,
+          instructionText: exactKeywordMatch.hint,
           conversation,
         });
         const promptPrefix = buildPromptPrefix(
           result,
           availableIntents,
           refreshedConfig,
+          exactKeywordMatch.hint,
         );
         if (!promptPrefix) return;
         return { prependContext: promptPrefix };
