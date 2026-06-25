@@ -5,6 +5,13 @@ import { createHookHandlers } from "./hooks.js";
 import { defaultTracker } from "./session-tracker.js";
 import { defaultStatsAggregator } from "./stats-aggregator.js";
 import { defaultCatalog, filterIntentsForAgent } from "./intent-loader.js";
+import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness";
+
+vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
+  emitAgentEvent: vi.fn(),
+}));
+
+const emitHostAgentEvent = vi.mocked(emitAgentEvent);
 
 function createHandlers() {
   return createHookHandlers({
@@ -18,6 +25,7 @@ function createHandlers() {
 describe("createHookHandlers tracking guards", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    emitHostAgentEvent.mockReset();
   });
 
   it("does not record tool calls without a session id", async () => {
@@ -457,6 +465,7 @@ describe("createHookHandlers topic switch flow", () => {
     instructionWriter?: ReturnType<typeof vi.fn>;
     api?: Partial<OpenClawPluginApi>;
   }) {
+    emitHostAgentEvent.mockReset();
     const intents = params.intents ?? [intent];
     const record = vi.fn();
     const tracker = {
@@ -491,14 +500,10 @@ describe("createHookHandlers topic switch flow", () => {
     const instructionWriter =
       params.instructionWriter ??
       vi.fn().mockResolvedValue("Follow the generated coding instructions.");
-    const emitAgentEvent = vi.fn().mockReturnValue({
-      emitted: true,
-      stream: "plugin:intention-hint",
-    });
+    const emitAgentEvent = emitHostAgentEvent;
     const handlers = createHookHandlers({
       api: {
         config: {},
-        agent: { events: { emitAgentEvent } },
         ...params.api,
       } as unknown as OpenClawPluginApi,
       config: () =>
@@ -580,7 +585,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "exact-keyword-hint:completed",
+      "topic-continuity-check:completed",
     );
     expect(JSON.stringify(emittedPipelineEvents(emitAgentEvent))).not.toMatch(
       /fastpath-a[12]/i,
@@ -762,10 +767,26 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "topic-keyword-route:completed",
+      "topic-continuity-check:completed",
     );
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
       "intent-classification:skipped",
+    );
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "intent-classification",
+          state: "skipped",
+          reason: "topic keyword route matched intent",
+          intent: "version-control",
+          domain: "git",
+          confidence: expect.closeTo(0.833, 0.01),
+          complexity: "low",
+          keyword: "comit",
+          matchedKeyword: "commit",
+          score: expect.closeTo(0.833, 0.01),
+        }),
+      }),
     );
     expect(record).toHaveBeenCalledWith(
       "session-1",
@@ -1019,9 +1040,11 @@ describe("createHookHandlers topic switch flow", () => {
     expect(result).toBeUndefined();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toEqual(
+      expect.arrayContaining(["instruction-hint-generation:skipped"]),
+    );
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
         "low-confidence-observation:completed",
-        "instruction-hint-generation:skipped",
         "prompt-prefix-injection:skipped",
       ]),
     );
@@ -1099,6 +1122,10 @@ describe("createHookHandlers topic switch flow", () => {
         "intent-classification:completed",
         "instruction-hint-generation:started",
         "instruction-hint-generation:completed",
+      ]),
+    );
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining([
         "session-record:completed",
         "prompt-prefix-injection:completed",
       ]),
@@ -1236,9 +1263,26 @@ describe("createHookHandlers topic switch flow", () => {
     expect(result?.prependContext).toBeUndefined();
     expect(emittedPhaseStates(emitAgentEvent)).toEqual(
       expect.arrayContaining([
-        "same-topic-inheritance:completed",
         "intent-classification:skipped",
         "instruction-hint-generation:skipped",
+      ]),
+    );
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "intent-classification",
+          state: "skipped",
+          reason: "same topic inherited previous intent",
+          intent: "coding",
+          domain: "coding",
+          confidence: 0.85,
+          complexity: "low",
+        }),
+      }),
+    );
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining([
+        "same-topic-inheritance:completed",
         "prompt-prefix-injection:skipped",
       ]),
     );
@@ -1260,7 +1304,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(record.mock.calls[0][1].current.intent.input).toBeUndefined();
   });
 
-  it("emits pipeline failure details when classification throws", async () => {
+  it("does not emit pipeline failure details when classification throws", async () => {
     const classifier = vi.fn().mockRejectedValue("classifier string failure");
     const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
@@ -1270,21 +1314,15 @@ describe("createHookHandlers topic switch flow", () => {
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(result).toBeUndefined();
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "pipeline-failed",
-          state: "failed",
-          reason: "classifier string failure",
-        }),
-      }),
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining(["pipeline-failed:failed"]),
     );
   });
 
-  it("uses the resolved session key when emitting pipeline failures", async () => {
+  it("resolves the session key before fail-open classifier errors", async () => {
     const classifier = vi.fn().mockRejectedValue("classifier string failure");
     const resolvedSessionKey = "agent:main:discord:direct:resolved";
-    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+    const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       classifier,
       api: {
@@ -1292,11 +1330,9 @@ describe("createHookHandlers topic switch flow", () => {
           agent: {
             session: {
               resolveStorePath: vi.fn().mockReturnValue("store-path"),
-              loadSessionStore: vi
-                .fn()
-                .mockReturnValue({
-                  data: { entries: [{ key: resolvedSessionKey }] },
-                }),
+              loadSessionStore: vi.fn().mockReturnValue({
+                data: { entries: [{ key: resolvedSessionKey }] },
+              }),
             },
           },
         } as never,
@@ -1310,14 +1346,9 @@ describe("createHookHandlers topic switch flow", () => {
     });
 
     expect(result).toBeUndefined();
-    expect(
-      emittedPipelineEvents(emitAgentEvent).find(
-        (pipelineEvent) => pipelineEvent.data.phase === "pipeline-failed",
-      )?.sessionKey,
-    ).toBe(resolvedSessionKey);
   });
 
-  it("does not require runId to preserve prompt behavior", async () => {
+  it("uses the session key as the pipeline run id when runId is unavailable", async () => {
     const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
     });
@@ -1334,6 +1365,12 @@ describe("createHookHandlers topic switch flow", () => {
     );
 
     expect(result?.prependContext).toContain("<intention_hint_plugin");
-    expect(emitAgentEvent).not.toHaveBeenCalled();
+    expect(emitAgentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "agent:main:direct:123",
+        sessionKey: "agent:main:direct:123",
+        stream: "plugin:intention-hint",
+      }),
+    );
   });
 });

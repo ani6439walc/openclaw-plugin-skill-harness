@@ -9,7 +9,7 @@ import type {
   PluginHookSessionEndEvent,
   PluginHookSessionContext,
 } from "openclaw/plugin-sdk/types";
-import type { PluginJsonValue } from "openclaw/plugin-sdk/plugin-entry";
+import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness";
 import { logger } from "../api.js";
 import { defaultCatalog } from "./intent-loader.js";
 import { defaultTracker } from "./session-tracker.js";
@@ -53,18 +53,9 @@ const INTENTION_HINT_EVENT_STREAM = "plugin:intention-hint";
 const INTENTION_HINT_EVENT_KIND = "intention-hint.pipeline";
 
 type PipelinePhase =
-  | "pipeline-started"
-  | "exact-keyword-hint"
-  | "model-selection"
   | "topic-continuity-check"
-  | "same-topic-inheritance"
-  | "topic-keyword-route"
   | "intent-classification"
-  | "low-confidence-observation"
-  | "instruction-hint-generation"
-  | "session-record"
-  | "prompt-prefix-injection"
-  | "pipeline-failed";
+  | "instruction-hint-generation";
 
 type PipelineState = "started" | "completed" | "skipped" | "failed";
 
@@ -82,10 +73,10 @@ type PipelineMetadata = {
 
 function cleanPipelineEventData(
   data: Record<string, unknown>,
-): PluginJsonValue {
+): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(data).filter(([, value]) => value !== undefined),
-  ) as PluginJsonValue;
+  );
 }
 
 export type HookDeps = {
@@ -350,18 +341,20 @@ export function createHookHandlers(deps: HookDeps) {
   const backlogWriter = deps.backlogWriter ?? defaultBacklogWriter;
 
   function emitPipelineEvent(
-    ctx: Pick<PluginHookAgentContext, "runId">,
+    ctx: Pick<PluginHookAgentContext, "runId" | "sessionId">,
     sessionKey: string | undefined,
     phase: PipelinePhase,
     state: PipelineState,
     metadata: PipelineMetadata = {},
   ): void {
-    const runId = ctx.runId?.trim();
-    const emitAgentEvent = api.agent?.events?.emitAgentEvent;
-    if (!runId || !emitAgentEvent) return;
+    const runId =
+      ctx.runId?.trim() || sessionKey?.trim() || ctx.sessionId?.trim();
+    if (!runId) {
+      return;
+    }
 
     try {
-      const emitted = emitAgentEvent({
+      emitHostAgentEvent({
         runId,
         sessionKey,
         stream: INTENTION_HINT_EVENT_STREAM,
@@ -369,16 +362,10 @@ export function createHookHandlers(deps: HookDeps) {
           kind: INTENTION_HINT_EVENT_KIND,
           phase,
           state,
+          sessionKey,
           ...metadata,
         }),
       });
-      if (!emitted.emitted) {
-        logger.debug("intention-hint pipeline event not emitted", {
-          phase,
-          state,
-          reason: emitted.reason,
-        });
-      }
     } catch (err) {
       logger.warn("failed to emit intention-hint pipeline event", {
         phase,
@@ -534,21 +521,15 @@ export function createHookHandlers(deps: HookDeps) {
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
-        "same-topic-inheritance",
-        "completed",
+        "intent-classification",
+        "skipped",
         {
+          reason: "same topic inherited previous intent",
           intent: result.intent,
           domain: result.domain,
           confidence: result.confidence,
           complexity: result.complexity,
         },
-      );
-      emitPipelineEvent(
-        params.ctx,
-        params.resolvedSessionKey,
-        "intent-classification",
-        "skipped",
-        { reason: "same topic inherited previous intent" },
       );
     } else {
       if (topicContext) {
@@ -580,7 +561,7 @@ export function createHookHandlers(deps: HookDeps) {
           emitPipelineEvent(
             params.ctx,
             params.resolvedSessionKey,
-            "topic-keyword-route",
+            "topic-continuity-check",
             "completed",
             {
               intent: result.intent,
@@ -598,7 +579,17 @@ export function createHookHandlers(deps: HookDeps) {
             params.resolvedSessionKey,
             "intent-classification",
             "skipped",
-            { reason: "topic keyword route matched intent" },
+            {
+              reason: "topic keyword route matched intent",
+              intent: result.intent,
+              domain: result.domain,
+              confidence: result.confidence,
+              complexity: result.complexity,
+              topicChangeReason,
+              keyword: topicKeywordSimilarityMatch.topicKeyword,
+              matchedKeyword: topicKeywordSimilarityMatch.intentKeyword,
+              score: topicKeywordSimilarityMatch.score,
+            },
           );
         }
       }
@@ -719,12 +710,6 @@ export function createHookHandlers(deps: HookDeps) {
         refreshedConfig,
         routing.effectiveAgentId,
       );
-      emitPipelineEvent(
-        ctx,
-        routing.resolvedSessionKey,
-        "pipeline-started",
-        "started",
-      );
       const exactKeywordMatch = findExactKeywordIntent(
         latestUserMessage,
         availableIntents,
@@ -756,7 +741,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           ctx,
           routing.resolvedSessionKey,
-          "exact-keyword-hint",
+          "topic-continuity-check",
           "completed",
           {
             intent: result.intent,
@@ -777,12 +762,6 @@ export function createHookHandlers(deps: HookDeps) {
           instructionText: exactKeywordMatch.hint,
           conversation,
         });
-        emitPipelineEvent(
-          ctx,
-          routing.resolvedSessionKey,
-          "session-record",
-          "completed",
-        );
         const promptPrefix = buildPromptPrefix(
           result,
           availableIntents,
@@ -790,31 +769,11 @@ export function createHookHandlers(deps: HookDeps) {
           exactKeywordMatch.hint,
         );
         if (!promptPrefix) {
-          emitPipelineEvent(
-            ctx,
-            routing.resolvedSessionKey,
-            "prompt-prefix-injection",
-            "skipped",
-            { reason: "empty prompt prefix" },
-          );
           return;
         }
-        emitPipelineEvent(
-          ctx,
-          routing.resolvedSessionKey,
-          "prompt-prefix-injection",
-          "completed",
-          { intent: result.intent, domain: result.domain },
-        );
         return { prependContext: promptPrefix };
       }
 
-      emitPipelineEvent(
-        ctx,
-        routing.resolvedSessionKey,
-        "model-selection",
-        "started",
-      );
       const modelRef = getModelRef(
         api,
         routing.effectiveAgentId,
@@ -823,13 +782,6 @@ export function createHookHandlers(deps: HookDeps) {
           modelProviderId: ctx.modelProviderId,
           modelId: ctx.modelId,
         },
-      );
-      emitPipelineEvent(
-        ctx,
-        routing.resolvedSessionKey,
-        "model-selection",
-        modelRef ? "completed" : "failed",
-        modelRef ? undefined : { reason: "no model reference" },
       );
       if (!modelRef) return;
 
@@ -847,13 +799,6 @@ export function createHookHandlers(deps: HookDeps) {
 
       if (!result) {
         logger.debug("intention subagent failed; skipping hint injection.");
-        emitPipelineEvent(
-          ctx,
-          routing.resolvedSessionKey,
-          "pipeline-failed",
-          "failed",
-          { reason: "intention classifier returned no result" },
-        );
         return;
       }
 
@@ -876,20 +821,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           ctx,
           routing.resolvedSessionKey,
-          "session-record",
-          "completed",
-        );
-        emitPipelineEvent(
-          ctx,
-          routing.resolvedSessionKey,
           "instruction-hint-generation",
-          "skipped",
-          { reason: "same topic inherited previous intent" },
-        );
-        emitPipelineEvent(
-          ctx,
-          routing.resolvedSessionKey,
-          "prompt-prefix-injection",
           "skipped",
           { reason: "same topic inherited previous intent" },
         );
@@ -913,33 +845,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           ctx,
           routing.resolvedSessionKey,
-          "session-record",
-          "completed",
-        );
-        emitPipelineEvent(
-          ctx,
-          routing.resolvedSessionKey,
-          "low-confidence-observation",
-          "completed",
-          {
-            intent: result.intent,
-            domain: result.domain,
-            confidence: result.confidence,
-            complexity: result.complexity,
-            topicChangeReason: result.topicChangeReason,
-          },
-        );
-        emitPipelineEvent(
-          ctx,
-          routing.resolvedSessionKey,
           "instruction-hint-generation",
-          "skipped",
-          { reason: "confidence below 0.7" },
-        );
-        emitPipelineEvent(
-          ctx,
-          routing.resolvedSessionKey,
-          "prompt-prefix-injection",
           "skipped",
           { reason: "confidence below 0.7" },
         );
@@ -990,12 +896,6 @@ export function createHookHandlers(deps: HookDeps) {
         instructionText,
         conversation,
       });
-      emitPipelineEvent(
-        ctx,
-        routing.resolvedSessionKey,
-        "session-record",
-        "completed",
-      );
 
       const promptPrefix = buildPromptPrefix(
         result,
@@ -1004,29 +904,11 @@ export function createHookHandlers(deps: HookDeps) {
         instructionText,
       );
       if (!promptPrefix) {
-        emitPipelineEvent(
-          ctx,
-          routing.resolvedSessionKey,
-          "prompt-prefix-injection",
-          "skipped",
-          { reason: "empty prompt prefix" },
-        );
         return;
       }
 
-      emitPipelineEvent(
-        ctx,
-        routing.resolvedSessionKey,
-        "prompt-prefix-injection",
-        "completed",
-        { intent: result.intent, domain: result.domain },
-      );
       return { prependContext: promptPrefix };
     } catch (err) {
-      emitPipelineEvent(ctx, resolvedSessionKey, "pipeline-failed", "failed", {
-        reason:
-          err instanceof Error ? err.message : String(err) || "unknown error",
-      });
       logger.warn("before_prompt_build hook error", { error: err });
       return;
     }
