@@ -770,21 +770,17 @@ describe("createHookHandlers topic switch flow", () => {
       "topic-continuity-check:completed",
     );
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "intent-classification:skipped",
+      "intent-classification:completed",
     );
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
           phase: "intent-classification",
-          state: "skipped",
-          reason: "topic keyword route matched intent",
+          state: "completed",
           intent: "version-control",
           domain: "git",
           confidence: expect.closeTo(0.833, 0.01),
           complexity: "low",
-          keyword: "comit",
-          matchedKeyword: "commit",
-          score: expect.closeTo(0.833, 0.01),
         }),
       }),
     );
@@ -1040,7 +1036,16 @@ describe("createHookHandlers topic switch flow", () => {
     expect(result).toBeUndefined();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toEqual(
-      expect.arrayContaining(["instruction-hint-generation:skipped"]),
+      expect.arrayContaining(["instruction-hint-generation:completed"]),
+    );
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "instruction-hint-generation",
+          state: "completed",
+          result: "skipped: confidence below 0.7",
+        }),
+      }),
     );
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
@@ -1263,16 +1268,15 @@ describe("createHookHandlers topic switch flow", () => {
     expect(result?.prependContext).toBeUndefined();
     expect(emittedPhaseStates(emitAgentEvent)).toEqual(
       expect.arrayContaining([
-        "intent-classification:skipped",
-        "instruction-hint-generation:skipped",
+        "intent-classification:completed",
+        "instruction-hint-generation:completed",
       ]),
     );
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
           phase: "intent-classification",
-          state: "skipped",
-          reason: "same topic inherited previous intent",
+          state: "completed",
           intent: "coding",
           domain: "coding",
           confidence: 0.85,

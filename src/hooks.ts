@@ -57,18 +57,17 @@ type PipelinePhase =
   | "intent-classification"
   | "instruction-hint-generation";
 
-type PipelineState = "started" | "completed" | "skipped" | "failed";
+type PipelineState = "started" | "completed" | "failed";
 
 type PipelineMetadata = {
-  intent?: string;
   domain?: string;
+  keywords?: string[];
+  topic?: string;
+  topicChangeReason?: string;
+  intent?: string;
   confidence?: number;
   complexity?: string;
-  topicChangeReason?: string;
-  keyword?: string;
-  matchedKeyword?: string;
-  score?: number;
-  reason?: string;
+  result?: string;
 };
 
 function cleanPipelineEventData(
@@ -496,14 +495,15 @@ export function createHookHandlers(deps: HookDeps) {
       params.ctx,
       params.resolvedSessionKey,
       "topic-continuity-check",
-      topicContext ? "completed" : "skipped",
+      topicContext ? "completed" : "completed",
       topicContext
         ? {
             domain: topicContext.domain,
-            complexity: topicContext.complexity,
+            keywords: topicContext.keywords,
+            topic: topicContext.topic,
             topicChangeReason: resolveTopicChangeReason(topicContext),
           }
-        : { reason: "no topic context" },
+        : { result: "skipped: no topic context" },
     );
 
     const latestHistoricalIntent =
@@ -522,9 +522,8 @@ export function createHookHandlers(deps: HookDeps) {
         params.ctx,
         params.resolvedSessionKey,
         "intent-classification",
-        "skipped",
+        "completed",
         {
-          reason: "same topic inherited previous intent",
           intent: result.intent,
           domain: result.domain,
           confidence: result.confidence,
@@ -564,31 +563,22 @@ export function createHookHandlers(deps: HookDeps) {
             "topic-continuity-check",
             "completed",
             {
-              intent: result.intent,
               domain: result.domain,
-              confidence: result.confidence,
-              complexity: result.complexity,
+              keywords: result.keywords,
+              topic: topicContext.topic,
               topicChangeReason,
-              keyword: topicKeywordSimilarityMatch.topicKeyword,
-              matchedKeyword: topicKeywordSimilarityMatch.intentKeyword,
-              score: topicKeywordSimilarityMatch.score,
             },
           );
           emitPipelineEvent(
             params.ctx,
             params.resolvedSessionKey,
             "intent-classification",
-            "skipped",
+            "completed",
             {
-              reason: "topic keyword route matched intent",
               intent: result.intent,
               domain: result.domain,
               confidence: result.confidence,
               complexity: result.complexity,
-              topicChangeReason,
-              keyword: topicKeywordSimilarityMatch.topicKeyword,
-              matchedKeyword: topicKeywordSimilarityMatch.intentKeyword,
-              score: topicKeywordSimilarityMatch.score,
             },
           );
         }
@@ -626,7 +616,7 @@ export function createHookHandlers(deps: HookDeps) {
                 confidence: result.confidence,
                 complexity: result.complexity,
               }
-            : { reason: "classifier returned no result" },
+            : { result: "classifier returned no result" },
         );
       }
     }
@@ -744,12 +734,10 @@ export function createHookHandlers(deps: HookDeps) {
           "topic-continuity-check",
           "completed",
           {
-            intent: result.intent,
             domain: result.domain,
-            confidence: result.confidence,
-            complexity: result.complexity,
+            keywords: result.keywords,
+            topic: result.topic,
             topicChangeReason: result.topicChangeReason,
-            keyword: exactKeywordMatch.keyword,
           },
         );
         recordPromptBuildSession({
@@ -822,8 +810,8 @@ export function createHookHandlers(deps: HookDeps) {
           ctx,
           routing.resolvedSessionKey,
           "instruction-hint-generation",
-          "skipped",
-          { reason: "same topic inherited previous intent" },
+          "completed",
+          { result: "skipped: same topic inherited previous intent" },
         );
         return;
       }
@@ -846,8 +834,8 @@ export function createHookHandlers(deps: HookDeps) {
           ctx,
           routing.resolvedSessionKey,
           "instruction-hint-generation",
-          "skipped",
-          { reason: "confidence below 0.7" },
+          "completed",
+          { result: "skipped: confidence below 0.7" },
         );
         return;
       }
@@ -857,13 +845,6 @@ export function createHookHandlers(deps: HookDeps) {
         routing.resolvedSessionKey,
         "instruction-hint-generation",
         "started",
-        {
-          intent: result.intent,
-          domain: result.domain,
-          confidence: result.confidence,
-          complexity: result.complexity,
-          topicChangeReason: result.topicChangeReason,
-        },
       );
       const instructionText = await instructionWriter({
         api,
@@ -883,7 +864,9 @@ export function createHookHandlers(deps: HookDeps) {
         routing.resolvedSessionKey,
         "instruction-hint-generation",
         "completed",
-        { intent: result.intent, domain: result.domain },
+        {
+          result: instructionText,
+        },
       );
 
       recordPromptBuildSession({
