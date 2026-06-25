@@ -869,15 +869,27 @@ export function createHookHandlers(deps: HookDeps) {
         messageProvider: ctx.messageProvider,
         modelRef,
       });
-      emitPipelineEvent(
-        ctx,
-        routing.resolvedSessionKey,
-        "instruction-hint-generation",
-        "completed",
-        {
-          result: instructionText,
-        },
-      );
+      if (instructionText) {
+        emitPipelineEvent(
+          ctx,
+          routing.resolvedSessionKey,
+          "instruction-hint-generation",
+          "completed",
+          {
+            result: instructionText,
+          },
+        );
+      } else {
+        emitPipelineEvent(
+          ctx,
+          routing.resolvedSessionKey,
+          "instruction-hint-generation",
+          "failed",
+          {
+            reason: "instruction writer returned no text",
+          },
+        );
+      }
 
       recordPromptBuildSession({
         sessionId: ctx.sessionId,

@@ -1113,6 +1113,36 @@ describe("createHookHandlers topic switch flow", () => {
     expect(record).toHaveBeenCalled();
   });
 
+  it("reports instruction generation failure when writer returns no text", async () => {
+    const instructionWriter = vi.fn().mockResolvedValue(undefined);
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      instructionWriter,
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(instructionWriter).toHaveBeenCalledOnce();
+    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "instruction-hint-generation",
+          state: "failed",
+          reason: "instruction writer returned no text",
+        }),
+      }),
+    );
+    expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "instruction-hint-generation",
+          state: "completed",
+        }),
+      }),
+    );
+  });
+
   it("runs topic checker on the first tracked turn to seed topic metadata", async () => {
     const topicContext = {
       keywords: ["initial", "topic"],
