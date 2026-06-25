@@ -525,7 +525,6 @@ export function createHookHandlers(deps: HookDeps) {
         "completed",
         {
           intent: result.intent,
-          domain: result.domain,
           confidence: result.confidence,
           complexity: result.complexity,
         },
@@ -576,7 +575,6 @@ export function createHookHandlers(deps: HookDeps) {
             "completed",
             {
               intent: result.intent,
-              domain: result.domain,
               confidence: result.confidence,
               complexity: result.complexity,
             },
@@ -612,7 +610,6 @@ export function createHookHandlers(deps: HookDeps) {
           result
             ? {
                 intent: result.intent,
-                domain: result.domain,
                 confidence: result.confidence,
                 complexity: result.complexity,
               }
