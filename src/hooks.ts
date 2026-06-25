@@ -593,6 +593,13 @@ export function createHookHandlers(deps: HookDeps) {
               score: topicKeywordSimilarityMatch.score,
             },
           );
+          emitPipelineEvent(
+            params.ctx,
+            params.resolvedSessionKey,
+            "intent-classification",
+            "skipped",
+            { reason: "topic keyword route matched intent" },
+          );
         }
       }
       if (!result) {
@@ -714,7 +721,7 @@ export function createHookHandlers(deps: HookDeps) {
         ctx,
         routing.resolvedSessionKey,
         "pipeline-started",
-        "completed",
+        "started",
       );
       const exactKeywordMatch = findExactKeywordIntent(
         latestUserMessage,
@@ -1015,7 +1022,8 @@ export function createHookHandlers(deps: HookDeps) {
       return { prependContext: promptPrefix };
     } catch (err) {
       emitPipelineEvent(ctx, ctx.sessionKey, "pipeline-failed", "failed", {
-        reason: err instanceof Error ? err.message : "unknown error",
+        reason:
+          err instanceof Error ? err.message : String(err) || "unknown error",
       });
       logger.warn("before_prompt_build hook error", { error: err });
       return;

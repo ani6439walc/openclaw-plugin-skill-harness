@@ -739,10 +739,10 @@ describe("createHookHandlers topic switch flow", () => {
       record,
       emitAgentEvent,
     } = createTopicFlowHarness({
-        historicalIntents: [],
-        intents: [intent, versionControlIntent],
-        topicChecker: vi.fn().mockResolvedValue(topicContext),
-      });
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      topicChecker: vi.fn().mockResolvedValue(topicContext),
+    });
 
     const result = await handlers.onBeforePromptBuild(
       {
@@ -761,6 +761,9 @@ describe("createHookHandlers topic switch flow", () => {
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
       "topic-keyword-route:completed",
+    );
+    expect(emittedPhaseStates(emitAgentEvent)).toContain(
+      "intent-classification:skipped",
     );
     expect(record).toHaveBeenCalledWith(
       "session-1",
@@ -1063,9 +1066,9 @@ describe("createHookHandlers topic switch flow", () => {
       record,
       emitAgentEvent,
     } = createTopicFlowHarness({
-        historicalIntents: [],
-        topicChecker: vi.fn().mockResolvedValue(topicContext),
-      });
+      historicalIntents: [],
+      topicChecker: vi.fn().mockResolvedValue(topicContext),
+    });
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
@@ -1209,19 +1212,19 @@ describe("createHookHandlers topic switch flow", () => {
       record,
       emitAgentEvent,
     } = createTopicFlowHarness({
-        historicalIntents: [
-          {
-            input: "plan topic checker",
-            intent: "coding",
-            keywords: ["topic", "checker"],
-            topic: "topic / checker",
-            domain: "coding",
-            confidence: 0.85,
-            complexity: "high",
-          },
-        ],
-        topicChecker: vi.fn().mockResolvedValue(topicContext),
-      });
+      historicalIntents: [
+        {
+          input: "plan topic checker",
+          intent: "coding",
+          keywords: ["topic", "checker"],
+          topic: "topic / checker",
+          domain: "coding",
+          confidence: 0.85,
+          complexity: "high",
+        },
+      ],
+      topicChecker: vi.fn().mockResolvedValue(topicContext),
+    });
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
@@ -1253,6 +1256,27 @@ describe("createHookHandlers topic switch flow", () => {
       }),
     );
     expect(record.mock.calls[0][1].current.intent.input).toBeUndefined();
+  });
+
+  it("emits pipeline failure details when classification throws", async () => {
+    const classifier = vi.fn().mockRejectedValue("classifier string failure");
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      classifier,
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result).toBeUndefined();
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "pipeline-failed",
+          state: "failed",
+          reason: "classifier string failure",
+        }),
+      }),
+    );
   });
 
   it("does not require runId to preserve prompt behavior", async () => {
