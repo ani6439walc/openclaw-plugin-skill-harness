@@ -54,9 +54,9 @@ const INTENTION_HINT_EVENT_STREAM = "plugin:intention-hint";
 const INTENTION_HINT_EVENT_KIND = "intention-hint.pipeline";
 
 type PipelinePhase =
-  | "topic-continuity-check"
-  | "intent-classification"
-  | "instruction-hint-generation";
+  | "topic-triage"
+  | "intent-classify"
+  | "hint-generate";
 
 type PipelineState = "started" | "completed" | "failed";
 
@@ -476,7 +476,7 @@ export function createHookHandlers(deps: HookDeps) {
     emitPipelineEvent(
       params.ctx,
       params.resolvedSessionKey,
-      "topic-continuity-check",
+      "topic-triage",
       "started",
     );
     const topicContext = await topicChecker({
@@ -495,7 +495,7 @@ export function createHookHandlers(deps: HookDeps) {
     emitPipelineEvent(
       params.ctx,
       params.resolvedSessionKey,
-      "topic-continuity-check",
+      "topic-triage",
       topicContext ? "completed" : "failed",
       topicContext
         ? {
@@ -523,7 +523,7 @@ export function createHookHandlers(deps: HookDeps) {
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
-        "intent-classification",
+        "intent-classify",
         "completed",
         {
           intent: result.intent,
@@ -562,7 +562,7 @@ export function createHookHandlers(deps: HookDeps) {
           emitPipelineEvent(
             params.ctx,
             params.resolvedSessionKey,
-            "topic-continuity-check",
+            "topic-triage",
             "completed",
             {
               domain: result.domain,
@@ -575,7 +575,7 @@ export function createHookHandlers(deps: HookDeps) {
           emitPipelineEvent(
             params.ctx,
             params.resolvedSessionKey,
-            "intent-classification",
+            "intent-classify",
             "completed",
             {
               intent: result.intent,
@@ -590,7 +590,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
-          "intent-classification",
+          "intent-classify",
           "started",
         );
         result = await classifier({
@@ -610,7 +610,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
-          "intent-classification",
+          "intent-classify",
           result ? "completed" : "failed",
           result
             ? {
@@ -734,7 +734,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           ctx,
           routing.resolvedSessionKey,
-          "topic-continuity-check",
+          "topic-triage",
           "completed",
           {
             domain: result.domain,
@@ -833,7 +833,7 @@ export function createHookHandlers(deps: HookDeps) {
       emitPipelineEvent(
         ctx,
         routing.resolvedSessionKey,
-        "instruction-hint-generation",
+        "hint-generate",
         "started",
       );
       const intentBody = findIntentBody(availableIntents, result.intent);
@@ -859,7 +859,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           ctx,
           routing.resolvedSessionKey,
-          "instruction-hint-generation",
+          "hint-generate",
           "completed",
           {
             result: instructionText,
@@ -869,7 +869,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           ctx,
           routing.resolvedSessionKey,
-          "instruction-hint-generation",
+          "hint-generate",
           "failed",
           {
             reason: "instruction writer returned no text",

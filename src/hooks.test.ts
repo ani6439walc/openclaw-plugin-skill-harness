@@ -620,7 +620,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "topic-continuity-check:completed",
+      "topic-triage:completed",
     );
     expect(JSON.stringify(emittedPipelineEvents(emitAgentEvent))).not.toMatch(
       /fastpath-a[12]/i,
@@ -802,15 +802,15 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "topic-continuity-check:completed",
+      "topic-triage:completed",
     );
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "intent-classification:completed",
+      "intent-classify:completed",
     );
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          phase: "intent-classification",
+          phase: "intent-classify",
           state: "completed",
           intent: "version-control",
           reason: "Topic keyword similarity match: comit -> commit",
@@ -1048,7 +1048,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(instructionWriter).not.toHaveBeenCalled();
   });
 
-  it("skips hint injection when confidence is undefined (treated as 0)", async () => {
+  it("does not emit instruction hint events when confidence is undefined (treated as 0)", async () => {
     const classifier = vi.fn().mockResolvedValue({
       intent: "coding",
       reason: "User wants implementation",
@@ -1069,20 +1069,11 @@ describe("createHookHandlers topic switch flow", () => {
 
     expect(result).toBeUndefined();
     expect(instructionWriter).not.toHaveBeenCalled();
-    expect(emittedPhaseStates(emitAgentEvent)).toEqual(
-      expect.arrayContaining(["instruction-hint-generation:completed"]),
-    );
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "instruction-hint-generation",
-          state: "completed",
-          result: "skipped by confidence below 0.7",
-        }),
-      }),
-    );
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
         "low-confidence-observation:completed",
         "prompt-prefix-injection:skipped",
       ]),
@@ -1127,7 +1118,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          phase: "instruction-hint-generation",
+          phase: "hint-generate",
           state: "failed",
           reason: "instruction writer returned no text",
         }),
@@ -1136,7 +1127,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          phase: "instruction-hint-generation",
+          phase: "hint-generate",
           state: "completed",
         }),
       }),
@@ -1185,12 +1176,12 @@ describe("createHookHandlers topic switch flow", () => {
     expect(result?.prependContext).toContain("<intention_hint_plugin");
     expect(emittedPhaseStates(emitAgentEvent)).toEqual(
       expect.arrayContaining([
-        "topic-continuity-check:started",
-        "topic-continuity-check:completed",
-        "intent-classification:started",
-        "intent-classification:completed",
-        "instruction-hint-generation:started",
-        "instruction-hint-generation:completed",
+        "topic-triage:started",
+        "topic-triage:completed",
+        "intent-classify:started",
+        "intent-classify:completed",
+        "hint-generate:started",
+        "hint-generate:completed",
       ]),
     );
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
@@ -1399,15 +1390,19 @@ describe("createHookHandlers topic switch flow", () => {
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(result?.prependContext).toBeUndefined();
     expect(emittedPhaseStates(emitAgentEvent)).toEqual(
+      expect.arrayContaining(["intent-classify:completed"]),
+    );
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
-        "intent-classification:completed",
-        "instruction-hint-generation:completed",
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
       ]),
     );
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          phase: "intent-classification",
+          phase: "intent-classify",
           state: "completed",
           intent: "coding",
           reason: "Topic unchanged; inherited previous intent",
