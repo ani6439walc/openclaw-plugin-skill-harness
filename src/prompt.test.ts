@@ -239,7 +239,7 @@ describe("buildTopicSwitchPrompt", () => {
     expect(prompt).toContain("different semantic domain");
     expect(prompt).toContain("even without an explicit transition marker");
     expect(prompt).toContain("Do not keep same-topic merely because");
-    expect(prompt).toContain('topicChangeReason="keyword-delta"');
+    expect(prompt).toContain('topicChangeReason="shift"');
     expect(prompt).toContain("conversation context has no prior user topic");
     expect(prompt).toContain(
       "semantic domain, or interaction mode differ sharply from conversation context",
@@ -323,7 +323,7 @@ describe("buildTopicSwitchPrompt", () => {
             intent: "intimate-roleplay",
             domain: "chat",
             topic: "User is switching to intimate roleplay.",
-            topicChangeReason: "keyword-delta",
+            topicChangeReason: "shift",
           },
         },
       ],
@@ -332,7 +332,7 @@ describe("buildTopicSwitchPrompt", () => {
     expect(prompt).toContain('<topic_segment index="1">');
     expect(prompt).toContain("處理 backlog");
     expect(prompt).toContain("<topic_boundary>");
-    expect(prompt).toContain("reason: keyword-delta");
+    expect(prompt).toContain("reason: shift");
     expect(prompt).toContain("topic: User is switching to intimate roleplay.");
     expect(prompt).toContain('<topic_segment index="2">');
     expect(prompt).toContain("抱抱");
@@ -366,7 +366,7 @@ describe("parseTopicSwitchResult", () => {
   it("accepts fenced JSON and rejects invalid reasons", () => {
     expect(
       parseTopicSwitchResult(
-        '```json\n{"keywords":["deploy"],"topic":"User is switching to deployment work.","domain":"infra","topicChanged":true,"topicChangeReason":"transition-marker","complexity":"high"}\n```',
+        '```json\n{"keywords":["deploy"],"topic":"User is switching to deployment work.","domain":"infra","topicChanged":true,"topicChangeReason":"marker","complexity":"high"}\n```',
         { domains: ["infra"] },
       ),
     ).toMatchObject({
@@ -374,7 +374,7 @@ describe("parseTopicSwitchResult", () => {
       topic: "User is switching to deployment work.",
       domain: "infra",
       topicChanged: true,
-      topicChangeReason: "transition-marker",
+      topicChangeReason: "marker",
       complexity: "high",
     });
 
@@ -399,7 +399,7 @@ describe("parseTopicSwitchResult", () => {
           topic: "User is switching to deployment work.",
           domain: "infra",
           topicChanged: true,
-          topicChangeReason: "transition-marker",
+          topicChangeReason: "marker",
           complexity: "huge",
         }),
         { domains: ["infra"] },
@@ -414,7 +414,7 @@ describe("parseTopicSwitchResult", () => {
           keywords: ["commit"],
           topic: "User wants a git commit.",
           topicChanged: true,
-          topicChangeReason: "initial",
+          topicChangeReason: "start",
           complexity: "low",
         }),
         { domains: ["git"] },
@@ -428,7 +428,7 @@ describe("parseTopicSwitchResult", () => {
           topic: "User wants a git commit.",
           domain: "chat",
           topicChanged: true,
-          topicChangeReason: "initial",
+          topicChangeReason: "start",
           complexity: "low",
         }),
         { domains: ["git"] },
@@ -444,7 +444,7 @@ describe("parseTopicSwitchResult", () => {
           topic: "User is starting a fresh topic.",
           domain: "coding",
           topicChanged: false,
-          topicChangeReason: "initial",
+          topicChangeReason: "start",
           complexity: "low",
         }),
         { domains: ["coding"] },
@@ -454,7 +454,7 @@ describe("parseTopicSwitchResult", () => {
       topic: "User is starting a fresh topic.",
       domain: "coding",
       topicChanged: true,
-      topicChangeReason: "initial",
+      topicChangeReason: "start",
       complexity: "low",
     });
   });
@@ -615,7 +615,7 @@ describe("parseIntentionResult", () => {
     expect(result!.topic).toBe(
       "User wants help writing code to sort an array.",
     );
-    expect(result!.topicChangeReason).toBe("initial");
+    expect(result!.topicChangeReason).toBe("start");
     expect(result!.confidence).toBe(0.85);
     expect(result!.complexity).toBe("medium");
   });
@@ -969,7 +969,7 @@ describe("buildPromptPrefix", () => {
       keywords: ["topic", "flow"],
       topic: "User is changing the topic flow.",
       topicChanged: true,
-      topicChangeReason: "transition-marker",
+      topicChangeReason: "marker",
       previousTopic: "docs",
       confidence: 0.9,
       complexity: "medium",
@@ -981,7 +981,7 @@ describe("buildPromptPrefix", () => {
     expect(prefix).not.toContain("topic: User is changing the topic flow.");
     expect(prefix).not.toContain("keywords: topic, flow");
     expect(prefix).not.toContain("topicChanged: true");
-    expect(prefix).not.toContain("topicChangeReason: transition-marker");
+    expect(prefix).not.toContain("topicChangeReason: marker");
     expect(prefix).not.toContain("previousTopic: docs");
     expect(prefix).not.toContain("confidence: 0.9");
     expect(prefix).not.toContain("complexity: medium");

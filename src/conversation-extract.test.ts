@@ -17,7 +17,7 @@ describe("attachHistoricalIntents", () => {
         input: "Plan the release",
         intent: "PLANNING",
         domain: "planning",
-        topicChangeReason: "keyword-delta",
+        topicChangeReason: "shift",
       },
     ];
 
@@ -28,7 +28,7 @@ describe("attachHistoricalIntents", () => {
         historicalIntent: {
           intent: "PLANNING",
           domain: "planning",
-          topicChangeReason: "keyword-delta",
+          topicChangeReason: "shift",
         },
       },
       { role: "assistant", text: "Here is a plan" },
@@ -112,7 +112,7 @@ describe("attachHistoricalIntents", () => {
         intent: "chat",
         domain: "chat",
         topic: "User is tired and wants to sleep.",
-        topicChangeReason: "keyword-delta",
+        topicChangeReason: "shift",
       },
     ];
 
@@ -128,7 +128,7 @@ describe("attachHistoricalIntents", () => {
           intent: "chat",
           domain: "chat",
           topic: "User is tired and wants to sleep.",
-          topicChangeReason: "keyword-delta",
+          topicChangeReason: "shift",
         },
       },
       { role: "assistant", text: "快去睡吧" },

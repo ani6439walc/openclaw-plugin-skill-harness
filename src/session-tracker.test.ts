@@ -110,7 +110,7 @@ describe("SessionTracker", () => {
           input: "changed topic",
           intent: "coding",
           domain: "other",
-          topicChangeReason: "explicit-change",
+          topicChangeReason: "change",
         }),
       ]);
       expect(migrated.history[0].intent.result).not.toHaveProperty(
@@ -122,7 +122,42 @@ describe("SessionTracker", () => {
       expect(migrated.current.intent.result).not.toHaveProperty("topicChanged");
       expect(migrated.current.intent.result).toMatchObject({
         domain: "other",
-        topicChangeReason: "explicit-change",
+        topicChangeReason: "change",
+      });
+    });
+
+    it("migrates legacy topic reason names to short names", () => {
+      const sessionsDir = path.join(tempDir, "sessions");
+      fs.mkdirSync(sessionsDir, { recursive: true });
+      const filePath = path.join(sessionsDir, "legacy-reasons.json");
+      fs.writeFileSync(
+        filePath,
+        JSON.stringify({
+          sessionId: "legacy-reasons",
+          current: {
+            input: "changed topic",
+            intent: {
+              result: {
+                intent: "coding",
+                reason: "changed",
+                domain: "coding",
+                topicChangeReason: "keyword-delta",
+                confidence: 0.9,
+                complexity: "medium",
+              },
+            },
+          },
+        }),
+      );
+
+      const loadedTracker = SessionTracker.create(tempDir);
+      const migrated = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+
+      expect(
+        loadedTracker.getHistoricalIntentRecords("legacy-reasons"),
+      ).toEqual([expect.objectContaining({ topicChangeReason: "shift" })]);
+      expect(migrated.current.intent.result).toMatchObject({
+        topicChangeReason: "shift",
       });
     });
 
@@ -908,7 +943,7 @@ describe("SessionTracker", () => {
                 keywords: ["plan", "change"],
                 domain: "planning",
                 topic: "plan / change",
-                topicChangeReason: "keyword-delta",
+                topicChangeReason: "shift",
                 confidence: 0.8,
                 complexity: "medium",
               },
@@ -948,7 +983,7 @@ describe("SessionTracker", () => {
           domain: "planning",
           keywords: ["plan", "change"],
           topic: "plan / change",
-          topicChangeReason: "keyword-delta",
+          topicChangeReason: "shift",
           confidence: 0.8,
           complexity: "medium",
         },
@@ -966,8 +1001,8 @@ describe("SessionTracker", () => {
       expect(tracker.getHistoricalIntentRecords("missing-session")).toEqual([]);
     });
 
-    it("should preserve keyword-match topic change metadata", () => {
-      tracker.record("keyword-match-session", {
+    it("should preserve match topic change metadata", () => {
+      tracker.record("match-session", {
         current: {
           input: "hi",
           intent: {
@@ -977,7 +1012,7 @@ describe("SessionTracker", () => {
               keywords: ["hi"],
               domain: "chat",
               topic: "Fast-path exact match for social-casual.",
-              topicChangeReason: "keyword-match",
+              topicChangeReason: "match",
               confidence: 1,
               complexity: "low",
             },
@@ -985,15 +1020,13 @@ describe("SessionTracker", () => {
         },
       });
 
-      expect(
-        tracker.getHistoricalIntentRecords("keyword-match-session"),
-      ).toEqual([
+      expect(tracker.getHistoricalIntentRecords("match-session")).toEqual([
         expect.objectContaining({
           input: "hi",
           intent: "social-casual",
           domain: "chat",
           keywords: ["hi"],
-          topicChangeReason: "keyword-match",
+          topicChangeReason: "match",
         }),
       ]);
     });

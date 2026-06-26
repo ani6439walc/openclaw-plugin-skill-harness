@@ -124,12 +124,7 @@ export type IntentionResult = {
   keywords?: string[];
   domain: string;
   topic?: string;
-  topicChangeReason?:
-    | "initial"
-    | "transition-marker"
-    | "keyword-delta"
-    | "explicit-change"
-    | "keyword-match";
+  topicChangeReason?: "start" | "marker" | "shift" | "change" | "match";
   previousTopic?: string;
   confidence: number;
   complexity: "low" | "medium" | "high";

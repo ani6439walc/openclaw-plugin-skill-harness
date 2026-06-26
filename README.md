@@ -390,7 +390,7 @@ The classification sub-agent returns JSON:
   "keywords": ["memory", "past discussion"],
   "domain": "memory",
   "topic": "memory / past discussion",
-  "topicChangeReason": "initial",
+  "topicChangeReason": "start",
   "confidence": 0.9,
   "complexity": "medium",
   "suggestion": "Only present when confidence < 0.8"
@@ -404,7 +404,7 @@ The classification sub-agent returns JSON:
 - `domain` is the selected intent/topic routing domain
 - `topic` is a concise natural-language phrase describing the current topic
 - `topicChangeReason` is present only when the topic changed; an empty value means same-topic continuation
-- `topicChangeReason="keyword-match"` marks a deterministic frontmatter keyword fast-path match that switched from a previous intent
+- `topicChangeReason="match"` marks a deterministic frontmatter keyword fast-path match that switched from a previous intent
 - Topic switch metadata is stored in session history; no separate cache or experience store is written
 - Durable session goals are managed by OpenClaw `/goal` and goal tools, not by intention-hint
 
@@ -445,7 +445,7 @@ classifier-only behavior.
 - A1 only scans intents with `fastpath.hint`; keyword-only intents are ignored by exact matching.
 - Matching normalizes Unicode, removes whitespace, and lowercases before comparison.
 - A match injects the short `fastpath.hint` and skips the topic checker, classifier, and instruction writer.
-- Topic reasons are `initial` or `keyword-match`; same-topic exact matches leave `topicChangeReason` empty.
+- Topic reasons are `start` or `match`; same-topic exact matches leave `topicChangeReason` empty.
 
 ### Fast Path A2 Keyword Similarity
 

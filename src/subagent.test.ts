@@ -140,7 +140,7 @@ describe("runIntentInstructionSubagent", () => {
         keywords: ["continuation"],
         topic: "continuation",
         topicChanged: true,
-        topicChangeReason: "keyword-delta",
+        topicChangeReason: "shift",
         confidence: 0.9,
         complexity: "medium",
       },

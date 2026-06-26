@@ -53,10 +53,7 @@ import type {
 const INTENTION_HINT_EVENT_STREAM = "plugin:intention-hint";
 const INTENTION_HINT_EVENT_KIND = "intention-hint.pipeline";
 
-type PipelinePhase =
-  | "topic-triage"
-  | "intent-classify"
-  | "hint-generate";
+type PipelinePhase = "topic-triage" | "intent-classify" | "hint-generate";
 
 type PipelineState = "started" | "completed" | "failed";
 
@@ -724,10 +721,10 @@ export function createHookHandlers(deps: HookDeps) {
               ? latestHistoricalIntent.topic
               : undefined,
           topicChangeReason: !latestHistoricalIntent
-            ? "initial"
+            ? "start"
             : sameIntent
               ? undefined
-              : "keyword-match",
+              : "match",
           confidence: 1,
           complexity: "low",
         };

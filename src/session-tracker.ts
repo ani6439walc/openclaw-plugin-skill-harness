@@ -20,12 +20,33 @@ import {
 const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const DEFAULT_MIGRATED_DOMAIN = "other";
 const TOPIC_CHANGE_REASONS = new Set([
-  "initial",
-  "transition-marker",
-  "keyword-delta",
-  "explicit-change",
-  "keyword-match",
+  "start",
+  "marker",
+  "shift",
+  "change",
+  "match",
 ]);
+
+const LEGACY_TOPIC_CHANGE_REASONS = new Map<
+  string,
+  IntentionResult["topicChangeReason"]
+>([
+  ["initial", "start"],
+  ["transition-marker", "marker"],
+  ["keyword-delta", "shift"],
+  ["explicit-change", "change"],
+  ["keyword-match", "match"],
+]);
+
+function normalizeTopicChangeReason(
+  reason: unknown,
+): IntentionResult["topicChangeReason"] | undefined {
+  if (typeof reason !== "string") return;
+  if (TOPIC_CHANGE_REASONS.has(reason)) {
+    return reason as IntentionResult["topicChangeReason"];
+  }
+  return LEGACY_TOPIC_CHANGE_REASONS.get(reason);
+}
 
 export interface SkillRecord {
   name: string;
@@ -150,21 +171,24 @@ function migrateIntentionResult(result: IntentionResult): boolean {
 
   const legacyTopicChanged = record.topicChanged;
   const legacyReason = record.topicChangeReason as unknown;
+  const normalizedReason = normalizeTopicChangeReason(legacyReason);
   if (legacyTopicChanged === false || legacyReason === "same-topic") {
     delete record.topicChanged;
     delete record.topicChangeReason;
     changed = true;
   } else if (legacyTopicChanged === true) {
     delete record.topicChanged;
-    if (
-      typeof legacyReason !== "string" ||
-      !TOPIC_CHANGE_REASONS.has(legacyReason)
-    ) {
-      result.topicChangeReason = "explicit-change";
-    }
+    result.topicChangeReason = normalizedReason ?? "change";
     changed = true;
   } else if (record.topicChanged !== undefined) {
     delete record.topicChanged;
+    changed = true;
+  } else if (legacyReason !== undefined && normalizedReason !== legacyReason) {
+    if (normalizedReason) {
+      result.topicChangeReason = normalizedReason;
+    } else {
+      delete record.topicChangeReason;
+    }
     changed = true;
   }
 
