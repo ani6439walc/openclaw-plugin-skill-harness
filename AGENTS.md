@@ -73,7 +73,7 @@ Use the existing module boundaries:
 - `src/session.ts`: session eligibility guards.
 - `src/*.test.ts`: tests are colocated with the module they protect.
 
-Conversation prompts are intentionally structured as XML-like blocks. Keep recent-turn context inside `<conversation_context>`, split historical topics with `<topic_segment>` and `<topic_boundary>`, and treat `topicChanged`/`topicChangeReason` as the only topic-continuity metadata. Do not reintroduce separate `intentChange` state.
+Conversation prompts are intentionally structured as XML-like blocks. Keep recent-turn context inside `<conversation_context>`, split historical topics with `<topic_segment>` and `<topic_boundary>`, and use compact topic-switch metadata names (`changed` and `reason`) in prompt-facing topic checker output. Persisted intent results may still store `topicChangeReason`; do not reintroduce separate `intentChange` state.
 
 ## Coding Rules
 

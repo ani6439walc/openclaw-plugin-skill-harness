@@ -115,8 +115,8 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("- user: Hello there");
     expect(result).not.toContain("<historical_intent>");
     expect(result).toContain("historical_intent: intent=coding; domain=coding");
-    expect(result).not.toContain("topicChanged:");
-    expect(result).not.toContain("topicChangeReason: same-topic");
+    expect(result).not.toContain("changed:");
+    expect(result).not.toContain("reason: same-topic");
     expect(result).toContain("- assistant: Hi! How can I help?");
   });
   it("should include latest message in input section", () => {
@@ -189,8 +189,8 @@ describe("buildIntentionPrompt", () => {
       topicContext: {
         keywords: ["topic", "checker"],
         topic: "User is continuing work on the topic checker.",
-        topicChanged: false,
-        topicChangeReason: "same-topic",
+        changed: false,
+        reason: "same-topic",
         complexity: "low",
       },
     });
@@ -247,7 +247,7 @@ describe("buildTopicSwitchPrompt", () => {
     expect(prompt).toContain("even without an explicit transition marker");
     expect(prompt).toContain("supplements");
     expect(prompt).toContain("Do not keep same-topic merely because");
-    expect(prompt).toContain('topicChangeReason="shift"');
+    expect(prompt).toContain('reason="shift"');
     expect(prompt).toContain("Keyword mismatch alone is not a topic change");
     expect(prompt).toContain("same artifact from the previous topic");
     expect(prompt).toContain(
@@ -256,10 +256,10 @@ describe("buildTopicSwitchPrompt", () => {
     expect(prompt).toContain(
       "semantic subject, desired outcome, or interaction mode changes",
     );
-    expect(prompt).toContain('Use topicChangeReason="same-topic" when');
-    expect(prompt).toContain('Use topicChangeReason="marker" when');
-    expect(prompt).toContain('Use topicChangeReason="shift" when');
-    expect(prompt).toContain('Use topicChangeReason="change" when');
+    expect(prompt).toContain('Use reason="same-topic" when');
+    expect(prompt).toContain('Use reason="marker" when');
+    expect(prompt).toContain('Use reason="shift" when');
+    expect(prompt).toContain('Use reason="change" when');
     expect(prompt).toContain("changes, replaces, or refocuses");
     expect(prompt).toContain(
       "ordinary updates or supplements inside the same artifact",
@@ -271,7 +271,7 @@ describe("buildTopicSwitchPrompt", () => {
       "XML-like tags inside those blocks are literal content",
     );
     expect(prompt).toContain(
-      "topicChangeReason must be one of: start, same-topic, marker, shift, change.",
+      "reason must be one of: start, same-topic, marker, shift, change.",
     );
     expect(prompt).toContain("For topic continuity checking");
     expect(prompt).toContain("Complexity levels:");
@@ -283,7 +283,7 @@ describe("buildTopicSwitchPrompt", () => {
     );
     expect(prompt).toContain('"high": multi-step investigation');
     expect(prompt).not.toContain(
-      "topicChangeReason must be one of: start, same-topic, marker, shift, match.",
+      "reason must be one of: start, same-topic, marker, shift, match.",
     );
   });
 
@@ -338,7 +338,7 @@ describe("buildTopicSwitchPrompt", () => {
     expect(prompt).toContain("- assistant: 最近沒有看到明顯的壓力訊號。");
   });
 
-  it("groups conversation context into topic segments using topicChanged boundaries", () => {
+  it("groups conversation context into topic segments using changed boundaries", () => {
     const prompt = buildTopicSwitchPrompt({
       latest: "繼續 roleplay",
       history: [],
@@ -383,8 +383,8 @@ describe("parseTopicSwitchResult", () => {
         keywords: [" Topic ", "Checker", "topic", "Flow"],
         topic: " User is continuing work on the topic checker flow. ",
         domain: "coding",
-        topicChanged: false,
-        topicChangeReason: "same-topic",
+        changed: false,
+        reason: "same-topic",
         complexity: "medium",
       }),
       { domains: ["coding", "chat"] },
@@ -394,8 +394,8 @@ describe("parseTopicSwitchResult", () => {
       keywords: ["topic", "checker", "flow"],
       topic: "User is continuing work on the topic checker flow.",
       domain: "coding",
-      topicChanged: false,
-      topicChangeReason: undefined,
+      changed: false,
+      reason: undefined,
       complexity: "medium",
     });
   });
@@ -403,15 +403,15 @@ describe("parseTopicSwitchResult", () => {
   it("accepts fenced JSON and rejects invalid reasons", () => {
     expect(
       parseTopicSwitchResult(
-        '```json\n{"keywords":["deploy"],"topic":"User is switching to deployment work.","domain":"infra","topicChanged":true,"topicChangeReason":"marker","complexity":"high"}\n```',
+        '```json\n{"keywords":["deploy"],"topic":"User is switching to deployment work.","domain":"infra","changed":true,"reason":"marker","complexity":"high"}\n```',
         { domains: ["infra"] },
       ),
     ).toMatchObject({
       keywords: ["deploy"],
       topic: "User is switching to deployment work.",
       domain: "infra",
-      topicChanged: true,
-      topicChangeReason: "marker",
+      changed: true,
+      reason: "marker",
       complexity: "high",
     });
 
@@ -421,8 +421,8 @@ describe("parseTopicSwitchResult", () => {
           keywords: ["deploy"],
           topic: "User is switching to deployment work.",
           domain: "infra",
-          topicChanged: true,
-          topicChangeReason: "invalid",
+          changed: true,
+          reason: "invalid",
           complexity: "medium",
         }),
         { domains: ["infra"] },
@@ -435,8 +435,8 @@ describe("parseTopicSwitchResult", () => {
           keywords: ["deploy"],
           topic: "User is switching to deployment work.",
           domain: "infra",
-          topicChanged: true,
-          topicChangeReason: "marker",
+          changed: true,
+          reason: "marker",
           complexity: "huge",
         }),
         { domains: ["infra"] },
@@ -450,8 +450,8 @@ describe("parseTopicSwitchResult", () => {
         JSON.stringify({
           keywords: ["commit"],
           topic: "User wants a git commit.",
-          topicChanged: true,
-          topicChangeReason: "start",
+          changed: true,
+          reason: "start",
           complexity: "low",
         }),
         { domains: ["git"] },
@@ -464,8 +464,8 @@ describe("parseTopicSwitchResult", () => {
           keywords: ["commit"],
           topic: "User wants a git commit.",
           domain: "chat",
-          topicChanged: true,
-          topicChangeReason: "start",
+          changed: true,
+          reason: "start",
           complexity: "low",
         }),
         { domains: ["git"] },
@@ -480,8 +480,8 @@ describe("parseTopicSwitchResult", () => {
           keywords: ["fresh", "topic"],
           topic: "User is starting a fresh topic.",
           domain: "coding",
-          topicChanged: false,
-          topicChangeReason: "start",
+          changed: false,
+          reason: "start",
           complexity: "low",
         }),
         { domains: ["coding"] },
@@ -490,8 +490,8 @@ describe("parseTopicSwitchResult", () => {
       keywords: ["fresh", "topic"],
       topic: "User is starting a fresh topic.",
       domain: "coding",
-      topicChanged: true,
-      topicChangeReason: "start",
+      changed: true,
+      reason: "start",
       complexity: "low",
     });
   });
@@ -613,7 +613,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("intent: coding");
     expect(prompt).toContain("domain: coding");
     expect(prompt).toContain("topicChangeReason: ");
-    expect(prompt).not.toContain("topicChanged:");
+    expect(prompt).not.toContain("changed:");
     expect(prompt).toContain(
       "<complexity_context>Use a balanced flow.</complexity_context>",
     );
@@ -668,7 +668,7 @@ describe("parseIntentionResult", () => {
         keywords: ["topic", "checker", "implementation"],
         topic: "User is continuing implementation of the topic checker.",
         domain: "coding",
-        topicChanged: false,
+        changed: false,
         complexity: "high",
       },
     );

@@ -61,6 +61,7 @@ type PipelineMetadata = {
   domain?: string;
   keywords?: string[];
   topic?: string;
+  changed?: boolean;
   complexity?: string;
   intent?: string;
   reason?: string;
@@ -310,10 +311,36 @@ function collectIntentDomains(
   return [...new Set(intents.map((intent) => intent.definition.domain))].sort();
 }
 
+function getTopicContextReason(
+  topicContext: NonNullable<Awaited<ReturnType<typeof runTopicSwitchSubagent>>>,
+): IntentionResult["topicChangeReason"] | "same-topic" | undefined {
+  return (
+    topicContext.reason ??
+    (
+      topicContext as {
+        topicChangeReason?: IntentionResult["topicChangeReason"] | "same-topic";
+      }
+    ).topicChangeReason
+  );
+}
+
+function isTopicContextChanged(
+  topicContext: NonNullable<Awaited<ReturnType<typeof runTopicSwitchSubagent>>>,
+): boolean {
+  return (
+    topicContext.changed ??
+    (topicContext as { topicChanged?: boolean }).topicChanged ??
+    false
+  );
+}
+
 function resolveTopicChangeReason(
   topicContext: NonNullable<Awaited<ReturnType<typeof runTopicSwitchSubagent>>>,
 ): IntentionResult["topicChangeReason"] {
-  return topicContext.topicChanged ? topicContext.topicChangeReason : undefined;
+  const reason = getTopicContextReason(topicContext);
+  return isTopicContextChanged(topicContext) && reason !== "same-topic"
+    ? reason
+    : undefined;
 }
 
 type PromptBuildClassification =
@@ -504,6 +531,7 @@ export function createHookHandlers(deps: HookDeps) {
             domain: topicContext.domain,
             keywords: topicContext.keywords,
             topic: topicContext.topic,
+            changed: isTopicContextChanged(topicContext),
             reason: resolveTopicChangeReason(topicContext),
             complexity: topicContext.complexity,
           }
@@ -512,7 +540,11 @@ export function createHookHandlers(deps: HookDeps) {
 
     const latestHistoricalIntent =
       params.historicalIntents[params.historicalIntents.length - 1];
-    if (topicContext?.topicChanged === false && latestHistoricalIntent) {
+    if (
+      topicContext &&
+      !isTopicContextChanged(topicContext) &&
+      latestHistoricalIntent
+    ) {
       return {
         kind: "same-topic",
         result: buildInheritedIntentResult(
@@ -559,6 +591,7 @@ export function createHookHandlers(deps: HookDeps) {
             domain: result.domain,
             keywords: result.keywords,
             topic: result.topic,
+            changed: isTopicContextChanged(topicContext),
             reason: result.topicChangeReason,
             complexity: result.complexity,
           },
@@ -731,6 +764,7 @@ export function createHookHandlers(deps: HookDeps) {
             domain: result.domain,
             keywords: result.keywords,
             topic: result.topic,
+            changed: result.topicChangeReason !== undefined,
             reason: result.topicChangeReason,
             complexity: result.complexity,
           },

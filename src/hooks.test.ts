@@ -526,7 +526,7 @@ describe("createHookHandlers topic switch flow", () => {
         keywords: ["topic", "flow"],
         topic: "User is chatting casually.",
         domain: "chat",
-        topicChanged: false,
+        changed: false,
         topicChangeReason: "start",
         confidence: 0.9,
         complexity: "medium" as const,
@@ -771,8 +771,8 @@ describe("createHookHandlers topic switch flow", () => {
       keywords: ["comit"],
       topic: "User wants a git commit.",
       domain: "git",
-      topicChanged: false,
-      topicChangeReason: undefined,
+      changed: false,
+      reason: undefined,
       complexity: "low" as const,
     };
     const {
@@ -805,6 +805,15 @@ describe("createHookHandlers topic switch flow", () => {
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
       "topic-triage:completed",
+    );
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "topic-triage",
+          state: "completed",
+          changed: false,
+        }),
+      }),
     );
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
       "intent-classify:completed",
@@ -848,8 +857,8 @@ describe("createHookHandlers topic switch flow", () => {
         keywords: ["comit"],
         topic: "User wants a git commit.",
         domain: "git",
-        topicChanged: true,
-        topicChangeReason: "start" as const,
+        changed: true,
+        reason: "start" as const,
         complexity: "low" as const,
       }),
     });
@@ -893,8 +902,8 @@ describe("createHookHandlers topic switch flow", () => {
         keywords: ["comit"],
         topic: "Ambiguous git-ish request.",
         domain: "git",
-        topicChanged: true,
-        topicChangeReason: "start" as const,
+        changed: true,
+        reason: "start" as const,
         complexity: "low" as const,
       }),
     });
@@ -928,8 +937,8 @@ describe("createHookHandlers topic switch flow", () => {
         keywords: ["deploy"],
         topic: "User wants deployment.",
         domain: "infra",
-        topicChanged: true,
-        topicChangeReason: "start" as const,
+        changed: true,
+        reason: "start" as const,
         complexity: "high" as const,
       }),
     });
@@ -963,8 +972,8 @@ describe("createHookHandlers topic switch flow", () => {
         keywords: ["commit"],
         topic: "User wants docs work.",
         domain: "docs",
-        topicChanged: true,
-        topicChangeReason: "start" as const,
+        changed: true,
+        reason: "start" as const,
         complexity: "low" as const,
       }),
     });
@@ -997,8 +1006,8 @@ describe("createHookHandlers topic switch flow", () => {
         keywords: ["commit"],
         topic: "User wants a git commit.",
         domain: "git",
-        topicChanged: true,
-        topicChangeReason: "start" as const,
+        changed: true,
+        reason: "start" as const,
         complexity: "low" as const,
       }),
     });
@@ -1031,8 +1040,8 @@ describe("createHookHandlers topic switch flow", () => {
         keywords: ["commit"],
         topic: "User is still discussing a git commit.",
         domain: "git",
-        topicChanged: false,
-        topicChangeReason: "same-topic" as const,
+        changed: false,
+        reason: "same-topic" as const,
         complexity: "low" as const,
       }),
     });
@@ -1056,7 +1065,7 @@ describe("createHookHandlers topic switch flow", () => {
       reason: "User wants implementation",
       keywords: ["topic", "flow"],
       topic: "User wants implementation help for the topic flow.",
-      topicChanged: true,
+      changed: true,
       topicChangeReason: "start",
       // confidence intentionally omitted (undefined)
       complexity: "medium" as const,
@@ -1089,7 +1098,7 @@ describe("createHookHandlers topic switch flow", () => {
       reason: "User wants implementation",
       keywords: ["topic", "flow"],
       topic: "User wants implementation help for the topic flow.",
-      topicChanged: true,
+      changed: true,
       topicChangeReason: "start",
       // confidence intentionally omitted (undefined)
       complexity: "medium" as const,
@@ -1177,8 +1186,8 @@ describe("createHookHandlers topic switch flow", () => {
       keywords: ["start", "topic"],
       topic: "User is starting an initial topic.",
       domain: "chat",
-      topicChanged: true,
-      topicChangeReason: "start" as const,
+      changed: true,
+      reason: "start" as const,
       complexity: "low" as const,
     };
     const {
@@ -1250,8 +1259,8 @@ describe("createHookHandlers topic switch flow", () => {
       keywords: ["new", "topic"],
       topic: "User is switching to a new topic.",
       domain: "chat",
-      topicChanged: true,
-      topicChangeReason: "marker" as const,
+      changed: true,
+      reason: "marker" as const,
       complexity: "high" as const,
     };
     const { handlers, classifier, topicChecker, instructionWriter } =
@@ -1395,8 +1404,8 @@ describe("createHookHandlers topic switch flow", () => {
     const topicContext = {
       keywords: ["topic", "checker"],
       topic: "User is continuing work on the topic checker.",
-      topicChanged: false,
-      topicChangeReason: "same-topic" as const,
+      changed: false,
+      reason: "same-topic" as const,
       complexity: "low" as const,
     };
     const {

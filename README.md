@@ -430,7 +430,7 @@ The following categories group intents by their ID prefix:
 
 Every tracked turn first runs a lightweight topic switch checker using the
 latest user message, recent conversation context, and recent session history
-(`intent`, `domain`, `keywords`, `topic`, `topicChangeReason`, `complexity`).
+(`intent`, `domain`, `keywords`, `topic`, `reason`, `complexity`).
 If the checker says the topic changed, or there is no historical
 intent to inherit, that topic context is passed into the classifier subagent.
 If the checker says the topic did not change, the plugin runs a local inherited
@@ -485,8 +485,8 @@ matched intent body.
 
 - The conversation context is omitted entirely when conversation is empty or undefined
 - Non-empty context is emitted as `<conversation_context>` with reference-only instructions, then one or more `<topic_segment index="...">` blocks containing oldest-to-newest turns
-- Matching historical user turns include a `<historical_intent>` block with prior `intent`, `domain`, `keywords`, `topic`, and optional `topicChangeReason`; assistant, unmatched, and latest user turns do not
-- When a historical user turn has `topicChangeReason`, prompt building closes the previous segment, inserts a `<topic_boundary>` with reason/topic metadata, and starts the next `<topic_segment>`
+- Matching historical user turns include a compact inline `historical_intent: intent=...; domain=...; topic=...; keywords=...; reason=...` annotation; assistant, unmatched, and latest user turns do not
+- When a historical user turn has a topic-change reason, prompt building closes the previous segment, inserts a `<topic_boundary>` with reason/topic metadata, and starts the next `<topic_segment>`
 - Historical records are matched by normalized user-message text, with duplicate messages paired newest-first
 - Classification rules use historical intent metadata as context while requiring fresh classification on topic switches
 - Same-topic continuation turns omit `topicChangeReason` and `current.intent.input` to avoid duplicating conversation snapshots, while keeping `current.intent.result` for tool tracking, stats, and Evolution
