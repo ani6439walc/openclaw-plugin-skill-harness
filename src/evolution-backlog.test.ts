@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  createBacklog,
   markPendingProcessed,
   parseBacklog,
   pruneProcessedEvents,
   selectPendingItem,
   updatePendingTarget,
+  type BacklogItem,
 } from "./evolution-backlog.js";
+import { DEFAULT_EVOLUTION_TRIGGER_KEYWORDS } from "./evolution-trigger-keywords.js";
 
-const item = (overrides: Record<string, unknown> = {}) => ({
+const item = (overrides: Partial<BacklogItem> = {}): BacklogItem => ({
   id: "IMP-1",
   type: "behavior-fix",
+  targetKind: "intent-markdown",
   operation: "unknown",
   targetIntentIds: [],
   dedupeKey: "key",
@@ -26,9 +30,10 @@ const item = (overrides: Record<string, unknown> = {}) => ({
 
 const backlog = () =>
   parseBacklog({
-    schemaVersion: 2,
+    schemaVersion: 3,
     createdAt: "2026-06-11T00:00:00.000Z",
     updatedAt: "2026-06-11T00:00:00.000Z",
+    triggerKeywords: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
     processedEvents: {},
     items: [],
   });
@@ -44,9 +49,16 @@ describe("evolution backlog", () => {
     });
 
     expect(migrated).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      triggerKeywords: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
       processedEvents: { event: "time" },
-      items: [{ operation: "unknown", targetIntentIds: [] }],
+      items: [
+        {
+          targetKind: "intent-markdown",
+          operation: "unknown",
+          targetIntentIds: [],
+        },
+      ],
     });
   });
 
@@ -66,6 +78,83 @@ describe("evolution backlog", () => {
       "successful-pattern",
       "behavior-fix",
     ]);
+  });
+
+  it("migrates v2 backlogs with default runtime trigger keywords", () => {
+    const parsed = parseBacklog({
+      schemaVersion: 2,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      processedEvents: {},
+      items: [item({ targetKind: undefined })],
+    });
+
+    expect(parsed).toMatchObject({
+      schemaVersion: 3,
+      triggerKeywords: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
+      items: [{ targetKind: "intent-markdown" }],
+    });
+  });
+
+  it("parses trigger keyword backlog items and root keyword fields", () => {
+    const parsed = parseBacklog({
+      schemaVersion: 3,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      triggerKeywords: {
+        successfulPattern: [" ship it ", ""],
+        behaviorFix: [" try again ", "try again"],
+      },
+      processedEvents: {},
+      items: [
+        item({
+          targetKind: "trigger-keywords",
+          operation: "adjust-trigger-keywords",
+          targetIntentIds: [],
+          targetTrigger: "successful-pattern",
+          keywordChange: { add: ["ship it"], remove: [] },
+        }),
+      ],
+    });
+
+    expect(parsed.triggerKeywords).toEqual({
+      successfulPattern: ["ship it"],
+      behaviorFix: ["try again"],
+    });
+    expect(parsed.items[0]).toMatchObject({
+      targetKind: "trigger-keywords",
+      operation: "adjust-trigger-keywords",
+      targetTrigger: "successful-pattern",
+      keywordChange: { add: ["ship it"], remove: [] },
+    });
+  });
+
+  it("creates new backlogs with default trigger keywords", () => {
+    expect(createBacklog("now")).toMatchObject({
+      schemaVersion: 3,
+      triggerKeywords: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
+    });
+  });
+
+  it("keeps trigger keyword suggestions pending until an apply workflow exists", () => {
+    const value = backlog();
+    value.items = [
+      item({
+        targetKind: "trigger-keywords",
+        operation: "adjust-trigger-keywords",
+        targetTrigger: "behavior-fix",
+        keywordChange: { add: ["try again"], remove: [] },
+      }),
+    ];
+
+    expect(() =>
+      markPendingProcessed(
+        value,
+        "IMP-1",
+        value.items[0].updatedAt,
+        "processed",
+      ),
+    ).toThrow("target metadata is unresolved");
   });
 
   it("selects highest frequency pending item then oldest", () => {

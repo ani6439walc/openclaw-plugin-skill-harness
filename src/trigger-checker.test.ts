@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "./config.js";
 import { checkEvolutionTriggers } from "./trigger-checker.js";
+import type { EvolutionTriggerKeywords } from "./evolution-trigger-keywords.js";
 import type { SessionState } from "./session-tracker.js";
 
 function state(overrides: Partial<SessionState> = {}): SessionState {
@@ -20,6 +21,10 @@ function state(overrides: Partial<SessionState> = {}): SessionState {
 
 describe("checkEvolutionTriggers", () => {
   const triggers = resolveConfig({}).evolution.triggers;
+  const customKeywords: EvolutionTriggerKeywords = {
+    successfulPattern: ["verified"],
+    behaviorFix: ["redo"],
+  };
 
   it("returns all matching current-turn triggers", () => {
     expect(
@@ -73,10 +78,10 @@ describe("checkEvolutionTriggers", () => {
         triggers: {
           skillCandidate: { enabled: false },
           processGap: { toolFailures: 1 },
-          successfulPattern: { toolCalls: 2, keywords: ["verified"] },
+          successfulPattern: { toolCalls: 2 },
           satisfactionCheck: { everyTurns: 3 },
           weakIntent: { confidenceBelow: 0.95 },
-          behaviorFix: { keywords: ["redo"] },
+          behaviorFix: {},
         },
       },
     }).evolution.triggers;
@@ -89,6 +94,7 @@ describe("checkEvolutionTriggers", () => {
         }),
         3,
         custom,
+        customKeywords,
       ),
     ).toEqual([
       "process-gap",
@@ -125,6 +131,29 @@ describe("checkEvolutionTriggers", () => {
         triggers,
       ),
     ).toContain("successful-pattern");
+  });
+
+  it("uses runtime evolution trigger keywords instead of plugin config keywords", () => {
+    const runtimeKeywords: EvolutionTriggerKeywords = {
+      successfulPattern: ["ship it"],
+      behaviorFix: ["try again"],
+    };
+
+    expect(
+      checkEvolutionTriggers(
+        state({
+          input: "try again with the other helper",
+          toolCalls: Array.from({ length: 5 }, (_, index) => ({
+            name: `tool-${index}`,
+            params: {},
+          })),
+          result: "ship it",
+        }),
+        1,
+        triggers,
+        runtimeKeywords,
+      ),
+    ).toEqual(["skill-candidate", "successful-pattern", "behavior-fix"]);
   });
 
   it("does not detect successful patterns for failed turns or completion text without reusable work", () => {

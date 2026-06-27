@@ -1,5 +1,6 @@
 import type { EvolutionTrigger } from "./trigger-checker.js";
 import type { EvolutionOperation } from "./evolution-backlog.js";
+import type { TriggerKeywordTarget } from "./evolution-trigger-keywords.js";
 import type {
   AvailableSkill,
   IntentCatalogEntry,
@@ -42,16 +43,31 @@ export type ReviewSnapshot = {
   >;
 };
 
-export type EvolutionFinding = {
+type BaseEvolutionFinding = {
   trigger: EvolutionTrigger;
-  operation: EvolutionOperation;
-  targetIntentIds: string[];
   dedupeKey: string;
   summary: string;
   evidence: string[];
   correctionGoal: string;
   suggestedChange: string;
 };
+
+export type IntentMarkdownEvolutionFinding = BaseEvolutionFinding & {
+  targetKind: "intent-markdown";
+  operation: EvolutionOperation;
+  targetIntentIds: string[];
+};
+
+export type TriggerKeywordsEvolutionFinding = BaseEvolutionFinding & {
+  targetKind: "trigger-keywords";
+  targetTrigger: TriggerKeywordTarget;
+  addKeywords: string[];
+  removeKeywords: string[];
+};
+
+export type EvolutionFinding =
+  | IntentMarkdownEvolutionFinding
+  | TriggerKeywordsEvolutionFinding;
 
 export type EvolutionSource = {
   sessionId: string;

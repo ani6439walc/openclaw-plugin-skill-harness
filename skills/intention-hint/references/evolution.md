@@ -27,9 +27,13 @@ Enter this mode only when the user explicitly asks to process the evolution back
    selects highest `frequency`, then oldest `createdAt`.
 2. Re-read the selected item immediately before processing. It must still be
    `pending`.
-3. Inspect its target Intent Markdown, the compact intent catalog, and relevant
+3. If `targetKind` is `trigger-keywords`, do not edit Intent Markdown and do not
+   mark it processed in this workflow. First-version trigger keyword learning is
+   proposal-only: inspect the evidence, dismiss clearly unsafe/duplicate
+   suggestions, or leave the item pending for a future apply workflow.
+4. Inspect its target Intent Markdown, the compact intent catalog, and relevant
    intention-hint Skill references.
-4. For a legacy item with `operation: unknown` or no targets, infer metadata
+5. For a legacy item with `operation: unknown` or no targets, infer metadata
    only when the existing intents and finding make it unambiguous. Persist it
    with:
 

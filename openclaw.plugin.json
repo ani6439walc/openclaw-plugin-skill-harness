@@ -243,10 +243,6 @@
                     "minimum": 1,
                     "maximum": 100,
                     "default": 5
-                  },
-                  "keywords": {
-                    "type": "array",
-                    "items": { "type": "string" }
                   }
                 }
               },
@@ -287,11 +283,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "enabled": { "type": "boolean", "default": true },
-                  "keywords": {
-                    "type": "array",
-                    "items": { "type": "string" }
-                  }
+                  "enabled": { "type": "boolean", "default": true }
                 }
               }
             },

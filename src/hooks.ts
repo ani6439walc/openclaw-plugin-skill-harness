@@ -19,6 +19,10 @@ import { defaultReviewQueue, type ReviewQueue } from "./review-queue.js";
 import { checkEvolutionTriggers } from "./trigger-checker.js";
 import { runReviewSubagent } from "./review-subagent.js";
 import {
+  DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
+  type EvolutionTriggerKeywords,
+} from "./evolution-trigger-keywords.js";
+import {
   limitConversationTurns,
   extractRecentTurns,
   extractToolText,
@@ -92,7 +96,20 @@ export type HookDeps = {
   topicChecker?: typeof runTopicSwitchSubagent;
   instructionWriter?: typeof runIntentInstructionSubagent;
   backlogWriter?: Pick<BacklogWriter, "record">;
+  triggerKeywords?: () => EvolutionTriggerKeywords;
 };
+
+function readTriggerKeywordsFailOpen(
+  reader?: () => EvolutionTriggerKeywords,
+): EvolutionTriggerKeywords {
+  if (!reader) return DEFAULT_EVOLUTION_TRIGGER_KEYWORDS;
+  try {
+    return reader();
+  } catch (error) {
+    logger.warn("failed to read evolution trigger keywords", { error });
+    return DEFAULT_EVOLUTION_TRIGGER_KEYWORDS;
+  }
+}
 
 function recordTrackedSession(
   tracker: typeof defaultTracker,
@@ -1044,6 +1061,7 @@ export function createHookHandlers(deps: HookDeps) {
       snapshot.current,
       snapshot.turnNumber,
       evolutionConfig.triggers,
+      readTriggerKeywordsFailOpen(deps.triggerKeywords),
     );
     if (triggers.length === 0) return;
 

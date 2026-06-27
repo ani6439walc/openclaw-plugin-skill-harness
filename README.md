@@ -60,11 +60,11 @@ index.ts
        │    └─ $OPENCLAW_STATE_DIR/plugins/intention-hint/stats.json
        │
        ├─ trigger-checker.ts + review-subagent.ts → Intent Evolution review
-       │    ├─ trigger-checker.ts → checkEvolutionTriggers() (seven configurable triggers)
+       │    ├─ trigger-checker.ts → checkEvolutionTriggers() (seven configurable triggers plus runtime trigger keywords)
        │    ├─ review-subagent.ts → buildReviewPrompt() + parseReviewFindings() + runReviewSubagent()
        │    └─ backlog-writer.ts + evolution-backlog.ts → $OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json
        │         ├─ backlog-writer.ts uses file-utils.ts for safeWriteJson()
-       │         └─ evolution-backlog.ts uses file-utils.ts for readJsonFile(), writeJsonAtomic()
+       │         └─ evolution-backlog.ts + evolution-trigger-keywords.ts validate backlog data and trigger keyword defaults
        │
        ├─ evolution-backlog-command.ts + intent-validation.ts → transactional backlog processing support
        │    └─ skills/intention-hint/references/evolution.md
@@ -91,11 +91,11 @@ index.ts
 | `evolution-types.ts`           | Shared types for Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource                                                    |
 | `session-tracker.ts`           | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
 | `stats-aggregator.ts`          | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
-| `trigger-checker.ts`           | Detect seven configurable Evolution triggers from completed turns                                                                                       |
+| `trigger-checker.ts`           | Detect seven configurable Evolution triggers from completed turns using runtime trigger keywords                                                        |
 | `review-subagent.ts`           | Build trigger-specific review prompts and run the read-only review sub-agent with a `read` allowlist                                                    |
 | `review-queue.ts`              | Serialized promise queue for background evolution reviews                                                                                               |
 | `backlog-writer.ts`            | Merge review findings atomically into `evolution.json`                                                                                                  |
-| `evolution-backlog.ts`         | Validate/migrate backlog schema and provide atomic mutation primitives                                                                                  |
+| `evolution-backlog.ts`         | Validate/migrate backlog schema, root `triggerKeywords`, and atomic mutation primitives                                                                 |
 | `evolution-backlog-command.ts` | List, target, validate, and optimistically complete pending backlog items                                                                               |
 | `intent-validation.ts`         | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
 | `conversation-extract.ts`      | Extract and truncate recent conversation turns for intent context                                                                                       |
@@ -277,10 +277,7 @@ pnpm run build
               satisfactionCheck: { enabled: true, everyTurns: 10 },
               missingIntent: { enabled: true },
               weakIntent: { enabled: true, confidenceBelow: 0.5 },
-              behaviorFix: {
-                enabled: true,
-                keywords: ["不對", "應該是", "wrong", "should be"],
-              },
+              behaviorFix: { enabled: true },
             },
           },
         },
@@ -292,21 +289,21 @@ pnpm run build
 
 ### Configuration Reference
 
-| Option              | Type       | Default      | Description                                                                                                                 |
-| ------------------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `agents`            | `string[]` | `["*"]`      | Which agents trigger the plugin. Use `["*"]` for all agents.                                                                |
-| `intentDeny`        | `object`   | `{}`         | Per-agent deny list of intent IDs. Keys support `*` glob patterns.                                                          |
-| `model`             | `string`   | —            | Lightweight model for the intention scanner. Falls back to the agent's default if empty.                                    |
-| `modelFallback`     | `string`   | —            | Fallback model when `config.model` cannot be resolved.                                                                      |
-| `thinking`          | `string`   | `"medium"`   | Thinking level for the intent classifier subagent.                                                                          |
-| `allowedChatTypes`  | `string[]` | `["direct"]` | Chat types (direct, group, channel) that allow intent analysis.                                                             |
-| `allowedChatIds`    | `string[]` | `[]`         | Allowlist of chat IDs. Empty means no allowlist restriction.                                                                |
-| `deniedChatIds`     | `string[]` | `[]`         | Blocklist of chat IDs. Plugin skips intent analysis for listed IDs.                                                         |
-| `queryMode`         | `string`   | `"recent"`   | Context window mode: `recent` (recent turns), `message` (latest message only), `full` (full history).                       |
-| `contextWindow`     | `object`   | see below    | Turn/char limits for conversation extraction.                                                                               |
-| `timeoutMs`         | `number`   | `3000`       | Max wait time for each scanner sub-agent run. Clamped to 250–120000ms.                                                      |
-| `complexityPrompts` | `object`   | built-in     | Custom instruction-generation guidance per complexity level.                                                                |
-| `evolution`         | `object`   | disabled     | Post-turn trigger review configuration. Findings are stored in `$OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json`. |
+| Option              | Type       | Default      | Description                                                                                                                                              |
+| ------------------- | ---------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents`            | `string[]` | `["*"]`      | Which agents trigger the plugin. Use `["*"]` for all agents.                                                                                             |
+| `intentDeny`        | `object`   | `{}`         | Per-agent deny list of intent IDs. Keys support `*` glob patterns.                                                                                       |
+| `model`             | `string`   | —            | Lightweight model for the intention scanner. Falls back to the agent's default if empty.                                                                 |
+| `modelFallback`     | `string`   | —            | Fallback model when `config.model` cannot be resolved.                                                                                                   |
+| `thinking`          | `string`   | `"medium"`   | Thinking level for the intent classifier subagent.                                                                                                       |
+| `allowedChatTypes`  | `string[]` | `["direct"]` | Chat types (direct, group, channel) that allow intent analysis.                                                                                          |
+| `allowedChatIds`    | `string[]` | `[]`         | Allowlist of chat IDs. Empty means no allowlist restriction.                                                                                             |
+| `deniedChatIds`     | `string[]` | `[]`         | Blocklist of chat IDs. Plugin skips intent analysis for listed IDs.                                                                                      |
+| `queryMode`         | `string`   | `"recent"`   | Context window mode: `recent` (recent turns), `message` (latest message only), `full` (full history).                                                    |
+| `contextWindow`     | `object`   | see below    | Turn/char limits for conversation extraction.                                                                                                            |
+| `timeoutMs`         | `number`   | `3000`       | Max wait time for each scanner sub-agent run. Clamped to 250–120000ms.                                                                                   |
+| `complexityPrompts` | `object`   | built-in     | Custom instruction-generation guidance per complexity level.                                                                                             |
+| `evolution`         | `object`   | disabled     | Post-turn trigger review configuration. Findings and runtime trigger keywords are stored in `$OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json`. |
 
 `evolution.thinking` independently controls the Evolution review
 subagent's thinking level. Both thinking settings accept `off`, `minimal`,
@@ -318,20 +315,21 @@ Intent Evolution is an opt-in observation and proposal pipeline. It does
 not edit intent files automatically. When enabled, each completed tracked turn
 is checked for seven trigger types:
 
-| Trigger              | Default condition                                      | Intent Markdown correction target                                            |
-| -------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `skill-candidate`    | Current turn has at least 5 tool calls                 | `Skills & Tools`, `Concrete Workflow`, or `Experience`                       |
-| `process-gap`        | Current turn has at least 2 tool errors                | Guidelines, tool examples, workflow, or pitfalls                             |
-| `successful-pattern` | Successful tool-heavy or skill-assisted completed turn | `Experience`, `Concrete Workflow`, or Response Strategy                      |
-| `satisfaction-check` | Every 10th tracked turn                                | Boundaries, examples, Guidelines, or Response Strategy                       |
-| `missing-intent`     | Classified intent is `other`                           | A narrowly scoped new intent draft                                           |
-| `weak-intent`        | Classification confidence is below 0.5                 | Frontmatter triggers/examples/domain/fastpath and boundary clarity           |
-| `behavior-fix`       | Current input contains a configured correction keyword | Fastpath metadata, guidance, or workflow that encodes the corrected behavior |
+| Trigger              | Default condition                                                                     | Intent Markdown correction target                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `skill-candidate`    | Current turn has at least 5 tool calls                                                | `Skills & Tools`, `Concrete Workflow`, or `Experience`                                                           |
+| `process-gap`        | Current turn has at least 2 tool errors                                               | Guidelines, tool examples, workflow, or pitfalls                                                                 |
+| `successful-pattern` | Successful tool-heavy or skill-assisted completed turn with a runtime success keyword | `Experience`, `Concrete Workflow`, Response Strategy, or pending `triggerKeywords.successfulPattern` suggestions |
+| `satisfaction-check` | Every 10th tracked turn                                                               | Boundaries, examples, Guidelines, or Response Strategy                                                           |
+| `missing-intent`     | Classified intent is `other`                                                          | A narrowly scoped new intent draft                                                                               |
+| `weak-intent`        | Classification confidence is below 0.5                                                | Frontmatter triggers/examples/domain/fastpath and boundary clarity                                               |
+| `behavior-fix`       | Current input contains a runtime correction keyword                                   | Fastpath metadata, guidance, workflow, or pending `triggerKeywords.behaviorFix` suggestions                      |
 
 All matching triggers are reviewed in one background, read-only sub-agent run.
 Each trigger receives a distinct review focus and correction goal, and may return
 no finding. Valid findings are merged by pending `type + dedupeKey` into the
-atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json` backlog. Review failures are
+atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json` backlog. Runtime trigger keyword lists live in the same root document under
+`triggerKeywords.successfulPattern` and `triggerKeywords.behaviorFix`; they are not configured in `openclaw.json`. Review failures are
 fail-open and never block or alter the main reply.
 
 The reviewer is intentionally scoped to improving runtime `intents/*.md`, following
@@ -343,8 +341,10 @@ metadata resolved from the matched intent body, so it can judge whether
 Guidelines, Skills & Tools, Concrete Workflow, or Experience should preserve a
 stable skill path. Depending on the trigger, it proposes a new intent draft or
 targeted changes to frontmatter, Guidelines, Skills & Tools, Response Strategy,
-Concrete Workflow, or Experience. It never proposes changes to skills, tools,
-AGENTS.md, SOUL.md, or other production files.
+Concrete Workflow, or Experience. It may also create pending `trigger-keywords`
+findings when the evidence supports a stable success/correction phrase, but it
+does not apply those keyword changes automatically. It never proposes changes to
+skills, tools, AGENTS.md, SOUL.md, or other production files.
 The review sub-agent uses `runEmbeddedAgent` with `promptMode="minimal"`,
 `modelRun=false`, and `toolsAllow=["read"]` so OpenClaw materializes only the
 core `read` tool. The `read` tool is reserved for inspecting relevant
@@ -353,10 +353,13 @@ available skill metadata.
 
 `evolution.json` is protected like `stats.json`: both live at the runtime data
 root, are not loaded as session state, and are never removed by session
-lifecycle or 14-day retention cleanup. Schema v2 findings include `operation` (`create`, `refine`,
-`split`, or `merge`) and all affected `targetIntentIds`. Existing schema v1
-items migrate to `operation: "unknown"` and empty targets until they can be
-grounded safely.
+lifecycle or 14-day retention cleanup. Schema v3 stores root `triggerKeywords`
+plus backlog findings. Intent Markdown findings include `targetKind:
+"intent-markdown"`, `operation` (`create`, `refine`, `split`, or `merge`), and
+all affected `targetIntentIds`. Trigger keyword findings include `targetKind:
+"trigger-keywords"`, `targetTrigger`, and a pending `keywordChange`. Existing
+schema v1/v2 items migrate to v3; v1 intent items use `operation: "unknown"` and
+empty targets until they can be grounded safely.
 
 ### Intention-Hint Backlog Mode
 
@@ -380,7 +383,7 @@ pnpm run evolution-backlog -- validate-intents --id productivity
 pnpm run evolution-backlog -- mark-processed --id IMP-... --expected-updated-at <timestamp>
 ```
 
-All mutations validate schema v2 and use a same-directory temporary file plus
+All mutations validate schema v3 and use a same-directory temporary file plus
 atomic rename. `mark-processed` rejects a stale item `updatedAt`.
 
 ## Key Design Decisions
@@ -563,9 +566,9 @@ The test suites cover:
 - Intent filtering via deny patterns
 - Internal/inter-session turn detection and conversation-history filtering
 - Per-turn historical intent matching, duplicate handling, and prompt injection
-- Six Evolution triggers, thresholds, and multi-trigger turns
+- Seven Evolution triggers, thresholds, runtime trigger keywords, and multi-trigger turns
 - Intention-hint Skill review prompts, response parsing, and read-only reviewer runs
 - Serialized background reviews and atomic, idempotent evolution backlog writes
-- Schema v1-to-v2 migration, structured finding targets, and evolution-backlog command concurrency checks
+- Schema v1/v2-to-v3 migration, structured finding targets, trigger keyword suggestions, and evolution-backlog command concurrency checks
 - Intent Markdown structure/catalog validation and explicit-only intention-hint backlog mode
 - Protection of root-level `evolution.json` from session loading and retention cleanup

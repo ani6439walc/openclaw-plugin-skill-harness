@@ -1,6 +1,10 @@
 import type { IntentionResult } from "./types.js";
 import type { ResolvedEvolutionConfig } from "./types.js";
 import { FALLBACK_INTENT_ID } from "./constants.js";
+import {
+  DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
+  type EvolutionTriggerKeywords,
+} from "./evolution-trigger-keywords.js";
 
 export const EVOLUTION_TRIGGER_TYPES = [
   "skill-candidate",
@@ -38,6 +42,7 @@ export function checkEvolutionTriggers(
   state: TriggerState,
   turnNumber: number,
   config: ResolvedEvolutionConfig["triggers"],
+  triggerKeywords: EvolutionTriggerKeywords = DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
 ): EvolutionTrigger[] {
   const matches: EvolutionTrigger[] = [];
   const toolCalls = state.toolCalls ?? [];
@@ -66,7 +71,7 @@ export function checkEvolutionTriggers(
       (state.skillsUsed?.length ?? 0) > 0) &&
     includesAnyKeyword(
       `${state.input ?? ""}\n${state.result ?? ""}`,
-      config.successfulPattern.keywords,
+      triggerKeywords.successfulPattern,
     )
   ) {
     matches.push("successful-pattern");
@@ -94,7 +99,7 @@ export function checkEvolutionTriggers(
   }
   if (
     config.behaviorFix.enabled &&
-    includesAnyKeyword(state.input, config.behaviorFix.keywords)
+    includesAnyKeyword(state.input, triggerKeywords.behaviorFix)
   ) {
     matches.push("behavior-fix");
   }

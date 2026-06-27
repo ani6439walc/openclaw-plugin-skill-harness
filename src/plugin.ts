@@ -11,11 +11,13 @@ import { IntentCatalog } from "./intent-loader.js";
 import { SessionTracker } from "./session-tracker.js";
 import { StatsAggregator } from "./stats-aggregator.js";
 import { BacklogWriter } from "./backlog-writer.js";
+import { readEvolutionTriggerKeywords } from "./evolution-backlog.js";
 import { createHookHandlers, type HookDeps } from "./hooks.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   intentsPath,
+  evolutionBacklogPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
   sessionsDirPath,
@@ -133,6 +135,8 @@ export function createPlugin(
         tracker,
         statsAggregator,
         backlogWriter,
+        triggerKeywords: () =>
+          readEvolutionTriggerKeywords(evolutionBacklogPath(dataRoot)),
       };
 
       const handlers = createHookHandlers(deps);

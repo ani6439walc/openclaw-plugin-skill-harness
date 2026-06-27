@@ -42,33 +42,6 @@ const DEFAULT_COMPLEXITY_PROMPTS = {
   high: DEFAULT_HIGH_COMPLEXITY_PROMPT,
 };
 
-const DEFAULT_BEHAVIOR_FIX_KEYWORDS = [
-  "不對",
-  "不是",
-  "應該是",
-  "你誤會了",
-  "wrong",
-  "incorrect",
-  "should be",
-  "you misunderstood",
-];
-
-const DEFAULT_SUCCESSFUL_PATTERN_KEYWORDS = [
-  "完成",
-  "解決",
-  "修好",
-  "通過",
-  "驗證",
-  "成功",
-  "可以了",
-  "completed",
-  "fixed",
-  "resolved",
-  "passed",
-  "verified",
-  "done",
-];
-
 const DEFAULT_EVOLUTION = {
   enabled: false,
   model: undefined,
@@ -81,12 +54,11 @@ const DEFAULT_EVOLUTION = {
     successfulPattern: {
       enabled: true,
       toolCalls: 5,
-      keywords: DEFAULT_SUCCESSFUL_PATTERN_KEYWORDS,
     },
     satisfactionCheck: { enabled: true, everyTurns: 10 },
     missingIntent: { enabled: true },
     weakIntent: { enabled: true, confidenceBelow: 0.5 },
-    behaviorFix: { enabled: true, keywords: DEFAULT_BEHAVIOR_FIX_KEYWORDS },
+    behaviorFix: { enabled: true },
   },
 } as const;
 
@@ -196,9 +168,6 @@ const EvolutionSchema = z
           .object({
             enabled: enabledSchema,
             toolCalls: boundedInt(5, 1, 100),
-            keywords: stringListWithDefault(
-              DEFAULT_SUCCESSFUL_PATTERN_KEYWORDS,
-            ),
           })
           .catch(DEFAULT_EVOLUTION.triggers.successfulPattern),
         satisfactionCheck: z
@@ -222,7 +191,6 @@ const EvolutionSchema = z
         behaviorFix: z
           .object({
             enabled: enabledSchema,
-            keywords: stringListWithDefault(DEFAULT_BEHAVIOR_FIX_KEYWORDS),
           })
           .catch(DEFAULT_EVOLUTION.triggers.behaviorFix),
       })

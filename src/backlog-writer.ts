@@ -15,6 +15,28 @@ import {
   type EvolutionBacklog,
 } from "./evolution-backlog.js";
 
+function backlogTargetFields(finding: EvolutionFinding) {
+  if (finding.targetKind === "trigger-keywords") {
+    return {
+      targetKind: "trigger-keywords" as const,
+      operation: "adjust-trigger-keywords" as const,
+      targetIntentIds: [],
+      targetTrigger: finding.targetTrigger,
+      keywordChange: {
+        add: [...finding.addKeywords],
+        remove: [...finding.removeKeywords],
+      },
+    };
+  }
+  return {
+    targetKind: "intent-markdown" as const,
+    operation: finding.operation,
+    targetIntentIds: [...finding.targetIntentIds],
+    targetTrigger: undefined,
+    keywordChange: undefined,
+  };
+}
+
 function nextItemId(backlog: EvolutionBacklog, nowIso: string): string {
   const date = nowIso.slice(0, 10).replaceAll("-", "");
   const prefix = `IMP-${date}-`;
@@ -61,6 +83,7 @@ export class BacklogWriter {
         if (backlog.processedEvents[eventId]) return false;
 
         for (const finding of findings) {
+          const targetFields = backlogTargetFields(finding);
           const existing = backlog.items.find(
             (item) =>
               item.status === "pending" &&
@@ -71,8 +94,11 @@ export class BacklogWriter {
             existing.frequency += 1;
             existing.sources.push(source);
             existing.updatedAt = nowIso;
-            existing.operation = finding.operation;
-            existing.targetIntentIds = [...finding.targetIntentIds];
+            existing.targetKind = targetFields.targetKind;
+            existing.operation = targetFields.operation;
+            existing.targetIntentIds = targetFields.targetIntentIds;
+            existing.targetTrigger = targetFields.targetTrigger;
+            existing.keywordChange = targetFields.keywordChange;
             existing.summary = finding.summary;
             existing.correctionGoal = finding.correctionGoal;
             existing.details = {
@@ -85,8 +111,7 @@ export class BacklogWriter {
           backlog.items.push({
             id: nextItemId(backlog, nowIso),
             type: finding.trigger,
-            operation: finding.operation,
-            targetIntentIds: [...finding.targetIntentIds],
+            ...targetFields,
             dedupeKey: finding.dedupeKey,
             summary: finding.summary,
             correctionGoal: finding.correctionGoal,

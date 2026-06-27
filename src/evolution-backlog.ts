@@ -1,11 +1,17 @@
 import { z } from "zod";
-import { readJsonFile, writeJsonAtomic, safeWriteJson } from "./file-utils.js";
+import { fileExists, readJsonFile, writeJsonAtomic } from "./file-utils.js";
 import type { EvolutionSource } from "./evolution-types.js";
 import {
   EVOLUTION_TRIGGER_TYPES,
   type EvolutionTrigger,
 } from "./trigger-checker.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "./constants.js";
+import {
+  normalizeEvolutionTriggerKeywords,
+  normalizeKeywordList,
+  type EvolutionTriggerKeywords,
+  type TriggerKeywordTarget,
+} from "./evolution-trigger-keywords.js";
 
 export const EVOLUTION_OPERATIONS = [
   "create",
@@ -13,7 +19,11 @@ export const EVOLUTION_OPERATIONS = [
   "split",
   "merge",
 ] as const;
-export const BACKLOG_OPERATIONS = ["unknown", ...EVOLUTION_OPERATIONS] as const;
+export const BACKLOG_OPERATIONS = [
+  "unknown",
+  ...EVOLUTION_OPERATIONS,
+  "adjust-trigger-keywords",
+] as const;
 
 export type EvolutionOperation = (typeof EVOLUTION_OPERATIONS)[number];
 export type BacklogOperation = (typeof BACKLOG_OPERATIONS)[number];
@@ -21,8 +31,11 @@ export type BacklogOperation = (typeof BACKLOG_OPERATIONS)[number];
 export type BacklogItem = {
   id: string;
   type: EvolutionTrigger;
+  targetKind: "intent-markdown" | "trigger-keywords";
   operation: BacklogOperation;
   targetIntentIds: string[];
+  targetTrigger?: TriggerKeywordTarget;
+  keywordChange?: { add: string[]; remove: string[] };
   dedupeKey: string;
   summary: string;
   correctionGoal: string;
@@ -38,9 +51,10 @@ export type BacklogItem = {
 };
 
 export type EvolutionBacklog = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   createdAt: string;
   updatedAt: string;
+  triggerKeywords: EvolutionTriggerKeywords;
   processedEvents: Record<string, string>;
   items: BacklogItem[];
 };
@@ -84,6 +98,24 @@ const EvolutionSourceSchema = z.object({
   turnStart: z.string(),
 });
 
+const TriggerKeywordTargetSchema = z.enum([
+  "successful-pattern",
+  "behavior-fix",
+]);
+
+const KeywordChangeSchema = z.object({
+  add: z
+    .array(z.string())
+    .transform((values) => normalizeKeywordList(values, [])),
+  remove: z
+    .array(z.string())
+    .transform((values) => normalizeKeywordList(values, [])),
+});
+
+const TriggerKeywordsSchema = z
+  .unknown()
+  .transform((value) => normalizeEvolutionTriggerKeywords(value));
+
 const BaseItemSchema = z.object({
   id: z.string(),
   type: z.enum(EVOLUTION_TRIGGER_TYPES),
@@ -101,6 +133,27 @@ const BaseItemSchema = z.object({
   status: z.enum(["pending", "processed", "dismissed"]),
 });
 
+const BacklogItemSchema = BaseItemSchema.extend({
+  targetKind: z.enum(["intent-markdown", "trigger-keywords"]),
+  operation: z.enum(BACKLOG_OPERATIONS),
+  targetIntentIds: z.array(z.string().trim().min(1)),
+  targetTrigger: TriggerKeywordTargetSchema.optional(),
+  keywordChange: KeywordChangeSchema.optional(),
+});
+
+function migrateItem(rawItem: unknown): unknown {
+  if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+    return rawItem;
+  }
+  const item = rawItem as Record<string, unknown>;
+  return {
+    ...item,
+    targetKind: item.targetKind ?? "intent-markdown",
+    operation: item.operation ?? "unknown",
+    targetIntentIds: item.targetIntentIds ?? [],
+  };
+}
+
 const BacklogV1Schema = z.object({
   schemaVersion: z.literal(1),
   createdAt: z.string(),
@@ -110,23 +163,20 @@ const BacklogV1Schema = z.object({
 });
 
 export const EvolutionBacklogSchema = z.object({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.literal(3),
   createdAt: z.string(),
   updatedAt: z.string(),
+  triggerKeywords: TriggerKeywordsSchema,
   processedEvents: z.record(z.string(), z.string()),
-  items: z.array(
-    BaseItemSchema.extend({
-      operation: z.enum(BACKLOG_OPERATIONS),
-      targetIntentIds: z.array(z.string().trim().min(1)),
-    }),
-  ),
+  items: z.array(BacklogItemSchema),
 });
 
 export function createBacklog(nowIso: string): EvolutionBacklog {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     createdAt: nowIso,
     updatedAt: nowIso,
+    triggerKeywords: normalizeEvolutionTriggerKeywords({}),
     processedEvents: {},
     items: [],
   };
@@ -135,23 +185,44 @@ export function createBacklog(nowIso: string): EvolutionBacklog {
 export function parseBacklog(raw: unknown): EvolutionBacklog {
   const normalized = normalizeBacklogTriggerTypes(raw);
   const version = z.object({ schemaVersion: z.number() }).parse(normalized);
-  if (version.schemaVersion === 2) {
+  if (version.schemaVersion === 3) {
     return EvolutionBacklogSchema.parse(normalized);
   }
+  if (version.schemaVersion === 2) {
+    const legacy = z
+      .object({
+        schemaVersion: z.literal(2),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+        processedEvents: z.record(z.string(), z.string()),
+        items: z.array(z.unknown()),
+      })
+      .parse(normalized);
+    return EvolutionBacklogSchema.parse({
+      ...legacy,
+      schemaVersion: 3,
+      triggerKeywords: normalizeEvolutionTriggerKeywords({}),
+      items: legacy.items.map(migrateItem),
+    });
+  }
   const legacy = BacklogV1Schema.parse(normalized);
-  return {
+  return EvolutionBacklogSchema.parse({
     ...legacy,
-    schemaVersion: 2,
-    items: legacy.items.map((item) => ({
-      ...item,
-      operation: "unknown",
-      targetIntentIds: [],
-    })),
-  };
+    schemaVersion: 3,
+    triggerKeywords: normalizeEvolutionTriggerKeywords({}),
+    items: legacy.items.map(migrateItem),
+  });
 }
 
 export function readBacklog(backlogPath: string): EvolutionBacklog {
   return parseBacklog(readJsonFile<unknown>(backlogPath));
+}
+
+export function readEvolutionTriggerKeywords(
+  backlogPath: string,
+): EvolutionTriggerKeywords {
+  if (!fileExists(backlogPath)) return normalizeEvolutionTriggerKeywords({});
+  return readBacklog(backlogPath).triggerKeywords;
 }
 
 export function writeBacklogAtomic(
@@ -210,7 +281,12 @@ export function markPendingProcessed(
 ): BacklogItem {
   const item = selectPendingItem(backlog, id);
   if (!item) throw new Error(`pending backlog item not found: ${id}`);
-  if (item.operation === "unknown" || item.targetIntentIds.length === 0) {
+  const hasResolvedIntentTarget =
+    item.targetKind === "intent-markdown" &&
+    item.operation !== "unknown" &&
+    item.operation !== "adjust-trigger-keywords" &&
+    item.targetIntentIds.length > 0;
+  if (!hasResolvedIntentTarget) {
     throw new Error(`backlog item target metadata is unresolved: ${id}`);
   }
   if (item.updatedAt !== expectedUpdatedAt) {
