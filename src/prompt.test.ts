@@ -136,6 +136,9 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("<latest_message>");
     expect(result).toContain("I need help with code");
     expect(result).toContain("</latest_message>");
+    expect(result).toMatch(
+      /<latest_message>\nI need help with code\n<\/latest_message>\n\nClassify the latest_message now\. Return exactly one raw JSON object with no Markdown code fences and no surrounding prose\.$/,
+    );
   });
 
   it("should not include a previous intent result section", () => {
@@ -328,6 +331,9 @@ describe("buildTopicSwitchPrompt", () => {
     expect(prompt).toContain('"high": multi-step investigation');
     expect(prompt).not.toContain(
       "reason must be one of: start, same-topic, marker, shift, match.",
+    );
+    expect(prompt).toMatch(
+      /<latest_message>\n繼續實作 topic checker\n<\/latest_message>\n\nCheck topic continuity for latest_message only\. Return exactly one raw JSON object with no Markdown code fences and no surrounding prose\.$/,
     );
   });
 
@@ -601,6 +607,8 @@ describe("buildIntentInstructionPrompt", () => {
         domain: "coding",
         keywords: ["topic", "continuation"],
         topic: "User is continuing implementation of the same topic.",
+        suggestion:
+          "Consider asking a clarifying question if the target is unclear.",
         confidence: 0.9,
         complexity: "medium",
       },
@@ -635,6 +643,12 @@ describe("buildIntentInstructionPrompt", () => {
       "Review the matched intent Markdown for relevant experience",
     );
     expect(prompt).toContain("workflow");
+    expect(prompt).toContain("Rules:");
+    expect(prompt).not.toContain("<rules>");
+    expect(prompt).not.toContain("</rules>");
+    expect(prompt.indexOf("<intent_metadata>")).toBeLessThan(
+      prompt.indexOf("Rules:"),
+    );
     expect(prompt).toContain("Skill Recommendation");
     expect(prompt).toContain("at most 1-3 explicit skill directives");
     expect(prompt).toContain("MUST read skill: <skill-name> at <path>");
@@ -643,11 +657,45 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("menu of possible guidance, not a checklist");
     expect(prompt).toContain("omit unrelated workflows");
     expect(prompt).toContain("narrowest concrete workflow");
-    expect(prompt).toContain("read-only status check");
-    expect(prompt).toContain("Do not suggest edits, commits, pushes");
+    expect(prompt).toContain(
+      "preserve the relevant operational constraint accurately",
+    );
+    expect(prompt).toContain(
+      "Quote verbatim only when the wording is directly applicable to this turn",
+    );
+    expect(prompt).toContain(
+      "read-only inspection, status, log, diff, history search",
+    );
+    expect(prompt).toContain("Do not suggest edits, staging, commits, pushes");
+    expect(prompt).toContain(
+      "For read-only git log/history requests, do not include stage/commit/push workflows",
+    );
+    expect(prompt).toContain(
+      "minimal inspection commands and a concise reporting shape",
+    );
     expect(prompt).toContain("complexity_context only to tune");
     expect(prompt).toContain("conversation context only to resolve references");
+    expect(prompt).toContain(
+      "Use topicChangeReason only as a carry-over guard",
+    );
+    expect(prompt).toContain("start = first reliable topic");
+    expect(prompt).toContain("marker = explicit transition wording");
+    expect(prompt).toContain(
+      "shift = semantic subject/outcome/interaction-mode changed without a marker",
+    );
+    expect(prompt).toContain(
+      "change = explicit goal/artifact replacement or refocus",
+    );
+    expect(prompt).toContain("match = exact keyword match to a catalog intent");
     expect(prompt).toContain("do not carry over prior workflow instructions");
+    expect(prompt).toContain(
+      "If topicChangeReason is absent, still treat conversation context as reference material",
+    );
+    expect(prompt).toContain("If suggestion is present in intent_metadata");
+    expect(prompt).toContain("treat it as low-confidence classifier guidance");
+    expect(prompt).toContain(
+      "do not repeat it verbatim unless it is directly useful",
+    );
     expect(prompt).toContain("Conversation context is reference material only");
     expect(prompt).toContain("style or routing intents");
     expect(prompt).toContain(
@@ -657,6 +705,9 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("intent: coding");
     expect(prompt).toContain("domain: coding");
     expect(prompt).toContain("topicChangeReason: ");
+    expect(prompt).toContain(
+      "suggestion: Consider asking a clarifying question if the target is unclear.",
+    );
     expect(prompt).not.toContain("changed:");
     expect(prompt).toContain(
       "<complexity_context>Use a balanced flow.</complexity_context>",
@@ -671,6 +722,9 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("Use test-driven-development");
     expect(prompt).toContain("apply_patch");
     expect(prompt).toContain("繼續實作同題續聊");
+    expect(prompt).toMatch(
+      /<latest_message>\n繼續實作同題續聊\n<\/latest_message>\n\nWrite the optional intention hint now\. Use latest_message as the decision source and output no surrounding analysis\.$/,
+    );
   });
 });
 
@@ -723,6 +777,52 @@ describe("parseIntentionResult", () => {
       domain: "coding",
       topicChangeReason: undefined,
       complexity: "high",
+    });
+  });
+
+  it("lets classifier complexity override topic context starting hint", () => {
+    const result = parseIntentionResult(
+      JSON.stringify({
+        intent: "coding",
+        reason: "User asks for a tiny follow-up",
+        confidence: 0.85,
+        complexity: "low",
+      }),
+      ["coding", "other"],
+      {
+        keywords: ["topic", "checker", "implementation"],
+        topic: "User is continuing implementation of the topic checker.",
+        domain: "coding",
+        changed: false,
+        complexity: "high",
+      },
+    );
+
+    expect(result).toMatchObject({
+      complexity: "low",
+    });
+  });
+
+  it("falls back to topic context when classifier complexity is invalid", () => {
+    const result = parseIntentionResult(
+      JSON.stringify({
+        intent: "coding",
+        reason: "User asks for a tiny follow-up",
+        confidence: 0.85,
+        complexity: "very-high",
+      }),
+      ["coding", "other"],
+      {
+        keywords: ["topic", "checker", "implementation"],
+        topic: "User is continuing implementation of the topic checker.",
+        domain: "coding",
+        changed: false,
+        complexity: "medium",
+      },
+    );
+
+    expect(result).toMatchObject({
+      complexity: "medium",
     });
   });
 

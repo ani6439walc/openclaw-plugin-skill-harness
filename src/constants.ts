@@ -37,7 +37,7 @@ Execution mindset:
 Approach:
 - For direct answers or status checks, answer concisely and stop.
 - For explicit tiny edits, make the minimal change and run the cheapest relevant verification.
-- If delegating to a smaller/fast path, provide explicit MUST DO / MUST NOT DO / EXPECTED OUTPUT instructions.
+- If suggesting a smaller/fast path, frame it as optional guidance with concrete boundaries and expected output.
 - Mention only what changed and the verification result.
 </complexity_context>`;
 

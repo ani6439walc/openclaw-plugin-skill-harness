@@ -37,10 +37,10 @@ index.ts
        │    ├─ onSessionEnd → cleanup() + cleanupExpired() (lifecycle cleanup + 14-day retention)
        │    └─ review-queue.ts → ReviewQueue (serialized background evolution reviews)
        │
-       ├─ prompt.ts → buildIntentionPrompt() (pure function — no API dependency)
-       │    ├─ JSON output format with filename-based intent ids
-       │    ├─ parseIntentionResult() — JSON parser with code-block tolerance
-       │    ├─ <intent_categories> — auto-derived from ID prefixes
+       ├─ prompt.ts → prompt builders and parsers (pure functions — no API dependency)
+       │    ├─ JSON output contracts with filename-based intent ids and final one-object reminders
+       │    ├─ parseIntentionResult() — JSON parser with code-block tolerance and classifier complexity precedence
+       │    ├─ intent groups by semantic domain — routing overview only; exact ids come from the catalog
        │    ├─ <current_time> — injects local timezone time
        │    ├─ <conversation_context> — topic-segmented recent turns, omitted when empty
        │    ├─ buildIntentInstructionPrompt() — condenses matched intent Markdown into main-agent instructions
@@ -78,30 +78,30 @@ index.ts
 
 ### Module Responsibilities
 
-| Module                         | Purpose                                                                                                                                       |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plugin.ts`                    | Plugin entry point, initializes runtime data, seeds empty intent catalogs from skill assets, and registers hooks on OpenClaw lifecycle events |
-| `hooks.ts`                     | Event handlers for prompt building, tool/agent tracking, and session cleanup                                                                  |
-| `subagent.ts`                  | Runs tool-free topic switch, intent classification, and instruction-writing sub-agents with model selection                                   |
-| `skill-catalog.ts`             | Resolves `skill: <name>` references from matched intent Markdown into available skill metadata                                                |
-| `intent-loader.ts`             | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                                                       |
-| `file-utils.ts`                | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                            |
-| `constants.ts`                 | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                             |
-| `types.ts`                     | All shared type definitions for plugin, config, intent, result, and turn shapes                                                               |
-| `evolution-types.ts`           | Shared types for Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource                                          |
-| `session-tracker.ts`           | Persist and clean up session data in runtime `sessions/` JSON files                                                                           |
-| `stats-aggregator.ts`          | Aggregate idempotent runtime usage statistics into `stats.json`                                                                               |
-| `trigger-checker.ts`           | Detect seven configurable Evolution triggers from completed turns                                                                             |
-| `review-subagent.ts`           | Build trigger-specific review prompts and run the read-only review sub-agent with a `read` allowlist                                          |
-| `review-queue.ts`              | Serialized promise queue for background evolution reviews                                                                                     |
-| `backlog-writer.ts`            | Merge review findings atomically into `evolution.json`                                                                                        |
-| `evolution-backlog.ts`         | Validate/migrate backlog schema and provide atomic mutation primitives                                                                        |
-| `evolution-backlog-command.ts` | List, target, validate, and optimistically complete pending backlog items                                                                     |
-| `intent-validation.ts`         | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                         |
-| `conversation-extract.ts`      | Extract and truncate recent conversation turns for intent context                                                                             |
-| `prompt.ts`                    | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints                     |
-| `session.ts`                   | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                              |
-| `config.ts`                    | Zod schema validation with defaults and clamping for plugin configuration                                                                     |
+| Module                         | Purpose                                                                                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugin.ts`                    | Plugin entry point, initializes runtime data, seeds empty intent catalogs from skill assets, and registers hooks on OpenClaw lifecycle events           |
+| `hooks.ts`                     | Event handlers for prompt building, tool/agent tracking, and session cleanup                                                                            |
+| `subagent.ts`                  | Runs tool-free topic switch, intent classification, and instruction-writing sub-agents with model selection                                             |
+| `skill-catalog.ts`             | Resolves `skill: <name>` references from matched intent Markdown into available skill metadata                                                          |
+| `intent-loader.ts`             | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                                                                 |
+| `file-utils.ts`                | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                                      |
+| `constants.ts`                 | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                                       |
+| `types.ts`                     | All shared type definitions for plugin, config, intent, result, and turn shapes                                                                         |
+| `evolution-types.ts`           | Shared types for Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource                                                    |
+| `session-tracker.ts`           | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
+| `stats-aggregator.ts`          | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
+| `trigger-checker.ts`           | Detect seven configurable Evolution triggers from completed turns                                                                                       |
+| `review-subagent.ts`           | Build trigger-specific review prompts and run the read-only review sub-agent with a `read` allowlist                                                    |
+| `review-queue.ts`              | Serialized promise queue for background evolution reviews                                                                                               |
+| `backlog-writer.ts`            | Merge review findings atomically into `evolution.json`                                                                                                  |
+| `evolution-backlog.ts`         | Validate/migrate backlog schema and provide atomic mutation primitives                                                                                  |
+| `evolution-backlog-command.ts` | List, target, validate, and optimistically complete pending backlog items                                                                               |
+| `intent-validation.ts`         | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
+| `conversation-extract.ts`      | Extract and truncate recent conversation turns for intent context                                                                                       |
+| `prompt.ts`                    | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
+| `session.ts`                   | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                                        |
+| `config.ts`                    | Zod schema validation with defaults and clamping for plugin configuration                                                                               |
 
 Every `session_end` removes the ended session from tracker memory. Final lifecycle reasons (`new`, `reset`, `idle`, `daily`, `compaction`, and `deleted`) also delete that session's JSON; restart-oriented reasons preserve it for reload. Each `session_end` additionally removes session JSON files under the runtime `sessions/` directory whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch root-level `stats.json`, `evolution.json`, transcripts, or other plugin data.
 
@@ -152,6 +152,16 @@ only on the three visible phases: `topic-continuity-check`,
 domain keyword routes are reported through those semantic phases instead of
 fastpath-specific phase names. Event failures are fail-open and never add text to
 `prependContext`.
+
+Prompt assembly keeps static instructions, schema examples, and catalog data before
+dynamic conversation input, then closes helper prompts with a short final output
+contract after `</latest_message>`. Topic continuity and intent classifier prompts
+ask for exactly one raw JSON object with no Markdown code fences and no
+surrounding prose, which helps prompt-only JSON parsing on compact helper models.
+The topic checker still provides a
+complexity starting hint, but `parseIntentionResult()` lets the classifier's final
+complexity override it when the latest-message scope is simpler or broader than the
+topic hint.
 
 ### Session Data Structure
 

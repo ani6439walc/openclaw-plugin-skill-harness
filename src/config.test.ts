@@ -368,6 +368,12 @@ describe("resolveConfig", () => {
     it("should use default prompts when not provided", () => {
       const result = resolveConfig({});
       expect(result.complexityPrompts.low).toBe(DEFAULT_LOW_COMPLEXITY_PROMPT);
+      expect(result.complexityPrompts.low).toContain(
+        "frame it as optional guidance with concrete boundaries and expected output",
+      );
+      expect(result.complexityPrompts.low).not.toContain(
+        "MUST DO / MUST NOT DO",
+      );
       expect(result.complexityPrompts.medium).toBe(
         DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
       );
