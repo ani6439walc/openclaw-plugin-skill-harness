@@ -167,8 +167,13 @@ describe("buildIntentionPrompt", () => {
       latest: "hello",
     });
 
-    expect(result).toContain("<classification_rules>");
-    expect(result).toContain("<output_format>");
+    expect(result).toContain("Classification rules:");
+    expect(result).toContain("Output format:");
+    expect(result).toContain("Intent catalog:");
+    expect(result).not.toContain("<classification_rules>");
+    expect(result).not.toContain("<output_format>");
+    expect(result).not.toContain("<intent_catalog>");
+    expect(result).not.toContain("</intent_catalog>");
     expect(result).toContain('"intent":');
     expect(result).toContain('"reason":');
     expect(result).toContain('"keywords":');
