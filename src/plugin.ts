@@ -46,6 +46,9 @@ function legacyTriggerKeywordSeedFromConfig(
   if (config.evolution.triggers.behaviorFix.keywords !== undefined) {
     seed.behaviorFix = config.evolution.triggers.behaviorFix.keywords;
   }
+  if (config.evolution.triggers.entityContext.keywords !== undefined) {
+    seed.entityContext = config.evolution.triggers.entityContext.keywords;
+  }
   return Object.keys(seed).length > 0 ? seed : undefined;
 }
 

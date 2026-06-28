@@ -37,6 +37,7 @@ export type EvolutionTriggersConfig = {
   missingIntent?: { enabled?: boolean };
   weakIntent?: { enabled?: boolean; confidenceBelow?: number };
   behaviorFix?: { enabled?: boolean; keywords?: string[] };
+  entityContext?: { enabled?: boolean; keywords?: string[] };
 };
 
 export type EvolutionConfig = {
@@ -66,6 +67,7 @@ export type ResolvedEvolutionConfig = {
     missingIntent: { enabled: boolean };
     weakIntent: { enabled: boolean; confidenceBelow: number };
     behaviorFix: { enabled: boolean; keywords?: string[] };
+    entityContext: { enabled: boolean; keywords?: string[] };
   };
 };
 

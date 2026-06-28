@@ -295,6 +295,18 @@
                     "description": "Deprecated seed for triggerKeywords.behaviorFix in runtime evolution.json. Prefer editing evolution.json via the backlog workflow."
                   }
                 }
+              },
+              "entityContext": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": { "type": "boolean", "default": true },
+                  "keywords": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Deprecated seed for triggerKeywords.entityContext in runtime evolution.json. Prefer editing evolution.json via the backlog workflow."
+                  }
+                }
               }
             },
             "default": {}

@@ -60,7 +60,7 @@ index.ts
        │    └─ $OPENCLAW_STATE_DIR/plugins/intention-hint/stats.json
        │
        ├─ trigger-checker.ts + review-subagent.ts → Intent Evolution review
-       │    ├─ trigger-checker.ts → checkEvolutionTriggers() (seven configurable triggers plus runtime trigger keywords)
+       │    ├─ trigger-checker.ts → checkEvolutionTriggers() (eight configurable triggers plus runtime trigger keywords)
        │    ├─ review-subagent.ts → buildReviewPrompt() + parseReviewFindings() + runReviewSubagent()
        │    └─ backlog-writer.ts + evolution-backlog.ts → $OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json
        │         ├─ backlog-writer.ts uses file-utils.ts for safeWriteJson()
@@ -91,7 +91,7 @@ index.ts
 | `evolution-types.ts`           | Shared types for Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource                                                    |
 | `session-tracker.ts`           | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
 | `stats-aggregator.ts`          | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
-| `trigger-checker.ts`           | Detect seven configurable Evolution triggers from completed turns using runtime trigger keywords                                                        |
+| `trigger-checker.ts`           | Detect eight configurable Evolution triggers from completed turns using runtime trigger keywords                                                        |
 | `review-subagent.ts`           | Build trigger-specific review prompts and run the read-only review sub-agent with a `read` allowlist                                                    |
 | `review-queue.ts`              | Serialized promise queue for background evolution reviews                                                                                               |
 | `backlog-writer.ts`            | Merge review findings atomically into `evolution.json`                                                                                                  |
@@ -312,23 +312,24 @@ subagent's thinking level. Both thinking settings accept `off`, `minimal`,
 
 Intent Evolution is an opt-in observation and proposal pipeline. It does
 not edit intent files automatically. When enabled, each completed tracked turn
-is checked for seven trigger types:
+is checked for eight trigger types:
 
-| Trigger              | Default condition                                                                     | Intent Markdown correction target                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `skill-candidate`    | Current turn has at least 5 tool calls                                                | `Skills & Tools`, `Concrete Workflow`, or `Experience`                                                           |
-| `process-gap`        | Current turn has at least 2 tool errors                                               | Guidelines, tool examples, workflow, or pitfalls                                                                 |
-| `successful-pattern` | Successful tool-heavy or skill-assisted completed turn with a runtime success keyword | `Experience`, `Concrete Workflow`, Response Strategy, or pending `triggerKeywords.successfulPattern` suggestions |
-| `satisfaction-check` | Every 10th tracked turn                                                               | Boundaries, examples, Guidelines, or Response Strategy                                                           |
-| `missing-intent`     | Classified intent is `other`                                                          | A narrowly scoped new intent draft                                                                               |
-| `weak-intent`        | Classification confidence is below 0.5                                                | Frontmatter triggers/examples/domain/fastpath and boundary clarity                                               |
-| `behavior-fix`       | Current input contains a runtime correction keyword                                   | Fastpath metadata, guidance, workflow, or pending `triggerKeywords.behaviorFix` suggestions                      |
+| Trigger              | Default condition                                                                                      | Intent Markdown correction target                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `skill-candidate`    | Current turn has at least 5 tool calls                                                                 | `Skills & Tools`, `Concrete Workflow`, or `Experience`                                                           |
+| `process-gap`        | Current turn has at least 2 tool errors                                                                | Guidelines, tool examples, workflow, or pitfalls                                                                 |
+| `successful-pattern` | Successful tool-heavy or skill-assisted completed turn with a runtime success keyword                  | `Experience`, `Concrete Workflow`, Response Strategy, or pending `triggerKeywords.successfulPattern` suggestions |
+| `satisfaction-check` | Every 10th tracked turn                                                                                | Boundaries, examples, Guidelines, or Response Strategy                                                           |
+| `missing-intent`     | Classified intent is `other`                                                                           | A narrowly scoped new intent draft                                                                               |
+| `weak-intent`        | Classification confidence is below 0.5                                                                 | Frontmatter triggers/examples/domain/fastpath and boundary clarity                                               |
+| `behavior-fix`       | Current input contains a runtime correction keyword                                                    | Fastpath metadata, guidance, workflow, or pending `triggerKeywords.behaviorFix` suggestions                      |
+| `entity-context`     | Runtime entity-context learning keyword plus `TOOLS.md`, `MEMORY.md`, or a `memory` path/source signal | `Experience`, `Concrete Workflow`, or pending `triggerKeywords.entityContext` suggestions                        |
 
 All matching triggers are reviewed in one background, read-only sub-agent run.
 Each trigger receives a distinct review focus and correction goal, and may return
 no finding. Valid findings are merged by pending `type + dedupeKey` into the
 atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json` backlog. Runtime trigger keyword lists live in the same root document under
-`triggerKeywords.successfulPattern` and `triggerKeywords.behaviorFix`; legacy `openclaw.json` trigger `keywords` are accepted only as first-run or v1/v2 migration seeds. Review failures are
+`triggerKeywords.successfulPattern`, `triggerKeywords.behaviorFix`, and `triggerKeywords.entityContext`; legacy `openclaw.json` trigger `keywords` are accepted only as first-run or v1/v2 migration seeds. `entity-context` deliberately avoids LLM entity detection: it requires a learning phrase such as `看看`, `看一下`, or `看下` plus a source signal from text or sanitized read/search tool params limited to `TOOLS.md`, `MEMORY.md`, or paths containing `memory`. Review failures are
 fail-open and never block or alter the main reply.
 
 The reviewer is intentionally scoped to improving runtime `intents/*.md`, following
@@ -341,14 +342,17 @@ Guidelines, Skills & Tools, Concrete Workflow, or Experience should preserve a
 stable skill path. Depending on the trigger, it proposes a new intent draft or
 targeted changes to frontmatter, Guidelines, Skills & Tools, Response Strategy,
 Concrete Workflow, or Experience. It may also create pending `trigger-keywords`
-findings when the evidence supports a stable success/correction phrase, but it
+findings when the evidence supports a stable success/correction/entity-context phrase, but it
 does not apply those keyword changes automatically. It never proposes changes to
 skills, tools, AGENTS.md, SOUL.md, or other production files.
 The review sub-agent uses `runEmbeddedAgent` with `promptMode="minimal"`,
 `modelRun=false`, and `toolsAllow=["read"]` so OpenClaw materializes only the
 core `read` tool. The `read` tool is reserved for inspecting relevant
-`SKILL.md` files referenced by the review snapshot's Skills Used paths or
-available skill metadata.
+`SKILL.md` files referenced by the review snapshot's Skills Used paths or, for
+`entity-context`, explicitly mentioned candidate sources limited to `TOOLS.md`,
+`MEMORY.md`, or paths containing `memory`. Trigger detection never reads file
+contents; the reviewer may read only those candidates and must not browse
+arbitrary filesystem paths or copy raw private memory.
 
 `evolution.json` is protected like `stats.json`: both live at the runtime data
 root, are not loaded as session state, and are never removed by session

@@ -67,6 +67,7 @@ const LEGACY_TRIGGER_TYPE_MAP: Record<string, EvolutionTrigger> = {
   missing_intent: "missing-intent",
   weak_intent: "weak-intent",
   behavior_fix: "behavior-fix",
+  entity_context: "entity-context",
 };
 
 function normalizeBacklogTriggerTypes(raw: unknown): unknown {
@@ -101,6 +102,7 @@ const EvolutionSourceSchema = z.object({
 const TriggerKeywordTargetSchema = z.enum([
   "successful-pattern",
   "behavior-fix",
+  "entity-context",
 ]);
 
 const KeywordChangeSchema = z.object({

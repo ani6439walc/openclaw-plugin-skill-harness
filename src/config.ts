@@ -59,6 +59,7 @@ const DEFAULT_EVOLUTION = {
     missingIntent: { enabled: true },
     weakIntent: { enabled: true, confidenceBelow: 0.5 },
     behaviorFix: { enabled: true },
+    entityContext: { enabled: true },
   },
 } as const;
 
@@ -195,6 +196,12 @@ const EvolutionSchema = z
             keywords: StringListSchema.optional().catch(undefined),
           })
           .catch(DEFAULT_EVOLUTION.triggers.behaviorFix),
+        entityContext: z
+          .object({
+            enabled: enabledSchema,
+            keywords: StringListSchema.optional().catch(undefined),
+          })
+          .catch(DEFAULT_EVOLUTION.triggers.entityContext),
       })
       .catch(DEFAULT_EVOLUTION.triggers),
   })

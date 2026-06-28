@@ -14,18 +14,33 @@ export const EVOLUTION_TRIGGER_TYPES = [
   "missing-intent",
   "weak-intent",
   "behavior-fix",
+  "entity-context",
 ] as const;
 
 export type EvolutionTrigger = (typeof EVOLUTION_TRIGGER_TYPES)[number];
+
+type TriggerToolCall = {
+  name?: string;
+  params?: Record<string, unknown>;
+  error?: string;
+};
 
 type TriggerState = {
   input?: string;
   intent?: { result?: IntentionResult } | IntentionResult;
   skillsUsed?: unknown[];
-  toolCalls?: Array<{ error?: string }>;
+  toolCalls?: TriggerToolCall[];
   result?: string;
   error?: string;
 };
+
+const ENTITY_CONTEXT_SOURCE_FILES = ["tools.md", "memory.md"];
+const ENTITY_CONTEXT_SOURCE_SUBSTRINGS = ["memory"];
+const ENTITY_CONTEXT_READ_TOOLS = new Set([
+  "read",
+  "read_file",
+  "search_files",
+]);
 
 function includesAnyKeyword(
   text: string | undefined,
@@ -38,6 +53,60 @@ function includesAnyKeyword(
   );
 }
 
+function hasEntityContextSourceText(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.toLocaleLowerCase();
+  return (
+    ENTITY_CONTEXT_SOURCE_FILES.some((source) => normalized.includes(source)) ||
+    normalized.includes("/memory") ||
+    normalized.includes("memory/") ||
+    normalized.includes("\\memory") ||
+    normalized.includes("memory\\")
+  );
+}
+
+function hasEntityContextSourceParam(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.toLocaleLowerCase();
+  return (
+    hasEntityContextSourceText(normalized) ||
+    ENTITY_CONTEXT_SOURCE_SUBSTRINGS.some((source) =>
+      normalized.includes(source),
+    )
+  );
+}
+
+function stringifyParam(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  if (Array.isArray(value)) {
+    return value.map(stringifyParam).filter(Boolean).join(" ");
+  }
+  return;
+}
+
+function toolCallsReadEntityContextSource(
+  toolCalls: readonly TriggerToolCall[],
+): boolean {
+  return toolCalls.some((call) => {
+    if (!call.name || !ENTITY_CONTEXT_READ_TOOLS.has(call.name)) return false;
+    return Object.values(call.params ?? {}).some((value) =>
+      hasEntityContextSourceParam(stringifyParam(value)),
+    );
+  });
+}
+
+function hasEntityContextSourceSignal(
+  text: string,
+  toolCalls: readonly TriggerToolCall[],
+): boolean {
+  return (
+    hasEntityContextSourceText(text) ||
+    toolCallsReadEntityContextSource(toolCalls)
+  );
+}
+
 export function checkEvolutionTriggers(
   state: TriggerState,
   turnNumber: number,
@@ -46,6 +115,7 @@ export function checkEvolutionTriggers(
 ): EvolutionTrigger[] {
   const matches: EvolutionTrigger[] = [];
   const toolCalls = state.toolCalls ?? [];
+  const text = `${state.input ?? ""}\n${state.result ?? ""}`;
   const result =
     state.intent && "intent" in state.intent
       ? state.intent
@@ -69,10 +139,7 @@ export function checkEvolutionTriggers(
     !state.error &&
     (toolCalls.length >= config.successfulPattern.toolCalls ||
       (state.skillsUsed?.length ?? 0) > 0) &&
-    includesAnyKeyword(
-      `${state.input ?? ""}\n${state.result ?? ""}`,
-      triggerKeywords.successfulPattern,
-    )
+    includesAnyKeyword(text, triggerKeywords.successfulPattern)
   ) {
     matches.push("successful-pattern");
   }
@@ -102,6 +169,13 @@ export function checkEvolutionTriggers(
     includesAnyKeyword(state.input, triggerKeywords.behaviorFix)
   ) {
     matches.push("behavior-fix");
+  }
+  if (
+    config.entityContext.enabled &&
+    includesAnyKeyword(text, triggerKeywords.entityContext) &&
+    hasEntityContextSourceSignal(text, toolCalls)
+  ) {
+    matches.push("entity-context");
   }
 
   return matches;

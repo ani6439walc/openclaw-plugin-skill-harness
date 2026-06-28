@@ -128,12 +128,17 @@ describe("evolution backlog", () => {
         processedEvents: {},
         items: [],
       },
-      { behaviorFix: ["my correction"], successfulPattern: [] },
+      {
+        behaviorFix: ["my correction"],
+        successfulPattern: [],
+        entityContext: ["看看"],
+      },
     );
 
     expect(parsed.triggerKeywords).toEqual({
       behaviorFix: ["my correction"],
       successfulPattern: [],
+      entityContext: ["看看"],
     });
   });
 
@@ -145,6 +150,7 @@ describe("evolution backlog", () => {
       triggerKeywords: {
         successfulPattern: [" ship it ", ""],
         behaviorFix: [" try again ", "try again"],
+        entityContext: [" 看一下 "],
       },
       processedEvents: {},
       items: [
@@ -155,18 +161,35 @@ describe("evolution backlog", () => {
           targetTrigger: "successful-pattern",
           keywordChange: { add: ["ship it"], remove: [] },
         }),
+        item({
+          id: "entity-keyword",
+          type: "entity-context",
+          targetKind: "trigger-keywords",
+          operation: "adjust-trigger-keywords",
+          targetIntentIds: [],
+          targetTrigger: "entity-context",
+          keywordChange: { add: ["看下"], remove: [] },
+        }),
       ],
     });
 
     expect(parsed.triggerKeywords).toEqual({
       successfulPattern: ["ship it"],
       behaviorFix: ["try again"],
+      entityContext: ["看一下"],
     });
     expect(parsed.items[0]).toMatchObject({
       targetKind: "trigger-keywords",
       operation: "adjust-trigger-keywords",
       targetTrigger: "successful-pattern",
       keywordChange: { add: ["ship it"], remove: [] },
+    });
+    expect(parsed.items[1]).toMatchObject({
+      type: "entity-context",
+      targetKind: "trigger-keywords",
+      operation: "adjust-trigger-keywords",
+      targetTrigger: "entity-context",
+      keywordChange: { add: ["看下"], remove: [] },
     });
   });
 
@@ -182,12 +205,14 @@ describe("evolution backlog", () => {
       createBacklog("now", {
         behaviorFix: [],
         successfulPattern: ["ship it"],
+        entityContext: ["看下"],
       }),
     ).toMatchObject({
       schemaVersion: 3,
       triggerKeywords: {
         behaviorFix: [],
         successfulPattern: ["ship it"],
+        entityContext: ["看下"],
       },
     });
   });
@@ -198,10 +223,12 @@ describe("evolution backlog", () => {
     expect(
       readEvolutionTriggerKeywords(backlogPath, {
         successfulPattern: ["ship it"],
+        entityContext: ["看一下"],
       }),
     ).toEqual({
       behaviorFix: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS.behaviorFix,
       successfulPattern: ["ship it"],
+      entityContext: ["看一下"],
     });
   });
 
@@ -214,6 +241,7 @@ describe("evolution backlog", () => {
       triggerKeywords: {
         behaviorFix: [" try again ", "TRY AGAIN"],
         successfulPattern: [" ship it "],
+        entityContext: [" 看下 "],
       },
       processedEvents: {},
       items: [],
@@ -222,6 +250,7 @@ describe("evolution backlog", () => {
     expect(readEvolutionTriggerKeywords(backlogPath)).toEqual({
       behaviorFix: ["TRY AGAIN"],
       successfulPattern: ["ship it"],
+      entityContext: ["看下"],
     });
   });
 
@@ -238,6 +267,7 @@ describe("evolution backlog", () => {
     const migrated = readBacklog(backlogPath, {
       behaviorFix: ["my correction"],
       successfulPattern: [],
+      entityContext: ["看看"],
     });
 
     expect(migrated).toMatchObject({
@@ -245,16 +275,19 @@ describe("evolution backlog", () => {
       triggerKeywords: {
         behaviorFix: ["my correction"],
         successfulPattern: [],
+        entityContext: ["看看"],
       },
     });
     expect(
       readEvolutionTriggerKeywords(backlogPath, {
         behaviorFix: ["my correction"],
         successfulPattern: [],
+        entityContext: ["看看"],
       }),
     ).toEqual({
       behaviorFix: ["my correction"],
       successfulPattern: [],
+      entityContext: ["看看"],
     });
   });
 
@@ -267,6 +300,7 @@ describe("evolution backlog", () => {
       triggerKeywords: {
         behaviorFix: [" retry "],
         successfulPattern: 123,
+        entityContext: 123,
       },
       processedEvents: {},
       items: [],
@@ -275,6 +309,7 @@ describe("evolution backlog", () => {
     expect(readBacklog(backlogPath).triggerKeywords).toEqual({
       behaviorFix: ["retry"],
       successfulPattern: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS.successfulPattern,
+      entityContext: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS.entityContext,
     });
   });
 
