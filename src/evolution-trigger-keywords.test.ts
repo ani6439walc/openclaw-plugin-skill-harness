@@ -36,6 +36,7 @@ describe("evolution trigger keyword normalization", () => {
     const fallback = {
       behaviorFix: ["wrong"],
       successfulPattern: ["done"],
+      entityContext: ["先看"],
     };
 
     expect(
@@ -46,6 +47,7 @@ describe("evolution trigger keyword normalization", () => {
     ).toEqual({
       behaviorFix: ["RETRY"],
       successfulPattern: ["done"],
+      entityContext: ["先看"],
     });
   });
 
@@ -54,11 +56,19 @@ describe("evolution trigger keyword normalization", () => {
       normalizeEvolutionTriggerKeywords({
         behaviorFix: [],
         successfulPattern: [],
+        entityContext: [],
       }),
     ).toEqual({
       behaviorFix: [],
       successfulPattern: [],
+      entityContext: [],
     });
+  });
+
+  it("includes default entity-context learning keywords", () => {
+    expect(DEFAULT_EVOLUTION_TRIGGER_KEYWORDS.entityContext).toEqual(
+      expect.arrayContaining(["看看", "看一下", "看下"]),
+    );
   });
 
   it("falls back to default trigger keywords for malformed root input", () => {
@@ -73,12 +83,14 @@ describe("evolution trigger keyword normalization", () => {
         {
           behaviorFix: ["wrong"],
           successfulPattern: ["done"],
+          entityContext: ["先看"],
         },
-        { successfulPattern: "ship it" },
+        { successfulPattern: "ship it", entityContext: ["看看"] },
       ),
     ).toEqual({
       behaviorFix: ["wrong"],
       successfulPattern: ["ship it"],
+      entityContext: ["看看"],
     });
   });
 });

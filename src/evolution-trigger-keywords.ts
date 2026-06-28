@@ -1,8 +1,12 @@
-export type TriggerKeywordTarget = "successful-pattern" | "behavior-fix";
+export type TriggerKeywordTarget =
+  | "successful-pattern"
+  | "behavior-fix"
+  | "entity-context";
 
 export type EvolutionTriggerKeywords = {
   successfulPattern: string[];
   behaviorFix: string[];
+  entityContext: string[];
 };
 
 export const DEFAULT_EVOLUTION_TRIGGER_KEYWORDS: EvolutionTriggerKeywords = {
@@ -30,6 +34,29 @@ export const DEFAULT_EVOLUTION_TRIGGER_KEYWORDS: EvolutionTriggerKeywords = {
     "passed",
     "verified",
     "done",
+  ],
+  entityContext: [
+    "指的是",
+    "代表的是",
+    "其實是",
+    "以後看到",
+    "下次遇到",
+    "先看",
+    "先去看",
+    "應該看",
+    "記在",
+    "記錄在",
+    "memory 裡",
+    "記憶裡",
+    "experience 內",
+    "refers to",
+    "means",
+    "alias",
+    "look up",
+    "check",
+    "看看",
+    "看一下",
+    "看下",
   ],
 };
 
@@ -71,6 +98,10 @@ export function normalizeEvolutionTriggerKeywords(
       record.successfulPattern,
       fallback.successfulPattern,
     ),
+    entityContext: normalizeKeywordList(
+      record.entityContext,
+      fallback.entityContext,
+    ),
   };
 }
 
@@ -90,6 +121,10 @@ export function mergeEvolutionTriggerKeywordSeeds(
         seedRecord.successfulPattern === undefined
           ? base.successfulPattern
           : seedRecord.successfulPattern,
+      entityContext:
+        seedRecord.entityContext === undefined
+          ? base.entityContext
+          : seedRecord.entityContext,
     },
     base,
   );

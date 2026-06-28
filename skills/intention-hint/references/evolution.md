@@ -11,6 +11,11 @@ Enter this mode only when the user explicitly asks to process the evolution back
   boundaries, collision checks, and workflow quality.
 - Do not edit `~/.openclaw/plugins/intention-hint/evolution.json` directly. Use
   `pnpm run evolution-backlog -- ...` for every backlog read or mutation.
+- `entity-context` trigger keyword findings are proposal-only like other
+  `trigger-keywords` items. The trigger is intentionally narrow: learning
+  keywords such as `看看`, `看一下`, or `看下` must pair with `TOOLS.md`,
+  `MEMORY.md`, or a path containing `memory`; source allowlists are not learned
+  from backlog suggestions.
 - Never create a git commit or push.
 - Process one item only. Leave blocked or ambiguous items `pending`.
 - Mark duplicate, superseded, unsafe, or clearly rejected findings `dismissed`
@@ -30,7 +35,10 @@ Enter this mode only when the user explicitly asks to process the evolution back
 3. If `targetKind` is `trigger-keywords`, do not edit Intent Markdown and do not
    mark it processed in this workflow. First-version trigger keyword learning is
    proposal-only: inspect the evidence, dismiss clearly unsafe/duplicate
-   suggestions, or leave the item pending for a future apply workflow.
+   suggestions, or leave the item pending for a future apply workflow. For
+   `targetTrigger: entity-context`, reject suggestions that try to expand the
+   source allowlist beyond `TOOLS.md`, `MEMORY.md`, or paths containing
+   `memory`.
 4. Inspect its target Intent Markdown, the compact intent catalog, and relevant
    intention-hint Skill references.
 5. For a legacy item with `operation: unknown` or no targets, infer metadata

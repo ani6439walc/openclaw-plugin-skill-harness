@@ -143,6 +143,8 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain('targetKind="trigger-keywords"');
     expect(prompt).toContain("triggerKeywords.successfulPattern");
     expect(prompt).toContain("triggerKeywords.behaviorFix");
+    expect(prompt).toContain("triggerKeywords.entityContext");
+    expect(prompt).toContain("TOOLS.md, MEMORY.md, or paths containing memory");
     expect(prompt).toContain("Do not auto-apply trigger keyword changes");
     expect(prompt).toContain(
       "Matched Intent section inside review_snapshot as the source of truth for the current intent Markdown",
@@ -188,6 +190,11 @@ describe("buildReviewPrompt", () => {
       "matched intent's routed behavior",
       "encode the corrected behavior",
     ],
+    [
+      "entity-context",
+      "explicit entity/context lookup learning",
+      "reusable context lookup habit",
+    ],
   ] as const)(
     "gives %s a distinct intent Markdown review focus and goal",
     (trigger, focus, goal) => {
@@ -225,20 +232,22 @@ describe("buildReviewPrompt", () => {
     expect(prompt.trim().endsWith("no surrounding prose.")).toBe(true);
   });
 
-  it.each(["skill-candidate", "successful-pattern", "process-gap"] as const)(
-    "omits the full intent catalog for %s reviews",
-    (trigger) => {
-      const prompt = buildReviewPrompt(snapshot, [trigger]);
+  it.each([
+    "skill-candidate",
+    "successful-pattern",
+    "process-gap",
+    "entity-context",
+  ] as const)("omits the full intent catalog for %s reviews", (trigger) => {
+    const prompt = buildReviewPrompt(snapshot, [trigger]);
 
-      expect(prompt).toContain("## Matched Intent");
-      expect(prompt).toContain("- ID: other");
-      expect(prompt).toContain("## Available Skills");
-      expect(prompt).not.toContain("## Intent Catalog");
-      expect(prompt).toContain(
-        "The Intent Catalog section is omitted for these triggers",
-      );
-    },
-  );
+    expect(prompt).toContain("## Matched Intent");
+    expect(prompt).toContain("- ID: other");
+    expect(prompt).toContain("## Available Skills");
+    expect(prompt).not.toContain("## Intent Catalog");
+    expect(prompt).toContain(
+      "The Intent Catalog section is omitted for these triggers",
+    );
+  });
 
   it.each([
     "missing-intent",
@@ -411,9 +420,22 @@ describe("parseReviewFindings", () => {
             correctionGoal: "Improve successful-pattern trigger recall",
             suggestedChange: "Add ship it to triggerKeywords.successfulPattern",
           },
+          {
+            trigger: "entity-context",
+            hasFinding: true,
+            targetKind: "trigger-keywords",
+            targetTrigger: "entity-context",
+            addKeywords: ["看一下"],
+            removeKeywords: [],
+            dedupeKey: "entity-context:look-up",
+            summary: "Learn entity-context lookup phrase",
+            evidence: ["User asked to check TOOLS.md for an entity record"],
+            correctionGoal: "Improve entity-context trigger recall",
+            suggestedChange: "Add 看一下 to triggerKeywords.entityContext",
+          },
         ],
       }),
-      ["successful-pattern"],
+      ["successful-pattern", "entity-context"],
     );
 
     expect(parsed).toEqual([
@@ -428,6 +450,18 @@ describe("parseReviewFindings", () => {
         evidence: ["User confirmed the completed work"],
         correctionGoal: "Improve successful-pattern trigger recall",
         suggestedChange: "Add ship it to triggerKeywords.successfulPattern",
+      },
+      {
+        trigger: "entity-context",
+        targetKind: "trigger-keywords",
+        targetTrigger: "entity-context",
+        addKeywords: ["看一下"],
+        removeKeywords: [],
+        dedupeKey: "entity-context:look-up",
+        summary: "Learn entity-context lookup phrase",
+        evidence: ["User asked to check TOOLS.md for an entity record"],
+        correctionGoal: "Improve entity-context trigger recall",
+        suggestedChange: "Add 看一下 to triggerKeywords.entityContext",
       },
     ]);
   });

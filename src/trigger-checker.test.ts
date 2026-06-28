@@ -24,13 +24,14 @@ describe("checkEvolutionTriggers", () => {
   const customKeywords: EvolutionTriggerKeywords = {
     successfulPattern: ["verified"],
     behaviorFix: ["redo"],
+    entityContext: ["means"],
   };
 
   it("returns all matching current-turn triggers", () => {
     expect(
       checkEvolutionTriggers(
         state({
-          input: "不對，應該是另一個做法",
+          input: "不對，應該是另一個做法，以後看到先看 TOOLS.md",
           result: "完成，驗證通過。",
           intent: {
             result: {
@@ -57,6 +58,7 @@ describe("checkEvolutionTriggers", () => {
       "missing-intent",
       "weak-intent",
       "behavior-fix",
+      "entity-context",
     ]);
   });
 
@@ -137,6 +139,7 @@ describe("checkEvolutionTriggers", () => {
     const runtimeKeywords: EvolutionTriggerKeywords = {
       successfulPattern: ["ship it"],
       behaviorFix: ["try again"],
+      entityContext: ["means"],
     };
 
     expect(
@@ -175,5 +178,117 @@ describe("checkEvolutionTriggers", () => {
     expect(
       checkEvolutionTriggers(state({ result: "done" }), 1, triggers),
     ).not.toContain("successful-pattern");
+  });
+
+  it("detects entity-context only from learning keywords plus narrow source signals", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({ input: "Yumi 指的是 Hermes/RG476H，之後先看 TOOLS.md" }),
+        1,
+        triggers,
+      ),
+    ).toContain("entity-context");
+
+    expect(
+      checkEvolutionTriggers(
+        state({ input: "幫我看一下 TOOLS.md 裡有沒有 Yumi 的紀錄" }),
+        1,
+        triggers,
+      ),
+    ).toContain("entity-context");
+
+    expect(
+      checkEvolutionTriggers(
+        state({ input: "看下 MEMORY.md 裡有沒有 RG476H 的紀錄" }),
+        1,
+        triggers,
+      ),
+    ).toContain("entity-context");
+  });
+
+  it("uses read/search tool params as entity-context source signals", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({
+          input: "Yumi 指的是 Hermes/RG476H",
+          toolCalls: [{ name: "read", params: { path: "TOOLS.md" } }],
+        }),
+        1,
+        triggers,
+      ),
+    ).toContain("entity-context");
+
+    expect(
+      checkEvolutionTriggers(
+        state({
+          input: "看看這個 alias 之前是不是有記",
+          toolCalls: [
+            {
+              name: "read_file",
+              params: { path: "/profile/memory/MEMORY.md" },
+            },
+          ],
+        }),
+        1,
+        triggers,
+      ),
+    ).toContain("entity-context");
+  });
+
+  it("does not detect entity-context from source or learning keywords alone", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({
+          input: "幫我看 TOOLS.md",
+          toolCalls: [{ name: "read", params: { path: "TOOLS.md" } }],
+        }),
+        1,
+        triggers,
+      ),
+    ).not.toContain("entity-context");
+
+    expect(
+      checkEvolutionTriggers(
+        state({ input: "Yumi 指的是 Hermes/RG476H" }),
+        1,
+        triggers,
+      ),
+    ).not.toContain("entity-context");
+
+    expect(
+      checkEvolutionTriggers(
+        state({
+          input: "RG476H 怎麼設定 Wi-Fi",
+          toolCalls: [{ name: "read_file", params: { path: "TOOLS.md" } }],
+        }),
+        1,
+        triggers,
+      ),
+    ).not.toContain("entity-context");
+
+    expect(
+      checkEvolutionTriggers(state({ input: "Yumi 好可愛" }), 1, triggers),
+    ).not.toContain("entity-context");
+  });
+
+  it("does not treat unrelated docs as entity-context source signals", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({ input: "以後看到 Yumi 先看 AGENTS.md" }),
+        1,
+        triggers,
+      ),
+    ).not.toContain("entity-context");
+
+    expect(
+      checkEvolutionTriggers(
+        state({
+          input: "Yumi 指的是 Hermes/RG476H",
+          toolCalls: [{ name: "read", params: { path: "AGENTS.md" } }],
+        }),
+        1,
+        triggers,
+      ),
+    ).not.toContain("entity-context");
   });
 });

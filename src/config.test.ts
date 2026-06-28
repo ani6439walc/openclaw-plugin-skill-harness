@@ -45,6 +45,8 @@ describe("resolveConfig", () => {
           satisfactionCheck: { enabled: true, everyTurns: 10 },
           missingIntent: { enabled: true },
           weakIntent: { enabled: true, confidenceBelow: 0.5 },
+          behaviorFix: { enabled: true },
+          entityContext: { enabled: true },
         },
       });
     });
@@ -90,6 +92,7 @@ describe("resolveConfig", () => {
             missingIntent: { enabled: false },
             weakIntent: { confidenceBelow: 2 },
             behaviorFix: { enabled: false, keywords: [] },
+            entityContext: { enabled: false, keywords: ["看一下"] },
           },
         },
       });
@@ -112,6 +115,7 @@ describe("resolveConfig", () => {
           missingIntent: { enabled: false },
           weakIntent: { enabled: true, confidenceBelow: 1 },
           behaviorFix: { enabled: false, keywords: [] },
+          entityContext: { enabled: false, keywords: ["看一下"] },
         },
       });
     });
