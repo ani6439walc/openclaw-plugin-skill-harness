@@ -1,14 +1,31 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   createBacklog,
   markPendingProcessed,
   parseBacklog,
   pruneProcessedEvents,
+  readBacklog,
+  readEvolutionTriggerKeywords,
   selectPendingItem,
   updatePendingTarget,
   type BacklogItem,
 } from "./evolution-backlog.js";
 import { DEFAULT_EVOLUTION_TRIGGER_KEYWORDS } from "./evolution-trigger-keywords.js";
+
+const tempRoots: string[] = [];
+
+function createTempBacklogPath(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "evolution-backlog-"));
+  tempRoots.push(root);
+  return path.join(root, "evolution.json");
+}
+
+function writeBacklogFixture(backlogPath: string, value: unknown): void {
+  fs.writeFileSync(backlogPath, JSON.stringify(value));
+}
 
 const item = (overrides: Partial<BacklogItem> = {}): BacklogItem => ({
   id: "IMP-1",
@@ -39,6 +56,12 @@ const backlog = () =>
   });
 
 describe("evolution backlog", () => {
+  afterEach(() => {
+    for (const root of tempRoots.splice(0)) {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("migrates v1 items with unknown operation and empty targets", () => {
     const migrated = parseBacklog({
       schemaVersion: 1,
@@ -166,6 +189,92 @@ describe("evolution backlog", () => {
         behaviorFix: [],
         successfulPattern: ["ship it"],
       },
+    });
+  });
+
+  it("reads seeded trigger keywords when the backlog file is absent", () => {
+    const backlogPath = createTempBacklogPath();
+
+    expect(
+      readEvolutionTriggerKeywords(backlogPath, {
+        successfulPattern: ["ship it"],
+      }),
+    ).toEqual({
+      behaviorFix: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS.behaviorFix,
+      successfulPattern: ["ship it"],
+    });
+  });
+
+  it("reads normalized trigger keywords from v3 backlog files", () => {
+    const backlogPath = createTempBacklogPath();
+    writeBacklogFixture(backlogPath, {
+      schemaVersion: 3,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      triggerKeywords: {
+        behaviorFix: [" try again ", "TRY AGAIN"],
+        successfulPattern: [" ship it "],
+      },
+      processedEvents: {},
+      items: [],
+    });
+
+    expect(readEvolutionTriggerKeywords(backlogPath)).toEqual({
+      behaviorFix: ["TRY AGAIN"],
+      successfulPattern: ["ship it"],
+    });
+  });
+
+  it("uses seed keywords while reading and migrating legacy backlog files", () => {
+    const backlogPath = createTempBacklogPath();
+    writeBacklogFixture(backlogPath, {
+      schemaVersion: 2,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      processedEvents: {},
+      items: [],
+    });
+
+    const migrated = readBacklog(backlogPath, {
+      behaviorFix: ["my correction"],
+      successfulPattern: [],
+    });
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 3,
+      triggerKeywords: {
+        behaviorFix: ["my correction"],
+        successfulPattern: [],
+      },
+    });
+    expect(
+      readEvolutionTriggerKeywords(backlogPath, {
+        behaviorFix: ["my correction"],
+        successfulPattern: [],
+      }),
+    ).toEqual({
+      behaviorFix: ["my correction"],
+      successfulPattern: [],
+    });
+  });
+
+  it("normalizes malformed trigger keyword fields while reading v3 backlog files", () => {
+    const backlogPath = createTempBacklogPath();
+    writeBacklogFixture(backlogPath, {
+      schemaVersion: 3,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      triggerKeywords: {
+        behaviorFix: [" retry "],
+        successfulPattern: 123,
+      },
+      processedEvents: {},
+      items: [],
+    });
+
+    expect(readBacklog(backlogPath).triggerKeywords).toEqual({
+      behaviorFix: ["retry"],
+      successfulPattern: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS.successfulPattern,
     });
   });
 
