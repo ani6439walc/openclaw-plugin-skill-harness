@@ -503,13 +503,15 @@ describe("createHookHandlers topic switch flow", () => {
     emitHostAgentEvent.mockReset();
     const intents = params.intents ?? [intent];
     const record = vi.fn();
+    const rotate = vi.fn();
+    const write = vi.fn();
     const tracker = {
       getHistoricalIntentRecords: vi
         .fn()
         .mockReturnValue(params.historicalIntents),
-      rotate: vi.fn(),
+      rotate,
       record,
-      write: vi.fn(),
+      write,
     };
     const catalog = {
       count: intents.length,
@@ -560,7 +562,9 @@ describe("createHookHandlers topic switch flow", () => {
       classifier,
       topicChecker,
       instructionWriter,
+      rotate,
       record,
+      write,
       emitAgentEvent,
     };
   }
@@ -643,6 +647,63 @@ describe("createHookHandlers topic switch flow", () => {
         }),
       }),
     );
+  });
+
+  it("persists prompt-build intent data for exact keyword matches", async () => {
+    const fastEvent = {
+      prompt: "謝謝",
+      messages: [{ role: "user", content: "謝謝" }],
+    } as never;
+    const { handlers, rotate, record, write } = createTopicFlowHarness({
+      historicalIntents: [],
+    });
+
+    await handlers.onBeforePromptBuild(fastEvent, ctx);
+
+    expect(rotate).toHaveBeenCalledWith("session-1");
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        sessionKey: "agent:main:direct:123",
+        agentId: "main",
+        current: expect.objectContaining({
+          input: "謝謝",
+          intent: expect.objectContaining({
+            input: expect.arrayContaining([
+              expect.objectContaining({ role: "user", text: "謝謝" }),
+            ]),
+            result: expect.objectContaining({
+              intent: "social-casual",
+              topicChangeReason: "start",
+            }),
+            instructionText: "Reply warmly.",
+          }),
+          timestamps: expect.objectContaining({ start: expect.any(String) }),
+        }),
+      }),
+    );
+    expect(write).toHaveBeenCalledWith("session-1");
+  });
+
+  it("does not persist prompt-build intent data without a session id", async () => {
+    const { handlers, rotate, record, write } = createTopicFlowHarness({
+      historicalIntents: [],
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "hi",
+        messages: [{ role: "user", content: "hi" }],
+      } as never,
+      {
+        ...ctx,
+        sessionId: undefined,
+      },
+    );
+
+    expect(rotate).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("requires a fastpath hint for exact keyword injection", async () => {
@@ -1051,27 +1112,28 @@ describe("createHookHandlers topic switch flow", () => {
   });
 
   it("keeps same-topic inheritance ahead of topic keyword similarity", async () => {
-    const { handlers, classifier, instructionWriter } = createTopicFlowHarness({
-      historicalIntents: [
-        {
-          input: "commit this",
-          intent: "version-control",
+    const { handlers, classifier, instructionWriter, record } =
+      createTopicFlowHarness({
+        historicalIntents: [
+          {
+            input: "commit this",
+            intent: "version-control",
+            keywords: ["commit"],
+            topic: "User wants a git commit.",
+            confidence: 0.9,
+            complexity: "medium",
+          },
+        ],
+        intents: [versionControlIntent],
+        topicChecker: vi.fn().mockResolvedValue({
           keywords: ["commit"],
-          topic: "User wants a git commit.",
-          confidence: 0.9,
-          complexity: "medium",
-        },
-      ],
-      intents: [versionControlIntent],
-      topicChecker: vi.fn().mockResolvedValue({
-        keywords: ["commit"],
-        topic: "User is still discussing a git commit.",
-        domain: "git",
-        changed: false,
-        reason: "same-topic" as const,
-        complexity: "low" as const,
-      }),
-    });
+          topic: "User is still discussing a git commit.",
+          domain: "git",
+          changed: false,
+          reason: "same-topic" as const,
+          complexity: "low" as const,
+        }),
+      });
 
     const result = await handlers.onBeforePromptBuild(
       {
@@ -1084,6 +1146,15 @@ describe("createHookHandlers topic switch flow", () => {
     expect(result).toBeUndefined();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          input: "commit it",
+          intent: expect.not.objectContaining({ input: expect.anything() }),
+        }),
+      }),
+    );
   });
 
   it("does not emit instruction hint events when confidence is undefined (treated as 0)", async () => {

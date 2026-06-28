@@ -5,6 +5,7 @@ import {
   intentsPath,
   resolvePluginDataRoot,
   sessionsDirPath,
+  sessionsPath,
   statsPath,
 } from "./file-utils.js";
 
@@ -22,6 +23,9 @@ describe("plugin data paths", () => {
 
     expect(intentsPath(dataRoot)).toBe(path.join(dataRoot, "intents"));
     expect(sessionsDirPath(dataRoot)).toBe(path.join(dataRoot, "sessions"));
+    expect(sessionsPath("session-1.json", dataRoot)).toBe(
+      path.join(dataRoot, "sessions", "session-1.json"),
+    );
     expect(statsPath(dataRoot)).toBe(path.join(dataRoot, "stats.json"));
     expect(evolutionBacklogPath(dataRoot)).toBe(
       path.join(dataRoot, "evolution.json"),

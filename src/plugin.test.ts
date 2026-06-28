@@ -65,6 +65,35 @@ describe("createPlugin", () => {
     const dataRoot = path.join(stateDir, "plugins", "intention-hint");
     expect(fs.existsSync(path.join(dataRoot, "sessions"))).toBe(true);
     expect(fs.existsSync(path.join(dataRoot, "intents"))).toBe(true);
+    expect(fs.existsSync(path.join(dataRoot, "sessions", "stats.json"))).toBe(
+      false,
+    );
+    expect(
+      fs.existsSync(path.join(dataRoot, "sessions", "evolution.json")),
+    ).toBe(false);
+  });
+
+  it("keeps runtime stats and evolution files at the data-root level", () => {
+    const api = createApi();
+    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    fs.mkdirSync(dataRoot, { recursive: true });
+    fs.writeFileSync(path.join(dataRoot, "stats.json"), '{"stats":true}');
+    fs.writeFileSync(
+      path.join(dataRoot, "evolution.json"),
+      '{"schemaVersion":3,"items":[],"triggerKeywords":{}}',
+    );
+
+    createPlugin(api).register(api);
+
+    expect(fs.readFileSync(path.join(dataRoot, "stats.json"), "utf-8")).toBe(
+      '{"stats":true}',
+    );
+    expect(fs.existsSync(path.join(dataRoot, "sessions", "stats.json"))).toBe(
+      false,
+    );
+    expect(
+      fs.existsSync(path.join(dataRoot, "sessions", "evolution.json")),
+    ).toBe(false);
   });
 
   it("loads runtime intents from the fixed data-root intents directory", () => {
