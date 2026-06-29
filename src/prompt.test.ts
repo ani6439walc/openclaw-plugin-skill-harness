@@ -215,14 +215,14 @@ describe("buildIntentionPrompt", () => {
     );
     expect(result).toContain("topic_switch_context as routing evidence");
     expect(result).toContain("Do not copy the topic text as the intent");
-    expect(result).toContain("Example when topic_switch_context is present:");
-    expect(result).toContain('"intent": "other"');
+    expect(result).toContain("Example when topic_switch_context is present (with keyword override):");
+    expect(result).toContain('"intent": "deploy"');
     expect(result).toContain(
-      "User provides a short corrected phrase for the previous ambiguous request",
+      "User wants to deploy to production",
     );
   });
 
-  it("tells classifier to omit keywords when topic context exists", () => {
+  it("tells classifier it may override keywords and complexity when topic context exists", () => {
     const result = buildIntentionPrompt({
       intents: mockIntents,
       latest: "繼續",
@@ -235,17 +235,16 @@ describe("buildIntentionPrompt", () => {
       },
     });
 
-    expect(result).toContain("Do not output keywords");
     expect(result).toContain(
-      "use its complexity as a starting hint, not a forced value",
+      "use its complexity and keywords as starting hints, not forced values",
     );
     expect(result).toContain(
-      "Choose the final complexity from latest_message scope and the selected intent",
+      "You may override them based on the selected intent's characteristics",
     );
     expect(result).toContain(
       "Required only when topic_switch_context is absent",
     );
-    expect(result).not.toContain("use its complexity value");
+    expect(result).toContain("Optional fields (when topic_switch_context is present)");
   });
 });
 

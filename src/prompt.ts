@@ -234,8 +234,12 @@ Your job is to decide whether the user's latest message continues the recent top
 Use only latest_message, latest_historical_intent, and conversation context. Historical intent annotations are evidence, not answers to inherit. Do not classify intent.
 
 Rules:
-1. Extract 3-8 core nouns or short phrases from the latest user message as keywords.
-2. Normalize keywords to lowercase and remove duplicates. Preserve important URLs or hostnames as one keyword when they are central to the latest message.
+1. Extract keywords from the latest user message using a 3W1H framework:
+   - Who: person, agent, or entity involved (0-2 keywords)
+   - What: action, object, event, or subject (0-2 keywords)
+   - When: time reference, sequence, or temporal context (0-2 keywords)
+   - How: method, tool, technique, or manner (0-2 keywords)
+   Keywords are not limited to nouns — include verbs, adjectives, or any word that captures the core meaning. Normalize to lowercase and remove duplicates. Preserve important URLs or hostnames as one keyword when central to the message. Total: 3-8 keywords across all dimensions.
 3. Write topic as one concise natural-language sentence or phrase describing the latest message's current subject and interaction mode. Do not join keywords with separators and do not name or choose an intent id.
 4. Choose the closest domain for the latest message's requested action or desired outcome, not merely the most technical noun mentioned. domain must be one of the candidates. For example, if the user asks to add an nginx HTTPS URL to an existing document, prefer documentation over infra/config because the requested action is a document update.
 5. changed=true when the latest message introduces a different semantic domain, desired outcome, or interaction mode from conversation context, even without an explicit transition marker.
@@ -465,7 +469,10 @@ Classification rules:
 4. **Short messages**: First determine whether the message is a standalone request, a continuation, a correction, or a target clarification. Do not inherit the most recent intent merely because the message is short or contains a continuation marker.
 5. **Correction fragments**: If latest_message is only a short noun phrase, proper name, repo/plugin name, or corrected spelling after a garbled or ambiguous previous request, prefer the catalog's typo/correction intent when one exists, or use "other" if no such intent exists. Treat it as a clarification of the previous request when that better explains the message. Do not classify it as a full topical workflow intent merely because the phrase matches an intent keyword.
 6. If topic_switch_context is present and changed=true, classify fresh from latest_message and topic_switch_context, but treat topic_switch_context as fallible routing evidence. Do not preserve the previous workflow intent by default; however, for terse corrections or target clarifications, use the immediately previous user message to understand what is being corrected.
-7. If topic_switch_context is present, use its complexity as a starting hint, not a forced value. Choose the final complexity from latest_message scope and the selected intent. Do not output keywords.
+7. If topic_switch_context is present, use its complexity and keywords as starting hints, not forced values. You may override them based on the selected intent's characteristics:
+   - Override complexity if the intent's typical scope differs from the topic switch estimate (e.g., high-risk intents like deploy/delete should be high complexity).
+   - Override or supplement keywords if the intent domain requires more specific terms.
+   Output your final complexity and keywords in the JSON.
 8. If topic_switch_context is present and changed=false, continuity with the previous topic is allowed but not mandatory.
 9. Do not classify a bare tool, plugin, repo, or concept name as its related workflow intent unless latest_message asks for an action such as review, modify, explain, configure, inspect, or use it.
 10. If topic_switch_context is absent, extract 3-8 lowercase core nouns or short phrases as keywords.
@@ -485,28 +492,30 @@ Required fields:
 - "complexity": string - "low", "medium", or "high"
 
 Required only when topic_switch_context is absent:
-- "keywords": string[] - 3-8 normalized core nouns or short phrases from the latest message
+- "keywords": string[] - 3-8 keywords extracted using 3W1H framework (Who/What/When/How)
 - "topic": string - concise natural-language sentence or phrase describing the user's current subject
 
-Optional fields:
+Optional fields (when topic_switch_context is present):
+- "keywords": string[] - Override or supplement topic_switch_context keywords if intent requires different terms
 - "suggestion": string - Only when confidence < 0.8; provide general guidance
 
 Example output when topic_switch_context is absent:
 {
   "intent": "memory-lookup",
   "reason": "User asked to recall previous conversation topic",
-  "keywords": ["python", "async", "memory"],
+  "keywords": ["recall", "python", "async", "memory"],
   "topic": "User is asking to recall a previous conversation about Python async memory.",
   "confidence": 0.9,
   "complexity": "medium"
 }
 
-Example when topic_switch_context is present:
+Example when topic_switch_context is present (with keyword override):
 {
-  "intent": "other",
-  "reason": "User provides a short corrected phrase for the previous ambiguous request.",
-  "confidence": 0.75,
-  "complexity": "low"
+  "intent": "deploy",
+  "reason": "User wants to deploy to production",
+  "keywords": ["deploy", "production", "kubernetes"],
+  "confidence": 0.95,
+  "complexity": "high"
 }
 
 ${COMPLEXITY_LEVEL_GUIDANCE}

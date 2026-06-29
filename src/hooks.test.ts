@@ -1391,7 +1391,7 @@ describe("createHookHandlers topic switch flow", () => {
               }),
             ]),
             result: expect.objectContaining({
-              keywords: ["start", "topic"],
+              keywords: ["topic", "flow"], // classifier keywords preserved
               topic: "User is starting an initial topic.",
               domain: "chat",
               topicChangeReason: "start",
@@ -1450,7 +1450,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(instructionWriter).toHaveBeenCalledWith(
       expect.objectContaining({
         result: expect.objectContaining({
-          complexity: "high",
+          complexity: "medium", // classifier value preserved, not topicContext override
           previousTopic: "topic / checker",
         }),
       }),
