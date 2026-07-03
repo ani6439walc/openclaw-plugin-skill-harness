@@ -152,6 +152,68 @@ function stripCodeFence(raw: string): string {
     .replace(/\s*```$/, "");
 }
 
+function readCompleteJsonObjectFrom(
+  value: string,
+  startIndex: number,
+): string | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = startIndex; index < value.length; index += 1) {
+    const char = value[index]!;
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return value.slice(startIndex, index + 1);
+      }
+      if (depth < 0) {
+        return;
+      }
+    }
+  }
+
+  return;
+}
+
+function extractFirstParseableJsonObject(value: string): string | undefined {
+  for (
+    let startIndex = value.indexOf("{");
+    startIndex !== -1;
+    startIndex = value.indexOf("{", startIndex + 1)
+  ) {
+    const candidate = readCompleteJsonObjectFrom(value, startIndex);
+    if (!candidate) continue;
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+      // Keep scanning; prose or malformed earlier braces may precede the JSON.
+    }
+  }
+
+  return;
+}
+
 function extractJsonFromProse(raw: string): string {
   const stripped = stripCodeFence(raw);
   // Try direct parse first
@@ -159,19 +221,8 @@ function extractJsonFromProse(raw: string): string {
     JSON.parse(stripped);
     return stripped;
   } catch {
-    // Fallback: find outermost { ... }
-    const firstBrace = stripped.indexOf("{");
-    const lastBrace = stripped.lastIndexOf("}");
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
-      const candidate = stripped.slice(firstBrace, lastBrace + 1);
-      try {
-        JSON.parse(candidate);
-        return candidate;
-      } catch {
-        // Return original stripped; let caller handle parse error
-        return stripped;
-      }
-    }
+    const candidate = extractFirstParseableJsonObject(stripped);
+    if (candidate) return candidate;
     return stripped;
   }
 }
@@ -430,6 +481,9 @@ Example no-finding structure for the requested triggers:
 For every hasFinding=true item:
 - For intent Markdown changes, set targetKind="intent-markdown" or omit targetKind for backward compatibility; operation must be create, refine, split, or merge; targetIntentIds must list every existing or proposed intent ID affected by the change.
 - For trigger keyword suggestions, set targetKind="trigger-keywords", targetTrigger to "successful-pattern", "behavior-fix", or "entity-context", and addKeywords/removeKeywords to the precise phrases. Do not suggest more than 3 additions or removals per finding.
+- dedupeKey must be a stable short key for merging repeated equivalent findings.
+- summary must briefly describe the reusable lesson or correction.
+- evidence must list concrete snapshot evidence; do not leave it empty.
 - correctionGoal must name the intent Markdown outcome or trigger keyword outcome.
 - suggestedChange must be a concrete intent Markdown draft or patch instruction, or a concrete triggerKeywords.successfulPattern / triggerKeywords.behaviorFix / triggerKeywords.entityContext keyword change.
 
