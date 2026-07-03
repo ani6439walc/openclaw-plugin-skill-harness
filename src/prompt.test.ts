@@ -229,6 +229,22 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("User wants to deploy to production");
   });
 
+  it("tells classifier to keep JSON string fields ultra-concise without losing semantics", () => {
+    const result = buildIntentionPrompt({
+      intents: mockIntents,
+      latest: "hello",
+    });
+
+    expect(result).toContain("Output style:");
+    expect(result).toContain("ultra-concise but semantics-preserving");
+    expect(result).toContain(
+      "Keep exact code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged",
+    );
+    expect(result).toContain(
+      "Do not abbreviate technical names into unclear shorthand",
+    );
+  });
+
   it("tells classifier it may override keywords and complexity when topic context exists", () => {
     const result = buildIntentionPrompt({
       intents: mockIntents,
@@ -347,6 +363,20 @@ describe("buildTopicSwitchPrompt", () => {
     );
     expect(prompt).toMatch(
       /<latest_message>\n繼續實作 topic checker\n<\/latest_message>\n\nCheck topic continuity for latest_message only\. Return exactly one raw JSON object with no Markdown code fences and no surrounding prose\.$/,
+    );
+  });
+
+  it("tells topic checker to keep JSON string fields ultra-concise without losing semantics", () => {
+    const prompt = buildTopicSwitchPrompt({
+      latest: "commit this",
+      history: [],
+      domains: ["git"],
+    });
+
+    expect(prompt).toContain("Output style:");
+    expect(prompt).toContain("ultra-concise but semantics-preserving");
+    expect(prompt).toContain(
+      "Keep exact code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged",
     );
   });
 
@@ -745,6 +775,29 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("繼續實作同題續聊");
     expect(prompt).toMatch(
       /<latest_message>\n繼續實作同題續聊\n<\/latest_message>\n\nWrite the optional intention hint now\. Use latest_message as the decision source and output no surrounding analysis\.$/,
+    );
+  });
+
+  it("tells instruction writer to output ultra-concise guidance without losing semantics", () => {
+    const prompt = buildIntentInstructionPrompt({
+      latest: "繼續實作同題續聊",
+      result: {
+        intent: "coding",
+        reason: "User wants implementation",
+        domain: "coding",
+        confidence: 0.95,
+        complexity: "medium",
+      },
+      intentBody: "## Guidelines\n\nUse tests.",
+      complexityContext:
+        "<complexity_context>Use a balanced flow.</complexity_context>",
+    });
+
+    expect(prompt).toContain("Output style:");
+    expect(prompt).toContain("ultra-concise but semantics-preserving");
+    expect(prompt).toContain("Prefer short fragments or compact bullets");
+    expect(prompt).toContain(
+      "Preserve safety warnings, required ordering, verification steps, and exact technical names",
     );
   });
 });

@@ -249,6 +249,19 @@ describe("buildReviewPrompt", () => {
     );
   });
 
+  it("tells reviewer to keep JSON string fields ultra-concise without losing semantics", () => {
+    const prompt = buildReviewPrompt(snapshot, ["skill-candidate"]);
+
+    expect(prompt).toContain("Output style:");
+    expect(prompt).toContain("ultra-concise but semantics-preserving");
+    expect(prompt).toContain(
+      "Keep exact code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged",
+    );
+    expect(prompt).toContain(
+      "Do not omit evidence, safety constraints, required ordering, or semantic qualifiers to make text shorter",
+    );
+  });
+
   it.each([
     "skill-candidate",
     "successful-pattern",

@@ -65,6 +65,14 @@ const CATALOG_CONTEXT_TRIGGERS = new Set<EvolutionTrigger>([
   "satisfaction-check",
 ]);
 
+const ULTRA_CONCISE_REVIEW_OUTPUT_STYLE = `Output style:
+- Keep JSON string fields ultra-concise but semantics-preserving.
+- Drop filler, pleasantries, hedging, duplicate points, and non-essential prose.
+- Use short fragments when clear.
+- Keep exact code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged.
+- Do not abbreviate technical names into unclear shorthand.
+- Do not omit evidence, safety constraints, required ordering, or semantic qualifiers to make text shorter.`;
+
 const INTENT_CRAFT_RUBRIC = `Intent Markdown review rules:
 - Decide whether the evidence calls for creating, refining, splitting, or merging an intent. Prefer the smallest maintainable boundary.
 - Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, and optional fastpath metadata.
@@ -475,6 +483,8 @@ Requested trigger reviews:
 ${triggerPrompts}
 
 Output format: Return exactly one raw JSON object with no Markdown code fences and no surrounding prose. Do not write analysis, reasoning, or commentary outside the JSON. The entire response should be parseable by JSON.parse without cleanup.
+${ULTRA_CONCISE_REVIEW_OUTPUT_STYLE}
+
 Example no-finding structure for the requested triggers:
 {"findings":[${exampleFindings}]}
 

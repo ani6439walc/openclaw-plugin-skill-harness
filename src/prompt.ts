@@ -34,6 +34,22 @@ const COMPLEXITY_LEVEL_GUIDANCE = `Complexity levels:
 - "medium": task requiring moderate context analysis or broader scope that needs some investigation before execution.
 - "high": multi-step investigation, research, complex code operations, or broad scope requiring full SOP workflow and structural changes.`;
 
+const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
+- Keep JSON string fields ultra-concise but semantics-preserving.
+- Drop filler, pleasantries, hedging, duplicate points, and non-essential prose.
+- Use short fragments when clear.
+- Keep exact code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged.
+- Do not abbreviate technical names into unclear shorthand.
+- Do not omit required schema fields, safety constraints, ordering, or key qualifiers to make text shorter.`;
+
+const ULTRA_CONCISE_TEXT_OUTPUT_STYLE = `Output style:
+- Write ultra-concise but semantics-preserving guidance.
+- Prefer short fragments or compact bullets.
+- Drop filler, pleasantries, hedging, duplicate points, and non-essential prose.
+- Preserve safety warnings, required ordering, verification steps, and exact technical names.
+- Keep code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged.
+- Do not abbreviate technical names into unclear shorthand.`;
+
 const FALLBACK_INTENT_ENTRY: IntentCatalogEntry = {
   id: FALLBACK_INTENT_ID,
   definition: FALLBACK_INTENT,
@@ -271,6 +287,8 @@ complexity must be one of: low, medium, high.
 For topic continuity checking, apply complexity to the latest message's apparent task scope; do not inflate complexity just because a downstream agent may execute the task later.
 ${COMPLEXITY_LEVEL_GUIDANCE}
 
+${ULTRA_CONCISE_JSON_OUTPUT_STYLE}
+
 ${domainSection}
 ${latestHistoricalIntentSection}
 ${conversationSection}
@@ -398,6 +416,8 @@ Rules:
 17. If confidence is below 90% (from intent_metadata), tone down all guidance — present suggestions as optional hints rather than strong recommendations.
 18. If suggestion is present in intent_metadata, treat it as low-confidence classifier guidance. Use it only to calibrate caution, ask for clarification, or avoid over-specific workflows; do not repeat it verbatim unless it is directly useful.
 19. For read-only git log/history requests, do not include stage/commit/push workflows from matched intent Markdown. Suggest only minimal inspection commands and a concise reporting shape.
+
+${ULTRA_CONCISE_TEXT_OUTPUT_STYLE}
 
 <matched_intent_markdown>
 ${params.intentBody}
@@ -534,6 +554,8 @@ Example when topic_switch_context is present (with keyword override):
 }
 
 ${COMPLEXITY_LEVEL_GUIDANCE}
+
+${ULTRA_CONCISE_JSON_OUTPUT_STYLE}
 
 Fallback: If no intent confidently matches, return intent as "other".
 
