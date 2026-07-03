@@ -232,6 +232,23 @@ describe("buildReviewPrompt", () => {
     expect(prompt.trim().endsWith("no surrounding prose.")).toBe(true);
   });
 
+  it("states every required field for positive findings", () => {
+    const prompt = buildReviewPrompt(snapshot, ["skill-candidate"]);
+
+    expect(prompt).toContain("For every hasFinding=true item:");
+    expect(prompt).toContain("dedupeKey must be a stable short key");
+    expect(prompt).toContain(
+      "summary must briefly describe the reusable lesson",
+    );
+    expect(prompt).toContain("evidence must list concrete snapshot evidence");
+    expect(prompt).toContain(
+      "targetIntentIds must list every existing or proposed intent ID affected by the change",
+    );
+    expect(prompt).toContain(
+      "suggestedChange must be a concrete intent Markdown draft or patch instruction",
+    );
+  });
+
   it.each([
     "skill-candidate",
     "successful-pattern",
@@ -517,6 +534,25 @@ Some more reasoning text here.
         evidence: ["misclassified twice"],
         correctionGoal: "narrow boundary",
         suggestedChange: "add negative examples",
+      },
+    ]);
+  });
+
+  it("extracts the first complete JSON object when extra trailing closers follow it", () => {
+    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":true,"operation":"refine","targetIntentIds":["system-diagnostics"],"dedupeKey":"memory-search-performance-diagnosis","summary":"Record memory search performance diagnosis methodology","evidence":["Compared CLI and tool timing"],"correctionGoal":"Add memory search diagnosis experience","suggestedChange":"Add an Experience note about comparing searchMs and elapsed timings."}]}]}`;
+
+    expect(parseReviewFindings(raw, ["skill-candidate"])).toEqual([
+      {
+        trigger: "skill-candidate",
+        targetKind: "intent-markdown",
+        operation: "refine",
+        targetIntentIds: ["system-diagnostics"],
+        dedupeKey: "memory-search-performance-diagnosis",
+        summary: "Record memory search performance diagnosis methodology",
+        evidence: ["Compared CLI and tool timing"],
+        correctionGoal: "Add memory search diagnosis experience",
+        suggestedChange:
+          "Add an Experience note about comparing searchMs and elapsed timings.",
       },
     ]);
   });
