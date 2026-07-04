@@ -208,6 +208,27 @@ const FindingSchema = z.union([
   TriggerKeywordFindingSchema,
 ]);
 
+function summarizeSchemaError(error: z.ZodError): {
+  issueCount: number;
+  issueCodes: string[];
+  issuePaths: string[];
+} {
+  return {
+    issueCount: error.issues.length,
+    issueCodes: [...new Set(error.issues.map((issue) => issue.code))].slice(
+      0,
+      5,
+    ),
+    issuePaths: [
+      ...new Set(
+        error.issues
+          .map((issue) => issue.path.map(String).join("."))
+          .filter(Boolean),
+      ),
+    ].slice(0, 10),
+  };
+}
+
 const ReviewResponseSchema = z.object({
   findings: z.array(z.unknown()),
 });
@@ -370,6 +391,21 @@ function extractJsonFromProse(raw: string): string {
     if (candidate) return candidate;
     return stripped;
   }
+}
+
+function summarizeRawReply(rawReply: string): {
+  replyLength: number;
+  startsWithJson: boolean;
+  containsCodeFence: boolean;
+  hasParseableJsonObject: boolean;
+} {
+  const trimmed = rawReply.trimStart();
+  return {
+    replyLength: rawReply.length,
+    startsWithJson: trimmed.startsWith("{") || trimmed.startsWith("["),
+    containsCodeFence: rawReply.includes("```"),
+    hasParseableJsonObject: Boolean(extractFirstParseableJsonObject(rawReply)),
+  };
 }
 
 function extractMalformedFindingsResponse(
@@ -723,14 +759,15 @@ function parseReviewFindingsDetailed(
 
       const result = FindingSchema.safeParse(rawFinding);
       if (!result.success) {
+        const reasonCode = classifySchemaRejection(rawRecord);
         if (isRequestedPositiveFinding) {
           invalidRequestedPositiveFindings += 1;
-          const reasonCode = classifySchemaRejection(rawRecord);
           schemaRejectionReasonCounts[reasonCode] =
             (schemaRejectionReasonCounts[reasonCode] ?? 0) + 1;
         }
         logger.debug("dropping invalid evolution review finding", {
-          error: result.error,
+          schemaRejectionReasonCode: reasonCode,
+          ...summarizeSchemaError(result.error),
         });
         continue;
       }
@@ -885,7 +922,9 @@ export async function runReviewSubagent(params: {
       const rawReply = extractPayloadText(result);
       const parsed = parseReviewFindingsDetailed(rawReply, params.triggers);
       if (!parsed) {
-        logger.warn("evolution review result parse failed", { rawReply });
+        logger.warn("evolution review result parse failed", {
+          ...summarizeRawReply(rawReply),
+        });
         return { findings: [], outcome: "parse-failed" };
       }
       if (

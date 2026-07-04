@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
+import { logger } from "../api.js";
 import { resolveConfig } from "./config.js";
 import {
   buildReviewPrompt,
@@ -7,6 +8,10 @@ import {
   runReviewSubagent,
 } from "./review-subagent.js";
 import type { ReviewSnapshot } from "./evolution-types.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const snapshot: ReviewSnapshot = {
   sessionId: "session-1",
@@ -637,6 +642,45 @@ describe("parseReviewFindings", () => {
     expect(parseReviewFindings(raw, ["weak-intent"])).toEqual([]);
   });
 
+  it("logs sanitized schema diagnostics without raw finding data", () => {
+    const debugSpy = vi
+      .spyOn(logger, "debug")
+      .mockImplementation(() => undefined);
+    const raw = JSON.stringify({
+      findings: [
+        {
+          trigger: "weak-intent",
+          hasFinding: true,
+          operation: "unknown",
+          targetIntentIds: ["private-intent-id"],
+          dedupeKey: "private-dedupe-key",
+          summary: "private summary text",
+          evidence: ["private user evidence text"],
+          correctionGoal: "private correction goal",
+          suggestedChange: "private suggested change",
+        },
+      ],
+    });
+
+    expect(parseReviewFindings(raw, ["weak-intent"])).toEqual([]);
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      "dropping invalid evolution review finding",
+      expect.objectContaining({
+        schemaRejectionReasonCode: "invalid-operation",
+        issueCount: expect.any(Number),
+        issueCodes: expect.any(Array),
+        issuePaths: expect.any(Array),
+      }),
+    );
+    const payload = debugSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("error");
+    const serializedPayload = JSON.stringify(payload);
+    expect(serializedPayload).not.toContain("private user evidence text");
+    expect(serializedPayload).not.toContain("private suggested change");
+    expect(serializedPayload).not.toContain("private summary text");
+  });
+
   it("extracts JSON from prose surrounding the JSON object", () => {
     const raw = `Looking at this behavior-fix trigger, I need to examine the routing.
 
@@ -949,6 +993,45 @@ describe("runReviewSubagent", () => {
       }),
     ).resolves.toEqual({ findings: [], outcome: "subagent-error" });
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("logs parse failures without raw model replies", async () => {
+    const rawReply =
+      "private raw model reply containing user text and token abc123";
+    const warnSpy = vi
+      .spyOn(logger, "warn")
+      .mockImplementation(() => undefined);
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [{ text: rawReply }],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual({ findings: [], outcome: "parse-failed" });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "evolution review result parse failed",
+      expect.objectContaining({
+        replyLength: rawReply.length,
+        startsWithJson: false,
+        containsCodeFence: false,
+        hasParseableJsonObject: false,
+      }),
+    );
+    const payload = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("rawReply");
+    expect(JSON.stringify(payload)).not.toContain("abc123");
   });
 
   it("returns schema-rejected when requested positive findings are all invalid", async () => {
