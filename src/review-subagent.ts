@@ -88,6 +88,25 @@ const CATALOG_CONTEXT_TRIGGERS = new Set<EvolutionTrigger>([
   "satisfaction-check",
 ]);
 
+const NO_FINDING_REASON_CODES = [
+  "routine-tool-use",
+  "outside-intent-scope",
+  "insufficient-evidence",
+  "wrong-trigger",
+  "already-covered",
+  "privacy-sensitive",
+] as const;
+
+const NO_FINDING_REASON_CODE_LIST = NO_FINDING_REASON_CODES.join(", ");
+
+const REVIEWER_WORKFLOW = `Reviewer workflow — not optional:
+- First decide whether the requested trigger itself is the right lens. If not, return hasFinding=false with reasonCode="wrong-trigger" rather than doing unrequested trigger work.
+- Then ask whether the evidence directly improves runtime intent Markdown or a pending trigger keyword suggestion. If not, return hasFinding=false with the closest reasonCode.
+- behavior-fix: if the snapshot contains an explicit user correction, concrete misroute, or wrong tool/no-tool behavior, prefer a narrow finding over no_finding; encode the smallest correction that would prevent recurrence.
+- successful-pattern: stay precision-biased; routine success is no_finding unless there is reusable ordering, parameters, recovery, or pitfalls that future turns would otherwise miss.
+- skill-candidate: accept small intent-local Experience notes only when concrete skill/tool evidence, parameters, recovery, or required ordering exists; never invent a missing skill from Skills Used=none.
+- entity-context: stay bounded to explicit TOOLS.md, MEMORY.md, or memory-path signals and never copy raw private memory; suggest only reusable lookup habits or pending triggerKeywords.entityContext phrases.`;
+
 const ULTRA_CONCISE_REVIEW_OUTPUT_STYLE = `Output style:
 - Keep JSON string fields ultra-concise but semantics-preserving.
 - Drop filler, pleasantries, hedging, duplicate points, and non-essential prose.
@@ -130,6 +149,7 @@ const INTENT_CRAFT_RUBRIC = `Intent Markdown review rules:
 const NoFindingSchema = z.object({
   trigger: z.string(),
   hasFinding: z.literal(false),
+  reasonCode: z.enum(NO_FINDING_REASON_CODES).optional(),
 });
 
 function normalizeSuggestedChange(value: unknown): unknown {
@@ -540,9 +560,13 @@ If matchedIntent is absent, return hasFinding=false unless the requested trigger
   const exampleFindings = triggers
     .map((trigger) => `{"trigger":"${trigger}","hasFinding":false}`)
     .join(",");
+  const reasonCodeExampleTrigger = triggers[0] ?? "skill-candidate";
 
   return `You are an Intent Evolution reviewer.
+This is an intent-evolution review, not a general audit, skill writer, repository refactor, or passive transcript summary.
 Your sole purpose is to improve the content and routing quality of intention-hint intents/*.md files.
+Target artifact shape: propose only runtime intent Markdown changes or pending trigger keyword suggestions.
+Hard rules — do not violate:
 Review only the requested triggers. Each trigger is independent and may return hasFinding=false.
 Do not perform unrequested trigger work. For example, do not turn a skill-candidate review into a weak-intent, behavior-fix, missing-intent, split, or merge recommendation unless that trigger was requested and the evidence supports it.
 Do not invent evidence. Do not modify files; propose intent Markdown drafts, intent Markdown patches, or pending trigger keyword suggestions only.
@@ -554,11 +578,18 @@ ${INTENT_CRAFT_RUBRIC}
 Requested trigger reviews:
 ${triggerPrompts}
 
+${REVIEWER_WORKFLOW}
+
 Output format: Return exactly one raw JSON object with no Markdown code fences and no surrounding prose. Do not write analysis, reasoning, or commentary outside the JSON. The entire response should be parseable by JSON.parse without cleanup.
 ${ULTRA_CONCISE_REVIEW_OUTPUT_STYLE}
 
 Example no-finding structure for the requested triggers:
 {"findings":[${exampleFindings}]}
+
+For hasFinding=false items:
+- reasonCode is optional but SHOULD be one of: ${NO_FINDING_REASON_CODE_LIST}.
+- Use reasonCode to make negative decisions auditable; do not add evidence, correctionGoal, suggestedChange, or target fields to no-finding items.
+- Example with reasonCode: {"trigger":"${reasonCodeExampleTrigger}","hasFinding":false,"reasonCode":"insufficient-evidence"}
 
 For every hasFinding=true item:
 - For intent Markdown changes, set targetKind="intent-markdown" or omit targetKind for backward compatibility; operation must be create, refine, split, or merge; targetIntentIds must list every existing or proposed intent ID affected by the change.
