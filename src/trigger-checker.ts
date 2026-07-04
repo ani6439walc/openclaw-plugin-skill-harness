@@ -41,6 +41,13 @@ const ENTITY_CONTEXT_READ_TOOLS = new Set([
   "read_file",
   "search_files",
 ]);
+const BEHAVIOR_FIX_QUOTED_CONTENT_MARKERS = [
+  "dream diary",
+  "memory fragments",
+  "from these memory fragments",
+  "ingest prompt",
+  "ingest payload",
+];
 
 function includesAnyKeyword(
   text: string | undefined,
@@ -50,6 +57,14 @@ function includesAnyKeyword(
   const normalizedText = text.toLocaleLowerCase();
   return keywords.some((keyword) =>
     normalizedText.includes(keyword.toLocaleLowerCase()),
+  );
+}
+
+function isQuotedContentPrompt(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.toLocaleLowerCase();
+  return BEHAVIOR_FIX_QUOTED_CONTENT_MARKERS.some((marker) =>
+    normalized.includes(marker),
   );
 }
 
@@ -166,6 +181,7 @@ export function checkEvolutionTriggers(
   }
   if (
     config.behaviorFix.enabled &&
+    !isQuotedContentPrompt(state.input) &&
     includesAnyKeyword(state.input, triggerKeywords.behaviorFix)
   ) {
     matches.push("behavior-fix");

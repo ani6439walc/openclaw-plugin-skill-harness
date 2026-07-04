@@ -144,6 +144,9 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("triggerKeywords.successfulPattern");
     expect(prompt).toContain("triggerKeywords.behaviorFix");
     expect(prompt).toContain("triggerKeywords.entityContext");
+    expect(prompt).toContain(
+      "For successful-pattern, behavior-fix, and entity-context reviews, also check whether the turn exposes a trigger keyword gap",
+    );
     expect(prompt).toContain("TOOLS.md, MEMORY.md, or paths containing memory");
     expect(prompt).toContain("Do not auto-apply trigger keyword changes");
     expect(prompt).toContain(
@@ -570,6 +573,46 @@ Some more reasoning text here.
     ]);
   });
 
+  it("extracts the first complete JSON object when an extra object closer follows it", () => {
+    const raw = `{"findings":[{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"retry-timeout","summary":"Preserve timeout retry flow","evidence":["GLM-5 timed out"],"correctionGoal":"Add timeout retry note","suggestedChange":"Add an Experience note about retrying fallback models."}]}}`;
+
+    expect(parseReviewFindings(raw, ["process-gap"])).toEqual([
+      {
+        trigger: "process-gap",
+        targetKind: "intent-markdown",
+        operation: "refine",
+        targetIntentIds: ["debugging"],
+        dedupeKey: "retry-timeout",
+        summary: "Preserve timeout retry flow",
+        evidence: ["GLM-5 timed out"],
+        correctionGoal: "Add timeout retry note",
+        suggestedChange:
+          "Add an Experience note about retrying fallback models.",
+      },
+    ]);
+  });
+
+  it("recovers positive findings after an initial no-finding object in a malformed findings array", () => {
+    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":false},{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"timeout-fallback","summary":"Retry fallback model after review timeout","evidence":["evolution review subagent error: timeout"],"correctionGoal":"Add review timeout fallback guidance","suggestedChange":"Add an Experience note about retrying fallback model after provider timeout."}]`;
+
+    expect(
+      parseReviewFindings(raw, ["skill-candidate", "process-gap"]),
+    ).toEqual([
+      {
+        trigger: "process-gap",
+        targetKind: "intent-markdown",
+        operation: "refine",
+        targetIntentIds: ["debugging"],
+        dedupeKey: "timeout-fallback",
+        summary: "Retry fallback model after review timeout",
+        evidence: ["evolution review subagent error: timeout"],
+        correctionGoal: "Add review timeout fallback guidance",
+        suggestedChange:
+          "Add an Experience note about retrying fallback model after provider timeout.",
+      },
+    ]);
+  });
+
   it("still returns undefined when prose contains no valid JSON", () => {
     expect(
       parseReviewFindings("just prose with no JSON at all", ["weak-intent"]),
@@ -587,7 +630,7 @@ describe("runReviewSubagent", () => {
       runtime: { agent: { runEmbeddedAgent } },
     } as unknown as OpenClawPluginApi;
 
-    await runReviewSubagent({
+    const result = await runReviewSubagent({
       api,
       config: resolveConfig({
         evolution: {
@@ -602,6 +645,7 @@ describe("runReviewSubagent", () => {
       triggers: ["weak-intent"],
     });
 
+    expect(result).toEqual({ findings: [], outcome: "nofinding" });
     expect(runEmbeddedAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "google",
@@ -618,5 +662,71 @@ describe("runReviewSubagent", () => {
         ),
       }),
     );
+  });
+
+  it("retries review with evolution modelFallback after a primary model error", async () => {
+    const runEmbeddedAgent = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("LLM idle timeout"))
+      .mockResolvedValueOnce({
+        payloads: [
+          {
+            text: '{"findings":[{"trigger":"weak-intent","hasFinding":false}]}',
+          },
+        ],
+      });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    const result = await runReviewSubagent({
+      api,
+      config: resolveConfig({
+        evolution: {
+          enabled: true,
+          modelFallback: "google/review-fallback",
+        },
+      }),
+      agentId: "main",
+      modelRef: { provider: "bifrost", model: "glm-5" },
+      snapshot,
+      triggers: ["weak-intent"],
+    });
+
+    expect(result).toEqual({ findings: [], outcome: "nofinding" });
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+    expect(runEmbeddedAgent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ provider: "bifrost", model: "glm-5" }),
+    );
+    expect(runEmbeddedAgent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ provider: "google", model: "review-fallback" }),
+    );
+  });
+
+  it("returns subagent-error when primary and fallback review runs fail", async () => {
+    const runEmbeddedAgent = vi
+      .fn()
+      .mockRejectedValue(new Error("all cooldown"));
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({
+          evolution: { enabled: true, modelFallback: "google/fallback" },
+        }),
+        agentId: "main",
+        modelRef: { provider: "bifrost", model: "glm-5" },
+        snapshot,
+        triggers: ["weak-intent"],
+      }),
+    ).resolves.toEqual({ findings: [], outcome: "subagent-error" });
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
   });
 });

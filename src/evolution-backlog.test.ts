@@ -74,7 +74,14 @@ describe("evolution backlog", () => {
     expect(migrated).toMatchObject({
       schemaVersion: 3,
       triggerKeywords: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
-      processedEvents: { event: "time" },
+      processedEvents: {
+        event: {
+          processedAt: "time",
+          triggers: [],
+          findingCount: 0,
+          outcome: "unknown",
+        },
+      },
       items: [
         {
           targetKind: "intent-markdown",
@@ -82,6 +89,31 @@ describe("evolution backlog", () => {
           targetIntentIds: [],
         },
       ],
+    });
+  });
+
+  it("parses structured processed event observability records", () => {
+    const parsed = parseBacklog({
+      schemaVersion: 3,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      triggerKeywords: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
+      processedEvents: {
+        "session-1:turn-1": {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["behavior-fix", "entity-context"],
+          findingCount: 0,
+          outcome: "parse-failed",
+        },
+      },
+      items: [],
+    });
+
+    expect(parsed.processedEvents["session-1:turn-1"]).toEqual({
+      processedAt: "2026-06-11T00:01:00.000Z",
+      triggers: ["behavior-fix", "entity-context"],
+      findingCount: 0,
+      outcome: "parse-failed",
     });
   });
 
@@ -398,7 +430,12 @@ describe("evolution backlog", () => {
     pruneProcessedEvents(value, now);
 
     expect(value.processedEvents).toEqual({
-      "keep-event": keepTimestamp,
+      "keep-event": {
+        processedAt: keepTimestamp,
+        triggers: [],
+        findingCount: 0,
+        outcome: "unknown",
+      },
     });
   });
 
@@ -438,8 +475,18 @@ describe("evolution backlog", () => {
 
     pruneProcessedEvents(value, now);
     expect(value.processedEvents).toEqual({
-      "fresh-1": freshTimestamp,
-      "fresh-2": freshTimestamp,
+      "fresh-1": {
+        processedAt: freshTimestamp,
+        triggers: [],
+        findingCount: 0,
+        outcome: "unknown",
+      },
+      "fresh-2": {
+        processedAt: freshTimestamp,
+        triggers: [],
+        findingCount: 0,
+        outcome: "unknown",
+      },
     });
   });
 
@@ -473,7 +520,12 @@ describe("evolution backlog", () => {
     pruneProcessedEvents(value, Date.parse("2026-06-15T12:00:00.000Z"));
 
     expect(value.processedEvents).toEqual({
-      "valid-event": "2026-06-14T00:00:00.000Z",
+      "valid-event": {
+        processedAt: "2026-06-14T00:00:00.000Z",
+        triggers: [],
+        findingCount: 0,
+        outcome: "unknown",
+      },
     });
   });
 });

@@ -246,6 +246,16 @@ describe("createHookHandlers tracking guards", () => {
       snapshot.eventId,
       expect.objectContaining({ sessionId: "session-1" }),
       [],
+      {
+        triggers: [
+          "skill-candidate",
+          "satisfaction-check",
+          "missing-intent",
+          "weak-intent",
+          "behavior-fix",
+        ],
+        outcome: "nofinding",
+      },
     );
   });
 });

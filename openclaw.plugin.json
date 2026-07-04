@@ -190,7 +190,7 @@
           },
           "modelFallback": {
             "type": "string",
-            "description": "Fallback model for Evolution reviews."
+            "description": "Fallback model retried when the primary Evolution review model fails."
           },
           "thinking": {
             "type": "string",
