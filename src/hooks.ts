@@ -1,4 +1,5 @@
 import type { ResolvedIntentionHintPluginConfig } from "./types.js";
+import type { EvolutionFinding } from "./evolution-types.js";
 import type { OpenClawPluginApi } from "../api.js";
 import type {
   PluginHookBeforePromptBuildEvent,
@@ -17,7 +18,10 @@ import { defaultStatsAggregator } from "./stats-aggregator.js";
 import { defaultBacklogWriter, type BacklogWriter } from "./backlog-writer.js";
 import { defaultReviewQueue, type ReviewQueue } from "./review-queue.js";
 import { checkEvolutionTriggers } from "./trigger-checker.js";
-import { runReviewSubagent } from "./review-subagent.js";
+import {
+  runReviewSubagent,
+  type ReviewSubagentResult,
+} from "./review-subagent.js";
 import {
   DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
   type EvolutionTriggerKeywords,
@@ -119,7 +123,9 @@ export type HookDeps = {
   tracker?: typeof defaultTracker;
   statsAggregator?: typeof defaultStatsAggregator;
   reviewQueue?: Pick<ReviewQueue, "enqueue">;
-  reviewer?: typeof runReviewSubagent;
+  reviewer?: (
+    params: Parameters<typeof runReviewSubagent>[0],
+  ) => Promise<ReviewSubagentResult | EvolutionFinding[] | undefined>;
   classifier?: typeof runIntentionSubagent;
   topicChecker?: typeof runTopicSwitchSubagent;
   instructionWriter?: typeof runIntentInstructionSubagent;
@@ -1181,7 +1187,7 @@ export function createHookHandlers(deps: HookDeps) {
     triggers: ReturnType<typeof checkEvolutionTriggers>;
   }): void {
     reviewQueue.enqueue(async () => {
-      const findings = await reviewer({
+      const reviewResult = await reviewer({
         api,
         config: params.resolvedConfig,
         agentId: params.agentId,
@@ -1191,7 +1197,15 @@ export function createHookHandlers(deps: HookDeps) {
         snapshot: params.snapshot,
         triggers: params.triggers,
       });
-      if (!findings) return;
+      if (!reviewResult) return;
+      const findings = Array.isArray(reviewResult)
+        ? reviewResult
+        : reviewResult.findings;
+      const outcome = Array.isArray(reviewResult)
+        ? findings.length > 0
+          ? "wrote-items"
+          : "nofinding"
+        : reviewResult.outcome;
       await backlogWriter.record(
         params.snapshot.eventId,
         {
@@ -1201,6 +1215,7 @@ export function createHookHandlers(deps: HookDeps) {
           turnStart: params.snapshot.current.timestamps!.start!,
         },
         findings,
+        { triggers: params.triggers, outcome },
       );
     });
   }

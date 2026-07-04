@@ -337,16 +337,16 @@ Intent Evolution is an opt-in observation and proposal pipeline. It does
 not edit intent files automatically. When enabled, each completed tracked turn
 is checked for eight trigger types:
 
-| Trigger              | Default condition                                                                                      | Intent Markdown correction target                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `skill-candidate`    | Current turn has at least 5 tool calls                                                                 | `Skills & Tools`, `Concrete Workflow`, or `Experience`                                                           |
-| `process-gap`        | Current turn has at least 2 tool errors                                                                | Guidelines, tool examples, workflow, or pitfalls                                                                 |
-| `successful-pattern` | Successful tool-heavy or skill-assisted completed turn with a runtime success keyword                  | `Experience`, `Concrete Workflow`, Response Strategy, or pending `triggerKeywords.successfulPattern` suggestions |
-| `satisfaction-check` | Every 10th tracked turn                                                                                | Boundaries, examples, Guidelines, or Response Strategy                                                           |
-| `missing-intent`     | Classified intent is `other`                                                                           | A narrowly scoped new intent draft                                                                               |
-| `weak-intent`        | Classification confidence is below 0.5                                                                 | Frontmatter triggers/examples/domain/fastpath and boundary clarity                                               |
-| `behavior-fix`       | Current input contains a runtime correction keyword                                                    | Fastpath metadata, guidance, workflow, or pending `triggerKeywords.behaviorFix` suggestions                      |
-| `entity-context`     | Runtime entity-context learning keyword plus `TOOLS.md`, `MEMORY.md`, or a `memory` path/source signal | `Experience`, `Concrete Workflow`, or pending `triggerKeywords.entityContext` suggestions                        |
+| Trigger              | Default condition                                                                                                      | Intent Markdown correction target                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `skill-candidate`    | Current turn has at least 5 tool calls                                                                                 | `Skills & Tools`, `Concrete Workflow`, or `Experience`                                                           |
+| `process-gap`        | Current turn has at least 2 tool errors                                                                                | Guidelines, tool examples, workflow, or pitfalls                                                                 |
+| `successful-pattern` | Successful tool-heavy or skill-assisted completed turn with a runtime success keyword                                  | `Experience`, `Concrete Workflow`, Response Strategy, or pending `triggerKeywords.successfulPattern` suggestions |
+| `satisfaction-check` | Every 10th tracked turn                                                                                                | Boundaries, examples, Guidelines, or Response Strategy                                                           |
+| `missing-intent`     | Classified intent is `other`                                                                                           | A narrowly scoped new intent draft                                                                               |
+| `weak-intent`        | Classification confidence is below 0.5                                                                                 | Frontmatter triggers/examples/domain/fastpath and boundary clarity                                               |
+| `behavior-fix`       | Latest user input contains a runtime correction keyword and is not a quoted ingest/dream diary/memory-fragment payload | Fastpath metadata, guidance, workflow, or pending `triggerKeywords.behaviorFix` suggestions                      |
+| `entity-context`     | Runtime entity-context learning keyword plus `TOOLS.md`, `MEMORY.md`, or a `memory` path/source signal                 | `Experience`, `Concrete Workflow`, or pending `triggerKeywords.entityContext` suggestions                        |
 
 All matching triggers are reviewed in one background, read-only sub-agent run.
 Each trigger receives a distinct review focus and correction goal, and may return
@@ -375,12 +375,18 @@ core `read` tool. The `read` tool is reserved for inspecting relevant
 `entity-context`, explicitly mentioned candidate sources limited to `TOOLS.md`,
 `MEMORY.md`, or paths containing `memory`. Trigger detection never reads file
 contents; the reviewer may read only those candidates and must not browse
-arbitrary filesystem paths or copy raw private memory.
+arbitrary filesystem paths or copy raw private memory. If the primary Evolution
+review model fails, the review is retried once with `evolution.modelFallback`
+when configured; parse failures and provider errors are recorded as processed
+event outcomes instead of silently disappearing.
 
 `evolution.json` is protected like `stats.json`: both live at the runtime data
 root, are not loaded as session state, and are never removed by session
 lifecycle or 14-day retention cleanup. Schema v3 stores root `triggerKeywords`
-plus backlog findings. Intent Markdown findings include `targetKind:
+plus structured `processedEvents` observability and backlog findings. Each
+processed event stores `{ processedAt, triggers, findingCount, outcome }`, where
+`outcome` is one of `wrote-items`, `nofinding`, `parse-failed`,
+`subagent-error`, or `unknown` for migrated legacy entries. Intent Markdown findings include `targetKind:
 "intent-markdown"`, `operation` (`create`, `refine`, `split`, or `merge`), and
 all affected `targetIntentIds`. Trigger keyword findings include `targetKind:
 "trigger-keywords"`, `targetTrigger`, and a pending `keywordChange`. Existing

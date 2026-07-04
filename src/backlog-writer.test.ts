@@ -50,7 +50,12 @@ describe("BacklogWriter", () => {
       schemaVersion: 3,
       updatedAt: "2026-06-11T00:01:00.000Z",
       processedEvents: {
-        "session-1:turn-1": "2026-06-11T00:01:00.000Z",
+        "session-1:turn-1": {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["skill-candidate"],
+          findingCount: 1,
+          outcome: "wrote-items",
+        },
       },
       items: [
         {
@@ -226,8 +231,53 @@ describe("BacklogWriter", () => {
   });
 
   it("records no-finding events for idempotency", async () => {
-    expect(await writer.record("event-1", source, [])).toBe(true);
+    expect(
+      await writer.record("event-1", source, [], {
+        triggers: ["behavior-fix"],
+        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+      }),
+    ).toBe(true);
     expect(await writer.record("event-1", source, [])).toBe(false);
-    expect(readBacklog().items).toEqual([]);
+    expect(readBacklog()).toMatchObject({
+      processedEvents: {
+        "event-1": {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["behavior-fix"],
+          findingCount: 0,
+          outcome: "nofinding",
+        },
+      },
+      items: [],
+    });
+  });
+
+  it("records parse-failed and subagent-error outcomes for observability", async () => {
+    expect(
+      await writer.record("event-parse", source, [], {
+        triggers: ["successful-pattern"],
+        outcome: "parse-failed",
+      }),
+    ).toBe(true);
+    expect(
+      await writer.record("event-error", source, [], {
+        triggers: ["behavior-fix", "entity-context"],
+        outcome: "subagent-error",
+      }),
+    ).toBe(true);
+
+    expect(readBacklog()).toMatchObject({
+      processedEvents: {
+        "event-parse": {
+          triggers: ["successful-pattern"],
+          findingCount: 0,
+          outcome: "parse-failed",
+        },
+        "event-error": {
+          triggers: ["behavior-fix", "entity-context"],
+          findingCount: 0,
+          outcome: "subagent-error",
+        },
+      },
+    });
   });
 });

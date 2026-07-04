@@ -14,7 +14,9 @@ import {
   pruneProcessedEvents,
   EvolutionBacklogSchema,
   type EvolutionBacklog,
+  type ProcessedEventOutcome,
 } from "./evolution-backlog.js";
+import type { EvolutionTrigger } from "./trigger-checker.js";
 
 function backlogTargetFields(finding: EvolutionFinding) {
   if (finding.targetKind === "trigger-keywords") {
@@ -77,7 +79,11 @@ export class BacklogWriter {
     eventId: string,
     source: EvolutionSource,
     findings: readonly EvolutionFinding[],
-    options: { nowMs?: number } = {},
+    options: {
+      nowMs?: number;
+      triggers?: readonly EvolutionTrigger[];
+      outcome?: ProcessedEventOutcome;
+    } = {},
   ): Promise<boolean> {
     if (!eventId) return false;
     const backlogPath = evolutionBacklogPath(this.pluginRoot);
@@ -142,7 +148,21 @@ export class BacklogWriter {
         }
 
         backlog.updatedAt = nowIso;
-        backlog.processedEvents[eventId] = nowIso;
+        const triggers = [
+          ...new Set(
+            (
+              options.triggers ?? findings.map((finding) => finding.trigger)
+            ).filter(Boolean),
+          ),
+        ];
+        backlog.processedEvents[eventId] = {
+          processedAt: nowIso,
+          triggers,
+          findingCount: findings.length,
+          outcome:
+            options.outcome ??
+            (findings.length > 0 ? "wrote-items" : "nofinding"),
+        };
         const validated = EvolutionBacklogSchema.parse(backlog);
         return safeWriteJson(
           backlogPath,

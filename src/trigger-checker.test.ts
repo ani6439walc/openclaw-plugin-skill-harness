@@ -159,6 +159,42 @@ describe("checkEvolutionTriggers", () => {
     ).toEqual(["skill-candidate", "successful-pattern", "behavior-fix"]);
   });
 
+  it("does not treat quoted dream diary memory fragments as behavior corrections", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({
+          input:
+            "Write a dream diary entry from these memory fragments:\n- RG476H 不是軟體問題，應該是排線鬆了\n- Ani 誤會主人要部署，其實只是查 log",
+        }),
+        1,
+        triggers,
+      ),
+    ).not.toContain("behavior-fix");
+  });
+
+  it("does not treat ingest payload text as behavior corrections", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({
+          input:
+            "Summarize this ingest prompt:\n- incorrect project status should be fixed in the source material",
+        }),
+        1,
+        triggers,
+      ),
+    ).not.toContain("behavior-fix");
+  });
+
+  it("still detects direct latest-user behavior corrections", () => {
+    expect(
+      checkEvolutionTriggers(
+        state({ input: "不是叫你查 README，是叫你看 AGENTS.md" }),
+        1,
+        triggers,
+      ),
+    ).toContain("behavior-fix");
+  });
+
   it("does not detect successful patterns for failed turns or completion text without reusable work", () => {
     expect(
       checkEvolutionTriggers(

@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  DEFAULT_PROVIDER,
+  parseModelRef,
+} from "openclaw/plugin-sdk/agent-runtime";
 import { z } from "zod";
 import type { OpenClawPluginApi } from "../api.js";
 import { logger } from "../api.js";
@@ -11,6 +15,15 @@ import type {
 import { EVOLUTION_OPERATIONS } from "./evolution-backlog.js";
 import { normalizeKeywordList } from "./evolution-trigger-keywords.js";
 import { extractPayloadText } from "./subagent.js";
+import type { ProcessedEventOutcome } from "./evolution-backlog.js";
+
+export interface ReviewSubagentResult {
+  findings: EvolutionFinding[];
+  outcome: Extract<
+    ProcessedEventOutcome,
+    "wrote-items" | "nofinding" | "parse-failed" | "subagent-error"
+  >;
+}
 
 const REVIEW_INSTRUCTIONS: Record<
   EvolutionTrigger,
@@ -96,6 +109,7 @@ const INTENT_CRAFT_RUBRIC = `Intent Markdown review rules:
 - When the lesson is general knowledge rather than intent-routing guidance, return no_finding unless it directly improves the matched intent's Guidelines, Response Strategy, Concrete Workflow, or Experience.
 - Never mention another intent name or id inside an intent body. Express scope boundaries through frontmatter triggers, examples, domain, and fastpath.
 - Trigger keyword suggestions are allowed only as pending backlog suggestions with targetKind="trigger-keywords" for triggerKeywords.successfulPattern, triggerKeywords.behaviorFix, or triggerKeywords.entityContext. Do not auto-apply trigger keyword changes and do not propose writes to openclaw.plugin.json.
+- For successful-pattern, behavior-fix, and entity-context reviews, also check whether the turn exposes a trigger keyword gap. If yes, prefer a pending trigger keyword suggestion over unrelated intent Markdown edits.
 - Suggest trigger keyword additions only for stable phrases that clearly mean completed successful work, agent/routing correction, or explicit entity/context lookup learning; reject generic words like "ok", "好", "不要", and one-off wording. Suggest removals only with concrete false-positive evidence.
 - Entity-context reviews are limited to reusable lookup habits grounded in TOOLS.md, MEMORY.md, or paths containing memory that appear in snapshot text or sanitized read/search tool params. The reviewer may use read only on those explicit candidate files. If the source is absent, missing, or does not support a reusable habit, return no_finding. Never browse arbitrary filesystem paths, infer from entity-like tokens/domain words alone, or copy raw private memory into suggestedChange.
 - Do not propose changes to skills, tools, AGENTS.md, SOUL.md, or other production files. The only correction targets are intent Markdown content and trigger keyword backlog suggestions.
@@ -232,6 +246,42 @@ function extractJsonFromProse(raw: string): string {
     const candidate = extractFirstParseableJsonObject(stripped);
     if (candidate) return candidate;
     return stripped;
+  }
+}
+
+function extractMalformedFindingsResponse(
+  raw: string,
+): { findings: unknown[] } | undefined {
+  const stripped = stripCodeFence(raw);
+  const findingsIndex = stripped.indexOf('"findings"');
+  if (findingsIndex === -1) return;
+  const arrayStart = stripped.indexOf("[", findingsIndex);
+  if (arrayStart === -1) return;
+
+  const findings: unknown[] = [];
+  for (
+    let startIndex = stripped.indexOf("{", arrayStart);
+    startIndex !== -1;
+    startIndex = stripped.indexOf("{", startIndex + 1)
+  ) {
+    const candidate = readCompleteJsonObjectFrom(stripped, startIndex);
+    if (!candidate) continue;
+    try {
+      findings.push(JSON.parse(candidate));
+      startIndex += candidate.length - 1;
+    } catch {
+      // Keep scanning malformed fragments.
+    }
+  }
+
+  return findings.length > 0 ? { findings } : undefined;
+}
+
+function parseReviewResponse(raw: string): unknown | undefined {
+  try {
+    return JSON.parse(extractJsonFromProse(raw));
+  } catch {
+    return extractMalformedFindingsResponse(raw);
   }
 }
 
@@ -509,9 +559,11 @@ export function parseReviewFindings(
   requestedTriggers: readonly EvolutionTrigger[],
 ): EvolutionFinding[] | undefined {
   try {
-    const parsed = ReviewResponseSchema.parse(
-      JSON.parse(extractJsonFromProse(raw)),
-    );
+    const response = parseReviewResponse(raw);
+    const parsedResult = ReviewResponseSchema.safeParse(response);
+    const parsed = parsedResult.success
+      ? parsedResult.data
+      : ReviewResponseSchema.parse(extractMalformedFindingsResponse(raw));
     const requested = new Set<string>(requestedTriggers);
     const findings: EvolutionFinding[] = [];
     for (const rawFinding of parsed.findings) {
@@ -557,6 +609,34 @@ export function parseReviewFindings(
   }
 }
 
+function reviewModelCandidates(params: {
+  config: ResolvedIntentionHintPluginConfig;
+  modelRef: { provider: string; model: string };
+}): { provider: string; model: string }[] {
+  const candidates = [params.modelRef];
+  const fallback = params.config.evolution.modelFallback;
+  if (fallback) {
+    try {
+      const parsed = parseModelRef(fallback, DEFAULT_PROVIDER);
+      if (
+        parsed &&
+        !candidates.some(
+          (candidate) =>
+            candidate.provider === parsed.provider &&
+            candidate.model === parsed.model,
+        )
+      ) {
+        candidates.push({ provider: parsed.provider, model: parsed.model });
+      }
+    } catch (err) {
+      logger.debug("skipping invalid evolution review fallback model", {
+        error: err,
+      });
+    }
+  }
+  return candidates;
+}
+
 export async function runReviewSubagent(params: {
   api: OpenClawPluginApi;
   config: ResolvedIntentionHintPluginConfig;
@@ -566,7 +646,7 @@ export async function runReviewSubagent(params: {
   modelRef: { provider: string; model: string };
   snapshot: ReviewSnapshot;
   triggers: readonly EvolutionTrigger[];
-}): Promise<EvolutionFinding[] | undefined> {
+}): Promise<ReviewSubagentResult> {
   const runId = `intention-hint-review-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const suffix = crypto
     .createHash("sha1")
@@ -576,45 +656,54 @@ export async function runReviewSubagent(params: {
   const sessionKey = params.sessionKey
     ? `${params.sessionKey}:intention-hint-review:${suffix}`
     : `agent:${params.agentId}:intention-hint-review:${suffix}`;
+  const prompt = buildReviewPrompt(params.snapshot, params.triggers);
 
-  try {
-    const result = await params.api.runtime.agent.runEmbeddedAgent({
-      sessionId: runId,
-      sessionKey,
-      agentId: params.agentId,
-      messageProvider: params.messageProvider,
-      config: params.api.config,
-      prompt: buildReviewPrompt(params.snapshot, params.triggers),
-      provider: params.modelRef.provider,
-      model: params.modelRef.model,
-      timeoutMs: params.config.evolution.timeoutMs,
-      runId,
-      workspaceDir: "/tmp",
-      agentDir: "/tmp",
-      sessionFile: `/tmp/${runId}.session.jsonl`,
-      trigger: "manual",
-      modelRun: false,
-      promptMode: "minimal",
-      toolsAllow: ["read"],
-      disableTools: false,
-      disableMessageTool: true,
-      allowGatewaySubagentBinding: true,
-      bootstrapContextMode: "lightweight",
-      verboseLevel: "off",
-      thinkLevel: params.config.evolution.thinking,
-      reasoningLevel: "off",
-      silentExpected: true,
-      authProfileFailurePolicy: "local",
-      cleanupBundleMcpOnRunEnd: true,
-    });
-    const rawReply = extractPayloadText(result);
-    const findings = parseReviewFindings(rawReply, params.triggers);
-    if (!findings) {
-      logger.warn("evolution review result parse failed", { rawReply });
+  for (const [index, modelRef] of reviewModelCandidates(params).entries()) {
+    const attemptRunId = index === 0 ? runId : `${runId}-retry-${index}`;
+    try {
+      const result = await params.api.runtime.agent.runEmbeddedAgent({
+        sessionId: attemptRunId,
+        sessionKey,
+        agentId: params.agentId,
+        messageProvider: params.messageProvider,
+        config: params.api.config,
+        prompt,
+        provider: modelRef.provider,
+        model: modelRef.model,
+        timeoutMs: params.config.evolution.timeoutMs,
+        runId: attemptRunId,
+        workspaceDir: "/tmp",
+        agentDir: "/tmp",
+        sessionFile: `/tmp/${attemptRunId}.session.jsonl`,
+        trigger: "manual",
+        modelRun: false,
+        promptMode: "minimal",
+        toolsAllow: ["read"],
+        disableTools: false,
+        disableMessageTool: true,
+        allowGatewaySubagentBinding: true,
+        bootstrapContextMode: "lightweight",
+        verboseLevel: "off",
+        thinkLevel: params.config.evolution.thinking,
+        reasoningLevel: "off",
+        silentExpected: true,
+        authProfileFailurePolicy: "local",
+        cleanupBundleMcpOnRunEnd: true,
+      });
+      const rawReply = extractPayloadText(result);
+      const findings = parseReviewFindings(rawReply, params.triggers);
+      if (!findings) {
+        logger.warn("evolution review result parse failed", { rawReply });
+        return { findings: [], outcome: "parse-failed" };
+      }
+      return {
+        findings,
+        outcome: findings.length > 0 ? "wrote-items" : "nofinding",
+      };
+    } catch (err) {
+      logger.warn("evolution review subagent error", { error: err, modelRef });
     }
-    return findings;
-  } catch (err) {
-    logger.warn("evolution review subagent error", { error: err });
-    return;
   }
+
+  return { findings: [], outcome: "subagent-error" };
 }

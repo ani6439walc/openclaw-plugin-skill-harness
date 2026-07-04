@@ -50,12 +50,29 @@ export type BacklogItem = {
   status: "pending" | "processed" | "dismissed";
 };
 
+export const PROCESSED_EVENT_OUTCOMES = [
+  "wrote-items",
+  "nofinding",
+  "parse-failed",
+  "subagent-error",
+  "unknown",
+] as const;
+
+export type ProcessedEventOutcome = (typeof PROCESSED_EVENT_OUTCOMES)[number];
+
+export type ProcessedEventRecord = {
+  processedAt: string;
+  triggers: EvolutionTrigger[];
+  findingCount: number;
+  outcome: ProcessedEventOutcome;
+};
+
 export type EvolutionBacklog = {
   schemaVersion: 3;
   createdAt: string;
   updatedAt: string;
   triggerKeywords: EvolutionTriggerKeywords;
-  processedEvents: Record<string, string>;
+  processedEvents: Record<string, ProcessedEventRecord>;
   items: BacklogItem[];
 };
 
@@ -118,6 +135,25 @@ const TriggerKeywordsSchema = z
   .unknown()
   .transform((value) => normalizeEvolutionTriggerKeywords(value));
 
+const ProcessedEventOutcomeSchema = z.enum(PROCESSED_EVENT_OUTCOMES);
+
+const ProcessedEventRecordSchema = z.union([
+  z.string().transform((processedAt): ProcessedEventRecord => ({
+    processedAt,
+    triggers: [],
+    findingCount: 0,
+    outcome: "unknown",
+  })),
+  z.object({
+    processedAt: z.string(),
+    triggers: z.array(z.enum(EVOLUTION_TRIGGER_TYPES)).catch([]),
+    findingCount: z.number().int().nonnegative().catch(0),
+    outcome: ProcessedEventOutcomeSchema.catch("unknown"),
+  }),
+]);
+
+const ProcessedEventsSchema = z.record(z.string(), ProcessedEventRecordSchema);
+
 const BaseItemSchema = z.object({
   id: z.string(),
   type: z.enum(EVOLUTION_TRIGGER_TYPES),
@@ -160,7 +196,7 @@ const BacklogV1Schema = z.object({
   schemaVersion: z.literal(1),
   createdAt: z.string(),
   updatedAt: z.string(),
-  processedEvents: z.record(z.string(), z.string()),
+  processedEvents: ProcessedEventsSchema,
   items: z.array(BaseItemSchema),
 });
 
@@ -169,7 +205,7 @@ export const EvolutionBacklogSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   triggerKeywords: TriggerKeywordsSchema,
-  processedEvents: z.record(z.string(), z.string()),
+  processedEvents: ProcessedEventsSchema,
   items: z.array(BacklogItemSchema),
 });
 
@@ -202,7 +238,7 @@ export function parseBacklog(
         schemaVersion: z.literal(2),
         createdAt: z.string(),
         updatedAt: z.string(),
-        processedEvents: z.record(z.string(), z.string()),
+        processedEvents: ProcessedEventsSchema,
         items: z.array(z.unknown()),
       })
       .parse(normalized);
@@ -345,7 +381,9 @@ export function pruneProcessedEvents(
 ): void {
   const cutoff = nowMs - PROCESSED_EVENTS_RETENTION_DAYS * 86_400_000;
   for (const eventId in backlog.processedEvents) {
-    const eventTime = new Date(backlog.processedEvents[eventId]).getTime();
+    const eventTime = new Date(
+      backlog.processedEvents[eventId].processedAt,
+    ).getTime();
     // Prune expired entries and corrupt data (NaN from invalid dates)
     if (Number.isNaN(eventTime) || eventTime < cutoff) {
       delete backlog.processedEvents[eventId];
