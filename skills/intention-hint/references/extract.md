@@ -156,12 +156,12 @@ If the user confirms, write:
 # Verify new skill file exists and has valid frontmatter
 cat <new-skill-path>/SKILL.md | head -5
 
-# Verify slimmed intent still matches the plugin schema
-/intention-hint evolution validate-intents <intent-id>
-
 # Check for trigger collisions between new skills and remaining intents
 grep -l "<key-trigger>" ~/.openclaw/plugins/intention-hint/intents/*.md
 ```
+
+Verify the slimmed intent still matches the plugin schema with
+`intention_hint_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
 
 Report: files created/modified, validation results, and remaining pending extractions (if any).
 

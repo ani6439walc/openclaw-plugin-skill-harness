@@ -31,8 +31,8 @@ const COMPLEXITIES = ["low", "medium", "high"] as const;
 
 const COMPLEXITY_LEVEL_GUIDANCE = `Complexity levels:
 - "low": simple greeting, acknowledgment, straightforward question or task with clear/unambiguous scope requiring direct execution. (narrow or standard scope — no additional investigation needed)
-- "medium": task requiring moderate context analysis or broader scope that needs some investigation before execution.
-- "high": multi-step investigation, research, complex code operations, or broad scope requiring full SOP workflow and structural changes.`;
+- "medium": task requiring moderate context analysis, multiple concrete steps, targeted verification, or dynamic replanning during execution.
+- "high": multi-step investigation, research, complex code operations, broad scope, or dependency-heavy work that may require phased planning, task decomposition, or parallel delegation.`;
 
 const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
 - Keep JSON string fields ultra-concise but semantics-preserving.

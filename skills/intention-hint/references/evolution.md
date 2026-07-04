@@ -10,8 +10,8 @@ Enter this mode only when the user explicitly asks to process the evolution back
 - Follow `references/format.md` and the relevant design/inventory references for intent
   boundaries, collision checks, and workflow quality.
 - Do not edit `~/.openclaw/plugins/intention-hint/evolution.json` directly. Use
-  the structured `intention_hint_evolution` tool or `/intention-hint evolution ...`
-  for every backlog read or mutation.
+  the structured `intention_hint_evolution` tool for every backlog read or
+  mutation.
 - `entity-context` trigger keyword findings are proposal-only like other
   `trigger-keywords` items. The trigger is intentionally narrow: learning
   keywords such as `看看`, `看一下`, or `看下` must pair with `TOOLS.md`,
@@ -27,16 +27,17 @@ Enter this mode only when the user explicitly asks to process the evolution back
 
 ## Select And Ground
 
-1. From the plugin root, run
-   `/intention-hint evolution show --id <item-id>` when the user supplied
-   an ID; otherwise run `/intention-hint evolution show`. The default
-   selects highest `frequency`, then oldest `createdAt`.
-   Use `/intention-hint evolution review-health --days 7` for read-only
-   runtime review-health audits; it summarizes recent `processedEvents` by
-   outcome (`wrote-items`, `nofinding`, `schema-rejected`, `parse-failed`,
-   `subagent-error`, or `unknown`), recent trigger counts, no-finding
-   reason-code counts, and schema-rejection reason-code counts without mutating
-   the backlog.
+1. Use `intention_hint_evolution({ action: "show" })` when the user did not
+   supply an ID. The default selects highest `frequency`, then oldest
+   `createdAt`. Use
+   `intention_hint_evolution({ action: "show", id: "<item-id>" })` when the user
+   supplied an ID. Use
+   `intention_hint_evolution({ action: "review-health", days: 7 })` for
+   read-only runtime review-health audits; it summarizes recent
+   `processedEvents` by outcome (`wrote-items`, `nofinding`, `schema-rejected`,
+   `parse-failed`, `subagent-error`, or `unknown`), recent trigger counts,
+   no-finding reason-code counts, and schema-rejection reason-code counts
+   without mutating the backlog.
 2. Re-read the selected item immediately before processing. It must still be
    `pending`.
 3. If `targetKind` is `trigger-keywords`, do not edit Intent Markdown and do not
@@ -52,12 +53,18 @@ Enter this mode only when the user explicitly asks to process the evolution back
    only when the existing intents and finding make it unambiguous. Persist it
    with:
 
-   ```bash
-   /intention-hint evolution set-target --id <item-id> --operation <operation> --target-intent <intent-id>
+   ```text
+   intention_hint_evolution({
+     action: "set-target",
+     id: "<item-id>",
+     operation: "<operation>",
+     targetIntentIds: ["<intent-id>"]
+   })
    ```
 
-   Repeat `--target-intent` for multiple targets, then re-run `show` and use
-   the new `updatedAt`. If inference is not clear, stop without modifying files.
+   Include multiple IDs in `targetIntentIds` for multiple targets, then re-run
+   `show` and use the new `updatedAt`. If inference is not clear, stop without
+   modifying files.
 
 ## Review Contract Diagnostics
 
@@ -113,8 +120,12 @@ examples, domain, fastpath metadata, and body guidance:
    current intent, or would introduce unsafe/conflicting behavior, do not edit
    files. Mark it dismissed using the latest selected `updatedAt`:
 
-   ```bash
-   /intention-hint evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>
+   ```text
+   intention_hint_evolution({
+     action: "mark-dismissed",
+     id: "<item-id>",
+     expectedUpdatedAt: "<timestamp>"
+   })
    ```
 
    Report the dismissal reason and stop processing this item.
@@ -132,19 +143,23 @@ examples, domain, fastpath metadata, and body guidance:
    - `split` or `merge`: execute only after the required confirmation.
 6. Validate the resulting files:
 
-   ```bash
-   /intention-hint evolution validate-intents <target-intent-id>
+   ```text
+   intention_hint_evolution({ action: "validate-intents", ids: ["<target-intent-id>"] })
    pnpm run test
    pnpm run build
    ```
 
-   Repeat `--id` for every resulting target intent.
+   Include every resulting target intent in `ids`.
 
 7. When all checks pass, mark the item processed using the `updatedAt` from the
    latest `show` or `set-target` result:
 
-   ```bash
-   /intention-hint evolution mark-processed --id <item-id> --expected-updated-at <timestamp>
+   ```text
+   intention_hint_evolution({
+     action: "mark-processed",
+     id: "<item-id>",
+     expectedUpdatedAt: "<timestamp>"
+   })
    ```
 
 8. If an edit, validation, or status update fails, restore only the files in
@@ -157,6 +172,6 @@ Report the item ID, operation, affected files, validation results, whether it
 was processed or dismissed, whether a rollback occurred, and the remaining
 pending count from:
 
-```bash
-/intention-hint evolution list
+```text
+intention_hint_evolution({ action: "list" })
 ```

@@ -113,8 +113,10 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" 
 
 # If no collisions, write to target, then validate through the plugin
 mv intent.md ~/.openclaw/plugins/intention-hint/intents/<intent-id>.md
-/intention-hint evolution validate-intents <intent-id>
 ```
+
+Validate with
+`intention_hint_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
 
 ### Failure modes
 
@@ -210,13 +212,10 @@ Read and follow `references/evolution.md` before processing a finding.
 
 **Step 1 — Select finding**
 
-```bash
-# Show all pending findings (picks highest frequency, oldest createdAt)
-/intention-hint evolution show
-
-# Or show a specific finding
-/intention-hint evolution show --id <item-id>
-```
+Use `intention_hint_evolution({ action: "show" })` to select the default pending
+finding (highest frequency, oldest `createdAt`), or
+`intention_hint_evolution({ action: "show", id: "<item-id>" })` when the user
+supplies an ID.
 
 Re-read the selected item — it must still be `pending`.
 
@@ -233,8 +232,13 @@ Before applying a suggested body edit, compare the filename-derived intent id, f
 
 For legacy items with `operation: unknown`, infer metadata:
 
-```bash
-/intention-hint evolution set-target --id <item-id> --operation <operation> --target-intent <intent-id>
+```text
+intention_hint_evolution({
+  action: "set-target",
+  id: "<item-id>",
+  operation: "<operation>",
+  targetIntentIds: ["<intent-id>"]
+})
 ```
 
 **Step 3 — Backup + Apply**
@@ -256,19 +260,21 @@ Then apply:
 **Step 4 — Validate**
 
 ```bash
-/intention-hint evolution validate-intents <target-intent-id>
 pnpm run test
 pnpm run build
 ```
 
+Before running tests, validate the target intent with
+`intention_hint_evolution({ action: "validate-intents", ids: ["<target-intent-id>"] })`.
+
 **Step 5 — Process, Dismiss, or Rollback**
 
-```bash
+```text
 # All checks pass → mark processed
-/intention-hint evolution mark-processed --id <item-id> --expected-updated-at <timestamp>
+intention_hint_evolution({ action: "mark-processed", id: "<item-id>", expectedUpdatedAt: "<timestamp>" })
 
 # Duplicate/superseded/unsafe/rejected finding → mark dismissed
-/intention-hint evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>
+intention_hint_evolution({ action: "mark-dismissed", id: "<item-id>", expectedUpdatedAt: "<timestamp>" })
 
 # Validation fails → restore from backup, leave item pending
 ```
@@ -362,10 +368,24 @@ When bootstrapping from scratch, copy example intent templates from `assets/`:
 
 ### Validation commands
 
-```bash
-# Validate intent schema and body format
-/intention-hint evolution validate-intents <intent-id>
+Use `intention_hint_evolution` for plugin runtime validation and backlog state
+changes.
 
+```text
+# Validate intent schema and body format
+intention_hint_evolution({ action: "validate-intents", ids: ["<intent-id>"] })
+
+# Validate all intents
+intention_hint_evolution({ action: "validate-intents" })
+
+# List pending backlog items
+intention_hint_evolution({ action: "list" })
+
+# Review recent evolution health
+intention_hint_evolution({ action: "review-health", days: 7 })
+```
+
+```bash
 # Check for trigger collisions
 grep -l "<trigger>" ~/.openclaw/plugins/intention-hint/intents/*.md
 
@@ -383,9 +403,9 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" 
 
 ### Test prompts (dry_run)
 
-| #   | Prompt                                           | Expected behavior                                                                                                 | Mode      |
-| --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------- |
-| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                               | design    |
-| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory |
-| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `/intention-hint evolution show` → ground → backup → apply → validate → mark/rollback       | evolve    |
-| 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract   |
+| #   | Prompt                                           | Expected behavior                                                                                                         | Mode      |
+| --- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | --------- |
+| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                                       | design    |
+| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                           | inventory |
+| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `intention_hint_evolution({ action: "show" })` → ground → backup → apply → validate → mark/rollback | evolve    |
+| 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver         | extract   |
