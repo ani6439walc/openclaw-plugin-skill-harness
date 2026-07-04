@@ -46,8 +46,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'",
     "test": "vitest run",
-    "build": "tsc",
-    "evolution-backlog": "node dist/src/evolution-backlog-command.js"
+    "build": "tsc"
   },
   "dependencies": {
     "gray-matter": "4.0.3",

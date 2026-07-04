@@ -78,7 +78,9 @@ index.ts
        │         ├─ backlog-writer.ts uses file-utils.ts for safeWriteJson()
        │         └─ evolution-backlog.ts + evolution-trigger-keywords.ts validate backlog data and trigger keyword defaults
        │
-       ├─ evolution-backlog-command.ts + intent-validation.ts → transactional backlog processing support
+       ├─ evolution-backlog-actions.ts + intent-validation.ts → transactional backlog processing support
+       │    ├─ evolution-tool.ts → agent tool `intention_hint_evolution`
+       │    ├─ evolution-command.ts → plugin command `/intention-hint evolution`
        │    └─ skills/intention-hint/references/evolution.md
        │
        ├─ session.ts → session guards (isEnabledForAgent, isEligibleInteractiveSession, etc.)
@@ -108,7 +110,9 @@ index.ts
 | `review-queue.ts`              | Serialized promise queue for background evolution reviews                                                                                               |
 | `backlog-writer.ts`            | Merge review findings atomically into `evolution.json`                                                                                                  |
 | `evolution-backlog.ts`         | Validate/migrate backlog schema, root `triggerKeywords`, and atomic mutation primitives                                                                 |
-| `evolution-backlog-command.ts` | List, target, validate, and optimistically complete pending backlog items                                                                               |
+| `evolution-backlog-actions.ts` | Shared JSON-compatible action service for backlog reads, validation, targeting, and optimistic completion                                               |
+| `evolution-tool.ts`            | Agent-callable `intention_hint_evolution` tool for structured backlog operations                                                                        |
+| `evolution-command.ts`         | Plugin-owned `/intention-hint evolution` command for user-facing backlog operations                                                                     |
 | `intent-validation.ts`         | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
 | `conversation-extract.ts`      | Extract and truncate recent conversation turns for intent context                                                                                       |
 | `prompt.ts`                    | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
@@ -426,15 +430,20 @@ mode never commits, pushes, dismisses items, or edits the backlog JSON directly.
 Detailed transactional steps live in
 `skills/intention-hint/references/evolution.md`.
 
-Backlog CLI:
+Backlog operations are exposed through two OpenClaw-native surfaces:
 
-```bash
-pnpm run evolution-backlog -- list --json
-pnpm run evolution-backlog -- show --id IMP-...
-pnpm run evolution-backlog -- review-health --days 7
-pnpm run evolution-backlog -- set-target --id IMP-... --operation refine --target-intent productivity
-pnpm run evolution-backlog -- validate-intents --id productivity
-pnpm run evolution-backlog -- mark-processed --id IMP-... --expected-updated-at <timestamp>
+- Agent tool `intention_hint_evolution` for structured JSON actions such as
+  `{ "action": "show", "id": "IMP-..." }`.
+- Plugin-owned command `/intention-hint evolution` for direct user/operator
+  workflows:
+
+```text
+/intention-hint evolution list
+/intention-hint evolution show --id IMP-...
+/intention-hint evolution review-health --days 7
+/intention-hint evolution set-target --id IMP-... --operation refine --target-intent productivity
+/intention-hint evolution validate-intents productivity
+/intention-hint evolution mark-processed --id IMP-... --expected-updated-at <timestamp>
 ```
 
 `review-health` reports total/recent processed events by outcome, recent trigger

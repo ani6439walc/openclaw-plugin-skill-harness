@@ -10,7 +10,8 @@ Enter this mode only when the user explicitly asks to process the evolution back
 - Follow `references/format.md` and the relevant design/inventory references for intent
   boundaries, collision checks, and workflow quality.
 - Do not edit `~/.openclaw/plugins/intention-hint/evolution.json` directly. Use
-  `pnpm run evolution-backlog -- ...` for every backlog read or mutation.
+  the structured `intention_hint_evolution` tool or `/intention-hint evolution ...`
+  for every backlog read or mutation.
 - `entity-context` trigger keyword findings are proposal-only like other
   `trigger-keywords` items. The trigger is intentionally narrow: learning
   keywords such as `看看`, `看一下`, or `看下` must pair with `TOOLS.md`,
@@ -27,10 +28,10 @@ Enter this mode only when the user explicitly asks to process the evolution back
 ## Select And Ground
 
 1. From the plugin root, run
-   `pnpm run evolution-backlog -- show --id <item-id>` when the user supplied
-   an ID; otherwise run `pnpm run evolution-backlog -- show`. The default
+   `/intention-hint evolution show --id <item-id>` when the user supplied
+   an ID; otherwise run `/intention-hint evolution show`. The default
    selects highest `frequency`, then oldest `createdAt`.
-   Use `pnpm run evolution-backlog -- review-health --days 7` for read-only
+   Use `/intention-hint evolution review-health --days 7` for read-only
    runtime review-health audits; it summarizes recent `processedEvents` by
    outcome (`wrote-items`, `nofinding`, `schema-rejected`, `parse-failed`,
    `subagent-error`, or `unknown`), recent trigger counts, no-finding
@@ -52,7 +53,7 @@ Enter this mode only when the user explicitly asks to process the evolution back
    with:
 
    ```bash
-   pnpm run evolution-backlog -- set-target --id <item-id> --operation <operation> --target-intent <intent-id>
+   /intention-hint evolution set-target --id <item-id> --operation <operation> --target-intent <intent-id>
    ```
 
    Repeat `--target-intent` for multiple targets, then re-run `show` and use
@@ -113,7 +114,7 @@ examples, domain, fastpath metadata, and body guidance:
    files. Mark it dismissed using the latest selected `updatedAt`:
 
    ```bash
-   pnpm run evolution-backlog -- mark-dismissed --id <item-id> --expected-updated-at <timestamp>
+   /intention-hint evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>
    ```
 
    Report the dismissal reason and stop processing this item.
@@ -132,7 +133,7 @@ examples, domain, fastpath metadata, and body guidance:
 6. Validate the resulting files:
 
    ```bash
-   pnpm run evolution-backlog -- validate-intents --id <target-intent-id>
+   /intention-hint evolution validate-intents <target-intent-id>
    pnpm run test
    pnpm run build
    ```
@@ -143,7 +144,7 @@ examples, domain, fastpath metadata, and body guidance:
    latest `show` or `set-target` result:
 
    ```bash
-   pnpm run evolution-backlog -- mark-processed --id <item-id> --expected-updated-at <timestamp>
+   /intention-hint evolution mark-processed --id <item-id> --expected-updated-at <timestamp>
    ```
 
 8. If an edit, validation, or status update fails, restore only the files in
@@ -157,5 +158,5 @@ was processed or dismissed, whether a rollback occurred, and the remaining
 pending count from:
 
 ```bash
-pnpm run evolution-backlog -- list --json
+/intention-hint evolution list
 ```

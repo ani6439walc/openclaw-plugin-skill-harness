@@ -113,7 +113,7 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" 
 
 # If no collisions, write to target, then validate through the plugin
 mv intent.md ~/.openclaw/plugins/intention-hint/intents/<intent-id>.md
-pnpm run evolution-backlog -- validate-intents --id <intent-id>
+/intention-hint evolution validate-intents <intent-id>
 ```
 
 ### Failure modes
@@ -212,10 +212,10 @@ Read and follow `references/evolution.md` before processing a finding.
 
 ```bash
 # Show all pending findings (picks highest frequency, oldest createdAt)
-pnpm run evolution-backlog -- show
+/intention-hint evolution show
 
 # Or show a specific finding
-pnpm run evolution-backlog -- show --id <item-id>
+/intention-hint evolution show --id <item-id>
 ```
 
 Re-read the selected item — it must still be `pending`.
@@ -234,7 +234,7 @@ Before applying a suggested body edit, compare the filename-derived intent id, f
 For legacy items with `operation: unknown`, infer metadata:
 
 ```bash
-pnpm run evolution-backlog -- set-target --id <item-id> --operation <operation> --target-intent <intent-id>
+/intention-hint evolution set-target --id <item-id> --operation <operation> --target-intent <intent-id>
 ```
 
 **Step 3 — Backup + Apply**
@@ -256,7 +256,7 @@ Then apply:
 **Step 4 — Validate**
 
 ```bash
-pnpm run evolution-backlog -- validate-intents --id <target-intent-id>
+/intention-hint evolution validate-intents <target-intent-id>
 pnpm run test
 pnpm run build
 ```
@@ -265,10 +265,10 @@ pnpm run build
 
 ```bash
 # All checks pass → mark processed
-pnpm run evolution-backlog -- mark-processed --id <item-id> --expected-updated-at <timestamp>
+/intention-hint evolution mark-processed --id <item-id> --expected-updated-at <timestamp>
 
 # Duplicate/superseded/unsafe/rejected finding → mark dismissed
-pnpm run evolution-backlog -- mark-dismissed --id <item-id> --expected-updated-at <timestamp>
+/intention-hint evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>
 
 # Validation fails → restore from backup, leave item pending
 ```
@@ -364,7 +364,7 @@ When bootstrapping from scratch, copy example intent templates from `assets/`:
 
 ```bash
 # Validate intent schema and body format
-pnpm run evolution-backlog -- validate-intents --id <intent-id>
+/intention-hint evolution validate-intents <intent-id>
 
 # Check for trigger collisions
 grep -l "<trigger>" ~/.openclaw/plugins/intention-hint/intents/*.md
@@ -387,5 +387,5 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" 
 | --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------- |
 | 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                               | design    |
 | 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory |
-| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `pnpm run evolution-backlog -- show` → ground → backup → apply → validate → mark/rollback   | evolve    |
+| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `/intention-hint evolution show` → ground → backup → apply → validate → mark/rollback       | evolve    |
 | 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract   |

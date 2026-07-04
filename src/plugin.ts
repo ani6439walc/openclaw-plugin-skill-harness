@@ -17,6 +17,8 @@ import {
   type EvolutionTriggerKeywords,
 } from "./evolution-trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks.js";
+import { createEvolutionCommand } from "./evolution-command.js";
+import { createEvolutionTool, EVOLUTION_TOOL_NAME } from "./evolution-tool.js";
 import type { ResolvedIntentionHintPluginConfig } from "./types.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -201,6 +203,11 @@ export function createPlugin(
       api.on("after_tool_call", handlers.onAfterToolCall);
       api.on("agent_end", handlers.onAgentEnd);
       api.on("session_end", handlers.onSessionEnd);
+      api.registerTool(() => createEvolutionTool(dataRoot), {
+        names: [EVOLUTION_TOOL_NAME],
+        optional: true,
+      });
+      api.registerCommand(createEvolutionCommand(dataRoot));
     },
   });
 }

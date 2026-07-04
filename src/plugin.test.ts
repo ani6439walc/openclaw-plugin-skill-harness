@@ -20,6 +20,8 @@ describe("createPlugin", () => {
 
   function createApi(overrides: Partial<OpenClawPluginApi> = {}) {
     const on = vi.fn();
+    const registerTool = vi.fn();
+    const registerCommand = vi.fn();
     const api = {
       config: {},
       pluginConfig: {},
@@ -32,8 +34,14 @@ describe("createPlugin", () => {
         },
       },
       on,
+      registerTool,
+      registerCommand,
       ...overrides,
-    } as unknown as OpenClawPluginApi & { on: ReturnType<typeof vi.fn> };
+    } as unknown as OpenClawPluginApi & {
+      on: ReturnType<typeof vi.fn>;
+      registerTool: ReturnType<typeof vi.fn>;
+      registerCommand: ReturnType<typeof vi.fn>;
+    };
     return api;
   }
 
@@ -43,6 +51,101 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
 
     expect(api.on).toHaveBeenCalledWith("session_end", expect.any(Function));
+  });
+
+  it("registers the optional evolution backlog tool", () => {
+    const api = createApi();
+
+    createPlugin(api).register(api);
+
+    expect(api.registerTool).toHaveBeenCalledWith(expect.any(Function), {
+      names: ["intention_hint_evolution"],
+      optional: true,
+    });
+  });
+
+  it("registers the plugin-owned intention-hint command namespace", () => {
+    const api = createApi();
+
+    createPlugin(api).register(api);
+
+    expect(api.registerCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "intention-hint",
+        acceptsArgs: true,
+        handler: expect.any(Function),
+      }),
+    );
+  });
+
+  it("runs evolution backlog actions through the registered tool", async () => {
+    const api = createApi();
+    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    fs.mkdirSync(dataRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(dataRoot, "evolution.json"),
+      JSON.stringify({
+        schemaVersion: 3,
+        createdAt: "2026-07-01T00:00:00.000Z",
+        updatedAt: "2026-07-01T00:00:00.000Z",
+        triggerKeywords: {
+          successfulPattern: [],
+          behaviorFix: [],
+          entityContext: [],
+        },
+        processedEvents: {},
+        items: [
+          {
+            id: "one",
+            type: "behavior-fix",
+            targetKind: "intent-markdown",
+            operation: "unknown",
+            targetIntentIds: [],
+            dedupeKey: "one",
+            summary: "one",
+            correctionGoal: "goal",
+            details: { evidence: [], suggestedChange: "change" },
+            frequency: 1,
+            sources: [],
+            createdAt: "2026-07-01T00:00:00.000Z",
+            updatedAt: "2026-07-01T00:00:00.000Z",
+            status: "pending",
+          },
+        ],
+      }),
+    );
+
+    createPlugin(api).register(api);
+    const [factory] = api.registerTool.mock.calls[0];
+    const tool = factory({});
+
+    const listResult = await tool.execute("call", { action: "list" });
+    expect(listResult.details).toMatchObject({
+      ok: true,
+      result: [{ id: "one" }],
+    });
+
+    const mutationError = await tool.execute("call", {
+      action: "set-target",
+      id: "one",
+      operation: "refine",
+      targetIntentIds: [],
+    });
+    expect(mutationError.details).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("at least one target intent ID"),
+    });
+
+    const validationError = await tool.execute("call", {
+      action: "set-target",
+      id: "one",
+      operation: "refine",
+      targetIntentIds: "debugging",
+    });
+    expect(validationError.details).toMatchObject({
+      ok: false,
+      error: "targetIntentIds must be an array",
+    });
   });
 
   it("budgets before_prompt_build timeout for three scanner subagent rounds", () => {
