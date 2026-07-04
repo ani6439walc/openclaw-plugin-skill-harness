@@ -157,7 +157,7 @@ If the user confirms, write:
 cat <new-skill-path>/SKILL.md | head -5
 
 # Verify slimmed intent still matches the plugin schema
-pnpm run evolution-backlog -- validate-intents --id <intent-id>
+/intention-hint evolution validate-intents <intent-id>
 
 # Check for trigger collisions between new skills and remaining intents
 grep -l "<key-trigger>" ~/.openclaw/plugins/intention-hint/intents/*.md

@@ -25,14 +25,13 @@ describe("intention-hint backlog mode", () => {
 
     expect(reference).toContain("only when the user explicitly asks");
     expect(reference).toContain("Process exactly one pending finding");
-    expect(reference).toContain("pnpm run evolution-backlog -- show");
-    expect(reference).toContain("pnpm run evolution-backlog -- set-target");
-    expect(reference).toContain(
-      "pnpm run evolution-backlog -- validate-intents",
-    );
-    expect(reference).toContain("pnpm run evolution-backlog -- mark-processed");
-    expect(reference).toContain("pnpm run evolution-backlog -- mark-dismissed");
-    expect(reference).toContain("pnpm run evolution-backlog -- list --json");
+    expect(reference).toContain("intention_hint_evolution");
+    expect(reference).toContain("/intention-hint evolution show");
+    expect(reference).toContain("/intention-hint evolution set-target");
+    expect(reference).toContain("/intention-hint evolution validate-intents");
+    expect(reference).toContain("/intention-hint evolution mark-processed");
+    expect(reference).toContain("/intention-hint evolution mark-dismissed");
+    expect(reference).toContain("/intention-hint evolution list");
     expect(reference).toContain("obtain explicit user confirmation");
     expect(reference).toContain("leave the item `pending`");
     expect(reference).toContain("duplicate, superseded, unsafe");

@@ -50,10 +50,9 @@ pnpm run typecheck          # TypeScript, no emit
 pnpm run test               # Full Vitest suite
 pnpm run build              # Compile to dist/
 pnpm run format             # Prettier for md/json/ts files
-pnpm run evolution-backlog -- <cmd>   # Operate on the evolution backlog after build
 ```
 
-Run `pnpm run typecheck` and `pnpm run test` before handing off code changes. Run `pnpm run build` when changing CLI behavior, package metadata, SDK imports, or anything that depends on emitted `dist/` output.
+Run `pnpm run typecheck` and `pnpm run test` before handing off code changes. Run `pnpm run build` when changing package metadata, SDK imports, or anything that depends on emitted `dist/` output.
 
 ## Runtime Data Layout
 
@@ -95,7 +94,9 @@ Use the existing module boundaries:
 - `src/stats-aggregator.ts`: usage aggregation into `dataRoot/stats.json`.
 - `src/backlog-writer.ts`: evolution findings into `dataRoot/evolution.json`.
 - `src/evolution-backlog.ts`: backlog schema validation, migration, and atomic mutations.
-- `src/evolution-backlog-command.ts`: command-line backlog workflow. Default root must use the OpenClaw state-dir helper, not package root.
+- `src/evolution-backlog-actions.ts`: shared action service for backlog reads, validation, targeting, and optimistic status updates.
+- `src/evolution-tool.ts`: registers the agent tool surface `intention_hint_evolution`.
+- `src/evolution-command.ts`: registers the plugin-owned command `/intention-hint evolution`.
 - `src/prompt.ts`, `src/subagent.ts`, `src/review-subagent.ts`, `src/trigger-checker.ts`: classification and evolution logic.
 - `src/conversation-extract.ts`: extracts recent turns, filters internal/inter-session traffic, attaches historical intent annotations, and applies context windows.
 - `src/skill-catalog.ts`: resolves `skill: <name>` references in intent Markdown into available `SKILL.md` metadata for instruction writing and Evolution review.
@@ -160,7 +161,7 @@ Typical mapping:
 - Skill metadata resolution: `src/skill-catalog.test.ts`.
 - Evolution trigger keyword normalization: `src/evolution-trigger-keywords.test.ts`.
 - Evolution backlog writes: `src/backlog-writer.test.ts` and `src/evolution-backlog.test.ts`.
-- Evolution backlog command behavior: `src/evolution-backlog-command.test.ts`.
+- Evolution backlog action/tool/command behavior: `src/evolution-backlog-actions.test.ts`, `src/evolution-command.test.ts`, and `src/plugin.test.ts`.
 
 When changing runtime paths, include tests for both the desired new location and non-overwrite startup behavior.
 
@@ -176,14 +177,16 @@ Intent markdown must keep valid YAML frontmatter and the expected sections used 
 
 Do not edit `~/.openclaw/plugins/intention-hint/evolution.json` manually. Use:
 
-```bash
-pnpm run build
-pnpm run evolution-backlog -- show
-pnpm run evolution-backlog -- list --json
-pnpm run evolution-backlog -- validate-intents --id <intent-id>
-pnpm run evolution-backlog -- mark-processed --id <item-id> --expected-updated-at <timestamp>
-pnpm run evolution-backlog -- mark-dismissed --id <item-id> --expected-updated-at <timestamp>
+```text
+/intention-hint evolution show
+/intention-hint evolution list
+/intention-hint evolution review-health --days 7
+/intention-hint evolution validate-intents <intent-id>
+/intention-hint evolution mark-processed --id <item-id> --expected-updated-at <timestamp>
+/intention-hint evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>
 ```
+
+Agents may call the structured `intention_hint_evolution` tool for the same operations.
 
 Process one backlog finding at a time unless the user explicitly asks for a bounded batch. For split, merge, rename, deletion, or any broad intent-boundary change, show the planned file operations and get explicit confirmation first.
 
