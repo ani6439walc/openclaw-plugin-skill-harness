@@ -86,6 +86,13 @@ describe("buildReviewPrompt", () => {
       "sole purpose is to improve the content and routing quality of intention-hint intents/*.md files",
     );
     expect(prompt).toContain(
+      "This is an intent-evolution review, not a general audit, skill writer, repository refactor, or passive transcript summary",
+    );
+    expect(prompt).toContain(
+      "Target artifact shape: propose only runtime intent Markdown changes or pending trigger keyword suggestions",
+    );
+    expect(prompt).toContain("Hard rules — do not violate:");
+    expect(prompt).toContain(
       "Intent ids come from Markdown filenames without the .md suffix",
     );
     expect(prompt).toContain(
@@ -212,6 +219,41 @@ describe("buildReviewPrompt", () => {
     const prompt = buildReviewPrompt(snapshot, ["weak-intent"]);
     expect(prompt).toContain("weak-intent: Review focus:");
     expect(prompt).not.toContain("missing-intent: Review focus:");
+  });
+
+  it("documents optional no-finding reason codes for auditable negative decisions", () => {
+    const prompt = buildReviewPrompt(snapshot, ["successful-pattern"]);
+
+    expect(prompt).toContain("For hasFinding=false items:");
+    expect(prompt).toContain(
+      "reasonCode is optional but SHOULD be one of: routine-tool-use, outside-intent-scope, insufficient-evidence, wrong-trigger, already-covered, privacy-sensitive",
+    );
+    expect(prompt).toContain(
+      '{"trigger":"successful-pattern","hasFinding":false,"reasonCode":"insufficient-evidence"}',
+    );
+  });
+
+  it("states an explicit asymmetric workflow for high-signal review triggers", () => {
+    const prompt = buildReviewPrompt(snapshot, [
+      "behavior-fix",
+      "successful-pattern",
+      "skill-candidate",
+      "entity-context",
+    ]);
+
+    expect(prompt).toContain("Reviewer workflow — not optional:");
+    expect(prompt).toContain(
+      "behavior-fix: if the snapshot contains an explicit user correction, concrete misroute, or wrong tool/no-tool behavior, prefer a narrow finding over no_finding",
+    );
+    expect(prompt).toContain(
+      "successful-pattern: stay precision-biased; routine success is no_finding unless there is reusable ordering, parameters, recovery, or pitfalls",
+    );
+    expect(prompt).toContain(
+      "skill-candidate: accept small intent-local Experience notes only when concrete skill/tool evidence, parameters, recovery, or required ordering exists",
+    );
+    expect(prompt).toContain(
+      "entity-context: stay bounded to explicit TOOLS.md, MEMORY.md, or memory-path signals and never copy raw private memory",
+    );
   });
 
   it("biases examples toward no finding and repeats a final raw JSON contract after the snapshot", () => {
@@ -440,6 +482,28 @@ describe("parseReviewFindings", () => {
         suggestedChange: "Draft SKILL.md",
       },
     ]);
+  });
+
+  it("accepts no-finding reason codes without persisting them as backlog findings", () => {
+    const parsed = parseReviewFindings(
+      JSON.stringify({
+        findings: [
+          {
+            trigger: "successful-pattern",
+            hasFinding: false,
+            reasonCode: "routine-tool-use",
+          },
+          {
+            trigger: "behavior-fix",
+            hasFinding: false,
+            reasonCode: "wrong-trigger",
+          },
+        ],
+      }),
+      ["successful-pattern", "behavior-fix"],
+    );
+
+    expect(parsed).toEqual([]);
   });
 
   it("accepts fenced JSON and rejects unknown or unrequested triggers", () => {
