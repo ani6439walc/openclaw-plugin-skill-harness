@@ -135,6 +135,17 @@ describe("createPlugin", () => {
       ok: false,
       error: expect.stringContaining("at least one target intent ID"),
     });
+
+    const validationError = await tool.execute("call", {
+      action: "set-target",
+      id: "one",
+      operation: "refine",
+      targetIntentIds: "debugging",
+    });
+    expect(validationError.details).toMatchObject({
+      ok: false,
+      error: "targetIntentIds must be an array",
+    });
   });
 
   it("budgets before_prompt_build timeout for three scanner subagent rounds", () => {

@@ -160,7 +160,15 @@ export function createEvolutionTool(dataRoot: string): AnyAgentTool {
       "List, inspect, validate, target, and mark Intention Hint Evolution backlog items in the plugin runtime data root.",
     parameters: EVOLUTION_TOOL_PARAMETERS,
     async execute(_toolCallId, params) {
-      const action = parseEvolutionToolAction(params);
+      let action: EvolutionBacklogAction;
+      try {
+        action = parseEvolutionToolAction(params);
+      } catch (error) {
+        return jsonToolResult({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       return jsonToolResult(runEvolutionBacklogAction({ action, dataRoot }));
     },
   };

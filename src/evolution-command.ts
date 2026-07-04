@@ -22,6 +22,15 @@ const HELP_TEXT = [
   "/intention-hint evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>",
 ].join("\n");
 
+const VALUE_OPTIONS = new Set([
+  "--days",
+  "--expected-updated-at",
+  "--id",
+  "--now",
+  "--operation",
+  "--target-intent",
+]);
+
 function splitArgs(input: string | undefined): string[] {
   if (!input) return [];
   const tokens: string[] = [];
@@ -34,12 +43,15 @@ function splitArgs(input: string | undefined): string[] {
 
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : undefined;
+  const value = index >= 0 ? args[index + 1] : undefined;
+  return value && !value.startsWith("--") ? value : undefined;
 }
 
 function options(args: string[], name: string): string[] {
   return args.flatMap((arg, index) =>
-    arg === name && args[index + 1] ? [args[index + 1]] : [],
+    arg === name && args[index + 1] && !args[index + 1].startsWith("--")
+      ? [args[index + 1]]
+      : [],
   );
 }
 
@@ -53,7 +65,9 @@ function positionalArgs(args: string[]): string[] {
   const values: string[] = [];
   for (let index = 1; index < args.length; index += 1) {
     if (args[index].startsWith("--")) {
-      index += 1;
+      const consumesValue =
+        VALUE_OPTIONS.has(args[index]) && !args[index + 1]?.startsWith("--");
+      if (consumesValue) index += 1;
       continue;
     }
     values.push(args[index]);

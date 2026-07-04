@@ -98,6 +98,31 @@ domain: coding
     });
   });
 
+  it("does not let parameter-less flags swallow positional intent IDs", () => {
+    const intentsDir = path.join(root, "intents");
+    fs.mkdirSync(intentsDir);
+    fs.writeFileSync(
+      path.join(intentsDir, "debugging.md"),
+      `---
+triggers: [debug]
+examples: [debug]
+domain: coding
+---
+## Guidelines
+- Debug carefully.
+
+## Response Strategy
+- Respond.
+`,
+    );
+
+    expect(
+      JSON.parse(run("evolution validate-intents --json debugging").text ?? ""),
+    ).toMatchObject({
+      valid: true,
+    });
+  });
+
   it("reports missing mutation arguments without stack traces", () => {
     expect(run("evolution mark-processed --id one").text).toBe(
       "missing required option: --expected-updated-at",
