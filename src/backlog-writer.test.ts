@@ -251,6 +251,66 @@ describe("BacklogWriter", () => {
     });
   });
 
+  it("records sanitized no-finding reason counts on processed events", async () => {
+    expect(
+      await writer.record("event-1", source, [], {
+        triggers: ["successful-pattern", "behavior-fix"],
+        outcome: "nofinding",
+        noFindingReasonCounts: {
+          "routine-tool-use": 2,
+          "wrong-trigger": 1,
+        },
+        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+      }),
+    ).toBe(true);
+
+    expect(readBacklog()).toMatchObject({
+      processedEvents: {
+        "event-1": {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["successful-pattern", "behavior-fix"],
+          findingCount: 0,
+          outcome: "nofinding",
+          noFindingReasonCounts: {
+            "routine-tool-use": 2,
+            "wrong-trigger": 1,
+          },
+        },
+      },
+      items: [],
+    });
+  });
+
+  it("records sanitized schema-rejection reason counts on processed events", async () => {
+    expect(
+      await writer.record("event-1", source, [], {
+        triggers: ["behavior-fix"],
+        outcome: "schema-rejected",
+        schemaRejectionReasonCounts: {
+          "missing-target": 2,
+          "invalid-operation": 1,
+        },
+        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+      }),
+    ).toBe(true);
+
+    expect(readBacklog()).toMatchObject({
+      processedEvents: {
+        "event-1": {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["behavior-fix"],
+          findingCount: 0,
+          outcome: "schema-rejected",
+          schemaRejectionReasonCounts: {
+            "missing-target": 2,
+            "invalid-operation": 1,
+          },
+        },
+      },
+      items: [],
+    });
+  });
+
   it("records parse-failed and subagent-error outcomes for observability", async () => {
     expect(
       await writer.record("event-parse", source, [], {

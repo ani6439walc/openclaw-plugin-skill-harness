@@ -91,6 +91,28 @@ function summarizeReviewHealth(params: {
     }
     return counts;
   };
+  const countNoFindingReasons = (events: ProcessedEventRecord[]) => {
+    const counts = emptyCounts();
+    for (const event of events) {
+      for (const [reasonCode, count] of Object.entries(
+        event.noFindingReasonCounts ?? {},
+      )) {
+        counts[reasonCode] = (counts[reasonCode] ?? 0) + count;
+      }
+    }
+    return counts;
+  };
+  const countSchemaRejectionReasons = (events: ProcessedEventRecord[]) => {
+    const counts = emptyCounts();
+    for (const event of events) {
+      for (const [reasonCode, count] of Object.entries(
+        event.schemaRejectionReasonCounts ?? {},
+      )) {
+        counts[reasonCode] = (counts[reasonCode] ?? 0) + count;
+      }
+    }
+    return counts;
+  };
 
   const recentCreated = params.backlog.items.filter((item) => {
     const createdAtMs = parseTimeMs(item.createdAt);
@@ -113,6 +135,12 @@ function summarizeReviewHealth(params: {
       totalByOutcome: countOutcomes(processedEvents),
       recentByOutcome: countOutcomes(recentEvents),
       recentByTrigger: countTriggers(recentEvents),
+      totalNoFindingReasonCounts: countNoFindingReasons(processedEvents),
+      recentNoFindingReasonCounts: countNoFindingReasons(recentEvents),
+      totalSchemaRejectionReasonCounts:
+        countSchemaRejectionReasons(processedEvents),
+      recentSchemaRejectionReasonCounts:
+        countSchemaRejectionReasons(recentEvents),
     },
     items: {
       total: params.backlog.items.length,

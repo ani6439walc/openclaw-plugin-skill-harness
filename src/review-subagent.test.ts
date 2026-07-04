@@ -782,6 +782,109 @@ describe("runReviewSubagent", () => {
     );
   });
 
+  it("returns no-finding reason counts for requested negative decisions", async () => {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [
+        {
+          text: JSON.stringify({
+            findings: [
+              {
+                trigger: "successful-pattern",
+                hasFinding: false,
+                reasonCode: "routine-tool-use",
+              },
+              {
+                trigger: "behavior-fix",
+                hasFinding: false,
+                reasonCode: "wrong-trigger",
+              },
+              {
+                trigger: "unrequested-trigger",
+                hasFinding: false,
+                reasonCode: "privacy-sensitive",
+              },
+            ],
+          }),
+        },
+      ],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["successful-pattern", "behavior-fix"],
+      }),
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "nofinding",
+      noFindingReasonCounts: {
+        "routine-tool-use": 1,
+        "wrong-trigger": 1,
+      },
+    });
+  });
+
+  it("accepts harmless suggestedChange object shape drift without schema rejection", async () => {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [
+        {
+          text: JSON.stringify({
+            findings: [
+              {
+                trigger: "behavior-fix",
+                hasFinding: true,
+                targetKind: "intent-markdown",
+                operation: "refine",
+                targetIntentIds: ["social-casual"],
+                dedupeKey: "tool-inquiry-boundary",
+                summary: "Tool inquiries should not route as casual chat",
+                evidence: ["User asked whether a specific tool exists"],
+                correctionGoal: "Exclude tool inquiries from casual chat",
+                suggestedChange: {
+                  section: "Guidelines",
+                  patch: "Add a tool-inquiry exclusion.",
+                },
+              },
+            ],
+          }),
+        },
+      ],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual({
+      findings: [
+        expect.objectContaining({
+          trigger: "behavior-fix",
+          targetKind: "intent-markdown",
+          suggestedChange:
+            '{"section":"Guidelines","patch":"Add a tool-inquiry exclusion."}',
+        }),
+      ],
+      outcome: "wrote-items",
+    });
+  });
+
   it("retries review with evolution modelFallback after a primary model error", async () => {
     const runEmbeddedAgent = vi
       .fn()
@@ -884,6 +987,10 @@ describe("runReviewSubagent", () => {
         snapshot,
         triggers: ["behavior-fix"],
       }),
-    ).resolves.toEqual({ findings: [], outcome: "schema-rejected" });
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "schema-rejected",
+      schemaRejectionReasonCounts: { "missing-required-field": 1 },
+    });
   });
 });

@@ -12,10 +12,18 @@ import type {
   AvailableSkill,
   ResolvedIntentionHintPluginConfig,
 } from "./types.js";
-import { EVOLUTION_OPERATIONS } from "./evolution-backlog.js";
+import {
+  EVOLUTION_OPERATIONS,
+  NO_FINDING_REASON_CODES,
+  normalizeNoFindingReasonCounts,
+  type NoFindingReasonCode,
+  type NoFindingReasonCounts,
+  type ProcessedEventOutcome,
+  type SchemaRejectionReasonCode,
+  type SchemaRejectionReasonCounts,
+} from "./evolution-backlog.js";
 import { normalizeKeywordList } from "./evolution-trigger-keywords.js";
 import { extractPayloadText } from "./subagent.js";
-import type { ProcessedEventOutcome } from "./evolution-backlog.js";
 
 export interface ReviewSubagentResult {
   findings: EvolutionFinding[];
@@ -27,12 +35,16 @@ export interface ReviewSubagentResult {
     | "parse-failed"
     | "subagent-error"
   >;
+  noFindingReasonCounts?: NoFindingReasonCounts;
+  schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
 }
 
 interface ReviewParseResult {
   findings: EvolutionFinding[];
   requestedPositiveFindings: number;
   invalidRequestedPositiveFindings: number;
+  noFindingReasonCounts?: NoFindingReasonCounts;
+  schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
 }
 
 const REVIEW_INSTRUCTIONS: Record<
@@ -87,15 +99,6 @@ const CATALOG_CONTEXT_TRIGGERS = new Set<EvolutionTrigger>([
   "behavior-fix",
   "satisfaction-check",
 ]);
-
-const NO_FINDING_REASON_CODES = [
-  "routine-tool-use",
-  "outside-intent-scope",
-  "insufficient-evidence",
-  "wrong-trigger",
-  "already-covered",
-  "privacy-sensitive",
-] as const;
 
 const NO_FINDING_REASON_CODE_LIST = NO_FINDING_REASON_CODES.join(", ");
 
@@ -208,6 +211,84 @@ const FindingSchema = z.union([
 const ReviewResponseSchema = z.object({
   findings: z.array(z.unknown()),
 });
+
+const EVOLUTION_OPERATION_SET = new Set<string>(EVOLUTION_OPERATIONS);
+
+function classifySchemaRejection(
+  rawRecord: Record<string, unknown> | undefined,
+): SchemaRejectionReasonCode {
+  if (!rawRecord) return "invalid-shape";
+
+  for (const field of [
+    "dedupeKey",
+    "summary",
+    "evidence",
+    "correctionGoal",
+    "suggestedChange",
+  ]) {
+    if (!(field in rawRecord)) return "missing-required-field";
+  }
+
+  for (const field of ["dedupeKey", "summary", "correctionGoal"]) {
+    if (typeof rawRecord[field] !== "string") return "invalid-field-type";
+    if (rawRecord[field].length > 1000) return "too-long-field";
+  }
+  if (!Array.isArray(rawRecord.evidence)) return "invalid-field-type";
+  if (rawRecord.evidence.length > 10) return "too-long-field";
+  if (
+    rawRecord.evidence.some(
+      (value) => typeof value !== "string" || value.length > 1000,
+    )
+  ) {
+    return "invalid-field-type";
+  }
+  if (
+    typeof rawRecord.suggestedChange !== "string" &&
+    (typeof rawRecord.suggestedChange !== "object" ||
+      rawRecord.suggestedChange === null ||
+      Array.isArray(rawRecord.suggestedChange))
+  ) {
+    return "invalid-field-type";
+  }
+
+  if (rawRecord.targetKind === "trigger-keywords") {
+    const targetTrigger = rawRecord.targetTrigger;
+    const addKeywords = rawRecord.addKeywords;
+    const removeKeywords = rawRecord.removeKeywords;
+    if (
+      targetTrigger !== "successful-pattern" &&
+      targetTrigger !== "behavior-fix" &&
+      targetTrigger !== "entity-context"
+    ) {
+      return "invalid-trigger-keyword-target";
+    }
+    if (!Array.isArray(addKeywords) || !Array.isArray(removeKeywords)) {
+      return "invalid-trigger-keyword-target";
+    }
+    if (addKeywords.length === 0 && removeKeywords.length === 0) {
+      return "invalid-trigger-keyword-target";
+    }
+    return "invalid-field-type";
+  }
+
+  if (!("operation" in rawRecord) || !("targetIntentIds" in rawRecord)) {
+    return "missing-target";
+  }
+  if (
+    typeof rawRecord.operation !== "string" ||
+    !EVOLUTION_OPERATION_SET.has(rawRecord.operation)
+  ) {
+    return "invalid-operation";
+  }
+  if (
+    !Array.isArray(rawRecord.targetIntentIds) ||
+    rawRecord.targetIntentIds.length === 0
+  ) {
+    return "missing-target";
+  }
+
+  return "invalid-field-type";
+}
 
 function stripCodeFence(raw: string): string {
   return raw
@@ -620,6 +701,11 @@ function parseReviewFindingsDetailed(
       : ReviewResponseSchema.parse(extractMalformedFindingsResponse(raw));
     const requested = new Set<string>(requestedTriggers);
     const findings: EvolutionFinding[] = [];
+    const noFindingReasonCounts: Partial<Record<NoFindingReasonCode, number>> =
+      {};
+    const schemaRejectionReasonCounts: Partial<
+      Record<SchemaRejectionReasonCode, number>
+    > = {};
     let requestedPositiveFindings = 0;
     let invalidRequestedPositiveFindings = 0;
     for (const rawFinding of parsed.findings) {
@@ -637,14 +723,26 @@ function parseReviewFindingsDetailed(
 
       const result = FindingSchema.safeParse(rawFinding);
       if (!result.success) {
-        if (isRequestedPositiveFinding) invalidRequestedPositiveFindings += 1;
+        if (isRequestedPositiveFinding) {
+          invalidRequestedPositiveFindings += 1;
+          const reasonCode = classifySchemaRejection(rawRecord);
+          schemaRejectionReasonCounts[reasonCode] =
+            (schemaRejectionReasonCounts[reasonCode] ?? 0) + 1;
+        }
         logger.debug("dropping invalid evolution review finding", {
           error: result.error,
         });
         continue;
       }
       const finding = result.data;
-      if (!finding.hasFinding || !requested.has(finding.trigger)) continue;
+      if (!finding.hasFinding) {
+        if (requested.has(finding.trigger) && finding.reasonCode) {
+          noFindingReasonCounts[finding.reasonCode] =
+            (noFindingReasonCounts[finding.reasonCode] ?? 0) + 1;
+        }
+        continue;
+      }
+      if (!requested.has(finding.trigger)) continue;
       if ("targetTrigger" in finding) {
         findings.push({
           trigger: finding.trigger as EvolutionTrigger,
@@ -672,10 +770,24 @@ function parseReviewFindingsDetailed(
         suggestedChange: finding.suggestedChange,
       });
     }
+    const normalizedReasonCounts = normalizeNoFindingReasonCounts(
+      noFindingReasonCounts,
+    );
+    const normalizedSchemaRejectionCounts = Object.keys(
+      schemaRejectionReasonCounts,
+    ).length
+      ? schemaRejectionReasonCounts
+      : undefined;
     return {
       findings,
       requestedPositiveFindings,
       invalidRequestedPositiveFindings,
+      ...(normalizedReasonCounts
+        ? { noFindingReasonCounts: normalizedReasonCounts }
+        : {}),
+      ...(normalizedSchemaRejectionCounts
+        ? { schemaRejectionReasonCounts: normalizedSchemaRejectionCounts }
+        : {}),
     };
   } catch {
     return;
@@ -786,11 +898,22 @@ export async function runReviewSubagent(params: {
           invalidFindingCount: parsed.invalidRequestedPositiveFindings,
           requestedPositiveFindings: parsed.requestedPositiveFindings,
         });
-        return { findings: [], outcome: "schema-rejected" };
+        return {
+          findings: [],
+          outcome: "schema-rejected",
+          ...(parsed.schemaRejectionReasonCounts
+            ? {
+                schemaRejectionReasonCounts: parsed.schemaRejectionReasonCounts,
+              }
+            : {}),
+        };
       }
       return {
         findings: parsed.findings,
         outcome: parsed.findings.length > 0 ? "wrote-items" : "nofinding",
+        ...(parsed.noFindingReasonCounts
+          ? { noFindingReasonCounts: parsed.noFindingReasonCounts }
+          : {}),
       };
     } catch (err) {
       logger.warn("evolution review subagent error", { error: err, modelRef });

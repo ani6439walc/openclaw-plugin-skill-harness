@@ -244,12 +244,20 @@ domain: test
             triggers: ["successful-pattern"],
             findingCount: 0,
             outcome: "nofinding",
+            noFindingReasonCounts: {
+              "routine-tool-use": 2,
+              "insufficient-evidence": 1,
+            },
           },
           rejected: {
             processedAt: "2026-07-04T11:00:00.000Z",
             triggers: ["behavior-fix"],
             findingCount: 0,
             outcome: "schema-rejected",
+            schemaRejectionReasonCounts: {
+              "missing-target": 2,
+              "invalid-operation": 1,
+            },
           },
         },
         items: [
@@ -309,6 +317,22 @@ domain: test
         recentByTrigger: {
           "successful-pattern": 1,
           "behavior-fix": 1,
+        },
+        totalNoFindingReasonCounts: {
+          "routine-tool-use": 2,
+          "insufficient-evidence": 1,
+        },
+        recentNoFindingReasonCounts: {
+          "routine-tool-use": 2,
+          "insufficient-evidence": 1,
+        },
+        totalSchemaRejectionReasonCounts: {
+          "missing-target": 2,
+          "invalid-operation": 1,
+        },
+        recentSchemaRejectionReasonCounts: {
+          "missing-target": 2,
+          "invalid-operation": 1,
         },
       },
       items: {

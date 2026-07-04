@@ -33,7 +33,9 @@ Enter this mode only when the user explicitly asks to process the evolution back
    Use `pnpm run evolution-backlog -- review-health --days 7` for read-only
    runtime review-health audits; it summarizes recent `processedEvents` by
    outcome (`wrote-items`, `nofinding`, `schema-rejected`, `parse-failed`,
-   `subagent-error`, or `unknown`) without mutating the backlog.
+   `subagent-error`, or `unknown`), recent trigger counts, no-finding
+   reason-code counts, and schema-rejection reason-code counts without mutating
+   the backlog.
 2. Re-read the selected item immediately before processing. It must still be
    `pending`.
 3. If `targetKind` is `trigger-keywords`, do not edit Intent Markdown and do not
@@ -55,6 +57,29 @@ Enter this mode only when the user explicitly asks to process the evolution back
 
    Repeat `--target-intent` for multiple targets, then re-run `show` and use
    the new `updatedAt`. If inference is not clear, stop without modifying files.
+
+## Review Contract Diagnostics
+
+The background reviewer is optimized for high-signal backlog proposals, not for
+recording every completed turn. `behavior-fix` is intentionally recall-biased for
+explicit user corrections, concrete misroutes, and wrong tool/no-tool behavior.
+`successful-pattern`, `skill-candidate`, and `entity-context` are
+precision-biased unless the turn contains reusable ordering, parameters,
+recovery, pitfalls, concrete skill/tool evidence, or bounded TOOLS.md/MEMORY.md
+lookup evidence.
+
+No-finding reviewer responses may include one bounded `reasonCode` per requested
+trigger: `routine-tool-use`, `outside-intent-scope`, `insufficient-evidence`,
+`wrong-trigger`, `already-covered`, or `privacy-sensitive`. These codes are
+aggregated into `processedEvents.*.noFindingReasonCounts` only as counts.
+
+When requested positive findings are returned but none pass schema validation,
+the event outcome remains `schema-rejected`. The parser records only bounded
+aggregate `schemaRejectionReasonCounts`: `missing-required-field`,
+`missing-target`, `invalid-operation`, `invalid-trigger-keyword-target`,
+`invalid-field-type`, `too-long-field`, `invalid-shape`, or `unknown`.
+Diagnostics must not persist raw snapshots, user text, evidence strings, raw
+model replies, or Zod error dumps.
 
 ## Body-boundary Mismatch Decision
 
