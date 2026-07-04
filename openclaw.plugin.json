@@ -5,6 +5,15 @@
   "activation": {
     "onStartup": true
   },
+  "contracts": {
+    "tools": ["intention_hint_evolution"]
+  },
+  "commandAliases": [
+    {
+      "name": "intention-hint",
+      "kind": "runtime-slash"
+    }
+  ],
   "skills": ["./skills"],
   "uiHints": {
     "model": {

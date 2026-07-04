@@ -6,6 +6,16 @@ const manifest = JSON.parse(
 );
 
 describe("intention-hint manifest", () => {
+  it("declares OpenClaw-owned tool and command surfaces", () => {
+    expect(manifest.contracts).toEqual({
+      tools: ["intention_hint_evolution"],
+    });
+    expect(manifest.commandAliases).toContainEqual({
+      name: "intention-hint",
+      kind: "runtime-slash",
+    });
+  });
+
   it("matches the runtime contextWindow schema", () => {
     const properties = manifest.configSchema.properties;
 
