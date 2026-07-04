@@ -385,8 +385,11 @@ root, are not loaded as session state, and are never removed by session
 lifecycle or 14-day retention cleanup. Schema v3 stores root `triggerKeywords`
 plus structured `processedEvents` observability and backlog findings. Each
 processed event stores `{ processedAt, triggers, findingCount, outcome }`, where
-`outcome` is one of `wrote-items`, `nofinding`, `parse-failed`,
-`subagent-error`, or `unknown` for migrated legacy entries. Intent Markdown findings include `targetKind:
+`outcome` is one of `wrote-items`, `nofinding`, `schema-rejected`,
+`parse-failed`, `subagent-error`, or `unknown` for migrated legacy entries. `schema-rejected`
+means the reviewer returned requested positive findings but none passed the
+finding schema, which separates malformed positives from true no-finding
+reviews. Intent Markdown findings include `targetKind:
 "intent-markdown"`, `operation` (`create`, `refine`, `split`, or `merge`), and
 all affected `targetIntentIds`. Trigger keyword findings include `targetKind:
 "trigger-keywords"`, `targetTrigger`, and a pending `keywordChange`. Existing
@@ -413,6 +416,7 @@ Backlog CLI:
 ```bash
 pnpm run evolution-backlog -- list --json
 pnpm run evolution-backlog -- show --id IMP-...
+pnpm run evolution-backlog -- review-health --days 7
 pnpm run evolution-backlog -- set-target --id IMP-... --operation refine --target-intent productivity
 pnpm run evolution-backlog -- validate-intents --id productivity
 pnpm run evolution-backlog -- mark-processed --id IMP-... --expected-updated-at <timestamp>

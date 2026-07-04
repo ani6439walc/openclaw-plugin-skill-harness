@@ -232,7 +232,13 @@ describe("buildReviewPrompt", () => {
 
     expect(snapshotEnd).toBeGreaterThan(-1);
     expect(finalContract).toBeGreaterThan(snapshotEnd);
-    expect(prompt.trim().endsWith("no surrounding prose.")).toBe(true);
+    expect(
+      prompt
+        .trim()
+        .endsWith(
+          "suggestedChange MUST be a JSON string, never an object or array.",
+        ),
+    ).toBe(true);
   });
 
   it("states every required field for positive findings", () => {
@@ -250,6 +256,20 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain(
       "suggestedChange must be a concrete intent Markdown draft or patch instruction",
     );
+    expect(prompt).toContain(
+      "suggestedChange MUST be a JSON string, never an object or array",
+    );
+  });
+
+  it("repeats the string-only suggestedChange contract after the snapshot", () => {
+    const prompt = buildReviewPrompt(snapshot, ["behavior-fix"]);
+    const snapshotEnd = prompt.lastIndexOf("</review_snapshot>");
+    const finalStringContract = prompt.lastIndexOf(
+      "suggestedChange MUST be a JSON string, never an object or array",
+    );
+
+    expect(snapshotEnd).toBeGreaterThan(-1);
+    expect(finalStringContract).toBeGreaterThan(snapshotEnd);
   });
 
   it("tells reviewer to keep JSON string fields ultra-concise without losing semantics", () => {
@@ -499,6 +519,40 @@ describe("parseReviewFindings", () => {
     ]);
   });
 
+  it("normalizes object suggestedChange values into strings", () => {
+    const parsed = parseReviewFindings(
+      JSON.stringify({
+        findings: [
+          {
+            trigger: "behavior-fix",
+            hasFinding: true,
+            targetKind: "intent-markdown",
+            operation: "refine",
+            targetIntentIds: ["social-casual"],
+            dedupeKey: "tool-inquiry-boundary",
+            summary: "Tool inquiries should not route as casual chat",
+            evidence: ["User asked whether a specific tool exists"],
+            correctionGoal: "Exclude tool inquiries from casual chat",
+            suggestedChange: {
+              section: "Guidelines",
+              patch: "Add a tool-inquiry exclusion.",
+            },
+          },
+        ],
+      }),
+      ["behavior-fix"],
+    );
+
+    expect(parsed).toEqual([
+      expect.objectContaining({
+        trigger: "behavior-fix",
+        targetKind: "intent-markdown",
+        suggestedChange:
+          '{"section":"Guidelines","patch":"Add a tool-inquiry exclusion."}',
+      }),
+    ]);
+  });
+
   it("rejects findings without a valid operation and target intents", () => {
     const raw = JSON.stringify({
       findings: [
@@ -728,5 +782,44 @@ describe("runReviewSubagent", () => {
       }),
     ).resolves.toEqual({ findings: [], outcome: "subagent-error" });
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns schema-rejected when requested positive findings are all invalid", async () => {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [
+        {
+          text: JSON.stringify({
+            findings: [
+              {
+                trigger: "behavior-fix",
+                hasFinding: true,
+                targetKind: "intent-markdown",
+                operation: "refine",
+                targetIntentIds: ["social-casual"],
+                summary: "Missing dedupe key",
+                evidence: ["Concrete correction evidence"],
+                correctionGoal: "Improve routing boundary",
+                suggestedChange: "Add a boundary note.",
+              },
+            ],
+          }),
+        },
+      ],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual({ findings: [], outcome: "schema-rejected" });
   });
 });

@@ -15,7 +15,9 @@ import {
   selectPendingItem,
   updatePendingTarget,
   writeBacklogAtomic,
+  type EvolutionBacklog,
   type EvolutionOperation,
+  type ProcessedEventRecord,
 } from "./evolution-backlog.js";
 import { validateIntentDirectory } from "./intent-validation.js";
 
@@ -45,6 +47,96 @@ function requireOption(args: string[], name: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function increment(counts: Record<string, number>, key: string): void {
+  counts[key] = (counts[key] ?? 0) + 1;
+}
+
+function parseTimeMs(value: string | undefined): number | undefined {
+  if (!value) return;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function rate(numerator: number, denominator: number): number {
+  return denominator > 0 ? numerator / denominator : 0;
+}
+
+function summarizeReviewHealth(params: {
+  backlog: EvolutionBacklog;
+  nowMs: number;
+  days: number;
+}) {
+  const cutoffMs = params.nowMs - params.days * 24 * 60 * 60 * 1000;
+  const processedEvents = Object.values(params.backlog.processedEvents);
+  const recentEvents = processedEvents.filter((event) => {
+    const processedAtMs = parseTimeMs(event.processedAt);
+    return processedAtMs !== undefined && processedAtMs >= cutoffMs;
+  });
+
+  const countOutcomes = (events: ProcessedEventRecord[]) => {
+    const counts: Record<string, number> = {};
+    for (const event of events) increment(counts, event.outcome);
+    return counts;
+  };
+  const countTriggers = (events: ProcessedEventRecord[]) => {
+    const counts: Record<string, number> = {};
+    for (const event of events) {
+      for (const trigger of event.triggers) increment(counts, trigger);
+    }
+    return counts;
+  };
+
+  const recentCreated = params.backlog.items.filter((item) => {
+    const createdAtMs = parseTimeMs(item.createdAt);
+    return createdAtMs !== undefined && createdAtMs >= cutoffMs;
+  }).length;
+  const recentUpdated = params.backlog.items.filter((item) => {
+    const updatedAtMs = parseTimeMs(item.updatedAt);
+    return updatedAtMs !== undefined && updatedAtMs >= cutoffMs;
+  }).length;
+  const byStatus: Record<string, number> = {};
+  for (const item of params.backlog.items) increment(byStatus, item.status);
+
+  return {
+    schemaVersion: params.backlog.schemaVersion,
+    updatedAt: params.backlog.updatedAt,
+    windowDays: params.days,
+    processedEvents: {
+      total: processedEvents.length,
+      recent: recentEvents.length,
+      totalByOutcome: countOutcomes(processedEvents),
+      recentByOutcome: countOutcomes(recentEvents),
+      recentByTrigger: countTriggers(recentEvents),
+    },
+    items: {
+      total: params.backlog.items.length,
+      pending: byStatus.pending ?? 0,
+      byStatus,
+      recentCreated,
+      recentUpdated,
+    },
+    rates: {
+      recentNoFindingRate: rate(
+        recentEvents.filter((event) => event.outcome === "nofinding").length,
+        recentEvents.length,
+      ),
+      recentSchemaRejectedRate: rate(
+        recentEvents.filter((event) => event.outcome === "schema-rejected")
+          .length,
+        recentEvents.length,
+      ),
+      recentParseFailedRate: rate(
+        recentEvents.filter((event) => event.outcome === "parse-failed").length,
+        recentEvents.length,
+      ),
+      recentNoNewItemRate: rate(
+        Math.max(0, recentEvents.length - recentCreated),
+        recentEvents.length,
+      ),
+    },
+  };
 }
 
 function markAndWriteItem(params: {
@@ -97,7 +189,7 @@ export function runEvolutionBacklogCommand(
     const backlogPath = evolutionBacklogPath(pluginRoot);
     if (!command)
       throw new Error(
-        "usage: evolution-backlog <list|show|set-target|validate-intents|mark-processed|mark-dismissed>",
+        "usage: evolution-backlog <list|show|review-health|set-target|validate-intents|mark-processed|mark-dismissed>",
       );
 
     if (command === "validate-intents") {
@@ -112,6 +204,22 @@ export function runEvolutionBacklogCommand(
     if (!fs.existsSync(backlogPath))
       throw new Error(`backlog not found: ${backlogPath}`);
     const backlog = readBacklog(backlogPath);
+
+    if (command === "review-health") {
+      const days = Number(option(args, "--days") ?? 7);
+      if (!Number.isFinite(days) || days <= 0) {
+        throw new Error("--days must be a positive number");
+      }
+      const nowMs = parseTimeMs(option(args, "--now")) ?? Date.now();
+      io.stdout(
+        JSON.stringify(
+          summarizeReviewHealth({ backlog, nowMs, days }),
+          null,
+          2,
+        ),
+      );
+      return 0;
+    }
 
     if (command === "list") {
       const items = backlog.items

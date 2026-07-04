@@ -219,4 +219,108 @@ domain: test
       errors: [],
     });
   });
+
+  it("summarizes recent review health by outcome", () => {
+    fs.writeFileSync(
+      path.join(root, "evolution.json"),
+      JSON.stringify({
+        schemaVersion: 3,
+        createdAt: "2026-07-01T00:00:00.000Z",
+        updatedAt: "2026-07-04T12:00:00.000Z",
+        triggerKeywords: {
+          successfulPattern: [],
+          behaviorFix: [],
+          entityContext: [],
+        },
+        processedEvents: {
+          old: {
+            processedAt: "2026-07-01T00:00:00.000Z",
+            triggers: ["successful-pattern"],
+            findingCount: 1,
+            outcome: "wrote-items",
+          },
+          nofinding: {
+            processedAt: "2026-07-04T10:00:00.000Z",
+            triggers: ["successful-pattern"],
+            findingCount: 0,
+            outcome: "nofinding",
+          },
+          rejected: {
+            processedAt: "2026-07-04T11:00:00.000Z",
+            triggers: ["behavior-fix"],
+            findingCount: 0,
+            outcome: "schema-rejected",
+          },
+        },
+        items: [
+          {
+            id: "processed",
+            type: "successful-pattern",
+            targetKind: "intent-markdown",
+            operation: "refine",
+            targetIntentIds: ["debugging"],
+            dedupeKey: "processed",
+            summary: "processed",
+            correctionGoal: "goal",
+            details: { evidence: [], suggestedChange: "change" },
+            frequency: 1,
+            sources: [],
+            createdAt: "2026-07-01T00:00:00.000Z",
+            updatedAt: "2026-07-01T00:00:00.000Z",
+            status: "processed",
+          },
+          {
+            id: "pending",
+            type: "behavior-fix",
+            targetKind: "intent-markdown",
+            operation: "refine",
+            targetIntentIds: ["social-casual"],
+            dedupeKey: "pending",
+            summary: "pending",
+            correctionGoal: "goal",
+            details: { evidence: [], suggestedChange: "change" },
+            frequency: 1,
+            sources: [],
+            createdAt: "2026-07-04T09:00:00.000Z",
+            updatedAt: "2026-07-04T09:00:00.000Z",
+            status: "pending",
+          },
+        ],
+      }),
+    );
+
+    expect(
+      run([
+        "review-health",
+        "--days",
+        "2",
+        "--now",
+        "2026-07-04T12:00:00.000Z",
+      ]),
+    ).toBe(0);
+    expect(JSON.parse(output.at(-1)!)).toMatchObject({
+      processedEvents: {
+        total: 3,
+        recent: 2,
+        recentByOutcome: {
+          nofinding: 1,
+          "schema-rejected": 1,
+        },
+        recentByTrigger: {
+          "successful-pattern": 1,
+          "behavior-fix": 1,
+        },
+      },
+      items: {
+        total: 2,
+        pending: 1,
+        recentCreated: 1,
+        recentUpdated: 1,
+      },
+      rates: {
+        recentNoFindingRate: 0.5,
+        recentNoNewItemRate: 0.5,
+      },
+    });
+  });
 });
