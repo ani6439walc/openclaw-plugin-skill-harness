@@ -323,4 +323,9 @@ domain: test
       },
     });
   });
+
+  it("rejects invalid review-health --now values", () => {
+    expect(run(["review-health", "--now", "not-a-date"])).toBe(1);
+    expect(errors.at(-1)).toContain("--now must be a valid date/time");
+  });
 });

@@ -49,6 +49,10 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function emptyCounts(): Record<string, number> {
+  return Object.create(null) as Record<string, number>;
+}
+
 function increment(counts: Record<string, number>, key: string): void {
   counts[key] = (counts[key] ?? 0) + 1;
 }
@@ -76,12 +80,12 @@ function summarizeReviewHealth(params: {
   });
 
   const countOutcomes = (events: ProcessedEventRecord[]) => {
-    const counts: Record<string, number> = {};
+    const counts = emptyCounts();
     for (const event of events) increment(counts, event.outcome);
     return counts;
   };
   const countTriggers = (events: ProcessedEventRecord[]) => {
-    const counts: Record<string, number> = {};
+    const counts = emptyCounts();
     for (const event of events) {
       for (const trigger of event.triggers) increment(counts, trigger);
     }
@@ -96,7 +100,7 @@ function summarizeReviewHealth(params: {
     const updatedAtMs = parseTimeMs(item.updatedAt);
     return updatedAtMs !== undefined && updatedAtMs >= cutoffMs;
   }).length;
-  const byStatus: Record<string, number> = {};
+  const byStatus = emptyCounts();
   for (const item of params.backlog.items) increment(byStatus, item.status);
 
   return {
@@ -131,6 +135,9 @@ function summarizeReviewHealth(params: {
         recentEvents.filter((event) => event.outcome === "parse-failed").length,
         recentEvents.length,
       ),
+      // Approximation: backlog items are not linked one-to-one to processed
+      // events, so recentCreated is a window-level item count rather than an
+      // event-level write count. This is sufficient for a coarse health audit.
       recentNoNewItemRate: rate(
         Math.max(0, recentEvents.length - recentCreated),
         recentEvents.length,
@@ -210,7 +217,11 @@ export function runEvolutionBacklogCommand(
       if (!Number.isFinite(days) || days <= 0) {
         throw new Error("--days must be a positive number");
       }
-      const nowMs = parseTimeMs(option(args, "--now")) ?? Date.now();
+      const nowOption = option(args, "--now");
+      const nowMs = nowOption ? parseTimeMs(nowOption) : Date.now();
+      if (nowMs === undefined) {
+        throw new Error("--now must be a valid date/time");
+      }
       io.stdout(
         JSON.stringify(
           summarizeReviewHealth({ backlog, nowMs, days }),
