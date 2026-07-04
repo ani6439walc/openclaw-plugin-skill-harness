@@ -117,6 +117,76 @@ describe("evolution backlog", () => {
     });
   });
 
+  it("parses sanitized no-finding reason counts on processed events", () => {
+    const parsed = parseBacklog({
+      schemaVersion: 3,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      triggerKeywords: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
+      processedEvents: {
+        "session-1:turn-1": {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["successful-pattern"],
+          findingCount: 0,
+          outcome: "nofinding",
+          noFindingReasonCounts: {
+            "routine-tool-use": 2,
+            "wrong-trigger": 1,
+            "raw user text should not survive": 99,
+            "privacy-sensitive": 0,
+          },
+        },
+      },
+      items: [],
+    });
+
+    expect(parsed.processedEvents["session-1:turn-1"]).toEqual({
+      processedAt: "2026-06-11T00:01:00.000Z",
+      triggers: ["successful-pattern"],
+      findingCount: 0,
+      outcome: "nofinding",
+      noFindingReasonCounts: {
+        "routine-tool-use": 2,
+        "wrong-trigger": 1,
+      },
+    });
+  });
+
+  it("parses sanitized schema-rejection reason counts on processed events", () => {
+    const parsed = parseBacklog({
+      schemaVersion: 3,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      triggerKeywords: DEFAULT_EVOLUTION_TRIGGER_KEYWORDS,
+      processedEvents: {
+        "session-1:turn-1": {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["behavior-fix"],
+          findingCount: 0,
+          outcome: "schema-rejected",
+          schemaRejectionReasonCounts: {
+            "missing-target": 2,
+            "invalid-operation": 1,
+            "raw zod message should not survive": 99,
+            "invalid-field-type": 0,
+          },
+        },
+      },
+      items: [],
+    });
+
+    expect(parsed.processedEvents["session-1:turn-1"]).toEqual({
+      processedAt: "2026-06-11T00:01:00.000Z",
+      triggers: ["behavior-fix"],
+      findingCount: 0,
+      outcome: "schema-rejected",
+      schemaRejectionReasonCounts: {
+        "missing-target": 2,
+        "invalid-operation": 1,
+      },
+    });
+  });
+
   it("normalizes legacy underscore trigger types to hyphenated names", () => {
     const parsed = parseBacklog({
       schemaVersion: 2,

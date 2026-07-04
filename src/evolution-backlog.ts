@@ -61,11 +61,44 @@ export const PROCESSED_EVENT_OUTCOMES = [
 
 export type ProcessedEventOutcome = (typeof PROCESSED_EVENT_OUTCOMES)[number];
 
+export const NO_FINDING_REASON_CODES = [
+  "routine-tool-use",
+  "outside-intent-scope",
+  "insufficient-evidence",
+  "wrong-trigger",
+  "already-covered",
+  "privacy-sensitive",
+] as const;
+
+export type NoFindingReasonCode = (typeof NO_FINDING_REASON_CODES)[number];
+export type NoFindingReasonCounts = Partial<
+  Record<NoFindingReasonCode, number>
+>;
+
+export const SCHEMA_REJECTION_REASON_CODES = [
+  "missing-required-field",
+  "missing-target",
+  "invalid-operation",
+  "invalid-trigger-keyword-target",
+  "invalid-field-type",
+  "too-long-field",
+  "invalid-shape",
+  "unknown",
+] as const;
+
+export type SchemaRejectionReasonCode =
+  (typeof SCHEMA_REJECTION_REASON_CODES)[number];
+export type SchemaRejectionReasonCounts = Partial<
+  Record<SchemaRejectionReasonCode, number>
+>;
+
 export type ProcessedEventRecord = {
   processedAt: string;
   triggers: EvolutionTrigger[];
   findingCount: number;
   outcome: ProcessedEventOutcome;
+  noFindingReasonCounts?: NoFindingReasonCounts;
+  schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
 };
 
 export type EvolutionBacklog = {
@@ -138,6 +171,34 @@ const TriggerKeywordsSchema = z
 
 const ProcessedEventOutcomeSchema = z.enum(PROCESSED_EVENT_OUTCOMES);
 
+function normalizeAllowlistedCounts<T extends string>(
+  value: unknown,
+  allowedKeys: readonly T[],
+): Partial<Record<T, number>> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const input = value as Record<string, unknown>;
+  const output: Partial<Record<T, number>> = {};
+  for (const reasonCode of allowedKeys) {
+    const count = input[reasonCode];
+    if (typeof count === "number" && Number.isInteger(count) && count > 0) {
+      output[reasonCode] = count;
+    }
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
+export function normalizeNoFindingReasonCounts(
+  value: unknown,
+): NoFindingReasonCounts | undefined {
+  return normalizeAllowlistedCounts(value, NO_FINDING_REASON_CODES);
+}
+
+export function normalizeSchemaRejectionReasonCounts(
+  value: unknown,
+): SchemaRejectionReasonCounts | undefined {
+  return normalizeAllowlistedCounts(value, SCHEMA_REJECTION_REASON_CODES);
+}
+
 const ProcessedEventRecordSchema = z.union([
   z.string().transform((processedAt): ProcessedEventRecord => ({
     processedAt,
@@ -145,12 +206,37 @@ const ProcessedEventRecordSchema = z.union([
     findingCount: 0,
     outcome: "unknown",
   })),
-  z.object({
-    processedAt: z.string(),
-    triggers: z.array(z.enum(EVOLUTION_TRIGGER_TYPES)).catch([]),
-    findingCount: z.number().int().nonnegative().catch(0),
-    outcome: ProcessedEventOutcomeSchema.catch("unknown"),
-  }),
+  z
+    .object({
+      processedAt: z.string(),
+      triggers: z.array(z.enum(EVOLUTION_TRIGGER_TYPES)).catch([]),
+      findingCount: z.number().int().nonnegative().catch(0),
+      outcome: ProcessedEventOutcomeSchema.catch("unknown"),
+      noFindingReasonCounts: z.unknown().optional(),
+      schemaRejectionReasonCounts: z.unknown().optional(),
+    })
+    .transform(
+      ({
+        noFindingReasonCounts,
+        schemaRejectionReasonCounts,
+        ...record
+      }): ProcessedEventRecord => {
+        const normalizedReasonCounts = normalizeNoFindingReasonCounts(
+          noFindingReasonCounts,
+        );
+        const normalizedSchemaRejectionCounts =
+          normalizeSchemaRejectionReasonCounts(schemaRejectionReasonCounts);
+        return {
+          ...record,
+          ...(normalizedReasonCounts
+            ? { noFindingReasonCounts: normalizedReasonCounts }
+            : {}),
+          ...(normalizedSchemaRejectionCounts
+            ? { schemaRejectionReasonCounts: normalizedSchemaRejectionCounts }
+            : {}),
+        };
+      },
+    ),
 ]);
 
 const ProcessedEventsSchema = z.record(z.string(), ProcessedEventRecordSchema);

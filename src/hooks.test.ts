@@ -178,7 +178,11 @@ describe("createHookHandlers tracking guards", () => {
       "---\nname: analysis\ndescription: Break down unclear tasks.\n---\n",
     );
     const enqueue = vi.fn();
-    const reviewer = vi.fn().mockResolvedValue([]);
+    const reviewer = vi.fn().mockResolvedValue({
+      findings: [],
+      outcome: "nofinding" as const,
+      noFindingReasonCounts: { "wrong-trigger": 1 },
+    });
     const backlogWriter = { record: vi.fn() };
     const handlers = createHookHandlers({
       api: {
@@ -255,6 +259,7 @@ describe("createHookHandlers tracking guards", () => {
           "behavior-fix",
         ],
         outcome: "nofinding",
+        noFindingReasonCounts: { "wrong-trigger": 1 },
       },
     );
   });

@@ -13,8 +13,12 @@ import {
   readBacklog,
   pruneProcessedEvents,
   EvolutionBacklogSchema,
+  normalizeNoFindingReasonCounts,
+  normalizeSchemaRejectionReasonCounts,
   type EvolutionBacklog,
+  type NoFindingReasonCounts,
   type ProcessedEventOutcome,
+  type SchemaRejectionReasonCounts,
 } from "./evolution-backlog.js";
 import type { EvolutionTrigger } from "./trigger-checker.js";
 
@@ -83,6 +87,8 @@ export class BacklogWriter {
       nowMs?: number;
       triggers?: readonly EvolutionTrigger[];
       outcome?: ProcessedEventOutcome;
+      noFindingReasonCounts?: NoFindingReasonCounts;
+      schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
     } = {},
   ): Promise<boolean> {
     if (!eventId) return false;
@@ -155,6 +161,13 @@ export class BacklogWriter {
             ).filter(Boolean),
           ),
         ];
+        const noFindingReasonCounts = normalizeNoFindingReasonCounts(
+          options.noFindingReasonCounts,
+        );
+        const schemaRejectionReasonCounts =
+          normalizeSchemaRejectionReasonCounts(
+            options.schemaRejectionReasonCounts,
+          );
         backlog.processedEvents[eventId] = {
           processedAt: nowIso,
           triggers,
@@ -162,6 +175,10 @@ export class BacklogWriter {
           outcome:
             options.outcome ??
             (findings.length > 0 ? "wrote-items" : "nofinding"),
+          ...(noFindingReasonCounts ? { noFindingReasonCounts } : {}),
+          ...(schemaRejectionReasonCounts
+            ? { schemaRejectionReasonCounts }
+            : {}),
         };
         const validated = EvolutionBacklogSchema.parse(backlog);
         return safeWriteJson(

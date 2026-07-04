@@ -1206,6 +1206,12 @@ export function createHookHandlers(deps: HookDeps) {
           ? "wrote-items"
           : "nofinding"
         : reviewResult.outcome;
+      const noFindingReasonCounts = Array.isArray(reviewResult)
+        ? undefined
+        : reviewResult.noFindingReasonCounts;
+      const schemaRejectionReasonCounts = Array.isArray(reviewResult)
+        ? undefined
+        : reviewResult.schemaRejectionReasonCounts;
       await backlogWriter.record(
         params.snapshot.eventId,
         {
@@ -1215,7 +1221,12 @@ export function createHookHandlers(deps: HookDeps) {
           turnStart: params.snapshot.current.timestamps!.start!,
         },
         findings,
-        { triggers: params.triggers, outcome },
+        {
+          triggers: params.triggers,
+          outcome,
+          noFindingReasonCounts,
+          schemaRejectionReasonCounts,
+        },
       );
     });
   }

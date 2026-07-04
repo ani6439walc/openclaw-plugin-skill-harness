@@ -365,9 +365,17 @@ Guidelines, Skills & Tools, Concrete Workflow, or Experience should preserve a
 stable skill path. Depending on the trigger, it proposes a new intent draft or
 targeted changes to frontmatter, Guidelines, Skills & Tools, Response Strategy,
 Concrete Workflow, or Experience. It may also create pending `trigger-keywords`
-findings when the evidence supports a stable success/correction/entity-context phrase, but it
-does not apply those keyword changes automatically. It never proposes changes to
-skills, tools, AGENTS.md, SOUL.md, or other production files.
+findings when the evidence supports a stable success/correction/entity-context
+phrase, but it does not apply those keyword changes automatically. It never
+proposes changes to skills, tools, AGENTS.md, SOUL.md, or other production files.
+The review prompt is intentionally asymmetric: `behavior-fix` is recall-biased
+for explicit corrections and concrete misroutes, while `successful-pattern`,
+`skill-candidate`, and `entity-context` stay precision-biased unless reusable
+workflow, skill/tool, or bounded memory-lookup evidence is present. No-finding
+responses may include an optional bounded `reasonCode` (`routine-tool-use`,
+`outside-intent-scope`, `insufficient-evidence`, `wrong-trigger`,
+`already-covered`, or `privacy-sensitive`) so runtime health can explain why a
+review intentionally produced no backlog item.
 The review sub-agent uses `runEmbeddedAgent` with `promptMode="minimal"`,
 `modelRun=false`, and `toolsAllow=["read"]` so OpenClaw materializes only the
 core `read` tool. The `read` tool is reserved for inspecting relevant
@@ -386,10 +394,17 @@ lifecycle or 14-day retention cleanup. Schema v3 stores root `triggerKeywords`
 plus structured `processedEvents` observability and backlog findings. Each
 processed event stores `{ processedAt, triggers, findingCount, outcome }`, where
 `outcome` is one of `wrote-items`, `nofinding`, `schema-rejected`,
-`parse-failed`, `subagent-error`, or `unknown` for migrated legacy entries. `schema-rejected`
-means the reviewer returned requested positive findings but none passed the
-finding schema, which separates malformed positives from true no-finding
-reviews. Intent Markdown findings include `targetKind:
+`parse-failed`, `subagent-error`, or `unknown` for migrated legacy entries.
+`nofinding` events may additionally store aggregate `noFindingReasonCounts`.
+`schema-rejected` means the reviewer returned requested positive findings but
+none passed the finding schema, which separates malformed positives from true
+no-finding reviews. Schema-rejected events may store aggregate
+`schemaRejectionReasonCounts` using bounded categories such as
+`missing-required-field`, `missing-target`, `invalid-operation`,
+`invalid-trigger-keyword-target`, `invalid-field-type`, `too-long-field`,
+`invalid-shape`, or `unknown`. These observability fields store only
+machine-readable count summaries; they do not store raw snapshots, user text,
+evidence strings, raw model replies, or Zod error dumps. Intent Markdown findings include `targetKind:
 "intent-markdown"`, `operation` (`create`, `refine`, `split`, or `merge`), and
 all affected `targetIntentIds`. Trigger keyword findings include `targetKind:
 "trigger-keywords"`, `targetTrigger`, and a pending `keywordChange`. Existing
@@ -421,6 +436,11 @@ pnpm run evolution-backlog -- set-target --id IMP-... --operation refine --targe
 pnpm run evolution-backlog -- validate-intents --id productivity
 pnpm run evolution-backlog -- mark-processed --id IMP-... --expected-updated-at <timestamp>
 ```
+
+`review-health` reports total/recent processed events by outcome, recent trigger
+counts, no-finding reason-code counts, schema-rejection reason-code counts, item
+status totals, and coarse rates for no-finding, schema-rejected, parse-failed,
+and no-new-item windows. It is read-only and safe for runtime audits.
 
 All mutations validate schema v3 and use a same-directory temporary file plus
 atomic rename. `mark-processed` rejects a stale item `updatedAt`.
