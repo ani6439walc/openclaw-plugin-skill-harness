@@ -30,6 +30,10 @@ Enter this mode only when the user explicitly asks to process the evolution back
    `pnpm run evolution-backlog -- show --id <item-id>` when the user supplied
    an ID; otherwise run `pnpm run evolution-backlog -- show`. The default
    selects highest `frequency`, then oldest `createdAt`.
+   Use `pnpm run evolution-backlog -- review-health --days 7` for read-only
+   runtime review-health audits; it summarizes recent `processedEvents` by
+   outcome (`wrote-items`, `nofinding`, `schema-rejected`, `parse-failed`,
+   `subagent-error`, or `unknown`) without mutating the backlog.
 2. Re-read the selected item immediately before processing. It must still be
    `pending`.
 3. If `targetKind` is `trigger-keywords`, do not edit Intent Markdown and do not

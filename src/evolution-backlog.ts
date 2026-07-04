@@ -53,6 +53,7 @@ export type BacklogItem = {
 export const PROCESSED_EVENT_OUTCOMES = [
   "wrote-items",
   "nofinding",
+  "schema-rejected",
   "parse-failed",
   "subagent-error",
   "unknown",
