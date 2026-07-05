@@ -69,9 +69,14 @@ export function resolveAvailableSkills(params: {
   for (const name of names) {
     for (const root of roots) {
       const skill = readSkillFile(path.join(root, name, "SKILL.md"));
-      if (!skill || skill.name !== name || seen.has(skill.name)) continue;
+      if (
+        !skill ||
+        skill.name.toLowerCase() !== name.toLowerCase() ||
+        seen.has(skill.name.toLowerCase())
+      )
+        continue;
       skills.push(skill);
-      seen.add(skill.name);
+      seen.add(skill.name.toLowerCase());
       break;
     }
   }
