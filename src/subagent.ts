@@ -197,7 +197,7 @@ export async function runIntentionSubagent(params: {
 
   try {
     const result =
-      await params.api.runtime.agent.runEmbeddedPiAgent(embeddedRunParams);
+      await params.api.runtime.agent.runEmbeddedAgent(embeddedRunParams);
 
     const rawReply = extractPayloadText(result);
 
@@ -250,7 +250,7 @@ export async function runTopicSwitchSubagent(params: {
   });
 
   try {
-    const result = await params.api.runtime.agent.runEmbeddedPiAgent(
+    const result = await params.api.runtime.agent.runEmbeddedAgent(
       buildIntentionEmbeddedRunParams({
         params,
         subagentSessionId,
@@ -305,14 +305,18 @@ export async function runIntentInstructionSubagent(params: {
   });
 
   try {
-    const result = await params.api.runtime.agent.runEmbeddedPiAgent(
-      buildIntentionEmbeddedRunParams({
+    const result = await params.api.runtime.agent.runEmbeddedAgent({
+      ...buildIntentionEmbeddedRunParams({
         params,
         subagentSessionId,
         subagentSessionKey,
         prompt,
       }),
-    );
+      modelRun: false,
+      promptMode: "minimal",
+      toolsAllow: ["read"],
+      disableTools: false,
+    });
     const embeddedError = extractEmbeddedRunError(result);
     if (embeddedError) {
       logger.warn("Intent instruction subagent returned an error", {

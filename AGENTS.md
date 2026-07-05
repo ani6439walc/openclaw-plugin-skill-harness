@@ -194,7 +194,7 @@ Process one backlog finding at a time unless the user explicitly asks for a boun
 
 - Use `api.pluginConfig` plus `resolveLivePluginConfigObject()` for live plugin config.
 - Use `api.runtime.state.resolveStateDir(process.env)` for OpenClaw state directory resolution.
-- Use `api.runtime.agent.runEmbeddedAgent()` for embedded review/classifier runs. `runEmbeddedPiAgent` is deprecated.
+- Use `api.runtime.agent.runEmbeddedAgent()` for embedded review/classifier runs; do not use legacy PI aliases.
 - When an embedded run needs the core `read` tool, keep `modelRun=false`, use `promptMode="minimal"`, set `disableTools=false`, and narrow `toolsAllow` to `["read"]`. Do not use `promptMode="none"`; OpenClaw treats that as a raw model run and skips tool construction.
 - If an SDK import path is uncertain or looks deprecated, verify it against the installed `openclaw` package before coding from memory.
 - Keep `zod` imports direct from `"zod"`; this plugin owns `zod` as a runtime dependency.

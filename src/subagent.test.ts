@@ -29,7 +29,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
 
 describe("runTopicSwitchSubagent", () => {
   it("runs a tool-free topic checker with classifier config", async () => {
-    const runEmbeddedPiAgent = vi.fn().mockResolvedValue({
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [
         {
           text: JSON.stringify({
@@ -45,7 +45,7 @@ describe("runTopicSwitchSubagent", () => {
     });
     const api = {
       config: {},
-      runtime: { agent: { runEmbeddedPiAgent } },
+      runtime: { agent: { runEmbeddedAgent } },
     } as unknown as OpenClawPluginApi;
 
     const result = await runTopicSwitchSubagent({
@@ -89,7 +89,7 @@ describe("runTopicSwitchSubagent", () => {
       reason: undefined,
       complexity: "medium",
     });
-    expect(runEmbeddedPiAgent).toHaveBeenCalledWith(
+    expect(runEmbeddedAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "google",
         model: "test-intent",
@@ -99,23 +99,23 @@ describe("runTopicSwitchSubagent", () => {
         prompt: expect.stringContaining("topic continuity checker"),
       }),
     );
-    expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
+    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
       "<conversation_context>",
     );
-    expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
+    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
       "topic=topic checker",
     );
   });
 });
 
 describe("runIntentInstructionSubagent", () => {
-  it("runs a tool-free instruction writer with classifier config", async () => {
-    const runEmbeddedPiAgent = vi.fn().mockResolvedValue({
+  it("runs a read-enabled instruction writer with classifier config", async () => {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: "Use test-driven-development, then apply_patch." }],
     });
     const api = {
       config: {},
-      runtime: { agent: { runEmbeddedPiAgent } },
+      runtime: { agent: { runEmbeddedAgent } },
     } as unknown as OpenClawPluginApi;
 
     const result = await runIntentInstructionSubagent({
@@ -152,37 +152,40 @@ describe("runIntentInstructionSubagent", () => {
     expect(result).toEqual({
       text: "Use test-driven-development, then apply_patch.",
     });
-    expect(runEmbeddedPiAgent).toHaveBeenCalledWith(
+    expect(runEmbeddedAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "google",
         model: "test-intent",
         timeoutMs: 4321,
         thinkLevel: "low",
-        disableTools: true,
+        promptMode: "minimal",
+        modelRun: false,
+        disableTools: false,
+        toolsAllow: ["read"],
         prompt: expect.stringContaining("intention-hint writer"),
       }),
     );
-    expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
+    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
       "Use test-driven-development",
     );
-    expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
+    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
       "Classify the latest message turn-locally",
     );
-    expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
+    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
       "<conversation_context>",
     );
-    expect(runEmbeddedPiAgent.mock.calls[0][0].prompt).toContain(
+    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
       "topic=continuation",
     );
   });
 
   it("reports no text when the instruction writer returns an empty payload", async () => {
-    const runEmbeddedPiAgent = vi.fn().mockResolvedValue({
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: "   " }],
     });
     const api = {
       config: {},
-      runtime: { agent: { runEmbeddedPiAgent } },
+      runtime: { agent: { runEmbeddedAgent } },
     } as unknown as OpenClawPluginApi;
 
     const result = await runIntentInstructionSubagent({
@@ -209,12 +212,12 @@ describe("runIntentInstructionSubagent", () => {
   });
 
   it("reports embedded agent error payloads instead of treating them as instructions", async () => {
-    const runEmbeddedPiAgent = vi.fn().mockResolvedValue({
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: "Model timed out", isError: true }],
     });
     const api = {
       config: {},
-      runtime: { agent: { runEmbeddedPiAgent } },
+      runtime: { agent: { runEmbeddedAgent } },
     } as unknown as OpenClawPluginApi;
 
     const result = await runIntentInstructionSubagent({

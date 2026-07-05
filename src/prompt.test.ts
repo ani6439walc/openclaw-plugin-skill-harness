@@ -704,6 +704,12 @@ describe("buildIntentInstructionPrompt", () => {
     );
     expect(prompt).toContain("MUST read skill: <skill-name> at <path>");
     expect(prompt).toContain("REQUIRED skill: <skill-name>");
+    expect(prompt).toContain("may use the read tool to inspect");
+    expect(prompt).toContain("SKILL.md paths listed in available_skills");
+    expect(prompt).toContain(
+      "If writing a concrete workflow depends on details not present in the skill description",
+    );
+    expect(prompt).toContain("Do not read unrelated files");
     expect(prompt).toContain("merely related or optional skills");
     expect(prompt).toContain("menu of possible guidance, not a checklist");
     expect(prompt).toContain("omit unrelated workflows");
