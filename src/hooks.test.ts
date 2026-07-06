@@ -562,7 +562,10 @@ describe("createHookHandlers topic switch flow", () => {
       ...((params.configRaw as Record<string, unknown> | undefined) ?? {}),
       instruction: {
         enabled: true,
-        ...((params.configRaw as { instruction?: Record<string, unknown> } | undefined)?.instruction ?? {}),
+        ...((
+          params.configRaw as
+            { instruction?: Record<string, unknown> } | undefined
+        )?.instruction ?? {}),
       },
     };
     const handlers = createHookHandlers({
@@ -1439,6 +1442,48 @@ describe("createHookHandlers topic switch flow", () => {
         configRaw: {
           model: "google/test-intent",
           instruction: { enabled: false },
+        },
+      });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result?.prependContext).not.toContain(
+      "Follow the generated coding instructions.",
+    );
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining([
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
+      ]),
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              intent: "social-casual",
+              topicChangeReason: "start",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(
+      record.mock.calls[0][1].current.intent.instructionText,
+    ).toBeUndefined();
+  });
+
+  it("falls back to domain skills when instruction model cannot be resolved", async () => {
+    const { handlers, instructionWriter, record, emitAgentEvent } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        configRaw: {
+          model: "google/test-intent",
+          instruction: { enabled: true, model: "/" },
         },
       });
 

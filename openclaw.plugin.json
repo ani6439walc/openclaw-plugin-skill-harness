@@ -191,7 +191,7 @@
         "properties": {
           "enabled": {
             "type": "boolean",
-            "default": false
+            "default": true
           },
           "model": {
             "type": "string",

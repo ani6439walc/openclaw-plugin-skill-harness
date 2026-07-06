@@ -50,7 +50,7 @@ describe("resolveConfig", () => {
         },
       });
       expect(result.instruction).toMatchObject({
-        enabled: false,
+        enabled: true,
         model: undefined,
         modelFallback: undefined,
         thinking: "medium",

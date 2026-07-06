@@ -1008,7 +1008,28 @@ export function createHookHandlers(deps: HookDeps) {
         modelId: params.ctx.modelId,
       },
     );
-    if (!instructionModelRef) return;
+    if (!instructionModelRef) {
+      logger.debug(
+        "instruction writer model unavailable; injecting domain skills without generated hint.",
+      );
+      recordPromptBuildResult({
+        ctx: params.ctx,
+        routing: params.routing,
+        latestUserMessage: params.latestUserMessage,
+        result,
+        conversation: params.conversation,
+      });
+      return {
+        prependContext: buildDomainSkillsPromptPrefix(
+          result,
+          await resolvePromptDomainSkills({
+            agentId: params.routing.effectiveAgentId,
+            domain: result.domain,
+            availableIntents: params.availableIntents,
+          }),
+        ),
+      };
+    }
 
     emitPipelineEvent(
       params.ctx,

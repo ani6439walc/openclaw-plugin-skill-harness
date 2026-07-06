@@ -43,7 +43,7 @@ const DEFAULT_COMPLEXITY_PROMPTS = {
 };
 
 const DEFAULT_INSTRUCTION = {
-  enabled: false,
+  enabled: true,
   model: undefined,
   modelFallback: undefined,
   thinking: "medium",
@@ -159,7 +159,7 @@ const LowThinkingModeSchema = z
   .catch("fastpath-only");
 const InstructionSchema = z
   .object({
-    enabled: z.boolean().catch(false),
+    enabled: z.boolean().catch(true),
     model: z.string().optional().catch(undefined),
     modelFallback: z.string().optional().catch(undefined),
     thinking: ThinkLevelSchema,

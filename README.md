@@ -296,7 +296,7 @@ pnpm run build
             high: "Custom high-complexity prompt...",
           },
           instruction: {
-            enabled: false,
+            enabled: true,
             model: "google/gemini-3-flash",
             modelFallback: "openai/gpt-5-mini",
             thinking: "medium", // instruction writer subagent thinking level
@@ -342,7 +342,7 @@ pnpm run build
 | `contextWindow`     | `object`   | see below         | Turn/char limits for conversation extraction.                                                                                                                                 |
 | `timeoutMs`         | `number`   | `3000`            | Max wait time for each scanner sub-agent run. Clamped to 250–120000ms.                                                                                                        |
 | `complexityPrompts` | `object`   | built-in          | Custom instruction-generation guidance per complexity level.                                                                                                                  |
-| `instruction`       | `object`   | disabled          | Instruction writer configuration. When disabled, the hook injects only `<domain_skills>` and skips generated hints.                                                           |
+| `instruction`       | `object`   | enabled           | Instruction writer configuration. When disabled or model resolution fails, the hook injects only `<domain_skills>` and skips generated hints.                                 |
 | `evolution`         | `object`   | disabled          | Post-turn trigger review configuration. Findings and runtime trigger keywords are stored in `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json`.                       |
 
 `instruction.thinking` independently controls the instruction writer subagent,

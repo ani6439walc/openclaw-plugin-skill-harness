@@ -85,11 +85,11 @@ describe("skill-harness manifest", () => {
     ).toBe(0.5);
   });
 
-  it("exposes disabled-by-default instruction writer settings without triggers", () => {
+  it("exposes enabled-by-default instruction writer settings without triggers", () => {
     const instruction = manifest.configSchema.properties.instruction;
 
     expect(instruction.description).toContain("instruction writer");
-    expect(instruction.properties.enabled.default).toBe(false);
+    expect(instruction.properties.enabled.default).toBe(true);
     expect(instruction.properties.model.description).toContain(
       "Dedicated model",
     );
