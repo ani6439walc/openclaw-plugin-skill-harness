@@ -245,7 +245,11 @@ export function resolveAvailableSkills(params: {
     path.join(stateDir, "plugin-skills"),
     bundledSkillsDir,
   ].filter((root): root is string => Boolean(root));
-  const disabledBundledSkillNames = readDisabledBundledSkillNames(stateDir);
+  let disabledBundledSkillNames: Set<string> | undefined;
+  const getDisabledBundledSkillNames = () => {
+    disabledBundledSkillNames ??= readDisabledBundledSkillNames(stateDir);
+    return disabledBundledSkillNames;
+  };
 
   const skills: AvailableSkill[] = [];
   const seen = new Set<string>();
@@ -257,7 +261,9 @@ export function resolveAvailableSkills(params: {
       const skill = getCachedSkillIndex(root, {
         cacheTtlMs: params.cacheTtlMs,
         disabledSkillNames:
-          root === bundledSkillsDir ? disabledBundledSkillNames : undefined,
+          root === bundledSkillsDir
+            ? getDisabledBundledSkillNames()
+            : undefined,
         nowMs: params.nowMs,
       }).get(normalizedName);
       if (!skill) continue;

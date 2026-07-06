@@ -515,6 +515,7 @@ describe("createHookHandlers topic switch flow", () => {
     topicChecker?: ReturnType<typeof vi.fn>;
     instructionWriter?: ReturnType<typeof vi.fn>;
     api?: Partial<OpenClawPluginApi>;
+    bundledSkillsDir?: string;
   }) {
     emitHostAgentEvent.mockReset();
     const intents = params.intents ?? [intent];
@@ -570,6 +571,7 @@ describe("createHookHandlers topic switch flow", () => {
       classifier,
       topicChecker,
       instructionWriter,
+      bundledSkillsDir: params.bundledSkillsDir,
     });
 
     return {
@@ -1609,6 +1611,7 @@ describe("createHookHandlers topic switch flow", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-hook-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
+    const bundled = path.join(tmp, "bundled");
     writeSkill(
       path.join(workspace, "skills"),
       "architecture-diagram",
@@ -1620,6 +1623,7 @@ describe("createHookHandlers topic switch flow", () => {
       "Drive changes with tests.",
     );
     writeSkill(path.join(state, "skills"), "blogwatcher", "Watch blogs.");
+    writeSkill(bundled, "codegraph-analysis", "Analyze code graphs.");
 
     const skillIntent = {
       id: "architecture",
@@ -1651,6 +1655,16 @@ describe("createHookHandlers topic switch flow", () => {
         prompt: "## Guidelines\n\nUse skill: blogwatcher.",
       },
     };
+    const codegraphIntent = {
+      id: "codegraph",
+      definition: {
+        triggers: ["codegraph"],
+        examples: ["analyze code graph"],
+        domain: "coding",
+        fastpath: { keywords: [] },
+        prompt: "## Guidelines\n\nUse skill: codegraph-analysis.",
+      },
+    };
     const classifier = vi.fn().mockResolvedValue({
       intent: "architecture",
       reason: "User wants a diagram",
@@ -1663,8 +1677,9 @@ describe("createHookHandlers topic switch flow", () => {
     });
     const { handlers, instructionWriter } = createTopicFlowHarness({
       historicalIntents: [],
-      intents: [skillIntent, testingIntent, researchIntent],
+      intents: [skillIntent, testingIntent, researchIntent, codegraphIntent],
       classifier,
+      bundledSkillsDir: bundled,
       api: {
         runtime: {
           state: { resolveStateDir: () => state },
@@ -1709,6 +1724,13 @@ describe("createHookHandlers topic switch flow", () => {
     );
     expect(result?.prependContext).toContain(
       "<description>Drive changes with tests.</description>",
+    );
+    expect(result?.prependContext).toContain("<name>codegraph-analysis</name>");
+    expect(result?.prependContext).toContain(
+      `<path>${path.join(bundled, "codegraph-analysis", "SKILL.md")}</path>`,
+    );
+    expect(result?.prependContext).toContain(
+      "<description>Analyze code graphs.</description>",
     );
     expect(result?.prependContext).not.toContain("blogwatcher");
   });

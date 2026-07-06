@@ -134,6 +134,7 @@ export type HookDeps = {
   instructionWriter?: typeof runIntentInstructionSubagent;
   backlogWriter?: Pick<BacklogWriter, "record">;
   triggerKeywords?: () => EvolutionTriggerKeywords;
+  bundledSkillsDir?: string;
 };
 
 function readTriggerKeywordsFailOpen(
@@ -422,6 +423,7 @@ export function createHookHandlers(deps: HookDeps) {
   const instructionWriter =
     deps.instructionWriter ?? runIntentInstructionSubagent;
   const backlogWriter = deps.backlogWriter ?? defaultBacklogWriter;
+  const bundledSkillsDir = deps.bundledSkillsDir;
 
   function emitPipelineEvent(
     ctx: Pick<PluginHookAgentContext, "runId" | "sessionId">,
@@ -784,6 +786,7 @@ export function createHookHandlers(deps: HookDeps) {
     return resolveDomainSkills({
       api,
       agentId: params.agentId,
+      bundledSkillsDir,
       domain: params.domain,
       intents: params.availableIntents,
     });
@@ -972,6 +975,7 @@ export function createHookHandlers(deps: HookDeps) {
       availableSkills: resolveAvailableSkills({
         api,
         agentId: params.routing.effectiveAgentId,
+        bundledSkillsDir,
         intentBody,
       }),
       messageProvider: params.ctx.messageProvider,
@@ -1215,6 +1219,7 @@ export function createHookHandlers(deps: HookDeps) {
         ? resolveAvailableSkills({
             api,
             agentId,
+            bundledSkillsDir,
             intentBody: intentDefinition.definition.prompt,
           })
         : [],
