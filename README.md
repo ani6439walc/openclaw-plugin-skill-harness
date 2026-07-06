@@ -560,11 +560,14 @@ metadata is resolved from workspace `skills/`, state `skills/`, state
 `plugin-skills/`, then bundled OpenClaw skills. Each root is searched
 recursively for directories containing `SKILL.md`, including symlinked skill
 directories or `SKILL.md` files while guarding against directory cycles; the
-skill frontmatter `name` must match the referenced skill name. Skill root indexes are cached briefly
-across prompt-build turns, expired entries are swept before reuse, and the cache
-is size-bounded so missing skill references do not rescan entire roots on every
-turn. The Evolution review prompt receives the same resolved skill metadata when
-a matched intent exists.
+skill frontmatter `name` must match the referenced skill name. Bundled skill
+scans also honor `skills.entries` in OpenClaw's state `openclaw.json`: entries
+with `enabled: false` are skipped for the bundled root while workspace, state,
+and plugin skill roots can still override them. Skill root indexes are cached
+briefly across prompt-build turns, expired entries are swept before reuse, and
+the cache is size-bounded so missing skill references do not rescan entire roots
+on every turn. The Evolution review prompt receives the same resolved skill
+metadata when a matched intent exists.
 
 The final main-agent prompt prefix always includes a `<domain_skills>` XML block
 once `onBeforePromptBuild` has resolved the current domain. This block is separate

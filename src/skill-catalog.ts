@@ -17,6 +17,10 @@ interface CachedSkillIndex {
   index: Map<string, AvailableSkill>;
 }
 
+interface SkillIndexOptions {
+  disabledSkillNames?: ReadonlySet<string>;
+}
+
 const skillIndexCache = new Map<string, CachedSkillIndex>();
 
 function sweepExpiredSkillIndexes(nowMs: number): void {
@@ -90,9 +94,44 @@ function resolveChildDirectory(
   return readEntryStat(entryPath)?.isDirectory() ? entryPath : undefined;
 }
 
-function buildSkillIndex(root: string): Map<string, AvailableSkill> {
+function readDisabledBundledSkillNames(stateDir: string): Set<string> {
+  const configPath = path.join(stateDir, "openclaw.json");
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf-8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return new Set();
+    const skills = (parsed as { skills?: unknown }).skills;
+    if (!skills || typeof skills !== "object") return new Set();
+    const entries = (skills as { entries?: unknown }).entries;
+    if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+      return new Set();
+    }
+
+    const disabled = new Set<string>();
+    for (const [name, entry] of Object.entries(entries)) {
+      if (!entry || typeof entry !== "object") continue;
+      if ((entry as { enabled?: unknown }).enabled === false) {
+        disabled.add(name.toLowerCase());
+      }
+    }
+    return disabled;
+  } catch (err) {
+    if (fs.existsSync(configPath)) {
+      logger.warn("failed to read OpenClaw skill entry configuration", {
+        error: err,
+        path: configPath,
+      });
+    }
+    return new Set();
+  }
+}
+
+function buildSkillIndex(
+  root: string,
+  options: SkillIndexOptions = {},
+): Map<string, AvailableSkill> {
   const index = new Map<string, AvailableSkill>();
   const visitedDirs = new Set<string>();
+  const disabledSkillNames = options.disabledSkillNames ?? new Set<string>();
 
   function visit(dir: string, depth = 0): void {
     if (depth > SKILL_INDEX_MAX_DEPTH) return;
@@ -116,6 +155,7 @@ function buildSkillIndex(root: string): Map<string, AvailableSkill> {
     if (entries.some((entry) => isSkillFileEntry(dir, entry))) {
       const skill = readSkillFile(path.join(dir, "SKILL.md"));
       const key = skill?.name.toLowerCase();
+      if (key && disabledSkillNames.has(key)) return;
       if (skill && key) {
         if (index.has(key)) {
           logger.warn("duplicate skill name ignored while indexing skills", {
@@ -130,6 +170,7 @@ function buildSkillIndex(root: string): Map<string, AvailableSkill> {
     }
 
     const childDirs = entries
+      .filter((entry) => !disabledSkillNames.has(entry.name.toLowerCase()))
       .map((entry) => resolveChildDirectory(dir, entry))
       .filter((childDir): childDir is string => Boolean(childDir))
       .sort((left, right) => left.localeCompare(right));
@@ -145,28 +186,34 @@ function buildSkillIndex(root: string): Map<string, AvailableSkill> {
 
 function getCachedSkillIndex(
   root: string,
-  options: { cacheTtlMs?: number; nowMs?: number } = {},
+  options: { cacheTtlMs?: number; nowMs?: number } & SkillIndexOptions = {},
 ): Map<string, AvailableSkill> {
   const nowMs = options.nowMs ?? Date.now();
   const cacheTtlMs = options.cacheTtlMs ?? SKILL_INDEX_CACHE_TTL_MS;
+  const disabledCacheKey = options.disabledSkillNames
+    ? [...options.disabledSkillNames].sort().join(",")
+    : "";
+  const cacheKey = `${root}\0${disabledCacheKey}`;
   sweepExpiredSkillIndexes(nowMs);
 
-  const cached = skillIndexCache.get(root);
+  const cached = skillIndexCache.get(cacheKey);
   if (cached) {
-    skillIndexCache.delete(root);
-    skillIndexCache.set(root, cached);
+    skillIndexCache.delete(cacheKey);
+    skillIndexCache.set(cacheKey, cached);
     return cached.index;
   }
 
-  const index = buildSkillIndex(root);
+  const index = buildSkillIndex(root, {
+    disabledSkillNames: options.disabledSkillNames,
+  });
   if (cacheTtlMs > 0) {
     pruneOldestSkillIndexes(SKILL_INDEX_CACHE_MAX_ENTRIES);
-    skillIndexCache.set(root, {
+    skillIndexCache.set(cacheKey, {
       expiresAtMs: nowMs + cacheTtlMs,
       index,
     });
   } else {
-    skillIndexCache.delete(root);
+    skillIndexCache.delete(cacheKey);
   }
   return index;
 }
@@ -198,6 +245,7 @@ export function resolveAvailableSkills(params: {
     path.join(stateDir, "plugin-skills"),
     bundledSkillsDir,
   ].filter((root): root is string => Boolean(root));
+  const disabledBundledSkillNames = readDisabledBundledSkillNames(stateDir);
 
   const skills: AvailableSkill[] = [];
   const seen = new Set<string>();
@@ -208,6 +256,8 @@ export function resolveAvailableSkills(params: {
     for (const root of roots) {
       const skill = getCachedSkillIndex(root, {
         cacheTtlMs: params.cacheTtlMs,
+        disabledSkillNames:
+          root === bundledSkillsDir ? disabledBundledSkillNames : undefined,
         nowMs: params.nowMs,
       }).get(normalizedName);
       if (!skill) continue;

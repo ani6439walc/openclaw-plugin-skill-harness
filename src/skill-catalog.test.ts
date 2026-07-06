@@ -26,6 +26,17 @@ function writeSkillAt(dir: string, name: string, description: string): void {
   );
 }
 
+function writeOpenClawSkillEntries(
+  stateDir: string,
+  entries: Record<string, { enabled?: boolean }>,
+): void {
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(stateDir, "openclaw.json"),
+    JSON.stringify({ skills: { entries } }),
+  );
+}
+
 describe("skill catalog", () => {
   it("extracts unique skill references from intent markdown", () => {
     expect(
@@ -107,6 +118,81 @@ describe("skill catalog", () => {
         description: "Bundled blog watcher.",
       },
     ]);
+  });
+
+  it("filters disabled bundled skill entries from OpenClaw config", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    const bundled = path.join(tmp, "bundled");
+    const disabledBundledDir = path.join(bundled, "disabled-bundled");
+
+    writeOpenClawSkillEntries(state, {
+      "disabled-bundled": { enabled: false },
+      "disabled-frontmatter": { enabled: false },
+      "enabled-bundled": { enabled: true },
+    });
+    writeSkill(
+      path.join(workspace, "skills"),
+      "disabled-bundled",
+      "Workspace copy remains available.",
+    );
+    writeSkill(bundled, "disabled-bundled", "Disabled bundled skill.");
+    writeSkillAt(
+      path.join(disabledBundledDir, "nested"),
+      "nested-disabled",
+      "Nested disabled bundled skill.",
+    );
+    writeSkill(
+      bundled,
+      "disabled-frontmatter",
+      "Disabled by frontmatter name.",
+    );
+    writeSkill(bundled, "enabled-bundled", "Enabled bundled skill.");
+
+    const api = {
+      config: {},
+      runtime: {
+        state: { resolveStateDir: () => state },
+        agent: { resolveAgentWorkspaceDir: () => workspace },
+      },
+    } as unknown as OpenClawPluginApi;
+    const readdirSpy = vi.spyOn(fs, "readdirSync");
+
+    try {
+      expect(
+        resolveAvailableSkills({
+          api,
+          agentId: "main",
+          bundledSkillsDir: bundled,
+          cacheTtlMs: 0,
+          intentBody:
+            "skill: disabled-bundled\nskill: disabled-frontmatter\nskill: nested-disabled\nskill: enabled-bundled",
+        }),
+      ).toEqual([
+        {
+          name: "disabled-bundled",
+          location: path.join(
+            workspace,
+            "skills",
+            "disabled-bundled",
+            "SKILL.md",
+          ),
+          description: "Workspace copy remains available.",
+        },
+        {
+          name: "enabled-bundled",
+          location: path.join(bundled, "enabled-bundled", "SKILL.md"),
+          description: "Enabled bundled skill.",
+        },
+      ]);
+
+      const calls = readdirSpy.mock.calls.map(([target]) => String(target));
+      expect(calls).not.toContain(disabledBundledDir);
+      expect(calls).not.toContain(path.join(disabledBundledDir, "nested"));
+    } finally {
+      readdirSpy.mockRestore();
+    }
   });
 
   it("loads referenced skills from nested directories in every root", () => {
