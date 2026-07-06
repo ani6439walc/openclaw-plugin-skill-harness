@@ -559,14 +559,10 @@ describe("createHookHandlers topic switch flow", () => {
     const emitAgentEvent = emitHostAgentEvent;
     const rawConfig = {
       model: "google/test-intent",
-      instruction: { enabled: true },
-      ...(params.configRaw as Record<string, unknown> | undefined),
+      ...((params.configRaw as Record<string, unknown> | undefined) ?? {}),
       instruction: {
         enabled: true,
-        ...(
-          params.configRaw as
-            { instruction?: Record<string, unknown> } | undefined
-        )?.instruction,
+        ...((params.configRaw as { instruction?: Record<string, unknown> } | undefined)?.instruction ?? {}),
       },
     };
     const handlers = createHookHandlers({
