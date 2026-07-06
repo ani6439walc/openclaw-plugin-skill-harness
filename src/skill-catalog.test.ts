@@ -323,6 +323,40 @@ describe("skill catalog", () => {
     ]);
   });
 
+  it("ignores blank optional skill roots", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    writeSkill(
+      path.join(workspace, "skills"),
+      "workspace-only",
+      "Workspace skill.",
+    );
+
+    const api = {
+      config: {},
+      runtime: {
+        state: { resolveStateDir: () => state },
+        agent: { resolveAgentWorkspaceDir: () => workspace },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    expect(
+      resolveAvailableSkills({
+        api,
+        agentId: "main",
+        bundledSkillsDir: "",
+        intentBody: "skill: workspace-only\nskill: missing",
+      }),
+    ).toEqual([
+      {
+        name: "workspace-only",
+        location: path.join(workspace, "skills", "workspace-only", "SKILL.md"),
+        description: "Workspace skill.",
+      },
+    ]);
+  });
+
   it("loads skills referenced by every intent in the requested domain", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");

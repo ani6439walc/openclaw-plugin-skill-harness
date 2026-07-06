@@ -8,6 +8,7 @@ import type { AvailableSkill, IntentCatalogEntry } from "./types.js";
 
 const SKILL_REF_RE = /\bskill:\s*([A-Za-z0-9_-]+)/gi;
 const SKILL_INDEX_CACHE_TTL_MS = 60_000;
+const SKILL_INDEX_CACHE_MAX_ENTRIES = 128;
 const require = createRequire(import.meta.url);
 
 interface CachedSkillIndex {
@@ -16,6 +17,22 @@ interface CachedSkillIndex {
 }
 
 const skillIndexCache = new Map<string, CachedSkillIndex>();
+
+function sweepExpiredSkillIndexes(nowMs: number): void {
+  for (const [root, cached] of skillIndexCache) {
+    if (cached.expiresAtMs <= nowMs) {
+      skillIndexCache.delete(root);
+    }
+  }
+}
+
+function pruneOldestSkillIndexes(maxEntries: number): void {
+  while (skillIndexCache.size >= maxEntries) {
+    const oldestRoot = skillIndexCache.keys().next().value;
+    if (!oldestRoot) return;
+    skillIndexCache.delete(oldestRoot);
+  }
+}
 
 export function extractReferencedSkillNames(markdown: string): string[] {
   const names: string[] = [];
@@ -94,11 +111,18 @@ function getCachedSkillIndex(
 ): Map<string, AvailableSkill> {
   const nowMs = options.nowMs ?? Date.now();
   const cacheTtlMs = options.cacheTtlMs ?? SKILL_INDEX_CACHE_TTL_MS;
+  sweepExpiredSkillIndexes(nowMs);
+
   const cached = skillIndexCache.get(root);
-  if (cached && cached.expiresAtMs > nowMs) return cached.index;
+  if (cached) {
+    skillIndexCache.delete(root);
+    skillIndexCache.set(root, cached);
+    return cached.index;
+  }
 
   const index = buildSkillIndex(root);
   if (cacheTtlMs > 0) {
+    pruneOldestSkillIndexes(SKILL_INDEX_CACHE_MAX_ENTRIES);
     skillIndexCache.set(root, {
       expiresAtMs: nowMs + cacheTtlMs,
       index,
@@ -135,7 +159,7 @@ export function resolveAvailableSkills(params: {
     path.join(stateDir, "skills"),
     path.join(stateDir, "plugin-skills"),
     bundledSkillsDir,
-  ];
+  ].filter((root): root is string => Boolean(root));
 
   const skills: AvailableSkill[] = [];
   const seen = new Set<string>();
