@@ -3,7 +3,7 @@ name: skill-harness
 description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution backlog finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
 ---
 
-# Skill Harness Skill
+# Skill Harness
 
 Manage the full lifecycle of intent definitions: from single-intent CRUD (design), to full-catalog bootstrap (inventory), to automated self-improvement (evolve).
 

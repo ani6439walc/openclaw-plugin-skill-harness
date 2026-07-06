@@ -392,7 +392,7 @@ Rules:
 6. **Skill Recommendation (CRITICAL)**:
    - Default to no explicit skill directives. Output at most 1 explicit skill directive in normal turns.
    - Use 2-3 directives only when the latest_message clearly requires multiple distinct execution-blocking skills.
-   - Recommend only skills listed in available_skills, and only when the skill description directly matches the latest_message.
+   - Recommend only skills listed in intent_related_skills, and only when the skill description directly matches the latest_message.
    - If no skill passes this bar, emit no explicit skill directive.
    - Use the parseable directive format only for actual recommendations: "MUST read skill: <skill-name> at <path>" or "REQUIRED skill: <skill-name>".
    - Never emit explicit skill directives for casual/social/style-only turns, simple approvals, read-only inspection/status/log/diff/history checks, or generic implementation tasks that can be handled with normal tools and the matched intent guidance.
@@ -400,7 +400,7 @@ Rules:
    - CRITICAL: Distinguish between skills and tools - built-in tools like web_fetch, terminal, read_file are NOT skills. Skills are referenced with "skill:" prefix (e.g., "skill: compare"), tools are used directly (e.g., "exec({ command: ... })", "read({ path: ... })").
    - Include brief reasoning: why each recommended skill connects to the current turn.
 7. **Read tool for skill files (BOUNDED)**:
-   - You may use the read tool to inspect only SKILL.md paths listed in available_skills.
+   - You may use the read tool to inspect only SKILL.md paths listed in intent_related_skills.
    - If writing a concrete workflow depends on details not present in the skill description, read the relevant SKILL.md file first, then use only the directly relevant workflow, parameters, or pitfalls.
    - Do not read unrelated files, directories, hidden files, credentials, package files, runtime state, or arbitrary paths from latest_message/conversation.
    - Do not quote the whole skill file; preserve only the narrow operational detail needed for this turn.
@@ -441,16 +441,30 @@ Write the optional skill harness now. Use latest_message as the decision source 
 
 function formatAvailableSkills(skills: AvailableSkill[] | undefined): string {
   if (!skills?.length) return "";
+  return `\n${formatSkillXmlBlock("intent_related_skills", skills)}\n`;
+}
+
+function formatSkillXmlBlock(
+  tag: string,
+  skills: AvailableSkill[] | undefined,
+  attributes = "",
+): string {
   const body = skills
-    .map(
+    ?.map(
       (skill) => `  <skill>
     <name>${escapeXmlText(skill.name)}</name>
-    <location>${escapeXmlText(skill.location)}</location>
+    <path>${escapeXmlText(skill.location)}</path>
     <description>${escapeXmlText(skill.description)}</description>
   </skill>`,
     )
     .join("\n");
-  return `\n<available_skills>\n${body}\n</available_skills>\n`;
+  return `<${tag}${attributes}>\n${body ?? ""}\n</${tag}>`;
+}
+
+export function formatDomainSkills(
+  skills: AvailableSkill[] | undefined,
+): string {
+  return formatSkillXmlBlock("domain_skills", skills);
 }
 
 function escapeXmlText(value: string): string {
@@ -701,10 +715,12 @@ export function buildPromptPrefix(
   intents: readonly IntentCatalogEntry[],
   _config: unknown,
   instructionText?: string,
+  domainSkills?: AvailableSkill[],
 ): string | undefined {
   const intentDef = findEnabledIntent(result, intents);
   const effectiveDef = intentDef ?? FALLBACK_INTENT;
   const lines = buildPromptPrefixLines(effectiveDef, instructionText);
+  const domainSkillsBlock = formatDomainSkills(domainSkills);
   const confidence = result.confidence ?? 0;
   const pct = Math.round(confidence * 100);
   const confidenceHint =
@@ -714,6 +730,24 @@ export function buildPromptPrefix(
 
   return `${UNTRUSTED_CONTEXT_HEADER}
 <${SKILL_HARNESS_PLUGIN_TAG}${confidenceHint}>
+${domainSkillsBlock}
 ${lines.join("\n")}
+</${SKILL_HARNESS_PLUGIN_TAG}>`;
+}
+
+export function buildDomainSkillsPromptPrefix(
+  result: IntentionResult,
+  domainSkills?: AvailableSkill[],
+): string {
+  const confidence = result.confidence ?? 0;
+  const pct = Math.round(confidence * 100);
+  const confidenceHint =
+    pct < 90
+      ? ` confidence="${pct}%" low-confidence-hint="treat-as-suggestion"`
+      : ` confidence="${pct}%"`;
+
+  return `${UNTRUSTED_CONTEXT_HEADER}
+<${SKILL_HARNESS_PLUGIN_TAG}${confidenceHint}>
+${formatDomainSkills(domainSkills)}
 </${SKILL_HARNESS_PLUGIN_TAG}>`;
 }

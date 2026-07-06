@@ -591,7 +591,7 @@ describe("parseTopicSwitchResult", () => {
 });
 
 describe("buildIntentInstructionPrompt", () => {
-  it("includes available skills when provided", () => {
+  it("includes intent-related skills when provided", () => {
     const prompt = buildIntentInstructionPrompt({
       latest: "draw architecture",
       result: {
@@ -613,17 +613,17 @@ describe("buildIntentInstructionPrompt", () => {
         "<complexity_context>Use a balanced flow.</complexity_context>",
     });
 
-    expect(prompt).toContain("<available_skills>");
+    expect(prompt).toContain("<intent_related_skills>");
     expect(prompt).toContain("<name>architecture-diagram</name>");
     expect(prompt).toContain(
-      "<location>/skills/architecture-diagram/SKILL.md</location>",
+      "<path>/skills/architecture-diagram/SKILL.md</path>",
     );
     expect(prompt).toContain(
       "<description>Draw architecture diagrams.</description>",
     );
   });
 
-  it("omits available skills when none are provided", () => {
+  it("omits intent-related skills when none are provided", () => {
     const prompt = buildIntentInstructionPrompt({
       latest: "draw architecture",
       result: {
@@ -638,7 +638,7 @@ describe("buildIntentInstructionPrompt", () => {
         "<complexity_context>Use a balanced flow.</complexity_context>",
     });
 
-    expect(prompt).not.toContain("<available_skills>");
+    expect(prompt).not.toContain("<intent_related_skills>");
   });
 
   it("includes the matched intent body, latest message, and instruction requirements", () => {
@@ -697,7 +697,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("at most 1 explicit skill directive");
     expect(prompt).toContain("Use 2-3 directives only when");
     expect(prompt).toContain(
-      "Recommend only skills listed in available_skills",
+      "Recommend only skills listed in intent_related_skills",
     );
     expect(prompt).toContain(
       "If no skill passes this bar, emit no explicit skill directive",
@@ -705,7 +705,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("MUST read skill: <skill-name> at <path>");
     expect(prompt).toContain("REQUIRED skill: <skill-name>");
     expect(prompt).toContain("may use the read tool to inspect");
-    expect(prompt).toContain("SKILL.md paths listed in available_skills");
+    expect(prompt).toContain("SKILL.md paths listed in intent_related_skills");
     expect(prompt).toContain(
       "If writing a concrete workflow depends on details not present in the skill description",
     );
@@ -1270,7 +1270,7 @@ describe("buildPromptPrefix", () => {
     expect(prefix).not.toContain("complexity: medium");
   });
 
-  it("uses generated instruction text when provided", () => {
+  it("places generated instruction text after domain skills when provided", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants code",
@@ -1283,9 +1283,20 @@ describe("buildPromptPrefix", () => {
       mockIntents,
       mockConfig,
       "Run tests first, then edit with apply_patch.",
+      [
+        {
+          name: "test-driven-development",
+          location: "/skills/test-driven-development/SKILL.md",
+          description: "Drive changes with tests.",
+        },
+      ],
     );
 
     expect(prefix).toContain("Run tests first, then edit with apply_patch.");
+    expect(prefix).toContain("<domain_skills>");
+    expect(prefix!.indexOf("<domain_skills>")).toBeLessThan(
+      prefix!.indexOf("Run tests first, then edit with apply_patch."),
+    );
     expect(prefix).not.toContain("Write clean, well-tested code.");
   });
 

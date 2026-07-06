@@ -8,6 +8,7 @@ import { createHookHandlers } from "./hooks.js";
 import { defaultTracker } from "./session-tracker.js";
 import { defaultStatsAggregator } from "./stats-aggregator.js";
 import { defaultCatalog, filterIntentsForAgent } from "./intent-loader.js";
+import type { IntentCatalogEntry } from "./types.js";
 import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness";
 
 vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
@@ -509,11 +510,12 @@ describe("createHookHandlers topic switch flow", () => {
       typeof defaultTracker.getHistoricalIntentRecords
     >;
     configRaw?: Parameters<typeof resolveConfig>[0];
-    intents?: (typeof intent)[];
+    intents?: IntentCatalogEntry[];
     classifier?: ReturnType<typeof vi.fn>;
     topicChecker?: ReturnType<typeof vi.fn>;
     instructionWriter?: ReturnType<typeof vi.fn>;
     api?: Partial<OpenClawPluginApi>;
+    bundledSkillsDir?: string;
   }) {
     emitHostAgentEvent.mockReset();
     const intents = params.intents ?? [intent];
@@ -569,6 +571,7 @@ describe("createHookHandlers topic switch flow", () => {
       classifier,
       topicChecker,
       instructionWriter,
+      bundledSkillsDir: params.bundledSkillsDir,
     });
 
     return {
@@ -983,7 +986,7 @@ describe("createHookHandlers topic switch flow", () => {
       ctx,
     );
 
-    expect(result).toBeUndefined();
+    expect(result?.prependContext).toContain("<domain_skills>");
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(topicChecker).toHaveBeenCalledWith(
       expect.objectContaining({ domains: ["chat", "git"] }),
@@ -1242,7 +1245,7 @@ describe("createHookHandlers topic switch flow", () => {
       ctx,
     );
 
-    expect(result).toBeUndefined();
+    expect(result?.prependContext).toContain("<domain_skills>");
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalledWith(
@@ -1275,7 +1278,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result).toBeUndefined();
+    expect(result?.prependContext).toContain("<domain_skills>");
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
@@ -1329,7 +1332,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result).toBeUndefined();
+    expect(result?.prependContext).toContain("<domain_skills>");
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalled();
   });
@@ -1608,11 +1611,19 @@ describe("createHookHandlers topic switch flow", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-hook-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
+    const bundled = path.join(tmp, "bundled");
     writeSkill(
       path.join(workspace, "skills"),
       "architecture-diagram",
       "Draw architecture diagrams.",
     );
+    writeSkill(
+      path.join(state, "plugin-skills"),
+      "test-driven-development",
+      "Drive changes with tests.",
+    );
+    writeSkill(path.join(state, "skills"), "blogwatcher", "Watch blogs.");
+    writeSkill(bundled, "codegraph-analysis", "Analyze code graphs.");
 
     const skillIntent = {
       id: "architecture",
@@ -1622,6 +1633,36 @@ describe("createHookHandlers topic switch flow", () => {
         domain: "coding",
         fastpath: { keywords: [] },
         prompt: "## Guidelines\n\nUse skill: architecture-diagram.",
+      },
+    };
+    const testingIntent = {
+      id: "testing",
+      definition: {
+        triggers: ["test"],
+        examples: ["add tests"],
+        domain: "coding",
+        fastpath: { keywords: [] },
+        prompt: "## Guidelines\n\nUse skill: test-driven-development.",
+      },
+    };
+    const researchIntent = {
+      id: "research",
+      definition: {
+        triggers: ["research"],
+        examples: ["watch blogs"],
+        domain: "research",
+        fastpath: { keywords: [] },
+        prompt: "## Guidelines\n\nUse skill: blogwatcher.",
+      },
+    };
+    const codegraphIntent = {
+      id: "codegraph",
+      definition: {
+        triggers: ["codegraph"],
+        examples: ["analyze code graph"],
+        domain: "coding",
+        fastpath: { keywords: [] },
+        prompt: "## Guidelines\n\nUse skill: codegraph-analysis.",
       },
     };
     const classifier = vi.fn().mockResolvedValue({
@@ -1636,8 +1677,9 @@ describe("createHookHandlers topic switch flow", () => {
     });
     const { handlers, instructionWriter } = createTopicFlowHarness({
       historicalIntents: [],
-      intents: [skillIntent],
+      intents: [skillIntent, testingIntent, researchIntent, codegraphIntent],
       classifier,
+      bundledSkillsDir: bundled,
       api: {
         runtime: {
           state: { resolveStateDir: () => state },
@@ -1646,7 +1688,7 @@ describe("createHookHandlers topic switch flow", () => {
       } as unknown as Partial<OpenClawPluginApi>,
     });
 
-    await handlers.onBeforePromptBuild(
+    const result = await handlers.onBeforePromptBuild(
       {
         prompt: "draw architecture",
         messages: [{ role: "user", content: "draw architecture" }],
@@ -1670,6 +1712,27 @@ describe("createHookHandlers topic switch flow", () => {
         ],
       }),
     );
+    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result?.prependContext).toContain(
+      "<name>architecture-diagram</name>",
+    );
+    expect(result?.prependContext).toContain(
+      "<name>test-driven-development</name>",
+    );
+    expect(result?.prependContext).toContain(
+      `<path>${path.join(state, "plugin-skills", "test-driven-development", "SKILL.md")}</path>`,
+    );
+    expect(result?.prependContext).toContain(
+      "<description>Drive changes with tests.</description>",
+    );
+    expect(result?.prependContext).toContain("<name>codegraph-analysis</name>");
+    expect(result?.prependContext).toContain(
+      `<path>${path.join(bundled, "codegraph-analysis", "SKILL.md")}</path>`,
+    );
+    expect(result?.prependContext).toContain(
+      "<description>Analyze code graphs.</description>",
+    );
+    expect(result?.prependContext).not.toContain("blogwatcher");
   });
 
   it("falls back to classifier-only when topic checker returns no result", async () => {
@@ -1731,7 +1794,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
-    expect(result?.prependContext).toBeUndefined();
+    expect(result?.prependContext).toContain("<domain_skills>");
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
         "intent-classify:started",

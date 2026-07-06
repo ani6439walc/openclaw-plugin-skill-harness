@@ -49,8 +49,11 @@ import {
   runIntentionSubagent,
   runTopicSwitchSubagent,
 } from "./subagent.js";
-import { buildPromptPrefix } from "./prompt.js";
-import { resolveAvailableSkills } from "./skill-catalog.js";
+import { buildDomainSkillsPromptPrefix, buildPromptPrefix } from "./prompt.js";
+import {
+  resolveAvailableSkills,
+  resolveDomainSkills,
+} from "./skill-catalog.js";
 import { FALLBACK_INTENT } from "./constants.js";
 import type {
   HistoricalIntentRecord,
@@ -131,6 +134,7 @@ export type HookDeps = {
   instructionWriter?: typeof runIntentInstructionSubagent;
   backlogWriter?: Pick<BacklogWriter, "record">;
   triggerKeywords?: () => EvolutionTriggerKeywords;
+  bundledSkillsDir?: string;
 };
 
 function readTriggerKeywordsFailOpen(
@@ -419,6 +423,7 @@ export function createHookHandlers(deps: HookDeps) {
   const instructionWriter =
     deps.instructionWriter ?? runIntentInstructionSubagent;
   const backlogWriter = deps.backlogWriter ?? defaultBacklogWriter;
+  const bundledSkillsDir = deps.bundledSkillsDir;
 
   function emitPipelineEvent(
     ctx: Pick<PluginHookAgentContext, "runId" | "sessionId">,
@@ -773,6 +778,20 @@ export function createHookHandlers(deps: HookDeps) {
     });
   }
 
+  async function resolvePromptDomainSkills(params: {
+    agentId: string;
+    domain: string;
+    availableIntents: readonly IntentCatalogEntry[];
+  }) {
+    return await resolveDomainSkills({
+      api,
+      agentId: params.agentId,
+      bundledSkillsDir,
+      domain: params.domain,
+      intents: params.availableIntents,
+    });
+  }
+
   function buildExactKeywordIntentResult(params: {
     exactKeywordMatch: NonNullable<ReturnType<typeof findExactKeywordIntent>>;
     latestHistoricalIntent?: HistoricalIntentRecord;
@@ -801,7 +820,7 @@ export function createHookHandlers(deps: HookDeps) {
     };
   }
 
-  function handleExactKeywordPromptBuild(params: {
+  async function handleExactKeywordPromptBuild(params: {
     ctx: PluginHookAgentContext;
     routing: NonNullable<ReturnType<typeof resolvePromptBuildRouting>>;
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
@@ -810,7 +829,7 @@ export function createHookHandlers(deps: HookDeps) {
     conversation: ReturnType<typeof limitConversationTurns>;
     availableIntents: ReturnType<typeof catalog.filterForAgent>;
     exactKeywordMatch: NonNullable<ReturnType<typeof findExactKeywordIntent>>;
-  }): PluginHookBeforePromptBuildResult | undefined {
+  }): Promise<PluginHookBeforePromptBuildResult | undefined> {
     const latestHistoricalIntent =
       params.historicalIntents[params.historicalIntents.length - 1];
     const result = buildExactKeywordIntentResult({
@@ -845,6 +864,11 @@ export function createHookHandlers(deps: HookDeps) {
       params.availableIntents,
       params.refreshedConfig,
       params.exactKeywordMatch.hint,
+      await resolvePromptDomainSkills({
+        agentId: params.routing.effectiveAgentId,
+        domain: result.domain,
+        availableIntents: params.availableIntents,
+      }),
     );
     return promptPrefix ? { prependContext: promptPrefix } : undefined;
   }
@@ -871,7 +895,16 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return;
+      return {
+        prependContext: buildDomainSkillsPromptPrefix(
+          result,
+          await resolvePromptDomainSkills({
+            agentId: params.routing.effectiveAgentId,
+            domain: result.domain,
+            availableIntents: params.availableIntents,
+          }),
+        ),
+      };
     }
 
     // Safety fallback: skip intent instruction subagent and hint injection when topic unchanged
@@ -886,7 +919,16 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return;
+      return {
+        prependContext: buildDomainSkillsPromptPrefix(
+          result,
+          await resolvePromptDomainSkills({
+            agentId: params.routing.effectiveAgentId,
+            domain: result.domain,
+            availableIntents: params.availableIntents,
+          }),
+        ),
+      };
     }
 
     // Skip intent instruction subagent when confidence is too low
@@ -901,7 +943,16 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return;
+      return {
+        prependContext: buildDomainSkillsPromptPrefix(
+          result,
+          await resolvePromptDomainSkills({
+            agentId: params.routing.effectiveAgentId,
+            domain: result.domain,
+            availableIntents: params.availableIntents,
+          }),
+        ),
+      };
     }
 
     emitPipelineEvent(
@@ -921,9 +972,10 @@ export function createHookHandlers(deps: HookDeps) {
       latest: params.latestUserMessage,
       result,
       intentBody,
-      availableSkills: resolveAvailableSkills({
+      availableSkills: await resolveAvailableSkills({
         api,
         agentId: params.routing.effectiveAgentId,
+        bundledSkillsDir,
         intentBody,
       }),
       messageProvider: params.ctx.messageProvider,
@@ -969,6 +1021,11 @@ export function createHookHandlers(deps: HookDeps) {
       params.availableIntents,
       params.refreshedConfig,
       instructionText,
+      await resolvePromptDomainSkills({
+        agentId: params.routing.effectiveAgentId,
+        domain: result.domain,
+        availableIntents: params.availableIntents,
+      }),
     );
     return promptPrefix ? { prependContext: promptPrefix } : undefined;
   }
@@ -1141,7 +1198,7 @@ export function createHookHandlers(deps: HookDeps) {
     return { intentDefinition };
   }
 
-  function buildEvolutionReviewSnapshot(
+  async function buildEvolutionReviewSnapshot(
     baseSnapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>,
     intentDefinition: ReturnType<typeof findIntentDefinition>,
     agentId: string,
@@ -1159,9 +1216,10 @@ export function createHookHandlers(deps: HookDeps) {
           }
         : undefined,
       availableSkills: intentDefinition
-        ? resolveAvailableSkills({
+        ? await resolveAvailableSkills({
             api,
             agentId,
+            bundledSkillsDir,
             intentBody: intentDefinition.definition.prompt,
           })
         : [],
@@ -1183,7 +1241,7 @@ export function createHookHandlers(deps: HookDeps) {
     resolvedConfig: ResolvedSkillHarnessPluginConfig;
     agentId: string;
     modelRef: NonNullable<ReturnType<typeof getReviewModelRef>>;
-    snapshot: ReturnType<typeof buildEvolutionReviewSnapshot>;
+    snapshot: Awaited<ReturnType<typeof buildEvolutionReviewSnapshot>>;
     triggers: ReturnType<typeof checkEvolutionTriggers>;
   }): void {
     reviewQueue.enqueue(async () => {
@@ -1247,7 +1305,7 @@ export function createHookHandlers(deps: HookDeps) {
     const baseSnapshot = tracker.getReviewSnapshot(ctx.sessionId);
     if (!baseSnapshot) return;
     const agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
-    const snapshot = buildEvolutionReviewSnapshot(
+    const snapshot = await buildEvolutionReviewSnapshot(
       baseSnapshot,
       agentEndStats.intentDefinition,
       agentId,

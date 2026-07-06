@@ -146,8 +146,8 @@ graph LR
     M1 -->|no| N{domain keyword similarity match?}
     N -->|yes| O[build routed intent result]
     N -->|no| P
-    M --> R[record session only]
-    R --> S[skip prompt injection]
+    M --> R[record session]
+    R --> S[inject domain skills block only]
     O --> T{confidence >= 0.7?}
     P --> U{classifier returned result?}
     U -->|no| S
@@ -167,6 +167,13 @@ only on the three visible phases: `topic-triage`, `intent-classify`, and
 `hint-generate`. Exact keyword and domain keyword routes are reported through
 those semantic phases instead of fastpath-specific phase names. Event failures
 are fail-open and never add text to `prependContext`.
+
+After a turn has a resolved current domain, the hook always prepends a
+`<domain_skills>` XML block under `<skill_harness_plugin>`, even when the
+instruction hint itself is skipped for same-topic continuity, unchanged topics,
+or low confidence. The block contains every resolved skill referenced by enabled
+intents in that domain, using `name`, `path`, and `description` fields. If no
+skills resolve for the domain, the block is empty.
 
 Prompt assembly keeps static instructions, schema examples, and catalog data before
 dynamic conversation input, then closes helper prompts with a short final output
@@ -226,11 +233,14 @@ Skill hints in Intent Markdown (`skill: <name>`) are catalog candidates only. Th
 describe possible skills the instruction writer and Evolution reviewer may reason
 about, but they are not counted as per-turn recommendations. When an intent is
 matched, referenced skills are resolved from the matched agent workspace
-`skills/`, `$OPENCLAW_STATE_DIR/skills/`, then bundled OpenClaw `skills/`. Only
-`SKILL.md` frontmatter `name`, path, and `description` are read; missing skills
-are skipped fail-open. `recommendedSkillOpportunities` counts only explicit
-instruction-writer directives such as `MUST read skill: <name> at <path>` or
-`REQUIRED skill: <name>`. `adoptedSkillOpportunities` counts the intersection
+`skills/`, `$OPENCLAW_STATE_DIR/skills/`, `$OPENCLAW_STATE_DIR/plugin-skills/`,
+then bundled OpenClaw `skills/`. Only `SKILL.md` frontmatter `name`, path, and
+`description` are read; missing skills are skipped fail-open. The main-agent
+prompt prefix also receives a `<domain_skills>` block listing all resolved skills
+referenced by enabled intents in the current domain. `recommendedSkillOpportunities`
+counts only explicit instruction-writer directives such as
+`MUST read skill: <name> at <path>` or `REQUIRED skill: <name>`.
+`adoptedSkillOpportunities` counts the intersection
 between those actual recommendations and skills read during the completed turn.
 Existing stats are not backfilled; the reduced-noise denominator applies to new
 tracked turns.
@@ -544,10 +554,32 @@ After an intent is resolved, the plugin reads the matched intent Markdown body
 and runs a short instruction-writing sub-agent. That sub-agent outputs plain text
 for the main agent: concrete workflow, relevant skills, useful tools, and durable
 Experience notes from the intent when they matter for the latest user message.
-Referenced `skill: <name>` hints are resolved into an `<available_skills>` block
-for this writer so it can recommend concrete skill paths without guessing. The
-Evolution review prompt receives the same resolved skill metadata when a matched
-intent exists.
+Referenced `skill: <name>` hints are resolved into an `<intent_related_skills>` block
+for this writer so it can recommend concrete skill paths without guessing. Skill
+metadata is resolved from workspace `skills/`, state `skills/`, state
+`plugin-skills/`, then bundled OpenClaw skills. Each root is searched
+recursively for directories containing `SKILL.md`, including symlinked skill
+directories or `SKILL.md` files while guarding against directory cycles; the
+skill frontmatter `name` must match the referenced skill name. Bundled skill
+scans also honor `skills.entries` in OpenClaw's state `openclaw.json`: entries
+with `enabled: false` are skipped for the bundled root while workspace, state,
+and plugin skill roots can still override them. Skill root indexes are cached
+briefly across prompt-build turns and are built with `fs.promises` so cache
+misses do not block the Node.js event loop while walking larger skill trees.
+Expired entries are swept before reuse, and the cache is size-bounded so missing
+skill references do not rescan entire roots on every turn. The Evolution review
+prompt receives the same resolved skill metadata when a matched intent exists.
+
+The final main-agent prompt prefix always includes a `<domain_skills>` XML block
+once `onBeforePromptBuild` has resolved the current domain. This block is separate
+from `<intent_related_skills>`: it is built from every enabled intent in the same
+domain, includes each skill's `name`, `path`, and `description`, and is emitted
+before any generated hint text. It is still injected when the generated hint is
+skipped because the topic is unchanged or the classification confidence is too
+low.
+This prompt shape intentionally uses `<intent_related_skills>` and
+`<domain_skills>` with `path` fields; update any custom prompt parsers that
+expected the older internal `<available_skills>` / `location` shape.
 The full complexity guidance is provided to this instruction writer, not appended
 to the final main-agent prefix.
 The generated instruction text replaces direct full intent-body injection. If
