@@ -194,7 +194,7 @@ describe("skill catalog", () => {
     ]);
   });
 
-  it("indexes each root once per resolution call for repeated missing skills", () => {
+  it("uses cached root indexes across resolution calls within the TTL", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -228,8 +228,19 @@ describe("skill catalog", () => {
           api,
           agentId: "main",
           bundledSkillsDir: bundled,
+          nowMs: 1_000,
           intentBody:
             "skill: missing-one\nskill: missing-two\nskill: missing-three",
+        }),
+      ).toEqual([]);
+
+      expect(
+        resolveAvailableSkills({
+          api,
+          agentId: "main",
+          bundledSkillsDir: bundled,
+          nowMs: 1_001,
+          intentBody: "skill: missing-four\nskill: missing-five",
         }),
       ).toEqual([]);
 
@@ -253,6 +264,63 @@ describe("skill catalog", () => {
     } finally {
       readdirSpy.mockRestore();
     }
+  });
+
+  it("refreshes cached root indexes after the TTL expires", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    const bundled = path.join(tmp, "bundled");
+    fs.mkdirSync(path.join(workspace, "skills"), { recursive: true });
+
+    const api = {
+      config: {},
+      runtime: {
+        state: { resolveStateDir: () => state },
+        agent: { resolveAgentWorkspaceDir: () => workspace },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    expect(
+      resolveAvailableSkills({
+        api,
+        agentId: "main",
+        bundledSkillsDir: bundled,
+        cacheTtlMs: 10,
+        nowMs: 1_000,
+        intentBody: "skill: late-skill",
+      }),
+    ).toEqual([]);
+
+    writeSkill(path.join(workspace, "skills"), "late-skill", "Appears later.");
+
+    expect(
+      resolveAvailableSkills({
+        api,
+        agentId: "main",
+        bundledSkillsDir: bundled,
+        cacheTtlMs: 10,
+        nowMs: 1_005,
+        intentBody: "skill: late-skill",
+      }),
+    ).toEqual([]);
+
+    expect(
+      resolveAvailableSkills({
+        api,
+        agentId: "main",
+        bundledSkillsDir: bundled,
+        cacheTtlMs: 10,
+        nowMs: 1_011,
+        intentBody: "skill: late-skill",
+      }),
+    ).toEqual([
+      {
+        name: "late-skill",
+        location: path.join(workspace, "skills", "late-skill", "SKILL.md"),
+        description: "Appears later.",
+      },
+    ]);
   });
 
   it("loads skills referenced by every intent in the requested domain", () => {

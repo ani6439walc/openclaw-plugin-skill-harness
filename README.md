@@ -559,8 +559,10 @@ for this writer so it can recommend concrete skill paths without guessing. Skill
 metadata is resolved from workspace `skills/`, state `skills/`, state
 `plugin-skills/`, then bundled OpenClaw skills. Each root is searched
 recursively for directories containing `SKILL.md`; the skill frontmatter `name`
-must match the referenced skill name. The Evolution review prompt receives the
-same resolved skill metadata when a matched intent exists.
+must match the referenced skill name. Skill root indexes are cached briefly
+across prompt-build turns, then refreshed, so missing skill references do not
+rescan entire roots on every turn. The Evolution review prompt receives the same
+resolved skill metadata when a matched intent exists.
 
 The final main-agent prompt prefix always includes a `<domain_skills>` XML block
 once `onBeforePromptBuild` has resolved the current domain. This block is separate
@@ -569,6 +571,9 @@ domain, includes each skill's `name`, `path`, and `description`, and is emitted
 before any generated hint text. It is still injected when the generated hint is
 skipped because the topic is unchanged or the classification confidence is too
 low.
+This prompt shape intentionally uses `<intent_related_skills>` and
+`<domain_skills>` with `path` fields; update any custom prompt parsers that
+expected the older internal `<available_skills>` / `location` shape.
 The full complexity guidance is provided to this instruction writer, not appended
 to the final main-agent prefix.
 The generated instruction text replaces direct full intent-body injection. If

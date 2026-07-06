@@ -7,7 +7,15 @@ import { logger } from "../api.js";
 import type { AvailableSkill, IntentCatalogEntry } from "./types.js";
 
 const SKILL_REF_RE = /\bskill:\s*([A-Za-z0-9_-]+)/gi;
+const SKILL_INDEX_CACHE_TTL_MS = 60_000;
 const require = createRequire(import.meta.url);
+
+interface CachedSkillIndex {
+  expiresAtMs: number;
+  index: Map<string, AvailableSkill>;
+}
+
+const skillIndexCache = new Map<string, CachedSkillIndex>();
 
 export function extractReferencedSkillNames(markdown: string): string[] {
   const names: string[] = [];
@@ -53,8 +61,16 @@ function buildSkillIndex(root: string): Map<string, AvailableSkill> {
     if (entries.some((entry) => entry.isFile() && entry.name === "SKILL.md")) {
       const skill = readSkillFile(path.join(dir, "SKILL.md"));
       const key = skill?.name.toLowerCase();
-      if (skill && key && !index.has(key)) {
-        index.set(key, skill);
+      if (skill && key) {
+        if (index.has(key)) {
+          logger.warn("duplicate skill name ignored while indexing skills", {
+            ignoredPath: skill.location,
+            name: skill.name,
+            root,
+          });
+        } else {
+          index.set(key, skill);
+        }
       }
     }
 
@@ -72,11 +88,34 @@ function buildSkillIndex(root: string): Map<string, AvailableSkill> {
   return index;
 }
 
+function getCachedSkillIndex(
+  root: string,
+  options: { cacheTtlMs?: number; nowMs?: number } = {},
+): Map<string, AvailableSkill> {
+  const nowMs = options.nowMs ?? Date.now();
+  const cacheTtlMs = options.cacheTtlMs ?? SKILL_INDEX_CACHE_TTL_MS;
+  const cached = skillIndexCache.get(root);
+  if (cached && cached.expiresAtMs > nowMs) return cached.index;
+
+  const index = buildSkillIndex(root);
+  if (cacheTtlMs > 0) {
+    skillIndexCache.set(root, {
+      expiresAtMs: nowMs + cacheTtlMs,
+      index,
+    });
+  } else {
+    skillIndexCache.delete(root);
+  }
+  return index;
+}
+
 export function resolveAvailableSkills(params: {
   api: OpenClawPluginApi;
   agentId: string;
   intentBody: string;
   bundledSkillsDir?: string;
+  cacheTtlMs?: number;
+  nowMs?: number;
 }): AvailableSkill[] {
   const names = extractReferencedSkillNames(params.intentBody);
   if (names.length === 0) return [];
@@ -100,22 +139,15 @@ export function resolveAvailableSkills(params: {
 
   const skills: AvailableSkill[] = [];
   const seen = new Set<string>();
-  const rootIndexes = new Map<string, Map<string, AvailableSkill>>();
-  const getRootIndex = (root: string) => {
-    let index = rootIndexes.get(root);
-    if (!index) {
-      index = buildSkillIndex(root);
-      rootIndexes.set(root, index);
-    }
-    return index;
-  };
-
   for (const name of names) {
     const normalizedName = name.toLowerCase();
     if (seen.has(normalizedName)) continue;
 
     for (const root of roots) {
-      const skill = getRootIndex(root).get(normalizedName);
+      const skill = getCachedSkillIndex(root, {
+        cacheTtlMs: params.cacheTtlMs,
+        nowMs: params.nowMs,
+      }).get(normalizedName);
       if (!skill) continue;
       skills.push(skill);
       seen.add(skill.name.toLowerCase());
@@ -131,6 +163,8 @@ export function resolveDomainSkills(params: {
   domain: string | null | undefined;
   intents: readonly IntentCatalogEntry[];
   bundledSkillsDir?: string;
+  cacheTtlMs?: number;
+  nowMs?: number;
 }): AvailableSkill[] {
   const domain = (params.domain ?? "").trim().toLowerCase();
   if (!domain) return [];
@@ -149,5 +183,7 @@ export function resolveDomainSkills(params: {
     agentId: params.agentId,
     intentBody,
     bundledSkillsDir: params.bundledSkillsDir,
+    cacheTtlMs: params.cacheTtlMs,
+    nowMs: params.nowMs,
   });
 }
