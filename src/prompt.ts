@@ -50,6 +50,15 @@ const ULTRA_CONCISE_TEXT_OUTPUT_STYLE = `Output style:
 - Keep code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged.
 - Do not abbreviate technical names into unclear shorthand.`;
 
+const MANDATORY_SKILLS_PROMPT = `## Skills (mandatory)
+Before replying, scan the skills below. If a skill matches or is even partially relevant to your task, you MUST read its listed SKILL.md path with the \`read\` tool and follow its instructions. Err on the side of loading — it is always better to have context you don't need than to miss critical steps, pitfalls, or established workflows. Skills contain specialized knowledge — API endpoints, tool-specific commands, and proven workflows that outperform general-purpose approaches. Load the skill even if you think you could handle the task with basic OpenClaw tools like \`read\`, \`write\`, or \`apply_patch\`. Skills also encode the user's preferred approach, conventions, and quality standards for tasks like code review, planning, and testing — load them even for tasks you already know how to do, because the skill defines how it should be done here.
+Whenever the user asks you to configure, set up, install, enable, disable, modify, or troubleshoot OpenClaw itself — its CLI, config, models, providers, tools, skills, gateway, plugins, or any feature — load the relevant OpenClaw skill first. It has the actual OpenClaw commands and project-specific workflows (e.g. \`openclaw plugins ...\`, \`openclaw skills ...\`, and plugin validation commands) so you don't have to guess or invent workarounds.
+If a skill has issues, fix it with \`apply_patch\` for targeted edits or \`write\` for full-file rewrites.
+After difficult/iterative tasks, offer to save as a skill. If a skill you loaded was missing steps, had wrong commands, or needed pitfalls you discovered, update it before finishing.`;
+
+const MANDATORY_SKILLS_FALLBACK =
+  "Only proceed without loading a skill if genuinely none are relevant to the task.";
+
 const FALLBACK_INTENT_ENTRY: IntentCatalogEntry = {
   id: FALLBACK_INTENT_ID,
   definition: FALLBACK_INTENT,
@@ -244,7 +253,7 @@ Domain candidates: ${params.domains.join(", ")}
 `
     : "";
 
-  return `${timeLine}You are a lightweight topic continuity checker.
+  return `${timeLine}You are a topic checker.
 Another model is preparing the final user-facing answer and needs compact topic routing context before intent resolution.
 Your job is to decide whether the user's latest message continues the recent topic or switches to a new one.
 Use only latest_message, latest_historical_intent, and conversation context. Historical intent annotations are evidence, not answers to inherit. Do not classify intent.
@@ -363,7 +372,7 @@ export function buildIntentInstructionPrompt(params: {
   const conversationSection = conversationMd ? `\n${conversationMd}\n` : "";
   const availableSkillsSection = formatAvailableSkills(params.availableSkills);
 
-  return `${timeLine}You are an skill-harness writer.
+  return `${timeLine}You are an instruction writer.
 Another model is preparing the final user-facing answer.
 Your job is to:
 1. Identify the user's intent from the latest message.
@@ -464,7 +473,9 @@ function formatSkillXmlBlock(
 export function formatDomainSkills(
   skills: AvailableSkill[] | undefined,
 ): string {
-  return formatSkillXmlBlock("domain_skills", skills);
+  return `${MANDATORY_SKILLS_PROMPT}
+${formatSkillXmlBlock("domain_skills", skills)}
+${MANDATORY_SKILLS_FALLBACK}`;
 }
 
 function escapeXmlText(value: string): string {
@@ -500,7 +511,7 @@ complexity: ${params.topicContext.complexity}
 `
     : "";
 
-  return `${timeLine}You are an intent classification agent.
+  return `${timeLine}You are an intent classifier.
 Another model is preparing the final user-facing answer with hints and subagent routing.
 Your job is to analyze conversation context and the user's latest message, then classify which intent best matches.
 You receive conversation history, the latest user message, and available intent definitions with triggers and examples.

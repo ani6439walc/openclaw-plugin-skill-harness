@@ -87,6 +87,8 @@ describe("buildReviewPrompt", () => {
   it("grounds every review in bundled skill-harness Markdown rules", () => {
     const prompt = buildReviewPrompt(snapshot, ["weak-intent"]);
 
+    expect(prompt).toContain("You are an evolution reviewer.");
+    expect(prompt).not.toContain("You are an Intent Evolution reviewer.");
     expect(prompt).toContain(
       "sole purpose is to improve the content and routing quality of skill-harness intents/*.md files",
     );

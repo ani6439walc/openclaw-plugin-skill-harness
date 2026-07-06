@@ -160,6 +160,24 @@ export function getReviewModelRef(
   );
 }
 
+export function getInstructionModelRef(
+  api: OpenClawPluginApi,
+  agentId: string,
+  config: ResolvedSkillHarnessPluginConfig,
+  currentRun: { modelProviderId?: string; modelId?: string },
+): { provider: string; model: string } | undefined {
+  return getModelRef(
+    api,
+    agentId,
+    {
+      ...config,
+      model: config.instruction.model ?? config.model,
+      modelFallback: config.instruction.modelFallback ?? config.modelFallback,
+    },
+    currentRun,
+  );
+}
+
 export async function runIntentionSubagent(params: {
   api: OpenClawPluginApi;
   config: ResolvedSkillHarnessPluginConfig;
@@ -312,6 +330,8 @@ export async function runIntentInstructionSubagent(params: {
         subagentSessionKey,
         prompt,
       }),
+      timeoutMs: params.config.instruction.timeoutMs,
+      thinkLevel: params.config.instruction.thinking,
       modelRun: false,
       promptMode: "minimal",
       toolsAllow: ["read"],

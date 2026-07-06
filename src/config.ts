@@ -42,6 +42,14 @@ const DEFAULT_COMPLEXITY_PROMPTS = {
   high: DEFAULT_HIGH_COMPLEXITY_PROMPT,
 };
 
+const DEFAULT_INSTRUCTION = {
+  enabled: false,
+  model: undefined,
+  modelFallback: undefined,
+  thinking: "medium",
+  timeoutMs: 30_000,
+} as const;
+
 const DEFAULT_EVOLUTION = {
   enabled: false,
   model: undefined,
@@ -77,6 +85,7 @@ const DEFAULT_CONFIG = {
   contextWindow: DEFAULT_CONTEXT_WINDOW,
   timeoutMs: DEFAULT_TIMEOUT_MS,
   complexityPrompts: DEFAULT_COMPLEXITY_PROMPTS,
+  instruction: DEFAULT_INSTRUCTION,
   evolution: DEFAULT_EVOLUTION,
 } satisfies ResolvedSkillHarnessPluginConfig;
 
@@ -148,6 +157,15 @@ const ThinkLevelSchema = z
 const LowThinkingModeSchema = z
   .enum(["fastpath-only", "full", "off"])
   .catch("fastpath-only");
+const InstructionSchema = z
+  .object({
+    enabled: z.boolean().catch(false),
+    model: z.string().optional().catch(undefined),
+    modelFallback: z.string().optional().catch(undefined),
+    thinking: ThinkLevelSchema,
+    timeoutMs: boundedInt(30_000, 250, 600_000),
+  })
+  .catch(DEFAULT_INSTRUCTION);
 const EvolutionSchema = z
   .object({
     enabled: z.boolean().catch(false),
@@ -242,6 +260,7 @@ const SkillHarnessConfigSchema = z
     contextWindow: ContextWindowSchema,
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 250, 120_000),
     complexityPrompts: ComplexityPromptsSchema,
+    instruction: InstructionSchema,
     evolution: EvolutionSchema,
   })
   .catch(DEFAULT_CONFIG);

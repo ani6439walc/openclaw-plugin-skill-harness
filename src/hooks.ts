@@ -43,6 +43,7 @@ import {
   resolveCanonicalSessionKeyFromSessionId,
 } from "./session.js";
 import {
+  getInstructionModelRef,
   getModelRef,
   getReviewModelRef,
   runIntentInstructionSubagent,
@@ -851,6 +852,26 @@ export function createHookHandlers(deps: HookDeps) {
         complexity: result.complexity,
       },
     );
+    if (!params.refreshedConfig.instruction.enabled) {
+      recordPromptBuildResult({
+        ctx: params.ctx,
+        routing: params.routing,
+        latestUserMessage: params.latestUserMessage,
+        result,
+        conversation: params.conversation,
+      });
+      return {
+        prependContext: buildDomainSkillsPromptPrefix(
+          result,
+          await resolvePromptDomainSkills({
+            agentId: params.routing.effectiveAgentId,
+            domain: result.domain,
+            availableIntents: params.availableIntents,
+          }),
+        ),
+      };
+    }
+
     recordPromptBuildResult({
       ctx: params.ctx,
       routing: params.routing,
@@ -955,6 +976,40 @@ export function createHookHandlers(deps: HookDeps) {
       };
     }
 
+    if (!params.refreshedConfig.instruction.enabled) {
+      logger.debug(
+        "instruction writer disabled; injecting domain skills without generated hint.",
+      );
+      recordPromptBuildResult({
+        ctx: params.ctx,
+        routing: params.routing,
+        latestUserMessage: params.latestUserMessage,
+        result,
+        conversation: params.conversation,
+      });
+      return {
+        prependContext: buildDomainSkillsPromptPrefix(
+          result,
+          await resolvePromptDomainSkills({
+            agentId: params.routing.effectiveAgentId,
+            domain: result.domain,
+            availableIntents: params.availableIntents,
+          }),
+        ),
+      };
+    }
+
+    const instructionModelRef = getInstructionModelRef(
+      api,
+      params.routing.effectiveAgentId,
+      params.refreshedConfig,
+      {
+        modelProviderId: params.ctx.modelProviderId,
+        modelId: params.ctx.modelId,
+      },
+    );
+    if (!instructionModelRef) return;
+
     emitPipelineEvent(
       params.ctx,
       params.routing.resolvedSessionKey,
@@ -979,7 +1034,7 @@ export function createHookHandlers(deps: HookDeps) {
         intentBody,
       }),
       messageProvider: params.ctx.messageProvider,
-      modelRef: params.modelRef,
+      modelRef: instructionModelRef,
     });
     const instructionText = instructionResult.text;
     if (instructionText) {

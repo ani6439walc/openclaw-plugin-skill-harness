@@ -170,6 +170,8 @@ describe("buildIntentionPrompt", () => {
       latest: "hello",
     });
 
+    expect(result).toContain("You are an intent classifier.");
+    expect(result).not.toContain("You are an intent classification agent.");
     expect(result).toContain("Classification rules:");
     expect(result).toContain("Output format:");
     expect(result).toContain("Intent catalog:");
@@ -292,7 +294,7 @@ describe("buildTopicSwitchPrompt", () => {
       ],
     });
 
-    expect(prompt).toContain("topic continuity checker");
+    expect(prompt).toContain("You are a topic checker.");
     expect(prompt).toContain(
       "Another model is preparing the final user-facing answer",
     );
@@ -301,6 +303,9 @@ describe("buildTopicSwitchPrompt", () => {
     );
     expect(prompt).not.toContain("<recent_history>");
     expect(prompt).toContain("Latest historical intent (reference only");
+    expect(prompt).not.toContain(
+      "You are a lightweight topic continuity checker.",
+    );
     expect(prompt).toContain("- input: 規劃 topic checker");
     expect(prompt).toContain(
       "  > historical_intent: intent=coding; domain=coding; topic=topic / checker; keywords=topic, checker",
@@ -674,7 +679,8 @@ describe("buildIntentInstructionPrompt", () => {
       ],
     });
 
-    expect(prompt).toContain("skill-harness writer");
+    expect(prompt).toContain("You are an instruction writer.");
+    expect(prompt).not.toContain("You are an skill-harness writer.");
     expect(prompt).toContain(
       "Another model is preparing the final user-facing answer",
     );
@@ -1298,6 +1304,56 @@ describe("buildPromptPrefix", () => {
       prefix!.indexOf("Run tests first, then edit with apply_patch."),
     );
     expect(prefix).not.toContain("Write clean, well-tested code.");
+  });
+
+  it("wraps injected domain skills with mandatory skill-loading guidance", () => {
+    const result: IntentionResult = {
+      intent: "coding",
+      reason: "User wants code",
+      confidence: 0.9,
+      complexity: "medium",
+    };
+
+    const prefix = buildPromptPrefix(
+      result,
+      mockIntents,
+      mockConfig,
+      undefined,
+      [
+        {
+          name: "test-driven-development",
+          location: "/skills/test-driven-development/SKILL.md",
+          description: "Drive changes with tests.",
+        },
+      ],
+    );
+
+    expect(prefix).toContain("## Skills (mandatory)");
+    expect(prefix).toContain(
+      "Before replying, scan the skills below. If a skill matches or is even partially relevant",
+    );
+    expect(prefix).toContain(
+      "MUST read its listed SKILL.md path with the `read` tool",
+    );
+    expect(prefix).toContain("load the relevant OpenClaw skill first");
+    expect(prefix).toContain("fix it with `apply_patch`");
+    expect(prefix).toContain("or `write`");
+    expect(prefix).not.toContain("skill_view");
+    expect(prefix).not.toContain("skill_manage");
+    expect(prefix).not.toContain("Hermes Agent");
+    expect(prefix).not.toContain("hermes-agent");
+    expect(prefix).toContain("<domain_skills>");
+    expect(prefix).toContain(
+      "Only proceed without loading a skill if genuinely none are relevant to the task.",
+    );
+    expect(prefix!.indexOf("## Skills (mandatory)")).toBeLessThan(
+      prefix!.indexOf("<domain_skills>"),
+    );
+    expect(prefix!.indexOf("</domain_skills>")).toBeLessThan(
+      prefix!.indexOf(
+        "Only proceed without loading a skill if genuinely none are relevant to the task.",
+      ),
+    );
   });
 
   it("should match filename intent ids when result includes display text", () => {

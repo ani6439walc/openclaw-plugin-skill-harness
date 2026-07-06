@@ -5,17 +5,17 @@
 
 An OpenClaw plugin that pre-scans user intent before main-agent replies and injects routing hints via the `before_prompt_build` hook. It also tracks session-level metrics via `after_tool_call` and `agent_end`, then cleans up tracker state and session JSON retention via `session_end`.
 
-## Current Status (verified 2026-06-30)
+## Current Status (verified 2026-07-06)
 
-- Package version: `2026.6.8`; OpenClaw compatibility in `package.json` targets Plugin API and Gateway `>=2026.6.8`.
-- Branch state inspected on `main` at `0e32bed` (`feat: add low thinking fastpath mode (#39)`).
-- Recent implementation work focused on low-thinking fastpath behavior, classifier override robustness, runtime Evolution trigger keywords, the deterministic `entity-context` trigger, reduced-noise skill recommendation stats, and prompt output contracts for compact helper models.
+- Package version: `2026.6.11`; OpenClaw compatibility in `package.json` targets Plugin API and Gateway `>=2026.6.11`.
+- Branch state inspected on `main` at `f803ae9` (`feat: inject domain skills prompt metadata (#48)`).
+- Recent implementation work focused on OpenClaw-native Evolution tool/command surfaces, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and recursive async skill-root indexing for workspace, state, plugin, and bundled skills.
 - Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/skill-harness/intents`.
-- Codebase shape from `pygount` excluding dependencies/build output: 48 TypeScript files with 10,844 code lines, 15 Markdown files, 3 JSON files, and 72 counted files total.
-- TypeScript line split: 25 runtime files / 7,171 lines, 22 test files / 9,250 lines, 1 tooling file / 8 lines; test/runtime line ratio is about 1.29x.
-- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 22 test files / 398 tests, and `pnpm pack --dry-run` succeeds.
-- Package hygiene note: current `pnpm pack --dry-run` output includes `dist/vitest.config.*` because `tsconfig.json` includes root `./*.ts`. Decide whether to keep publishing that harmless build artifact or narrow the TypeScript include/exclude list in a future cleanup.
-- Dependency audit note: `pnpm audit --audit-level moderate` currently reports transitive OpenClaw dependency findings for `undici`, `protobufjs`, and `tar`, plus `gray-matter > js-yaml`. Remediation should be coordinated with OpenClaw/gray-matter compatibility rather than patched blindly in this plugin.
+- Codebase shape from `pygount` excluding dependencies/build output: 51 TypeScript files with 13,296 code lines, 15 Markdown files, 3 JSON files, and 70 counted files total.
+- TypeScript line split from direct file line counts: 25 runtime files / 8,716 lines, 23 test files / 11,384 lines, 3 root/tooling files / 30 lines; test/runtime line ratio is about 1.31x.
+- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 23 test files / 452 tests, `pnpm run build` passes, and `pnpm pack --dry-run` succeeds.
+- Package hygiene note: current `pnpm pack --dry-run` output still includes `dist/vitest.config.*` because `tsconfig.json` includes root `./*.ts`. Decide whether to keep publishing that harmless build artifact or narrow the TypeScript include/exclude list in a future cleanup.
+- Dependency audit note: `pnpm audit --audit-level moderate` currently reports transitive OpenClaw dependency findings for `protobufjs` and `tar`, plus `gray-matter > js-yaml`. Remediation should be coordinated with OpenClaw/gray-matter compatibility rather than patched blindly in this plugin.
 
 ## Architecture
 
@@ -138,7 +138,7 @@ graph LR
     I --> Q[main agent generates]
     G -->|no| J{model available?}
     J -->|no| Z
-    J -->|yes| K[run topic continuity checker with domain candidates]
+    J -->|yes| K[run topic checker with domain candidates]
     K --> L{topic context returned?}
     L -->|no| P[run intent classifier subagent]
     L -->|yes| M1{same topic with history?}
@@ -154,10 +154,12 @@ graph LR
     U -->|yes| T
     T -->|no| V[record low-confidence observation]
     V --> S
-    T -->|yes| W[resolve available skills from matched intent]
-    W --> X[run instruction writer subagent]
-    X --> Y[record session with instruction text]
-    Y --> AA[inject generated instruction hint]
+    T -->|yes| W{instruction enabled?}
+    W -->|no| S
+    W -->|yes| X[resolve available skills from matched intent]
+    X --> Y[run instruction writer subagent]
+    Y --> AB[record session with instruction text]
+    AB --> AA[inject generated instruction hint]
     AA --> Q
     S --> Q
 ```
@@ -171,9 +173,10 @@ are fail-open and never add text to `prependContext`.
 After a turn has a resolved current domain, the hook always prepends a
 `<domain_skills>` XML block under `<skill_harness_plugin>`, even when the
 instruction hint itself is skipped for same-topic continuity, unchanged topics,
-or low confidence. The block contains every resolved skill referenced by enabled
-intents in that domain, using `name`, `path`, and `description` fields. If no
-skills resolve for the domain, the block is empty.
+low confidence, or disabled `instruction.enabled`. The block contains every
+resolved skill referenced by enabled intents in that domain, using `name`,
+`path`, and `description` fields. If no skills resolve for the domain, the block
+is empty.
 
 Prompt assembly keeps static instructions, schema examples, and catalog data before
 dynamic conversation input, then closes helper prompts with a short final output
@@ -292,6 +295,13 @@ pnpm run build
             medium: "Custom medium-complexity prompt...",
             high: "Custom high-complexity prompt...",
           },
+          instruction: {
+            enabled: false,
+            model: "google/gemini-3-flash",
+            modelFallback: "openai/gpt-5-mini",
+            thinking: "medium", // instruction writer subagent thinking level
+            timeoutMs: 30000,
+          },
           evolution: {
             enabled: false,
             model: "google/gemini-3-flash",
@@ -332,18 +342,22 @@ pnpm run build
 | `contextWindow`     | `object`   | see below         | Turn/char limits for conversation extraction.                                                                                                                                 |
 | `timeoutMs`         | `number`   | `3000`            | Max wait time for each scanner sub-agent run. Clamped to 250–120000ms.                                                                                                        |
 | `complexityPrompts` | `object`   | built-in          | Custom instruction-generation guidance per complexity level.                                                                                                                  |
+| `instruction`       | `object`   | disabled          | Instruction writer configuration. When disabled, the hook injects only `<domain_skills>` and skips generated hints.                                                           |
 | `evolution`         | `object`   | disabled          | Post-turn trigger review configuration. Findings and runtime trigger keywords are stored in `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json`.                       |
 
-`evolution.thinking` independently controls the Evolution review
-subagent's thinking level. Both thinking settings accept `off`, `minimal`,
-`low`, `medium`, `high`, `xhigh`, `adaptive`, or `max`.
+`instruction.thinking` independently controls the instruction writer subagent,
+and `evolution.thinking` independently controls the Evolution review subagent.
+All thinking settings accept `off`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+`adaptive`, or `max`. `instruction.model`, `instruction.modelFallback`, and
+`instruction.timeoutMs` mirror the Evolution review knobs but apply only to
+generated instruction hints.
 
 `lowThinkingMode` controls main-agent low-thinking turns (`off`, `minimal`, or
 `low`). The default `fastpath-only` mode keeps deterministic exact keyword hints
-but skips topic checker, intent classifier, and instruction writer LLM calls
-when no exact fastpath keyword matches. Use `full` to always run the complete
-scanner pipeline, or `off` to disable the plugin entirely for low-thinking
-turns.
+when instruction hints are enabled, but skips topic checker, intent classifier,
+and instruction writer LLM calls when no exact fastpath keyword matches. Use
+`full` to always run the complete scanner pipeline, or `off` to disable the
+plugin entirely for low-thinking turns.
 
 ### Intent Evolution
 
@@ -571,12 +585,17 @@ skill references do not rescan entire roots on every turn. The Evolution review
 prompt receives the same resolved skill metadata when a matched intent exists.
 
 The final main-agent prompt prefix always includes a `<domain_skills>` XML block
-once `onBeforePromptBuild` has resolved the current domain. This block is separate
-from `<intent_related_skills>`: it is built from every enabled intent in the same
-domain, includes each skill's `name`, `path`, and `description`, and is emitted
-before any generated hint text. It is still injected when the generated hint is
-skipped because the topic is unchanged or the classification confidence is too
-low.
+once `onBeforePromptBuild` has resolved the current domain. This block is wrapped
+with mandatory skill-loading guidance before the tag and a fallback reminder after
+the closing tag: read relevant `SKILL.md` files with OpenClaw's `read` tool,
+update broken skills with `apply_patch` or `write`, load the relevant OpenClaw
+skill before OpenClaw configuration/troubleshooting work, and only proceed
+without loading a skill when genuinely no listed skill is relevant. The block is
+separate from `<intent_related_skills>`: it is built from every enabled intent in
+the same domain, includes each skill's `name`, `path`, and `description`, and is
+emitted before any generated hint text. It is still injected when the generated
+hint is skipped because the topic is unchanged or the classification confidence
+is too low.
 This prompt shape intentionally uses `<intent_related_skills>` and
 `<domain_skills>` with `path` fields; update any custom prompt parsers that
 expected the older internal `<available_skills>` / `location` shape.
@@ -667,9 +686,10 @@ The test suites cover:
 - Intent filtering via deny patterns
 - Internal/inter-session turn detection and conversation-history filtering
 - Per-turn historical intent matching, duplicate handling, and prompt injection
-- Seven Evolution triggers, thresholds, runtime trigger keywords, and multi-trigger turns
+- Eight Evolution triggers, thresholds, runtime trigger keywords, and multi-trigger turns
 - Skill Harness Skill review prompts, response parsing, and read-only reviewer runs
 - Serialized background reviews and atomic, idempotent evolution backlog writes
 - Schema v1/v2-to-v3 migration, structured finding targets, trigger keyword suggestions, and evolution-backlog command concurrency checks
 - Intent Markdown structure/catalog validation and explicit-only skill-harness backlog mode
+- Recursive async skill catalog indexing, symlink cycle guards, disabled bundled skill filtering, and domain skill prompt injection
 - Protection of root-level `evolution.json` from session loading and retention cleanup
