@@ -46,7 +46,7 @@ describe("skill catalog", () => {
     ).toEqual(["architecture-diagram", "test-driven-development"]);
   });
 
-  it("loads referenced skills from workspace, personal, plugin, and bundled roots", () => {
+  it("loads referenced skills from workspace, personal, plugin, and bundled roots", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -79,7 +79,7 @@ describe("skill catalog", () => {
     } as unknown as OpenClawPluginApi;
 
     expect(
-      resolveAvailableSkills({
+      await resolveAvailableSkills({
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
@@ -120,7 +120,7 @@ describe("skill catalog", () => {
     ]);
   });
 
-  it("filters disabled bundled skill entries from OpenClaw config", () => {
+  it("filters disabled bundled skill entries from OpenClaw config", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -157,11 +157,11 @@ describe("skill catalog", () => {
         agent: { resolveAgentWorkspaceDir: () => workspace },
       },
     } as unknown as OpenClawPluginApi;
-    const readdirSpy = vi.spyOn(fs, "readdirSync");
+    const readdirSpy = vi.spyOn(fs.promises, "readdir");
 
     try {
       expect(
-        resolveAvailableSkills({
+        await resolveAvailableSkills({
           api,
           agentId: "main",
           bundledSkillsDir: bundled,
@@ -195,7 +195,7 @@ describe("skill catalog", () => {
     }
   });
 
-  it("loads referenced skills from nested directories in every root", () => {
+  it("loads referenced skills from nested directories in every root", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -231,7 +231,7 @@ describe("skill catalog", () => {
     } as unknown as OpenClawPluginApi;
 
     expect(
-      resolveAvailableSkills({
+      await resolveAvailableSkills({
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
@@ -280,7 +280,7 @@ describe("skill catalog", () => {
     ]);
   });
 
-  it("indexes symlinked skill directories and SKILL.md files without following cycles", () => {
+  it("indexes symlinked skill directories and SKILL.md files without following cycles", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -333,7 +333,7 @@ describe("skill catalog", () => {
     } as unknown as OpenClawPluginApi;
 
     expect(
-      resolveAvailableSkills({
+      await resolveAvailableSkills({
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
@@ -353,7 +353,7 @@ describe("skill catalog", () => {
     ]);
   });
 
-  it("uses cached root indexes across resolution calls within the TTL", () => {
+  it("uses cached root indexes across resolution calls within the TTL", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -379,11 +379,11 @@ describe("skill catalog", () => {
         agent: { resolveAgentWorkspaceDir: () => workspace },
       },
     } as unknown as OpenClawPluginApi;
-    const readdirSpy = vi.spyOn(fs, "readdirSync");
+    const readdirSpy = vi.spyOn(fs.promises, "readdir");
 
     try {
       expect(
-        resolveAvailableSkills({
+        await resolveAvailableSkills({
           api,
           agentId: "main",
           bundledSkillsDir: bundled,
@@ -394,7 +394,7 @@ describe("skill catalog", () => {
       ).toEqual([]);
 
       expect(
-        resolveAvailableSkills({
+        await resolveAvailableSkills({
           api,
           agentId: "main",
           bundledSkillsDir: bundled,
@@ -425,7 +425,7 @@ describe("skill catalog", () => {
     }
   });
 
-  it("refreshes cached root indexes after the TTL expires", () => {
+  it("refreshes cached root indexes after the TTL expires", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -441,7 +441,7 @@ describe("skill catalog", () => {
     } as unknown as OpenClawPluginApi;
 
     expect(
-      resolveAvailableSkills({
+      await resolveAvailableSkills({
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
@@ -454,7 +454,7 @@ describe("skill catalog", () => {
     writeSkill(path.join(workspace, "skills"), "late-skill", "Appears later.");
 
     expect(
-      resolveAvailableSkills({
+      await resolveAvailableSkills({
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
@@ -465,7 +465,7 @@ describe("skill catalog", () => {
     ).toEqual([]);
 
     expect(
-      resolveAvailableSkills({
+      await resolveAvailableSkills({
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
@@ -482,7 +482,7 @@ describe("skill catalog", () => {
     ]);
   });
 
-  it("ignores blank optional skill roots", () => {
+  it("ignores blank optional skill roots", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -501,7 +501,7 @@ describe("skill catalog", () => {
     } as unknown as OpenClawPluginApi;
 
     expect(
-      resolveAvailableSkills({
+      await resolveAvailableSkills({
         api,
         agentId: "main",
         bundledSkillsDir: "",
@@ -516,7 +516,7 @@ describe("skill catalog", () => {
     ]);
   });
 
-  it("loads skills referenced by every intent in the requested domain", () => {
+  it("loads skills referenced by every intent in the requested domain", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -543,7 +543,7 @@ describe("skill catalog", () => {
     } as unknown as OpenClawPluginApi;
 
     expect(
-      resolveDomainSkills({
+      await resolveDomainSkills({
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
@@ -605,7 +605,7 @@ describe("skill catalog", () => {
     ]);
   });
 
-  it("returns no domain skills for blank or absent domains", () => {
+  it("returns no domain skills for blank or absent domains", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -635,8 +635,14 @@ describe("skill catalog", () => {
       ],
     };
 
-    expect(resolveDomainSkills({ ...params, domain: "" })).toEqual([]);
-    expect(resolveDomainSkills({ ...params, domain: undefined })).toEqual([]);
-    expect(resolveDomainSkills({ ...params, domain: null })).toEqual([]);
+    await expect(
+      resolveDomainSkills({ ...params, domain: "" }),
+    ).resolves.toEqual([]);
+    await expect(
+      resolveDomainSkills({ ...params, domain: undefined }),
+    ).resolves.toEqual([]);
+    await expect(
+      resolveDomainSkills({ ...params, domain: null }),
+    ).resolves.toEqual([]);
   });
 });

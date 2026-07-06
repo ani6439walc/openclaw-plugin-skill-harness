@@ -1,4 +1,5 @@
-import fs from "node:fs";
+import { promises as fs } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import matter from "gray-matter";
@@ -39,6 +40,15 @@ function pruneOldestSkillIndexes(maxEntries: number): void {
   }
 }
 
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
+}
+
 export function extractReferencedSkillNames(markdown: string): string[] {
   const names: string[] = [];
   for (const match of markdown.matchAll(SKILL_REF_RE)) {
@@ -48,10 +58,11 @@ export function extractReferencedSkillNames(markdown: string): string[] {
   return [...new Set(names)];
 }
 
-function readSkillFile(filePath: string): AvailableSkill | undefined {
-  if (!fs.existsSync(filePath)) return;
+async function readSkillFile(
+  filePath: string,
+): Promise<AvailableSkill | undefined> {
   try {
-    const parsed = matter(fs.readFileSync(filePath, "utf-8"));
+    const parsed = matter(await fs.readFile(filePath, "utf-8"));
     const name =
       typeof parsed.data.name === "string" ? parsed.data.name.trim() : "";
     if (!name) return;
@@ -61,43 +72,51 @@ function readSkillFile(filePath: string): AvailableSkill | undefined {
         : "";
     return { name, location: filePath, description };
   } catch (err) {
-    logger.warn("failed to read referenced skill metadata", {
-      error: err,
-      path: filePath,
-    });
+    if (!isMissingPathError(err)) {
+      logger.warn("failed to read referenced skill metadata", {
+        error: err,
+        path: filePath,
+      });
+    }
     return;
   }
 }
 
-function readEntryStat(entryPath: string): fs.Stats | undefined {
+async function readEntryStat(entryPath: string): Promise<Stats | undefined> {
   try {
-    return fs.statSync(entryPath);
+    return await fs.stat(entryPath);
   } catch {
     return;
   }
 }
 
-function isSkillFileEntry(dir: string, entry: fs.Dirent): boolean {
+async function isSkillFileEntry(dir: string, entry: Dirent): Promise<boolean> {
   if (entry.name !== "SKILL.md") return false;
   if (entry.isFile()) return true;
   if (!entry.isSymbolicLink()) return false;
-  return readEntryStat(path.join(dir, entry.name))?.isFile() ?? false;
+  return (await readEntryStat(path.join(dir, entry.name)))?.isFile() ?? false;
 }
 
-function resolveChildDirectory(
+async function resolveChildDirectory(
   dir: string,
-  entry: fs.Dirent,
-): string | undefined {
+  entry: Dirent,
+): Promise<string | undefined> {
   const entryPath = path.join(dir, entry.name);
   if (entry.isDirectory()) return entryPath;
   if (!entry.isSymbolicLink()) return;
-  return readEntryStat(entryPath)?.isDirectory() ? entryPath : undefined;
+  return (await readEntryStat(entryPath))?.isDirectory()
+    ? entryPath
+    : undefined;
 }
 
-function readDisabledBundledSkillNames(stateDir: string): Set<string> {
+async function readDisabledBundledSkillNames(
+  stateDir: string,
+): Promise<Set<string>> {
   const configPath = path.join(stateDir, "openclaw.json");
   try {
-    const parsed = JSON.parse(fs.readFileSync(configPath, "utf-8")) as unknown;
+    const parsed = JSON.parse(
+      await fs.readFile(configPath, "utf-8"),
+    ) as unknown;
     if (!parsed || typeof parsed !== "object") return new Set();
     const skills = (parsed as { skills?: unknown }).skills;
     if (!skills || typeof skills !== "object") return new Set();
@@ -115,7 +134,7 @@ function readDisabledBundledSkillNames(stateDir: string): Set<string> {
     }
     return disabled;
   } catch (err) {
-    if (fs.existsSync(configPath)) {
+    if (!isMissingPathError(err)) {
       logger.warn("failed to read OpenClaw skill entry configuration", {
         error: err,
         path: configPath,
@@ -125,35 +144,36 @@ function readDisabledBundledSkillNames(stateDir: string): Set<string> {
   }
 }
 
-function buildSkillIndex(
+async function buildSkillIndex(
   root: string,
   options: SkillIndexOptions = {},
-): Map<string, AvailableSkill> {
+): Promise<Map<string, AvailableSkill>> {
   const index = new Map<string, AvailableSkill>();
   const visitedDirs = new Set<string>();
   const disabledSkillNames = options.disabledSkillNames ?? new Set<string>();
 
-  function visit(dir: string, depth = 0): void {
+  async function visit(dir: string, depth = 0): Promise<void> {
     if (depth > SKILL_INDEX_MAX_DEPTH) return;
 
     let realDir: string;
     try {
-      realDir = fs.realpathSync(dir);
+      realDir = await fs.realpath(dir);
     } catch {
       return;
     }
     if (visitedDirs.has(realDir)) return;
     visitedDirs.add(realDir);
 
-    let entries: fs.Dirent[];
+    let entries: Dirent[];
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = await fs.readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
 
-    if (entries.some((entry) => isSkillFileEntry(dir, entry))) {
-      const skill = readSkillFile(path.join(dir, "SKILL.md"));
+    const skillFileEntry = entries.find((entry) => entry.name === "SKILL.md");
+    if (skillFileEntry && (await isSkillFileEntry(dir, skillFileEntry))) {
+      const skill = await readSkillFile(path.join(dir, "SKILL.md"));
       const key = skill?.name.toLowerCase();
       if (key && disabledSkillNames.has(key)) return;
       if (skill && key) {
@@ -169,25 +189,27 @@ function buildSkillIndex(
       }
     }
 
-    const childDirs = entries
-      .filter((entry) => !disabledSkillNames.has(entry.name.toLowerCase()))
-      .map((entry) => resolveChildDirectory(dir, entry))
-      .filter((childDir): childDir is string => Boolean(childDir))
-      .sort((left, right) => left.localeCompare(right));
+    const childDirs: string[] = [];
+    for (const entry of entries) {
+      if (disabledSkillNames.has(entry.name.toLowerCase())) continue;
+      const childDir = await resolveChildDirectory(dir, entry);
+      if (childDir) childDirs.push(childDir);
+    }
+    childDirs.sort((left, right) => left.localeCompare(right));
 
     for (const childDir of childDirs) {
-      visit(childDir, depth + 1);
+      await visit(childDir, depth + 1);
     }
   }
 
-  visit(root);
+  await visit(root);
   return index;
 }
 
-function getCachedSkillIndex(
+async function getCachedSkillIndex(
   root: string,
   options: { cacheTtlMs?: number; nowMs?: number } & SkillIndexOptions = {},
-): Map<string, AvailableSkill> {
+): Promise<Map<string, AvailableSkill>> {
   const nowMs = options.nowMs ?? Date.now();
   const cacheTtlMs = options.cacheTtlMs ?? SKILL_INDEX_CACHE_TTL_MS;
   const disabledCacheKey = options.disabledSkillNames
@@ -203,7 +225,7 @@ function getCachedSkillIndex(
     return cached.index;
   }
 
-  const index = buildSkillIndex(root, {
+  const index = await buildSkillIndex(root, {
     disabledSkillNames: options.disabledSkillNames,
   });
   if (cacheTtlMs > 0) {
@@ -218,14 +240,14 @@ function getCachedSkillIndex(
   return index;
 }
 
-export function resolveAvailableSkills(params: {
+export async function resolveAvailableSkills(params: {
   api: OpenClawPluginApi;
   agentId: string;
   intentBody: string;
   bundledSkillsDir?: string;
   cacheTtlMs?: number;
   nowMs?: number;
-}): AvailableSkill[] {
+}): Promise<AvailableSkill[]> {
   const names = extractReferencedSkillNames(params.intentBody);
   if (names.length === 0) return [];
 
@@ -246,8 +268,8 @@ export function resolveAvailableSkills(params: {
     bundledSkillsDir,
   ].filter((root): root is string => Boolean(root));
   let disabledBundledSkillNames: Set<string> | undefined;
-  const getDisabledBundledSkillNames = () => {
-    disabledBundledSkillNames ??= readDisabledBundledSkillNames(stateDir);
+  const getDisabledBundledSkillNames = async () => {
+    disabledBundledSkillNames ??= await readDisabledBundledSkillNames(stateDir);
     return disabledBundledSkillNames;
   };
 
@@ -258,14 +280,16 @@ export function resolveAvailableSkills(params: {
     if (seen.has(normalizedName)) continue;
 
     for (const root of roots) {
-      const skill = getCachedSkillIndex(root, {
-        cacheTtlMs: params.cacheTtlMs,
-        disabledSkillNames:
-          root === bundledSkillsDir
-            ? getDisabledBundledSkillNames()
-            : undefined,
-        nowMs: params.nowMs,
-      }).get(normalizedName);
+      const skill = (
+        await getCachedSkillIndex(root, {
+          cacheTtlMs: params.cacheTtlMs,
+          disabledSkillNames:
+            root === bundledSkillsDir
+              ? await getDisabledBundledSkillNames()
+              : undefined,
+          nowMs: params.nowMs,
+        })
+      ).get(normalizedName);
       if (!skill) continue;
       skills.push(skill);
       seen.add(skill.name.toLowerCase());
@@ -275,7 +299,7 @@ export function resolveAvailableSkills(params: {
   return skills;
 }
 
-export function resolveDomainSkills(params: {
+export async function resolveDomainSkills(params: {
   api: OpenClawPluginApi;
   agentId: string;
   domain: string | null | undefined;
@@ -283,7 +307,7 @@ export function resolveDomainSkills(params: {
   bundledSkillsDir?: string;
   cacheTtlMs?: number;
   nowMs?: number;
-}): AvailableSkill[] {
+}): Promise<AvailableSkill[]> {
   const domain = (params.domain ?? "").trim().toLowerCase();
   if (!domain) return [];
 
@@ -296,7 +320,7 @@ export function resolveDomainSkills(params: {
 
   if (!intentBody.trim()) return [];
 
-  return resolveAvailableSkills({
+  return await resolveAvailableSkills({
     api: params.api,
     agentId: params.agentId,
     intentBody,

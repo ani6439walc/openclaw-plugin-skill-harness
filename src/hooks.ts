@@ -778,12 +778,12 @@ export function createHookHandlers(deps: HookDeps) {
     });
   }
 
-  function resolvePromptDomainSkills(params: {
+  async function resolvePromptDomainSkills(params: {
     agentId: string;
     domain: string;
     availableIntents: readonly IntentCatalogEntry[];
   }) {
-    return resolveDomainSkills({
+    return await resolveDomainSkills({
       api,
       agentId: params.agentId,
       bundledSkillsDir,
@@ -820,7 +820,7 @@ export function createHookHandlers(deps: HookDeps) {
     };
   }
 
-  function handleExactKeywordPromptBuild(params: {
+  async function handleExactKeywordPromptBuild(params: {
     ctx: PluginHookAgentContext;
     routing: NonNullable<ReturnType<typeof resolvePromptBuildRouting>>;
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
@@ -829,7 +829,7 @@ export function createHookHandlers(deps: HookDeps) {
     conversation: ReturnType<typeof limitConversationTurns>;
     availableIntents: ReturnType<typeof catalog.filterForAgent>;
     exactKeywordMatch: NonNullable<ReturnType<typeof findExactKeywordIntent>>;
-  }): PluginHookBeforePromptBuildResult | undefined {
+  }): Promise<PluginHookBeforePromptBuildResult | undefined> {
     const latestHistoricalIntent =
       params.historicalIntents[params.historicalIntents.length - 1];
     const result = buildExactKeywordIntentResult({
@@ -864,7 +864,7 @@ export function createHookHandlers(deps: HookDeps) {
       params.availableIntents,
       params.refreshedConfig,
       params.exactKeywordMatch.hint,
-      resolvePromptDomainSkills({
+      await resolvePromptDomainSkills({
         agentId: params.routing.effectiveAgentId,
         domain: result.domain,
         availableIntents: params.availableIntents,
@@ -898,7 +898,7 @@ export function createHookHandlers(deps: HookDeps) {
       return {
         prependContext: buildDomainSkillsPromptPrefix(
           result,
-          resolvePromptDomainSkills({
+          await resolvePromptDomainSkills({
             agentId: params.routing.effectiveAgentId,
             domain: result.domain,
             availableIntents: params.availableIntents,
@@ -922,7 +922,7 @@ export function createHookHandlers(deps: HookDeps) {
       return {
         prependContext: buildDomainSkillsPromptPrefix(
           result,
-          resolvePromptDomainSkills({
+          await resolvePromptDomainSkills({
             agentId: params.routing.effectiveAgentId,
             domain: result.domain,
             availableIntents: params.availableIntents,
@@ -946,7 +946,7 @@ export function createHookHandlers(deps: HookDeps) {
       return {
         prependContext: buildDomainSkillsPromptPrefix(
           result,
-          resolvePromptDomainSkills({
+          await resolvePromptDomainSkills({
             agentId: params.routing.effectiveAgentId,
             domain: result.domain,
             availableIntents: params.availableIntents,
@@ -972,7 +972,7 @@ export function createHookHandlers(deps: HookDeps) {
       latest: params.latestUserMessage,
       result,
       intentBody,
-      availableSkills: resolveAvailableSkills({
+      availableSkills: await resolveAvailableSkills({
         api,
         agentId: params.routing.effectiveAgentId,
         bundledSkillsDir,
@@ -1021,7 +1021,7 @@ export function createHookHandlers(deps: HookDeps) {
       params.availableIntents,
       params.refreshedConfig,
       instructionText,
-      resolvePromptDomainSkills({
+      await resolvePromptDomainSkills({
         agentId: params.routing.effectiveAgentId,
         domain: result.domain,
         availableIntents: params.availableIntents,
@@ -1198,7 +1198,7 @@ export function createHookHandlers(deps: HookDeps) {
     return { intentDefinition };
   }
 
-  function buildEvolutionReviewSnapshot(
+  async function buildEvolutionReviewSnapshot(
     baseSnapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>,
     intentDefinition: ReturnType<typeof findIntentDefinition>,
     agentId: string,
@@ -1216,7 +1216,7 @@ export function createHookHandlers(deps: HookDeps) {
           }
         : undefined,
       availableSkills: intentDefinition
-        ? resolveAvailableSkills({
+        ? await resolveAvailableSkills({
             api,
             agentId,
             bundledSkillsDir,
@@ -1241,7 +1241,7 @@ export function createHookHandlers(deps: HookDeps) {
     resolvedConfig: ResolvedSkillHarnessPluginConfig;
     agentId: string;
     modelRef: NonNullable<ReturnType<typeof getReviewModelRef>>;
-    snapshot: ReturnType<typeof buildEvolutionReviewSnapshot>;
+    snapshot: Awaited<ReturnType<typeof buildEvolutionReviewSnapshot>>;
     triggers: ReturnType<typeof checkEvolutionTriggers>;
   }): void {
     reviewQueue.enqueue(async () => {
@@ -1305,7 +1305,7 @@ export function createHookHandlers(deps: HookDeps) {
     const baseSnapshot = tracker.getReviewSnapshot(ctx.sessionId);
     if (!baseSnapshot) return;
     const agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
-    const snapshot = buildEvolutionReviewSnapshot(
+    const snapshot = await buildEvolutionReviewSnapshot(
       baseSnapshot,
       agentEndStats.intentDefinition,
       agentId,
