@@ -66,6 +66,22 @@ export type ResolvedEvolutionConfig = {
   };
 };
 
+export type InstructionConfig = {
+  enabled?: boolean;
+  model?: string;
+  modelFallback?: string;
+  thinking?: ThinkLevel;
+  timeoutMs?: number;
+};
+
+export type ResolvedInstructionConfig = {
+  enabled: boolean;
+  model: string | undefined;
+  modelFallback: string | undefined;
+  thinking: ThinkLevel;
+  timeoutMs: number;
+};
+
 export type SkillHarnessPluginConfig = {
   agents?: string[];
   intentDeny?: Record<string, string[]>;
@@ -80,6 +96,7 @@ export type SkillHarnessPluginConfig = {
   contextWindow?: ContextWindow;
   timeoutMs?: number;
   complexityPrompts?: ComplexityPromptsConfig;
+  instruction?: InstructionConfig;
   evolution?: EvolutionConfig;
 };
 
@@ -97,6 +114,7 @@ export type ResolvedSkillHarnessPluginConfig = {
   contextWindow: ContextWindow;
   timeoutMs: number;
   complexityPrompts: ResolvedComplexityPromptsConfig;
+  instruction: ResolvedInstructionConfig;
   evolution: ResolvedEvolutionConfig;
 };
 

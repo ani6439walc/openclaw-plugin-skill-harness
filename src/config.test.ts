@@ -49,6 +49,13 @@ describe("resolveConfig", () => {
           entityContext: { enabled: true },
         },
       });
+      expect(result.instruction).toMatchObject({
+        enabled: true,
+        model: undefined,
+        modelFallback: undefined,
+        thinking: "medium",
+        timeoutMs: 30000,
+      });
     });
 
     it("should handle empty object loading", () => {
@@ -120,13 +127,15 @@ describe("resolveConfig", () => {
       });
     });
 
-    it("falls back for invalid classifier and review thinking levels", () => {
+    it("falls back for invalid classifier, instruction, and review thinking levels", () => {
       const result = resolveConfig({
         thinking: "invalid",
+        instruction: { thinking: "invalid" },
         evolution: { thinking: "invalid" },
       });
 
       expect(result.thinking).toBe("medium");
+      expect(result.instruction.thinking).toBe("medium");
       expect(result.evolution.thinking).toBe("medium");
     });
 
@@ -149,6 +158,30 @@ describe("resolveConfig", () => {
       expect(
         resolveConfig({ lowThinkingMode: "invalid" }).lowThinkingMode,
       ).toBe("fastpath-only");
+    });
+  });
+
+  describe("instruction", () => {
+    it("parses and clamps instruction-writer settings without triggers", () => {
+      const result = resolveConfig({
+        instruction: {
+          enabled: true,
+          model: "google/gemini-3-flash",
+          modelFallback: "openai/gpt-5-mini",
+          thinking: "high",
+          timeoutMs: 700000,
+          triggers: { ignored: true },
+        },
+      });
+
+      expect(result.instruction).toMatchObject({
+        enabled: true,
+        model: "google/gemini-3-flash",
+        modelFallback: "openai/gpt-5-mini",
+        thinking: "high",
+        timeoutMs: 600000,
+      });
+      expect(result.instruction).not.toHaveProperty("triggers");
     });
   });
 

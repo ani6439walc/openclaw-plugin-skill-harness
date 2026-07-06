@@ -557,13 +557,23 @@ describe("createHookHandlers topic switch flow", () => {
         text: "Follow the generated coding instructions.",
       });
     const emitAgentEvent = emitHostAgentEvent;
+    const rawConfig = {
+      model: "google/test-intent",
+      ...((params.configRaw as Record<string, unknown> | undefined) ?? {}),
+      instruction: {
+        enabled: true,
+        ...((
+          params.configRaw as
+            { instruction?: Record<string, unknown> } | undefined
+        )?.instruction ?? {}),
+      },
+    };
     const handlers = createHookHandlers({
       api: {
         config: {},
         ...params.api,
       } as unknown as OpenClawPluginApi,
-      config: () =>
-        resolveConfig(params.configRaw ?? { model: "google/test-intent" }),
+      config: () => resolveConfig(rawConfig),
       refreshLiveConfigFromRuntime: vi.fn(),
       refreshIntents: vi.fn(),
       catalog: catalog as never,
@@ -661,6 +671,39 @@ describe("createHookHandlers topic switch flow", () => {
               topicChangeReason: "start",
             }),
             instructionText: "Reply warmly.",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("skips exact keyword hints when instruction config is disabled", async () => {
+    const fastEvent = {
+      prompt: "謝謝",
+      messages: [{ role: "user", content: "謝謝" }],
+    } as never;
+    const { handlers, classifier, topicChecker, instructionWriter, record } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        configRaw: {
+          model: "google/test-intent",
+          instruction: { enabled: false },
+        },
+      });
+
+    const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
+
+    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result?.prependContext).not.toContain("Reply warmly.");
+    expect(topicChecker).not.toHaveBeenCalled();
+    expect(classifier).not.toHaveBeenCalled();
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.not.objectContaining({
+            instructionText: expect.any(String),
           }),
         }),
       }),
@@ -1379,6 +1422,90 @@ describe("createHookHandlers topic switch flow", () => {
                 text: "implement topic checker",
               }),
             ]),
+            result: expect.objectContaining({
+              intent: "social-casual",
+              topicChangeReason: "start",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(
+      record.mock.calls[0][1].current.intent.instructionText,
+    ).toBeUndefined();
+  });
+
+  it("skips instruction writer hints when instruction config is disabled", async () => {
+    const { handlers, instructionWriter, record, emitAgentEvent } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        configRaw: {
+          model: "google/test-intent",
+          instruction: { enabled: false },
+        },
+      });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result?.prependContext).not.toContain(
+      "Follow the generated coding instructions.",
+    );
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining([
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
+      ]),
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              intent: "social-casual",
+              topicChangeReason: "start",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(
+      record.mock.calls[0][1].current.intent.instructionText,
+    ).toBeUndefined();
+  });
+
+  it("falls back to domain skills when instruction model cannot be resolved", async () => {
+    const { handlers, instructionWriter, record, emitAgentEvent } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        configRaw: {
+          model: "google/test-intent",
+          instruction: { enabled: true, model: "/" },
+        },
+      });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result?.prependContext).not.toContain(
+      "Follow the generated coding instructions.",
+    );
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining([
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
+      ]),
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
             result: expect.objectContaining({
               intent: "social-casual",
               topicChangeReason: "start",

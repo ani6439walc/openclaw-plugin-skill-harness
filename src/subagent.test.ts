@@ -96,7 +96,7 @@ describe("runTopicSwitchSubagent", () => {
         timeoutMs: 4321,
         thinkLevel: "low",
         disableTools: true,
-        prompt: expect.stringContaining("topic continuity checker"),
+        prompt: expect.stringContaining("You are a topic checker."),
       }),
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
@@ -122,8 +122,14 @@ describe("runIntentInstructionSubagent", () => {
       api,
       config: resolveConfig({
         model: "google/test-intent",
-        thinking: "low",
-        timeoutMs: 4321,
+        thinking: "high",
+        timeoutMs: 9999,
+        instruction: {
+          enabled: true,
+          model: "google/test-instruction",
+          thinking: "low",
+          timeoutMs: 4321,
+        },
       }),
       agentId: "main",
       conversation: [
@@ -146,7 +152,7 @@ describe("runIntentInstructionSubagent", () => {
       },
       intentBody:
         "## Concrete Workflow\n\n- Use test-driven-development.\n\n## Tools\n\n- apply_patch",
-      modelRef: { provider: "google", model: "test-intent" },
+      modelRef: { provider: "google", model: "test-instruction" },
     });
 
     expect(result).toEqual({
@@ -155,14 +161,14 @@ describe("runIntentInstructionSubagent", () => {
     expect(runEmbeddedAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "google",
-        model: "test-intent",
+        model: "test-instruction",
         timeoutMs: 4321,
         thinkLevel: "low",
         promptMode: "minimal",
         modelRun: false,
         disableTools: false,
         toolsAllow: ["read"],
-        prompt: expect.stringContaining("skill-harness writer"),
+        prompt: expect.stringContaining("You are an instruction writer."),
       }),
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(

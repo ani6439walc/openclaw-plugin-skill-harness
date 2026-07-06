@@ -84,4 +84,36 @@ describe("skill-harness manifest", () => {
         .confidenceBelow.default,
     ).toBe(0.5);
   });
+
+  it("exposes enabled-by-default instruction writer settings without triggers", () => {
+    const instruction = manifest.configSchema.properties.instruction;
+
+    expect(instruction.description).toContain("instruction writer");
+    expect(instruction.properties.enabled.default).toBe(true);
+    expect(instruction.properties.model.description).toContain(
+      "Dedicated model",
+    );
+    expect(instruction.properties.modelFallback.description).toContain(
+      "Fallback model",
+    );
+    expect(instruction.properties.thinking).toMatchObject({
+      default: "medium",
+      enum: [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "adaptive",
+        "max",
+      ],
+    });
+    expect(instruction.properties.timeoutMs).toMatchObject({
+      minimum: 250,
+      maximum: 600000,
+      default: 30000,
+    });
+    expect(instruction.properties).not.toHaveProperty("triggers");
+  });
 });

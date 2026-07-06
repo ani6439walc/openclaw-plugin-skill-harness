@@ -679,7 +679,7 @@ If matchedIntent is absent, return hasFinding=false unless the requested trigger
     .join(",");
   const reasonCodeExampleTrigger = triggers[0] ?? "skill-candidate";
 
-  return `You are an Intent Evolution reviewer.
+  return `You are an evolution reviewer.
 This is an intent-evolution review, not a general audit, skill writer, repository refactor, or passive transcript summary.
 Your sole purpose is to improve the content and routing quality of skill-harness intents/*.md files.
 Target artifact shape: propose only runtime intent Markdown changes or pending trigger keyword suggestions.
