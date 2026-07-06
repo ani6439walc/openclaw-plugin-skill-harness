@@ -175,8 +175,7 @@ async function buildSkillIndex(
     if (skillFileEntry && (await isSkillFileEntry(dir, skillFileEntry))) {
       const skill = await readSkillFile(path.join(dir, "SKILL.md"));
       const key = skill?.name.toLowerCase();
-      if (key && disabledSkillNames.has(key)) return;
-      if (skill && key) {
+      if (skill && key && !disabledSkillNames.has(key)) {
         if (index.has(key)) {
           logger.warn("duplicate skill name ignored while indexing skills", {
             ignoredPath: skill.location,

@@ -148,6 +148,16 @@ describe("skill catalog", () => {
       "disabled-frontmatter",
       "Disabled by frontmatter name.",
     );
+    writeSkillAt(
+      path.join(bundled, "category", "package"),
+      "disabled-frontmatter",
+      "Disabled by frontmatter name.",
+    );
+    writeSkillAt(
+      path.join(bundled, "category", "package", "child"),
+      "nested-enabled",
+      "Nested skill inside disabled package.",
+    );
     writeSkill(bundled, "enabled-bundled", "Enabled bundled skill.");
 
     const api = {
@@ -167,7 +177,7 @@ describe("skill catalog", () => {
           bundledSkillsDir: bundled,
           cacheTtlMs: 0,
           intentBody:
-            "skill: disabled-bundled\nskill: disabled-frontmatter\nskill: nested-disabled\nskill: enabled-bundled",
+            "skill: disabled-bundled\nskill: disabled-frontmatter\nskill: nested-disabled\nskill: nested-enabled\nskill: enabled-bundled",
         }),
       ).toEqual([
         {
@@ -179,6 +189,17 @@ describe("skill catalog", () => {
             "SKILL.md",
           ),
           description: "Workspace copy remains available.",
+        },
+        {
+          name: "nested-enabled",
+          location: path.join(
+            bundled,
+            "category",
+            "package",
+            "child",
+            "SKILL.md",
+          ),
+          description: "Nested skill inside disabled package.",
         },
         {
           name: "enabled-bundled",
