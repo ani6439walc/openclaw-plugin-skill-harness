@@ -9,6 +9,7 @@ import type { AvailableSkill, IntentCatalogEntry } from "./types.js";
 const SKILL_REF_RE = /\bskill:\s*([A-Za-z0-9_-]+)/gi;
 const SKILL_INDEX_CACHE_TTL_MS = 60_000;
 const SKILL_INDEX_CACHE_MAX_ENTRIES = 128;
+const SKILL_INDEX_MAX_DEPTH = 32;
 const require = createRequire(import.meta.url);
 
 interface CachedSkillIndex {
@@ -64,10 +65,47 @@ function readSkillFile(filePath: string): AvailableSkill | undefined {
   }
 }
 
+function readEntryStat(entryPath: string): fs.Stats | undefined {
+  try {
+    return fs.statSync(entryPath);
+  } catch {
+    return;
+  }
+}
+
+function isSkillFileEntry(dir: string, entry: fs.Dirent): boolean {
+  if (entry.name !== "SKILL.md") return false;
+  if (entry.isFile()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  return readEntryStat(path.join(dir, entry.name))?.isFile() ?? false;
+}
+
+function resolveChildDirectory(
+  dir: string,
+  entry: fs.Dirent,
+): string | undefined {
+  const entryPath = path.join(dir, entry.name);
+  if (entry.isDirectory()) return entryPath;
+  if (!entry.isSymbolicLink()) return;
+  return readEntryStat(entryPath)?.isDirectory() ? entryPath : undefined;
+}
+
 function buildSkillIndex(root: string): Map<string, AvailableSkill> {
   const index = new Map<string, AvailableSkill>();
+  const visitedDirs = new Set<string>();
 
-  function visit(dir: string): void {
+  function visit(dir: string, depth = 0): void {
+    if (depth > SKILL_INDEX_MAX_DEPTH) return;
+
+    let realDir: string;
+    try {
+      realDir = fs.realpathSync(dir);
+    } catch {
+      return;
+    }
+    if (visitedDirs.has(realDir)) return;
+    visitedDirs.add(realDir);
+
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -75,7 +113,7 @@ function buildSkillIndex(root: string): Map<string, AvailableSkill> {
       return;
     }
 
-    if (entries.some((entry) => entry.isFile() && entry.name === "SKILL.md")) {
+    if (entries.some((entry) => isSkillFileEntry(dir, entry))) {
       const skill = readSkillFile(path.join(dir, "SKILL.md"));
       const key = skill?.name.toLowerCase();
       if (skill && key) {
@@ -92,12 +130,12 @@ function buildSkillIndex(root: string): Map<string, AvailableSkill> {
     }
 
     const childDirs = entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(dir, entry.name))
+      .map((entry) => resolveChildDirectory(dir, entry))
+      .filter((childDir): childDir is string => Boolean(childDir))
       .sort((left, right) => left.localeCompare(right));
 
     for (const childDir of childDirs) {
-      visit(childDir);
+      visit(childDir, depth + 1);
     }
   }
 

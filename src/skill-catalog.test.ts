@@ -194,6 +194,79 @@ describe("skill catalog", () => {
     ]);
   });
 
+  it("indexes symlinked skill directories and SKILL.md files without following cycles", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    const bundled = path.join(tmp, "bundled");
+    const workspaceSkills = path.join(workspace, "skills");
+
+    writeSkillAt(
+      path.join(tmp, "shared", "directory-skill"),
+      "symlink-dir-skill",
+      "Symlinked directory skill.",
+    );
+    const linkedDir = path.join(workspaceSkills, "links", "directory-skill");
+    fs.mkdirSync(path.dirname(linkedDir), { recursive: true });
+    fs.symlinkSync(
+      path.join(tmp, "shared", "directory-skill"),
+      linkedDir,
+      "dir",
+    );
+
+    writeSkillAt(
+      path.join(workspaceSkills, "file-link-skill"),
+      "symlink-file-skill",
+      "Symlinked file skill.",
+    );
+    const linkedSkillFile = path.join(
+      workspaceSkills,
+      "linked-file",
+      "SKILL.md",
+    );
+    fs.mkdirSync(path.dirname(linkedSkillFile), { recursive: true });
+    fs.renameSync(
+      path.join(workspaceSkills, "file-link-skill", "SKILL.md"),
+      path.join(tmp, "linked-SKILL.md"),
+    );
+    fs.symlinkSync(path.join(tmp, "linked-SKILL.md"), linkedSkillFile, "file");
+
+    fs.mkdirSync(path.join(workspaceSkills, "cycle"), { recursive: true });
+    fs.symlinkSync(
+      workspaceSkills,
+      path.join(workspaceSkills, "cycle", "back"),
+      "dir",
+    );
+
+    const api = {
+      config: {},
+      runtime: {
+        state: { resolveStateDir: () => state },
+        agent: { resolveAgentWorkspaceDir: () => workspace },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    expect(
+      resolveAvailableSkills({
+        api,
+        agentId: "main",
+        bundledSkillsDir: bundled,
+        intentBody: "skill: symlink-dir-skill\nskill: symlink-file-skill",
+      }),
+    ).toEqual([
+      {
+        name: "symlink-dir-skill",
+        location: path.join(linkedDir, "SKILL.md"),
+        description: "Symlinked directory skill.",
+      },
+      {
+        name: "symlink-file-skill",
+        location: linkedSkillFile,
+        description: "Symlinked file skill.",
+      },
+    ]);
+  });
+
   it("uses cached root indexes across resolution calls within the TTL", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");

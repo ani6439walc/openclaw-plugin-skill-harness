@@ -558,8 +558,9 @@ Referenced `skill: <name>` hints are resolved into an `<intent_related_skills>` 
 for this writer so it can recommend concrete skill paths without guessing. Skill
 metadata is resolved from workspace `skills/`, state `skills/`, state
 `plugin-skills/`, then bundled OpenClaw skills. Each root is searched
-recursively for directories containing `SKILL.md`; the skill frontmatter `name`
-must match the referenced skill name. Skill root indexes are cached briefly
+recursively for directories containing `SKILL.md`, including symlinked skill
+directories or `SKILL.md` files while guarding against directory cycles; the
+skill frontmatter `name` must match the referenced skill name. Skill root indexes are cached briefly
 across prompt-build turns, expired entries are swept before reuse, and the cache
 is size-bounded so missing skill references do not rescan entire roots on every
 turn. The Evolution review prompt receives the same resolved skill metadata when
