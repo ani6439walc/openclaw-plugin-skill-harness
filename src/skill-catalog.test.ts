@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   extractReferencedSkillNames,
   resolveAvailableSkills,
@@ -194,6 +194,67 @@ describe("skill catalog", () => {
     ]);
   });
 
+  it("indexes each root once per resolution call for repeated missing skills", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    const bundled = path.join(tmp, "bundled");
+
+    fs.mkdirSync(path.join(workspace, "skills", "group-a", "nested"), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(state, "skills", "group-b", "nested"), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(state, "plugin-skills", "group-c", "nested"), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(bundled, "group-d", "nested"), {
+      recursive: true,
+    });
+
+    const api = {
+      config: {},
+      runtime: {
+        state: { resolveStateDir: () => state },
+        agent: { resolveAgentWorkspaceDir: () => workspace },
+      },
+    } as unknown as OpenClawPluginApi;
+    const readdirSpy = vi.spyOn(fs, "readdirSync");
+
+    try {
+      expect(
+        resolveAvailableSkills({
+          api,
+          agentId: "main",
+          bundledSkillsDir: bundled,
+          intentBody:
+            "skill: missing-one\nskill: missing-two\nskill: missing-three",
+        }),
+      ).toEqual([]);
+
+      const calls = readdirSpy.mock.calls.map(([target]) => String(target));
+      for (const dir of [
+        path.join(workspace, "skills"),
+        path.join(workspace, "skills", "group-a"),
+        path.join(workspace, "skills", "group-a", "nested"),
+        path.join(state, "skills"),
+        path.join(state, "skills", "group-b"),
+        path.join(state, "skills", "group-b", "nested"),
+        path.join(state, "plugin-skills"),
+        path.join(state, "plugin-skills", "group-c"),
+        path.join(state, "plugin-skills", "group-c", "nested"),
+        bundled,
+        path.join(bundled, "group-d"),
+        path.join(bundled, "group-d", "nested"),
+      ]) {
+        expect(calls.filter((call) => call === dir)).toHaveLength(1);
+      }
+    } finally {
+      readdirSpy.mockRestore();
+    }
+  });
+
   it("loads skills referenced by every intent in the requested domain", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
@@ -281,5 +342,40 @@ describe("skill catalog", () => {
         description: "Drive changes with tests.",
       },
     ]);
+  });
+
+  it("returns no domain skills for blank or absent domains", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    const bundled = path.join(tmp, "bundled");
+    const api = {
+      config: {},
+      runtime: {
+        state: { resolveStateDir: () => state },
+        agent: { resolveAgentWorkspaceDir: () => workspace },
+      },
+    } as unknown as OpenClawPluginApi;
+    const params = {
+      api,
+      agentId: "main",
+      bundledSkillsDir: bundled,
+      intents: [
+        {
+          id: "diagram",
+          definition: {
+            triggers: ["diagram"],
+            examples: [],
+            domain: "coding",
+            fastpath: { keywords: [] },
+            prompt: "Use skill: architecture-diagram.",
+          },
+        },
+      ],
+    };
+
+    expect(resolveDomainSkills({ ...params, domain: "" })).toEqual([]);
+    expect(resolveDomainSkills({ ...params, domain: undefined })).toEqual([]);
+    expect(resolveDomainSkills({ ...params, domain: null })).toEqual([]);
   });
 });

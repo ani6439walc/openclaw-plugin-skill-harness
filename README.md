@@ -565,9 +565,10 @@ same resolved skill metadata when a matched intent exists.
 The final main-agent prompt prefix always includes a `<domain_skills>` XML block
 once `onBeforePromptBuild` has resolved the current domain. This block is separate
 from `<intent_related_skills>`: it is built from every enabled intent in the same
-domain, includes each skill's `name`, `path`, and `description`, and is still
-injected when the generated hint is skipped because the topic is unchanged or the
-classification confidence is too low.
+domain, includes each skill's `name`, `path`, and `description`, and is emitted
+before any generated hint text. It is still injected when the generated hint is
+skipped because the topic is unchanged or the classification confidence is too
+low.
 The full complexity guidance is provided to this instruction writer, not appended
 to the final main-agent prefix.
 The generated instruction text replaces direct full intent-body injection. If

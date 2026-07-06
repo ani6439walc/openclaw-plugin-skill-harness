@@ -39,21 +39,23 @@ function readSkillFile(filePath: string): AvailableSkill | undefined {
   }
 }
 
-function findSkillInRoot(
-  root: string,
-  skillName: string,
-): AvailableSkill | undefined {
-  const expectedName = skillName.toLowerCase();
+function buildSkillIndex(root: string): Map<string, AvailableSkill> {
+  const index = new Map<string, AvailableSkill>();
 
-  function visit(dir: string): AvailableSkill | undefined {
-    const skill = readSkillFile(path.join(dir, "SKILL.md"));
-    if (skill?.name.toLowerCase() === expectedName) return skill;
-
+  function visit(dir: string): void {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
+    }
+
+    if (entries.some((entry) => entry.isFile() && entry.name === "SKILL.md")) {
+      const skill = readSkillFile(path.join(dir, "SKILL.md"));
+      const key = skill?.name.toLowerCase();
+      if (skill && key && !index.has(key)) {
+        index.set(key, skill);
+      }
     }
 
     const childDirs = entries
@@ -62,12 +64,12 @@ function findSkillInRoot(
       .sort((left, right) => left.localeCompare(right));
 
     for (const childDir of childDirs) {
-      const found = visit(childDir);
-      if (found) return found;
+      visit(childDir);
     }
   }
 
-  return visit(root);
+  visit(root);
+  return index;
 }
 
 export function resolveAvailableSkills(params: {
@@ -98,12 +100,22 @@ export function resolveAvailableSkills(params: {
 
   const skills: AvailableSkill[] = [];
   const seen = new Set<string>();
+  const rootIndexes = new Map<string, Map<string, AvailableSkill>>();
+  const getRootIndex = (root: string) => {
+    let index = rootIndexes.get(root);
+    if (!index) {
+      index = buildSkillIndex(root);
+      rootIndexes.set(root, index);
+    }
+    return index;
+  };
+
   for (const name of names) {
     const normalizedName = name.toLowerCase();
     if (seen.has(normalizedName)) continue;
 
     for (const root of roots) {
-      const skill = findSkillInRoot(root, name);
+      const skill = getRootIndex(root).get(normalizedName);
       if (!skill) continue;
       skills.push(skill);
       seen.add(skill.name.toLowerCase());
@@ -116,11 +128,11 @@ export function resolveAvailableSkills(params: {
 export function resolveDomainSkills(params: {
   api: OpenClawPluginApi;
   agentId: string;
-  domain: string;
+  domain: string | null | undefined;
   intents: readonly IntentCatalogEntry[];
   bundledSkillsDir?: string;
 }): AvailableSkill[] {
-  const domain = params.domain.trim().toLowerCase();
+  const domain = (params.domain ?? "").trim().toLowerCase();
   if (!domain) return [];
 
   const intentBody = params.intents

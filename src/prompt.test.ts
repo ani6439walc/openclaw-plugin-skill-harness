@@ -1270,7 +1270,7 @@ describe("buildPromptPrefix", () => {
     expect(prefix).not.toContain("complexity: medium");
   });
 
-  it("uses generated instruction text when provided", () => {
+  it("places generated instruction text after domain skills when provided", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants code",
@@ -1283,9 +1283,20 @@ describe("buildPromptPrefix", () => {
       mockIntents,
       mockConfig,
       "Run tests first, then edit with apply_patch.",
+      [
+        {
+          name: "test-driven-development",
+          location: "/skills/test-driven-development/SKILL.md",
+          description: "Drive changes with tests.",
+        },
+      ],
     );
 
     expect(prefix).toContain("Run tests first, then edit with apply_patch.");
+    expect(prefix).toContain("<domain_skills>");
+    expect(prefix!.indexOf("<domain_skills>")).toBeLessThan(
+      prefix!.indexOf("Run tests first, then edit with apply_patch."),
+    );
     expect(prefix).not.toContain("Write clean, well-tested code.");
   });
 

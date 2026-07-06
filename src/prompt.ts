@@ -730,8 +730,8 @@ export function buildPromptPrefix(
 
   return `${UNTRUSTED_CONTEXT_HEADER}
 <${SKILL_HARNESS_PLUGIN_TAG}${confidenceHint}>
-${lines.join("\n")}
 ${domainSkillsBlock}
+${lines.join("\n")}
 </${SKILL_HARNESS_PLUGIN_TAG}>`;
 }
 
