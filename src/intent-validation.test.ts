@@ -230,7 +230,7 @@ domain: ""
 
   it("accepts bundled skill asset examples", () => {
     const result = validateIntentDirectory(
-      path.join(packageRoot, "skills", "intention-hint", "assets"),
+      path.join(packageRoot, "skills", "skill-harness", "assets"),
     );
 
     expect(result).toMatchObject({

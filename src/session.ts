@@ -1,9 +1,9 @@
 import type { OpenClawPluginApi } from "../api.js";
 import { logger } from "../api.js";
-import type { ResolvedIntentionHintPluginConfig } from "./types.js";
+import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 
 export function isEnabledForAgent(
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
   agentId: string | undefined,
 ): boolean {
   if (!agentId) return false;
@@ -36,10 +36,10 @@ export function shouldSkipIntentAnalysis(ctx: {
 
   return (
     sessionKey.includes(":active-memory:") ||
-    sessionKey.includes(":intention-hint:") ||
+    sessionKey.includes(":skill-harness:") ||
     sessionKey.includes(":subagent:") ||
     sessionId.startsWith("active-memory-") ||
-    sessionId.startsWith("intention-hint-")
+    sessionId.startsWith("skill-harness-")
   );
 }
 
@@ -78,7 +78,7 @@ function resolveChatType(ctx: {
 }
 
 export function isAllowedChatType(
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
   ctx: {
     sessionKey?: string;
     messageProvider?: string;
@@ -92,7 +92,7 @@ export function isAllowedChatType(
 }
 
 export function isAllowedChatId(
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
   ctx: { sessionKey?: string; messageProvider?: string },
 ): boolean {
   const provider = (ctx.messageProvider ?? "").trim().toLowerCase();

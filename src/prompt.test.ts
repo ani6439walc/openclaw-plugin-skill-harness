@@ -10,7 +10,7 @@ import {
 import type {
   IntentCatalogEntry,
   IntentionResult,
-  ResolvedIntentionHintPluginConfig,
+  ResolvedSkillHarnessPluginConfig,
   RecentTurn,
 } from "./types.js";
 import { FALLBACK_INTENT, FALLBACK_INTENT_ID } from "./constants.js";
@@ -674,7 +674,7 @@ describe("buildIntentInstructionPrompt", () => {
       ],
     });
 
-    expect(prompt).toContain("intention-hint writer");
+    expect(prompt).toContain("skill-harness writer");
     expect(prompt).toContain(
       "Another model is preparing the final user-facing answer",
     );
@@ -780,7 +780,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("apply_patch");
     expect(prompt).toContain("繼續實作同題續聊");
     expect(prompt).toMatch(
-      /<latest_message>\n繼續實作同題續聊\n<\/latest_message>\n\nWrite the optional intention hint now\. Use latest_message as the decision source and output no surrounding analysis\.$/,
+      /<latest_message>\n繼續實作同題續聊\n<\/latest_message>\n\nWrite the optional skill harness now\. Use latest_message as the decision source and output no surrounding analysis\.$/,
     );
   });
 
@@ -1205,7 +1205,7 @@ describe("buildPromptPrefix", () => {
     },
   ];
 
-  const mockConfig: ResolvedIntentionHintPluginConfig = {
+  const mockConfig: ResolvedSkillHarnessPluginConfig = {
     agents: [],
     intentDeny: {},
     model: undefined,
@@ -1347,7 +1347,7 @@ describe("buildPromptPrefix", () => {
     expect(prefix).toContain(FALLBACK_INTENT.prompt);
   });
 
-  it("should wrap content in intention_hint_plugin tags", () => {
+  it("should wrap content in skill_harness_plugin tags", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants code",
@@ -1357,8 +1357,8 @@ describe("buildPromptPrefix", () => {
 
     const prefix = buildPromptPrefix(result, mockIntents, mockConfig);
 
-    expect(prefix).toContain('<intention_hint_plugin confidence="90%"');
-    expect(prefix).toContain("</intention_hint_plugin>");
+    expect(prefix).toContain('<skill_harness_plugin confidence="90%"');
+    expect(prefix).toContain("</skill_harness_plugin>");
   });
 
   it("should include untrusted context header", () => {

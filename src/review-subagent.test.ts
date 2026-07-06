@@ -84,11 +84,11 @@ const snapshot: ReviewSnapshot = {
 };
 
 describe("buildReviewPrompt", () => {
-  it("grounds every review in bundled intention-hint Markdown rules", () => {
+  it("grounds every review in bundled skill-harness Markdown rules", () => {
     const prompt = buildReviewPrompt(snapshot, ["weak-intent"]);
 
     expect(prompt).toContain(
-      "sole purpose is to improve the content and routing quality of intention-hint intents/*.md files",
+      "sole purpose is to improve the content and routing quality of skill-harness intents/*.md files",
     );
     expect(prompt).toContain(
       "This is an intent-evolution review, not a general audit, skill writer, repository refactor, or passive transcript summary",
@@ -820,7 +820,7 @@ describe("runReviewSubagent", () => {
         disableTools: false,
         toolsAllow: ["read"],
         sessionFile: expect.stringMatching(
-          /^\/tmp\/intention-hint-review-.+\.session\.jsonl$/,
+          /^\/tmp\/skill-harness-review-.+\.session\.jsonl$/,
         ),
       }),
     );

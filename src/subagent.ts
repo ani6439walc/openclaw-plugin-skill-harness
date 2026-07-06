@@ -22,12 +22,12 @@ import type {
   IntentionResult,
   AvailableSkill,
   RecentTurn,
-  ResolvedIntentionHintPluginConfig,
+  ResolvedSkillHarnessPluginConfig,
 } from "./types.js";
 
 export type EmbeddedSubagentBaseParams = {
   api: OpenClawPluginApi;
-  config: ResolvedIntentionHintPluginConfig;
+  config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
   sessionKey?: string;
   sessionId?: string;
@@ -108,7 +108,7 @@ function extractEmbeddedRunError(result: {
 export function getModelRef(
   api: OpenClawPluginApi,
   agentId: string,
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
   currentRun: { modelProviderId?: string; modelId?: string },
 ): { provider: string; model: string } | undefined {
   const candidates: (string | undefined)[] = [
@@ -145,7 +145,7 @@ export function getModelRef(
 export function getReviewModelRef(
   api: OpenClawPluginApi,
   agentId: string,
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
   currentRun: { modelProviderId?: string; modelId?: string },
 ): { provider: string; model: string } | undefined {
   return getModelRef(
@@ -162,7 +162,7 @@ export function getReviewModelRef(
 
 export async function runIntentionSubagent(params: {
   api: OpenClawPluginApi;
-  config: ResolvedIntentionHintPluginConfig;
+  config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
   sessionKey?: string;
   sessionId?: string;
@@ -176,8 +176,8 @@ export async function runIntentionSubagent(params: {
 }): Promise<IntentionResult | undefined> {
   const { subagentSessionId, subagentSessionKey } =
     createSubagentSessionIdentity(params, {
-      runPrefix: "intention-hint",
-      keyPrefix: "intention-hint",
+      runPrefix: "skill-harness",
+      keyPrefix: "skill-harness",
       hashInput: params.latest,
     });
 
@@ -223,7 +223,7 @@ export async function runIntentionSubagent(params: {
 
 export async function runTopicSwitchSubagent(params: {
   api: OpenClawPluginApi;
-  config: ResolvedIntentionHintPluginConfig;
+  config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
   sessionKey?: string;
   sessionId?: string;
@@ -236,8 +236,8 @@ export async function runTopicSwitchSubagent(params: {
 }): Promise<TopicSwitchResult | undefined> {
   const { subagentSessionId, subagentSessionKey } =
     createSubagentSessionIdentity(params, {
-      runPrefix: "intention-hint",
-      keyPrefix: "intention-hint",
+      runPrefix: "skill-harness",
+      keyPrefix: "skill-harness",
       hashInput: params.latest,
     });
 
@@ -274,7 +274,7 @@ export async function runTopicSwitchSubagent(params: {
 
 export async function runIntentInstructionSubagent(params: {
   api: OpenClawPluginApi;
-  config: ResolvedIntentionHintPluginConfig;
+  config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
   sessionKey?: string;
   sessionId?: string;
@@ -288,8 +288,8 @@ export async function runIntentInstructionSubagent(params: {
 }): Promise<IntentInstructionSubagentResult> {
   const { subagentSessionId, subagentSessionKey } =
     createSubagentSessionIdentity(params, {
-      runPrefix: "intention-hint",
-      keyPrefix: "intention-hint",
+      runPrefix: "skill-harness",
+      keyPrefix: "skill-harness",
       hashInput: `${params.latest}:${params.result.intent}`,
     });
 

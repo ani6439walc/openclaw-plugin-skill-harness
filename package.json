@@ -1,6 +1,6 @@
 {
-  "name": "intention-hint",
-  "displayName": "Intention Hint",
+  "name": "skill-harness",
+  "displayName": "Skill Harness",
   "description": "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
   "version": "2026.6.11",
   "type": "module",
@@ -9,18 +9,18 @@
   "contributors": [
     "Wan, Jiun Wei <wei840222@gmail.com>"
   ],
-  "homepage": "https://github.com/ani6439walc/openclaw-plugin-intention-hint#readme",
+  "homepage": "https://github.com/ani6439walc/openclaw-plugin-skill-harness#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ani6439walc/openclaw-plugin-intention-hint.git"
+    "url": "git+https://github.com/ani6439walc/openclaw-plugin-skill-harness.git"
   },
   "bugs": {
-    "url": "https://github.com/ani6439walc/openclaw-plugin-intention-hint/issues"
+    "url": "https://github.com/ani6439walc/openclaw-plugin-skill-harness/issues"
   },
   "keywords": [
     "openclaw",
     "plugin",
-    "intention-hint"
+    "skill-harness"
   ],
   "files": [
     "README.md",

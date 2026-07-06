@@ -19,7 +19,7 @@ import {
 import { createHookHandlers, type HookDeps } from "./hooks.js";
 import { createEvolutionCommand } from "./evolution-command.js";
 import { createEvolutionTool, EVOLUTION_TOOL_NAME } from "./evolution-tool.js";
-import type { ResolvedIntentionHintPluginConfig } from "./types.js";
+import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -30,15 +30,15 @@ import {
   sessionsDirPath,
 } from "./file-utils.js";
 
-const PLUGIN_ID = "intention-hint";
+const PLUGIN_ID = "skill-harness";
 const EXAMPLE_INTENT_ASSETS_DIR = path.join(
   "skills",
-  "intention-hint",
+  "skill-harness",
   "assets",
 );
 
 function legacyTriggerKeywordSeedFromConfig(
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
 ): Partial<EvolutionTriggerKeywords> | undefined {
   const seed: Partial<EvolutionTriggerKeywords> = {};
   if (config.evolution.triggers.successfulPattern.keywords !== undefined) {
@@ -111,7 +111,7 @@ export function initializePluginDataRoot({
     fs.mkdirSync(dataRoot, { recursive: true });
     fs.mkdirSync(sessionsDirPath(dataRoot), { recursive: true });
   } catch (err) {
-    logger.warn("failed to create intention-hint data root", {
+    logger.warn("failed to create skill-harness data root", {
       error: err,
       path: dataRoot,
     });
@@ -121,7 +121,7 @@ export function initializePluginDataRoot({
   try {
     seedExampleIntents(dataRoot, packageRoot);
   } catch (err) {
-    logger.warn("failed to seed intention-hint example intents", {
+    logger.warn("failed to seed skill-harness example intents", {
       error: err,
       path: intentsPath(dataRoot),
     });
@@ -148,7 +148,7 @@ export function createPlugin(
 
   return definePluginEntry({
     id: PLUGIN_ID,
-    name: "Intention Hint",
+    name: "Skill Harness",
     description:
       "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
     register() {

@@ -634,7 +634,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
-    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(result?.prependContext).toContain("Reply warmly.");
     expect(result?.prependContext).not.toContain("## Guidelines");
     expect(topicChecker).not.toHaveBeenCalled();
@@ -902,7 +902,7 @@ describe("createHookHandlers topic switch flow", () => {
       ctx,
     );
 
-    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -1058,7 +1058,7 @@ describe("createHookHandlers topic switch flow", () => {
       ctx,
     );
 
-    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1346,7 +1346,7 @@ describe("createHookHandlers topic switch flow", () => {
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(instructionWriter).toHaveBeenCalledOnce();
-    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1401,7 +1401,7 @@ describe("createHookHandlers topic switch flow", () => {
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(instructionWriter).toHaveBeenCalledOnce();
-    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1461,7 +1461,7 @@ describe("createHookHandlers topic switch flow", () => {
       expect.objectContaining({ topicContext }),
     );
     expect(instructionWriter).toHaveBeenCalledOnce();
-    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(emittedPhaseStates(emitAgentEvent)).toEqual(
       expect.arrayContaining([
         "topic-triage:started",
@@ -1830,12 +1830,12 @@ describe("createHookHandlers topic switch flow", () => {
       },
     );
 
-    expect(result?.prependContext).toContain("<intention_hint_plugin");
+    expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(emitAgentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         runId: "agent:main:direct:123",
         sessionKey: "agent:main:direct:123",
-        stream: "plugin:intention-hint",
+        stream: "plugin:skill-harness",
       }),
     );
   });

@@ -1,4 +1,4 @@
-import type { ResolvedIntentionHintPluginConfig } from "./types.js";
+import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import type { EvolutionFinding } from "./evolution-types.js";
 import type { OpenClawPluginApi } from "../api.js";
 import type {
@@ -58,8 +58,8 @@ import type {
   IntentionResult,
 } from "./types.js";
 
-const INTENTION_HINT_EVENT_STREAM = "plugin:intention-hint";
-const INTENTION_HINT_EVENT_KIND = "intention-hint.pipeline";
+const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
+const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
 type PipelinePhase = "topic-triage" | "intent-classify" | "hint-generate";
 
@@ -94,14 +94,14 @@ function isLowThinkingEffort(ctx: PluginHookAgentContext): boolean {
 
 function shouldSkipAllForLowThinking(
   ctx: PluginHookAgentContext,
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
 ): boolean {
   return config.lowThinkingMode === "off" && isLowThinkingEffort(ctx);
 }
 
 function shouldUseDeterministicLowThinkingMode(
   ctx: PluginHookAgentContext,
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
 ): boolean {
   return config.lowThinkingMode === "fastpath-only" && isLowThinkingEffort(ctx);
 }
@@ -116,7 +116,7 @@ function cleanPipelineEventData(
 
 export type HookDeps = {
   api: OpenClawPluginApi;
-  config: () => ResolvedIntentionHintPluginConfig;
+  config: () => ResolvedSkillHarnessPluginConfig;
   refreshLiveConfigFromRuntime: () => void;
   refreshIntents: () => void;
   catalog?: typeof defaultCatalog;
@@ -437,9 +437,9 @@ export function createHookHandlers(deps: HookDeps) {
       emitHostAgentEvent({
         runId,
         sessionKey,
-        stream: INTENTION_HINT_EVENT_STREAM,
+        stream: SKILL_HARNESS_EVENT_STREAM,
         data: cleanPipelineEventData({
-          kind: INTENTION_HINT_EVENT_KIND,
+          kind: SKILL_HARNESS_EVENT_KIND,
           phase,
           state,
           sessionKey,
@@ -447,7 +447,7 @@ export function createHookHandlers(deps: HookDeps) {
         }),
       });
     } catch (err) {
-      logger.warn("failed to emit intention-hint pipeline event", {
+      logger.warn("failed to emit skill-harness pipeline event", {
         phase,
         state,
         error: err,
@@ -499,7 +499,7 @@ export function createHookHandlers(deps: HookDeps) {
   function buildConversationContext(
     event: PluginHookBeforePromptBuildEvent,
     ctx: PluginHookAgentContext,
-    refreshedConfig: ResolvedIntentionHintPluginConfig,
+    refreshedConfig: ResolvedSkillHarnessPluginConfig,
   ): {
     latestUserMessage: string;
     historicalIntents: HistoricalIntentRecord[];
@@ -553,7 +553,7 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function classifyPromptBuild(params: {
     ctx: PluginHookAgentContext;
-    refreshedConfig: ResolvedIntentionHintPluginConfig;
+    refreshedConfig: ResolvedSkillHarnessPluginConfig;
     effectiveAgentId: string;
     resolvedSessionKey?: string;
     latestUserMessage: string;
@@ -804,7 +804,7 @@ export function createHookHandlers(deps: HookDeps) {
   function handleExactKeywordPromptBuild(params: {
     ctx: PluginHookAgentContext;
     routing: NonNullable<ReturnType<typeof resolvePromptBuildRouting>>;
-    refreshedConfig: ResolvedIntentionHintPluginConfig;
+    refreshedConfig: ResolvedSkillHarnessPluginConfig;
     latestUserMessage: string;
     historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
@@ -852,7 +852,7 @@ export function createHookHandlers(deps: HookDeps) {
   async function handleClassifiedPromptBuild(params: {
     ctx: PluginHookAgentContext;
     routing: NonNullable<ReturnType<typeof resolvePromptBuildRouting>>;
-    refreshedConfig: ResolvedIntentionHintPluginConfig;
+    refreshedConfig: ResolvedSkillHarnessPluginConfig;
     latestUserMessage: string;
     conversation: ReturnType<typeof limitConversationTurns>;
     availableIntents: ReturnType<typeof catalog.filterForAgent>;
@@ -1180,7 +1180,7 @@ export function createHookHandlers(deps: HookDeps) {
 
   function enqueueEvolutionReview(params: {
     ctx: PluginHookAgentContext;
-    resolvedConfig: ResolvedIntentionHintPluginConfig;
+    resolvedConfig: ResolvedSkillHarnessPluginConfig;
     agentId: string;
     modelRef: NonNullable<ReturnType<typeof getReviewModelRef>>;
     snapshot: ReturnType<typeof buildEvolutionReviewSnapshot>;

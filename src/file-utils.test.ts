@@ -13,8 +13,8 @@ describe("plugin data paths", () => {
   it("resolves the plugin data root under the OpenClaw state directory", () => {
     const stateDir = path.join("tmp", "openclaw-state");
 
-    expect(resolvePluginDataRoot(stateDir, "intention-hint")).toBe(
-      path.join(stateDir, "plugins", "intention-hint"),
+    expect(resolvePluginDataRoot(stateDir, "skill-harness")).toBe(
+      path.join(stateDir, "plugins", "skill-harness"),
     );
   });
 

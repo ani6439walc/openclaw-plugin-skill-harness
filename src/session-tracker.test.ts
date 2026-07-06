@@ -752,9 +752,9 @@ describe("SessionTracker", () => {
           toolCalls: [
             {
               name: "read",
-              params: { path: "/path/to/intention-hint/SKILL.md" },
+              params: { path: "/path/to/skill-harness/SKILL.md" },
               result:
-                '---\nname: intention-hint\ndescription: "Design, inventory, or evolve intent definitions for the intention-hint plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing \n',
+                '---\nname: skill-harness\ndescription: "Design, inventory, or evolve intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing \n',
               durationMs: 100,
             },
           ],

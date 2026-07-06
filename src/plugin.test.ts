@@ -59,19 +59,19 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
 
     expect(api.registerTool).toHaveBeenCalledWith(expect.any(Function), {
-      names: ["intention_hint_evolution"],
+      names: ["skill_harness_evolution"],
       optional: true,
     });
   });
 
-  it("registers the plugin-owned intention-hint command namespace", () => {
+  it("registers the plugin-owned skill-harness command namespace", () => {
     const api = createApi();
 
     createPlugin(api).register(api);
 
     expect(api.registerCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: "intention-hint",
+        name: "skill-harness",
         acceptsArgs: true,
         handler: expect.any(Function),
       }),
@@ -80,7 +80,7 @@ describe("createPlugin", () => {
 
   it("runs evolution backlog actions through the registered tool", async () => {
     const api = createApi();
-    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(dataRoot, { recursive: true });
     fs.writeFileSync(
       path.join(dataRoot, "evolution.json"),
@@ -165,7 +165,7 @@ describe("createPlugin", () => {
 
     createPlugin(api).register(api);
 
-    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     expect(fs.existsSync(path.join(dataRoot, "sessions"))).toBe(true);
     expect(fs.existsSync(path.join(dataRoot, "intents"))).toBe(true);
     expect(fs.existsSync(path.join(dataRoot, "sessions", "stats.json"))).toBe(
@@ -178,7 +178,7 @@ describe("createPlugin", () => {
 
   it("keeps runtime stats and evolution files at the data-root level", () => {
     const api = createApi();
-    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(dataRoot, { recursive: true });
     fs.writeFileSync(path.join(dataRoot, "stats.json"), '{"stats":true}');
     fs.writeFileSync(
@@ -210,7 +210,7 @@ describe("createPlugin", () => {
 
   it("registers hooks when evolution trigger keyword cache is corrupt", () => {
     const api = createApi();
-    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(dataRoot, { recursive: true });
     fs.writeFileSync(path.join(dataRoot, "evolution.json"), "{ broken");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
@@ -226,7 +226,7 @@ describe("createPlugin", () => {
 
   function createPackageRootWithAssets(files: Record<string, string>): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-package-root-"));
-    const assetsDir = path.join(root, "skills", "intention-hint", "assets");
+    const assetsDir = path.join(root, "skills", "skill-harness", "assets");
     fs.mkdirSync(assetsDir, { recursive: true });
     for (const [name, content] of Object.entries(files)) {
       fs.writeFileSync(path.join(assetsDir, name), content);
@@ -239,7 +239,7 @@ describe("createPlugin", () => {
       "example.md": "example",
       "ignore.txt": "ignore",
     });
-    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     try {
       initializePluginDataRoot({ dataRoot, packageRoot });
 
@@ -258,7 +258,7 @@ describe("createPlugin", () => {
     const packageRoot = createPackageRootWithAssets({
       "example.md": "example",
     });
-    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(path.join(dataRoot, "intents"), { recursive: true });
     try {
       initializePluginDataRoot({ dataRoot, packageRoot });
@@ -275,7 +275,7 @@ describe("createPlugin", () => {
     const packageRoot = createPackageRootWithAssets({
       "example.md": "example",
     });
-    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(path.join(dataRoot, "intents"), { recursive: true });
     fs.writeFileSync(path.join(dataRoot, "intents", "notes.txt"), "notes");
     try {
@@ -295,7 +295,7 @@ describe("createPlugin", () => {
       "custom.md": "seed",
       "example.md": "example",
     });
-    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     const intentsDir = path.join(dataRoot, "intents");
     fs.mkdirSync(intentsDir, { recursive: true });
     fs.writeFileSync(path.join(intentsDir, "custom.md"), "custom");
@@ -325,7 +325,7 @@ describe("createPlugin", () => {
     fs.writeFileSync(path.join(oldSessions, "stats.json"), '{"old":true}');
     fs.writeFileSync(path.join(oldSessions, "evolution.json"), '{"old":true}');
 
-    const dataRoot = path.join(stateDir, "plugins", "intention-hint");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     try {
       initializePluginDataRoot({ dataRoot, packageRoot });
 

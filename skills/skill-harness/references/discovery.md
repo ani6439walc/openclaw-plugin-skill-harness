@@ -24,7 +24,7 @@ Goal: Build a complete inventory of all actionable capabilities.
 3. **Scan existing intents:**
 
    ```bash
-   ls ~/.openclaw/plugins/intention-hint/intents/
+   ls ~/.openclaw/plugins/skill-harness/intents/
    ```
 
    To see what intent coverage already exists.

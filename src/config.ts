@@ -12,7 +12,7 @@ import {
 } from "./constants.js";
 import type {
   ContextWindow,
-  ResolvedIntentionHintPluginConfig,
+  ResolvedSkillHarnessPluginConfig,
 } from "./types.js";
 
 export function clampInt(
@@ -78,7 +78,7 @@ const DEFAULT_CONFIG = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   complexityPrompts: DEFAULT_COMPLEXITY_PROMPTS,
   evolution: DEFAULT_EVOLUTION,
-} satisfies ResolvedIntentionHintPluginConfig;
+} satisfies ResolvedSkillHarnessPluginConfig;
 
 const StringListSchema = z
   .union([
@@ -227,7 +227,7 @@ const IntentDenySchema = z
     return result;
   });
 
-const IntentionHintConfigSchema = z
+const SkillHarnessConfigSchema = z
   .object({
     agents: stringListWithDefault(["main"]),
     intentDeny: IntentDenySchema,
@@ -246,8 +246,8 @@ const IntentionHintConfigSchema = z
   })
   .catch(DEFAULT_CONFIG);
 
-export function resolveConfig(raw: unknown): ResolvedIntentionHintPluginConfig {
-  return IntentionHintConfigSchema.parse(
+export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
+  return SkillHarnessConfigSchema.parse(
     raw,
-  ) as ResolvedIntentionHintPluginConfig;
+  ) as ResolvedSkillHarnessPluginConfig;
 }

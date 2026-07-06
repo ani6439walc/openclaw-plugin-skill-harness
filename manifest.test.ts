@@ -5,13 +5,13 @@ const manifest = JSON.parse(
   fs.readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf-8"),
 );
 
-describe("intention-hint manifest", () => {
+describe("skill-harness manifest", () => {
   it("declares OpenClaw-owned tool and command surfaces", () => {
     expect(manifest.contracts).toEqual({
-      tools: ["intention_hint_evolution"],
+      tools: ["skill_harness_evolution"],
     });
     expect(manifest.commandAliases).toContainEqual({
-      name: "intention-hint",
+      name: "skill-harness",
       kind: "runtime-slash",
     });
   });

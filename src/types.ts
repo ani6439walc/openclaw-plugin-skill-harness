@@ -66,7 +66,7 @@ export type ResolvedEvolutionConfig = {
   };
 };
 
-export type IntentionHintPluginConfig = {
+export type SkillHarnessPluginConfig = {
   agents?: string[];
   intentDeny?: Record<string, string[]>;
   model?: string;
@@ -83,7 +83,7 @@ export type IntentionHintPluginConfig = {
   evolution?: EvolutionConfig;
 };
 
-export type ResolvedIntentionHintPluginConfig = {
+export type ResolvedSkillHarnessPluginConfig = {
   agents: string[];
   intentDeny: Record<string, string[]>;
   model: string | undefined;

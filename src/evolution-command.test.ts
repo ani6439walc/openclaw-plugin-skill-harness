@@ -54,9 +54,9 @@ describe("evolution plugin command", () => {
     handleEvolutionCommand({ args, dataRoot: root });
 
   it("shows help for the command namespace", () => {
-    expect(run().text).toContain("/intention-hint evolution list");
+    expect(run().text).toContain("/skill-harness evolution list");
     expect(run("evolution help").text).toContain(
-      "/intention-hint evolution mark-dismissed",
+      "/skill-harness evolution mark-dismissed",
     );
   });
 

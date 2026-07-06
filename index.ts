@@ -2,8 +2,8 @@ import type { OpenClawPluginApi } from "./api.js";
 import { createPlugin } from "./src/plugin.js";
 
 export default {
-  id: "intention-hint",
-  name: "Intention Hint",
+  id: "skill-harness",
+  name: "Skill Harness",
   description:
     "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
   register(api: OpenClawPluginApi) {

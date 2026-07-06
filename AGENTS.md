@@ -1,4 +1,4 @@
-# Agent Guide: Intention Hint
+# Agent Guide: Skill Harness
 
 This repository is an OpenClaw plugin. It classifies the user's intent before the main reply, injects a routing hint through `before_prompt_build`, records per-session runtime data, aggregates usage stats, and optionally writes evolution backlog findings.
 
@@ -18,16 +18,16 @@ Work in this order:
 
 Use this routing table for common tasks:
 
-| Task type                                       | Start with                                                                                              | Usually update                                                                               | Minimum verification                                                                              |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Hook routing, fast paths, session lifecycle     | `src/hooks.ts`, `src/session.ts`, `src/conversation-extract.ts`                                         | `src/hooks.test.ts`, `src/conversation-extract.test.ts`                                      | `pnpm run typecheck`, `pnpm run test`                                                             |
-| Prompt output, parsing, compact-model contracts | `src/prompt.ts`, `src/subagent.ts`                                                                      | `src/prompt.test.ts`, `src/subagent.test.ts`, README if behavior changes                     | `pnpm run typecheck`, `pnpm run test`                                                             |
-| Config or manifest-visible option               | `src/config.ts`, `src/types.ts`, `openclaw.plugin.json`                                                 | `src/config.test.ts`, README configuration table                                             | `pnpm run typecheck`, `pnpm run test`                                                             |
-| Runtime data layout or first-install seeding    | `src/plugin.ts`, `src/file-utils.ts`, `src/intent-loader.ts`                                            | `src/plugin.test.ts`, `src/file-utils.test.ts`, README/AGENTS path docs                      | `pnpm run typecheck`, `pnpm run test`, `pnpm run build` if CLI/package output depends on it       |
-| Stats or skill recommendation accounting        | `src/stats-aggregator.ts`, `src/skill-catalog.ts`                                                       | `src/stats-aggregator.test.ts`, `src/skill-catalog.test.ts`, README stats docs               | `pnpm run typecheck`, `pnpm run test`                                                             |
-| Evolution trigger/review/backlog behavior       | `src/trigger-checker.ts`, `src/review-subagent.ts`, `src/backlog-writer.ts`, `src/evolution-backlog.ts` | Matching `*.test.ts`, `skills/intention-hint/references/evolution.md`, README Evolution docs | `pnpm run typecheck`, `pnpm run test`, `pnpm run build` for CLI changes                           |
-| Bundled first-install intent examples           | `skills/intention-hint/assets/*.md`                                                                     | `src/intent-validation.test.ts` fixtures/expectations if needed                              | `pnpm run test`                                                                                   |
-| Documentation-only sync                         | Source files that prove the claim                                                                       | `README.md`, `AGENTS.md`, or `skills/intention-hint/**`                                      | `pnpm run format`; run `pnpm run typecheck` and `pnpm run test` when docs assert current behavior |
+| Task type                                       | Start with                                                                                              | Usually update                                                                              | Minimum verification                                                                              |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Hook routing, fast paths, session lifecycle     | `src/hooks.ts`, `src/session.ts`, `src/conversation-extract.ts`                                         | `src/hooks.test.ts`, `src/conversation-extract.test.ts`                                     | `pnpm run typecheck`, `pnpm run test`                                                             |
+| Prompt output, parsing, compact-model contracts | `src/prompt.ts`, `src/subagent.ts`                                                                      | `src/prompt.test.ts`, `src/subagent.test.ts`, README if behavior changes                    | `pnpm run typecheck`, `pnpm run test`                                                             |
+| Config or manifest-visible option               | `src/config.ts`, `src/types.ts`, `openclaw.plugin.json`                                                 | `src/config.test.ts`, README configuration table                                            | `pnpm run typecheck`, `pnpm run test`                                                             |
+| Runtime data layout or first-install seeding    | `src/plugin.ts`, `src/file-utils.ts`, `src/intent-loader.ts`                                            | `src/plugin.test.ts`, `src/file-utils.test.ts`, README/AGENTS path docs                     | `pnpm run typecheck`, `pnpm run test`, `pnpm run build` if CLI/package output depends on it       |
+| Stats or skill recommendation accounting        | `src/stats-aggregator.ts`, `src/skill-catalog.ts`                                                       | `src/stats-aggregator.test.ts`, `src/skill-catalog.test.ts`, README stats docs              | `pnpm run typecheck`, `pnpm run test`                                                             |
+| Evolution trigger/review/backlog behavior       | `src/trigger-checker.ts`, `src/review-subagent.ts`, `src/backlog-writer.ts`, `src/evolution-backlog.ts` | Matching `*.test.ts`, `skills/skill-harness/references/evolution.md`, README Evolution docs | `pnpm run typecheck`, `pnpm run test`, `pnpm run build` for CLI changes                           |
+| Bundled first-install intent examples           | `skills/skill-harness/assets/*.md`                                                                      | `src/intent-validation.test.ts` fixtures/expectations if needed                             | `pnpm run test`                                                                                   |
+| Documentation-only sync                         | Source files that prove the claim                                                                       | `README.md`, `AGENTS.md`, or `skills/skill-harness/**`                                      | `pnpm run format`; run `pnpm run typecheck` and `pnpm run test` when docs assert current behavior |
 
 ## First Checks
 
@@ -66,8 +66,8 @@ Package root:
 
 Runtime data root:
 
-- Resolved at plugin registration with `api.runtime.state.resolveStateDir(process.env)`, then `resolvePluginDataRoot(stateDir, "intention-hint")`.
-- Normal local path: `~/.openclaw/plugins/intention-hint`.
+- Resolved at plugin registration with `api.runtime.state.resolveStateDir(process.env)`, then `resolvePluginDataRoot(stateDir, "skill-harness")`.
+- Normal local path: `~/.openclaw/plugins/skill-harness`.
 - Active runtime files live here:
   - `intents/*.md`
   - `sessions/<sessionId>.json`
@@ -76,9 +76,9 @@ Runtime data root:
 
 Rules:
 
-- The active intent catalog always loads from `~/.openclaw/plugins/intention-hint/intents`.
+- The active intent catalog always loads from `~/.openclaw/plugins/skill-harness/intents`.
 - `stats.json` and `evolution.json` are root-level runtime files. They must not be placed under `sessions/`.
-- Startup initialization may copy example intent files from `skills/intention-hint/assets/*.md` into an absent or empty runtime `intents/` directory.
+- Startup initialization may copy example intent files from `skills/skill-harness/assets/*.md` into an absent or empty runtime `intents/` directory.
 - Startup initialization must not overwrite existing runtime intent files.
 
 ## Source Map
@@ -95,8 +95,8 @@ Use the existing module boundaries:
 - `src/backlog-writer.ts`: evolution findings into `dataRoot/evolution.json`.
 - `src/evolution-backlog.ts`: backlog schema validation, migration, and atomic mutations.
 - `src/evolution-backlog-actions.ts`: shared action service for backlog reads, validation, targeting, and optimistic status updates.
-- `src/evolution-tool.ts`: registers the agent tool surface `intention_hint_evolution`.
-- `src/evolution-command.ts`: registers the plugin-owned command `/intention-hint evolution`.
+- `src/evolution-tool.ts`: registers the agent tool surface `skill_harness_evolution`.
+- `src/evolution-command.ts`: registers the plugin-owned command `/skill-harness evolution`.
 - `src/prompt.ts`, `src/subagent.ts`, `src/review-subagent.ts`, `src/trigger-checker.ts`: classification and evolution logic.
 - `src/conversation-extract.ts`: extracts recent turns, filters internal/inter-session traffic, attaches historical intent annotations, and applies context windows.
 - `src/skill-catalog.ts`: resolves `skill: <name>` references in intent Markdown into available `SKILL.md` metadata for instruction writing and Evolution review.
@@ -167,26 +167,26 @@ When changing runtime paths, include tests for both the desired new location and
 
 ## Intent Files
 
-Runtime editable intents live in `~/.openclaw/plugins/intention-hint/intents/*.md`. First-install examples live in `skills/intention-hint/assets/*.md` and are copied only when the runtime intent directory is absent or empty.
+Runtime editable intents live in `~/.openclaw/plugins/skill-harness/intents/*.md`. First-install examples live in `skills/skill-harness/assets/*.md` and are copied only when the runtime intent directory is absent or empty.
 
-When changing first-install examples, edit `skills/intention-hint/assets/*.md` and run validation through the test suite. When changing a live local intent for the user's current OpenClaw environment, edit the runtime intent directory instead.
+When changing first-install examples, edit `skills/skill-harness/assets/*.md` and run validation through the test suite. When changing a live local intent for the user's current OpenClaw environment, edit the runtime intent directory instead.
 
-Intent markdown must keep valid YAML frontmatter and the expected sections used by `intent-validation.ts` and the intention-hint skill references.
+Intent markdown must keep valid YAML frontmatter and the expected sections used by `intent-validation.ts` and the skill-harness skill references.
 
 ## Evolution Backlog Workflow
 
-Do not edit `~/.openclaw/plugins/intention-hint/evolution.json` manually. Use:
+Do not edit `~/.openclaw/plugins/skill-harness/evolution.json` manually. Use:
 
 ```text
-/intention-hint evolution show
-/intention-hint evolution list
-/intention-hint evolution review-health --days 7
-/intention-hint evolution validate-intents <intent-id>
-/intention-hint evolution mark-processed --id <item-id> --expected-updated-at <timestamp>
-/intention-hint evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>
+/skill-harness evolution show
+/skill-harness evolution list
+/skill-harness evolution review-health --days 7
+/skill-harness evolution validate-intents <intent-id>
+/skill-harness evolution mark-processed --id <item-id> --expected-updated-at <timestamp>
+/skill-harness evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>
 ```
 
-Agents may call the structured `intention_hint_evolution` tool for the same operations.
+Agents may call the structured `skill_harness_evolution` tool for the same operations.
 
 Process one backlog finding at a time unless the user explicitly asks for a bounded batch. For split, merge, rename, deletion, or any broad intent-boundary change, show the planned file operations and get explicit confirmation first.
 
@@ -206,12 +206,12 @@ Update documentation when behavior or public configuration changes:
 - `README.md` for architecture, runtime behavior, configuration, and user-facing workflows.
 - `openclaw.plugin.json` for manifest-visible config descriptions/defaults.
 - `AGENTS.md` for coding-agent rules and known gotchas.
-- `skills/intention-hint/**` when an agent workflow or path changes.
+- `skills/skill-harness/**` when an agent workflow or path changes.
 
 Search for stale names and paths before finishing. For runtime layout changes, at minimum search for:
 
 ```bash
-rg "sessions/(stats|evolution)\\.json|extensions/intention-hint/intents|~/.openclaw/extensions/intention-hint/intents|packageRoot.*intents|migrateLegacy|seedBundled"
+rg "sessions/(stats|evolution)\\.json|extensions/skill-harness/intents|~/.openclaw/extensions/skill-harness/intents|packageRoot.*intents|migrateLegacy|seedBundled"
 ```
 
 ## Finish Checklist

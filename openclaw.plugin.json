@@ -1,16 +1,16 @@
 {
-  "id": "intention-hint",
-  "name": "Intention Hint",
+  "id": "skill-harness",
+  "name": "Skill Harness",
   "description": "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
   "activation": {
     "onStartup": true
   },
   "contracts": {
-    "tools": ["intention_hint_evolution"]
+    "tools": ["skill_harness_evolution"]
   },
   "commandAliases": [
     {
-      "name": "intention-hint",
+      "name": "skill-harness",
       "kind": "runtime-slash"
     }
   ],

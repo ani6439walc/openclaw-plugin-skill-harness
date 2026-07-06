@@ -1,4 +1,4 @@
-# Intention Hint Plugin
+# Skill Harness Plugin
 
 [![OpenClaw](https://img.shields.io/badge/Platform-OpenClaw-blue.svg)](https://github.com/openclaw/openclaw)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -10,7 +10,7 @@ An OpenClaw plugin that pre-scans user intent before main-agent replies and inje
 - Package version: `2026.6.8`; OpenClaw compatibility in `package.json` targets Plugin API and Gateway `>=2026.6.8`.
 - Branch state inspected on `main` at `0e32bed` (`feat: add low thinking fastpath mode (#39)`).
 - Recent implementation work focused on low-thinking fastpath behavior, classifier override robustness, runtime Evolution trigger keywords, the deterministic `entity-context` trigger, reduced-noise skill recommendation stats, and prompt output contracts for compact helper models.
-- Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/intention-hint/intents`.
+- Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/skill-harness/intents`.
 - Codebase shape from `pygount` excluding dependencies/build output: 48 TypeScript files with 10,844 code lines, 15 Markdown files, 3 JSON files, and 72 counted files total.
 - TypeScript line split: 25 runtime files / 7,171 lines, 22 test files / 9,250 lines, 1 tooling file / 8 lines; test/runtime line ratio is about 1.29x.
 - Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 22 test files / 398 tests, and `pnpm pack --dry-run` succeeds.
@@ -33,7 +33,7 @@ index.ts
        ├─ evolution-types.ts → Evolution review types (ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource)
        │
        ├─ intent-loader.ts → runtime catalog
-       │    └─ loads intent .md files from $OPENCLAW_STATE_DIR/plugins/intention-hint/intents
+       │    └─ loads intent .md files from $OPENCLAW_STATE_DIR/plugins/skill-harness/intents
        │
        ├─ subagent.ts → topic switch, intent classification, and instruction-writing sub-agents
        │    ├─ resolveCurrentTime() — timezone-aware local time formatting
@@ -65,23 +65,23 @@ index.ts
        ├─ session-tracker.ts → SessionTracker (JSON session persistence)
        │    ├─ uses file-utils.ts for fileExists(), readJsonFile(), safeWriteJson()
        │    ├─ uses evolution-types.ts for ReviewState, ReviewSnapshot
-       │    └─ $OPENCLAW_STATE_DIR/plugins/intention-hint/sessions/<sessionId>.json
+       │    └─ $OPENCLAW_STATE_DIR/plugins/skill-harness/sessions/<sessionId>.json
        │
        ├─ stats-aggregator.ts → StatsAggregator (atomic runtime usage aggregation)
        │    ├─ uses file-utils.ts for fileExists(), readJsonFile(), safeWriteJson()
-       │    └─ $OPENCLAW_STATE_DIR/plugins/intention-hint/stats.json
+       │    └─ $OPENCLAW_STATE_DIR/plugins/skill-harness/stats.json
        │
        ├─ trigger-checker.ts + review-subagent.ts → Intent Evolution review
        │    ├─ trigger-checker.ts → checkEvolutionTriggers() (eight configurable triggers plus runtime trigger keywords)
        │    ├─ review-subagent.ts → buildReviewPrompt() + parseReviewFindings() + runReviewSubagent()
-       │    └─ backlog-writer.ts + evolution-backlog.ts → $OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json
+       │    └─ backlog-writer.ts + evolution-backlog.ts → $OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json
        │         ├─ backlog-writer.ts uses file-utils.ts for safeWriteJson()
        │         └─ evolution-backlog.ts + evolution-trigger-keywords.ts validate backlog data and trigger keyword defaults
        │
        ├─ evolution-backlog-actions.ts + intent-validation.ts → transactional backlog processing support
-       │    ├─ evolution-tool.ts → agent tool `intention_hint_evolution`
-       │    ├─ evolution-command.ts → plugin command `/intention-hint evolution`
-       │    └─ skills/intention-hint/references/evolution.md
+       │    ├─ evolution-tool.ts → agent tool `skill_harness_evolution`
+       │    ├─ evolution-command.ts → plugin command `/skill-harness evolution`
+       │    └─ skills/skill-harness/references/evolution.md
        │
        ├─ session.ts → session guards (isEnabledForAgent, isEligibleInteractiveSession, etc.)
        │
@@ -111,8 +111,8 @@ index.ts
 | `backlog-writer.ts`            | Merge review findings atomically into `evolution.json`                                                                                                  |
 | `evolution-backlog.ts`         | Validate/migrate backlog schema, root `triggerKeywords`, and atomic mutation primitives                                                                 |
 | `evolution-backlog-actions.ts` | Shared JSON-compatible action service for backlog reads, validation, targeting, and optimistic completion                                               |
-| `evolution-tool.ts`            | Agent-callable `intention_hint_evolution` tool for structured backlog operations                                                                        |
-| `evolution-command.ts`         | Plugin-owned `/intention-hint evolution` command for user-facing backlog operations                                                                     |
+| `evolution-tool.ts`            | Agent-callable `skill_harness_evolution` tool for structured backlog operations                                                                         |
+| `evolution-command.ts`         | Plugin-owned `/skill-harness evolution` command for user-facing backlog operations                                                                      |
 | `intent-validation.ts`         | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
 | `conversation-extract.ts`      | Extract and truncate recent conversation turns for intent context                                                                                       |
 | `prompt.ts`                    | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
@@ -210,7 +210,7 @@ interface SessionData {
 
 ### Runtime Usage Statistics
 
-After a tracked turn is persisted, `agent_end` synchronously updates `$OPENCLAW_STATE_DIR/plugins/intention-hint/stats.json`. The aggregator is observation-only, fail-open, and idempotent by `sessionId + timestamps.start`; it never scans existing session JSON for backfill. Writes use a temporary file and atomic rename. Invalid or corrupt existing stats are preserved and the update is skipped.
+After a tracked turn is persisted, `agent_end` synchronously updates `$OPENCLAW_STATE_DIR/plugins/skill-harness/stats.json`. The aggregator is observation-only, fail-open, and idempotent by `sessionId + timestamps.start`; it never scans existing session JSON for backfill. Writes use a temporary file and atomic rename. Invalid or corrupt existing stats are preserved and the update is skipped.
 
 The versioned stats document contains:
 
@@ -242,7 +242,7 @@ Rates use `0.0–1.0`. Skill lifecycle is `active` within 30 days, `stale` after
 Build the package from the plugin repository root:
 
 ```bash
-cd openclaw-plugin-intention-hint
+cd openclaw-plugin-skill-harness
 pnpm install
 pnpm run typecheck
 pnpm run test
@@ -255,7 +255,7 @@ pnpm run build
 {
   plugins: {
     entries: {
-      "intention-hint": {
+      "skill-harness": {
         enabled: true,
         config: {
           agents: ["main"],
@@ -322,7 +322,7 @@ pnpm run build
 | `contextWindow`     | `object`   | see below         | Turn/char limits for conversation extraction.                                                                                                                                 |
 | `timeoutMs`         | `number`   | `3000`            | Max wait time for each scanner sub-agent run. Clamped to 250–120000ms.                                                                                                        |
 | `complexityPrompts` | `object`   | built-in          | Custom instruction-generation guidance per complexity level.                                                                                                                  |
-| `evolution`         | `object`   | disabled          | Post-turn trigger review configuration. Findings and runtime trigger keywords are stored in `$OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json`.                      |
+| `evolution`         | `object`   | disabled          | Post-turn trigger review configuration. Findings and runtime trigger keywords are stored in `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json`.                       |
 
 `evolution.thinking` independently controls the Evolution review
 subagent's thinking level. Both thinking settings accept `off`, `minimal`,
@@ -355,12 +355,12 @@ is checked for eight trigger types:
 All matching triggers are reviewed in one background, read-only sub-agent run.
 Each trigger receives a distinct review focus and correction goal, and may return
 no finding. Valid findings are merged by pending `type + dedupeKey` into the
-atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/intention-hint/evolution.json` backlog. Runtime trigger keyword lists live in the same root document under
+atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json` backlog. Runtime trigger keyword lists live in the same root document under
 `triggerKeywords.successfulPattern`, `triggerKeywords.behaviorFix`, and `triggerKeywords.entityContext`; legacy `openclaw.json` trigger `keywords` are accepted only as first-run or v1/v2 migration seeds. `entity-context` deliberately avoids LLM entity detection: it requires a learning phrase such as `看看`, `看一下`, or `看下` plus a source signal from text or sanitized read/search tool params limited to `TOOLS.md`, `MEMORY.md`, or paths containing `memory`. Review failures are
 fail-open and never block or alter the main reply.
 
 The reviewer is intentionally scoped to improving runtime `intents/*.md`, following
-the bundled `intention-hint` Skill rules. It receives the full matched intent
+the bundled `skill-harness` Skill rules. It receives the full matched intent
 definition and a compact frontmatter catalog, including domain and fastpath
 metadata, for collision checks, plus the current turn and up to nine previous
 tracked turns with truncated content. It also receives the same available skill
@@ -418,9 +418,9 @@ grounded safely. Trigger keyword state is cached at plugin startup and refreshed
 after backlog writes so hook execution does not repeatedly read and parse the
 full backlog.
 
-### Intention-Hint Backlog Mode
+### Skill Harness Backlog Mode
 
-The bundled `intention-hint` Skill has an explicit-only `backlog` mode that
+The bundled `skill-harness` Skill has an explicit-only `backlog` mode that
 processes exactly one pending finding per invocation. The mode treats current
 Intent Markdown as the source of truth, backs up affected files under `/tmp`,
 validates the result, and only then marks the item `processed`. Validation or
@@ -428,22 +428,22 @@ optimistic-concurrency failures restore the pre-processing files and leave the
 item `pending`. `split`, `merge`, and deletions require user confirmation. The
 mode never commits, pushes, dismisses items, or edits the backlog JSON directly.
 Detailed transactional steps live in
-`skills/intention-hint/references/evolution.md`.
+`skills/skill-harness/references/evolution.md`.
 
 Backlog operations are exposed through two OpenClaw-native surfaces:
 
-- Agent tool `intention_hint_evolution` for structured JSON actions such as
+- Agent tool `skill_harness_evolution` for structured JSON actions such as
   `{ "action": "show", "id": "IMP-..." }`.
-- Plugin-owned command `/intention-hint evolution` for direct user/operator
+- Plugin-owned command `/skill-harness evolution` for direct user/operator
   workflows:
 
 ```text
-/intention-hint evolution list
-/intention-hint evolution show --id IMP-...
-/intention-hint evolution review-health --days 7
-/intention-hint evolution set-target --id IMP-... --operation refine --target-intent productivity
-/intention-hint evolution validate-intents productivity
-/intention-hint evolution mark-processed --id IMP-... --expected-updated-at <timestamp>
+/skill-harness evolution list
+/skill-harness evolution show --id IMP-...
+/skill-harness evolution review-health --days 7
+/skill-harness evolution set-target --id IMP-... --operation refine --target-intent productivity
+/skill-harness evolution validate-intents productivity
+/skill-harness evolution mark-processed --id IMP-... --expected-updated-at <timestamp>
 ```
 
 `review-health` reports total/recent processed events by outcome, recent trigger
@@ -487,7 +487,7 @@ The classification sub-agent returns JSON:
 - `topicChangeReason` is present only when the topic changed; an empty value means same-topic continuation
 - `topicChangeReason="match"` marks a deterministic frontmatter keyword fast-path match that switched from a previous intent
 - Topic switch metadata is stored in session history; no separate cache or experience store is written
-- Durable session goals are managed by OpenClaw `/goal` and goal tools, not by intention-hint
+- Durable session goals are managed by OpenClaw `/goal` and goal tools, not by skill-harness
 
 ### Intent Categories
 
@@ -636,8 +636,8 @@ The test suites cover:
 - Internal/inter-session turn detection and conversation-history filtering
 - Per-turn historical intent matching, duplicate handling, and prompt injection
 - Seven Evolution triggers, thresholds, runtime trigger keywords, and multi-trigger turns
-- Intention-hint Skill review prompts, response parsing, and read-only reviewer runs
+- Skill Harness Skill review prompts, response parsing, and read-only reviewer runs
 - Serialized background reviews and atomic, idempotent evolution backlog writes
 - Schema v1/v2-to-v3 migration, structured finding targets, trigger keyword suggestions, and evolution-backlog command concurrency checks
-- Intent Markdown structure/catalog validation and explicit-only intention-hint backlog mode
+- Intent Markdown structure/catalog validation and explicit-only skill-harness backlog mode
 - Protection of root-level `evolution.json` from session loading and retention cleanup

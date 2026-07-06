@@ -34,6 +34,6 @@ Ask user to confirm resolution before proceeding to final draft.
 1. Write to a staging location first (e.g., `/tmp/intent-drafts/`)
 2. Show diff preview to user
 3. Confirm no conflicts
-4. Write to `~/.openclaw/plugins/intention-hint/intents/` on approval
+4. Write to `~/.openclaw/plugins/skill-harness/intents/` on approval
 5. Validate the written intent with
-   `intention_hint_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
+   `skill_harness_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.

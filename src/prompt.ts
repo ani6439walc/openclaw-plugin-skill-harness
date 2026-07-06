@@ -1,7 +1,7 @@
 import {
   FALLBACK_INTENT,
   FALLBACK_INTENT_ID,
-  INTENTION_HINT_PLUGIN_TAG,
+  SKILL_HARNESS_PLUGIN_TAG,
   UNTRUSTED_CONTEXT_HEADER,
 } from "./constants.js";
 import type {
@@ -363,7 +363,7 @@ export function buildIntentInstructionPrompt(params: {
   const conversationSection = conversationMd ? `\n${conversationMd}\n` : "";
   const availableSkillsSection = formatAvailableSkills(params.availableSkills);
 
-  return `${timeLine}You are an intention-hint writer.
+  return `${timeLine}You are an skill-harness writer.
 Another model is preparing the final user-facing answer.
 Your job is to:
 1. Identify the user's intent from the latest message.
@@ -436,7 +436,7 @@ ${conversationSection}
 ${params.latest}
 </latest_message>
 
-Write the optional intention hint now. Use latest_message as the decision source and output no surrounding analysis.`;
+Write the optional skill harness now. Use latest_message as the decision source and output no surrounding analysis.`;
 }
 
 function formatAvailableSkills(skills: AvailableSkill[] | undefined): string {
@@ -713,7 +713,7 @@ export function buildPromptPrefix(
       : ` confidence="${pct}%"`;
 
   return `${UNTRUSTED_CONTEXT_HEADER}
-<${INTENTION_HINT_PLUGIN_TAG}${confidenceHint}>
+<${SKILL_HARNESS_PLUGIN_TAG}${confidenceHint}>
 ${lines.join("\n")}
-</${INTENTION_HINT_PLUGIN_TAG}>`;
+</${SKILL_HARNESS_PLUGIN_TAG}>`;
 }

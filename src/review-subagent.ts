@@ -10,7 +10,7 @@ import type { EvolutionFinding, ReviewSnapshot } from "./evolution-types.js";
 import type { EvolutionTrigger } from "./trigger-checker.js";
 import type {
   AvailableSkill,
-  ResolvedIntentionHintPluginConfig,
+  ResolvedSkillHarnessPluginConfig,
 } from "./types.js";
 import {
   EVOLUTION_OPERATIONS,
@@ -74,7 +74,7 @@ const REVIEW_INSTRUCTIONS: Record<
   "missing-intent": {
     focus:
       "Extract the uncategorized user goal, its distinguishing boundary, representative trigger descriptions, examples, required skills/tools, and execution strategy. Check that it is not merely a refinement of an existing intent.",
-    goal: "Draft a new, narrowly scoped intent Markdown definition that follows the bundled intention-hint Skill format.",
+    goal: "Draft a new, narrowly scoped intent Markdown definition that follows the bundled skill-harness Skill format.",
   },
   "weak-intent": {
     focus:
@@ -681,7 +681,7 @@ If matchedIntent is absent, return hasFinding=false unless the requested trigger
 
   return `You are an Intent Evolution reviewer.
 This is an intent-evolution review, not a general audit, skill writer, repository refactor, or passive transcript summary.
-Your sole purpose is to improve the content and routing quality of intention-hint intents/*.md files.
+Your sole purpose is to improve the content and routing quality of skill-harness intents/*.md files.
 Target artifact shape: propose only runtime intent Markdown changes or pending trigger keyword suggestions.
 Hard rules — do not violate:
 Review only the requested triggers. Each trigger is independent and may return hasFinding=false.
@@ -839,7 +839,7 @@ export function parseReviewFindings(
 }
 
 function reviewModelCandidates(params: {
-  config: ResolvedIntentionHintPluginConfig;
+  config: ResolvedSkillHarnessPluginConfig;
   modelRef: { provider: string; model: string };
 }): { provider: string; model: string }[] {
   const candidates = [params.modelRef];
@@ -868,7 +868,7 @@ function reviewModelCandidates(params: {
 
 export async function runReviewSubagent(params: {
   api: OpenClawPluginApi;
-  config: ResolvedIntentionHintPluginConfig;
+  config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
   sessionKey?: string;
   messageProvider?: string;
@@ -876,15 +876,15 @@ export async function runReviewSubagent(params: {
   snapshot: ReviewSnapshot;
   triggers: readonly EvolutionTrigger[];
 }): Promise<ReviewSubagentResult> {
-  const runId = `intention-hint-review-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+  const runId = `skill-harness-review-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const suffix = crypto
     .createHash("sha1")
     .update(params.snapshot.eventId)
     .digest("hex")
     .slice(0, 12);
   const sessionKey = params.sessionKey
-    ? `${params.sessionKey}:intention-hint-review:${suffix}`
-    : `agent:${params.agentId}:intention-hint-review:${suffix}`;
+    ? `${params.sessionKey}:skill-harness-review:${suffix}`
+    : `agent:${params.agentId}:skill-harness-review:${suffix}`;
   const prompt = buildReviewPrompt(params.snapshot, params.triggers);
 
   for (const [index, modelRef] of reviewModelCandidates(params).entries()) {

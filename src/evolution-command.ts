@@ -13,13 +13,13 @@ type PluginCommandResult = Awaited<
 >;
 
 const HELP_TEXT = [
-  "/intention-hint evolution list",
-  "/intention-hint evolution show [--id <item-id>]",
-  "/intention-hint evolution review-health [--days 7]",
-  "/intention-hint evolution validate-intents [intent-id ...]",
-  "/intention-hint evolution set-target --id <item-id> --operation <create|refine|split|merge> --target-intent <intent-id>",
-  "/intention-hint evolution mark-processed --id <item-id> --expected-updated-at <timestamp>",
-  "/intention-hint evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>",
+  "/skill-harness evolution list",
+  "/skill-harness evolution show [--id <item-id>]",
+  "/skill-harness evolution review-health [--days 7]",
+  "/skill-harness evolution validate-intents [intent-id ...]",
+  "/skill-harness evolution set-target --id <item-id> --operation <create|refine|split|merge> --target-intent <intent-id>",
+  "/skill-harness evolution mark-processed --id <item-id> --expected-updated-at <timestamp>",
+  "/skill-harness evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>",
 ].join("\n");
 
 const VALUE_OPTIONS = new Set([
@@ -151,7 +151,7 @@ export function handleEvolutionCommand(params: {
   if (!namespace || namespace === "help") return commandResult(HELP_TEXT);
   if (namespace !== "evolution") {
     return commandResult(
-      `Unknown /intention-hint command: ${namespace}\n\n${HELP_TEXT}`,
+      `Unknown /skill-harness command: ${namespace}\n\n${HELP_TEXT}`,
     );
   }
   if (rest.length === 0 || rest[0] === "help") return commandResult(HELP_TEXT);
@@ -175,8 +175,8 @@ export function createEvolutionCommand(
   dataRoot: string,
 ): PluginCommandDefinition {
   return {
-    name: "intention-hint",
-    description: "Manage Intention Hint plugin workflows.",
+    name: "skill-harness",
+    description: "Manage Skill Harness plugin workflows.",
     acceptsArgs: true,
     handler: async (ctx) =>
       handleEvolutionCommand({ args: ctx.args, dataRoot }),

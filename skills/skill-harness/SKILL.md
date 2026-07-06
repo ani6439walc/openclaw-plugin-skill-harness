@@ -1,9 +1,9 @@
 ---
-name: intention-hint
-description: "Design, inventory, evolve, or extract intent definitions for the intention-hint plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution backlog finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
+name: skill-harness
+description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution backlog finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
 ---
 
-# Intention Hint Skill
+# Skill Harness Skill
 
 Manage the full lifecycle of intent definitions: from single-intent CRUD (design), to full-catalog bootstrap (inventory), to automated self-improvement (evolve).
 
@@ -62,13 +62,13 @@ Q6: "Any existing intent this overlaps with?" → check collision
 
 ```bash
 # List all existing intents
-ls ~/.openclaw/plugins/intention-hint/intents/
+ls ~/.openclaw/plugins/skill-harness/intents/
 
 # Read the most similar existing intent for reference
-cat ~/.openclaw/plugins/intention-hint/intents/<similar>.md
+cat ~/.openclaw/plugins/skill-harness/intents/<similar>.md
 
 # Check for trigger collisions
-grep -l "<trigger>" ~/.openclaw/plugins/intention-hint/intents/*.md
+grep -l "<trigger>" ~/.openclaw/plugins/skill-harness/intents/*.md
 ```
 
 **Step 4 — Draft with exact format**
@@ -112,11 +112,11 @@ fastpath:
 grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" intent.md
 
 # If no collisions, write to target, then validate through the plugin
-mv intent.md ~/.openclaw/plugins/intention-hint/intents/<intent-id>.md
+mv intent.md ~/.openclaw/plugins/skill-harness/intents/<intent-id>.md
 ```
 
 Validate with
-`intention_hint_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
+`skill_harness_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
 
 ### Failure modes
 
@@ -155,7 +155,7 @@ Keywords: "audit intents", "bootstrap intents", "re-audit", "check intent covera
 ls -1 ~/.openclaw/skills/ && for d in ~/.openclaw/skills/*/; do [ -f "$d/SKILL.md" ] && basename "$d"; done
 
 # Scan existing intents
-ls ~/.openclaw/plugins/intention-hint/intents/
+ls ~/.openclaw/plugins/skill-harness/intents/
 ```
 
 Output: capability table with columns `capability | type(skill/tool) | summary | source`
@@ -204,7 +204,7 @@ User explicitly asks to process an evolution backlog finding.
 
 Keywords: "process backlog", "evolve intent", "handle evolution finding", "process the next finding"
 
-**Never enter this mode merely because `~/.openclaw/plugins/intention-hint/evolution.json` contains pending items.**
+**Never enter this mode merely because `~/.openclaw/plugins/skill-harness/evolution.json` contains pending items.**
 
 Read and follow `references/evolution.md` before processing a finding.
 
@@ -212,9 +212,9 @@ Read and follow `references/evolution.md` before processing a finding.
 
 **Step 1 — Select finding**
 
-Use `intention_hint_evolution({ action: "show" })` to select the default pending
+Use `skill_harness_evolution({ action: "show" })` to select the default pending
 finding (highest frequency, oldest `createdAt`), or
-`intention_hint_evolution({ action: "show", id: "<item-id>" })` when the user
+`skill_harness_evolution({ action: "show", id: "<item-id>" })` when the user
 supplies an ID.
 
 Re-read the selected item — it must still be `pending`.
@@ -233,7 +233,7 @@ Before applying a suggested body edit, compare the filename-derived intent id, f
 For legacy items with `operation: unknown`, infer metadata:
 
 ```text
-intention_hint_evolution({
+skill_harness_evolution({
   action: "set-target",
   id: "<item-id>",
   operation: "<operation>",
@@ -245,7 +245,7 @@ intention_hint_evolution({
 
 ```bash
 # Create backup directory
-mkdir -p /tmp/intention-hint-process-backlog/<item-id>-<timestamp>/
+mkdir -p /tmp/skill-harness-process-backlog/<item-id>-<timestamp>/
 
 # Backup every file that may be modified or deleted
 ```
@@ -265,16 +265,16 @@ pnpm run build
 ```
 
 Before running tests, validate the target intent with
-`intention_hint_evolution({ action: "validate-intents", ids: ["<target-intent-id>"] })`.
+`skill_harness_evolution({ action: "validate-intents", ids: ["<target-intent-id>"] })`.
 
 **Step 5 — Process, Dismiss, or Rollback**
 
 ```text
 # All checks pass → mark processed
-intention_hint_evolution({ action: "mark-processed", id: "<item-id>", expectedUpdatedAt: "<timestamp>" })
+skill_harness_evolution({ action: "mark-processed", id: "<item-id>", expectedUpdatedAt: "<timestamp>" })
 
 # Duplicate/superseded/unsafe/rejected finding → mark dismissed
-intention_hint_evolution({ action: "mark-dismissed", id: "<item-id>", expectedUpdatedAt: "<timestamp>" })
+skill_harness_evolution({ action: "mark-dismissed", id: "<item-id>", expectedUpdatedAt: "<timestamp>" })
 
 # Validation fails → restore from backup, leave item pending
 ```
@@ -285,12 +285,12 @@ Dismiss instead of leaving pending when the finding is clearly duplicate, supers
 
 ### Failure modes
 
-| Trigger                                            | First fix                                                  | Fallback                                                                    |
-| -------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------- |
-| **Backlog finding already processed**              | Skip, mark as `already_processed`                          | Re-check `~/.openclaw/plugins/intention-hint/evolution.json` state          |
-| **Target intent deleted or missing**               | Skip finding, log warning with missing intent ID           | Leave item `pending`, report to user for manual resolution                  |
-| **Validation fails after apply**                   | Restore from `/tmp/intention-hint-process-backlog/` backup | Leave item `pending`, report validation errors to user                      |
-| **Suggested change breaks existing intent format** | Reject the suggestion, keep original intent unchanged      | Mark `dismissed` if clearly invalid; otherwise leave `pending` with blocker |
+| Trigger                                            | First fix                                                 | Fallback                                                                    |
+| -------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **Backlog finding already processed**              | Skip, mark as `already_processed`                         | Re-check `~/.openclaw/plugins/skill-harness/evolution.json` state           |
+| **Target intent deleted or missing**               | Skip finding, log warning with missing intent ID          | Leave item `pending`, report to user for manual resolution                  |
+| **Validation fails after apply**                   | Restore from `/tmp/skill-harness-process-backlog/` backup | Leave item `pending`, report validation errors to user                      |
+| **Suggested change breaks existing intent format** | Reject the suggestion, keep original intent unchanged     | Mark `dismissed` if clearly invalid; otherwise leave `pending` with blocker |
 
 ### Anti-patterns
 
@@ -368,29 +368,29 @@ When bootstrapping from scratch, copy example intent templates from `assets/`:
 
 ### Validation commands
 
-Use `intention_hint_evolution` for plugin runtime validation and backlog state
+Use `skill_harness_evolution` for plugin runtime validation and backlog state
 changes.
 
 ```text
 # Validate intent schema and body format
-intention_hint_evolution({ action: "validate-intents", ids: ["<intent-id>"] })
+skill_harness_evolution({ action: "validate-intents", ids: ["<intent-id>"] })
 
 # Validate all intents
-intention_hint_evolution({ action: "validate-intents" })
+skill_harness_evolution({ action: "validate-intents" })
 
 # List pending backlog items
-intention_hint_evolution({ action: "list" })
+skill_harness_evolution({ action: "list" })
 
 # Review recent evolution health
-intention_hint_evolution({ action: "review-health", days: 7 })
+skill_harness_evolution({ action: "review-health", days: 7 })
 ```
 
 ```bash
 # Check for trigger collisions
-grep -l "<trigger>" ~/.openclaw/plugins/intention-hint/intents/*.md
+grep -l "<trigger>" ~/.openclaw/plugins/skill-harness/intents/*.md
 
 # List all existing intent IDs
-find ~/.openclaw/plugins/intention-hint/intents -name '*.md' -exec basename {} .md \; | sort
+find ~/.openclaw/plugins/skill-harness/intents -name '*.md' -exec basename {} .md \; | sort
 
 # Verify required sections exist
 grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" <file>
@@ -403,9 +403,9 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" 
 
 ### Test prompts (dry_run)
 
-| #   | Prompt                                           | Expected behavior                                                                                                         | Mode      |
-| --- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | --------- |
-| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                                       | design    |
-| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                           | inventory |
-| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `intention_hint_evolution({ action: "show" })` → ground → backup → apply → validate → mark/rollback | evolve    |
-| 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver         | extract   |
+| #   | Prompt                                           | Expected behavior                                                                                                        | Mode      |
+| --- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | --------- |
+| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                                      | design    |
+| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                          | inventory |
+| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `skill_harness_evolution({ action: "show" })` → ground → backup → apply → validate → mark/rollback | evolve    |
+| 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver        | extract   |

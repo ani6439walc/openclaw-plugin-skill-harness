@@ -16,13 +16,13 @@ describe("buildIntentionEmbeddedRunParams", () => {
         agentId: "main",
         modelRef: { provider: "google", model: "intent" },
       },
-      subagentSessionId: "intention-hint-test-run",
-      subagentSessionKey: "agent:main:intention-hint:test",
+      subagentSessionId: "skill-harness-test-run",
+      subagentSessionKey: "agent:main:skill-harness:test",
       prompt: "classify",
     });
 
     expect(result.sessionFile).toBe(
-      "/tmp/intention-hint-test-run.session.jsonl",
+      "/tmp/skill-harness-test-run.session.jsonl",
     );
   });
 });
@@ -162,7 +162,7 @@ describe("runIntentInstructionSubagent", () => {
         modelRun: false,
         disableTools: false,
         toolsAllow: ["read"],
-        prompt: expect.stringContaining("intention-hint writer"),
+        prompt: expect.stringContaining("skill-harness writer"),
       }),
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(

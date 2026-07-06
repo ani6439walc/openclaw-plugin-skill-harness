@@ -19,20 +19,20 @@ identifies structural bloat before it degrades classification quality.
 
 ## Step 1 — Complexity Scan
 
-Score every intent in `~/.openclaw/plugins/intention-hint/intents/`:
+Score every intent in `~/.openclaw/plugins/skill-harness/intents/`:
 
 ```bash
 # Line count per intent
-wc -l ~/.openclaw/plugins/intention-hint/intents/*.md | sort -rn
+wc -l ~/.openclaw/plugins/skill-harness/intents/*.md | sort -rn
 
 # Trigger count per intent
-for f in ~/.openclaw/plugins/intention-hint/intents/*.md; do
+for f in ~/.openclaw/plugins/skill-harness/intents/*.md; do
   count=$(grep -c "^  - " "$f" 2>/dev/null || echo 0)
   echo "$count $(basename "$f")"
 done | sort -rn
 
 # Example count per intent
-for f in ~/.openclaw/plugins/intention-hint/intents/*.md; do
+for f in ~/.openclaw/plugins/skill-harness/intents/*.md; do
   count=$(awk '/^examples:/,/^---$/' "$f" | grep -c "^  - " 2>/dev/null || echo 0)
   echo "$count $(basename "$f")"
 done | sort -rn
@@ -148,7 +148,7 @@ Ask the user:
 If the user confirms, write:
 
 1. New skill directory and `SKILL.md` under the appropriate skills path.
-2. Updated (slimmed) intent file in `~/.openclaw/plugins/intention-hint/intents/`.
+2. Updated (slimmed) intent file in `~/.openclaw/plugins/skill-harness/intents/`.
 
 ### Post-delivery validation
 
@@ -157,11 +157,11 @@ If the user confirms, write:
 cat <new-skill-path>/SKILL.md | head -5
 
 # Check for trigger collisions between new skills and remaining intents
-grep -l "<key-trigger>" ~/.openclaw/plugins/intention-hint/intents/*.md
+grep -l "<key-trigger>" ~/.openclaw/plugins/skill-harness/intents/*.md
 ```
 
 Verify the slimmed intent still matches the plugin schema with
-`intention_hint_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
+`skill_harness_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
 
 Report: files created/modified, validation results, and remaining pending extractions (if any).
 

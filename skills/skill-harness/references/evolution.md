@@ -1,16 +1,16 @@
 # Evolution Workflow
 
-Process exactly one pending finding from `~/.openclaw/plugins/intention-hint/evolution.json`.
+Process exactly one pending finding from `~/.openclaw/plugins/skill-harness/evolution.json`.
 Enter this mode only when the user explicitly asks to process the evolution backlog.
 
 ## Safety Rules
 
-- Treat current runtime `~/.openclaw/plugins/intention-hint/intents/*.md` and the loaded catalog as the source of truth.
+- Treat current runtime `~/.openclaw/plugins/skill-harness/intents/*.md` and the loaded catalog as the source of truth.
   `suggestedChange` is evidence and advice, not a patch to apply blindly.
 - Follow `references/format.md` and the relevant design/inventory references for intent
   boundaries, collision checks, and workflow quality.
-- Do not edit `~/.openclaw/plugins/intention-hint/evolution.json` directly. Use
-  the structured `intention_hint_evolution` tool for every backlog read or
+- Do not edit `~/.openclaw/plugins/skill-harness/evolution.json` directly. Use
+  the structured `skill_harness_evolution` tool for every backlog read or
   mutation.
 - `entity-context` trigger keyword findings are proposal-only like other
   `trigger-keywords` items. The trigger is intentionally narrow: learning
@@ -27,12 +27,12 @@ Enter this mode only when the user explicitly asks to process the evolution back
 
 ## Select And Ground
 
-1. Use `intention_hint_evolution({ action: "show" })` when the user did not
+1. Use `skill_harness_evolution({ action: "show" })` when the user did not
    supply an ID. The default selects highest `frequency`, then oldest
    `createdAt`. Use
-   `intention_hint_evolution({ action: "show", id: "<item-id>" })` when the user
+   `skill_harness_evolution({ action: "show", id: "<item-id>" })` when the user
    supplied an ID. Use
-   `intention_hint_evolution({ action: "review-health", days: 7 })` for
+   `skill_harness_evolution({ action: "review-health", days: 7 })` for
    read-only runtime review-health audits; it summarizes recent
    `processedEvents` by outcome (`wrote-items`, `nofinding`, `schema-rejected`,
    `parse-failed`, `subagent-error`, or `unknown`), recent trigger counts,
@@ -48,13 +48,13 @@ Enter this mode only when the user explicitly asks to process the evolution back
    source allowlist beyond `TOOLS.md`, `MEMORY.md`, or paths containing
    `memory`.
 4. Inspect its target Intent Markdown, the compact intent catalog, and relevant
-   intention-hint Skill references.
+   skill-harness Skill references.
 5. For a legacy item with `operation: unknown` or no targets, infer metadata
    only when the existing intents and finding make it unambiguous. Persist it
    with:
 
    ```text
-   intention_hint_evolution({
+   skill_harness_evolution({
      action: "set-target",
      id: "<item-id>",
      operation: "<operation>",
@@ -121,7 +121,7 @@ examples, domain, fastpath metadata, and body guidance:
    files. Mark it dismissed using the latest selected `updatedAt`:
 
    ```text
-   intention_hint_evolution({
+   skill_harness_evolution({
      action: "mark-dismissed",
      id: "<item-id>",
      expectedUpdatedAt: "<timestamp>"
@@ -131,7 +131,7 @@ examples, domain, fastpath metadata, and body guidance:
    Report the dismissal reason and stop processing this item.
 
 4. Before any edit, create
-   `/tmp/intention-hint-process-backlog/<item-id>-<timestamp>/` and back up
+   `/tmp/skill-harness-process-backlog/<item-id>-<timestamp>/` and back up
    every file that may be modified or deleted. Record every file that does not
    yet exist so it can be removed during rollback.
 5. Apply only the grounded Intent Markdown changes:
@@ -144,7 +144,7 @@ examples, domain, fastpath metadata, and body guidance:
 6. Validate the resulting files:
 
    ```text
-   intention_hint_evolution({ action: "validate-intents", ids: ["<target-intent-id>"] })
+   skill_harness_evolution({ action: "validate-intents", ids: ["<target-intent-id>"] })
    pnpm run test
    pnpm run build
    ```
@@ -155,7 +155,7 @@ examples, domain, fastpath metadata, and body guidance:
    latest `show` or `set-target` result:
 
    ```text
-   intention_hint_evolution({
+   skill_harness_evolution({
      action: "mark-processed",
      id: "<item-id>",
      expectedUpdatedAt: "<timestamp>"
@@ -173,5 +173,5 @@ was processed or dismissed, whether a rollback occurred, and the remaining
 pending count from:
 
 ```text
-intention_hint_evolution({ action: "list" })
+skill_harness_evolution({ action: "list" })
 ```

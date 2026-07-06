@@ -3,7 +3,7 @@ import { runEvolutionBacklogAction } from "./evolution-backlog-actions.js";
 import type { EvolutionBacklogAction } from "./evolution-backlog-actions.js";
 import type { EvolutionOperation } from "./evolution-backlog.js";
 
-const TOOL_NAME = "intention_hint_evolution";
+const TOOL_NAME = "skill_harness_evolution";
 
 const EVOLUTION_ACTIONS = [
   "list",
@@ -155,9 +155,9 @@ export function parseEvolutionToolAction(
 export function createEvolutionTool(dataRoot: string): AnyAgentTool {
   return {
     name: TOOL_NAME,
-    label: "Intention Hint Evolution",
+    label: "Skill Harness Evolution",
     description:
-      "List, inspect, validate, target, and mark Intention Hint Evolution backlog items in the plugin runtime data root.",
+      "List, inspect, validate, target, and mark Skill Harness Evolution backlog items in the plugin runtime data root.",
     parameters: EVOLUTION_TOOL_PARAMETERS,
     async execute(_toolCallId, params) {
       let action: EvolutionBacklogAction;

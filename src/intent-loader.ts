@@ -4,7 +4,7 @@ import matter from "gray-matter";
 import type {
   IntentCatalogEntry,
   IntentDefinition,
-  ResolvedIntentionHintPluginConfig,
+  ResolvedSkillHarnessPluginConfig,
 } from "./types.js";
 import { logger } from "../api.js";
 import { pluginRoot } from "./file-utils.js";
@@ -24,7 +24,7 @@ function matchesWildcard(pattern: string, value: string): boolean {
 }
 
 function resolveIntentDenyPatterns(
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
   agentId: string | undefined,
 ): string[] {
   const normalizedAgentId = agentId?.trim();
@@ -78,7 +78,7 @@ function parseFastpath(
 
 export function filterIntentsForAgent(
   intents: readonly IntentCatalogEntry[],
-  config: ResolvedIntentionHintPluginConfig,
+  config: ResolvedSkillHarnessPluginConfig,
   agentId: string | undefined,
 ): IntentCatalogEntry[] {
   const denyPatterns = resolveIntentDenyPatterns(config, agentId);
@@ -131,7 +131,7 @@ export class IntentCatalog {
   }
 
   filterForAgent(
-    config: ResolvedIntentionHintPluginConfig,
+    config: ResolvedSkillHarnessPluginConfig,
     agentId: string | undefined,
   ): IntentCatalogEntry[] {
     return filterIntentsForAgent(this.intents, config, agentId);
