@@ -49,8 +49,11 @@ import {
   runIntentionSubagent,
   runTopicSwitchSubagent,
 } from "./subagent.js";
-import { buildPromptPrefix } from "./prompt.js";
-import { resolveAvailableSkills } from "./skill-catalog.js";
+import { buildDomainSkillsPromptPrefix, buildPromptPrefix } from "./prompt.js";
+import {
+  resolveAvailableSkills,
+  resolveDomainSkills,
+} from "./skill-catalog.js";
 import { FALLBACK_INTENT } from "./constants.js";
 import type {
   HistoricalIntentRecord,
@@ -773,6 +776,19 @@ export function createHookHandlers(deps: HookDeps) {
     });
   }
 
+  function resolvePromptDomainSkills(params: {
+    agentId: string;
+    domain: string;
+    availableIntents: readonly IntentCatalogEntry[];
+  }) {
+    return resolveDomainSkills({
+      api,
+      agentId: params.agentId,
+      domain: params.domain,
+      intents: params.availableIntents,
+    });
+  }
+
   function buildExactKeywordIntentResult(params: {
     exactKeywordMatch: NonNullable<ReturnType<typeof findExactKeywordIntent>>;
     latestHistoricalIntent?: HistoricalIntentRecord;
@@ -845,6 +861,11 @@ export function createHookHandlers(deps: HookDeps) {
       params.availableIntents,
       params.refreshedConfig,
       params.exactKeywordMatch.hint,
+      resolvePromptDomainSkills({
+        agentId: params.routing.effectiveAgentId,
+        domain: result.domain,
+        availableIntents: params.availableIntents,
+      }),
     );
     return promptPrefix ? { prependContext: promptPrefix } : undefined;
   }
@@ -871,7 +892,16 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return;
+      return {
+        prependContext: buildDomainSkillsPromptPrefix(
+          result,
+          resolvePromptDomainSkills({
+            agentId: params.routing.effectiveAgentId,
+            domain: result.domain,
+            availableIntents: params.availableIntents,
+          }),
+        ),
+      };
     }
 
     // Safety fallback: skip intent instruction subagent and hint injection when topic unchanged
@@ -886,7 +916,16 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return;
+      return {
+        prependContext: buildDomainSkillsPromptPrefix(
+          result,
+          resolvePromptDomainSkills({
+            agentId: params.routing.effectiveAgentId,
+            domain: result.domain,
+            availableIntents: params.availableIntents,
+          }),
+        ),
+      };
     }
 
     // Skip intent instruction subagent when confidence is too low
@@ -901,7 +940,16 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return;
+      return {
+        prependContext: buildDomainSkillsPromptPrefix(
+          result,
+          resolvePromptDomainSkills({
+            agentId: params.routing.effectiveAgentId,
+            domain: result.domain,
+            availableIntents: params.availableIntents,
+          }),
+        ),
+      };
     }
 
     emitPipelineEvent(
@@ -969,6 +1017,11 @@ export function createHookHandlers(deps: HookDeps) {
       params.availableIntents,
       params.refreshedConfig,
       instructionText,
+      resolvePromptDomainSkills({
+        agentId: params.routing.effectiveAgentId,
+        domain: result.domain,
+        availableIntents: params.availableIntents,
+      }),
     );
     return promptPrefix ? { prependContext: promptPrefix } : undefined;
   }
