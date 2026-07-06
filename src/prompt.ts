@@ -59,6 +59,12 @@ After difficult/iterative tasks, offer to save as a skill. If a skill you loaded
 const MANDATORY_SKILLS_FALLBACK =
   "Only proceed without loading a skill if genuinely none are relevant to the task.";
 
+const SKILL_HARNESS_CONTEXT_POLICY = `<context_policy>
+- \`## Skills (mandatory)\`: mandatory skill-loading guidance for listed skills relevant to the user's actual request; ignore irrelevant listed skills if the selected domain is wrong.
+- \`## Instruction Hint\`: advisory; follow only when it matches the user's request and verified context.
+- Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.
+</context_policy>`;
+
 const FALLBACK_INTENT_ENTRY: IntentCatalogEntry = {
   id: FALLBACK_INTENT_ID,
   definition: FALLBACK_INTENT,
@@ -473,6 +479,8 @@ function formatSkillXmlBlock(
 export function formatDomainSkills(
   skills: AvailableSkill[] | undefined,
 ): string {
+  if (!skills?.length) return "";
+
   return `${MANDATORY_SKILLS_PROMPT}
 ${formatSkillXmlBlock("domain_skills", skills)}
 ${MANDATORY_SKILLS_FALLBACK}`;
@@ -703,7 +711,34 @@ function buildPromptPrefixLines(
   intentDef: IntentDefinition,
   instructionText?: string,
 ): string[] {
-  return [instructionText?.trim() || intentDef.prompt];
+  const trimmedInstruction = instructionText?.trim();
+  if (trimmedInstruction) return [`## Instruction Hint\n${trimmedInstruction}`];
+  return intentDef.prompt.trim() ? [intentDef.prompt] : [];
+}
+
+function formatSkillHarnessPluginPrefix(
+  result: IntentionResult,
+  blocks: readonly string[],
+): string | undefined {
+  const content = blocks
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .join("\n\n");
+  if (!content) return;
+
+  const confidence = result.confidence ?? 0;
+  const pct = Math.round(confidence * 100);
+  const confidenceHint =
+    pct < 90
+      ? ` confidence="${pct}%" low-confidence-hint="treat-as-suggestion"`
+      : ` confidence="${pct}%"`;
+
+  return `${UNTRUSTED_CONTEXT_HEADER}
+<${SKILL_HARNESS_PLUGIN_TAG}${confidenceHint}>
+${SKILL_HARNESS_CONTEXT_POLICY}
+
+${content}
+</${SKILL_HARNESS_PLUGIN_TAG}>`;
 }
 
 function resolveIntentId(intent: string): string {
@@ -732,33 +767,15 @@ export function buildPromptPrefix(
   const effectiveDef = intentDef ?? FALLBACK_INTENT;
   const lines = buildPromptPrefixLines(effectiveDef, instructionText);
   const domainSkillsBlock = formatDomainSkills(domainSkills);
-  const confidence = result.confidence ?? 0;
-  const pct = Math.round(confidence * 100);
-  const confidenceHint =
-    pct < 90
-      ? ` confidence="${pct}%" low-confidence-hint="treat-as-suggestion"`
-      : ` confidence="${pct}%"`;
 
-  return `${UNTRUSTED_CONTEXT_HEADER}
-<${SKILL_HARNESS_PLUGIN_TAG}${confidenceHint}>
-${domainSkillsBlock}
-${lines.join("\n")}
-</${SKILL_HARNESS_PLUGIN_TAG}>`;
+  return formatSkillHarnessPluginPrefix(result, [domainSkillsBlock, ...lines]);
 }
 
 export function buildDomainSkillsPromptPrefix(
   result: IntentionResult,
   domainSkills?: AvailableSkill[],
-): string {
-  const confidence = result.confidence ?? 0;
-  const pct = Math.round(confidence * 100);
-  const confidenceHint =
-    pct < 90
-      ? ` confidence="${pct}%" low-confidence-hint="treat-as-suggestion"`
-      : ` confidence="${pct}%"`;
-
-  return `${UNTRUSTED_CONTEXT_HEADER}
-<${SKILL_HARNESS_PLUGIN_TAG}${confidenceHint}>
-${formatDomainSkills(domainSkills)}
-</${SKILL_HARNESS_PLUGIN_TAG}>`;
+): string | undefined {
+  return formatSkillHarnessPluginPrefix(result, [
+    formatDomainSkills(domainSkills),
+  ]);
 }

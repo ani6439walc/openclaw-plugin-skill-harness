@@ -33,7 +33,10 @@ describe("createHookHandlers tracking guards", () => {
   });
 
   it("does not record tool calls without a session id", async () => {
-    const hasIntentData = vi.spyOn(defaultTracker, "hasIntentData");
+    const resolveCurrentSessionId = vi.spyOn(
+      defaultTracker,
+      "resolveCurrentSessionId",
+    );
     const record = vi.spyOn(defaultTracker, "record");
     const write = vi.spyOn(defaultTracker, "write");
 
@@ -47,13 +50,15 @@ describe("createHookHandlers tracking guards", () => {
       {},
     );
 
-    expect(hasIntentData).not.toHaveBeenCalled();
+    expect(resolveCurrentSessionId).toHaveBeenCalledWith({});
     expect(record).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
   });
 
   it("does not record tool calls before intent data exists", async () => {
-    vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(false);
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      undefined,
+    );
     const record = vi.spyOn(defaultTracker, "record");
     const write = vi.spyOn(defaultTracker, "write");
 
@@ -67,11 +72,54 @@ describe("createHookHandlers tracking guards", () => {
       { sessionId: "session-without-intent" },
     );
 
-    expect(defaultTracker.hasIntentData).toHaveBeenCalledWith(
-      "session-without-intent",
-    );
+    expect(defaultTracker.resolveCurrentSessionId).toHaveBeenCalledWith({
+      sessionId: "session-without-intent",
+    });
     expect(record).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it("records skill metadata from full read output while storing truncated tool output", async () => {
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "session-1",
+    );
+    const record = vi.spyOn(defaultTracker, "record");
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const longSkillOutput = `---
+name: skill-harness
+description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution backlog finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
+---
+
+# Skill Harness`;
+
+    await createHandlers().onAfterToolCall(
+      {
+        toolName: "read",
+        params: { path: "/skills/skill-harness/SKILL.md" },
+        result: longSkillOutput,
+        durationMs: 1,
+      } as never,
+      { sessionKey: "agent:main:discord:channel:1490722656197152878" },
+    );
+
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          skillsUsed: [
+            expect.objectContaining({
+              name: "skill-harness",
+              path: "/skills/skill-harness/SKILL.md",
+            }),
+          ],
+          toolCalls: [
+            expect.objectContaining({
+              result: longSkillOutput.slice(0, 200),
+            }),
+          ],
+        }),
+      }),
+    );
   });
 
   it("aggregates the completed current turn on agent_end", async () => {
@@ -112,6 +160,56 @@ describe("createHookHandlers tracking guards", () => {
     );
 
     expect(recordStats).toHaveBeenCalledWith("session-1", state, definition);
+  });
+
+  it("aggregates agent_end using the tracked session resolved from sessionKey", async () => {
+    const state = {
+      input: "read skill-harness",
+      intent: {
+        result: {
+          intent: "skill-lifecycle",
+          reason: "test",
+          domain: "agent-ops",
+          confidence: 0.9,
+          complexity: "low" as const,
+        },
+      },
+      timestamps: { start: "2026-07-06T15:47:27.004Z" },
+    };
+    const definition = {
+      id: "skill-lifecycle",
+      definition: {
+        triggers: ["skill"],
+        examples: [],
+        domain: "agent-ops",
+        fastpath: { keywords: [] },
+        prompt: "skill: skill-harness",
+      },
+    };
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "tracked-session",
+    );
+    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
+    const recordStats = vi
+      .spyOn(defaultStatsAggregator, "record")
+      .mockReturnValue(true);
+
+    await createHandlers().onAgentEnd(
+      { messages: [{ role: "assistant", content: "done" }] } as never,
+      {
+        sessionId: "event-context-session",
+        sessionKey: "agent:main:discord:channel:1490722656197152878",
+      } as never,
+    );
+
+    expect(recordStats).toHaveBeenCalledWith(
+      "tracked-session",
+      state,
+      definition,
+    );
   });
 
   it("does not aggregate agent_end without a tracked current turn", async () => {
@@ -693,8 +791,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
-    expect(result?.prependContext).toContain("<domain_skills>");
-    expect(result?.prependContext).not.toContain("Reply warmly.");
+    expect(result).toBeUndefined();
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
@@ -1029,7 +1126,7 @@ describe("createHookHandlers topic switch flow", () => {
       ctx,
     );
 
-    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result).toBeUndefined();
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(topicChecker).toHaveBeenCalledWith(
       expect.objectContaining({ domains: ["chat", "git"] }),
@@ -1288,7 +1385,7 @@ describe("createHookHandlers topic switch flow", () => {
       ctx,
     );
 
-    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result).toBeUndefined();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalledWith(
@@ -1321,7 +1418,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result).toBeUndefined();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
@@ -1375,7 +1472,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result).toBeUndefined();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalled();
   });
@@ -1447,10 +1544,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result?.prependContext).toContain("<domain_skills>");
-    expect(result?.prependContext).not.toContain(
-      "Follow the generated coding instructions.",
-    );
+    expect(result).toBeUndefined();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
@@ -1477,7 +1571,7 @@ describe("createHookHandlers topic switch flow", () => {
     ).toBeUndefined();
   });
 
-  it("falls back to domain skills when instruction model cannot be resolved", async () => {
+  it("falls back to no prefix when instruction model cannot be resolved and no domain skills exist", async () => {
     const { handlers, instructionWriter, record, emitAgentEvent } =
       createTopicFlowHarness({
         historicalIntents: [],
@@ -1489,10 +1583,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result?.prependContext).toContain("<domain_skills>");
-    expect(result?.prependContext).not.toContain(
-      "Follow the generated coding instructions.",
-    );
+    expect(result).toBeUndefined();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
@@ -1921,7 +2012,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
-    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result).toBeUndefined();
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
         "intent-classify:started",

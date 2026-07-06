@@ -204,7 +204,7 @@ function migrateSessionData(sessionData: SessionData): boolean {
   return changed;
 }
 
-function extractSkillInfo(
+export function extractSkillInfo(
   toolName: string,
   toolParams: Record<string, unknown>,
   toolResult: unknown,
@@ -331,6 +331,30 @@ export class SessionTracker {
 
   getCurrentState(sessionId: string): SessionState | undefined {
     return this.sessionData.get(sessionId)?.current;
+  }
+
+  resolveCurrentSessionId(params: {
+    sessionId?: string;
+    sessionKey?: string;
+  }): string | undefined {
+    const sessionKey = params.sessionKey?.trim();
+    if (sessionKey) {
+      let bestMatch: { sessionId: string; startMs: number } | undefined;
+      for (const [sessionId, session] of this.sessionData.entries()) {
+        if (session.sessionKey !== sessionKey) continue;
+        if (!session.current?.intent?.result) continue;
+        const startMs = Date.parse(session.current.timestamps?.start ?? "");
+        if (Number.isNaN(startMs)) continue;
+        if (!bestMatch || startMs > bestMatch.startMs) {
+          bestMatch = { sessionId, startMs };
+        }
+      }
+      if (bestMatch) return bestMatch.sessionId;
+    }
+
+    if (params.sessionId && this.hasIntentData(params.sessionId)) {
+      return params.sessionId;
+    }
   }
 
   getReviewSnapshot(sessionId: string): ReviewSnapshot | undefined {

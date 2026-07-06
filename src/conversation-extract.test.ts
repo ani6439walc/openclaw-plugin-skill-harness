@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   attachHistoricalIntents,
+  extractRecentTurns,
   limitConversationTurns,
 } from "./conversation-extract.js";
 import type { HistoricalIntentRecord, RecentTurn } from "./types.js";
@@ -164,6 +165,26 @@ describe("attachHistoricalIntents", () => {
       },
       { role: "assistant", text: "快去睡吧" },
       { role: "user", text: "不然這三個 幫我看看" },
+    ]);
+  });
+});
+
+describe("extractRecentTurns", () => {
+  it("strips legacy skill harness prefix headers from conversation history", () => {
+    const legacyHeader =
+      "Use it as a helpful reference to naturally guide the conversation or tasks, but prioritize the user's explicit intent. (the following information is retrieved background context):";
+
+    expect(
+      extractRecentTurns([
+        { role: "user", content: "Please inspect this" },
+        {
+          role: "assistant",
+          content: `${legacyHeader}\n<skill_harness_plugin confidence="90%">\n## Skills (mandatory)\nold injected guidance\n</skill_harness_plugin>\nInspected the files.`,
+        },
+      ]),
+    ).toEqual([
+      { role: "user", text: "Please inspect this" },
+      { role: "assistant", text: "Inspected the files." },
     ]);
   });
 });

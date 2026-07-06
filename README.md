@@ -170,13 +170,19 @@ only on the three visible phases: `topic-triage`, `intent-classify`, and
 those semantic phases instead of fastpath-specific phase names. Event failures
 are fail-open and never add text to `prependContext`.
 
-After a turn has a resolved current domain, the hook always prepends a
-`<domain_skills>` XML block under `<skill_harness_plugin>`, even when the
-instruction hint itself is skipped for same-topic continuity, unchanged topics,
-low confidence, or disabled `instruction.enabled`. The block contains every
-resolved skill referenced by enabled intents in that domain, using `name`,
-`path`, and `description` fields. If no skills resolve for the domain, the block
-is empty.
+After a turn has a resolved current domain, the hook prepends a `<domain_skills>`
+XML block under `<skill_harness_plugin>` only when resolved domain skills exist.
+The block contains every resolved skill referenced by enabled intents in that
+domain, using `name`, `path`, and `description` fields. If no skills resolve for
+the domain, the `<domain_skills>` block and its surrounding skill-loading
+guidance are omitted; if there is no generated instruction hint or fallback
+intent guidance either, the entire `<skill_harness_plugin>` prefix is omitted.
+When a prefix is emitted, the header frames it as generated Skill Harness context
+and the plugin tag starts with a short `<context_policy>`: relevant `## Skills
+(mandatory)` entries are mandatory skill-loading guidance, irrelevant listed
+skills should be ignored if the selected domain is wrong, and `## Instruction
+Hint` / intent-derived prose remains advisory against the latest request and
+verified repository or tool evidence.
 
 Prompt assembly keeps static instructions, schema examples, and catalog data before
 dynamic conversation input, then closes helper prompts with a short final output
@@ -327,23 +333,23 @@ pnpm run build
 
 ### Configuration Reference
 
-| Option              | Type       | Default           | Description                                                                                                                                                                   |
-| ------------------- | ---------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agents`            | `string[]` | `["*"]`           | Which agents trigger the plugin. Use `["*"]` for all agents.                                                                                                                  |
-| `intentDeny`        | `object`   | `{}`              | Per-agent deny list of intent IDs. Keys support `*` glob patterns.                                                                                                            |
-| `model`             | `string`   | —                 | Lightweight model for the intention scanner. Falls back to the agent's default if empty.                                                                                      |
-| `modelFallback`     | `string`   | —                 | Fallback model when `config.model` cannot be resolved.                                                                                                                        |
-| `thinking`          | `string`   | `"medium"`        | Thinking level for the intent classifier subagent.                                                                                                                            |
-| `lowThinkingMode`   | `string`   | `"fastpath-only"` | Behavior when the main agent uses `off`, `minimal`, or `low` thinking: preserve deterministic exact keyword hints, run the full scanner, or disable the plugin for that turn. |
-| `allowedChatTypes`  | `string[]` | `["direct"]`      | Chat types (direct, group, channel) that allow intent analysis.                                                                                                               |
-| `allowedChatIds`    | `string[]` | `[]`              | Allowlist of chat IDs. Empty means no allowlist restriction.                                                                                                                  |
-| `deniedChatIds`     | `string[]` | `[]`              | Blocklist of chat IDs. Plugin skips intent analysis for listed IDs.                                                                                                           |
-| `queryMode`         | `string`   | `"recent"`        | Context window mode: `recent` (recent turns), `message` (latest message only), `full` (full history).                                                                         |
-| `contextWindow`     | `object`   | see below         | Turn/char limits for conversation extraction.                                                                                                                                 |
-| `timeoutMs`         | `number`   | `3000`            | Max wait time for each scanner sub-agent run. Clamped to 250–120000ms.                                                                                                        |
-| `complexityPrompts` | `object`   | built-in          | Custom instruction-generation guidance per complexity level.                                                                                                                  |
-| `instruction`       | `object`   | enabled           | Instruction writer configuration. When disabled or model resolution fails, the hook injects only `<domain_skills>` and skips generated hints.                                 |
-| `evolution`         | `object`   | disabled          | Post-turn trigger review configuration. Findings and runtime trigger keywords are stored in `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json`.                       |
+| Option              | Type       | Default           | Description                                                                                                                                                                    |
+| ------------------- | ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agents`            | `string[]` | `["*"]`           | Which agents trigger the plugin. Use `["*"]` for all agents.                                                                                                                   |
+| `intentDeny`        | `object`   | `{}`              | Per-agent deny list of intent IDs. Keys support `*` glob patterns.                                                                                                             |
+| `model`             | `string`   | —                 | Lightweight model for the intention scanner. Falls back to the agent's default if empty.                                                                                       |
+| `modelFallback`     | `string`   | —                 | Fallback model when `config.model` cannot be resolved.                                                                                                                         |
+| `thinking`          | `string`   | `"medium"`        | Thinking level for the intent classifier subagent.                                                                                                                             |
+| `lowThinkingMode`   | `string`   | `"fastpath-only"` | Behavior when the main agent uses `off`, `minimal`, or `low` thinking: preserve deterministic exact keyword hints, run the full scanner, or disable the plugin for that turn.  |
+| `allowedChatTypes`  | `string[]` | `["direct"]`      | Chat types (direct, group, channel) that allow intent analysis.                                                                                                                |
+| `allowedChatIds`    | `string[]` | `[]`              | Allowlist of chat IDs. Empty means no allowlist restriction.                                                                                                                   |
+| `deniedChatIds`     | `string[]` | `[]`              | Blocklist of chat IDs. Plugin skips intent analysis for listed IDs.                                                                                                            |
+| `queryMode`         | `string`   | `"recent"`        | Context window mode: `recent` (recent turns), `message` (latest message only), `full` (full history).                                                                          |
+| `contextWindow`     | `object`   | see below         | Turn/char limits for conversation extraction.                                                                                                                                  |
+| `timeoutMs`         | `number`   | `3000`            | Max wait time for each scanner sub-agent run. Clamped to 250–120000ms.                                                                                                         |
+| `complexityPrompts` | `object`   | built-in          | Custom instruction-generation guidance per complexity level.                                                                                                                   |
+| `instruction`       | `object`   | enabled           | Instruction writer configuration. When disabled or model resolution fails, the hook injects `<domain_skills>` only if resolved domain skills exist, and skips generated hints. |
+| `evolution`         | `object`   | disabled          | Post-turn trigger review configuration. Findings and runtime trigger keywords are stored in `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json`.                        |
 
 `instruction.thinking` independently controls the instruction writer subagent,
 and `evolution.thinking` independently controls the Evolution review subagent.
@@ -584,26 +590,34 @@ Expired entries are swept before reuse, and the cache is size-bounded so missing
 skill references do not rescan entire roots on every turn. The Evolution review
 prompt receives the same resolved skill metadata when a matched intent exists.
 
-The final main-agent prompt prefix always includes a `<domain_skills>` XML block
-once `onBeforePromptBuild` has resolved the current domain. This block is wrapped
-with mandatory skill-loading guidance before the tag and a fallback reminder after
-the closing tag: read relevant `SKILL.md` files with OpenClaw's `read` tool,
-update broken skills with `apply_patch` or `write`, load the relevant OpenClaw
-skill before OpenClaw configuration/troubleshooting work, and only proceed
-without loading a skill when genuinely no listed skill is relevant. The block is
-separate from `<intent_related_skills>`: it is built from every enabled intent in
-the same domain, includes each skill's `name`, `path`, and `description`, and is
-emitted before any generated hint text. It is still injected when the generated
-hint is skipped because the topic is unchanged or the classification confidence
-is too low.
+The final main-agent prompt prefix includes a `<domain_skills>` XML block only
+when `onBeforePromptBuild` resolves at least one skill for the current domain.
+When resolved skills exist, this block is wrapped with mandatory skill-loading
+guidance before the tag and a fallback reminder after the closing tag: read
+relevant `SKILL.md` files with OpenClaw's `read` tool, update broken skills with
+`apply_patch` or `write`, load the relevant OpenClaw skill before OpenClaw
+configuration/troubleshooting work, and only proceed without loading a skill when
+genuinely no listed skill is relevant. When no skills resolve, the
+`<domain_skills>` block and surrounding guidance are omitted entirely. The block
+is separate from `<intent_related_skills>`: it is built from every enabled intent
+in the same domain and includes each skill's `name`, `path`, and `description`.
 This prompt shape intentionally uses `<intent_related_skills>` and
 `<domain_skills>` with `path` fields; update any custom prompt parsers that
 expected the older internal `<available_skills>` / `location` shape.
 The full complexity guidance is provided to this instruction writer, not appended
 to the final main-agent prefix.
-The generated instruction text replaces direct full intent-body injection. If
+The generated instruction text is emitted under a `## Instruction Hint` heading.
+When `<domain_skills>` is present, the heading appears after its fallback
+reminder; otherwise the hint is emitted without an empty skill block. If
 instruction generation fails, `buildPromptPrefix()` falls back to the original
-matched intent body.
+matched intent body. If none of these blocks has content, the whole
+`<skill_harness_plugin>` prefix is omitted.
+Every emitted prefix starts with generated-context framing and a
+`<context_policy>` inside `<skill_harness_plugin>` before any skill or hint
+content. The policy calibrates the main agent to treat relevant listed skills as
+mandatory to load, ignore irrelevant skills when domain classification is wrong,
+and treat `## Instruction Hint` / fallback intent prose as advisory when it does
+not match the user request or verified evidence.
 
 ### Time Injection
 

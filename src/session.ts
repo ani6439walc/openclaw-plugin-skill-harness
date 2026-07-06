@@ -24,6 +24,11 @@ export function isEligibleInteractiveSession(ctx: {
   return Boolean(ctx.channelId && ctx.channelId.trim());
 }
 
+function isDreamingSessionKey(sessionKey: string): boolean {
+  const parts = sessionKey.split(":");
+  return parts[0] === "agent" && parts[2]?.startsWith("dreaming-") === true;
+}
+
 export function shouldSkipIntentAnalysis(ctx: {
   trigger?: string;
   sessionKey?: string;
@@ -36,6 +41,7 @@ export function shouldSkipIntentAnalysis(ctx: {
 
   return (
     sessionKey.includes(":active-memory:") ||
+    isDreamingSessionKey(sessionKey) ||
     sessionKey.includes(":skill-harness:") ||
     sessionKey.includes(":subagent:") ||
     sessionId.startsWith("active-memory-") ||

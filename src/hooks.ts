@@ -13,7 +13,7 @@ import type {
 import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness";
 import { logger } from "../api.js";
 import { defaultCatalog } from "./intent-loader.js";
-import { defaultTracker } from "./session-tracker.js";
+import { defaultTracker, extractSkillInfo } from "./session-tracker.js";
 import { defaultStatsAggregator } from "./stats-aggregator.js";
 import { defaultBacklogWriter, type BacklogWriter } from "./backlog-writer.js";
 import { defaultReviewQueue, type ReviewQueue } from "./review-queue.js";
@@ -152,14 +152,21 @@ function readTriggerKeywordsFailOpen(
 
 function recordTrackedSession(
   tracker: typeof defaultTracker,
-  sessionId: string | undefined,
+  context: { sessionId?: string; sessionKey?: string },
   data: Parameters<typeof defaultTracker.record>[1],
-): void {
+): string | undefined {
+  const sessionId = tracker.resolveCurrentSessionId(context);
   if (!sessionId) return;
-  if (!tracker.hasIntentData(sessionId)) return;
 
   tracker.record(sessionId, data);
   tracker.write(sessionId);
+  return sessionId;
+}
+
+function toPromptBuildResult(
+  prependContext: string | undefined,
+): PluginHookBeforePromptBuildResult | undefined {
+  return prependContext ? { prependContext } : undefined;
 }
 
 function findIntentDefinition(
@@ -860,8 +867,8 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return {
-        prependContext: buildDomainSkillsPromptPrefix(
+      return toPromptBuildResult(
+        buildDomainSkillsPromptPrefix(
           result,
           await resolvePromptDomainSkills({
             agentId: params.routing.effectiveAgentId,
@@ -869,7 +876,7 @@ export function createHookHandlers(deps: HookDeps) {
             availableIntents: params.availableIntents,
           }),
         ),
-      };
+      );
     }
 
     recordPromptBuildResult({
@@ -916,8 +923,8 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return {
-        prependContext: buildDomainSkillsPromptPrefix(
+      return toPromptBuildResult(
+        buildDomainSkillsPromptPrefix(
           result,
           await resolvePromptDomainSkills({
             agentId: params.routing.effectiveAgentId,
@@ -925,7 +932,7 @@ export function createHookHandlers(deps: HookDeps) {
             availableIntents: params.availableIntents,
           }),
         ),
-      };
+      );
     }
 
     // Safety fallback: skip intent instruction subagent and hint injection when topic unchanged
@@ -940,8 +947,8 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return {
-        prependContext: buildDomainSkillsPromptPrefix(
+      return toPromptBuildResult(
+        buildDomainSkillsPromptPrefix(
           result,
           await resolvePromptDomainSkills({
             agentId: params.routing.effectiveAgentId,
@@ -949,7 +956,7 @@ export function createHookHandlers(deps: HookDeps) {
             availableIntents: params.availableIntents,
           }),
         ),
-      };
+      );
     }
 
     // Skip intent instruction subagent when confidence is too low
@@ -964,8 +971,8 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return {
-        prependContext: buildDomainSkillsPromptPrefix(
+      return toPromptBuildResult(
+        buildDomainSkillsPromptPrefix(
           result,
           await resolvePromptDomainSkills({
             agentId: params.routing.effectiveAgentId,
@@ -973,7 +980,7 @@ export function createHookHandlers(deps: HookDeps) {
             availableIntents: params.availableIntents,
           }),
         ),
-      };
+      );
     }
 
     if (!params.refreshedConfig.instruction.enabled) {
@@ -987,8 +994,8 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return {
-        prependContext: buildDomainSkillsPromptPrefix(
+      return toPromptBuildResult(
+        buildDomainSkillsPromptPrefix(
           result,
           await resolvePromptDomainSkills({
             agentId: params.routing.effectiveAgentId,
@@ -996,7 +1003,7 @@ export function createHookHandlers(deps: HookDeps) {
             availableIntents: params.availableIntents,
           }),
         ),
-      };
+      );
     }
 
     const instructionModelRef = getInstructionModelRef(
@@ -1019,8 +1026,8 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         conversation: params.conversation,
       });
-      return {
-        prependContext: buildDomainSkillsPromptPrefix(
+      return toPromptBuildResult(
+        buildDomainSkillsPromptPrefix(
           result,
           await resolvePromptDomainSkills({
             agentId: params.routing.effectiveAgentId,
@@ -1028,7 +1035,7 @@ export function createHookHandlers(deps: HookDeps) {
             availableIntents: params.availableIntents,
           }),
         ),
-      };
+      );
     }
 
     emitPipelineEvent(
@@ -1222,8 +1229,11 @@ export function createHookHandlers(deps: HookDeps) {
     const outputStr =
       typeof output === "string" ? output : extractToolText(output);
     const truncatedOutput = outputStr.slice(0, 200);
+    const skillUsed = event.error
+      ? undefined
+      : extractSkillInfo(event.toolName, event.params, outputStr);
 
-    recordTrackedSession(tracker, ctx.sessionId, {
+    recordTrackedSession(tracker, ctx, {
       current: {
         toolCalls: [
           {
@@ -1234,6 +1244,7 @@ export function createHookHandlers(deps: HookDeps) {
             durationMs: event.durationMs,
           },
         ],
+        skillsUsed: skillUsed ? [skillUsed] : undefined,
       },
     });
   }
@@ -1241,7 +1252,7 @@ export function createHookHandlers(deps: HookDeps) {
   function recordAgentEndResult(
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
-  ): void {
+  ): string | undefined {
     const turns = extractRecentTurns(
       event.messages as Array<{
         role?: string;
@@ -1253,7 +1264,7 @@ export function createHookHandlers(deps: HookDeps) {
       .reverse()
       .find((t) => t.role === "assistant");
 
-    recordTrackedSession(tracker, ctx.sessionId, {
+    return recordTrackedSession(tracker, ctx, {
       current: {
         result: lastAssistantTurn?.text,
         error: event.error,
@@ -1369,16 +1380,16 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    recordAgentEndResult(event, ctx);
+    const trackedSessionId = recordAgentEndResult(event, ctx);
 
-    if (!ctx.sessionId) return;
-    const agentEndStats = recordAgentEndStats(ctx.sessionId);
+    if (!trackedSessionId) return;
+    const agentEndStats = recordAgentEndStats(trackedSessionId);
     if (!agentEndStats) return;
 
     const resolvedConfig = config();
     const evolutionConfig = resolvedConfig.evolution;
     if (!evolutionConfig.enabled) return;
-    const baseSnapshot = tracker.getReviewSnapshot(ctx.sessionId);
+    const baseSnapshot = tracker.getReviewSnapshot(trackedSessionId);
     if (!baseSnapshot) return;
     const agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
     const snapshot = await buildEvolutionReviewSnapshot(

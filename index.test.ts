@@ -128,6 +128,15 @@ describe("shouldSkipIntentAnalysis", () => {
     ).toBe(true);
   });
 
+  it("skips dreaming sessions", () => {
+    expect(
+      shouldSkipIntentAnalysis({
+        trigger: "user",
+        sessionKey: "agent:main:dreaming-narrative-light-83a0e00c357f",
+      }),
+    ).toBe(true);
+  });
+
   it("does not skip normal user sessions", () => {
     expect(
       shouldSkipIntentAnalysis({

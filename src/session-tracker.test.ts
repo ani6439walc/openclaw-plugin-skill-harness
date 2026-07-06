@@ -266,6 +266,85 @@ describe("SessionTracker", () => {
 
       expect(() => tracker.write("test-session-123")).not.toThrow();
     });
+
+    it("resolves the latest current session by session key", () => {
+      tracker.record("old-session", {
+        sessionKey: "agent:main:discord:channel:1490722656197152878",
+        current: {
+          intent: {
+            result: {
+              intent: "skill-lifecycle",
+              reason: "test",
+              domain: "agent-ops",
+              confidence: 0.9,
+              complexity: "low",
+            },
+          },
+          timestamps: { start: "2026-07-06T15:33:50.743Z" },
+        },
+      });
+      tracker.record("new-session", {
+        sessionKey: "agent:main:discord:channel:1490722656197152878",
+        current: {
+          intent: {
+            result: {
+              intent: "skill-lifecycle",
+              reason: "test",
+              domain: "agent-ops",
+              confidence: 0.95,
+              complexity: "low",
+            },
+          },
+          timestamps: { start: "2026-07-06T15:47:27.004Z" },
+        },
+      });
+
+      expect(
+        tracker.resolveCurrentSessionId({
+          sessionKey: "agent:main:discord:channel:1490722656197152878",
+        }),
+      ).toBe("new-session");
+    });
+
+    it("prefers the latest session-key match over a stale event session id", () => {
+      tracker.record("stale-event-session", {
+        sessionKey: "agent:main:discord:channel:1490722656197152878",
+        current: {
+          intent: {
+            result: {
+              intent: "skill-lifecycle",
+              reason: "test",
+              domain: "agent-ops",
+              confidence: 0.9,
+              complexity: "low",
+            },
+          },
+          timestamps: { start: "2026-07-06T15:47:27.004Z" },
+        },
+      });
+      tracker.record("latest-prompt-session", {
+        sessionKey: "agent:main:discord:channel:1490722656197152878",
+        current: {
+          intent: {
+            result: {
+              intent: "skill-lifecycle",
+              reason: "test",
+              domain: "agent-ops",
+              confidence: 0.95,
+              complexity: "low",
+            },
+          },
+          timestamps: { start: "2026-07-06T16:14:33.056Z" },
+        },
+      });
+
+      expect(
+        tracker.resolveCurrentSessionId({
+          sessionId: "stale-event-session",
+          sessionKey: "agent:main:discord:channel:1490722656197152878",
+        }),
+      ).toBe("latest-prompt-session");
+    });
   });
 
   describe("write", () => {
