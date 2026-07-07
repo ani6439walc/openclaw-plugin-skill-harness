@@ -243,15 +243,15 @@ pnpm run build
 
 **Step 5 — Report**
 
-Report affected files, validation results, and whether any rollback occurred. Never commit or push unless the user explicitly asks.
+Report affected files, validation results, and whether any staged edits were applied. Never commit or push unless the user explicitly asks.
 
 ### Failure modes
 
-| Trigger                              | First fix                                        | Fallback                                          |
-| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------- |
-| **Target intent deleted or missing** | Re-read runtime intent directory and catalog     | Ask user whether to create a new intent           |
-| **Validation fails after apply**     | Restore only the changed runtime intent files    | Report validation errors and leave files restored |
-| **Boundary change is broad**         | Present rename/split/merge plan for confirmation | Keep existing intent unchanged                    |
+| Trigger                              | First fix                                        | Fallback                                                   |
+| ------------------------------------ | ------------------------------------------------ | ---------------------------------------------------------- |
+| **Target intent deleted or missing** | Re-read runtime intent directory and catalog     | Ask user whether to create a new intent                    |
+| **Validation fails before apply**    | Keep staged edits out of the runtime catalog     | Report validation errors and leave runtime files unchanged |
+| **Boundary change is broad**         | Present rename/split/merge plan for confirmation | Keep existing intent unchanged                             |
 
 ### Anti-patterns
 

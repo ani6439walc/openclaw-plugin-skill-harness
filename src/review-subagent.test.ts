@@ -841,6 +841,7 @@ Some more reasoning text here.
 
 describe("runReviewSubagent", () => {
   it("runs an isolated read/write review with the review timeout", async () => {
+    const intentDirectory = createIntentDirectory();
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: '{"findings":[]}' }],
     });
@@ -859,7 +860,7 @@ describe("runReviewSubagent", () => {
         },
       }),
       agentId: "main",
-      intentDirectory: createIntentDirectory(),
+      intentDirectory,
       modelRef: { provider: "google", model: "review" },
       snapshot,
       triggers: ["weak-intent"],
@@ -882,6 +883,13 @@ describe("runReviewSubagent", () => {
         ),
       }),
     );
+    const options = runEmbeddedAgent.mock.calls[0]?.[0] as {
+      workspaceDir: string;
+      agentDir: string;
+    };
+    expect(options.workspaceDir).not.toBe(intentDirectory);
+    expect(options.agentDir).toBe(options.workspaceDir);
+    expect(fs.existsSync(options.workspaceDir)).toBe(false);
   });
 
   it("returns no-finding reason counts for requested negative decisions", async () => {
@@ -1005,6 +1013,7 @@ describe("runReviewSubagent", () => {
   it("records runtime intent Markdown files changed by the review run", async () => {
     const intentDirectory = createIntentDirectory();
     const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.writeFileSync(path.join(options.workspaceDir, "temp.json"), "{}");
       const targetPath = path.join(options.workspaceDir, "social-casual.md");
       const current = fs.readFileSync(targetPath, "utf-8");
       fs.writeFileSync(
@@ -1062,9 +1071,10 @@ describe("runReviewSubagent", () => {
     expect(
       fs.readFileSync(path.join(intentDirectory, "social-casual.md"), "utf-8"),
     ).toContain("Treat tool capability questions as implementation support");
+    expect(fs.existsSync(path.join(intentDirectory, "temp.json"))).toBe(false);
   });
 
-  it("rolls back runtime intent edits that have no matching finding", async () => {
+  it("rejects isolated runtime intent edits that have no matching finding", async () => {
     const intentDirectory = createIntentDirectory();
     const original = fs.readFileSync(
       path.join(intentDirectory, "social-casual.md"),
@@ -1102,6 +1112,183 @@ describe("runReviewSubagent", () => {
     expect(
       fs.readFileSync(path.join(intentDirectory, "social-casual.md"), "utf-8"),
     ).toBe(original);
+  });
+
+  it("does not overwrite concurrent live intent edits when review parsing fails", async () => {
+    const intentDirectory = createIntentDirectory();
+    const targetPath = path.join(intentDirectory, "social-casual.md");
+    const original = fs.readFileSync(targetPath, "utf-8");
+    const concurrent = original.replace(
+      "- Chat casually.",
+      "- Preserve a manual concurrent edit.",
+    );
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.writeFileSync(
+        path.join(options.workspaceDir, "social-casual.md"),
+        original.replace("- Chat casually.", "- Invalid review edit."),
+      );
+      fs.writeFileSync(path.join(options.workspaceDir, "temp.json"), "{}");
+      fs.writeFileSync(targetPath, concurrent);
+      return { payloads: [{ text: "not json" }] };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual({ findings: [], outcome: "parse-failed" });
+    expect(fs.readFileSync(targetPath, "utf-8")).toBe(concurrent);
+    expect(fs.existsSync(path.join(intentDirectory, "temp.json"))).toBe(false);
+  });
+
+  it("rejects successful review edits when the live target changed concurrently", async () => {
+    const intentDirectory = createIntentDirectory();
+    const targetPath = path.join(intentDirectory, "social-casual.md");
+    const original = fs.readFileSync(targetPath, "utf-8");
+    const concurrent = original.replace(
+      "- Chat casually.",
+      "- Preserve a manual concurrent edit.",
+    );
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.writeFileSync(
+        path.join(options.workspaceDir, "social-casual.md"),
+        original.replace("- Chat casually.", "- Route tool support away."),
+      );
+      fs.writeFileSync(targetPath, concurrent);
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "behavior-fix",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["social-casual"],
+                  dedupeKey: "tool-inquiry-boundary",
+                  summary: "Tool inquiries need a clearer boundary",
+                  evidence: ["User asked whether a tool exists"],
+                  correctionGoal: "Clarify the casual-chat boundary",
+                  suggestedChange: "Update social-casual.md Guidelines.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "validation-failed",
+      validationErrors: [
+        "runtime intent files changed during review: social-casual",
+      ],
+    });
+    expect(fs.readFileSync(targetPath, "utf-8")).toBe(concurrent);
+  });
+
+  it("rejects review edits to undeclared runtime intent files", async () => {
+    const intentDirectory = createIntentDirectory();
+    const originalSocial = fs.readFileSync(
+      path.join(intentDirectory, "social-casual.md"),
+      "utf-8",
+    );
+    const originalOther = fs.readFileSync(
+      path.join(intentDirectory, "other.md"),
+      "utf-8",
+    );
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.writeFileSync(
+        path.join(options.workspaceDir, "social-casual.md"),
+        originalSocial.replace(
+          "- Chat casually.",
+          "- Route tool support away.",
+        ),
+      );
+      fs.writeFileSync(
+        path.join(options.workspaceDir, "other.md"),
+        originalOther.replace(
+          "- Ask for context.",
+          "- Ask for specific context.",
+        ),
+      );
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "behavior-fix",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["social-casual"],
+                  dedupeKey: "tool-inquiry-boundary",
+                  summary: "Tool inquiries need a clearer boundary",
+                  evidence: ["User asked whether a tool exists"],
+                  correctionGoal: "Clarify the casual-chat boundary",
+                  suggestedChange: "Update social-casual.md Guidelines.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "validation-failed",
+      validationErrors: [
+        "review edited undeclared runtime intent files: other",
+      ],
+    });
+    expect(
+      fs.readFileSync(path.join(intentDirectory, "social-casual.md"), "utf-8"),
+    ).toBe(originalSocial);
+    expect(
+      fs.readFileSync(path.join(intentDirectory, "other.md"), "utf-8"),
+    ).toBe(originalOther);
   });
 
   it("rejects intent-markdown findings when the review did not edit runtime intents", async () => {

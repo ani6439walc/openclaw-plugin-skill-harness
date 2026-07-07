@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   DEFAULT_PROVIDER,
@@ -895,18 +896,54 @@ function changedIntentIds(
     .sort();
 }
 
-function restoreIntentFiles(
-  intentDirectory: string,
-  before: Map<string, string>,
-): void {
-  fs.mkdirSync(intentDirectory, { recursive: true });
-  const current = snapshotIntentFiles(intentDirectory);
-  for (const file of current.keys()) {
-    if (!before.has(file))
-      fs.rmSync(path.join(intentDirectory, file), { force: true });
-  }
+function createIntentWorkspace(before: Map<string, string>): string {
+  const workspaceDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "skill-harness-review-intents-"),
+  );
   for (const [file, content] of before) {
-    fs.writeFileSync(path.join(intentDirectory, file), content);
+    fs.writeFileSync(path.join(workspaceDir, file), content);
+  }
+  return workspaceDir;
+}
+
+function undeclaredIntentEdits(
+  changedIds: readonly string[],
+  intentFindingTargets: ReadonlySet<string>,
+): string[] {
+  return changedIds
+    .filter((id) => !intentFindingTargets.has(id))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function concurrentIntentConflicts(
+  before: Map<string, string>,
+  current: Map<string, string>,
+  changedIds: readonly string[],
+): string[] {
+  return changedIds
+    .filter((id) => {
+      const file = `${id}.md`;
+      return before.get(file) !== current.get(file);
+    })
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function applyIntentWorkspaceChanges(params: {
+  intentDirectory: string;
+  before: Map<string, string>;
+  after: Map<string, string>;
+  changedIds: readonly string[];
+}): void {
+  fs.mkdirSync(params.intentDirectory, { recursive: true });
+  for (const id of params.changedIds) {
+    const file = `${id}.md`;
+    const targetPath = path.join(params.intentDirectory, file);
+    const content = params.after.get(file);
+    if (content === undefined) {
+      if (params.before.has(file)) fs.rmSync(targetPath, { force: true });
+      continue;
+    }
+    fs.writeFileSync(targetPath, content);
   }
 }
 
@@ -935,6 +972,7 @@ export async function runReviewSubagent(params: {
 
   for (const [index, modelRef] of reviewModelCandidates(params).entries()) {
     const attemptRunId = index === 0 ? runId : `${runId}-retry-${index}`;
+    const workspaceDir = createIntentWorkspace(beforeIntentFiles);
     try {
       const result = await params.api.runtime.agent.runEmbeddedAgent({
         sessionId: attemptRunId,
@@ -947,8 +985,8 @@ export async function runReviewSubagent(params: {
         model: modelRef.model,
         timeoutMs: params.config.evolution.timeoutMs,
         runId: attemptRunId,
-        workspaceDir: params.intentDirectory,
-        agentDir: params.intentDirectory,
+        workspaceDir,
+        agentDir: workspaceDir,
         sessionFile: `/tmp/${attemptRunId}.session.jsonl`,
         trigger: "manual",
         modelRun: false,
@@ -968,7 +1006,6 @@ export async function runReviewSubagent(params: {
       const rawReply = extractPayloadText(result);
       const parsed = parseReviewFindingsDetailed(rawReply, params.triggers);
       if (!parsed) {
-        restoreIntentFiles(params.intentDirectory, beforeIntentFiles);
         logger.warn("evolution review result parse failed", {
           ...summarizeRawReply(rawReply),
         });
@@ -980,7 +1017,6 @@ export async function runReviewSubagent(params: {
         parsed.invalidRequestedPositiveFindings ===
           parsed.requestedPositiveFindings
       ) {
-        restoreIntentFiles(params.intentDirectory, beforeIntentFiles);
         logger.warn("evolution review findings rejected by schema", {
           invalidFindingCount: parsed.invalidRequestedPositiveFindings,
           requestedPositiveFindings: parsed.requestedPositiveFindings,
@@ -995,7 +1031,7 @@ export async function runReviewSubagent(params: {
             : {}),
         };
       }
-      const afterIntentFiles = snapshotIntentFiles(params.intentDirectory);
+      const afterIntentFiles = snapshotIntentFiles(workspaceDir);
       const changedIds = changedIntentIds(beforeIntentFiles, afterIntentFiles);
       const intentFindingTargets = new Set(
         parsed.findings
@@ -1006,12 +1042,24 @@ export async function runReviewSubagent(params: {
         ...new Set([...changedIds, ...intentFindingTargets]),
       ];
       if (changedIds.length > 0 && intentFindingTargets.size === 0) {
-        restoreIntentFiles(params.intentDirectory, beforeIntentFiles);
         return {
           findings: [],
           outcome: "validation-failed",
           validationErrors: [
             "review edited runtime intent files without returning an intent-markdown finding",
+          ],
+        };
+      }
+      const undeclaredChangedIds = undeclaredIntentEdits(
+        changedIds,
+        intentFindingTargets,
+      );
+      if (undeclaredChangedIds.length > 0) {
+        return {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: [
+            `review edited undeclared runtime intent files: ${undeclaredChangedIds.join(", ")}`,
           ],
         };
       }
@@ -1025,11 +1073,10 @@ export async function runReviewSubagent(params: {
         };
       }
       const validation = validateIntentDirectory(
-        params.intentDirectory,
+        workspaceDir,
         relevantValidationTargets,
       );
       if (!validation.valid) {
-        restoreIntentFiles(params.intentDirectory, beforeIntentFiles);
         logger.warn("evolution review produced invalid runtime intents", {
           errors: validation.errors,
         });
@@ -1039,6 +1086,33 @@ export async function runReviewSubagent(params: {
           validationErrors: validation.errors,
         };
       }
+      const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
+      const conflictIds = concurrentIntentConflicts(
+        beforeIntentFiles,
+        liveIntentFiles,
+        changedIds,
+      );
+      if (conflictIds.length > 0) {
+        logger.warn(
+          "evolution review skipped concurrent runtime intent edits",
+          {
+            conflictIntentIds: conflictIds,
+          },
+        );
+        return {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: [
+            `runtime intent files changed during review: ${conflictIds.join(", ")}`,
+          ],
+        };
+      }
+      applyIntentWorkspaceChanges({
+        intentDirectory: params.intentDirectory,
+        before: beforeIntentFiles,
+        after: afterIntentFiles,
+        changedIds,
+      });
       return {
         findings: parsed.findings,
         ...(changedIds.length > 0 ? { changedIntentIds: changedIds } : {}),
@@ -1051,8 +1125,9 @@ export async function runReviewSubagent(params: {
           : {}),
       };
     } catch (err) {
-      restoreIntentFiles(params.intentDirectory, beforeIntentFiles);
       logger.warn("evolution review subagent error", { error: err, modelRef });
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
     }
   }
 

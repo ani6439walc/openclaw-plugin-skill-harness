@@ -53,7 +53,7 @@ Use this workflow only when the user explicitly asks to edit runtime intents man
    pnpm run build
    ```
 
-6. Report affected files, validation results, and whether any rollback occurred.
+6. Report affected files, validation results, and whether any staged edits were applied.
 
 ## Safety Rules
 

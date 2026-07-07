@@ -452,11 +452,11 @@ execution does not repeatedly read and parse the full log.
 ### Direct Evolution Mode
 
 Evolution no longer exposes `skill_harness_evolution` or `/skill-harness evolution`.
-Background reviews apply safe runtime intent edits directly, validate changed or
-targeted intents, roll back invalid edits, and record the event in
-`evolution.json`. Manual intent evolution is still documented in
+Background reviews stage safe runtime intent edits in an isolated temporary
+workspace, validate changed or targeted intents, copy validated target edits back
+to the runtime catalog, and record the event in `evolution.json`. Manual intent evolution is still documented in
 `skills/skill-harness/references/evolution.md`, but it operates on runtime intent
-Markdown and test/build gates rather than pending items.
+files directly rather than pending queue items.
 
 ## Key Design Decisions
 
@@ -677,7 +677,7 @@ The test suites cover:
 - Eight Evolution triggers, thresholds, runtime trigger keywords, and multi-trigger turns
 - Skill Harness Skill review prompts, response parsing, and bounded read/write/apply_patch reviewer runs
 - Serialized background reviews and atomic, idempotent evolution log writes
-- Schema v1-v3-to-v4 migration, structured processed event records, direct intent edit validation/rollback, and trigger keyword updates
+- Schema v1-v3-to-v4 migration, structured processed event records, staged direct intent edit validation/apply, and trigger keyword updates
 - Intent Markdown structure/catalog validation and manual direct Evolution mode
 - Recursive async skill catalog indexing, symlink cycle guards, disabled bundled skill filtering, and domain skill prompt injection
 - Protection of root-level `evolution.json` from session loading and retention cleanup
