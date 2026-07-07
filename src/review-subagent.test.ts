@@ -1127,6 +1127,11 @@ describe("runReviewSubagent", () => {
     const intentDirectory = createIntentDirectory();
     const file = "social-casual.md";
     const deletionPath = path.join(intentDirectory, "other.md");
+    const originalOther = fs.readFileSync(deletionPath, "utf-8");
+    const originalSocial = fs.readFileSync(
+      path.join(intentDirectory, file),
+      "utf-8",
+    );
     fs.rmSync(path.join(intentDirectory, file));
     fs.mkdirSync(path.join(intentDirectory, file));
 
@@ -1134,14 +1139,27 @@ describe("runReviewSubagent", () => {
       applyIntentWorkspaceChanges({
         intentDirectory,
         before: new Map([
-          ["other.md", fs.readFileSync(deletionPath, "utf-8")],
-          [file, "before"],
+          ["other.md", originalOther],
+          [file, originalSocial],
         ]),
-        after: new Map([[file, "after"]]),
+        after: new Map([
+          [
+            "other.md",
+            originalOther.replace(
+              "- Keep the response short.",
+              "- Stay direct.",
+            ),
+          ],
+          [file, originalSocial.replace("- Chat casually.", "- Stay casual.")],
+        ]),
         changedIds: ["other", "social-casual"],
       }),
     ).toThrow();
     expect(fs.existsSync(deletionPath)).toBe(true);
+    expect(fs.readFileSync(deletionPath, "utf-8")).toBe(originalOther);
+    expect(fs.readFileSync(path.join(intentDirectory, file), "utf-8")).toBe(
+      originalSocial,
+    );
     expect(fs.readdirSync(intentDirectory)).not.toContain(
       expect.stringContaining(".tmp"),
     );

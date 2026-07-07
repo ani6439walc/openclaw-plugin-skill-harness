@@ -939,6 +939,11 @@ interface StagedIntentWrite {
   tempPath: string;
 }
 
+interface IntentFileBackup {
+  targetPath: string;
+  backupPath?: string;
+}
+
 function stageIntentWrite(
   targetPath: string,
   content: string,
@@ -956,6 +961,41 @@ function stageIntentWrite(
   return { targetPath, tempPath };
 }
 
+function createIntentFileBackup(
+  targetPath: string,
+  beforeContent: string | undefined,
+): IntentFileBackup {
+  if (beforeContent === undefined) return { targetPath };
+  const backupPath = path.join(
+    path.dirname(targetPath),
+    `.${path.basename(targetPath)}.${process.pid}.${crypto.randomUUID()}.backup.tmp`,
+  );
+  try {
+    fs.writeFileSync(backupPath, beforeContent);
+  } catch (err) {
+    fs.rmSync(backupPath, { force: true });
+    throw err;
+  }
+  return { targetPath, backupPath };
+}
+
+function restoreIntentBackups(backups: readonly IntentFileBackup[]): void {
+  for (const backup of [...backups].reverse()) {
+    if (backup.backupPath) {
+      fs.rmSync(backup.targetPath, { recursive: true, force: true });
+      fs.renameSync(backup.backupPath, backup.targetPath);
+      continue;
+    }
+    fs.rmSync(backup.targetPath, { recursive: true, force: true });
+  }
+}
+
+function removeIntentBackups(backups: readonly IntentFileBackup[]): void {
+  for (const backup of backups) {
+    if (backup.backupPath) fs.rmSync(backup.backupPath, { force: true });
+  }
+}
+
 export function applyIntentWorkspaceChanges(params: {
   intentDirectory: string;
   before: Map<string, string>;
@@ -964,12 +1004,14 @@ export function applyIntentWorkspaceChanges(params: {
 }): void {
   fs.mkdirSync(params.intentDirectory, { recursive: true });
   const stagedWrites: StagedIntentWrite[] = [];
+  const backups: IntentFileBackup[] = [];
   const deletions: string[] = [];
   try {
     for (const id of params.changedIds) {
       const file = `${id}.md`;
       const targetPath = path.join(params.intentDirectory, file);
       const content = params.after.get(file);
+      backups.push(createIntentFileBackup(targetPath, params.before.get(file)));
       if (content === undefined) {
         if (params.before.has(file)) deletions.push(targetPath);
         continue;
@@ -987,8 +1029,10 @@ export function applyIntentWorkspaceChanges(params: {
     for (const write of stagedWrites) {
       fs.rmSync(write.tempPath, { force: true });
     }
+    restoreIntentBackups(backups);
     throw err;
   }
+  removeIntentBackups(backups);
 }
 
 export async function runReviewSubagent(params: {
