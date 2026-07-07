@@ -1,5 +1,4 @@
 import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
-import type { EvolutionFinding } from "./evolution-types.js";
 import type { OpenClawPluginApi } from "../api.js";
 import type {
   PluginHookBeforePromptBuildEvent,
@@ -133,7 +132,7 @@ export type HookDeps = {
   reviewQueue?: Pick<ReviewQueue, "enqueue">;
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],
-  ) => Promise<ReviewSubagentResult | EvolutionFinding[] | undefined>;
+  ) => Promise<ReviewSubagentResult | undefined>;
   classifier?: typeof runIntentionSubagent;
   topicChecker?: typeof runTopicSwitchSubagent;
   instructionWriter?: typeof runIntentInstructionSubagent;
@@ -1350,26 +1349,6 @@ export function createHookHandlers(deps: HookDeps) {
         triggers: params.triggers,
       });
       if (!reviewResult) return;
-      const findings = Array.isArray(reviewResult)
-        ? reviewResult
-        : reviewResult.findings;
-      const outcome = Array.isArray(reviewResult)
-        ? findings.length > 0
-          ? "applied"
-          : "nofinding"
-        : reviewResult.outcome;
-      const noFindingReasonCounts = Array.isArray(reviewResult)
-        ? undefined
-        : reviewResult.noFindingReasonCounts;
-      const schemaRejectionReasonCounts = Array.isArray(reviewResult)
-        ? undefined
-        : reviewResult.schemaRejectionReasonCounts;
-      const changedIntentIds = Array.isArray(reviewResult)
-        ? undefined
-        : reviewResult.changedIntentIds;
-      const validationErrors = Array.isArray(reviewResult)
-        ? undefined
-        : reviewResult.validationErrors;
       await evolutionLogWriter.record(
         params.snapshot.eventId,
         {
@@ -1378,20 +1357,17 @@ export function createHookHandlers(deps: HookDeps) {
           agentId: params.snapshot.agentId,
           turnStart: params.snapshot.current.timestamps!.start!,
         },
-        findings,
+        reviewResult.findings,
         {
           triggers: params.triggers,
-          outcome,
-          changedIntentIds,
-          validationErrors,
-          noFindingReasonCounts,
-          schemaRejectionReasonCounts,
+          outcome: reviewResult.outcome,
+          changedIntentIds: reviewResult.changedIntentIds,
+          validationErrors: reviewResult.validationErrors,
+          noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+          schemaRejectionReasonCounts: reviewResult.schemaRejectionReasonCounts,
         },
       );
-      if (
-        !Array.isArray(reviewResult) &&
-        reviewResult.changedIntentIds?.length
-      ) {
+      if (reviewResult.changedIntentIds?.length) {
         deps.refreshIntents();
       }
     });

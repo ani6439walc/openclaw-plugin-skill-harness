@@ -6,6 +6,7 @@ import type { OpenClawPluginApi } from "../api.js";
 import { logger } from "../api.js";
 import { resolveConfig } from "./config.js";
 import {
+  applyIntentWorkspaceChanges,
   buildReviewPrompt,
   createIntentWorkspace,
   parseReviewFindings,
@@ -1096,6 +1097,49 @@ describe("runReviewSubagent", () => {
       fs.readFileSync(path.join(intentDirectory, "social-casual.md"), "utf-8"),
     ).toContain("Treat tool capability questions as implementation support");
     expect(fs.existsSync(path.join(intentDirectory, "temp.json"))).toBe(false);
+  });
+
+  it("applies runtime intent writes without leaving temp files", () => {
+    const intentDirectory = createIntentDirectory();
+    const file = "social-casual.md";
+    const targetPath = path.join(intentDirectory, file);
+    const before = new Map([[file, fs.readFileSync(targetPath, "utf-8")]]);
+    const afterContent = before
+      .get(file)!
+      .replace("- Chat casually.", "- Route tool support away.");
+
+    applyIntentWorkspaceChanges({
+      intentDirectory,
+      before,
+      after: new Map([[file, afterContent]]),
+      changedIds: ["social-casual"],
+    });
+
+    expect(fs.readFileSync(targetPath, "utf-8")).toContain(
+      "- Route tool support away.",
+    );
+    expect(fs.readdirSync(intentDirectory)).not.toContain(
+      expect.stringContaining(".tmp"),
+    );
+  });
+
+  it("cleans up temp files when atomic intent replacement fails", () => {
+    const intentDirectory = createIntentDirectory();
+    const file = "social-casual.md";
+    fs.rmSync(path.join(intentDirectory, file));
+    fs.mkdirSync(path.join(intentDirectory, file));
+
+    expect(() =>
+      applyIntentWorkspaceChanges({
+        intentDirectory,
+        before: new Map([[file, "before"]]),
+        after: new Map([[file, "after"]]),
+        changedIds: ["social-casual"],
+      }),
+    ).toThrow();
+    expect(fs.readdirSync(intentDirectory)).not.toContain(
+      expect.stringContaining(".tmp"),
+    );
   });
 
   it("rejects isolated runtime intent edits that have no matching finding", async () => {

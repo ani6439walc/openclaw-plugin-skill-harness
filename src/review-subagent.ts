@@ -934,7 +934,21 @@ function concurrentIntentConflicts(
     .sort((a, b) => a.localeCompare(b));
 }
 
-function applyIntentWorkspaceChanges(params: {
+function atomicWriteIntentFile(targetPath: string, content: string): void {
+  const tempPath = path.join(
+    path.dirname(targetPath),
+    `.${path.basename(targetPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tempPath, content);
+    fs.renameSync(tempPath, targetPath);
+  } catch (err) {
+    fs.rmSync(tempPath, { force: true });
+    throw err;
+  }
+}
+
+export function applyIntentWorkspaceChanges(params: {
   intentDirectory: string;
   before: Map<string, string>;
   after: Map<string, string>;
@@ -949,7 +963,7 @@ function applyIntentWorkspaceChanges(params: {
       if (params.before.has(file)) fs.rmSync(targetPath, { force: true });
       continue;
     }
-    fs.writeFileSync(targetPath, content);
+    atomicWriteIntentFile(targetPath, content);
   }
 }
 
