@@ -1,5 +1,5 @@
 import type { EvolutionTrigger } from "./trigger-checker.js";
-import type { EvolutionOperation } from "./evolution-backlog.js";
+import type { EvolutionOperation } from "./evolution-log.js";
 import type { TriggerKeywordTarget } from "./evolution-trigger-keywords.js";
 import type {
   AvailableSkill,

@@ -10,21 +10,19 @@ import { resolveConfig } from "./config.js";
 import { IntentCatalog } from "./intent-loader.js";
 import { SessionTracker } from "./session-tracker.js";
 import { StatsAggregator } from "./stats-aggregator.js";
-import { BacklogWriter } from "./backlog-writer.js";
-import { readEvolutionTriggerKeywords } from "./evolution-backlog.js";
+import { EvolutionLogWriter } from "./evolution-log-writer.js";
+import { readEvolutionTriggerKeywords } from "./evolution-log.js";
 import {
   normalizeEvolutionTriggerKeywords,
   type EvolutionTriggerKeywords,
 } from "./evolution-trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks.js";
-import { createEvolutionCommand } from "./evolution-command.js";
-import { createEvolutionTool, EVOLUTION_TOOL_NAME } from "./evolution-tool.js";
 import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   intentsPath,
-  evolutionBacklogPath,
+  evolutionLogPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
   sessionsDirPath,
@@ -55,15 +53,15 @@ function legacyTriggerKeywordSeedFromConfig(
 }
 
 function readEvolutionTriggerKeywordsFailOpen(
-  backlogPath: string,
+  logPath: string,
   triggerKeywordSeed?: Partial<EvolutionTriggerKeywords>,
 ): EvolutionTriggerKeywords {
   try {
-    return readEvolutionTriggerKeywords(backlogPath, triggerKeywordSeed);
+    return readEvolutionTriggerKeywords(logPath, triggerKeywordSeed);
   } catch (err) {
     logger.warn("failed to read evolution trigger keywords", {
       error: err,
-      path: backlogPath,
+      path: logPath,
     });
     return normalizeEvolutionTriggerKeywords(triggerKeywordSeed);
   }
@@ -159,18 +157,18 @@ export function createPlugin(
       const catalog = IntentCatalog.create(dataRoot);
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
-      const backlogPath = evolutionBacklogPath(dataRoot);
+      const logPath = evolutionLogPath(dataRoot);
       let triggerKeywordCache = readEvolutionTriggerKeywordsFailOpen(
-        backlogPath,
+        logPath,
         legacyTriggerKeywordSeedFromConfig(config),
       );
       const refreshTriggerKeywordCache = () => {
         triggerKeywordCache = readEvolutionTriggerKeywordsFailOpen(
-          backlogPath,
+          logPath,
           legacyTriggerKeywordSeedFromConfig(config),
         );
       };
-      const backlogWriter = BacklogWriter.create(dataRoot, {
+      const evolutionLogWriter = EvolutionLogWriter.create(dataRoot, {
         triggerKeywordSeed: () => legacyTriggerKeywordSeedFromConfig(config),
         onAfterWrite: refreshTriggerKeywordCache,
       });
@@ -187,8 +185,9 @@ export function createPlugin(
         catalog,
         tracker,
         statsAggregator,
-        backlogWriter,
+        evolutionLogWriter,
         triggerKeywords: () => triggerKeywordCache,
+        dataRoot,
       };
 
       const handlers = createHookHandlers(deps);
@@ -203,11 +202,6 @@ export function createPlugin(
       api.on("after_tool_call", handlers.onAfterToolCall);
       api.on("agent_end", handlers.onAgentEnd);
       api.on("session_end", handlers.onSessionEnd);
-      api.registerTool(() => createEvolutionTool(dataRoot), {
-        names: [EVOLUTION_TOOL_NAME],
-        optional: true,
-      });
-      api.registerCommand(createEvolutionCommand(dataRoot));
     },
   });
 }

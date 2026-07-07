@@ -1,5 +1,4 @@
 import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
-import type { EvolutionFinding } from "./evolution-types.js";
 import type { OpenClawPluginApi } from "../api.js";
 import type {
   PluginHookBeforePromptBuildEvent,
@@ -15,7 +14,10 @@ import { logger } from "../api.js";
 import { defaultCatalog } from "./intent-loader.js";
 import { defaultTracker, extractSkillInfo } from "./session-tracker.js";
 import { defaultStatsAggregator } from "./stats-aggregator.js";
-import { defaultBacklogWriter, type BacklogWriter } from "./backlog-writer.js";
+import {
+  defaultEvolutionLogWriter,
+  type EvolutionLogWriter,
+} from "./evolution-log-writer.js";
 import { defaultReviewQueue, type ReviewQueue } from "./review-queue.js";
 import { checkEvolutionTriggers } from "./trigger-checker.js";
 import {
@@ -56,6 +58,7 @@ import {
   resolveDomainSkills,
 } from "./skill-catalog.js";
 import { FALLBACK_INTENT } from "./constants.js";
+import { intentsPath } from "./file-utils.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
@@ -129,13 +132,14 @@ export type HookDeps = {
   reviewQueue?: Pick<ReviewQueue, "enqueue">;
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],
-  ) => Promise<ReviewSubagentResult | EvolutionFinding[] | undefined>;
+  ) => Promise<ReviewSubagentResult | undefined>;
   classifier?: typeof runIntentionSubagent;
   topicChecker?: typeof runTopicSwitchSubagent;
   instructionWriter?: typeof runIntentInstructionSubagent;
-  backlogWriter?: Pick<BacklogWriter, "record">;
+  evolutionLogWriter?: Pick<EvolutionLogWriter, "record">;
   triggerKeywords?: () => EvolutionTriggerKeywords;
   bundledSkillsDir?: string;
+  dataRoot?: string;
 };
 
 function readTriggerKeywordsFailOpen(
@@ -430,7 +434,8 @@ export function createHookHandlers(deps: HookDeps) {
   const topicChecker = deps.topicChecker ?? runTopicSwitchSubagent;
   const instructionWriter =
     deps.instructionWriter ?? runIntentInstructionSubagent;
-  const backlogWriter = deps.backlogWriter ?? defaultBacklogWriter;
+  const evolutionLogWriter =
+    deps.evolutionLogWriter ?? defaultEvolutionLogWriter;
   const bundledSkillsDir = deps.bundledSkillsDir;
 
   function emitPipelineEvent(
@@ -1336,6 +1341,7 @@ export function createHookHandlers(deps: HookDeps) {
         api,
         config: params.resolvedConfig,
         agentId: params.agentId,
+        intentDirectory: intentsPath(deps.dataRoot ?? "."),
         sessionKey: params.ctx.sessionKey ?? params.snapshot.sessionKey,
         messageProvider: params.ctx.messageProvider,
         modelRef: params.modelRef,
@@ -1343,21 +1349,7 @@ export function createHookHandlers(deps: HookDeps) {
         triggers: params.triggers,
       });
       if (!reviewResult) return;
-      const findings = Array.isArray(reviewResult)
-        ? reviewResult
-        : reviewResult.findings;
-      const outcome = Array.isArray(reviewResult)
-        ? findings.length > 0
-          ? "wrote-items"
-          : "nofinding"
-        : reviewResult.outcome;
-      const noFindingReasonCounts = Array.isArray(reviewResult)
-        ? undefined
-        : reviewResult.noFindingReasonCounts;
-      const schemaRejectionReasonCounts = Array.isArray(reviewResult)
-        ? undefined
-        : reviewResult.schemaRejectionReasonCounts;
-      await backlogWriter.record(
+      await evolutionLogWriter.record(
         params.snapshot.eventId,
         {
           sessionId: params.snapshot.sessionId,
@@ -1365,14 +1357,19 @@ export function createHookHandlers(deps: HookDeps) {
           agentId: params.snapshot.agentId,
           turnStart: params.snapshot.current.timestamps!.start!,
         },
-        findings,
+        reviewResult.findings,
         {
           triggers: params.triggers,
-          outcome,
-          noFindingReasonCounts,
-          schemaRejectionReasonCounts,
+          outcome: reviewResult.outcome,
+          changedIntentIds: reviewResult.changedIntentIds,
+          validationErrors: reviewResult.validationErrors,
+          noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+          schemaRejectionReasonCounts: reviewResult.schemaRejectionReasonCounts,
         },
       );
+      if (reviewResult.changedIntentIds?.length) {
+        deps.refreshIntents();
+      }
     });
   }
 

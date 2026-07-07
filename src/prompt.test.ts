@@ -446,14 +446,14 @@ describe("buildTopicSwitchPrompt", () => {
       conversation: [
         {
           role: "user",
-          text: "處理 backlog",
+          text: "處理流程狀態",
           historicalIntent: {
             intent: "session-lifecycle",
             domain: "session",
-            topic: "User is processing backlog items.",
+            topic: "User is processing workflow state.",
           },
         },
-        { role: "assistant", text: "開始處理 backlog。" },
+        { role: "assistant", text: "開始處理流程狀態。" },
         {
           role: "user",
           text: "抱抱",
@@ -468,7 +468,7 @@ describe("buildTopicSwitchPrompt", () => {
     });
 
     expect(prompt).toContain('<topic_segment index="1">');
-    expect(prompt).toContain("處理 backlog");
+    expect(prompt).toContain("處理流程狀態");
     expect(prompt).toContain("<topic_boundary>");
     expect(prompt).toContain("reason: shift");
     expect(prompt).toContain("topic: User is switching to intimate roleplay.");

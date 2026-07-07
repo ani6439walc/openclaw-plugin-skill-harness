@@ -1,177 +1,63 @@
 # Evolution Workflow
 
-Process exactly one pending finding from `~/.openclaw/plugins/skill-harness/evolution.json`.
-Enter this mode only when the user explicitly asks to process the evolution backlog.
+Evolution no longer creates or processes pending items. Background review applies safe runtime intent edits directly and records a compact audit trail in `~/.openclaw/plugins/skill-harness/evolution.json`.
 
-## Safety Rules
+## Runtime Contract
 
-- Treat current runtime `~/.openclaw/plugins/skill-harness/intents/*.md` and the loaded catalog as the source of truth.
-  `suggestedChange` is evidence and advice, not a patch to apply blindly.
-- Follow `references/format.md` and the relevant design/inventory references for intent
-  boundaries, collision checks, and workflow quality.
-- Do not edit `~/.openclaw/plugins/skill-harness/evolution.json` directly. Use
-  the structured `skill_harness_evolution` tool for every backlog read or
-  mutation.
-- `entity-context` trigger keyword findings are proposal-only like other
-  `trigger-keywords` items. The trigger is intentionally narrow: learning
-  keywords such as `看看`, `看一下`, or `看下` must pair with `TOOLS.md`,
-  `MEMORY.md`, or a path containing `memory`; source allowlists are not learned
-  from backlog suggestions.
-- Never create a git commit or push.
-- Process one item only. Leave blocked or ambiguous items `pending`.
-- Mark duplicate, superseded, unsafe, or clearly rejected findings `dismissed`
-  after grounding them against current Intent Markdown, so they do not stay at
-  the front of the pending queue forever.
-- For `split`, `merge`, or any deletion, first show the affected intents and
-  planned file operations, then obtain explicit user confirmation.
+- Runtime editable intents live in `~/.openclaw/plugins/skill-harness/intents/*.md`.
+- The review subagent runs through the serialized `ReviewQueue` with bounded `read`/`write`/`apply_patch` tools rooted at an isolated temporary workspace copied from the runtime intents directory.
+- The subagent may edit only runtime intent Markdown files in that directory.
+- The subagent must not edit bundled/package intents, skills, config, source code, `evolution.json`, `stats.json`, or any path outside runtime intents.
+- Trigger keyword updates are returned as JSON findings only; the host records them into `evolution.json`.
+- The host validates changed or targeted intents after the review run. Invalid intent edits are rolled back to the pre-review snapshot and recorded as `validation-failed`.
 
-## Select And Ground
+## evolution.json
 
-1. Use `skill_harness_evolution({ action: "show" })` when the user did not
-   supply an ID. The default selects highest `frequency`, then oldest
-   `createdAt`. Use
-   `skill_harness_evolution({ action: "show", id: "<item-id>" })` when the user
-   supplied an ID. Use
-   `skill_harness_evolution({ action: "review-health", days: 7 })` for
-   read-only runtime review-health audits; it summarizes recent
-   `processedEvents` by outcome (`wrote-items`, `nofinding`, `schema-rejected`,
-   `parse-failed`, `subagent-error`, or `unknown`), recent trigger counts,
-   no-finding reason-code counts, and schema-rejection reason-code counts
-   without mutating the backlog.
-2. Re-read the selected item immediately before processing. It must still be
-   `pending`.
-3. If `targetKind` is `trigger-keywords`, do not edit Intent Markdown and do not
-   mark it processed in this workflow. First-version trigger keyword learning is
-   proposal-only: inspect the evidence, dismiss clearly unsafe/duplicate
-   suggestions, or leave the item pending for a future apply workflow. For
-   `targetTrigger: entity-context`, reject suggestions that try to expand the
-   source allowlist beyond `TOOLS.md`, `MEMORY.md`, or paths containing
-   `memory`.
-4. Inspect its target Intent Markdown, the compact intent catalog, and relevant
-   skill-harness Skill references.
-5. For a legacy item with `operation: unknown` or no targets, infer metadata
-   only when the existing intents and finding make it unambiguous. Persist it
-   with:
+`evolution.json` is now an audit log plus runtime trigger keyword store:
 
-   ```text
-   skill_harness_evolution({
-     action: "set-target",
-     id: "<item-id>",
-     operation: "<operation>",
-     targetIntentIds: ["<intent-id>"]
-   })
-   ```
+- `schemaVersion: 4`
+- `triggerKeywords` stores runtime phrases for `successfulPattern`, `behaviorFix`, and `entityContext` triggers.
+- `processedEvents` is the only event ledger. Each key is an event ID; each value stores `processedAt`, optional `source`, requested `triggers`, `changeCount`, `outcome`, optional `changedIntentIds`, optional applied `changes`, and bounded diagnostics.
+- There is no `items` array and no pending/processed/dismissed item lifecycle.
+- Legacy v1-v3 files are migrated by preserving `processedEvents`/`triggerKeywords` and dropping stale `items`.
 
-   Include multiple IDs in `targetIntentIds` for multiple targets, then re-run
-   `show` and use the new `updatedAt`. If inference is not clear, stop without
-   modifying files.
+Outcomes are:
 
-## Review Contract Diagnostics
+- `applied` — the review applied runtime intent edits and/or trigger keyword updates.
+- `nofinding` — the review intentionally found no reusable change.
+- `schema-rejected` — requested positive findings were malformed.
+- `parse-failed` — the reviewer output could not be parsed as JSON.
+- `subagent-error` — all review model attempts failed.
+- `validation-failed` — intent edits failed validation and were rolled back.
+- `unknown` — migrated legacy/unknown state.
 
-The background reviewer is optimized for high-signal backlog proposals, not for
-recording every completed turn. `behavior-fix` is intentionally recall-biased for
-explicit user corrections, concrete misroutes, and wrong tool/no-tool behavior.
-`successful-pattern`, `skill-candidate`, and `entity-context` are
-precision-biased unless the turn contains reusable ordering, parameters,
-recovery, pitfalls, concrete skill/tool evidence, or bounded TOOLS.md/MEMORY.md
-lookup evidence.
+`nofinding` events may include bounded `noFindingReasonCounts`: `routine-tool-use`, `outside-intent-scope`, `insufficient-evidence`, `wrong-trigger`, `already-covered`, or `privacy-sensitive`.
 
-No-finding reviewer responses may include one bounded `reasonCode` per requested
-trigger: `routine-tool-use`, `outside-intent-scope`, `insufficient-evidence`,
-`wrong-trigger`, `already-covered`, or `privacy-sensitive`. These codes are
-aggregated into `processedEvents.*.noFindingReasonCounts` only as counts.
+`schema-rejected` events may include bounded `schemaRejectionReasonCounts`: `missing-required-field`, `missing-target`, `invalid-operation`, `invalid-trigger-keyword-target`, `invalid-field-type`, `too-long-field`, `invalid-shape`, or `unknown`.
 
-When requested positive findings are returned but none pass schema validation,
-the event outcome remains `schema-rejected`. The parser records only bounded
-aggregate `schemaRejectionReasonCounts`: `missing-required-field`,
-`missing-target`, `invalid-operation`, `invalid-trigger-keyword-target`,
-`invalid-field-type`, `too-long-field`, `invalid-shape`, or `unknown`.
-Diagnostics must not persist raw snapshots, user text, evidence strings, raw
-model replies, or Zod error dumps.
+Diagnostics must never persist raw snapshots, user text, evidence strings, raw model replies, secrets, or Zod dumps.
 
-## Body-boundary Mismatch Decision
+## Manual Intent Evolution
 
-Before editing, compare the filename-derived intent id, frontmatter triggers,
-examples, domain, fastpath metadata, and body guidance:
+Use this workflow only when the user explicitly asks to edit runtime intents manually.
 
-- If filename id and metadata are correct but the body drifted away from the declared
-  boundary, treat the finding as `refine` and fix the body, triggers, or
-  examples to match the existing intent boundary.
-- If the body consistently describes a better boundary than the current
-  filename id or metadata, do not silently rewrite the body to fit stale
-  routing metadata. Propose a rename or metadata update with the recommended
-  filename, domain, fastpath fields, and any affected references, then obtain
-  explicit user confirmation before changing filenames.
-- If the body mixes multiple responsibilities or has become an oversized intent,
-  propose `split` with the new intent boundaries, affected files, and migration
-  plan, then obtain explicit user confirmation before creating/moving/deleting
-  intent files.
-- If the mismatch is caused by a duplicate or superseded finding, dismiss the
-  finding instead of reshaping a healthy intent.
+1. Treat current runtime intent Markdown and the loaded catalog as source of truth.
+2. Read `references/format.md` and any relevant design/inventory references.
+3. For rename, split, merge, deletion, or broad boundary changes, show the planned file operations and get explicit confirmation before editing.
+4. Apply the smallest grounded runtime intent Markdown change.
+5. Validate with focused tests, at minimum:
 
-## Apply Transactionally
-
-1. Decide whether the finding is already satisfied by current Intent Markdown.
-   If so, skip edits and continue to validation.
-2. Run the Body-boundary Mismatch Decision before changing any body section,
-   routing metadata, or filename. Rename and split plans require explicit user
-   confirmation; do not execute them as an automatic `refine`.
-3. If the finding is a duplicate of an existing intent, is superseded by a safer
-   current intent, or would introduce unsafe/conflicting behavior, do not edit
-   files. Mark it dismissed using the latest selected `updatedAt`:
-
-   ```text
-   skill_harness_evolution({
-     action: "mark-dismissed",
-     id: "<item-id>",
-     expectedUpdatedAt: "<timestamp>"
-   })
-   ```
-
-   Report the dismissal reason and stop processing this item.
-
-4. Before any edit, create
-   `/tmp/skill-harness-process-backlog/<item-id>-<timestamp>/` and back up
-   every file that may be modified or deleted. Record every file that does not
-   yet exist so it can be removed during rollback.
-5. Apply only the grounded Intent Markdown changes:
-   - `create`: create the declared target intent.
-   - `refine`: update the declared target intent without broadening unrelated
-     behavior.
-   - `rename`: execute only after confirmation, then update filename-derived id
-     and stale references together.
-   - `split` or `merge`: execute only after the required confirmation.
-6. Validate the resulting files:
-
-   ```text
-   skill_harness_evolution({ action: "validate-intents", ids: ["<target-intent-id>"] })
+   ```bash
+   pnpm test src/intent-validation.test.ts
    pnpm run test
    pnpm run build
    ```
 
-   Include every resulting target intent in `ids`.
+6. Report affected files, validation results, and whether any staged edits were applied.
 
-7. When all checks pass, mark the item processed using the `updatedAt` from the
-   latest `show` or `set-target` result:
+## Safety Rules
 
-   ```text
-   skill_harness_evolution({
-     action: "mark-processed",
-     id: "<item-id>",
-     expectedUpdatedAt: "<timestamp>"
-   })
-   ```
-
-8. If an edit, validation, or status update fails, restore only the files in
-   this transaction from the backup, remove files recorded as newly created,
-   and leave the item `pending`.
-
-## Report
-
-Report the item ID, operation, affected files, validation results, whether it
-was processed or dismissed, whether a rollback occurred, and the remaining
-pending count from:
-
-```text
-skill_harness_evolution({ action: "list" })
-```
+- Never enter this workflow merely because `evolution.json` has processed events.
+- Never create a git commit or push unless the user explicitly asks.
+- Do not manually edit `evolution.json` for normal intent evolution. Runtime review owns event records; manual edits should change intent Markdown and rely on tests/build for validation.
+- Preserve entity-context privacy boundaries: learning phrases such as `看看`, `看一下`, or `看下` must pair with explicit `TOOLS.md`, `MEMORY.md`, or a path containing `memory`; never copy raw private memory into intent Markdown.

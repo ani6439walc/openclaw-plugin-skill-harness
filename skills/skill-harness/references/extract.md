@@ -1,7 +1,7 @@
 # Extract Workflow
 
 Analyze intent complexity and recommend extracting oversized intents into standalone skills.
-This is a **proactive** analysis mode — unlike `evolve` (reactive backlog processing), `extract`
+This is a **proactive** analysis mode — unlike `evolve` (reactive intent evolution), `extract`
 identifies structural bloat before it degrades classification quality.
 
 ## When to Enter
@@ -14,7 +14,7 @@ identifies structural bloat before it degrades classification quality.
 
 - Never modify intent files or create skills without explicit user confirmation.
 - Treat the analysis as advisory — the user decides what to extract.
-- Do not confuse `extract` with `evolve`: extract analyzes complexity, evolve processes backlog findings.
+- Do not confuse `extract` with `evolve`: extract analyzes complexity, evolve processes evolution findings.
 - Preserve existing triggers and examples when proposing intent slim-down.
 
 ## Step 1 — Complexity Scan
@@ -161,7 +161,7 @@ grep -l "<key-trigger>" ~/.openclaw/plugins/skill-harness/intents/*.md
 ```
 
 Verify the slimmed intent still matches the plugin schema with
-`skill_harness_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
+`pnpm test src/intent-validation.test.ts`.
 
 Report: files created/modified, validation results, and remaining pending extractions (if any).
 

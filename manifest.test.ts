@@ -6,14 +6,9 @@ const manifest = JSON.parse(
 );
 
 describe("skill-harness manifest", () => {
-  it("declares OpenClaw-owned tool and command surfaces", () => {
-    expect(manifest.contracts).toEqual({
-      tools: ["skill_harness_evolution"],
-    });
-    expect(manifest.commandAliases).toContainEqual({
-      name: "skill-harness",
-      kind: "runtime-slash",
-    });
+  it("does not declare legacy evolution tool or command surfaces", () => {
+    expect(manifest).not.toHaveProperty("contracts");
+    expect(manifest).not.toHaveProperty("commandAliases");
   });
 
   it("matches the runtime contextWindow schema", () => {

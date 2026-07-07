@@ -17,7 +17,7 @@ REVIEWABLE_STATES = {
     "PAUSED",
 }
 FINAL_STATES = REVIEWABLE_STATES | {"FAILED"}
-MAX_DIFF_CHARS = 180_000
+MAX_DIFF_CHARS = 300_000
 MAX_COMMENT_CHARS = 60_000
 POLL_SECONDS = 15
 MAX_POLLS = 100  # 25 minutes total
@@ -69,6 +69,28 @@ def jules_headers():
     }
 
 
+def git_config_value(key):
+    result = subprocess.run(
+        ["git", "config", "--get", key],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return None
+
+
+def ensure_git_config(key, value):
+    if git_config_value(key):
+        return
+    subprocess.run(
+        ["git", "config", key, value],
+        check=True,
+        capture_output=True,
+    )
+
+
 def get_pr_diff(owner, repo, pr_number):
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
     return request("GET", url, github_headers("application/vnd.github.v3.diff"))
@@ -92,7 +114,13 @@ def create_diff_branch(pr_number, diff_text):
     log(f"Writing full diff to {file_name} ({len(diff_text):,} chars)...")
     with open(file_name, "w") as f:
         f.write(diff_text)
-    
+
+    ensure_git_config("user.name", "github-actions[bot]")
+    ensure_git_config(
+        "user.email",
+        "41898282+github-actions[bot]@users.noreply.github.com",
+    )
+
     log(f"Creating branch {branch_name}...")
     subprocess.run(["git", "checkout", "-b", branch_name], check=True, capture_output=True)
     subprocess.run(["git", "add", file_name], check=True, capture_output=True)

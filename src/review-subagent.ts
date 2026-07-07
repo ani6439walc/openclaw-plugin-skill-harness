@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   DEFAULT_PROVIDER,
   parseModelRef,
@@ -21,20 +24,24 @@ import {
   type ProcessedEventOutcome,
   type SchemaRejectionReasonCode,
   type SchemaRejectionReasonCounts,
-} from "./evolution-backlog.js";
+} from "./evolution-log.js";
 import { normalizeKeywordList } from "./evolution-trigger-keywords.js";
+import { validateIntentDirectory } from "./intent-validation.js";
 import { extractPayloadText } from "./subagent.js";
 
 export interface ReviewSubagentResult {
   findings: EvolutionFinding[];
   outcome: Extract<
     ProcessedEventOutcome,
-    | "wrote-items"
+    | "applied"
     | "nofinding"
     | "schema-rejected"
     | "parse-failed"
     | "subagent-error"
+    | "validation-failed"
   >;
+  changedIntentIds?: string[];
+  validationErrors?: string[];
   noFindingReasonCounts?: NoFindingReasonCounts;
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
 }
@@ -53,7 +60,7 @@ const REVIEW_INSTRUCTIONS: Record<
 > = {
   "skill-candidate": {
     focus:
-      "Identify reusable skills, tools, execution sequences, tips, parameters, and pitfalls that the matched intent Markdown should preserve. When concrete skill usage or a tool-specific pitfall exists, prefer a small Experience note over broad rewrites. Exclude one-off tool usage and capabilities outside the intent boundary.",
+      "Identify reusable skills, tools, execution sequences, tips, parameters, and pitfalls that the matched intent Markdown should preserve. When concrete skill usage or a tool-specific pitfall exists, prefer a small direct Experience edit over broad rewrites. Exclude one-off tool usage and capabilities outside the intent boundary.",
     goal: "Refine the matched intent Markdown's Skills & Tools, Concrete Workflow, or Experience section when the sequence or lesson is stable.",
   },
   "process-gap": {
@@ -63,7 +70,7 @@ const REVIEW_INSTRUCTIONS: Record<
   },
   "successful-pattern": {
     focus:
-      "Identify reusable workflow, multi-step tool sequence, skill usage, parameters, recovery path, and pitfalls from a completed successful turn. Keep a high bar: routine completion without reusable ordering, parameters, or recovery remains no_finding. Do not propose writes outside runtime intent Markdown.",
+      "Identify reusable workflow, multi-step tool sequence, skill usage, parameters, recovery path, and pitfalls from a completed successful turn. Keep a high bar: routine completion without reusable ordering, parameters, or recovery remains no_finding. Do not write outside runtime intent Markdown.",
     goal: "Refine the matched intent Markdown's Experience, Concrete Workflow, or Response Strategy so future runs preserve the successful pattern without interrupting the user.",
   },
   "satisfaction-check": {
@@ -89,7 +96,7 @@ const REVIEW_INSTRUCTIONS: Record<
   "entity-context": {
     focus:
       "Review explicit entity/context lookup learning. Only consider TOOLS.md, MEMORY.md, or paths containing memory when they are mentioned in the snapshot text or sanitized read/search tool params. Do not infer from entity-like tokens or domain words alone.",
-    goal: "Refine the matched intent Markdown's Experience or Concrete Workflow with a reusable context lookup habit, or propose pending triggerKeywords.entityContext phrase updates, without copying raw private memory.",
+    goal: "Refine the matched intent Markdown's Experience or Concrete Workflow with a reusable context lookup habit, or report triggerKeywords.entityContext phrase updates for immediate logging, without copying raw private memory.",
   },
 };
 
@@ -104,11 +111,11 @@ const NO_FINDING_REASON_CODE_LIST = NO_FINDING_REASON_CODES.join(", ");
 
 const REVIEWER_WORKFLOW = `Reviewer workflow — not optional:
 - First decide whether the requested trigger itself is the right lens. If not, return hasFinding=false with reasonCode="wrong-trigger" rather than doing unrequested trigger work.
-- Then ask whether the evidence directly improves runtime intent Markdown or a pending trigger keyword suggestion. If not, return hasFinding=false with the closest reasonCode.
+- Then ask whether the evidence directly improves runtime intent Markdown or a trigger keyword update. If not, return hasFinding=false with the closest reasonCode.
 - behavior-fix: if the snapshot contains an explicit user correction, concrete misroute, or wrong tool/no-tool behavior, prefer a narrow finding over no_finding; encode the smallest correction that would prevent recurrence.
 - successful-pattern: stay precision-biased; routine success is no_finding unless there is reusable ordering, parameters, recovery, or pitfalls that future turns would otherwise miss.
 - skill-candidate: accept small intent-local Experience notes only when concrete skill/tool evidence, parameters, recovery, or required ordering exists; never invent a missing skill from Skills Used=none.
-- entity-context: stay bounded to explicit TOOLS.md, MEMORY.md, or memory-path signals and never copy raw private memory; suggest only reusable lookup habits or pending triggerKeywords.entityContext phrases.`;
+- entity-context: stay bounded to explicit TOOLS.md, MEMORY.md, or memory-path signals and never copy raw private memory; apply only reusable lookup habits or report triggerKeywords.entityContext phrases.`;
 
 const ULTRA_CONCISE_REVIEW_OUTPUT_STYLE = `Output style:
 - Keep JSON string fields ultra-concise but semantics-preserving.
@@ -129,7 +136,7 @@ const INTENT_CRAFT_RUBRIC = `Intent Markdown review rules:
 - Include Concrete Workflow for multi-step or sequence-sensitive intents. Use short numbered "### Step N — <name>" sections.
 - Use Experience for reusable tips, parameters, pitfalls, stable skill/tool lessons, and recovery notes that help future turns with the same intent.
 - The review subagent may use the read tool to inspect SKILL.md files referenced by the review snapshot's Skills Used paths when the skill description is not enough to judge an intent-local improvement. Read only the relevant SKILL.md files and do not inspect unrelated files.
-- For completed reusable workflows, prefer a concise intent-local Experience note or Response Strategy reminder that preserves the pattern in future turns; do not ask the user to record it and do not propose writes outside runtime intent Markdown.
+- For completed reusable workflows, prefer a concise intent-local Experience note or Response Strategy reminder that preserves the pattern in future turns; do not ask the user to record it and do not write outside runtime intent Markdown.
 - Recordability filter: the core question is whether the lesson will save future time.
 - Trigger calibration: behavior-fix optimizes for recall on explicit corrections and concrete misroutes; successful-pattern and entity-context optimize for precision; skill-candidate accepts small Experience notes only when concrete skill/tool evidence exists.
 - General workflow lessons are recordable only when they are reusable workflows or decision steps, costly error recovery paths, critical parameters/settings/prerequisites, stable user preference or style rules, multi-attempt successful solutions with failure reasons and success conditions, reusable templates/checklists/formats, or stable external dependency/resource locations.
@@ -141,11 +148,12 @@ const INTENT_CRAFT_RUBRIC = `Intent Markdown review rules:
 - When evidence resembles an external learning entry, distill only the reusable title, context, solution steps, key paths, parameters, and keywords that directly improve the matched intent's Guidelines, Response Strategy, Concrete Workflow, or Experience; do not propose external file formats or writes.
 - When the lesson is general knowledge rather than intent-routing guidance, return no_finding unless it directly improves the matched intent's Guidelines, Response Strategy, Concrete Workflow, or Experience.
 - Never mention another intent name or id inside an intent body. Express scope boundaries through frontmatter triggers, examples, domain, and fastpath.
-- Trigger keyword suggestions are allowed only as pending backlog suggestions with targetKind="trigger-keywords" for triggerKeywords.successfulPattern, triggerKeywords.behaviorFix, or triggerKeywords.entityContext. Do not auto-apply trigger keyword changes and do not propose writes to openclaw.plugin.json.
-- For successful-pattern, behavior-fix, and entity-context reviews, also check whether the turn exposes a trigger keyword gap. If yes, prefer a pending trigger keyword suggestion over unrelated intent Markdown edits.
+- Trigger keyword updates are allowed only as JSON-reported changes with targetKind="trigger-keywords" for triggerKeywords.successfulPattern, triggerKeywords.behaviorFix, or triggerKeywords.entityContext. The host records those changes in evolution.json; do not edit evolution.json or openclaw.plugin.json yourself.
+- For successful-pattern, behavior-fix, and entity-context reviews, also check whether the turn exposes a trigger keyword gap. If yes, prefer a JSON-reported trigger keyword update over unrelated intent Markdown edits.
 - Suggest trigger keyword additions only for stable phrases that clearly mean completed successful work, agent/routing correction, or explicit entity/context lookup learning; reject generic words like "ok", "好", "不要", and one-off wording. Suggest removals only with concrete false-positive evidence.
 - Entity-context reviews are limited to reusable lookup habits grounded in TOOLS.md, MEMORY.md, or paths containing memory that appear in snapshot text or sanitized read/search tool params. The reviewer may use read only on those explicit candidate files. If the source is absent, missing, or does not support a reusable habit, return no_finding. Never browse arbitrary filesystem paths, infer from entity-like tokens/domain words alone, or copy raw private memory into suggestedChange.
-- Do not propose changes to skills, tools, AGENTS.md, SOUL.md, or other production files. The only correction targets are intent Markdown content and trigger keyword backlog suggestions.
+- Do not propose or write changes to skills, tools, AGENTS.md, SOUL.md, or other production files. The only correction targets are runtime intent Markdown content and trigger keyword updates recorded by the host.
+- For split or merge operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to: rather than requesting extra file-management tools.
 - suggestedChange MUST be a JSON string, never an object or array. If you need structured patch details, serialize them as concise plain text inside the string.
 - Return no finding when the evidence does not justify a concrete intent Markdown improvement or trigger keyword suggestion.`;
 
@@ -682,11 +690,11 @@ If matchedIntent is absent, return hasFinding=false unless the requested trigger
   return `You are an evolution reviewer.
 This is an intent-evolution review, not a general audit, skill writer, repository refactor, or passive transcript summary.
 Your sole purpose is to improve the content and routing quality of skill-harness intents/*.md files.
-Target artifact shape: propose only runtime intent Markdown changes or pending trigger keyword suggestions.
+Target artifact shape: directly edit runtime intent Markdown files when evidence supports a change, and return JSON describing what changed. For trigger keyword updates, return JSON only; the host records them in evolution.json.
 Hard rules — do not violate:
 Review only the requested triggers. Each trigger is independent and may return hasFinding=false.
 Do not perform unrequested trigger work. For example, do not turn a skill-candidate review into a weak-intent, behavior-fix, missing-intent, split, or merge recommendation unless that trigger was requested and the evidence supports it.
-Do not invent evidence. Do not modify files; propose intent Markdown drafts, intent Markdown patches, or pending trigger keyword suggestions only.
+Do not invent evidence. Modify only runtime intent Markdown files in the current workspace. Do not touch bundled/package intents, skills, config, source code, state JSON, or any path outside the runtime intents directory.
 Use the Matched Intent section inside review_snapshot as the source of truth for the current intent Markdown.
 ${catalogGuidance}
 
@@ -709,13 +717,13 @@ For hasFinding=false items:
 - Example with reasonCode: {"trigger":"${reasonCodeExampleTrigger}","hasFinding":false,"reasonCode":"insufficient-evidence"}
 
 For every hasFinding=true item:
-- For intent Markdown changes, set targetKind="intent-markdown" or omit targetKind for backward compatibility; operation must be create, refine, split, or merge; targetIntentIds must list every existing or proposed intent ID affected by the change.
-- For trigger keyword suggestions, set targetKind="trigger-keywords", targetTrigger to "successful-pattern", "behavior-fix", or "entity-context", and addKeywords/removeKeywords to the precise phrases. Do not suggest more than 3 additions or removals per finding.
+- For intent Markdown changes, first apply the smallest valid edit to the runtime intent Markdown file, then set targetKind="intent-markdown" or omit targetKind for backward compatibility; operation must be create, refine, split, or merge; targetIntentIds must list every existing or proposed intent ID affected by the change.
+- For trigger keyword updates, do not edit files; set targetKind="trigger-keywords", targetTrigger to "successful-pattern", "behavior-fix", or "entity-context", and addKeywords/removeKeywords to the precise phrases. Do not suggest more than 3 additions or removals per finding.
 - dedupeKey must be a stable short key for merging repeated equivalent findings.
 - summary must briefly describe the reusable lesson or correction.
 - evidence must list concrete snapshot evidence; do not leave it empty.
 - correctionGoal must name the intent Markdown outcome or trigger keyword outcome.
-- suggestedChange must be a concrete intent Markdown draft or patch instruction, or a concrete triggerKeywords.successfulPattern / triggerKeywords.behaviorFix / triggerKeywords.entityContext keyword change.
+- suggestedChange must concisely summarize the file edit already applied or the concrete triggerKeywords.successfulPattern / triggerKeywords.behaviorFix / triggerKeywords.entityContext keyword change.
 - suggestedChange MUST be a JSON string, never an object or array. If structured patch details are useful, serialize them as concise plain text inside the string.
 
 Review snapshot:
@@ -866,10 +874,172 @@ function reviewModelCandidates(params: {
   return candidates;
 }
 
+function snapshotIntentFiles(intentDirectory: string): Map<string, string> {
+  const snapshot = new Map<string, string>();
+  if (!fs.existsSync(intentDirectory)) return snapshot;
+  for (const entry of fs.readdirSync(intentDirectory).sort()) {
+    if (!entry.endsWith(".md")) continue;
+    const filePath = path.join(intentDirectory, entry);
+    if (!fs.statSync(filePath).isFile()) continue;
+    snapshot.set(entry, fs.readFileSync(filePath, "utf-8"));
+  }
+  return snapshot;
+}
+
+function changedIntentIds(
+  before: Map<string, string>,
+  after: Map<string, string>,
+): string[] {
+  const files = new Set([...before.keys(), ...after.keys()]);
+  return [...files]
+    .filter((file) => before.get(file) !== after.get(file))
+    .map((file) => file.slice(0, -".md".length))
+    .sort();
+}
+
+export function createIntentWorkspace(before: Map<string, string>): string {
+  const workspaceDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "skill-harness-review-intents-"),
+  );
+  try {
+    for (const [file, content] of before) {
+      fs.writeFileSync(path.join(workspaceDir, file), content);
+    }
+  } catch (err) {
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
+    throw err;
+  }
+  return workspaceDir;
+}
+
+function undeclaredIntentEdits(
+  changedIds: readonly string[],
+  intentFindingTargets: ReadonlySet<string>,
+): string[] {
+  return changedIds
+    .filter((id) => !intentFindingTargets.has(id))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function concurrentIntentConflicts(
+  before: Map<string, string>,
+  current: Map<string, string>,
+  changedIds: readonly string[],
+): string[] {
+  return changedIds
+    .filter((id) => {
+      const file = `${id}.md`;
+      return before.get(file) !== current.get(file);
+    })
+    .sort((a, b) => a.localeCompare(b));
+}
+
+interface StagedIntentWrite {
+  targetPath: string;
+  tempPath: string;
+}
+
+interface IntentFileBackup {
+  targetPath: string;
+  backupPath?: string;
+}
+
+function stageIntentWrite(
+  targetPath: string,
+  content: string,
+): StagedIntentWrite {
+  const tempPath = path.join(
+    path.dirname(targetPath),
+    `.${path.basename(targetPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tempPath, content);
+  } catch (err) {
+    fs.rmSync(tempPath, { force: true });
+    throw err;
+  }
+  return { targetPath, tempPath };
+}
+
+function createIntentFileBackup(
+  targetPath: string,
+  beforeContent: string | undefined,
+): IntentFileBackup {
+  if (beforeContent === undefined) return { targetPath };
+  const backupPath = path.join(
+    path.dirname(targetPath),
+    `.${path.basename(targetPath)}.${process.pid}.${crypto.randomUUID()}.backup.tmp`,
+  );
+  try {
+    fs.writeFileSync(backupPath, beforeContent);
+  } catch (err) {
+    fs.rmSync(backupPath, { force: true });
+    throw err;
+  }
+  return { targetPath, backupPath };
+}
+
+function restoreIntentBackups(backups: readonly IntentFileBackup[]): void {
+  for (const backup of [...backups].reverse()) {
+    if (backup.backupPath) {
+      fs.rmSync(backup.targetPath, { recursive: true, force: true });
+      fs.renameSync(backup.backupPath, backup.targetPath);
+      continue;
+    }
+    fs.rmSync(backup.targetPath, { recursive: true, force: true });
+  }
+}
+
+function removeIntentBackups(backups: readonly IntentFileBackup[]): void {
+  for (const backup of backups) {
+    if (backup.backupPath) fs.rmSync(backup.backupPath, { force: true });
+  }
+}
+
+export function applyIntentWorkspaceChanges(params: {
+  intentDirectory: string;
+  before: Map<string, string>;
+  after: Map<string, string>;
+  changedIds: readonly string[];
+}): void {
+  fs.mkdirSync(params.intentDirectory, { recursive: true });
+  const stagedWrites: StagedIntentWrite[] = [];
+  const backups: IntentFileBackup[] = [];
+  const deletions: string[] = [];
+  try {
+    for (const id of params.changedIds) {
+      const file = `${id}.md`;
+      const targetPath = path.join(params.intentDirectory, file);
+      const content = params.after.get(file);
+      backups.push(createIntentFileBackup(targetPath, params.before.get(file)));
+      if (content === undefined) {
+        if (params.before.has(file)) deletions.push(targetPath);
+        continue;
+      }
+      stagedWrites.push(stageIntentWrite(targetPath, content));
+    }
+
+    for (const write of stagedWrites) {
+      fs.renameSync(write.tempPath, write.targetPath);
+    }
+    for (const targetPath of deletions) {
+      fs.rmSync(targetPath, { force: true });
+    }
+  } catch (err) {
+    for (const write of stagedWrites) {
+      fs.rmSync(write.tempPath, { force: true });
+    }
+    restoreIntentBackups(backups);
+    throw err;
+  }
+  removeIntentBackups(backups);
+}
+
 export async function runReviewSubagent(params: {
   api: OpenClawPluginApi;
   config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
+  intentDirectory: string;
   sessionKey?: string;
   messageProvider?: string;
   modelRef: { provider: string; model: string };
@@ -886,9 +1056,24 @@ export async function runReviewSubagent(params: {
     ? `${params.sessionKey}:skill-harness-review:${suffix}`
     : `agent:${params.agentId}:skill-harness-review:${suffix}`;
   const prompt = buildReviewPrompt(params.snapshot, params.triggers);
+  const beforeIntentFiles = snapshotIntentFiles(params.intentDirectory);
+  const candidates = reviewModelCandidates(params);
 
-  for (const [index, modelRef] of reviewModelCandidates(params).entries()) {
+  for (const [index, modelRef] of candidates.entries()) {
     const attemptRunId = index === 0 ? runId : `${runId}-retry-${index}`;
+    const hasFallbackAttempt = index < candidates.length - 1;
+    const retryRecoverableFailure = (
+      failure: ReviewSubagentResult,
+      retryable = true,
+    ): boolean => {
+      if (!retryable || !hasFallbackAttempt) return false;
+      logger.warn("evolution review retrying fallback after failed attempt", {
+        outcome: failure.outcome,
+        modelRef,
+      });
+      return true;
+    };
+    const workspaceDir = createIntentWorkspace(beforeIntentFiles);
     try {
       const result = await params.api.runtime.agent.runEmbeddedAgent({
         sessionId: attemptRunId,
@@ -901,13 +1086,13 @@ export async function runReviewSubagent(params: {
         model: modelRef.model,
         timeoutMs: params.config.evolution.timeoutMs,
         runId: attemptRunId,
-        workspaceDir: "/tmp",
-        agentDir: "/tmp",
+        workspaceDir,
+        agentDir: workspaceDir,
         sessionFile: `/tmp/${attemptRunId}.session.jsonl`,
         trigger: "manual",
         modelRun: false,
         promptMode: "minimal",
-        toolsAllow: ["read"],
+        toolsAllow: ["read", "write", "apply_patch"],
         disableTools: false,
         disableMessageTool: true,
         allowGatewaySubagentBinding: true,
@@ -925,7 +1110,12 @@ export async function runReviewSubagent(params: {
         logger.warn("evolution review result parse failed", {
           ...summarizeRawReply(rawReply),
         });
-        return { findings: [], outcome: "parse-failed" };
+        const failure: ReviewSubagentResult = {
+          findings: [],
+          outcome: "parse-failed",
+        };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
       }
       if (
         parsed.findings.length === 0 &&
@@ -937,7 +1127,7 @@ export async function runReviewSubagent(params: {
           invalidFindingCount: parsed.invalidRequestedPositiveFindings,
           requestedPositiveFindings: parsed.requestedPositiveFindings,
         });
-        return {
+        const failure: ReviewSubagentResult = {
           findings: [],
           outcome: "schema-rejected",
           ...(parsed.schemaRejectionReasonCounts
@@ -946,16 +1136,114 @@ export async function runReviewSubagent(params: {
               }
             : {}),
         };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
       }
+      const afterIntentFiles = snapshotIntentFiles(workspaceDir);
+      const changedIds = changedIntentIds(beforeIntentFiles, afterIntentFiles);
+      const intentFindingTargets = new Set(
+        parsed.findings
+          .filter((finding) => finding.targetKind === "intent-markdown")
+          .flatMap((finding) => finding.targetIntentIds),
+      );
+      const relevantValidationTargets = [
+        ...new Set([...changedIds, ...intentFindingTargets]),
+      ];
+      if (changedIds.length > 0 && intentFindingTargets.size === 0) {
+        const failure: ReviewSubagentResult = {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: [
+            "review edited runtime intent files without returning an intent-markdown finding",
+          ],
+        };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
+      }
+      const undeclaredChangedIds = undeclaredIntentEdits(
+        changedIds,
+        intentFindingTargets,
+      );
+      if (undeclaredChangedIds.length > 0) {
+        const failure: ReviewSubagentResult = {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: [
+            `review edited undeclared runtime intent files: ${undeclaredChangedIds.join(", ")}`,
+          ],
+        };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
+      }
+      if (changedIds.length === 0 && intentFindingTargets.size > 0) {
+        const failure: ReviewSubagentResult = {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: [
+            "review returned an intent-markdown finding without editing runtime intent files",
+          ],
+        };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
+      }
+      const validation = validateIntentDirectory(
+        workspaceDir,
+        relevantValidationTargets,
+      );
+      if (!validation.valid) {
+        logger.warn("evolution review produced invalid runtime intents", {
+          errors: validation.errors,
+        });
+        const failure: ReviewSubagentResult = {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: validation.errors,
+        };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
+      }
+      const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
+      const conflictIds = concurrentIntentConflicts(
+        beforeIntentFiles,
+        liveIntentFiles,
+        changedIds,
+      );
+      if (conflictIds.length > 0) {
+        logger.warn(
+          "evolution review skipped concurrent runtime intent edits",
+          {
+            conflictIntentIds: conflictIds,
+          },
+        );
+        return {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: [
+            `runtime intent files changed during review: ${conflictIds.join(", ")}`,
+          ],
+        };
+      }
+      applyIntentWorkspaceChanges({
+        intentDirectory: params.intentDirectory,
+        before: beforeIntentFiles,
+        after: afterIntentFiles,
+        changedIds,
+      });
       return {
         findings: parsed.findings,
-        outcome: parsed.findings.length > 0 ? "wrote-items" : "nofinding",
+        ...(changedIds.length > 0 ? { changedIntentIds: changedIds } : {}),
+        outcome:
+          parsed.findings.length > 0 || changedIds.length > 0
+            ? "applied"
+            : "nofinding",
         ...(parsed.noFindingReasonCounts
           ? { noFindingReasonCounts: parsed.noFindingReasonCounts }
           : {}),
       };
     } catch (err) {
       logger.warn("evolution review subagent error", { error: err, modelRef });
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
     }
   }
 
