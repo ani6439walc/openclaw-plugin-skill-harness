@@ -15,7 +15,10 @@ import { logger } from "../api.js";
 import { defaultCatalog } from "./intent-loader.js";
 import { defaultTracker, extractSkillInfo } from "./session-tracker.js";
 import { defaultStatsAggregator } from "./stats-aggregator.js";
-import { defaultBacklogWriter, type BacklogWriter } from "./backlog-writer.js";
+import {
+  defaultEvolutionLogWriter,
+  type EvolutionLogWriter,
+} from "./evolution-log-writer.js";
 import { defaultReviewQueue, type ReviewQueue } from "./review-queue.js";
 import { checkEvolutionTriggers } from "./trigger-checker.js";
 import {
@@ -134,7 +137,7 @@ export type HookDeps = {
   classifier?: typeof runIntentionSubagent;
   topicChecker?: typeof runTopicSwitchSubagent;
   instructionWriter?: typeof runIntentInstructionSubagent;
-  backlogWriter?: Pick<BacklogWriter, "record">;
+  evolutionLogWriter?: Pick<EvolutionLogWriter, "record">;
   triggerKeywords?: () => EvolutionTriggerKeywords;
   bundledSkillsDir?: string;
   dataRoot?: string;
@@ -432,7 +435,8 @@ export function createHookHandlers(deps: HookDeps) {
   const topicChecker = deps.topicChecker ?? runTopicSwitchSubagent;
   const instructionWriter =
     deps.instructionWriter ?? runIntentInstructionSubagent;
-  const backlogWriter = deps.backlogWriter ?? defaultBacklogWriter;
+  const evolutionLogWriter =
+    deps.evolutionLogWriter ?? defaultEvolutionLogWriter;
   const bundledSkillsDir = deps.bundledSkillsDir;
 
   function emitPipelineEvent(
@@ -1366,7 +1370,7 @@ export function createHookHandlers(deps: HookDeps) {
       const validationErrors = Array.isArray(reviewResult)
         ? undefined
         : reviewResult.validationErrors;
-      await backlogWriter.record(
+      await evolutionLogWriter.record(
         params.snapshot.eventId,
         {
           sessionId: params.snapshot.sessionId,

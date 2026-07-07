@@ -23,7 +23,7 @@ import {
   type ProcessedEventOutcome,
   type SchemaRejectionReasonCode,
   type SchemaRejectionReasonCounts,
-} from "./evolution-backlog.js";
+} from "./evolution-log.js";
 import { normalizeKeywordList } from "./evolution-trigger-keywords.js";
 import { validateIntentDirectory } from "./intent-validation.js";
 import { extractPayloadText } from "./subagent.js";
@@ -953,7 +953,7 @@ export async function runReviewSubagent(params: {
         trigger: "manual",
         modelRun: false,
         promptMode: "minimal",
-        toolsAllow: ["read", "write"],
+        toolsAllow: ["read", "write", "apply_patch"],
         disableTools: false,
         disableMessageTool: true,
         allowGatewaySubagentBinding: true,

@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { BacklogWriter } from "./backlog-writer.js";
+import { EvolutionLogWriter } from "./evolution-log-writer.js";
 
-describe("BacklogWriter", () => {
+describe("EvolutionLogWriter", () => {
   let root: string;
-  let writer: BacklogWriter;
+  let writer: EvolutionLogWriter;
   const source = {
     sessionId: "session-1",
     agentId: "main",
@@ -26,7 +26,7 @@ describe("BacklogWriter", () => {
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "evolution-writer-"));
-    writer = BacklogWriter.create(root);
+    writer = EvolutionLogWriter.create(root);
   });
 
   afterEach(() => {
@@ -39,7 +39,7 @@ describe("BacklogWriter", () => {
     );
   }
 
-  it("creates evolution.json and records applied direct changes without backlog items", async () => {
+  it("creates evolution.json and records applied direct changes without pending items", async () => {
     expect(
       await writer.record("session-1:turn-1", source, [finding], {
         nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
@@ -76,7 +76,7 @@ describe("BacklogWriter", () => {
 
   it("seeds legacy config keywords on first evolution log write and refreshes cache", async () => {
     const onAfterWrite = vi.fn();
-    writer = BacklogWriter.create(root, {
+    writer = EvolutionLogWriter.create(root, {
       triggerKeywordSeed: () => ({
         behaviorFix: [],
         successfulPattern: ["ship it"],
@@ -95,7 +95,7 @@ describe("BacklogWriter", () => {
     expect(onAfterWrite).toHaveBeenCalledOnce();
   });
 
-  it("is event-idempotent without merging repeated backlog items", async () => {
+  it("is event-idempotent without merging repeated pending items", async () => {
     await writer.record("event-1", source, [finding]);
     expect(await writer.record("event-1", source, [finding])).toBe(false);
 
@@ -148,7 +148,7 @@ describe("BacklogWriter", () => {
     });
   });
 
-  it("migrates legacy v3 evolution files by dropping backlog items", async () => {
+  it("migrates legacy v3 evolution files by dropping legacy items", async () => {
     const logPath = path.join(root, "evolution.json");
     fs.writeFileSync(
       logPath,

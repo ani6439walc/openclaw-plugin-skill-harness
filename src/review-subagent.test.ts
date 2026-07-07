@@ -546,7 +546,7 @@ describe("parseReviewFindings", () => {
     ]);
   });
 
-  it("accepts no-finding reason codes without persisting them as backlog findings", () => {
+  it("accepts no-finding reason codes without persisting them as evolution findings", () => {
     const parsed = parseReviewFindings(
       JSON.stringify({
         findings: [
@@ -876,7 +876,7 @@ describe("runReviewSubagent", () => {
         promptMode: "minimal",
         modelRun: false,
         disableTools: false,
-        toolsAllow: ["read", "write"],
+        toolsAllow: ["read", "write", "apply_patch"],
         sessionFile: expect.stringMatching(
           /^\/tmp\/skill-harness-review-.+\.session\.jsonl$/,
         ),

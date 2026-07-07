@@ -100,10 +100,6 @@ export type EvolutionLog = {
   processedEvents: Record<string, ProcessedEventRecord>;
 };
 
-// Backward-compatible alias for older module imports while the runtime file no
-// longer contains backlog items.
-export type EvolutionBacklog = EvolutionLog;
-
 const LEGACY_TRIGGER_TYPE_MAP: Record<string, EvolutionTrigger> = {
   skill_candidate: "skill-candidate",
   process_gap: "process-gap",
@@ -275,9 +271,7 @@ export const EvolutionLogSchema = z.object({
   processedEvents: ProcessedEventsSchema,
 });
 
-export const EvolutionBacklogSchema = EvolutionLogSchema;
-
-export function createBacklog(
+export function createEvolutionLog(
   nowIso: string,
   triggerKeywordSeed?: Partial<EvolutionTriggerKeywords>,
 ): EvolutionLog {
@@ -290,7 +284,7 @@ export function createBacklog(
   };
 }
 
-export function parseBacklog(
+export function parseEvolutionLog(
   raw: unknown,
   triggerKeywordSeed?: Partial<EvolutionTriggerKeywords>,
 ): EvolutionLog {
@@ -326,11 +320,11 @@ export function parseBacklog(
   );
 }
 
-export function readBacklog(
+export function readEvolutionLog(
   logPath: string,
   triggerKeywordSeed?: Partial<EvolutionTriggerKeywords>,
 ): EvolutionLog {
-  return parseBacklog(readJsonFile<unknown>(logPath), triggerKeywordSeed);
+  return parseEvolutionLog(readJsonFile<unknown>(logPath), triggerKeywordSeed);
 }
 
 export function readEvolutionTriggerKeywords(
@@ -340,10 +334,13 @@ export function readEvolutionTriggerKeywords(
   if (!fileExists(logPath)) {
     return normalizeEvolutionTriggerKeywords(triggerKeywordSeed);
   }
-  return readBacklog(logPath, triggerKeywordSeed).triggerKeywords;
+  return readEvolutionLog(logPath, triggerKeywordSeed).triggerKeywords;
 }
 
-export function writeBacklogAtomic(logPath: string, log: EvolutionLog): void {
+export function writeEvolutionLogAtomic(
+  logPath: string,
+  log: EvolutionLog,
+): void {
   const parsed = EvolutionLogSchema.parse(log);
   writeJsonAtomic(logPath, parsed);
 }

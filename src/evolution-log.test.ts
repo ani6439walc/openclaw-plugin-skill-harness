@@ -3,12 +3,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-  createBacklog,
-  parseBacklog,
+  createEvolutionLog,
+  parseEvolutionLog,
   pruneProcessedEvents,
-  readBacklog,
+  readEvolutionLog,
   readEvolutionTriggerKeywords,
-} from "./evolution-backlog.js";
+} from "./evolution-log.js";
 import { DEFAULT_EVOLUTION_TRIGGER_KEYWORDS } from "./evolution-trigger-keywords.js";
 
 const tempRoots: string[] = [];
@@ -30,8 +30,8 @@ describe("evolution log", () => {
     }
   });
 
-  it("creates a v4 evolution log without backlog items", () => {
-    expect(createBacklog("2026-06-11T00:00:00.000Z")).toEqual({
+  it("creates a v4 evolution log without pending items", () => {
+    expect(createEvolutionLog("2026-06-11T00:00:00.000Z")).toEqual({
       schemaVersion: 4,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
@@ -41,7 +41,7 @@ describe("evolution log", () => {
   });
 
   it("migrates legacy v1-v3 files by keeping processedEvents and dropping items", () => {
-    const migrated = parseBacklog({
+    const migrated = parseEvolutionLog({
       schemaVersion: 3,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
@@ -75,7 +75,7 @@ describe("evolution log", () => {
   });
 
   it("parses structured processed event records", () => {
-    const parsed = parseBacklog({
+    const parsed = parseEvolutionLog({
       schemaVersion: 4,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
@@ -119,7 +119,7 @@ describe("evolution log", () => {
   });
 
   it("parses sanitized reason counts on processed events", () => {
-    const parsed = parseBacklog({
+    const parsed = parseEvolutionLog({
       schemaVersion: 4,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
@@ -156,7 +156,7 @@ describe("evolution log", () => {
   });
 
   it("seeds legacy config keywords while migrating legacy logs", () => {
-    const parsed = parseBacklog(
+    const parsed = parseEvolutionLog(
       {
         schemaVersion: 2,
         createdAt: "2026-06-11T00:00:00.000Z",
@@ -179,7 +179,7 @@ describe("evolution log", () => {
   });
 
   it("parses and normalizes root trigger keyword fields", () => {
-    const parsed = parseBacklog({
+    const parsed = parseEvolutionLog({
       schemaVersion: 4,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
@@ -223,13 +223,13 @@ describe("evolution log", () => {
 
   it("reads evolution logs from disk", () => {
     const logPath = createTempLogPath();
-    writeLogFixture(logPath, createBacklog("2026-06-11T00:00:00.000Z"));
+    writeLogFixture(logPath, createEvolutionLog("2026-06-11T00:00:00.000Z"));
 
-    expect(readBacklog(logPath)).toMatchObject({ schemaVersion: 4 });
+    expect(readEvolutionLog(logPath)).toMatchObject({ schemaVersion: 4 });
   });
 
   it("prunes old or corrupt processed event records", () => {
-    const log = createBacklog("2026-06-11T00:00:00.000Z");
+    const log = createEvolutionLog("2026-06-11T00:00:00.000Z");
     log.processedEvents.old = {
       processedAt: "2026-01-01T00:00:00.000Z",
       triggers: [],

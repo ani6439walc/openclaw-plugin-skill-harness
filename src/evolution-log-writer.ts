@@ -1,7 +1,7 @@
 import { logger } from "../api.js";
 import {
   pluginRoot,
-  evolutionBacklogPath,
+  evolutionLogPath,
   fileExists,
   safeWriteJson,
   withFileLock,
@@ -10,8 +10,8 @@ import type { EvolutionFinding, EvolutionSource } from "./evolution-types.js";
 import type { EvolutionTriggerKeywords } from "./evolution-trigger-keywords.js";
 import { normalizeKeywordList } from "./evolution-trigger-keywords.js";
 import {
-  createBacklog,
-  readBacklog,
+  createEvolutionLog,
+  readEvolutionLog,
   pruneProcessedEvents,
   EvolutionLogSchema,
   normalizeNoFindingReasonCounts,
@@ -20,7 +20,7 @@ import {
   type NoFindingReasonCounts,
   type ProcessedEventOutcome,
   type SchemaRejectionReasonCounts,
-} from "./evolution-backlog.js";
+} from "./evolution-log.js";
 import type { EvolutionTrigger } from "./trigger-checker.js";
 
 function appliedChangeFromFinding(
@@ -68,7 +68,7 @@ function applyKeywordChange(
   );
 }
 
-export class BacklogWriter {
+export class EvolutionLogWriter {
   private constructor(
     private readonly pluginRoot: string,
     private readonly options: {
@@ -83,8 +83,8 @@ export class BacklogWriter {
       triggerKeywordSeed?: () => Partial<EvolutionTriggerKeywords> | undefined;
       onAfterWrite?: () => void;
     } = {},
-  ): BacklogWriter {
-    return new BacklogWriter(pluginRoot, options);
+  ): EvolutionLogWriter {
+    return new EvolutionLogWriter(pluginRoot, options);
   }
 
   async record(
@@ -102,15 +102,15 @@ export class BacklogWriter {
     } = {},
   ): Promise<boolean> {
     if (!eventId) return false;
-    const logPath = evolutionBacklogPath(this.pluginRoot);
+    const logPath = evolutionLogPath(this.pluginRoot);
 
     const result = await withFileLock(logPath, async () => {
       try {
         const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
         const triggerKeywordSeed = this.options.triggerKeywordSeed?.();
         const log = fileExists(logPath)
-          ? readBacklog(logPath, triggerKeywordSeed)
-          : createBacklog(nowIso, triggerKeywordSeed);
+          ? readEvolutionLog(logPath, triggerKeywordSeed)
+          : createEvolutionLog(nowIso, triggerKeywordSeed);
 
         pruneProcessedEvents(log, options.nowMs ?? Date.now());
 
@@ -214,4 +214,4 @@ export class BacklogWriter {
   }
 }
 
-export const defaultBacklogWriter = BacklogWriter.create(pluginRoot);
+export const defaultEvolutionLogWriter = EvolutionLogWriter.create(pluginRoot);

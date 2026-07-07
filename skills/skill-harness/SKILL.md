@@ -1,6 +1,6 @@
 ---
 name: skill-harness
-description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution backlog finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
+description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
 ---
 
 # Skill Harness
@@ -13,11 +13,11 @@ Manage the full lifecycle of intent definitions: from single-intent CRUD (design
 What does the user want?
 ├─ Create/rename/split/merge/refine ONE intent → design
 ├─ Bootstrap or re-audit the ENTIRE catalog → inventory
-├─ Process an evolution backlog finding → evolve
+├─ Process an evolution finding → evolve
 └─ Check intent complexity / upgrade intents to skills → extract
 ```
 
-If ambiguous, ask: "Are you working on a single intent, auditing the whole system, processing a backlog finding, or analyzing intent complexity?"
+If ambiguous, ask: "Are you working on a single intent, auditing the whole system, processing an evolution finding, or analyzing intent complexity?"
 
 ---
 
@@ -203,7 +203,7 @@ User explicitly asks to manually evolve runtime intent Markdown or inspect Evolu
 
 Keywords: "evolve intent", "調整 intent", "修 intent", "check evolution", "inspect evolution"
 
-**There is no pending backlog-item workflow anymore.** Background Evolution reviews edit runtime intents directly and record outcomes in `~/.openclaw/plugins/skill-harness/evolution.json`.
+**There is no pending-item workflow anymore.** Background Evolution reviews edit runtime intents directly and record outcomes in `~/.openclaw/plugins/skill-harness/evolution.json`.
 
 Read and follow `references/evolution.md` before manual intent evolution.
 
@@ -257,7 +257,7 @@ Report affected files, validation results, and whether any rollback occurred. Ne
 
 | #   | Anti-pattern                                       | Why not                                       | Do instead                                       |
 | --- | -------------------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
-| 1   | **Process non-existent backlog items**             | Evolution no longer stores pending items      | Inspect processedEvents or edit intents directly |
+| 1   | **Process non-existent pending items**             | Evolution no longer stores pending items      | Inspect processedEvents or edit intents directly |
 | 2   | **Skip validation before handoff**                 | May introduce format errors or collisions     | Always run intent-validation, test, and build    |
 | 3   | **Manually edit `evolution.json` for normal work** | Bypasses processedEvents audit and migrations | Let runtime review record outcomes               |
 

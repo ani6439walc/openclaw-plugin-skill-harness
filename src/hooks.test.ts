@@ -87,7 +87,7 @@ describe("createHookHandlers tracking guards", () => {
     vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
     const longSkillOutput = `---
 name: skill-harness
-description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution backlog finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
+description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
 ---
 
 # Skill Harness`;
@@ -282,7 +282,7 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
       outcome: "nofinding" as const,
       noFindingReasonCounts: { "wrong-trigger": 1 },
     });
-    const backlogWriter = { record: vi.fn() };
+    const evolutionLogWriter = { record: vi.fn() };
     const handlers = createHookHandlers({
       api: {
         config: {},
@@ -304,7 +304,7 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
       refreshIntents: vi.fn(),
       reviewQueue: { enqueue },
       reviewer,
-      backlogWriter,
+      evolutionLogWriter,
     });
 
     await handlers.onAgentEnd({ messages: [] } as never, {
@@ -345,7 +345,7 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
         ],
       }),
     );
-    expect(backlogWriter.record).toHaveBeenCalledWith(
+    expect(evolutionLogWriter.record).toHaveBeenCalledWith(
       snapshot.eventId,
       expect.objectContaining({ sessionId: "session-1" }),
       [],

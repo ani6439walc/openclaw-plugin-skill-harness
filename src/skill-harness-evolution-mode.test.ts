@@ -8,8 +8,8 @@ const referencePath = path.resolve(
   "skills/skill-harness/references/evolution.md",
 );
 
-describe("skill-harness backlog mode", () => {
-  it("documents direct evolution without backlog tool surfaces", () => {
+describe("skill-harness evolution mode", () => {
+  it("documents direct evolution without legacy tool surfaces", () => {
     const parsed = matter(fs.readFileSync(skillPath, "utf-8"));
     const reference = fs.readFileSync(referencePath, "utf-8");
 
@@ -24,10 +24,10 @@ describe("skill-harness backlog mode", () => {
     expect(parsed.content).toContain("references/evolution.md");
 
     expect(reference).toContain(
-      "Evolution no longer creates or processes backlog items",
+      "Evolution no longer creates or processes pending items",
     );
     expect(reference).toContain(
-      "bounded `read`/`write` tools rooted at the runtime intents directory",
+      "bounded `read`/`write`/`apply_patch` tools rooted at the runtime intents directory",
     );
     expect(reference).toContain("schemaVersion: 4");
     expect(reference).toContain("processedEvents");

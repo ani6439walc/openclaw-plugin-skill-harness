@@ -1,11 +1,11 @@
 # Evolution Workflow
 
-Evolution no longer creates or processes backlog items. Background review applies safe runtime intent edits directly and records a compact audit trail in `~/.openclaw/plugins/skill-harness/evolution.json`.
+Evolution no longer creates or processes pending items. Background review applies safe runtime intent edits directly and records a compact audit trail in `~/.openclaw/plugins/skill-harness/evolution.json`.
 
 ## Runtime Contract
 
 - Runtime editable intents live in `~/.openclaw/plugins/skill-harness/intents/*.md`.
-- The review subagent runs with bounded `read`/`write` tools rooted at the runtime intents directory.
+- The review subagent runs with bounded `read`/`write`/`apply_patch` tools rooted at the runtime intents directory.
 - The subagent may edit only runtime intent Markdown files in that directory.
 - The subagent must not edit bundled/package intents, skills, config, source code, `evolution.json`, `stats.json`, or any path outside runtime intents.
 - Trigger keyword updates are returned as JSON findings only; the host records them into `evolution.json`.
@@ -19,7 +19,7 @@ Evolution no longer creates or processes backlog items. Background review applie
 - `triggerKeywords` stores runtime phrases for `successfulPattern`, `behaviorFix`, and `entityContext` triggers.
 - `processedEvents` is the only event ledger. Each key is an event ID; each value stores `processedAt`, optional `source`, requested `triggers`, `changeCount`, `outcome`, optional `changedIntentIds`, optional applied `changes`, and bounded diagnostics.
 - There is no `items` array and no pending/processed/dismissed item lifecycle.
-- Legacy v1-v3 files are migrated by preserving `processedEvents`/`triggerKeywords` and dropping stale backlog `items`.
+- Legacy v1-v3 files are migrated by preserving `processedEvents`/`triggerKeywords` and dropping stale `items`.
 
 Outcomes are:
 

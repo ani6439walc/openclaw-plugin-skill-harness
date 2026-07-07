@@ -74,9 +74,9 @@ index.ts
        ├─ trigger-checker.ts + review-subagent.ts → Intent Evolution review
        │    ├─ trigger-checker.ts → checkEvolutionTriggers() (eight configurable triggers plus runtime trigger keywords)
        │    ├─ review-subagent.ts → buildReviewPrompt() + parseReviewFindings() + runReviewSubagent()
-       │    └─ backlog-writer.ts + evolution-backlog.ts → $OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json
-       │         ├─ backlog-writer.ts records direct-review processedEvents and trigger keyword updates
-       │         └─ evolution-backlog.ts + evolution-trigger-keywords.ts validate evolution logs and trigger keyword defaults
+       │    └─ evolution-log-writer.ts + evolution-log.ts → $OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json
+       │         ├─ evolution-log-writer.ts records direct-review processedEvents and trigger keyword updates
+       │         └─ evolution-log.ts + evolution-trigger-keywords.ts validate evolution logs and trigger keyword defaults
        │
        ├─ intent-validation.ts → runtime intent Markdown validation for direct Evolution edits
        │
@@ -103,10 +103,10 @@ index.ts
 | `session-tracker.ts`      | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
 | `stats-aggregator.ts`     | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
 | `trigger-checker.ts`      | Detect eight configurable Evolution triggers from completed turns using runtime trigger keywords                                                        |
-| `review-subagent.ts`      | Build trigger-specific review prompts and run the bounded read/write review sub-agent rooted at the runtime intents directory                           |
+| `review-subagent.ts`      | Build trigger-specific review prompts and run the bounded read/write/apply_patch review sub-agent rooted at the runtime intents directory               |
 | `review-queue.ts`         | Serialized promise queue for background evolution reviews                                                                                               |
-| `backlog-writer.ts`       | Record direct Evolution review outcomes and trigger keyword updates atomically into `evolution.json`                                                    |
-| `evolution-backlog.ts`    | Validate/migrate the Evolution log schema and root `triggerKeywords`; legacy backlog items are dropped during migration                                 |
+| `evolution-log-writer.ts` | Record direct Evolution review outcomes and trigger keyword updates atomically into `evolution.json`                                                    |
+| `evolution-log.ts`        | Validate/migrate the Evolution log schema and root `triggerKeywords`; legacy items are dropped during migration                                         |
 | `intent-validation.ts`    | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
 | `conversation-extract.ts` | Extract and truncate recent conversation turns for intent context                                                                                       |
 | `prompt.ts`               | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
@@ -375,7 +375,7 @@ enabled, each completed tracked turn is checked for eight trigger types:
 | `behavior-fix`       | Latest user input contains a runtime correction keyword and is not a quoted ingest/dream diary/memory-fragment payload | Fastpath metadata, guidance, workflow, or `triggerKeywords.behaviorFix` updates                      |
 | `entity-context`     | Runtime entity-context learning keyword plus `TOOLS.md`, `MEMORY.md`, or a `memory` path/source signal                 | `Experience`, `Concrete Workflow`, or `triggerKeywords.entityContext` updates                        |
 
-All matching triggers are reviewed in one background, bounded read/write
+All matching triggers are reviewed in one background, bounded read/write/apply_patch
 sub-agent run rooted at the runtime intents directory. Each trigger receives a
 distinct review focus and correction goal, and may return no finding. Valid
 intent edits are applied directly to runtime `intents/*.md`, validated, and
@@ -411,8 +411,9 @@ responses may include an optional bounded `reasonCode` (`routine-tool-use`,
 `already-covered`, or `privacy-sensitive`) so runtime health can explain why a
 review intentionally produced no change.
 The review sub-agent uses `runEmbeddedAgent` with `promptMode="minimal"`,
-`modelRun=false`, and `toolsAllow=["read", "write"]` rooted at the runtime
-intents directory. `write` is for direct edits to runtime `intents/*.md`; the
+`modelRun=false`, and `toolsAllow=["read", "write", "apply_patch"]` rooted at
+the runtime intents directory. `apply_patch` is preferred for targeted edits,
+and `write` is available for full-file rewrites of runtime `intents/*.md`; the
 reviewer must not write bundled intents, source files, skills, config, or
 `evolution.json`. `read` is limited to the same runtime intents directory and is
 used only to inspect the files being edited. Trigger detection never reads file
@@ -426,7 +427,7 @@ silently disappearing.
 root, are not loaded as session state, and are never removed by session
 lifecycle or 14-day retention cleanup. Schema v4 stores root `triggerKeywords`
 plus structured `processedEvents` observability. There is no `items` array and
-no pending/processed/dismissed backlog lifecycle. Each processed event stores
+no pending/processed/dismissed item lifecycle. Each processed event stores
 `{ processedAt, triggers, changeCount, outcome }`, where `outcome` is one of
 `applied`, `nofinding`, `schema-rejected`, `parse-failed`, `subagent-error`,
 `validation-failed`, or `unknown` for migrated legacy entries. Applied events may
@@ -444,7 +445,7 @@ raw model replies, secrets, or Zod error dumps. Intent Markdown findings include
 `merge`), and all affected `targetIntentIds`. Trigger keyword findings include
 `targetKind: "trigger-keywords"`, `targetTrigger`, and keyword additions/removals.
 Legacy schema v1-v3 files migrate to v4 by preserving `triggerKeywords` and
-`processedEvents` and dropping stale backlog `items`. Trigger keyword state is
+`processedEvents` and dropping stale `items`. Trigger keyword state is
 cached at plugin startup and refreshed after evolution log writes so hook
 execution does not repeatedly read and parse the full log.
 
@@ -455,7 +456,7 @@ Background reviews apply safe runtime intent edits directly, validate changed or
 targeted intents, roll back invalid edits, and record the event in
 `evolution.json`. Manual intent evolution is still documented in
 `skills/skill-harness/references/evolution.md`, but it operates on runtime intent
-Markdown and test/build gates rather than backlog items.
+Markdown and test/build gates rather than pending items.
 
 ## Key Design Decisions
 
@@ -674,7 +675,7 @@ The test suites cover:
 - Internal/inter-session turn detection and conversation-history filtering
 - Per-turn historical intent matching, duplicate handling, and prompt injection
 - Eight Evolution triggers, thresholds, runtime trigger keywords, and multi-trigger turns
-- Skill Harness Skill review prompts, response parsing, and bounded read/write reviewer runs
+- Skill Harness Skill review prompts, response parsing, and bounded read/write/apply_patch reviewer runs
 - Serialized background reviews and atomic, idempotent evolution log writes
 - Schema v1-v3-to-v4 migration, structured processed event records, direct intent edit validation/rollback, and trigger keyword updates
 - Intent Markdown structure/catalog validation and manual direct Evolution mode

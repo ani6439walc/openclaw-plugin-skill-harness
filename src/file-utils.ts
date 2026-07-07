@@ -43,7 +43,7 @@ export function statsPath(dataRoot: string): string {
   return path.join(dataRoot, "stats.json");
 }
 
-export function evolutionBacklogPath(dataRoot: string): string {
+export function evolutionLogPath(dataRoot: string): string {
   return path.join(dataRoot, "evolution.json");
 }
 
