@@ -62,8 +62,11 @@ function applyKeywordChange(
   change: { add: string[]; remove: string[] },
 ): string[] {
   const remove = new Set(normalizeKeywordList(change.remove, []));
+  const add = normalizeKeywordList(change.add, []).filter(
+    (keyword) => !remove.has(keyword),
+  );
   return normalizeKeywordList(
-    [...current.filter((keyword) => !remove.has(keyword)), ...change.add],
+    [...current.filter((keyword) => !remove.has(keyword)), ...add],
     [],
   );
 }

@@ -148,6 +148,30 @@ describe("EvolutionLogWriter", () => {
     });
   });
 
+  it("lets explicit trigger keyword removals win over duplicate additions", async () => {
+    expect(
+      await writer.record("session-1:turn-1", source, [
+        {
+          trigger: "successful-pattern",
+          targetKind: "trigger-keywords",
+          targetTrigger: "successful-pattern",
+          addKeywords: ["verified", "ship it"],
+          removeKeywords: ["verified"],
+          dedupeKey: "successful-pattern:keyword-conflict",
+          summary: "Update successful-pattern keywords",
+          evidence: ["The reviewer returned conflicting keyword edits"],
+          correctionGoal: "Remove stale trigger wording while adding a new one",
+          suggestedChange: "Remove verified and add ship it.",
+        },
+      ]),
+    ).toBe(true);
+
+    expect(readLog().triggerKeywords.successfulPattern).toContain("ship it");
+    expect(readLog().triggerKeywords.successfulPattern).not.toContain(
+      "verified",
+    );
+  });
+
   it("migrates legacy v3 evolution files by dropping legacy items", async () => {
     const logPath = path.join(root, "evolution.json");
     fs.writeFileSync(
