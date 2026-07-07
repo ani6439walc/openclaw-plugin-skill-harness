@@ -17,7 +17,7 @@ REVIEWABLE_STATES = {
     "PAUSED",
 }
 FINAL_STATES = REVIEWABLE_STATES | {"FAILED"}
-MAX_DIFF_CHARS = 180_000
+MAX_DIFF_CHARS = 300_000
 MAX_COMMENT_CHARS = 60_000
 POLL_SECONDS = 15
 MAX_POLLS = 100  # 25 minutes total
@@ -92,7 +92,23 @@ def create_diff_branch(pr_number, diff_text):
     log(f"Writing full diff to {file_name} ({len(diff_text):,} chars)...")
     with open(file_name, "w") as f:
         f.write(diff_text)
-    
+
+    subprocess.run(
+        ["git", "config", "user.name", "github-actions[bot]"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "user.email",
+            "41898282+github-actions[bot]@users.noreply.github.com",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
     log(f"Creating branch {branch_name}...")
     subprocess.run(["git", "checkout", "-b", branch_name], check=True, capture_output=True)
     subprocess.run(["git", "add", file_name], check=True, capture_output=True)
