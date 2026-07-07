@@ -9,6 +9,8 @@ import type {
 import { logger } from "../api.js";
 import { pluginRoot } from "./file-utils.js";
 
+const catalogCache = new Map<string, IntentCatalog>();
+
 function wildcardToRegExp(pattern: string): RegExp {
   const escaped = pattern
     .replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
@@ -99,7 +101,13 @@ export class IntentCatalog {
   }
 
   static create(pluginRoot: string): IntentCatalog {
-    return new IntentCatalog(pluginRoot);
+    const normalizedPluginRoot = path.resolve(pluginRoot);
+    const existing = catalogCache.get(normalizedPluginRoot);
+    if (existing) return existing;
+
+    const catalog = new IntentCatalog(normalizedPluginRoot);
+    catalogCache.set(normalizedPluginRoot, catalog);
+    return catalog;
   }
 
   load(intentDirectory: string, options: { silent?: boolean } = {}): number {

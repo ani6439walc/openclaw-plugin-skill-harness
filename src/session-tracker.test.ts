@@ -20,13 +20,56 @@ describe("SessionTracker", () => {
   });
 
   describe("create", () => {
-    it("should return a new instance each time (not singleton)", () => {
+    it("should return a shared instance for the same plugin root", () => {
       const tracker1 = SessionTracker.create(tempDir);
       const tracker2 = SessionTracker.create(tempDir);
 
       expect(tracker1).toBeInstanceOf(SessionTracker);
       expect(tracker2).toBeInstanceOf(SessionTracker);
-      expect(tracker1).not.toBe(tracker2);
+      expect(tracker1).toBe(tracker2);
+    });
+
+    it("should return different instances for different plugin roots", () => {
+      const otherDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "session-tracker-other-"),
+      );
+      try {
+        const tracker1 = SessionTracker.create(tempDir);
+        const tracker2 = SessionTracker.create(otherDir);
+
+        expect(tracker1).toBeInstanceOf(SessionTracker);
+        expect(tracker2).toBeInstanceOf(SessionTracker);
+        expect(tracker1).not.toBe(tracker2);
+      } finally {
+        fs.rmSync(otherDir, { recursive: true, force: true });
+      }
+    });
+
+    it("should share in-memory state across repeated creates for the same plugin root", () => {
+      const tracker1 = SessionTracker.create(tempDir);
+      const tracker2 = SessionTracker.create(tempDir);
+
+      tracker1.record("shared-session", {
+        sessionKey: "agent:main:direct:123",
+        current: {
+          input: "first turn",
+          intent: {
+            result: {
+              intent: "chat",
+              reason: "test",
+              confidence: 0.9,
+              complexity: "low",
+            },
+          },
+          timestamps: { start: "2026-07-07T11:00:00.000Z" },
+        },
+      });
+
+      expect(
+        tracker2.resolveCurrentSessionId({
+          sessionKey: "agent:main:direct:123",
+        }),
+      ).toBe("shared-session");
     });
 
     it("should create tracker with correct plugin root", () => {
@@ -265,6 +308,39 @@ describe("SessionTracker", () => {
       tracker.record("test-session-123", { agentId: "agent2" });
 
       expect(() => tracker.write("test-session-123")).not.toThrow();
+    });
+
+    it("preserves prompt-build intent trigger metadata", () => {
+      tracker.record("test-session-123", {
+        current: {
+          input: "read a skill",
+          intent: {
+            trigger: "classifier",
+            result: {
+              intent: "tool-reference",
+              reason: "User wants to read a skill",
+              domain: "agent-ops",
+              confidence: 0.9,
+              complexity: "low",
+            },
+            instructionText: "Use the requested skill.",
+          },
+        },
+      });
+
+      tracker.write("test-session-123");
+
+      const saved = JSON.parse(
+        fs.readFileSync(
+          path.join(tempDir, "sessions", "test-session-123.json"),
+          "utf-8",
+        ),
+      );
+      expect(saved.current.intent).toMatchObject({
+        trigger: "classifier",
+        instructionText: "Use the requested skill.",
+        result: { intent: "tool-reference" },
+      });
     });
 
     it("resolves the latest current session by session key", () => {
@@ -591,7 +667,7 @@ describe("SessionTracker", () => {
       ).toBe(false);
     });
 
-    it("should remove session data while preserving its persisted JSON file", () => {
+    it("should keep session data in memory when preserving its persisted JSON file", () => {
       tracker.record("preserve-test", {
         current: {
           intent: {
@@ -608,10 +684,56 @@ describe("SessionTracker", () => {
 
       tracker.cleanup("preserve-test", { deleteFile: false });
 
-      expect(tracker.hasIntentData("preserve-test")).toBe(false);
+      expect(tracker.hasIntentData("preserve-test")).toBe(true);
       expect(
         fs.existsSync(path.join(tempDir, "sessions", "preserve-test.json")),
       ).toBe(true);
+    });
+
+    it("should retain history across preserved session_end cleanup", () => {
+      tracker.record("preserve-history-test", {
+        current: {
+          input: "first turn",
+          intent: {
+            result: {
+              intent: "chat",
+              reason: "first turn",
+              confidence: 0.9,
+              complexity: "low",
+            },
+          },
+          timestamps: { start: "2026-07-07T10:00:00.000Z" },
+        },
+      });
+      tracker.write("preserve-history-test");
+
+      tracker.cleanup("preserve-history-test", { deleteFile: false });
+      tracker.rotate("preserve-history-test");
+      tracker.record("preserve-history-test", {
+        current: {
+          input: "second turn",
+          intent: {
+            result: {
+              intent: "chat",
+              reason: "second turn",
+              confidence: 0.9,
+              complexity: "low",
+            },
+          },
+          timestamps: { start: "2026-07-07T10:01:00.000Z" },
+        },
+      });
+      tracker.write("preserve-history-test");
+
+      const parsed = JSON.parse(
+        fs.readFileSync(
+          path.join(tempDir, "sessions", "preserve-history-test.json"),
+          "utf-8",
+        ),
+      );
+      expect(parsed.history).toHaveLength(1);
+      expect(parsed.history[0].input).toBe("first turn");
+      expect(parsed.current.input).toBe("second turn");
     });
 
     it("should be idempotent when the session or file does not exist", () => {

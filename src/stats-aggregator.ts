@@ -1,3 +1,4 @@
+import path from "node:path";
 import { logger } from "../api.js";
 import type { SessionState } from "./session-tracker.js";
 import type { IntentCatalogEntry } from "./types.js";
@@ -15,6 +16,7 @@ const DAILY_RETENTION_MS = 90 * DAY_MS;
 const RECENT_WINDOW_MS = 7 * DAY_MS;
 const REVIEW_MIN_RECOMMENDATIONS = 5;
 const REVIEW_ADOPTION_THRESHOLD = 0.7;
+const statsAggregatorCache = new Map<string, StatsAggregator>();
 
 type CountMap = Record<string, number>;
 type ComplexityCounts = { low: number; medium: number; high: number };
@@ -474,7 +476,13 @@ export class StatsAggregator {
   private constructor(private readonly pluginRoot: string) {}
 
   static create(pluginRoot: string): StatsAggregator {
-    return new StatsAggregator(pluginRoot);
+    const normalizedPluginRoot = path.resolve(pluginRoot);
+    const existing = statsAggregatorCache.get(normalizedPluginRoot);
+    if (existing) return existing;
+
+    const aggregator = new StatsAggregator(normalizedPluginRoot);
+    statsAggregatorCache.set(normalizedPluginRoot, aggregator);
+    return aggregator;
   }
 
   record(

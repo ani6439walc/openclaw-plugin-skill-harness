@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import type {
   RecentTurn,
   IntentionResult,
+  IntentTrigger,
   HistoricalIntentRecord,
 } from "./types.js";
 import type { ReviewSnapshot, ReviewState } from "./evolution-types.js";
@@ -19,6 +20,7 @@ import {
 
 const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const DEFAULT_MIGRATED_DOMAIN = "other";
+const trackerCache = new Map<string, SessionTracker>();
 const TOPIC_CHANGE_REASONS = new Set([
   "start",
   "marker",
@@ -56,6 +58,7 @@ export interface SkillRecord {
 
 export interface IntentState {
   input?: RecentTurn[];
+  trigger?: IntentTrigger;
   result?: IntentionResult;
   instructionText?: string;
 }
@@ -286,8 +289,16 @@ export class SessionTracker {
   }
 
   static create(pluginRoot: string): SessionTracker {
-    const tracker = new SessionTracker(pluginRoot);
+    const normalizedPluginRoot = path.resolve(pluginRoot);
+    const existing = trackerCache.get(normalizedPluginRoot);
+    if (existing) {
+      existing.loadSessionsFromDisk();
+      return existing;
+    }
+
+    const tracker = new SessionTracker(normalizedPluginRoot);
     tracker.loadSessionsFromDisk();
+    trackerCache.set(normalizedPluginRoot, tracker);
     return tracker;
   }
 
@@ -450,6 +461,9 @@ export class SessionTracker {
         if (data.current.intent.input !== undefined) {
           current.intent.input = data.current.intent.input;
         }
+        if (data.current.intent.trigger !== undefined) {
+          current.intent.trigger = data.current.intent.trigger;
+        }
         if (data.current.intent.result !== undefined) {
           current.intent.result = data.current.intent.result;
         }
@@ -497,8 +511,9 @@ export class SessionTracker {
   }
 
   cleanup(sessionId: string, options: { deleteFile: boolean }): void {
-    this.sessionData.delete(sessionId);
     if (!options.deleteFile) return;
+
+    this.sessionData.delete(sessionId);
 
     const filename = `${sessionId}.json`;
     if (path.basename(filename) !== filename) {

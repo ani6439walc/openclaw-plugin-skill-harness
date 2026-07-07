@@ -16,6 +16,29 @@ describe("IntentCatalog", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  describe("create", () => {
+    it("returns a shared instance for the same plugin root", () => {
+      const catalog1 = IntentCatalog.create(root);
+      const catalog2 = IntentCatalog.create(root);
+
+      expect(catalog1).toBe(catalog2);
+    });
+
+    it("returns different instances for different plugin roots", () => {
+      const otherRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "intent-loader-other-"),
+      );
+      try {
+        const catalog1 = IntentCatalog.create(root);
+        const catalog2 = IntentCatalog.create(otherRoot);
+
+        expect(catalog1).not.toBe(catalog2);
+      } finally {
+        fs.rmSync(otherRoot, { recursive: true, force: true });
+      }
+    });
+  });
+
   it("derives intent ids from filenames and ignores stale metadata fields", () => {
     fs.writeFileSync(
       path.join(root, "intents", "agent-dispatch.md"),

@@ -6,8 +6,14 @@ import type {
   PluginHookBeforePromptBuildResult,
   PluginHookAfterToolCallEvent,
   PluginHookAgentEndEvent,
+  PluginHookBeforeAgentFinalizeEvent,
+  PluginHookBeforeAgentFinalizeResult,
+  PluginHookBeforeToolCallEvent,
   PluginHookSessionEndEvent,
   PluginHookSessionContext,
+  PluginHookToolContext,
+  PluginHookToolResultPersistContext,
+  PluginHookToolResultPersistEvent,
 } from "openclaw/plugin-sdk/types";
 import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness";
 import { logger } from "../api.js";
@@ -62,6 +68,7 @@ import { intentsPath } from "./file-utils.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
+  IntentTrigger,
   IntentionResult,
 } from "./types.js";
 
@@ -84,6 +91,12 @@ type PipelineMetadata = {
   result?: string;
   error?: string;
 };
+
+interface PendingToolCall {
+  name: string;
+  params: Record<string, unknown>;
+  ctx: { sessionId?: string; agentId?: string; sessionKey?: string };
+}
 
 const LOW_THINKING_EFFORTS = new Set(["off", "minimal", "low"]);
 
@@ -411,8 +424,16 @@ function resolveTopicChangeReason(
 }
 
 type PromptBuildClassification =
-  | { kind: "same-topic"; result: IntentionResult }
-  | { kind: "classified"; result: IntentionResult };
+  | {
+      kind: "same-topic";
+      trigger: IntentTrigger;
+      result: IntentionResult;
+    }
+  | {
+      kind: "classified";
+      trigger: IntentTrigger;
+      result: IntentionResult;
+    };
 
 const SESSION_END_REASONS_THAT_DELETE_FILE = new Set([
   "new",
@@ -437,6 +458,8 @@ export function createHookHandlers(deps: HookDeps) {
   const evolutionLogWriter =
     deps.evolutionLogWriter ?? defaultEvolutionLogWriter;
   const bundledSkillsDir = deps.bundledSkillsDir;
+  const pendingToolCalls = new Map<string, PendingToolCall>();
+  const recordedToolCalls = new Set<string>();
 
   function emitPipelineEvent(
     ctx: Pick<PluginHookAgentContext, "runId" | "sessionId">,
@@ -490,7 +513,11 @@ export function createHookHandlers(deps: HookDeps) {
     // Use current config for early checks. These must run before refreshing live config.
     const currentConfig = config();
     if (!isEnabledForAgent(currentConfig, resolvedAgentId)) return;
-    if (!isEligibleInteractiveSession(ctx)) return;
+    if (
+      !isEligibleInteractiveSession({ ...ctx, sessionKey: resolvedSessionKey })
+    ) {
+      return;
+    }
 
     const resolvedSessionKeyForChecks = resolvedSessionKey ?? ctx.sessionKey;
     if (
@@ -512,6 +539,62 @@ export function createHookHandlers(deps: HookDeps) {
     }
 
     return { effectiveAgentId: resolvedAgentId, resolvedSessionKey };
+  }
+
+  function resolveTrackingContext(ctx: {
+    sessionId?: string;
+    sessionKey?: string;
+    agentId?: string;
+  }): { sessionId?: string; sessionKey?: string } {
+    const sessionKey =
+      ctx.sessionKey?.trim() ||
+      (ctx.agentId
+        ? resolveCanonicalSessionKeyFromSessionId({
+            api,
+            agentId: ctx.agentId,
+            sessionId: ctx.sessionId,
+          })
+        : undefined);
+
+    return { sessionId: ctx.sessionId, sessionKey };
+  }
+
+  function resolveToolCallKey(params: {
+    toolCallId?: string;
+    runId?: string;
+    sessionId?: string;
+    sessionKey?: string;
+  }): string | undefined {
+    return params.toolCallId;
+  }
+
+  function resolveToolResultText(message: unknown): string {
+    if (typeof message === "object" && message !== null) {
+      const content = (message as { content?: unknown }).content;
+      if (Array.isArray(content)) {
+        const text = content
+          .map((block) => {
+            if (typeof block === "string") return block;
+            if (typeof block === "object" && block !== null) {
+              const blockText = (block as { text?: unknown }).text;
+              if (typeof blockText === "string") return blockText;
+            }
+            return "";
+          })
+          .join("\n")
+          .trim();
+        if (text) return text;
+      }
+    }
+    return extractToolText(message);
+  }
+
+  function isToolResultError(message: unknown): boolean {
+    return (
+      typeof message === "object" &&
+      message !== null &&
+      (message as { isError?: unknown }).isError === true
+    );
   }
 
   function buildConversationContext(
@@ -625,6 +708,7 @@ export function createHookHandlers(deps: HookDeps) {
     ) {
       return {
         kind: "same-topic",
+        trigger: "same-topic",
         result: buildInheritedIntentResult(
           latestHistoricalIntent,
           topicContext,
@@ -726,6 +810,9 @@ export function createHookHandlers(deps: HookDeps) {
     }
 
     if (result) {
+      const trigger: IntentTrigger = topicKeywordSimilarityMatched
+        ? "topic-keyword-similarity"
+        : "classifier";
       if (!topicKeywordSimilarityMatched) {
         applyTopicContextToResult(result, topicContext, latestHistoricalIntent);
       }
@@ -735,7 +822,7 @@ export function createHookHandlers(deps: HookDeps) {
           result.intent,
         );
       }
-      return { kind: "classified", result };
+      return { kind: "classified", trigger, result };
     }
     return;
   }
@@ -746,15 +833,19 @@ export function createHookHandlers(deps: HookDeps) {
     fallbackSessionKey?: string;
     effectiveAgentId: string;
     latestUserMessage: string;
+    trigger: IntentTrigger;
     result: IntentionResult;
     instructionText?: string;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): void {
-    if (!params.sessionId) return;
+    const sessionKey = params.resolvedSessionKey ?? params.fallbackSessionKey;
+    const sessionId =
+      params.sessionId ?? tracker.resolveCurrentSessionId({ sessionKey });
+    if (!sessionId) return;
 
-    tracker.rotate(params.sessionId);
-    tracker.record(params.sessionId, {
-      sessionKey: params.resolvedSessionKey ?? params.fallbackSessionKey,
+    tracker.rotate(sessionId);
+    tracker.record(sessionId, {
+      sessionKey,
       agentId: params.effectiveAgentId,
       current: {
         input: params.latestUserMessage,
@@ -762,19 +853,21 @@ export function createHookHandlers(deps: HookDeps) {
           ...(params.result.topicChangeReason
             ? { input: params.conversation }
             : {}),
+          trigger: params.trigger,
           result: params.result,
           instructionText: params.instructionText,
         },
         timestamps: { start: new Date().toISOString() },
       },
     });
-    tracker.write(params.sessionId);
+    tracker.write(sessionId);
   }
 
   function recordPromptBuildResult(params: {
     ctx: PluginHookAgentContext;
     routing: NonNullable<ReturnType<typeof resolvePromptBuildRouting>>;
     latestUserMessage: string;
+    trigger: IntentTrigger;
     result: IntentionResult;
     instructionText?: string;
     conversation: ReturnType<typeof limitConversationTurns>;
@@ -785,6 +878,7 @@ export function createHookHandlers(deps: HookDeps) {
       fallbackSessionKey: params.ctx.sessionKey,
       effectiveAgentId: params.routing.effectiveAgentId,
       latestUserMessage: params.latestUserMessage,
+      trigger: params.trigger,
       result: params.result,
       instructionText: params.instructionText,
       conversation: params.conversation,
@@ -869,6 +963,7 @@ export function createHookHandlers(deps: HookDeps) {
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
+        trigger: "exact-keyword",
         result,
         conversation: params.conversation,
       });
@@ -888,6 +983,7 @@ export function createHookHandlers(deps: HookDeps) {
       ctx: params.ctx,
       routing: params.routing,
       latestUserMessage: params.latestUserMessage,
+      trigger: "exact-keyword",
       result,
       instructionText: params.exactKeywordMatch.hint,
       conversation: params.conversation,
@@ -925,6 +1021,7 @@ export function createHookHandlers(deps: HookDeps) {
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
+        trigger: params.classification.trigger,
         result,
         conversation: params.conversation,
       });
@@ -949,6 +1046,7 @@ export function createHookHandlers(deps: HookDeps) {
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
+        trigger: params.classification.trigger,
         result,
         conversation: params.conversation,
       });
@@ -973,6 +1071,7 @@ export function createHookHandlers(deps: HookDeps) {
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
+        trigger: params.classification.trigger,
         result,
         conversation: params.conversation,
       });
@@ -996,6 +1095,7 @@ export function createHookHandlers(deps: HookDeps) {
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
+        trigger: params.classification.trigger,
         result,
         conversation: params.conversation,
       });
@@ -1028,6 +1128,7 @@ export function createHookHandlers(deps: HookDeps) {
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
+        trigger: params.classification.trigger,
         result,
         conversation: params.conversation,
       });
@@ -1099,6 +1200,7 @@ export function createHookHandlers(deps: HookDeps) {
       ctx: params.ctx,
       routing: params.routing,
       latestUserMessage: params.latestUserMessage,
+      trigger: params.classification.trigger,
       result,
       instructionText,
       conversation: params.conversation,
@@ -1230,6 +1332,17 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookAfterToolCallEvent,
     ctx: { sessionId?: string; agentId?: string; sessionKey?: string },
   ): Promise<void> {
+    const toolCallKey = resolveToolCallKey({
+      toolCallId: event.toolCallId,
+      runId: event.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+    });
+    if (toolCallKey && recordedToolCalls.has(toolCallKey)) {
+      recordedToolCalls.delete(toolCallKey);
+      pendingToolCalls.delete(toolCallKey);
+      return;
+    }
     const output = event.result ?? event.error ?? "";
     const outputStr =
       typeof output === "string" ? output : extractToolText(output);
@@ -1238,7 +1351,7 @@ export function createHookHandlers(deps: HookDeps) {
       ? undefined
       : extractSkillInfo(event.toolName, event.params, outputStr);
 
-    recordTrackedSession(tracker, ctx, {
+    recordTrackedSession(tracker, resolveTrackingContext(ctx), {
       current: {
         toolCalls: [
           {
@@ -1252,14 +1365,92 @@ export function createHookHandlers(deps: HookDeps) {
         skillsUsed: skillUsed ? [skillUsed] : undefined,
       },
     });
+    if (toolCallKey) {
+      recordedToolCalls.add(toolCallKey);
+      pendingToolCalls.delete(toolCallKey);
+    }
   }
 
-  function recordAgentEndResult(
-    event: PluginHookAgentEndEvent,
+  async function onBeforeToolCall(
+    event: PluginHookBeforeToolCallEvent,
+    ctx: PluginHookToolContext,
+  ): Promise<void> {
+    const toolCallKey = resolveToolCallKey({
+      toolCallId: event.toolCallId,
+      runId: event.runId ?? ctx.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+    });
+    if (!toolCallKey) return;
+    pendingToolCalls.set(toolCallKey, {
+      name: event.toolName,
+      params: event.params,
+      ctx,
+    });
+  }
+
+  function onToolResultPersist(
+    event: PluginHookToolResultPersistEvent,
+    ctx: PluginHookToolResultPersistContext,
+  ): void {
+    const toolCallKey = resolveToolCallKey({
+      toolCallId: event.toolCallId ?? ctx.toolCallId,
+      sessionKey: ctx.sessionKey,
+    });
+    if (toolCallKey && recordedToolCalls.has(toolCallKey)) {
+      recordedToolCalls.delete(toolCallKey);
+      return;
+    }
+
+    const pending = toolCallKey ? pendingToolCalls.get(toolCallKey) : undefined;
+    const toolName = event.toolName ?? ctx.toolName ?? pending?.name;
+    if (!toolName) return;
+
+    const outputStr = resolveToolResultText(event.message);
+    const truncatedOutput = outputStr.slice(0, 200);
+    const error = isToolResultError(event.message)
+      ? truncatedOutput
+      : undefined;
+    const params = pending?.params ?? {};
+    const trackingCtx = resolveTrackingContext({
+      ...pending?.ctx,
+      agentId: ctx.agentId ?? pending?.ctx.agentId,
+      sessionKey: ctx.sessionKey ?? pending?.ctx.sessionKey,
+    });
+    const skillUsed = error
+      ? undefined
+      : extractSkillInfo(toolName, params, outputStr);
+
+    recordTrackedSession(tracker, trackingCtx, {
+      current: {
+        toolCalls: [
+          {
+            name: toolName,
+            params,
+            result: error ? undefined : truncatedOutput,
+            error,
+          },
+        ],
+        skillsUsed: skillUsed ? [skillUsed] : undefined,
+      },
+    });
+
+    if (toolCallKey) {
+      recordedToolCalls.add(toolCallKey);
+      pendingToolCalls.delete(toolCallKey);
+    }
+  }
+
+  function recordFinalResult(
+    params: {
+      messages?: unknown[];
+      lastAssistantMessage?: string;
+      error?: string;
+    },
     ctx: PluginHookAgentContext,
   ): string | undefined {
     const turns = extractRecentTurns(
-      event.messages as Array<{
+      (params.messages ?? []) as Array<{
         role?: string;
         content?: string;
       }>,
@@ -1269,10 +1460,10 @@ export function createHookHandlers(deps: HookDeps) {
       .reverse()
       .find((t) => t.role === "assistant");
 
-    return recordTrackedSession(tracker, ctx, {
+    return recordTrackedSession(tracker, resolveTrackingContext(ctx), {
       current: {
-        result: lastAssistantTurn?.text,
-        error: event.error,
+        result: lastAssistantTurn?.text ?? params.lastAssistantMessage,
+        error: params.error,
         timestamps: { end: new Date().toISOString() },
       },
     });
@@ -1286,7 +1477,7 @@ export function createHookHandlers(deps: HookDeps) {
       catalog,
       state.intent?.result?.intent,
     );
-    statsAggregator.record(sessionId, state, intentDefinition);
+    if (!statsAggregator.record(sessionId, state, intentDefinition)) return;
     return { intentDefinition };
   }
 
@@ -1373,12 +1564,10 @@ export function createHookHandlers(deps: HookDeps) {
     });
   }
 
-  async function onAgentEnd(
-    event: PluginHookAgentEndEvent,
+  async function finalizeTrackedTurn(
+    trackedSessionId: string | undefined,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    const trackedSessionId = recordAgentEndResult(event, ctx);
-
     if (!trackedSessionId) return;
     const agentEndStats = recordAgentEndStats(trackedSessionId);
     if (!agentEndStats) return;
@@ -1418,6 +1607,39 @@ export function createHookHandlers(deps: HookDeps) {
     });
   }
 
+  async function onAgentEnd(
+    event: PluginHookAgentEndEvent,
+    ctx: PluginHookAgentContext,
+  ): Promise<void> {
+    const trackedSessionId = recordFinalResult(
+      { messages: event.messages, error: event.error },
+      ctx,
+    );
+    await finalizeTrackedTurn(trackedSessionId, ctx);
+  }
+
+  async function onBeforeAgentFinalize(
+    event: PluginHookBeforeAgentFinalizeEvent,
+    ctx: PluginHookAgentContext,
+  ): Promise<PluginHookBeforeAgentFinalizeResult | void> {
+    const trackingCtx: PluginHookAgentContext = {
+      ...ctx,
+      sessionId: event.sessionId ?? ctx.sessionId,
+      sessionKey: event.sessionKey ?? ctx.sessionKey,
+      runId: event.runId ?? ctx.runId,
+      modelId: event.model ?? ctx.modelId,
+    };
+    const trackedSessionId = recordFinalResult(
+      {
+        messages: event.messages,
+        lastAssistantMessage: event.lastAssistantMessage,
+      },
+      trackingCtx,
+    );
+    await finalizeTrackedTurn(trackedSessionId, trackingCtx);
+    return;
+  }
+
   async function onSessionEnd(
     event: PluginHookSessionEndEvent,
     ctx: PluginHookSessionContext,
@@ -1430,7 +1652,10 @@ export function createHookHandlers(deps: HookDeps) {
 
   return {
     onBeforePromptBuild,
+    onBeforeToolCall,
     onAfterToolCall,
+    onToolResultPersist,
+    onBeforeAgentFinalize,
     onAgentEnd,
     onSessionEnd,
   };

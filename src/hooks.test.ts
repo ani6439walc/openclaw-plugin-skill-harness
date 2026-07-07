@@ -17,9 +17,9 @@ vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
 
 const emitHostAgentEvent = vi.mocked(emitAgentEvent);
 
-function createHandlers() {
+function createHandlers(api: Partial<OpenClawPluginApi> = {}) {
   return createHookHandlers({
-    api: {} as OpenClawPluginApi,
+    api: api as OpenClawPluginApi,
     config: () => resolveConfig({}),
     refreshLiveConfigFromRuntime: () => undefined,
     refreshIntents: () => undefined,
@@ -122,6 +122,167 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
     );
   });
 
+  it("records skill metadata from persisted tool results when after_tool_call is unavailable", async () => {
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "session-1",
+    );
+    const record = vi.spyOn(defaultTracker, "record");
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const skillOutput = `---
+name: tokyo
+description: Navigate Tokyo.
+---
+
+# Tokyo`;
+    const handlers = createHandlers();
+
+    await handlers.onBeforeToolCall(
+      {
+        toolName: "read",
+        params: { path: "/home/ani/.openclaw/skills/tokyo/SKILL.md" },
+        toolCallId: "call-read-tokyo",
+      } as never,
+      {
+        sessionKey: "agent:main:discord:direct:529296776637972480",
+        toolName: "read",
+        toolCallId: "call-read-tokyo",
+      } as never,
+    );
+    handlers.onToolResultPersist(
+      {
+        toolName: "read",
+        toolCallId: "call-read-tokyo",
+        message: {
+          role: "toolResult",
+          content: [{ type: "text", text: skillOutput }],
+        },
+      } as never,
+      {
+        sessionKey: "agent:main:discord:direct:529296776637972480",
+        toolName: "read",
+        toolCallId: "call-read-tokyo",
+      } as never,
+    );
+
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          skillsUsed: [
+            expect.objectContaining({
+              name: "tokyo",
+              path: "/home/ani/.openclaw/skills/tokyo/SKILL.md",
+            }),
+          ],
+          toolCalls: [
+            expect.objectContaining({
+              name: "read",
+              result: skillOutput.slice(0, 200),
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("does not double-record a persisted tool result when after_tool_call also arrives", async () => {
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "session-1",
+    );
+    const record = vi.spyOn(defaultTracker, "record");
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const handlers = createHandlers();
+
+    await handlers.onBeforeToolCall(
+      {
+        toolName: "read",
+        params: { path: "/home/ani/.openclaw/skills/tokyo/SKILL.md" },
+        toolCallId: "call-read-tokyo",
+      } as never,
+      {
+        sessionKey: "agent:main:discord:direct:529296776637972480",
+        toolName: "read",
+        toolCallId: "call-read-tokyo",
+      } as never,
+    );
+    handlers.onToolResultPersist(
+      {
+        toolName: "read",
+        toolCallId: "call-read-tokyo",
+        message: { role: "toolResult", content: "ok" },
+      } as never,
+      {
+        sessionKey: "agent:main:discord:direct:529296776637972480",
+        toolName: "read",
+        toolCallId: "call-read-tokyo",
+      } as never,
+    );
+    await handlers.onAfterToolCall(
+      {
+        toolName: "read",
+        params: { path: "/home/ani/.openclaw/skills/tokyo/SKILL.md" },
+        toolCallId: "call-read-tokyo",
+        result: "ok",
+      } as never,
+      {
+        sessionKey: "agent:main:discord:direct:529296776637972480",
+        toolName: "read",
+        toolCallId: "call-read-tokyo",
+      } as never,
+    );
+
+    expect(record).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves the canonical session key for tool tracking when hook context omits it", async () => {
+    const sessionKey = "agent:main:discord:direct:529296776637972480";
+    const api = {
+      runtime: {
+        agent: {
+          session: {
+            listSessionEntries: vi.fn().mockReturnValue([
+              {
+                sessionKey,
+                entry: { sessionId: "stale-event-session" },
+              },
+            ]),
+          },
+        },
+      },
+    };
+    const resolveCurrentSessionId = vi
+      .spyOn(defaultTracker, "resolveCurrentSessionId")
+      .mockReturnValue("latest-prompt-session");
+    const record = vi.spyOn(defaultTracker, "record");
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+
+    await createHandlers(api).onAfterToolCall(
+      {
+        toolName: "read",
+        params: { path: "/skills/nuwa-skill/SKILL.md" },
+        result: "ok",
+        durationMs: 1,
+      } as never,
+      { sessionId: "stale-event-session", agentId: "main" },
+    );
+
+    expect(api.runtime.agent.session.listSessionEntries).toHaveBeenCalledWith({
+      agentId: "main",
+    });
+    expect(resolveCurrentSessionId).toHaveBeenCalledWith({
+      sessionId: "stale-event-session",
+      sessionKey,
+    });
+    expect(record).toHaveBeenCalledWith(
+      "latest-prompt-session",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          toolCalls: [expect.objectContaining({ name: "read" })],
+        }),
+      }),
+    );
+  });
+
   it("aggregates the completed current turn on agent_end", async () => {
     const state = {
       input: "commit this",
@@ -160,6 +321,56 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
     );
 
     expect(recordStats).toHaveBeenCalledWith("session-1", state, definition);
+  });
+
+  it("aggregates the completed current turn before agent finalize", async () => {
+    const state = {
+      input: "read vue skill",
+      intent: {
+        result: {
+          intent: "skill-lifecycle",
+          reason: "test",
+          domain: "agent-ops",
+          confidence: 0.9,
+          complexity: "low" as const,
+        },
+      },
+      timestamps: { start: "2026-07-07T10:22:10.674Z" },
+    };
+    const definition = {
+      id: "skill-lifecycle",
+      definition: {
+        triggers: ["skill"],
+        examples: [],
+        domain: "agent-ops",
+        fastpath: { keywords: [] },
+        prompt: "skill: vue",
+      },
+    };
+    vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
+    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
+    const recordStats = vi
+      .spyOn(defaultStatsAggregator, "record")
+      .mockReturnValue(true);
+
+    await createHandlers().onBeforeAgentFinalize(
+      {
+        sessionId: "event-context-session",
+        sessionKey: "agent:main:discord:direct:529296776637972480",
+        lastAssistantMessage: "done",
+        messages: [],
+      } as never,
+      {} as never,
+    );
+
+    expect(recordStats).toHaveBeenCalledWith(
+      "event-context-session",
+      state,
+      definition,
+    );
   });
 
   it("aggregates agent_end using the tracked session resolved from sessionKey", async () => {
@@ -207,6 +418,75 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
 
     expect(recordStats).toHaveBeenCalledWith(
       "tracked-session",
+      state,
+      definition,
+    );
+  });
+
+  it("aggregates agent_end using canonical session key when hook context omits it", async () => {
+    const sessionKey = "agent:main:discord:direct:529296776637972480";
+    const api = {
+      runtime: {
+        agent: {
+          session: {
+            listSessionEntries: vi.fn().mockReturnValue([
+              {
+                sessionKey,
+                entry: { sessionId: "stale-event-session" },
+              },
+            ]),
+          },
+        },
+      },
+    };
+    const state = {
+      input: "read nuwa skill",
+      intent: {
+        result: {
+          intent: "skill-lifecycle",
+          reason: "test",
+          domain: "agent-ops",
+          confidence: 0.9,
+          complexity: "low" as const,
+        },
+      },
+      timestamps: { start: "2026-07-07T10:07:46.061Z" },
+    };
+    const definition = {
+      id: "skill-lifecycle",
+      definition: {
+        triggers: ["skill"],
+        examples: [],
+        domain: "agent-ops",
+        fastpath: { keywords: [] },
+        prompt: "skill: skill-lifecycle",
+      },
+    };
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "latest-prompt-session",
+    );
+    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
+    const recordStats = vi
+      .spyOn(defaultStatsAggregator, "record")
+      .mockReturnValue(true);
+
+    await createHandlers(api).onAgentEnd(
+      { messages: [{ role: "assistant", content: "done" }] } as never,
+      { sessionId: "stale-event-session", agentId: "main" },
+    );
+
+    expect(api.runtime.agent.session.listSessionEntries).toHaveBeenCalledWith({
+      agentId: "main",
+    });
+    expect(defaultTracker.resolveCurrentSessionId).toHaveBeenCalledWith({
+      sessionId: "stale-event-session",
+      sessionKey,
+    });
+    expect(recordStats).toHaveBeenCalledWith(
+      "latest-prompt-session",
       state,
       definition,
     );
@@ -624,6 +904,7 @@ describe("createHookHandlers topic switch flow", () => {
       getHistoricalIntentRecords: vi
         .fn()
         .mockReturnValue(params.historicalIntents),
+      resolveCurrentSessionId: vi.fn().mockReturnValue(undefined),
       rotate,
       record,
       write,
@@ -914,6 +1195,7 @@ describe("createHookHandlers topic switch flow", () => {
             input: expect.arrayContaining([
               expect.objectContaining({ role: "user", text: "謝謝" }),
             ]),
+            trigger: "exact-keyword",
             result: expect.objectContaining({
               intent: "social-casual",
               topicChangeReason: "start",
@@ -927,7 +1209,89 @@ describe("createHookHandlers topic switch flow", () => {
     expect(write).toHaveBeenCalledWith("session-1");
   });
 
-  it("does not persist prompt-build intent data without a session id", async () => {
+  it("uses a resolved session key for prompt-build eligibility when hook ctx omits it", async () => {
+    const fastEvent = {
+      prompt: "謝謝",
+      messages: [{ role: "user", content: "謝謝" }],
+    } as never;
+    const resolvedSessionKey = "agent:main:discord:direct:resolved";
+    const { handlers, rotate, record, write } = createTopicFlowHarness({
+      historicalIntents: [],
+      api: {
+        runtime: {
+          agent: {
+            session: {
+              listSessionEntries: vi.fn().mockReturnValue([
+                {
+                  sessionKey: resolvedSessionKey,
+                  entry: { sessionId: ctx.sessionId },
+                },
+              ]),
+            },
+          },
+        } as never,
+      },
+    });
+
+    const result = await handlers.onBeforePromptBuild(fastEvent, {
+      ...ctx,
+      sessionKey: undefined,
+      channelId: undefined,
+      messageProvider: undefined,
+    });
+
+    expect(result?.prependContext).toContain("Reply warmly.");
+    expect(rotate).toHaveBeenCalledWith("session-1");
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        sessionKey: resolvedSessionKey,
+        current: expect.objectContaining({
+          input: "謝謝",
+        }),
+      }),
+    );
+    expect(write).toHaveBeenCalledWith("session-1");
+  });
+
+  it("records prompt-build data into the current keyed session when hook ctx omits sessionId", async () => {
+    const fastEvent = {
+      prompt: "qrcode",
+      messages: [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "hello" },
+      ],
+    } as never;
+    const { handlers, tracker, rotate, record, write } = createTopicFlowHarness(
+      {
+        historicalIntents: [],
+      },
+    );
+    tracker.resolveCurrentSessionId.mockReturnValue("session-1");
+
+    const result = await handlers.onBeforePromptBuild(fastEvent, {
+      ...ctx,
+      sessionId: undefined,
+    });
+
+    expect(result?.prependContext).toContain("<skill_harness_plugin");
+    expect(tracker.resolveCurrentSessionId).toHaveBeenCalledWith({
+      sessionKey: "agent:main:direct:123",
+    });
+    expect(rotate).toHaveBeenCalledWith("session-1");
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        sessionKey: "agent:main:direct:123",
+        current: expect.objectContaining({
+          input: "qrcode",
+        }),
+      }),
+    );
+    expect(write).toHaveBeenCalledWith("session-1");
+  });
+
+  it("does not persist prompt-build intent data without a session id or current keyed session", async () => {
     const { handlers, rotate, record, write } = createTopicFlowHarness({
       historicalIntents: [],
     });
@@ -1164,6 +1528,7 @@ describe("createHookHandlers topic switch flow", () => {
       expect.objectContaining({
         current: expect.objectContaining({
           intent: expect.objectContaining({
+            trigger: "topic-keyword-similarity",
             result: expect.objectContaining({
               intent: "version-control",
               reason: "Topic keyword similarity match: comit -> commit",
@@ -1393,7 +1758,9 @@ describe("createHookHandlers topic switch flow", () => {
       expect.objectContaining({
         current: expect.objectContaining({
           input: "commit it",
-          intent: expect.not.objectContaining({ input: expect.anything() }),
+          intent: expect.objectContaining({
+            trigger: "same-topic",
+          }),
         }),
       }),
     );
@@ -1441,6 +1808,7 @@ describe("createHookHandlers topic switch flow", () => {
                 text: "implement topic checker",
               }),
             ]),
+            trigger: "classifier",
             result: expect.objectContaining({
               intent: "coding",
               topicChangeReason: "start",

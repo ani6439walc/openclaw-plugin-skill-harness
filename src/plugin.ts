@@ -199,7 +199,10 @@ export function createPlugin(
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
         timeoutMs: config.timeoutMs * 3 + 1_500,
       });
+      api.on("before_tool_call", handlers.onBeforeToolCall);
       api.on("after_tool_call", handlers.onAfterToolCall);
+      api.on("tool_result_persist", handlers.onToolResultPersist);
+      api.on("before_agent_finalize", handlers.onBeforeAgentFinalize);
       api.on("agent_end", handlers.onAgentEnd);
       api.on("session_end", handlers.onSessionEnd);
     },

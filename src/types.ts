@@ -147,6 +147,9 @@ export type IntentionResult = {
   complexity: "low" | "medium" | "high";
 };
 
+export type IntentTrigger =
+  "exact-keyword" | "same-topic" | "topic-keyword-similarity" | "classifier";
+
 export type AvailableSkill = {
   name: string;
   location: string;

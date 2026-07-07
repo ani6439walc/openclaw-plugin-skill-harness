@@ -69,6 +69,29 @@ describe("StatsAggregator", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  describe("create", () => {
+    it("returns a shared instance for the same plugin root", () => {
+      const aggregator1 = StatsAggregator.create(tempDir);
+      const aggregator2 = StatsAggregator.create(tempDir);
+
+      expect(aggregator1).toBe(aggregator2);
+    });
+
+    it("returns different instances for different plugin roots", () => {
+      const otherDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "stats-test-other-"),
+      );
+      try {
+        const aggregator1 = StatsAggregator.create(tempDir);
+        const aggregator2 = StatsAggregator.create(otherDir);
+
+        expect(aggregator1).not.toBe(aggregator2);
+      } finally {
+        fs.rmSync(otherDir, { recursive: true, force: true });
+      }
+    });
+  });
+
   function readStats() {
     return JSON.parse(
       fs.readFileSync(path.join(tempDir, "stats.json"), "utf-8"),

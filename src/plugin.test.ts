@@ -53,6 +53,25 @@ describe("createPlugin", () => {
     expect(api.on).toHaveBeenCalledWith("session_end", expect.any(Function));
   });
 
+  it("registers tool tracking and finalize hooks", () => {
+    const api = createApi();
+
+    createPlugin(api).register(api);
+
+    expect(api.on).toHaveBeenCalledWith(
+      "before_tool_call",
+      expect.any(Function),
+    );
+    expect(api.on).toHaveBeenCalledWith(
+      "tool_result_persist",
+      expect.any(Function),
+    );
+    expect(api.on).toHaveBeenCalledWith(
+      "before_agent_finalize",
+      expect.any(Function),
+    );
+  });
+
   it("does not register legacy evolution tool or command surfaces", () => {
     const api = createApi();
 
