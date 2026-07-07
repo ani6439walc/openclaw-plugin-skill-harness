@@ -92,11 +92,8 @@ Use the existing module boundaries:
 - `src/intent-loader.ts`: runtime intent catalog loading.
 - `src/session-tracker.ts`: session JSON state under `dataRoot/sessions`.
 - `src/stats-aggregator.ts`: usage aggregation into `dataRoot/stats.json`.
-- `src/backlog-writer.ts`: evolution findings into `dataRoot/evolution.json`.
-- `src/evolution-backlog.ts`: backlog schema validation, migration, and atomic mutations.
-- `src/evolution-backlog-actions.ts`: shared action service for backlog reads, validation, targeting, and optimistic status updates.
-- `src/evolution-tool.ts`: registers the agent tool surface `skill_harness_evolution`.
-- `src/evolution-command.ts`: registers the plugin-owned command `/skill-harness evolution`.
+- `src/backlog-writer.ts`: direct Evolution review outcomes and trigger keyword updates into `dataRoot/evolution.json`.
+- `src/evolution-backlog.ts`: evolution log schema validation/migration and root trigger keyword state. Legacy backlog `items` are dropped during migration; there is no tool/command action surface.
 - `src/prompt.ts`, `src/subagent.ts`, `src/review-subagent.ts`, `src/trigger-checker.ts`: classification and evolution logic.
 - `src/conversation-extract.ts`: extracts recent turns, filters internal/inter-session traffic, attaches historical intent annotations, and applies context windows.
 - `src/skill-catalog.ts`: resolves `skill: <name>` references in intent Markdown into available `SKILL.md` metadata for instruction writing and Evolution review.
@@ -160,8 +157,8 @@ Typical mapping:
 - Stats behavior: `src/stats-aggregator.test.ts`.
 - Skill metadata resolution: `src/skill-catalog.test.ts`.
 - Evolution trigger keyword normalization: `src/evolution-trigger-keywords.test.ts`.
-- Evolution backlog writes: `src/backlog-writer.test.ts` and `src/evolution-backlog.test.ts`.
-- Evolution backlog action/tool/command behavior: `src/evolution-backlog-actions.test.ts`, `src/evolution-command.test.ts`, and `src/plugin.test.ts`.
+- Evolution direct review writes and log migration: `src/backlog-writer.test.ts` and `src/evolution-backlog.test.ts`.
+- Evolution tool/command removal behavior: `src/plugin.test.ts` and `manifest.test.ts`.
 
 When changing runtime paths, include tests for both the desired new location and non-overwrite startup behavior.
 
@@ -173,22 +170,21 @@ When changing first-install examples, edit `skills/skill-harness/assets/*.md` an
 
 Intent markdown must keep valid YAML frontmatter and the expected sections used by `intent-validation.ts` and the skill-harness skill references.
 
-## Evolution Backlog Workflow
+## Evolution Workflow
 
-Do not edit `~/.openclaw/plugins/skill-harness/evolution.json` manually. Use:
+Evolution no longer creates backlog items or exposes `skill_harness_evolution` / `/skill-harness evolution`. Background reviews edit runtime `~/.openclaw/plugins/skill-harness/intents/*.md` directly, validate changed/targeted intents, roll back invalid edits, and record compact outcomes under `processedEvents` in `~/.openclaw/plugins/skill-harness/evolution.json`.
 
-```text
-/skill-harness evolution show
-/skill-harness evolution list
-/skill-harness evolution review-health --days 7
-/skill-harness evolution validate-intents <intent-id>
-/skill-harness evolution mark-processed --id <item-id> --expected-updated-at <timestamp>
-/skill-harness evolution mark-dismissed --id <item-id> --expected-updated-at <timestamp>
+Do not edit `~/.openclaw/plugins/skill-harness/evolution.json` manually for normal work. It stores schema v4 `triggerKeywords` plus `processedEvents`; legacy backlog `items` are discarded during migration.
+
+For manual runtime intent edits, read current runtime intent Markdown, make the smallest grounded change, then run at least:
+
+```bash
+pnpm test src/intent-validation.test.ts
+pnpm run test
+pnpm run build
 ```
 
-Agents may call the structured `skill_harness_evolution` tool for the same operations.
-
-Process one backlog finding at a time unless the user explicitly asks for a bounded batch. For split, merge, rename, deletion, or any broad intent-boundary change, show the planned file operations and get explicit confirmation first.
+For split, merge, rename, deletion, or any broad intent-boundary change, show the planned file operations and get explicit confirmation first.
 
 ## OpenClaw SDK Usage
 

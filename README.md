@@ -9,7 +9,7 @@ An OpenClaw plugin that pre-scans user intent before main-agent replies and inje
 
 - Package version: `2026.6.11`; OpenClaw compatibility in `package.json` targets Plugin API and Gateway `>=2026.6.11`.
 - Branch state inspected on `main` at `f803ae9` (`feat: inject domain skills prompt metadata (#48)`).
-- Recent implementation work focused on OpenClaw-native Evolution tool/command surfaces, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and recursive async skill-root indexing for workspace, state, plugin, and bundled skills.
+- Recent implementation work focused on direct runtime Intent Evolution, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and recursive async skill-root indexing for workspace, state, plugin, and bundled skills.
 - Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/skill-harness/intents`.
 - Codebase shape from `pygount` excluding dependencies/build output: 51 TypeScript files with 13,296 code lines, 15 Markdown files, 3 JSON files, and 70 counted files total.
 - TypeScript line split from direct file line counts: 25 runtime files / 8,716 lines, 23 test files / 11,384 lines, 3 root/tooling files / 30 lines; test/runtime line ratio is about 1.31x.
@@ -75,13 +75,10 @@ index.ts
        │    ├─ trigger-checker.ts → checkEvolutionTriggers() (eight configurable triggers plus runtime trigger keywords)
        │    ├─ review-subagent.ts → buildReviewPrompt() + parseReviewFindings() + runReviewSubagent()
        │    └─ backlog-writer.ts + evolution-backlog.ts → $OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json
-       │         ├─ backlog-writer.ts uses file-utils.ts for safeWriteJson()
-       │         └─ evolution-backlog.ts + evolution-trigger-keywords.ts validate backlog data and trigger keyword defaults
+       │         ├─ backlog-writer.ts records direct-review processedEvents and trigger keyword updates
+       │         └─ evolution-backlog.ts + evolution-trigger-keywords.ts validate evolution logs and trigger keyword defaults
        │
-       ├─ evolution-backlog-actions.ts + intent-validation.ts → transactional backlog processing support
-       │    ├─ evolution-tool.ts → agent tool `skill_harness_evolution`
-       │    ├─ evolution-command.ts → plugin command `/skill-harness evolution`
-       │    └─ skills/skill-harness/references/evolution.md
+       ├─ intent-validation.ts → runtime intent Markdown validation for direct Evolution edits
        │
        ├─ session.ts → session guards (isEnabledForAgent, isEligibleInteractiveSession, etc.)
        │
@@ -92,32 +89,29 @@ index.ts
 
 ### Module Responsibilities
 
-| Module                         | Purpose                                                                                                                                                 |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plugin.ts`                    | Plugin entry point, initializes runtime data, seeds empty intent catalogs from skill assets, and registers hooks on OpenClaw lifecycle events           |
-| `hooks.ts`                     | Event handlers for prompt building, tool/agent tracking, and session cleanup                                                                            |
-| `subagent.ts`                  | Runs tool-free topic switch, intent classification, and instruction-writing sub-agents with model selection                                             |
-| `skill-catalog.ts`             | Resolves `skill: <name>` references from matched intent Markdown into available skill metadata                                                          |
-| `intent-loader.ts`             | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                                                                 |
-| `file-utils.ts`                | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                                      |
-| `constants.ts`                 | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                                       |
-| `types.ts`                     | All shared type definitions for plugin, config, intent, result, and turn shapes                                                                         |
-| `evolution-types.ts`           | Shared types for Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource                                                    |
-| `session-tracker.ts`           | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
-| `stats-aggregator.ts`          | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
-| `trigger-checker.ts`           | Detect eight configurable Evolution triggers from completed turns using runtime trigger keywords                                                        |
-| `review-subagent.ts`           | Build trigger-specific review prompts and run the read-only review sub-agent with a `read` allowlist                                                    |
-| `review-queue.ts`              | Serialized promise queue for background evolution reviews                                                                                               |
-| `backlog-writer.ts`            | Merge review findings atomically into `evolution.json`                                                                                                  |
-| `evolution-backlog.ts`         | Validate/migrate backlog schema, root `triggerKeywords`, and atomic mutation primitives                                                                 |
-| `evolution-backlog-actions.ts` | Shared JSON-compatible action service for backlog reads, validation, targeting, and optimistic completion                                               |
-| `evolution-tool.ts`            | Agent-callable `skill_harness_evolution` tool for structured backlog operations                                                                         |
-| `evolution-command.ts`         | Plugin-owned `/skill-harness evolution` command for user-facing backlog operations                                                                      |
-| `intent-validation.ts`         | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
-| `conversation-extract.ts`      | Extract and truncate recent conversation turns for intent context                                                                                       |
-| `prompt.ts`                    | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
-| `session.ts`                   | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                                        |
-| `config.ts`                    | Zod schema validation with defaults and clamping for plugin configuration                                                                               |
+| Module                    | Purpose                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugin.ts`               | Plugin entry point, initializes runtime data, seeds empty intent catalogs from skill assets, and registers hooks on OpenClaw lifecycle events           |
+| `hooks.ts`                | Event handlers for prompt building, tool/agent tracking, and session cleanup                                                                            |
+| `subagent.ts`             | Runs tool-free topic switch, intent classification, and instruction-writing sub-agents with model selection                                             |
+| `skill-catalog.ts`        | Resolves `skill: <name>` references from matched intent Markdown into available skill metadata                                                          |
+| `intent-loader.ts`        | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                                                                 |
+| `file-utils.ts`           | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                                      |
+| `constants.ts`            | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                                       |
+| `types.ts`                | All shared type definitions for plugin, config, intent, result, and turn shapes                                                                         |
+| `evolution-types.ts`      | Shared types for Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource                                                    |
+| `session-tracker.ts`      | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
+| `stats-aggregator.ts`     | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
+| `trigger-checker.ts`      | Detect eight configurable Evolution triggers from completed turns using runtime trigger keywords                                                        |
+| `review-subagent.ts`      | Build trigger-specific review prompts and run the bounded read/write review sub-agent rooted at the runtime intents directory                           |
+| `review-queue.ts`         | Serialized promise queue for background evolution reviews                                                                                               |
+| `backlog-writer.ts`       | Record direct Evolution review outcomes and trigger keyword updates atomically into `evolution.json`                                                    |
+| `evolution-backlog.ts`    | Validate/migrate the Evolution log schema and root `triggerKeywords`; legacy backlog items are dropped during migration                                 |
+| `intent-validation.ts`    | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
+| `conversation-extract.ts` | Extract and truncate recent conversation turns for intent context                                                                                       |
+| `prompt.ts`               | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
+| `session.ts`              | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                                        |
+| `config.ts`               | Zod schema validation with defaults and clamping for plugin configuration                                                                               |
 
 Every `session_end` removes the ended session from tracker memory. Final lifecycle reasons (`new`, `reset`, `idle`, `daily`, `compaction`, and `deleted`) also delete that session's JSON; restart-oriented reasons preserve it for reload. Each `session_end` additionally removes session JSON files under the runtime `sessions/` directory whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch root-level `stats.json`, `evolution.json`, transcripts, or other plugin data.
 
@@ -367,27 +361,33 @@ plugin entirely for low-thinking turns.
 
 ### Intent Evolution
 
-Intent Evolution is an opt-in observation and proposal pipeline. It does
-not edit intent files automatically. When enabled, each completed tracked turn
-is checked for eight trigger types:
+Intent Evolution is an opt-in direct runtime intent improvement pipeline. When
+enabled, each completed tracked turn is checked for eight trigger types:
 
-| Trigger              | Default condition                                                                                                      | Intent Markdown correction target                                                                                |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `skill-candidate`    | Current turn has at least 5 tool calls                                                                                 | `Skills & Tools`, `Concrete Workflow`, or `Experience`                                                           |
-| `process-gap`        | Current turn has at least 2 tool errors                                                                                | Guidelines, tool examples, workflow, or pitfalls                                                                 |
-| `successful-pattern` | Successful tool-heavy or skill-assisted completed turn with a runtime success keyword                                  | `Experience`, `Concrete Workflow`, Response Strategy, or pending `triggerKeywords.successfulPattern` suggestions |
-| `satisfaction-check` | Every 10th tracked turn                                                                                                | Boundaries, examples, Guidelines, or Response Strategy                                                           |
-| `missing-intent`     | Classified intent is `other`                                                                                           | A narrowly scoped new intent draft                                                                               |
-| `weak-intent`        | Classification confidence is below 0.5                                                                                 | Frontmatter triggers/examples/domain/fastpath and boundary clarity                                               |
-| `behavior-fix`       | Latest user input contains a runtime correction keyword and is not a quoted ingest/dream diary/memory-fragment payload | Fastpath metadata, guidance, workflow, or pending `triggerKeywords.behaviorFix` suggestions                      |
-| `entity-context`     | Runtime entity-context learning keyword plus `TOOLS.md`, `MEMORY.md`, or a `memory` path/source signal                 | `Experience`, `Concrete Workflow`, or pending `triggerKeywords.entityContext` suggestions                        |
+| Trigger              | Default condition                                                                                                      | Intent Markdown correction target                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `skill-candidate`    | Current turn has at least 5 tool calls                                                                                 | `Skills & Tools`, `Concrete Workflow`, or `Experience`                                               |
+| `process-gap`        | Current turn has at least 2 tool errors                                                                                | Guidelines, tool examples, workflow, or pitfalls                                                     |
+| `successful-pattern` | Successful tool-heavy or skill-assisted completed turn with a runtime success keyword                                  | `Experience`, `Concrete Workflow`, Response Strategy, or `triggerKeywords.successfulPattern` updates |
+| `satisfaction-check` | Every 10th tracked turn                                                                                                | Boundaries, examples, Guidelines, or Response Strategy                                               |
+| `missing-intent`     | Classified intent is `other`                                                                                           | A narrowly scoped new intent draft                                                                   |
+| `weak-intent`        | Classification confidence is below 0.5                                                                                 | Frontmatter triggers/examples/domain/fastpath and boundary clarity                                   |
+| `behavior-fix`       | Latest user input contains a runtime correction keyword and is not a quoted ingest/dream diary/memory-fragment payload | Fastpath metadata, guidance, workflow, or `triggerKeywords.behaviorFix` updates                      |
+| `entity-context`     | Runtime entity-context learning keyword plus `TOOLS.md`, `MEMORY.md`, or a `memory` path/source signal                 | `Experience`, `Concrete Workflow`, or `triggerKeywords.entityContext` updates                        |
 
-All matching triggers are reviewed in one background, read-only sub-agent run.
-Each trigger receives a distinct review focus and correction goal, and may return
-no finding. Valid findings are merged by pending `type + dedupeKey` into the
-atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json` backlog. Runtime trigger keyword lists live in the same root document under
-`triggerKeywords.successfulPattern`, `triggerKeywords.behaviorFix`, and `triggerKeywords.entityContext`; legacy `openclaw.json` trigger `keywords` are accepted only as first-run or v1/v2 migration seeds. `entity-context` deliberately avoids LLM entity detection: it requires a learning phrase such as `看看`, `看一下`, or `看下` plus a source signal from text or sanitized read/search tool params limited to `TOOLS.md`, `MEMORY.md`, or paths containing `memory`. Review failures are
-fail-open and never block or alter the main reply.
+All matching triggers are reviewed in one background, bounded read/write
+sub-agent run rooted at the runtime intents directory. Each trigger receives a
+distinct review focus and correction goal, and may return no finding. Valid
+intent edits are applied directly to runtime `intents/*.md`, validated, and
+rolled back on validation failure. Trigger keyword findings update the same
+atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json`
+document under `triggerKeywords.successfulPattern`, `triggerKeywords.behaviorFix`,
+and `triggerKeywords.entityContext`; legacy `openclaw.json` trigger `keywords`
+are accepted only as first-run or legacy migration seeds. `entity-context`
+deliberately avoids LLM entity detection: it requires a learning phrase such as
+`看看`, `看一下`, or `看下` plus a source signal from text or sanitized read/search
+tool params limited to `TOOLS.md`, `MEMORY.md`, or paths containing `memory`.
+Review failures are fail-open and never block or alter the main reply.
 
 The reviewer is intentionally scoped to improving runtime `intents/*.md`, following
 the bundled `skill-harness` Skill rules. It receives the full matched intent
@@ -398,10 +398,10 @@ metadata resolved from the matched intent body, so it can judge whether
 Guidelines, Skills & Tools, Concrete Workflow, or Experience should preserve a
 stable skill path. Depending on the trigger, it proposes a new intent draft or
 targeted changes to frontmatter, Guidelines, Skills & Tools, Response Strategy,
-Concrete Workflow, or Experience. It may also create pending `trigger-keywords`
-findings when the evidence supports a stable success/correction/entity-context
-phrase, but it does not apply those keyword changes automatically. It never
-proposes changes to skills, tools, AGENTS.md, SOUL.md, or other production files.
+Concrete Workflow, or Experience. It may also report `trigger-keywords` findings
+when the evidence supports a stable success/correction/entity-context phrase;
+the host records those keyword updates in `evolution.json`. It never proposes
+changes to skills, tools, AGENTS.md, SOUL.md, or other production files.
 The review prompt is intentionally asymmetric: `behavior-fix` is recall-biased
 for explicit corrections and concrete misroutes, while `successful-pattern`,
 `skill-candidate`, and `entity-context` stay precision-biased unless reusable
@@ -409,80 +409,53 @@ workflow, skill/tool, or bounded memory-lookup evidence is present. No-finding
 responses may include an optional bounded `reasonCode` (`routine-tool-use`,
 `outside-intent-scope`, `insufficient-evidence`, `wrong-trigger`,
 `already-covered`, or `privacy-sensitive`) so runtime health can explain why a
-review intentionally produced no backlog item.
+review intentionally produced no change.
 The review sub-agent uses `runEmbeddedAgent` with `promptMode="minimal"`,
-`modelRun=false`, and `toolsAllow=["read"]` so OpenClaw materializes only the
-core `read` tool. The `read` tool is reserved for inspecting relevant
-`SKILL.md` files referenced by the review snapshot's Skills Used paths or, for
-`entity-context`, explicitly mentioned candidate sources limited to `TOOLS.md`,
-`MEMORY.md`, or paths containing `memory`. Trigger detection never reads file
-contents; the reviewer may read only those candidates and must not browse
-arbitrary filesystem paths or copy raw private memory. If the primary Evolution
-review model fails, the review is retried once with `evolution.modelFallback`
-when configured; parse failures and provider errors are recorded as processed
-event outcomes instead of silently disappearing.
+`modelRun=false`, and `toolsAllow=["read", "write"]` rooted at the runtime
+intents directory. `write` is for direct edits to runtime `intents/*.md`; the
+reviewer must not write bundled intents, source files, skills, config, or
+`evolution.json`. `read` is limited to the same runtime intents directory and is
+used only to inspect the files being edited. Trigger detection never reads file
+contents; the reviewer must not browse arbitrary filesystem paths or copy raw
+private memory. If the primary Evolution review model fails,
+the review is retried once with `evolution.modelFallback` when configured; parse
+failures and provider errors are recorded as processed event outcomes instead of
+silently disappearing.
 
 `evolution.json` is protected like `stats.json`: both live at the runtime data
 root, are not loaded as session state, and are never removed by session
-lifecycle or 14-day retention cleanup. Schema v3 stores root `triggerKeywords`
-plus structured `processedEvents` observability and backlog findings. Each
-processed event stores `{ processedAt, triggers, findingCount, outcome }`, where
-`outcome` is one of `wrote-items`, `nofinding`, `schema-rejected`,
-`parse-failed`, `subagent-error`, or `unknown` for migrated legacy entries.
-`nofinding` events may additionally store aggregate `noFindingReasonCounts`.
-`schema-rejected` means the reviewer returned requested positive findings but
-none passed the finding schema, which separates malformed positives from true
-no-finding reviews. Schema-rejected events may store aggregate
-`schemaRejectionReasonCounts` using bounded categories such as
-`missing-required-field`, `missing-target`, `invalid-operation`,
-`invalid-trigger-keyword-target`, `invalid-field-type`, `too-long-field`,
-`invalid-shape`, or `unknown`. These observability fields store only
-machine-readable count summaries; they do not store raw snapshots, user text,
-evidence strings, raw model replies, or Zod error dumps. Intent Markdown findings include `targetKind:
-"intent-markdown"`, `operation` (`create`, `refine`, `split`, or `merge`), and
-all affected `targetIntentIds`. Trigger keyword findings include `targetKind:
-"trigger-keywords"`, `targetTrigger`, and a pending `keywordChange`. Existing
-schema v1/v2 items migrate to v3 and preserve legacy config keyword seeds; v1
-intent items use `operation: "unknown"` and empty targets until they can be
-grounded safely. Trigger keyword state is cached at plugin startup and refreshed
-after backlog writes so hook execution does not repeatedly read and parse the
-full backlog.
+lifecycle or 14-day retention cleanup. Schema v4 stores root `triggerKeywords`
+plus structured `processedEvents` observability. There is no `items` array and
+no pending/processed/dismissed backlog lifecycle. Each processed event stores
+`{ processedAt, triggers, changeCount, outcome }`, where `outcome` is one of
+`applied`, `nofinding`, `schema-rejected`, `parse-failed`, `subagent-error`,
+`validation-failed`, or `unknown` for migrated legacy entries. Applied events may
+store `changedIntentIds` and compact `changes`. `nofinding` events may
+additionally store aggregate `noFindingReasonCounts`. `schema-rejected` means
+the reviewer returned requested positive findings but none passed the finding
+schema, which separates malformed positives from true no-finding reviews.
+Schema-rejected events may store aggregate `schemaRejectionReasonCounts` using
+bounded categories such as `missing-required-field`, `missing-target`,
+`invalid-operation`, `invalid-trigger-keyword-target`, `invalid-field-type`,
+`too-long-field`, `invalid-shape`, or `unknown`. These observability fields store
+only machine-readable summaries; they do not store raw snapshots, user text,
+raw model replies, secrets, or Zod error dumps. Intent Markdown findings include
+`targetKind: "intent-markdown"`, `operation` (`create`, `refine`, `split`, or
+`merge`), and all affected `targetIntentIds`. Trigger keyword findings include
+`targetKind: "trigger-keywords"`, `targetTrigger`, and keyword additions/removals.
+Legacy schema v1-v3 files migrate to v4 by preserving `triggerKeywords` and
+`processedEvents` and dropping stale backlog `items`. Trigger keyword state is
+cached at plugin startup and refreshed after evolution log writes so hook
+execution does not repeatedly read and parse the full log.
 
-### Skill Harness Backlog Mode
+### Direct Evolution Mode
 
-The bundled `skill-harness` Skill has an explicit-only `backlog` mode that
-processes exactly one pending finding per invocation. The mode treats current
-Intent Markdown as the source of truth, backs up affected files under `/tmp`,
-validates the result, and only then marks the item `processed`. Validation or
-optimistic-concurrency failures restore the pre-processing files and leave the
-item `pending`. `split`, `merge`, and deletions require user confirmation. The
-mode never commits, pushes, dismisses items, or edits the backlog JSON directly.
-Detailed transactional steps live in
-`skills/skill-harness/references/evolution.md`.
-
-Backlog operations are exposed through two OpenClaw-native surfaces:
-
-- Agent tool `skill_harness_evolution` for structured JSON actions such as
-  `{ "action": "show", "id": "IMP-..." }`.
-- Plugin-owned command `/skill-harness evolution` for direct user/operator
-  workflows:
-
-```text
-/skill-harness evolution list
-/skill-harness evolution show --id IMP-...
-/skill-harness evolution review-health --days 7
-/skill-harness evolution set-target --id IMP-... --operation refine --target-intent productivity
-/skill-harness evolution validate-intents productivity
-/skill-harness evolution mark-processed --id IMP-... --expected-updated-at <timestamp>
-```
-
-`review-health` reports total/recent processed events by outcome, recent trigger
-counts, no-finding reason-code counts, schema-rejection reason-code counts, item
-status totals, and coarse rates for no-finding, schema-rejected, parse-failed,
-and no-new-item windows. It is read-only and safe for runtime audits.
-
-All mutations validate schema v3 and use a same-directory temporary file plus
-atomic rename. `mark-processed` rejects a stale item `updatedAt`.
+Evolution no longer exposes `skill_harness_evolution` or `/skill-harness evolution`.
+Background reviews apply safe runtime intent edits directly, validate changed or
+targeted intents, roll back invalid edits, and record the event in
+`evolution.json`. Manual intent evolution is still documented in
+`skills/skill-harness/references/evolution.md`, but it operates on runtime intent
+Markdown and test/build gates rather than backlog items.
 
 ## Key Design Decisions
 
@@ -701,9 +674,9 @@ The test suites cover:
 - Internal/inter-session turn detection and conversation-history filtering
 - Per-turn historical intent matching, duplicate handling, and prompt injection
 - Eight Evolution triggers, thresholds, runtime trigger keywords, and multi-trigger turns
-- Skill Harness Skill review prompts, response parsing, and read-only reviewer runs
-- Serialized background reviews and atomic, idempotent evolution backlog writes
-- Schema v1/v2-to-v3 migration, structured finding targets, trigger keyword suggestions, and evolution-backlog command concurrency checks
-- Intent Markdown structure/catalog validation and explicit-only skill-harness backlog mode
+- Skill Harness Skill review prompts, response parsing, and bounded read/write reviewer runs
+- Serialized background reviews and atomic, idempotent evolution log writes
+- Schema v1-v3-to-v4 migration, structured processed event records, direct intent edit validation/rollback, and trigger keyword updates
+- Intent Markdown structure/catalog validation and manual direct Evolution mode
 - Recursive async skill catalog indexing, symlink cycle guards, disabled bundled skill filtering, and domain skill prompt injection
 - Protection of root-level `evolution.json` from session loading and retention cleanup

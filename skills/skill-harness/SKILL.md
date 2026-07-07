@@ -115,8 +115,7 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" 
 mv intent.md ~/.openclaw/plugins/skill-harness/intents/<intent-id>.md
 ```
 
-Validate with
-`skill_harness_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
+Validate with `pnpm test src/intent-validation.test.ts` plus the relevant plugin gates.
 
 ### Failure modes
 
@@ -200,105 +199,67 @@ Validate all new intents, check for collisions, and deliver.
 
 ### When to use
 
-User explicitly asks to process an evolution backlog finding.
+User explicitly asks to manually evolve runtime intent Markdown or inspect Evolution behavior.
 
-Keywords: "process backlog", "evolve intent", "handle evolution finding", "process the next finding"
+Keywords: "evolve intent", "調整 intent", "修 intent", "check evolution", "inspect evolution"
 
-**Never enter this mode merely because `~/.openclaw/plugins/skill-harness/evolution.json` contains pending items.**
+**There is no pending backlog-item workflow anymore.** Background Evolution reviews edit runtime intents directly and record outcomes in `~/.openclaw/plugins/skill-harness/evolution.json`.
 
-Read and follow `references/evolution.md` before processing a finding.
+Read and follow `references/evolution.md` before manual intent evolution.
 
 ### Workflow
 
-**Step 1 — Select finding**
+**Step 1 — Ground current state**
 
-Use `skill_harness_evolution({ action: "show" })` to select the default pending
-finding (highest frequency, oldest `createdAt`), or
-`skill_harness_evolution({ action: "show", id: "<item-id>" })` when the user
-supplies an ID.
+Read the target runtime intent Markdown under `~/.openclaw/plugins/skill-harness/intents/`, the compact intent catalog, and relevant references.
 
-Re-read the selected item — it must still be `pending`.
+**Step 2 — Decide scope**
 
-**Step 2 — Ground against current state**
-
-Read the target intent markdown, the compact intent catalog, and relevant references.
-
-Before applying a suggested body edit, compare the filename-derived intent id, frontmatter triggers, examples, domain, fastpath metadata, and body:
+Before changing routing metadata, filenames, or body sections, compare the filename-derived intent id, frontmatter triggers, examples, domain, fastpath metadata, and body:
 
 - If the filename id and metadata are correct and only the body drifted, refine the body back to the declared boundary.
 - If the body is more accurate than the current filename id or metadata, propose a rename or metadata update and ask for explicit confirmation before changing filenames or references.
 - If the body contains multiple responsibilities or an oversized boundary, propose a split plan and ask for explicit confirmation before creating/moving/deleting intent files.
-- If the mismatch comes from a duplicate or superseded finding, dismiss it instead of reshaping a healthy intent.
+- If the mismatch is already fixed by current runtime intents, do nothing and report that no edit is needed.
 
-For legacy items with `operation: unknown`, infer metadata:
+**Step 3 — Apply smallest safe edit**
 
-```text
-skill_harness_evolution({
-  action: "set-target",
-  id: "<item-id>",
-  operation: "<operation>",
-  targetIntentIds: ["<intent-id>"]
-})
-```
+Apply only grounded runtime intent Markdown changes:
 
-**Step 3 — Backup + Apply**
+- `create` → create a new narrow intent.
+- `refine` → update the target intent without broadening unrelated behavior.
+- `rename` → only after user confirmation; update filename-derived id and stale references together.
+- `split`/`merge` → only after user confirmation.
 
-```bash
-# Create backup directory
-mkdir -p /tmp/skill-harness-process-backlog/<item-id>-<timestamp>/
-
-# Backup every file that may be modified or deleted
-```
-
-Then apply:
-
-- `create` → new intent
-- `refine` → update target intent
-- `rename` → only after user confirmation; update filename-derived id and stale references together
-- `split`/`merge` → only after user confirmation
+Do not edit `evolution.json`; normal runtime review owns processed event records.
 
 **Step 4 — Validate**
 
 ```bash
+pnpm test src/intent-validation.test.ts
 pnpm run test
 pnpm run build
 ```
 
-Before running tests, validate the target intent with
-`skill_harness_evolution({ action: "validate-intents", ids: ["<target-intent-id>"] })`.
+**Step 5 — Report**
 
-**Step 5 — Process, Dismiss, or Rollback**
-
-```text
-# All checks pass → mark processed
-skill_harness_evolution({ action: "mark-processed", id: "<item-id>", expectedUpdatedAt: "<timestamp>" })
-
-# Duplicate/superseded/unsafe/rejected finding → mark dismissed
-skill_harness_evolution({ action: "mark-dismissed", id: "<item-id>", expectedUpdatedAt: "<timestamp>" })
-
-# Validation fails → restore from backup, leave item pending
-```
-
-Dismiss instead of leaving pending when the finding is clearly duplicate, superseded by a better current intent, unsafe, or explicitly rejected by the user. Leave genuinely ambiguous or blocked findings pending.
-
-**🔴 CHECKPOINT**: After processing, before commit — show diff preview and confirm no conflicts.
+Report affected files, validation results, and whether any rollback occurred. Never commit or push unless the user explicitly asks.
 
 ### Failure modes
 
-| Trigger                                            | First fix                                                 | Fallback                                                                    |
-| -------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------- |
-| **Backlog finding already processed**              | Skip, mark as `already_processed`                         | Re-check `~/.openclaw/plugins/skill-harness/evolution.json` state           |
-| **Target intent deleted or missing**               | Skip finding, log warning with missing intent ID          | Leave item `pending`, report to user for manual resolution                  |
-| **Validation fails after apply**                   | Restore from `/tmp/skill-harness-process-backlog/` backup | Leave item `pending`, report validation errors to user                      |
-| **Suggested change breaks existing intent format** | Reject the suggestion, keep original intent unchanged     | Mark `dismissed` if clearly invalid; otherwise leave `pending` with blocker |
+| Trigger                              | First fix                                        | Fallback                                          |
+| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------- |
+| **Target intent deleted or missing** | Re-read runtime intent directory and catalog     | Ask user whether to create a new intent           |
+| **Validation fails after apply**     | Restore only the changed runtime intent files    | Report validation errors and leave files restored |
+| **Boundary change is broad**         | Present rename/split/merge plan for confirmation | Keep existing intent unchanged                    |
 
 ### Anti-patterns
 
-| #   | Anti-pattern                                            | Why not                                                      | Do instead                                                                                 |
-| --- | ------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| 1   | **Process multiple backlog findings in one invocation** | Mixes context, impossible to track which finding was handled | Exactly one pending finding per invocation unless user explicitly requests a bounded batch |
-| 2   | **Skip validation before commit**                       | May introduce format errors or collisions                    | Always run validate-intents, test, build                                                   |
-| 3   | **Enter evolve mode without explicit user request**     | Backlog items may be stale or irrelevant                     | Only enter when user says "process backlog"                                                |
+| #   | Anti-pattern                                       | Why not                                       | Do instead                                       |
+| --- | -------------------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
+| 1   | **Process non-existent backlog items**             | Evolution no longer stores pending items      | Inspect processedEvents or edit intents directly |
+| 2   | **Skip validation before handoff**                 | May introduce format errors or collisions     | Always run intent-validation, test, and build    |
+| 3   | **Manually edit `evolution.json` for normal work** | Bypasses processedEvents audit and migrations | Let runtime review record outcomes               |
 
 ---
 
@@ -368,21 +329,13 @@ When bootstrapping from scratch, copy example intent templates from `assets/`:
 
 ### Validation commands
 
-Use `skill_harness_evolution` for plugin runtime validation and backlog state
-changes.
+Use test/build gates for runtime intent validation. The legacy Evolution tool has
+been removed; Evolution writes processed event records automatically.
 
-```text
-# Validate intent schema and body format
-skill_harness_evolution({ action: "validate-intents", ids: ["<intent-id>"] })
-
-# Validate all intents
-skill_harness_evolution({ action: "validate-intents" })
-
-# List pending backlog items
-skill_harness_evolution({ action: "list" })
-
-# Review recent evolution health
-skill_harness_evolution({ action: "review-health", days: 7 })
+```bash
+pnpm test src/intent-validation.test.ts
+pnpm run test
+pnpm run build
 ```
 
 ```bash
@@ -403,9 +356,9 @@ grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" 
 
 ### Test prompts (dry_run)
 
-| #   | Prompt                                           | Expected behavior                                                                                                        | Mode      |
-| --- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | --------- |
-| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                                      | design    |
-| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                          | inventory |
-| 3   | "Process the next evolution backlog finding"     | Route to **evolve** → `skill_harness_evolution({ action: "show" })` → ground → backup → apply → validate → mark/rollback | evolve    |
-| 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver        | extract   |
+| #   | Prompt                                           | Expected behavior                                                                                                 | Mode      |
+| --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------- |
+| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                               | design    |
+| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory |
+| 3   | "Refine the git intent wording"                  | Route to **evolve** → ground runtime intent → apply smallest safe edit → validate → report                        | evolve    |
+| 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract   |

@@ -9,7 +9,7 @@ const referencePath = path.resolve(
 );
 
 describe("skill-harness backlog mode", () => {
-  it("routes explicit backlog requests to the transactional reference", () => {
+  it("documents direct evolution without backlog tool surfaces", () => {
     const parsed = matter(fs.readFileSync(skillPath, "utf-8"));
     const reference = fs.readFileSync(referencePath, "utf-8");
 
@@ -23,21 +23,18 @@ describe("skill-harness backlog mode", () => {
     expect(parsed.content).toContain("## Mode: evolve");
     expect(parsed.content).toContain("references/evolution.md");
 
-    expect(reference).toContain("only when the user explicitly asks");
-    expect(reference).toContain("Process exactly one pending finding");
-    expect(reference).toContain("skill_harness_evolution");
-    expect(reference).toContain('skill_harness_evolution({ action: "show" })');
-    expect(reference).toContain('action: "set-target"');
-    expect(reference).toContain('action: "validate-intents"');
-    expect(reference).toContain('action: "mark-processed"');
-    expect(reference).toContain('action: "mark-dismissed"');
-    expect(reference).toContain('skill_harness_evolution({ action: "list" })');
+    expect(reference).toContain(
+      "Evolution no longer creates or processes backlog items",
+    );
+    expect(reference).toContain(
+      "bounded `read`/`write` tools rooted at the runtime intents directory",
+    );
+    expect(reference).toContain("schemaVersion: 4");
+    expect(reference).toContain("processedEvents");
+    expect(reference).toContain("There is no `items` array");
+    expect(reference).not.toContain("skill_harness_evolution");
     expect(reference).not.toContain("/skill-harness evolution");
-    expect(reference).toContain("obtain explicit user confirmation");
-    expect(reference).toContain("leave the item `pending`");
-    expect(reference).toContain("duplicate, superseded, unsafe");
-    expect(reference).toContain("Body-boundary Mismatch Decision");
-    expect(reference).toContain("oversized intent");
-    expect(reference).toContain("Propose a rename");
+    expect(reference).toContain("get explicit confirmation before editing");
+    expect(reference).toContain("pnpm test src/intent-validation.test.ts");
   });
 });

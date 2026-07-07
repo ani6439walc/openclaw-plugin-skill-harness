@@ -35,5 +35,5 @@ Ask user to confirm resolution before proceeding to final draft.
 2. Show diff preview to user
 3. Confirm no conflicts
 4. Write to `~/.openclaw/plugins/skill-harness/intents/` on approval
-5. Validate the written intent with
-   `skill_harness_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
+5. Validate the written intent with `pnpm test src/intent-validation.test.ts` and
+   the relevant plugin gates.

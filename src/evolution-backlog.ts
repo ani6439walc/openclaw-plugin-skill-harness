@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { fileExists, readJsonFile, writeJsonAtomic } from "./file-utils.js";
-import type { EvolutionSource } from "./evolution-types.js";
+import type { EvolutionFinding, EvolutionSource } from "./evolution-types.js";
 import {
   EVOLUTION_TRIGGER_TYPES,
   type EvolutionTrigger,
@@ -19,43 +19,16 @@ export const EVOLUTION_OPERATIONS = [
   "split",
   "merge",
 ] as const;
-export const BACKLOG_OPERATIONS = [
-  "unknown",
-  ...EVOLUTION_OPERATIONS,
-  "adjust-trigger-keywords",
-] as const;
 
 export type EvolutionOperation = (typeof EVOLUTION_OPERATIONS)[number];
-export type BacklogOperation = (typeof BACKLOG_OPERATIONS)[number];
-
-export type BacklogItem = {
-  id: string;
-  type: EvolutionTrigger;
-  targetKind: "intent-markdown" | "trigger-keywords";
-  operation: BacklogOperation;
-  targetIntentIds: string[];
-  targetTrigger?: TriggerKeywordTarget;
-  keywordChange?: { add: string[]; remove: string[] };
-  dedupeKey: string;
-  summary: string;
-  correctionGoal: string;
-  details: {
-    evidence: string[];
-    suggestedChange: string;
-  };
-  frequency: number;
-  sources: EvolutionSource[];
-  createdAt: string;
-  updatedAt: string;
-  status: "pending" | "processed" | "dismissed";
-};
 
 export const PROCESSED_EVENT_OUTCOMES = [
-  "wrote-items",
+  "applied",
   "nofinding",
   "schema-rejected",
   "parse-failed",
   "subagent-error",
+  "validation-failed",
   "unknown",
 ] as const;
 
@@ -92,23 +65,44 @@ export type SchemaRejectionReasonCounts = Partial<
   Record<SchemaRejectionReasonCode, number>
 >;
 
+export type AppliedEvolutionChange = {
+  trigger: EvolutionTrigger;
+  targetKind: "intent-markdown" | "trigger-keywords";
+  operation: EvolutionOperation | "adjust-trigger-keywords";
+  targetIntentIds: string[];
+  targetTrigger?: TriggerKeywordTarget;
+  keywordChange?: { add: string[]; remove: string[] };
+  dedupeKey: string;
+  summary: string;
+  evidence: string[];
+  correctionGoal: string;
+  suggestedChange: string;
+};
+
 export type ProcessedEventRecord = {
   processedAt: string;
+  source?: EvolutionSource;
   triggers: EvolutionTrigger[];
-  findingCount: number;
+  changeCount: number;
   outcome: ProcessedEventOutcome;
+  changes?: AppliedEvolutionChange[];
+  changedIntentIds?: string[];
+  validationErrors?: string[];
   noFindingReasonCounts?: NoFindingReasonCounts;
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
 };
 
-export type EvolutionBacklog = {
-  schemaVersion: 3;
+export type EvolutionLog = {
+  schemaVersion: 4;
   createdAt: string;
   updatedAt: string;
   triggerKeywords: EvolutionTriggerKeywords;
   processedEvents: Record<string, ProcessedEventRecord>;
-  items: BacklogItem[];
 };
+
+// Backward-compatible alias for older module imports while the runtime file no
+// longer contains backlog items.
+export type EvolutionBacklog = EvolutionLog;
 
 const LEGACY_TRIGGER_TYPE_MAP: Record<string, EvolutionTrigger> = {
   skill_candidate: "skill-candidate",
@@ -121,26 +115,12 @@ const LEGACY_TRIGGER_TYPE_MAP: Record<string, EvolutionTrigger> = {
   entity_context: "entity-context",
 };
 
-function normalizeBacklogTriggerTypes(raw: unknown): unknown {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
-  const value = raw as Record<string, unknown>;
-  const items = value.items;
-  if (!Array.isArray(items)) return raw;
-  return {
-    ...value,
-    items: items.map((item) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) {
-        return item;
-      }
-      const itemValue = item as Record<string, unknown>;
-      const type = itemValue.type;
-      if (typeof type !== "string") return item;
-      return {
-        ...itemValue,
-        type: LEGACY_TRIGGER_TYPE_MAP[type] ?? type,
-      };
-    }),
-  };
+function normalizeTrigger(value: unknown): EvolutionTrigger | undefined {
+  if (typeof value !== "string") return;
+  const normalized = LEGACY_TRIGGER_TYPE_MAP[value] ?? value;
+  return (EVOLUTION_TRIGGER_TYPES as readonly string[]).includes(normalized)
+    ? (normalized as EvolutionTrigger)
+    : undefined;
 }
 
 const EvolutionSourceSchema = z.object({
@@ -155,15 +135,6 @@ const TriggerKeywordTargetSchema = z.enum([
   "behavior-fix",
   "entity-context",
 ]);
-
-const KeywordChangeSchema = z.object({
-  add: z
-    .array(z.string())
-    .transform((values) => normalizeKeywordList(values, [])),
-  remove: z
-    .array(z.string())
-    .transform((values) => normalizeKeywordList(values, [])),
-});
 
 const TriggerKeywordsSchema = z
   .unknown()
@@ -199,24 +170,76 @@ export function normalizeSchemaRejectionReasonCounts(
   return normalizeAllowlistedCounts(value, SCHEMA_REJECTION_REASON_CODES);
 }
 
+const KeywordChangeSchema = z.object({
+  add: z
+    .array(z.string())
+    .catch([])
+    .transform((values) => normalizeKeywordList(values, [])),
+  remove: z
+    .array(z.string())
+    .catch([])
+    .transform((values) => normalizeKeywordList(values, [])),
+});
+
+const AppliedEvolutionChangeSchema = z
+  .object({
+    trigger: z.unknown().transform((value, ctx): EvolutionTrigger => {
+      const trigger = normalizeTrigger(value);
+      if (!trigger) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "invalid trigger",
+        });
+        return z.NEVER;
+      }
+      return trigger;
+    }),
+    targetKind: z.enum(["intent-markdown", "trigger-keywords"]),
+    operation: z.enum([...EVOLUTION_OPERATIONS, "adjust-trigger-keywords"]),
+    targetIntentIds: z.array(z.string().trim().min(1)).catch([]),
+    targetTrigger: TriggerKeywordTargetSchema.optional(),
+    keywordChange: KeywordChangeSchema.optional(),
+    dedupeKey: z.string().trim().min(1),
+    summary: z.string().trim().min(1),
+    evidence: z.array(z.string()).catch([]),
+    correctionGoal: z.string().trim().min(1),
+    suggestedChange: z.string().trim().min(1),
+  })
+  .transform((change): AppliedEvolutionChange => change);
+
 const ProcessedEventRecordSchema = z.union([
   z.string().transform((processedAt): ProcessedEventRecord => ({
     processedAt,
     triggers: [],
-    findingCount: 0,
+    changeCount: 0,
     outcome: "unknown",
   })),
   z
     .object({
       processedAt: z.string(),
-      triggers: z.array(z.enum(EVOLUTION_TRIGGER_TYPES)).catch([]),
-      findingCount: z.number().int().nonnegative().catch(0),
-      outcome: ProcessedEventOutcomeSchema.catch("unknown"),
+      source: EvolutionSourceSchema.optional(),
+      triggers: z
+        .array(z.unknown())
+        .catch([])
+        .transform((values) =>
+          values.flatMap((value) => normalizeTrigger(value) ?? []),
+        ),
+      findingCount: z.number().int().nonnegative().optional(),
+      changeCount: z.number().int().nonnegative().optional(),
+      outcome: z
+        .union([ProcessedEventOutcomeSchema, z.literal("wrote-items")])
+        .catch("unknown"),
+      changes: z.array(AppliedEvolutionChangeSchema).optional(),
+      changedIntentIds: z.array(z.string()).optional(),
+      validationErrors: z.array(z.string()).optional(),
       noFindingReasonCounts: z.unknown().optional(),
       schemaRejectionReasonCounts: z.unknown().optional(),
     })
     .transform(
       ({
+        findingCount,
+        changeCount,
+        outcome,
         noFindingReasonCounts,
         schemaRejectionReasonCounts,
         ...record
@@ -228,6 +251,9 @@ const ProcessedEventRecordSchema = z.union([
           normalizeSchemaRejectionReasonCounts(schemaRejectionReasonCounts);
         return {
           ...record,
+          changeCount:
+            changeCount ?? findingCount ?? record.changes?.length ?? 0,
+          outcome: outcome === "wrote-items" ? "applied" : outcome,
           ...(normalizedReasonCounts
             ? { noFindingReasonCounts: normalizedReasonCounts }
             : {}),
@@ -241,239 +267,98 @@ const ProcessedEventRecordSchema = z.union([
 
 const ProcessedEventsSchema = z.record(z.string(), ProcessedEventRecordSchema);
 
-const BaseItemSchema = z.object({
-  id: z.string(),
-  type: z.enum(EVOLUTION_TRIGGER_TYPES),
-  dedupeKey: z.string(),
-  summary: z.string(),
-  correctionGoal: z.string(),
-  details: z.object({
-    evidence: z.array(z.string()),
-    suggestedChange: z.string(),
-  }),
-  frequency: z.number().int().positive(),
-  sources: z.array(EvolutionSourceSchema),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  status: z.enum(["pending", "processed", "dismissed"]),
-});
-
-const BacklogItemSchema = BaseItemSchema.extend({
-  targetKind: z.enum(["intent-markdown", "trigger-keywords"]),
-  operation: z.enum(BACKLOG_OPERATIONS),
-  targetIntentIds: z.array(z.string().trim().min(1)),
-  targetTrigger: TriggerKeywordTargetSchema.optional(),
-  keywordChange: KeywordChangeSchema.optional(),
-});
-
-function migrateItem(rawItem: unknown): unknown {
-  if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
-    return rawItem;
-  }
-  const item = rawItem as Record<string, unknown>;
-  return {
-    ...item,
-    targetKind: item.targetKind ?? "intent-markdown",
-    operation: item.operation ?? "unknown",
-    targetIntentIds: item.targetIntentIds ?? [],
-  };
-}
-
-const BacklogV1Schema = z.object({
-  schemaVersion: z.literal(1),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  processedEvents: ProcessedEventsSchema,
-  items: z.array(BaseItemSchema),
-});
-
-export const EvolutionBacklogSchema = z.object({
-  schemaVersion: z.literal(3),
+export const EvolutionLogSchema = z.object({
+  schemaVersion: z.literal(4),
   createdAt: z.string(),
   updatedAt: z.string(),
   triggerKeywords: TriggerKeywordsSchema,
   processedEvents: ProcessedEventsSchema,
-  items: z.array(BacklogItemSchema),
 });
+
+export const EvolutionBacklogSchema = EvolutionLogSchema;
 
 export function createBacklog(
   nowIso: string,
   triggerKeywordSeed?: Partial<EvolutionTriggerKeywords>,
-): EvolutionBacklog {
+): EvolutionLog {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     createdAt: nowIso,
     updatedAt: nowIso,
     triggerKeywords: normalizeEvolutionTriggerKeywords(triggerKeywordSeed),
     processedEvents: {},
-    items: [],
   };
 }
 
 export function parseBacklog(
   raw: unknown,
   triggerKeywordSeed?: Partial<EvolutionTriggerKeywords>,
-): EvolutionBacklog {
-  const normalized = normalizeBacklogTriggerTypes(raw);
-  const version = z.object({ schemaVersion: z.number() }).parse(normalized);
-  if (version.schemaVersion === 3) {
-    return EvolutionBacklogSchema.parse(normalized);
-  }
-  if (version.schemaVersion === 2) {
+): EvolutionLog {
+  const version = z.object({ schemaVersion: z.number() }).parse(raw);
+  if (version.schemaVersion === 4) return EvolutionLogSchema.parse(raw);
+
+  if (
+    version.schemaVersion === 1 ||
+    version.schemaVersion === 2 ||
+    version.schemaVersion === 3
+  ) {
     const legacy = z
       .object({
-        schemaVersion: z.literal(2),
         createdAt: z.string(),
         updatedAt: z.string(),
-        processedEvents: ProcessedEventsSchema,
-        items: z.array(z.unknown()),
+        triggerKeywords: TriggerKeywordsSchema.optional(),
+        processedEvents: ProcessedEventsSchema.catch({}),
       })
-      .parse(normalized);
-    return EvolutionBacklogSchema.parse({
-      ...legacy,
-      schemaVersion: 3,
-      triggerKeywords: normalizeEvolutionTriggerKeywords(triggerKeywordSeed),
-      items: legacy.items.map(migrateItem),
+      .parse(raw);
+    return EvolutionLogSchema.parse({
+      schemaVersion: 4,
+      createdAt: legacy.createdAt,
+      updatedAt: legacy.updatedAt,
+      triggerKeywords: normalizeEvolutionTriggerKeywords(
+        legacy.triggerKeywords ?? triggerKeywordSeed,
+      ),
+      processedEvents: legacy.processedEvents,
     });
   }
-  const legacy = BacklogV1Schema.parse(normalized);
-  return EvolutionBacklogSchema.parse({
-    ...legacy,
-    schemaVersion: 3,
-    triggerKeywords: normalizeEvolutionTriggerKeywords(triggerKeywordSeed),
-    items: legacy.items.map(migrateItem),
-  });
+
+  throw new Error(
+    `unsupported evolution schema version: ${version.schemaVersion}`,
+  );
 }
 
 export function readBacklog(
-  backlogPath: string,
+  logPath: string,
   triggerKeywordSeed?: Partial<EvolutionTriggerKeywords>,
-): EvolutionBacklog {
-  return parseBacklog(readJsonFile<unknown>(backlogPath), triggerKeywordSeed);
+): EvolutionLog {
+  return parseBacklog(readJsonFile<unknown>(logPath), triggerKeywordSeed);
 }
 
 export function readEvolutionTriggerKeywords(
-  backlogPath: string,
+  logPath: string,
   triggerKeywordSeed?: Partial<EvolutionTriggerKeywords>,
 ): EvolutionTriggerKeywords {
-  if (!fileExists(backlogPath)) {
+  if (!fileExists(logPath)) {
     return normalizeEvolutionTriggerKeywords(triggerKeywordSeed);
   }
-  return readBacklog(backlogPath, triggerKeywordSeed).triggerKeywords;
+  return readBacklog(logPath, triggerKeywordSeed).triggerKeywords;
 }
 
-export function writeBacklogAtomic(
-  backlogPath: string,
-  backlog: EvolutionBacklog,
-): void {
-  const parsed = EvolutionBacklogSchema.parse(backlog);
-  writeJsonAtomic(backlogPath, parsed);
+export function writeBacklogAtomic(logPath: string, log: EvolutionLog): void {
+  const parsed = EvolutionLogSchema.parse(log);
+  writeJsonAtomic(logPath, parsed);
 }
 
-export function selectPendingItem(
-  backlog: EvolutionBacklog,
-  id?: string,
-): BacklogItem | undefined {
-  if (id) {
-    return backlog.items.find(
-      (item) => item.id === id && item.status === "pending",
-    );
-  }
-  return backlog.items
-    .filter((item) => item.status === "pending")
-    .sort(
-      (a, b) =>
-        b.frequency - a.frequency ||
-        a.createdAt.localeCompare(b.createdAt) ||
-        a.id.localeCompare(b.id),
-    )[0];
-}
-
-export function updatePendingTarget(
-  backlog: EvolutionBacklog,
-  id: string,
-  operation: EvolutionOperation,
-  targetIntentIds: string[],
-  nowIso: string,
-): BacklogItem {
-  const item = selectPendingItem(backlog, id);
-  if (!item) throw new Error(`pending backlog item not found: ${id}`);
-  const normalizedTargets = [
-    ...new Set(targetIntentIds.map((target) => target.trim()).filter(Boolean)),
-  ];
-  if (normalizedTargets.length === 0)
-    throw new Error("at least one target intent ID is required");
-  item.operation = operation;
-  item.targetIntentIds = normalizedTargets;
-  item.updatedAt = nowIso;
-  backlog.updatedAt = nowIso;
-  return item;
-}
-
-export function markPendingProcessed(
-  backlog: EvolutionBacklog,
-  id: string,
-  expectedUpdatedAt: string,
-  nowIso: string,
-): BacklogItem {
-  const item = selectPendingItem(backlog, id);
-  if (!item) throw new Error(`pending backlog item not found: ${id}`);
-  const hasResolvedIntentTarget =
-    item.targetKind === "intent-markdown" &&
-    item.operation !== "unknown" &&
-    item.operation !== "adjust-trigger-keywords" &&
-    item.targetIntentIds.length > 0;
-  if (!hasResolvedIntentTarget) {
-    throw new Error(`backlog item target metadata is unresolved: ${id}`);
-  }
-  if (item.updatedAt !== expectedUpdatedAt) {
-    throw new Error(`backlog item changed since it was selected: ${id}`);
-  }
-  item.status = "processed";
-  item.updatedAt = nowIso;
-  backlog.updatedAt = nowIso;
-  return item;
-}
-
-export function markPendingDismissed(
-  backlog: EvolutionBacklog,
-  id: string,
-  expectedUpdatedAt: string,
-  nowIso: string,
-): BacklogItem {
-  const item = selectPendingItem(backlog, id);
-  if (!item) throw new Error(`pending backlog item not found: ${id}`);
-  if (item.updatedAt !== expectedUpdatedAt) {
-    throw new Error(`backlog item changed since it was selected: ${id}`);
-  }
-  item.status = "dismissed";
-  item.updatedAt = nowIso;
-  backlog.updatedAt = nowIso;
-  return item;
-}
-
-// ============================================================================
-// processedEvents Retention
-// ============================================================================
-
-/**
- * Prune processedEvents entries older than retention period.
- * Modifies the backlog in place.
- * @param backlog - The backlog to prune
- * @param nowMs - Optional current time in ms (defaults to Date.now())
- */
 export function pruneProcessedEvents(
-  backlog: EvolutionBacklog,
+  log: EvolutionLog,
   nowMs: number = Date.now(),
 ): void {
   const cutoff = nowMs - PROCESSED_EVENTS_RETENTION_DAYS * 86_400_000;
-  for (const eventId in backlog.processedEvents) {
+  for (const eventId in log.processedEvents) {
     const eventTime = new Date(
-      backlog.processedEvents[eventId].processedAt,
+      log.processedEvents[eventId].processedAt,
     ).getTime();
-    // Prune expired entries and corrupt data (NaN from invalid dates)
     if (Number.isNaN(eventTime) || eventTime < cutoff) {
-      delete backlog.processedEvents[eventId];
+      delete log.processedEvents[eventId];
     }
   }
 }

@@ -20,8 +20,8 @@ describe("BacklogWriter", () => {
     dedupeKey: "deploy-flow",
     summary: "Reusable deployment flow",
     evidence: ["Five related tool calls"],
-    correctionGoal: "Create a deployment skill",
-    suggestedChange: "Draft SKILL.md",
+    correctionGoal: "Preserve deployment workflow",
+    suggestedChange: "Updated productivity.md Experience with deployment flow",
   };
 
   beforeEach(() => {
@@ -33,46 +33,48 @@ describe("BacklogWriter", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  function readBacklog() {
+  function readLog() {
     return JSON.parse(
       fs.readFileSync(path.join(root, "evolution.json"), "utf-8"),
     );
   }
 
-  it("creates evolution.json and records findings", async () => {
+  it("creates evolution.json and records applied direct changes without backlog items", async () => {
     expect(
       await writer.record("session-1:turn-1", source, [finding], {
         nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+        changedIntentIds: ["productivity"],
       }),
     ).toBe(true);
 
-    expect(readBacklog()).toMatchObject({
-      schemaVersion: 3,
+    expect(readLog()).toMatchObject({
+      schemaVersion: 4,
       updatedAt: "2026-06-11T00:01:00.000Z",
       processedEvents: {
         "session-1:turn-1": {
           processedAt: "2026-06-11T00:01:00.000Z",
+          source,
           triggers: ["skill-candidate"],
-          findingCount: 1,
-          outcome: "wrote-items",
+          changeCount: 1,
+          outcome: "applied",
+          changedIntentIds: ["productivity"],
+          changes: [
+            {
+              trigger: "skill-candidate",
+              targetKind: "intent-markdown",
+              operation: "refine",
+              targetIntentIds: ["productivity"],
+              dedupeKey: "deploy-flow",
+              summary: "Reusable deployment flow",
+            },
+          ],
         },
       },
-      items: [
-        {
-          id: "IMP-20260611-001",
-          type: "skill-candidate",
-          operation: "refine",
-          targetIntentIds: ["productivity"],
-          dedupeKey: "deploy-flow",
-          frequency: 1,
-          status: "pending",
-          summary: "Reusable deployment flow",
-        },
-      ],
     });
+    expect(readLog()).not.toHaveProperty("items");
   });
 
-  it("seeds legacy config keywords on first backlog write and refreshes cache", async () => {
+  it("seeds legacy config keywords on first evolution log write and refreshes cache", async () => {
     const onAfterWrite = vi.fn();
     writer = BacklogWriter.create(root, {
       triggerKeywordSeed: () => ({
@@ -84,7 +86,7 @@ describe("BacklogWriter", () => {
 
     expect(await writer.record("event-1", source, [finding])).toBe(true);
 
-    expect(readBacklog()).toMatchObject({
+    expect(readLog()).toMatchObject({
       triggerKeywords: {
         behaviorFix: [],
         successfulPattern: ["ship it"],
@@ -93,20 +95,16 @@ describe("BacklogWriter", () => {
     expect(onAfterWrite).toHaveBeenCalledOnce();
   });
 
-  it("merges matching pending findings and is event-idempotent", async () => {
+  it("is event-idempotent without merging repeated backlog items", async () => {
     await writer.record("event-1", source, [finding]);
-    await writer.record("event-2", { ...source, sessionId: "session-2" }, [
-      finding,
-    ]);
-    expect(await writer.record("event-2", source, [finding])).toBe(false);
+    expect(await writer.record("event-1", source, [finding])).toBe(false);
 
-    const backlog = readBacklog();
-    expect(backlog.items).toHaveLength(1);
-    expect(backlog.items[0].frequency).toBe(2);
-    expect(backlog.items[0].sources).toHaveLength(2);
+    const log = readLog();
+    expect(Object.keys(log.processedEvents)).toEqual(["event-1"]);
+    expect(log).not.toHaveProperty("items");
   });
 
-  it("records trigger keyword suggestions into evolution.json without applying them", async () => {
+  it("applies trigger keyword findings directly to evolution.json", async () => {
     expect(
       await writer.record(
         "session-1:turn-1",
@@ -124,60 +122,41 @@ describe("BacklogWriter", () => {
             correctionGoal: "Add a precise successful-pattern trigger phrase",
             suggestedChange: "Add ship it to triggerKeywords.successfulPattern",
           },
-          {
-            trigger: "entity-context",
-            targetKind: "trigger-keywords",
-            targetTrigger: "entity-context",
-            addKeywords: ["看一下"],
-            removeKeywords: [],
-            dedupeKey: "entity-context:look-up",
-            summary: "Learn entity-context keyword",
-            evidence: ["User asked to check TOOLS.md for an entity record"],
-            correctionGoal: "Add a precise entity-context trigger phrase",
-            suggestedChange: "Add 看一下 to triggerKeywords.entityContext",
-          },
         ],
         { nowMs: Date.parse("2026-06-11T00:01:00.000Z") },
       ),
     ).toBe(true);
 
-    expect(readBacklog()).toMatchObject({
-      schemaVersion: 3,
+    expect(readLog()).toMatchObject({
+      schemaVersion: 4,
       triggerKeywords: expect.objectContaining({
-        successfulPattern: expect.arrayContaining(["verified"]),
+        successfulPattern: expect.arrayContaining(["verified", "ship it"]),
       }),
-      items: [
-        {
-          type: "successful-pattern",
-          targetKind: "trigger-keywords",
-          operation: "adjust-trigger-keywords",
-          targetTrigger: "successful-pattern",
-          keywordChange: { add: ["ship it"], remove: [] },
-          targetIntentIds: [],
-          status: "pending",
+      processedEvents: {
+        "session-1:turn-1": {
+          outcome: "applied",
+          changes: [
+            {
+              targetKind: "trigger-keywords",
+              operation: "adjust-trigger-keywords",
+              targetTrigger: "successful-pattern",
+              keywordChange: { add: ["ship it"], remove: [] },
+            },
+          ],
         },
-        {
-          type: "entity-context",
-          targetKind: "trigger-keywords",
-          operation: "adjust-trigger-keywords",
-          targetTrigger: "entity-context",
-          keywordChange: { add: ["看一下"], remove: [] },
-          targetIntentIds: [],
-          status: "pending",
-        },
-      ],
+      },
     });
   });
 
-  it("migrates v1 backlogs and updates operation and targets on merge", async () => {
-    fs.mkdirSync(path.join(root, "sessions"));
-    const backlogPath = path.join(root, "evolution.json");
+  it("migrates legacy v3 evolution files by dropping backlog items", async () => {
+    const logPath = path.join(root, "evolution.json");
     fs.writeFileSync(
-      backlogPath,
+      logPath,
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 3,
         createdAt: "2026-06-10T00:00:00.000Z",
         updatedAt: "2026-06-10T00:00:00.000Z",
+        triggerKeywords: { successfulPattern: ["done"] },
         processedEvents: {},
         items: [
           {
@@ -198,36 +177,20 @@ describe("BacklogWriter", () => {
     );
 
     expect(await writer.record("event-2", source, [finding])).toBe(true);
-    expect(readBacklog()).toMatchObject({
-      schemaVersion: 3,
-      items: [
-        {
-          frequency: 2,
-          operation: "refine",
-          targetIntentIds: ["productivity"],
-        },
-      ],
+    expect(readLog()).toMatchObject({
+      schemaVersion: 4,
+      triggerKeywords: { successfulPattern: ["done"] },
+      processedEvents: { "event-2": { outcome: "applied" } },
     });
+    expect(readLog()).not.toHaveProperty("items");
   });
 
   it("preserves corrupt existing evolution.json", async () => {
-    fs.mkdirSync(path.join(root, "sessions"));
-    const backlogPath = path.join(root, "evolution.json");
-    fs.writeFileSync(backlogPath, "{ broken");
+    const logPath = path.join(root, "evolution.json");
+    fs.writeFileSync(logPath, "{ broken");
 
     expect(await writer.record("event-1", source, [finding])).toBe(false);
-    expect(fs.readFileSync(backlogPath, "utf-8")).toBe("{ broken");
-  });
-
-  it("preserves valid JSON with an invalid backlog schema", async () => {
-    fs.mkdirSync(path.join(root, "sessions"));
-    const backlogPath = path.join(root, "evolution.json");
-    fs.writeFileSync(backlogPath, '{"schemaVersion":1,"items":"invalid"}');
-
-    expect(await writer.record("event-1", source, [finding])).toBe(false);
-    expect(fs.readFileSync(backlogPath, "utf-8")).toBe(
-      '{"schemaVersion":1,"items":"invalid"}',
-    );
+    expect(fs.readFileSync(logPath, "utf-8")).toBe("{ broken");
   });
 
   it("records no-finding events for idempotency", async () => {
@@ -238,106 +201,41 @@ describe("BacklogWriter", () => {
       }),
     ).toBe(true);
     expect(await writer.record("event-1", source, [])).toBe(false);
-    expect(readBacklog()).toMatchObject({
+    expect(readLog()).toMatchObject({
       processedEvents: {
         "event-1": {
           processedAt: "2026-06-11T00:01:00.000Z",
           triggers: ["behavior-fix"],
-          findingCount: 0,
+          changeCount: 0,
           outcome: "nofinding",
         },
       },
-      items: [],
     });
+    expect(readLog()).not.toHaveProperty("items");
   });
 
-  it("records sanitized no-finding reason counts on processed events", async () => {
+  it("records sanitized review metadata on processed events", async () => {
     expect(
       await writer.record("event-1", source, [], {
         triggers: ["successful-pattern", "behavior-fix"],
-        outcome: "nofinding",
+        outcome: "schema-rejected",
+        validationErrors: ["bad.md: missing ## Guidelines"],
         noFindingReasonCounts: {
           "routine-tool-use": 2,
-          "wrong-trigger": 1,
-        },
-        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
-      }),
-    ).toBe(true);
-
-    expect(readBacklog()).toMatchObject({
-      processedEvents: {
-        "event-1": {
-          processedAt: "2026-06-11T00:01:00.000Z",
-          triggers: ["successful-pattern", "behavior-fix"],
-          findingCount: 0,
-          outcome: "nofinding",
-          noFindingReasonCounts: {
-            "routine-tool-use": 2,
-            "wrong-trigger": 1,
-          },
-        },
-      },
-      items: [],
-    });
-  });
-
-  it("records sanitized schema-rejection reason counts on processed events", async () => {
-    expect(
-      await writer.record("event-1", source, [], {
-        triggers: ["behavior-fix"],
-        outcome: "schema-rejected",
+          unknown: 1,
+        } as never,
         schemaRejectionReasonCounts: {
-          "missing-target": 2,
-          "invalid-operation": 1,
-        },
-        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+          "missing-required-field": 1,
+          nope: 4,
+        } as never,
       }),
     ).toBe(true);
 
-    expect(readBacklog()).toMatchObject({
-      processedEvents: {
-        "event-1": {
-          processedAt: "2026-06-11T00:01:00.000Z",
-          triggers: ["behavior-fix"],
-          findingCount: 0,
-          outcome: "schema-rejected",
-          schemaRejectionReasonCounts: {
-            "missing-target": 2,
-            "invalid-operation": 1,
-          },
-        },
-      },
-      items: [],
-    });
-  });
-
-  it("records parse-failed and subagent-error outcomes for observability", async () => {
-    expect(
-      await writer.record("event-parse", source, [], {
-        triggers: ["successful-pattern"],
-        outcome: "parse-failed",
-      }),
-    ).toBe(true);
-    expect(
-      await writer.record("event-error", source, [], {
-        triggers: ["behavior-fix", "entity-context"],
-        outcome: "subagent-error",
-      }),
-    ).toBe(true);
-
-    expect(readBacklog()).toMatchObject({
-      processedEvents: {
-        "event-parse": {
-          triggers: ["successful-pattern"],
-          findingCount: 0,
-          outcome: "parse-failed",
-        },
-        "event-error": {
-          triggers: ["behavior-fix", "entity-context"],
-          findingCount: 0,
-          outcome: "subagent-error",
-        },
-      },
+    expect(readLog().processedEvents["event-1"]).toMatchObject({
+      outcome: "schema-rejected",
+      validationErrors: ["bad.md: missing ## Guidelines"],
+      noFindingReasonCounts: { "routine-tool-use": 2 },
+      schemaRejectionReasonCounts: { "missing-required-field": 1 },
     });
   });
 });

@@ -56,6 +56,7 @@ import {
   resolveDomainSkills,
 } from "./skill-catalog.js";
 import { FALLBACK_INTENT } from "./constants.js";
+import { intentsPath } from "./file-utils.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
@@ -136,6 +137,7 @@ export type HookDeps = {
   backlogWriter?: Pick<BacklogWriter, "record">;
   triggerKeywords?: () => EvolutionTriggerKeywords;
   bundledSkillsDir?: string;
+  dataRoot?: string;
 };
 
 function readTriggerKeywordsFailOpen(
@@ -1336,6 +1338,7 @@ export function createHookHandlers(deps: HookDeps) {
         api,
         config: params.resolvedConfig,
         agentId: params.agentId,
+        intentDirectory: intentsPath(deps.dataRoot ?? "."),
         sessionKey: params.ctx.sessionKey ?? params.snapshot.sessionKey,
         messageProvider: params.ctx.messageProvider,
         modelRef: params.modelRef,
@@ -1348,7 +1351,7 @@ export function createHookHandlers(deps: HookDeps) {
         : reviewResult.findings;
       const outcome = Array.isArray(reviewResult)
         ? findings.length > 0
-          ? "wrote-items"
+          ? "applied"
           : "nofinding"
         : reviewResult.outcome;
       const noFindingReasonCounts = Array.isArray(reviewResult)
@@ -1357,6 +1360,12 @@ export function createHookHandlers(deps: HookDeps) {
       const schemaRejectionReasonCounts = Array.isArray(reviewResult)
         ? undefined
         : reviewResult.schemaRejectionReasonCounts;
+      const changedIntentIds = Array.isArray(reviewResult)
+        ? undefined
+        : reviewResult.changedIntentIds;
+      const validationErrors = Array.isArray(reviewResult)
+        ? undefined
+        : reviewResult.validationErrors;
       await backlogWriter.record(
         params.snapshot.eventId,
         {
@@ -1369,10 +1378,18 @@ export function createHookHandlers(deps: HookDeps) {
         {
           triggers: params.triggers,
           outcome,
+          changedIntentIds,
+          validationErrors,
           noFindingReasonCounts,
           schemaRejectionReasonCounts,
         },
       );
+      if (
+        !Array.isArray(reviewResult) &&
+        reviewResult.changedIntentIds?.length
+      ) {
+        deps.refreshIntents();
+      }
     });
   }
 

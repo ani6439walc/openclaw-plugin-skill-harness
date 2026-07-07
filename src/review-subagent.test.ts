@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { OpenClawPluginApi } from "../api.js";
 import { logger } from "../api.js";
 import { resolveConfig } from "./config.js";
@@ -9,8 +12,60 @@ import {
 } from "./review-subagent.js";
 import type { ReviewSnapshot } from "./evolution-types.js";
 
+const tempRoots: string[] = [];
+
+function createIntentDirectory(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-intents-"));
+  tempRoots.push(root);
+  fs.writeFileSync(
+    path.join(root, "other.md"),
+    `---
+triggers:
+  - Requests that do not match a defined intent
+examples:
+  - help with this
+domain: other
+fastpath:
+  keywords:
+    - help
+---
+
+## Guidelines
+
+- Ask for context.
+
+## Response Strategy
+
+- Keep the response short.
+`,
+  );
+  fs.writeFileSync(
+    path.join(root, "social-casual.md"),
+    `---
+triggers:
+  - Casual social chat
+examples:
+  - hi
+domain: social
+---
+
+## Guidelines
+
+- Chat casually.
+
+## Response Strategy
+
+- Reply warmly.
+`,
+  );
+  return root;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
+  for (const root of tempRoots.splice(0)) {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 const snapshot: ReviewSnapshot = {
@@ -96,7 +151,7 @@ describe("buildReviewPrompt", () => {
       "This is an intent-evolution review, not a general audit, skill writer, repository refactor, or passive transcript summary",
     );
     expect(prompt).toContain(
-      "Target artifact shape: propose only runtime intent Markdown changes or pending trigger keyword suggestions",
+      "Target artifact shape: directly edit runtime intent Markdown files when evidence supports a change",
     );
     expect(prompt).toContain("Hard rules — do not violate:");
     expect(prompt).toContain(
@@ -140,7 +195,7 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("reusable title, context, solution steps");
     expect(prompt).toContain("key paths, parameters, and keywords");
     expect(prompt).toContain("external learning entry");
-    expect(prompt).toContain("writes outside runtime intent Markdown");
+    expect(prompt).toContain("do not write outside runtime intent Markdown");
     expect(prompt).toContain("one-off Q&A");
     expect(prompt).toContain(
       "general knowledge rather than intent-routing guidance",
@@ -149,10 +204,10 @@ describe("buildReviewPrompt", () => {
       "Never mention another intent name or id inside an intent body",
     );
     expect(prompt).toContain(
-      "The only correction targets are intent Markdown content and trigger keyword backlog suggestions",
+      "The only correction targets are runtime intent Markdown content and trigger keyword updates recorded by the host",
     );
     expect(prompt).toContain(
-      "suggestedChange must be a concrete intent Markdown draft or patch instruction",
+      "suggestedChange must concisely summarize the file edit already applied",
     );
     expect(prompt).toContain('targetKind="trigger-keywords"');
     expect(prompt).toContain("triggerKeywords.successfulPattern");
@@ -162,7 +217,7 @@ describe("buildReviewPrompt", () => {
       "For successful-pattern, behavior-fix, and entity-context reviews, also check whether the turn exposes a trigger keyword gap",
     );
     expect(prompt).toContain("TOOLS.md, MEMORY.md, or paths containing memory");
-    expect(prompt).toContain("Do not auto-apply trigger keyword changes");
+    expect(prompt).toContain("host records those changes in evolution.json");
     expect(prompt).toContain(
       "Matched Intent section inside review_snapshot as the source of truth for the current intent Markdown",
     );
@@ -303,7 +358,7 @@ describe("buildReviewPrompt", () => {
       "targetIntentIds must list every existing or proposed intent ID affected by the change",
     );
     expect(prompt).toContain(
-      "suggestedChange must be a concrete intent Markdown draft or patch instruction",
+      "suggestedChange must concisely summarize the file edit already applied",
     );
     expect(prompt).toContain(
       "suggestedChange MUST be a JSON string, never an object or array",
@@ -527,7 +582,7 @@ describe("parseReviewFindings", () => {
     ).toBeUndefined();
   });
 
-  it("parses trigger keyword findings for pending backlog suggestions", () => {
+  it("parses trigger keyword findings for direct evolution log updates", () => {
     const parsed = parseReviewFindings(
       JSON.stringify({
         findings: [
@@ -785,7 +840,7 @@ Some more reasoning text here.
 });
 
 describe("runReviewSubagent", () => {
-  it("runs an isolated read-only review with the review timeout", async () => {
+  it("runs an isolated read/write review with the review timeout", async () => {
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: '{"findings":[]}' }],
     });
@@ -804,6 +859,7 @@ describe("runReviewSubagent", () => {
         },
       }),
       agentId: "main",
+      intentDirectory: createIntentDirectory(),
       modelRef: { provider: "google", model: "review" },
       snapshot,
       triggers: ["weak-intent"],
@@ -820,7 +876,7 @@ describe("runReviewSubagent", () => {
         promptMode: "minimal",
         modelRun: false,
         disableTools: false,
-        toolsAllow: ["read"],
+        toolsAllow: ["read", "write"],
         sessionFile: expect.stringMatching(
           /^\/tmp\/skill-harness-review-.+\.session\.jsonl$/,
         ),
@@ -864,6 +920,7 @@ describe("runReviewSubagent", () => {
         api,
         config: resolveConfig({ evolution: { enabled: true } }),
         agentId: "main",
+        intentDirectory: createIntentDirectory(),
         modelRef: { provider: "google", model: "review" },
         snapshot,
         triggers: ["successful-pattern", "behavior-fix"],
@@ -879,6 +936,176 @@ describe("runReviewSubagent", () => {
   });
 
   it("accepts harmless suggestedChange object shape drift without schema rejection", async () => {
+    const intentDirectory = createIntentDirectory();
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      const targetPath = path.join(options.workspaceDir, "social-casual.md");
+      const current = fs.readFileSync(targetPath, "utf-8");
+      fs.writeFileSync(
+        targetPath,
+        current.replace(
+          "- Chat casually.",
+          "- Chat casually.\n- Exclude specific tool capability questions.",
+        ),
+      );
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "behavior-fix",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["social-casual"],
+                  dedupeKey: "tool-inquiry-boundary",
+                  summary: "Tool inquiries should not route as casual chat",
+                  evidence: ["User asked whether a specific tool exists"],
+                  correctionGoal: "Exclude tool inquiries from casual chat",
+                  suggestedChange: {
+                    section: "Guidelines",
+                    patch: "Add a tool-inquiry exclusion.",
+                  },
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual({
+      findings: [
+        expect.objectContaining({
+          trigger: "behavior-fix",
+          targetKind: "intent-markdown",
+          suggestedChange:
+            '{"section":"Guidelines","patch":"Add a tool-inquiry exclusion."}',
+        }),
+      ],
+      changedIntentIds: ["social-casual"],
+      outcome: "applied",
+    });
+  });
+
+  it("records runtime intent Markdown files changed by the review run", async () => {
+    const intentDirectory = createIntentDirectory();
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      const targetPath = path.join(options.workspaceDir, "social-casual.md");
+      const current = fs.readFileSync(targetPath, "utf-8");
+      fs.writeFileSync(
+        targetPath,
+        current.replace(
+          "- Chat casually.",
+          "- Chat casually.\n- Treat tool capability questions as implementation support, not casual chat.",
+        ),
+      );
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "behavior-fix",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["social-casual"],
+                  dedupeKey: "tool-inquiry-boundary",
+                  summary: "Tool inquiries need a clearer boundary",
+                  evidence: ["User asked whether a tool exists"],
+                  correctionGoal: "Clarify the casual-chat boundary",
+                  suggestedChange: "Updated social-casual.md Guidelines.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toMatchObject({
+      outcome: "applied",
+      changedIntentIds: ["social-casual"],
+      findings: [
+        expect.objectContaining({ targetIntentIds: ["social-casual"] }),
+      ],
+    });
+    expect(
+      fs.readFileSync(path.join(intentDirectory, "social-casual.md"), "utf-8"),
+    ).toContain("Treat tool capability questions as implementation support");
+  });
+
+  it("rolls back runtime intent edits that have no matching finding", async () => {
+    const intentDirectory = createIntentDirectory();
+    const original = fs.readFileSync(
+      path.join(intentDirectory, "social-casual.md"),
+      "utf-8",
+    );
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.writeFileSync(
+        path.join(options.workspaceDir, "social-casual.md"),
+        original.replace("- Chat casually.", "- Drift into tool support."),
+      );
+      return { payloads: [{ text: JSON.stringify({ findings: [] }) }] };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ evolution: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "validation-failed",
+      validationErrors: [
+        "review edited runtime intent files without returning an intent-markdown finding",
+      ],
+    });
+    expect(
+      fs.readFileSync(path.join(intentDirectory, "social-casual.md"), "utf-8"),
+    ).toBe(original);
+  });
+
+  it("rejects intent-markdown findings when the review did not edit runtime intents", async () => {
+    const intentDirectory = createIntentDirectory();
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [
         {
@@ -891,13 +1118,10 @@ describe("runReviewSubagent", () => {
                 operation: "refine",
                 targetIntentIds: ["social-casual"],
                 dedupeKey: "tool-inquiry-boundary",
-                summary: "Tool inquiries should not route as casual chat",
-                evidence: ["User asked whether a specific tool exists"],
-                correctionGoal: "Exclude tool inquiries from casual chat",
-                suggestedChange: {
-                  section: "Guidelines",
-                  patch: "Add a tool-inquiry exclusion.",
-                },
+                summary: "Tool inquiries need a clearer boundary",
+                evidence: ["User asked whether a tool exists"],
+                correctionGoal: "Clarify the casual-chat boundary",
+                suggestedChange: "Update social-casual.md Guidelines.",
               },
             ],
           }),
@@ -914,20 +1138,17 @@ describe("runReviewSubagent", () => {
         api,
         config: resolveConfig({ evolution: { enabled: true } }),
         agentId: "main",
+        intentDirectory,
         modelRef: { provider: "google", model: "review" },
         snapshot,
         triggers: ["behavior-fix"],
       }),
     ).resolves.toEqual({
-      findings: [
-        expect.objectContaining({
-          trigger: "behavior-fix",
-          targetKind: "intent-markdown",
-          suggestedChange:
-            '{"section":"Guidelines","patch":"Add a tool-inquiry exclusion."}',
-        }),
+      findings: [],
+      outcome: "validation-failed",
+      validationErrors: [
+        "review returned an intent-markdown finding without editing runtime intent files",
       ],
-      outcome: "wrote-items",
     });
   });
 
@@ -956,6 +1177,7 @@ describe("runReviewSubagent", () => {
         },
       }),
       agentId: "main",
+      intentDirectory: createIntentDirectory(),
       modelRef: { provider: "bifrost", model: "glm-5" },
       snapshot,
       triggers: ["weak-intent"],
@@ -989,6 +1211,7 @@ describe("runReviewSubagent", () => {
           evolution: { enabled: true, modelFallback: "google/fallback" },
         }),
         agentId: "main",
+        intentDirectory: createIntentDirectory(),
         modelRef: { provider: "bifrost", model: "glm-5" },
         snapshot,
         triggers: ["weak-intent"],
@@ -1016,6 +1239,7 @@ describe("runReviewSubagent", () => {
         api,
         config: resolveConfig({ evolution: { enabled: true } }),
         agentId: "main",
+        intentDirectory: createIntentDirectory(),
         modelRef: { provider: "google", model: "review" },
         snapshot,
         triggers: ["behavior-fix"],
@@ -1068,6 +1292,7 @@ describe("runReviewSubagent", () => {
         api,
         config: resolveConfig({ evolution: { enabled: true } }),
         agentId: "main",
+        intentDirectory: createIntentDirectory(),
         modelRef: { provider: "google", model: "review" },
         snapshot,
         triggers: ["behavior-fix"],

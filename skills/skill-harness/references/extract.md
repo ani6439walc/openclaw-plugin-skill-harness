@@ -161,7 +161,7 @@ grep -l "<key-trigger>" ~/.openclaw/plugins/skill-harness/intents/*.md
 ```
 
 Verify the slimmed intent still matches the plugin schema with
-`skill_harness_evolution({ action: "validate-intents", ids: ["<intent-id>"] })`.
+`pnpm test src/intent-validation.test.ts`.
 
 Report: files created/modified, validation results, and remaining pending extractions (if any).
 
