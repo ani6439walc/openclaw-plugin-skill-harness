@@ -5,7 +5,7 @@ Evolution no longer creates or processes pending items. Background review applie
 ## Runtime Contract
 
 - Runtime editable intents live in `~/.openclaw/plugins/skill-harness/intents/*.md`.
-- The review subagent runs with bounded `read`/`write`/`apply_patch` tools rooted at the runtime intents directory.
+- The review subagent runs through the serialized `ReviewQueue` with bounded `read`/`write`/`apply_patch` tools rooted at an isolated temporary workspace copied from the runtime intents directory.
 - The subagent may edit only runtime intent Markdown files in that directory.
 - The subagent must not edit bundled/package intents, skills, config, source code, `evolution.json`, `stats.json`, or any path outside runtime intents.
 - Trigger keyword updates are returned as JSON findings only; the host records them into `evolution.json`.

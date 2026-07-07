@@ -452,9 +452,11 @@ execution does not repeatedly read and parse the full log.
 ### Direct Evolution Mode
 
 Evolution no longer exposes `skill_harness_evolution` or `/skill-harness evolution`.
-Background reviews stage safe runtime intent edits in an isolated temporary
-workspace, validate changed or targeted intents, copy validated target edits back
-to the runtime catalog, and record the event in `evolution.json`. Manual intent evolution is still documented in
+This is a breaking workflow change for users who relied on the legacy backlog
+tool or command; release notes should call it out prominently. Background reviews
+run through the serialized `ReviewQueue`, stage safe runtime intent edits in an
+isolated temporary workspace, validate changed or targeted intents, copy validated
+target edits back to the runtime catalog, and record the event in `evolution.json`. Manual intent evolution is still documented in
 `skills/skill-harness/references/evolution.md`, but it operates on runtime intent
 files directly rather than pending queue items.
 

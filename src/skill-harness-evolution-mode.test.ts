@@ -27,7 +27,7 @@ describe("skill-harness evolution mode", () => {
       "Evolution no longer creates or processes pending items",
     );
     expect(reference).toContain(
-      "bounded `read`/`write`/`apply_patch` tools rooted at the runtime intents directory",
+      "serialized `ReviewQueue` with bounded `read`/`write`/`apply_patch` tools rooted at an isolated temporary workspace",
     );
     expect(reference).toContain("schemaVersion: 4");
     expect(reference).toContain("processedEvents");

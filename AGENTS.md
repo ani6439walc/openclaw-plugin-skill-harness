@@ -172,7 +172,7 @@ Intent markdown must keep valid YAML frontmatter and the expected sections used 
 
 ## Evolution Workflow
 
-Evolution no longer creates pending items or exposes `skill_harness_evolution` / `/skill-harness evolution`. Background reviews stage runtime intent edits in an isolated temporary workspace, validate changed/targeted intents, copy validated target edits back to `~/.openclaw/plugins/skill-harness/intents/*.md`, and record compact outcomes under `processedEvents` in `~/.openclaw/plugins/skill-harness/evolution.json`.
+Evolution no longer creates pending items or exposes `skill_harness_evolution` / `/skill-harness evolution`. This is a breaking workflow change and must be highlighted in release notes. Background reviews are serialized through `ReviewQueue`, stage runtime intent edits in an isolated temporary workspace, validate changed/targeted intents, copy validated target edits back to `~/.openclaw/plugins/skill-harness/intents/*.md`, and record compact outcomes under `processedEvents` in `~/.openclaw/plugins/skill-harness/evolution.json`.
 
 Do not edit `~/.openclaw/plugins/skill-harness/evolution.json` manually for normal work. It stores schema v4 `triggerKeywords` plus `processedEvents`; legacy `items` are discarded during migration.
 
