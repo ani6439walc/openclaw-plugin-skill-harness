@@ -7,6 +7,7 @@ import { logger } from "../api.js";
 import { resolveConfig } from "./config.js";
 import {
   buildReviewPrompt,
+  createIntentWorkspace,
   parseReviewFindings,
   runReviewSubagent,
 } from "./review-subagent.js";
@@ -890,6 +891,26 @@ describe("runReviewSubagent", () => {
     expect(options.workspaceDir).not.toBe(intentDirectory);
     expect(options.agentDir).toBe(options.workspaceDir);
     expect(fs.existsSync(options.workspaceDir)).toBe(false);
+  });
+
+  it("cleans up the isolated workspace if copying intent files fails", async () => {
+    const workspacePrefix = "skill-harness-review-intents-";
+    const before = new Set(
+      fs
+        .readdirSync(os.tmpdir())
+        .filter((entry) => entry.startsWith(workspacePrefix)),
+    );
+
+    expect(() =>
+      createIntentWorkspace(new Map([["missing-parent/bad.md", "broken"]])),
+    ).toThrow();
+
+    const leaked = fs
+      .readdirSync(os.tmpdir())
+      .filter(
+        (entry) => entry.startsWith(workspacePrefix) && !before.has(entry),
+      );
+    expect(leaked).toEqual([]);
   });
 
   it("returns no-finding reason counts for requested negative decisions", async () => {

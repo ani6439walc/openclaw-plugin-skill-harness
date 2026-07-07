@@ -896,12 +896,17 @@ function changedIntentIds(
     .sort();
 }
 
-function createIntentWorkspace(before: Map<string, string>): string {
+export function createIntentWorkspace(before: Map<string, string>): string {
   const workspaceDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "skill-harness-review-intents-"),
   );
-  for (const [file, content] of before) {
-    fs.writeFileSync(path.join(workspaceDir, file), content);
+  try {
+    for (const [file, content] of before) {
+      fs.writeFileSync(path.join(workspaceDir, file), content);
+    }
+  } catch (err) {
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
+    throw err;
   }
   return workspaceDir;
 }
