@@ -303,6 +303,58 @@ describe("SessionTracker", () => {
       expect(() => tracker.write("test-session-123")).not.toThrow();
     });
 
+    it("tracks distinct skills read through exec commands ending with SKILL.md", () => {
+      tracker.record("test-session-123", {
+        current: {
+          intent: {},
+          toolCalls: [
+            {
+              name: "exec",
+              params: {
+                command:
+                  "sed -n '1,220p' /home/ani/.openclaw/skills/treemd/SKILL.md",
+              },
+              result: "---\nname: treemd\ndescription: Tree docs.\n---\n",
+            },
+            {
+              name: "exec",
+              params: {
+                command: "treemd -l skills/gcp-cert-exam/SKILL.md",
+              },
+              result: "# gcp-cert-exam",
+            },
+            {
+              name: "exec",
+              params: {
+                command: "treemd -l skills/gcp-cert-exam/SKILL.md",
+              },
+              result: "# gcp-cert-exam again",
+            },
+          ],
+        },
+      });
+
+      tracker.write("test-session-123");
+
+      const saved = JSON.parse(
+        fs.readFileSync(
+          path.join(tempDir, "sessions", "test-session-123.json"),
+          "utf-8",
+        ),
+      );
+      expect(saved.current.skillsUsed).toEqual([
+        {
+          name: "treemd",
+          path: "/home/ani/.openclaw/skills/treemd/SKILL.md",
+          description: "Tree docs.",
+        },
+        {
+          name: "gcp-cert-exam",
+          path: "skills/gcp-cert-exam/SKILL.md",
+        },
+      ]);
+    });
+
     it("should handle multiple record calls", () => {
       tracker.record("test-session-123", { agentId: "agent1" });
       tracker.record("test-session-123", { agentId: "agent2" });

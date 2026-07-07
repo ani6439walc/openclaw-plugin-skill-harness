@@ -212,9 +212,21 @@ export function extractSkillInfo(
   toolParams: Record<string, unknown>,
   toolResult: unknown,
 ): SkillRecord | undefined {
+  if (toolName === "exec") {
+    return extractExecSkillInfo(toolParams, toolResult);
+  }
+
   if (toolName !== "read") return;
   const filePath = toolParams.path;
   if (typeof filePath !== "string" || !filePath.endsWith("SKILL.md")) return;
+
+  return extractSkillInfoFromMarkdown(filePath, toolResult);
+}
+
+function extractSkillInfoFromMarkdown(
+  filePath: string,
+  toolResult: unknown,
+): SkillRecord | undefined {
   const text = typeof toolResult === "string" ? toolResult : null;
   if (text === null) return;
 
@@ -243,6 +255,30 @@ export function extractSkillInfo(
     });
   }
   return;
+}
+
+function extractExecSkillInfo(
+  toolParams: Record<string, unknown>,
+  toolResult: unknown,
+): SkillRecord | undefined {
+  const command = toolParams.command;
+  if (typeof command !== "string") return;
+
+  const filePath = extractTrailingSkillPath(command);
+  if (!filePath) return;
+
+  const parsed = extractSkillInfoFromMarkdown(filePath, toolResult);
+  if (parsed) return parsed;
+
+  const skillName = path.basename(path.dirname(filePath));
+  if (!skillName || skillName === "." || skillName === path.sep) return;
+  return { name: skillName, path: filePath };
+}
+
+function extractTrailingSkillPath(command: string): string | undefined {
+  const trimmed = command.trim();
+  const match = trimmed.match(/(?:^|\s)(["']?)(\S*SKILL\.md)\1$/);
+  return match?.[2];
 }
 
 function mergeUniqueSkills(
