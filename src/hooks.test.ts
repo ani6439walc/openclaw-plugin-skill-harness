@@ -653,27 +653,18 @@ describe("createHookHandlers session cleanup", () => {
     vi.restoreAllMocks();
   });
 
-  it.each(["new", "reset", "idle", "daily", "compaction", "deleted"] as const)(
-    "deletes persisted session data when session_end reason is %s",
-    async (reason) => {
-      const cleanup = vi.spyOn(defaultTracker, "cleanup");
-
-      await createHandlers().onSessionEnd(
-        {
-          sessionId: "ended-session",
-          messageCount: 1,
-          reason,
-        },
-        { sessionId: "ended-session" },
-      );
-
-      expect(cleanup).toHaveBeenCalledWith("ended-session", {
-        deleteFile: true,
-      });
-    },
-  );
-
-  it.each(["shutdown", "restart", "unknown", undefined] as const)(
+  it.each([
+    "new",
+    "reset",
+    "idle",
+    "daily",
+    "compaction",
+    "deleted",
+    "shutdown",
+    "restart",
+    "unknown",
+    undefined,
+  ] as const)(
     "preserves persisted session data when session_end reason is %s",
     async (reason) => {
       const cleanup = vi.spyOn(defaultTracker, "cleanup");

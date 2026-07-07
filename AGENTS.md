@@ -139,7 +139,7 @@ Rules:
 - Use `safeWriteJson()` for fail-open writes that should log instead of throw.
 - Use `readJsonFile<T>()` for JSON reads.
 - Do not add production code that combines `fs.readFileSync` with `JSON.parse`, or `fs.writeFileSync` with `JSON.stringify`, when the file-utils helpers fit.
-- Session cleanup may delete expired `sessions/*.json`; it must not touch root-level `stats.json`, root-level `evolution.json`, intent files, skills, transcripts, or package files.
+- Session cleanup may delete expired `sessions/*.json` through the 14-day retention sweep only. `session_end` should preserve the ended session JSON for audit/reload; it must not delete current session files or touch root-level `stats.json`, root-level `evolution.json`, intent files, skills, transcripts, or package files.
 
 ## Testing Expectations
 

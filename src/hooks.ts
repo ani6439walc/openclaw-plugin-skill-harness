@@ -435,15 +435,6 @@ type PromptBuildClassification =
       result: IntentionResult;
     };
 
-const SESSION_END_REASONS_THAT_DELETE_FILE = new Set([
-  "new",
-  "reset",
-  "idle",
-  "daily",
-  "compaction",
-  "deleted",
-]);
-
 export function createHookHandlers(deps: HookDeps) {
   const { api, config, refreshLiveConfigFromRuntime, refreshIntents } = deps;
   const catalog = deps.catalog ?? defaultCatalog;
@@ -1645,7 +1636,7 @@ export function createHookHandlers(deps: HookDeps) {
     ctx: PluginHookSessionContext,
   ): Promise<void> {
     tracker.cleanup(ctx.sessionId, {
-      deleteFile: SESSION_END_REASONS_THAT_DELETE_FILE.has(event.reason ?? ""),
+      deleteFile: false,
     });
     tracker.cleanupExpired();
   }

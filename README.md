@@ -46,7 +46,7 @@ index.ts
        │    ├─ onBeforePromptBuild → resolve intent → write session data → inject generated hint
        │    ├─ onAfterToolCall → record() → write() (tracks tool usage)
        │    ├─ onAgentEnd → record() → aggregate stats → enqueue evolution review
-       │    ├─ onSessionEnd → cleanup() + cleanupExpired() (lifecycle cleanup + 14-day retention)
+       │    ├─ onSessionEnd → cleanup() + cleanupExpired() (preserve ended sessions + 14-day retention)
        │    └─ review-queue.ts → ReviewQueue (serialized background evolution reviews)
        │
        ├─ prompt.ts → prompt builders and parsers (pure functions — no API dependency)
@@ -113,7 +113,7 @@ index.ts
 | `session.ts`              | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                                        |
 | `config.ts`               | Zod schema validation with defaults and clamping for plugin configuration                                                                               |
 
-Every `session_end` removes the ended session from tracker memory. Final lifecycle reasons (`new`, `reset`, `idle`, `daily`, `compaction`, and `deleted`) also delete that session's JSON; restart-oriented reasons preserve it for reload. Each `session_end` additionally removes session JSON files under the runtime `sessions/` directory whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch root-level `stats.json`, `evolution.json`, transcripts, or other plugin data.
+Every `session_end` preserves the ended session in tracker memory and keeps its session JSON available for audit/reload. Each `session_end` additionally removes only session JSON files under the runtime `sessions/` directory whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch root-level `stats.json`, `evolution.json`, transcripts, or other plugin data.
 
 ### Hook Execution Flow
 
