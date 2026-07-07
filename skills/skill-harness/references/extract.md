@@ -1,44 +1,33 @@
 # Extract Workflow
 
-Analyze intent complexity and recommend extracting oversized intents into standalone skills.
-This is a **proactive** analysis mode — unlike `evolve` (reactive intent evolution), `extract`
-identifies structural bloat before it degrades classification quality.
+Analyze intent complexity and recommend extracting oversized intents into standalone skills. This is a **proactive** analysis mode that identifies structural bloat before it degrades classification quality.
 
-## When to Enter
+## When to enter
 
 - User asks to check intent complexity, find oversized intents, or upgrade intents to skills.
-- After `inventory` mode reveals intents above the complexity threshold.
-- When the user suspects an intent has grown too large or handles too many responsibilities.
+- Inventory mode reveals intents above the complexity threshold.
+- The user suspects an intent has grown too large or handles too many responsibilities.
 
-## Safety Rules
+## Safety rules
 
 - Never modify intent files or create skills without explicit user confirmation.
 - Treat the analysis as advisory — the user decides what to extract.
-- Do not confuse `extract` with `evolve`: extract analyzes complexity, evolve processes evolution findings.
 - Preserve existing triggers and examples when proposing intent slim-down.
+- Prefer drafts and diff previews before writes.
 
-## Step 1 — Complexity Scan
+## Step 1 — Complexity scan
 
-Score every intent in `~/.openclaw/plugins/skill-harness/intents/`:
+Score every runtime intent under `~/.openclaw/plugins/skill-harness/intents/` or the user-provided runtime root.
 
-```bash
-# Line count per intent
-wc -l ~/.openclaw/plugins/skill-harness/intents/*.md | sort -rn
+Use structured file/search tools where available:
 
-# Trigger count per intent
-for f in ~/.openclaw/plugins/skill-harness/intents/*.md; do
-  count=$(grep -c "^  - " "$f" 2>/dev/null || echo 0)
-  echo "$count $(basename "$f")"
-done | sort -rn
+- List all intent Markdown files.
+- Count lines per intent.
+- Parse frontmatter to count triggers and examples.
+- Search body sections for skill/tool references.
+- Read suspiciously large intents to identify distinct sub-responsibilities.
 
-# Example count per intent
-for f in ~/.openclaw/plugins/skill-harness/intents/*.md; do
-  count=$(awk '/^examples:/,/^---$/' "$f" | grep -c "^  - " 2>/dev/null || echo 0)
-  echo "$count $(basename "$f")"
-done | sort -rn
-```
-
-### Complexity Score
+### Complexity score
 
 ```
 complexity_score =
@@ -49,9 +38,7 @@ complexity_score =
   distinct_sub_responsibility_count × 5
 ```
 
-Count `distinct_sub_responsibility_count` by identifying separate thematic clusters in
-`## Guidelines` — each unrelated concern (e.g., "device tracking" vs "K8s operations"
-in the same intent) counts as one.
+Count `distinct_sub_responsibility_count` by identifying separate thematic clusters in `## Guidelines`, `## Response Strategy`, and `## Concrete Workflow`. Each unrelated concern counts as one.
 
 ### Thresholds
 
@@ -62,15 +49,14 @@ in the same intent) counts as one.
 | 101–150 | 🟠 Warning | Recommend rewrite or split    |
 | 150+    | 🔴 Extract | Strongly recommend extraction |
 
-Output a ranked table: `intent-id | lines | triggers | examples | sub-responsibilities | score | level`
+Output a ranked table: `intent-id | lines | triggers | examples | sub-responsibilities | score | level`.
 
-## Step 2 — Sub-Responsibility Analysis
+## Step 2 — Sub-responsibility analysis
 
 For each 🔴 or high 🟠 intent:
 
 1. Read the full intent file.
-2. Identify distinct sub-responsibilities — groups of guidelines, tools, and examples
-   that serve different user goals and could operate independently.
+2. Identify distinct sub-responsibilities — groups of guidelines, tools, and examples that serve different user goals and could operate independently.
 3. For each sub-responsibility, assess:
    - **Independence**: Can it function as a standalone skill with its own workflow?
    - **Cohesion**: Does it have a clear, single purpose?
@@ -92,94 +78,68 @@ Intent: <intent-id> (<lines> lines, score: <score>)
 
 **🔴 CHECKPOINT**: Present the extraction plan to the user. Do not proceed without confirmation.
 
-## Step 3 — Draft Skill Blueprints
+## Step 3 — Draft skill blueprints
 
 For each confirmed extraction:
 
-1. Draft a `SKILL.md` following the standard skill format:
-   - `name`, `description`, `metadata` frontmatter
-   - Clear workflow steps derived from the intent's guidelines
-   - Tool and skill references preserved from the original intent
-   - Failure modes and anti-patterns if the original intent included them
+1. Draft a `SKILL.md` following standard skill format:
+   - frontmatter with `name` and `description`
+   - clear workflow steps derived from the intent's guidelines
+   - tool and skill references preserved from the original intent
+   - failure modes and anti-patterns if the original intent included them
 
 2. Draft the slimmed-down intent:
-   - Keep only classification triggers and examples (enough for the classifier to route)
+   - Keep only classification triggers and examples needed for routing.
    - Replace detailed guidelines with a skill hint:
 
      ```markdown
      ## Skills & Tools
 
-     - skill: <new-skill-name>
-       Load and follow the skill workflow for detailed execution.
+     - Load and follow the extracted skill workflow for detailed execution:
+       skill: <new-skill-name>
      ```
 
-   - Target: <50 lines for the slimmed intent
+   - Target: under 50 lines for the slimmed intent.
 
 3. Show both drafts to the user as a diff preview:
-   - Original intent → slimmed intent
-   - New skill SKILL.md (full draft)
+   - Original intent → slimmed intent.
+   - New skill `SKILL.md` draft.
 
 ## Step 4 — Deliver
 
-### If `skill_workshop` tool is available
+There is no required specialized skill-authoring tool path. Use the tools available in the host environment:
 
-Use `skill_workshop` with `action=create` to create each new skill:
+- If the user only wants a proposal, deliver drafts and stop.
+- If the user confirms writing, create the new skill directory and `SKILL.md` under the appropriate skills path, then update the slimmed runtime intent.
+- If the target skill path is ambiguous, ask where to write before making changes.
 
-```
-skill_workshop(
-  action="create",
-  skill_name="<proposed-name>",
-  description="<concise description under 160 bytes>",
-  proposal_content=<full SKILL.md content>
-)
-```
+## Step 5 — Format checks
 
-Then update the original intent file with the slimmed version.
+Use structured file/search tools to check:
 
-### If `skill_workshop` tool is NOT available
+- New `SKILL.md` frontmatter exists and includes `name` and `description`.
+- The slimmed intent frontmatter has required fields with the right shapes.
+- The slimmed intent keeps enough triggers/examples for routing.
+- Skill hints follow `references/format.md`.
+- Proposed triggers do not obviously collide with remaining runtime intents.
 
-Ask the user:
+Report files created/modified, format-check results, and remaining pending extractions if any.
 
-> "Ani 已經準備好技能藍圖了！要把這些寫成檔案嗎？
->
-> - 寫入檔案（Ani 會建立 SKILL.md 並更新 intent）
-> - 先不寫，只看草稿就好"
-
-If the user confirms, write:
-
-1. New skill directory and `SKILL.md` under the appropriate skills path.
-2. Updated (slimmed) intent file in `~/.openclaw/plugins/skill-harness/intents/`.
-
-### Post-delivery validation
-
-```bash
-# Verify new skill file exists and has valid frontmatter
-cat <new-skill-path>/SKILL.md | head -5
-
-# Check for trigger collisions between new skills and remaining intents
-grep -l "<key-trigger>" ~/.openclaw/plugins/skill-harness/intents/*.md
-```
-
-Verify the slimmed intent still matches the plugin schema with
-`pnpm test src/intent-validation.test.ts`.
-
-Report: files created/modified, validation results, and remaining pending extractions (if any).
-
-## Failure Modes
+## Failure modes
 
 | Trigger                                   | First fix                                              | Fallback                                              |
 | ----------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------- |
 | **No intents above threshold**            | Report all scores, confirm system is healthy           | Suggest re-running after adding more intents          |
 | **Sub-responsibility boundaries unclear** | Ask user to clarify which parts should stay vs extract | Keep intent unchanged, flag for next review           |
 | **Skill name collision**                  | Suggest alternative name, check existing skills        | Use namespaced name (e.g., `<domain>-ops`)            |
-| **User rejects extraction**               | Respect decision, mark as `reviewed`                   | Suggest lighter alternative (rewrite guidelines only) |
+| **User rejects extraction**               | Respect decision, mark as reviewed                     | Suggest lighter alternative (rewrite guidelines only) |
 
-## Anti-Patterns
+## Anti-patterns
 
-| #   | Anti-pattern                              | Why not                                        | Do instead                                                   |
-| --- | ----------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
-| 1   | **Auto-extract without confirmation**     | Destructive change to intent routing           | Always present plan and get explicit approval                |
-| 2   | **Extract too aggressively**              | Creates skill sprawl, fragments related logic  | Only extract when sub-responsibilities are truly independent |
-| 3   | **Leave intent empty after extraction**   | Intent still needed for classification routing | Keep slimmed intent with triggers + skill hint               |
-| 4   | **Ignore format.md when drafting skills** | Inconsistent skill structure                   | Follow standard skill format conventions                     |
-| 5   | **Skip validation after delivery**        | May break classification or skill loading      | Always run post-delivery validation checks                   |
+| #   | Anti-pattern                            | Why not                                        | Do instead                                                   |
+| --- | --------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| 1   | **Auto-extract without confirmation**   | Destructive change to intent routing           | Always present plan and get explicit approval                |
+| 2   | **Extract too aggressively**            | Creates skill sprawl, fragments related logic  | Only extract when sub-responsibilities are truly independent |
+| 3   | **Leave intent empty after extraction** | Intent still needed for classification routing | Keep slimmed intent with triggers + skill hint               |
+| 4   | **Ignore format rules when drafting**   | Inconsistent skill and intent structure        | Follow `references/format.md` and standard skill format      |
+| 5   | **Skip format checks after delivery**   | May break classification or skill loading      | Always run local format checks before reporting done         |

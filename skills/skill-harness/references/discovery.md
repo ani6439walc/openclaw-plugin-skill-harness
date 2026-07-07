@@ -4,30 +4,11 @@ Goal: Build a complete inventory of all actionable capabilities.
 
 ## Actions
 
-1. **Scan skills:**
+1. **Scan skills:** Inventory every active skill source exposed by the current environment: bundled extension skills, configured user/runtime skill directories, and the active OpenClaw skill catalog when available. Read each `SKILL.md` frontmatter (`name`, `description`) before deep-reading bodies.
 
-   ```bash
-   ls -1 ~/.openclaw/skills/ && for d in ~/.openclaw/skills/*/; do [ -f "$d/SKILL.md" ] && basename "$d"; done
-   ```
+2. **Scan tool schema:** List currently available tools from the runtime catalog, config, built-in help, or dashboard. Record user-visible capabilities such as exec, web search/fetch, memory search, browser, or image generation only when they are actually available.
 
-   Read each `SKILL.md` frontmatter (`name`, `description`) to extract capability summaries.
-
-2. **Scan tool schema:** List currently available tools by running:
-
-   ```bash
-   # List tool schemas from OpenClaw config
-   cat ~/.openclaw/config.yaml | grep -A 50 "tools:" || echo "Check OpenClaw dashboard for tool list"
-   ```
-
-   Alternatively, review the tool documentation in OpenClaw's built-in help or dashboard to enumerate: exec, web_search, web_fetch, memory_search, browser, image_generate, etc.
-
-3. **Scan existing intents:**
-
-   ```bash
-   ls ~/.openclaw/plugins/skill-harness/intents/
-   ```
-
-   To see what intent coverage already exists.
+3. **Scan existing intents:** Use structured file/search tools to list and inspect runtime intent Markdown under `~/.openclaw/plugins/skill-harness/intents/` or the user-provided runtime root. This shows what intent coverage already exists.
 
 4. **Read format rules:** Read `references/format.md` (this directory) to refresh intent format rules.
 

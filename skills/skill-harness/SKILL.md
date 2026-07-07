@@ -1,11 +1,11 @@
 ---
 name: skill-harness
-description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing an evolution finding (evolve), or analyzing intent complexity and extracting oversized intents into skills (extract)."
+description: "Design, inventory, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), or analyzing intent complexity and extracting oversized intents into skills (extract)."
 ---
 
 # Skill Harness
 
-Manage the full lifecycle of intent definitions: from single-intent CRUD (design), to full-catalog bootstrap (inventory), to automated self-improvement (evolve).
+Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), and complexity analysis or skill extraction (extract). Background subagents handle automated self-improvement; do not process evolution findings manually through this skill.
 
 ## Quick routing
 
@@ -13,11 +13,21 @@ Manage the full lifecycle of intent definitions: from single-intent CRUD (design
 What does the user want?
 ├─ Create/rename/split/merge/refine ONE intent → design
 ├─ Bootstrap or re-audit the ENTIRE catalog → inventory
-├─ Process an evolution finding → evolve
 └─ Check intent complexity / upgrade intents to skills → extract
 ```
 
-If ambiguous, ask: "Are you working on a single intent, auditing the whole system, processing an evolution finding, or analyzing intent complexity?"
+If ambiguous, ask one routing question: "Are you working on a single intent, auditing the whole system, or analyzing intent complexity?"
+
+## Shared operating rules
+
+- Prefer structured file/search tools available in the host environment for listing, reading, and searching files. In Hermes, that means `search_files`, `read_file`, `write_file`, and `patch` before shell equivalents.
+- Treat shell snippets in older notes as implementation examples, not required commands. Use terminal only for package/test/build commands or when no structured tool exists.
+- Current source layout:
+  - Bundled skill assets live under this skill directory, especially `assets/` and `references/`.
+  - Runtime editable intents live under `~/.openclaw/plugins/skill-harness/intents/` unless the user provides another runtime root.
+  - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
+- For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
+- Check changed intent files for canonical format: valid frontmatter shape, required sections in order, concrete triggers/examples, consistent skill/tool hints, and no body cross-references to other intent ids.
 
 ---
 
@@ -31,99 +41,25 @@ Keywords: "create intent", "new intent", "rename intent", "split intent", "merge
 
 ### Workflow
 
-**Step 1 — Classify action type**
+Read and follow `references/design.md`. Keep these checkpoints visible:
 
-```bash
-if user says "create" or "new" → action=create
-if user says "rename" or "change name" → action=rename
-if user says "split" or "separate" → action=split
-if user says "merge" or "combine" → action=merge
-if user says "refine" or "improve" → action=refine
-```
-
-**Step 2 — Interview** (one question at a time, wait for reply)
-
-```
-Q1: "What should this intent detect?" → capture purpose
-Q2: "What triggers this intent?" → capture 2-3 trigger phrases
-Q3: "Which domain should it belong to?" → capture one domain
-Q4: "Any exact-match fastpath phrases or short hint?" → capture optional fastpath
-Q5: "What tools or skills does it need?" → capture tool list
-Q6: "Any existing intent this overlaps with?" → check collision
-```
-
-**🔴 CHECKPOINT**: Before drafting, confirm boundary summary with user:
-
-- What this intent handles
-- What it doesn't handle
-- Neighboring intents it's close to
-
-**Step 3 — Ground against existing intents**
-
-```bash
-# List all existing intents
-ls ~/.openclaw/plugins/skill-harness/intents/
-
-# Read the most similar existing intent for reference
-cat ~/.openclaw/plugins/skill-harness/intents/<similar>.md
-
-# Check for trigger collisions
-grep -l "<trigger>" ~/.openclaw/plugins/skill-harness/intents/*.md
-```
-
-**Step 4 — Draft with exact format**
-
-```markdown
----
-triggers:
-  - "<trigger phrase 1>"
-  - "<trigger phrase 2>"
-examples:
-  - "<example user message 1>"
-  - "<example user message 2>"
-domain: "<one domain>"
-fastpath:
-  hint: "<optional short A1 injected hint>"
-  keywords:
-    - "<optional exact or fuzzy keyword>"
----
-
-## Guidelines
-
-<2-3 sentences describing when to use this intent>
-
-## Skills & Tools
-
-- <skill or tool name>: <one-line description>
-
-## Response Strategy
-
-<bullet list of what the agent should do>
-
-## Experience
-
-<optional durable tips, parameters, pitfalls, or recovery notes>
-```
-
-**Step 5 — Deliver with validation**
-
-```bash
-# Verify required sections exist
-grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" intent.md
-
-# If no collisions, write to target, then validate through the plugin
-mv intent.md ~/.openclaw/plugins/skill-harness/intents/<intent-id>.md
-```
-
-Validate with `pnpm test src/intent-validation.test.ts` plus the relevant plugin gates.
+1. **Classify the action** — create, rename, split, merge, or refine.
+2. **Interview one question at a time** — use `references/interview.md`; do not batch questions.
+3. **Ground against existing runtime intents** — list/search/read runtime intent Markdown with structured file tools.
+4. **Confirm boundary summary** before drafting:
+   - what this intent handles
+   - what it does not handle
+   - neighboring intents it is close to
+5. **Draft with canonical format** — use `references/format.md`.
+6. **Deliver through closing mode** — use `references/closing.md`; stage, preview, confirm, write, then run simple format checks.
 
 ### Failure modes
 
-| Trigger                                                           | First fix                                      | Fallback                                                     |
-| ----------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
-| **Interview stalls** — user does not reply or gives vague answers | Restate with recommended options ("A or B?")   | Mark as `incomplete`, suggest resuming later                 |
-| **Collision detected** — new intent overlaps existing             | Suggest split or merge, show collision details | Force-create but tag as `experimental`, flag for next review |
-| **format.md validation fails**                                    | Read error message, fix format and retry       | Display full format.md for manual inspection                 |
+| Trigger                                                           | First fix                                      | Fallback                                      |
+| ----------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------- |
+| **Interview stalls** — user does not reply or gives vague answers | Restate with recommended options ("A or B?")   | Mark as incomplete and suggest resuming later |
+| **Collision detected** — new intent overlaps existing             | Suggest split or merge, show collision details | Keep draft staged until user confirms         |
+| **Format validation fails**                                       | Read the validation error, fix format, retry   | Show unresolved error and leave file staged   |
 
 ### Anti-patterns
 
@@ -131,9 +67,9 @@ Validate with `pnpm test src/intent-validation.test.ts` plus the relevant plugin
 | --- | ----------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- |
 | 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality                       | Interview one question at a time                                     |
 | 2   | **Cross-reference other intents in body**       | Classifier only sees frontmatter, while fastpaths use metadata | Express boundaries via triggers, examples, domain, and fastpath only |
-| 3   | **Skip format.md before writing**               | Inconsistent format breaks plugin parsing                      | Always read format.md first                                          |
+| 3   | **Skip format rules before writing**            | Inconsistent format breaks plugin parsing                      | Read `references/format.md` first                                    |
 | 4   | **Create a new intent when one already exists** | Causes duplication and collision                               | Check existing intents during interview                              |
-| 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately                         | Triggers must be concrete phrases or keywords                        |
+| 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately                         | Use concrete phrases or keywords                                     |
 
 ---
 
@@ -147,119 +83,29 @@ Keywords: "audit intents", "bootstrap intents", "re-audit", "check intent covera
 
 ### Workflow
 
-**Step 1 — Discovery scan**
+Read and follow `references/inventory.md`. Keep these checkpoints visible:
 
-```bash
-# Scan all skills
-ls -1 ~/.openclaw/skills/ && for d in ~/.openclaw/skills/*/; do [ -f "$d/SKILL.md" ] && basename "$d"; done
-
-# Scan existing intents
-ls ~/.openclaw/plugins/skill-harness/intents/
-```
-
-Output: capability table with columns `capability | type(skill/tool) | summary | source`
-
-**Step 2 — Clustering**
-
-Group capabilities by **what the user is trying to achieve**, not by directory name.
-
-Output: cluster map with `cluster name | capabilities | existing intent match | recommended intent ID`
-
-**🔴 CHECKPOINT**: Present cluster map to user for calibration before proceeding.
-
-**Step 3 — Interview gaps**
-
-Fill gaps identified in clustering. For each uncovered cluster, interview the user to confirm intent boundaries.
-
-**Step 4 — Generate new intents**
-
-Draft new intent definitions for uncovered clusters using the design mode workflow (Step 4 format).
-
-**Step 5 — Review for collisions**
-
-Validate all new intents, check for collisions, and deliver.
+1. **Discovery scan** — use `references/discovery.md` to inventory bundled skills, configured/user skills, active tools, and existing runtime intents.
+2. **Clustering** — use `references/clustering.md`; group by user goal, not directory name.
+3. **Calibration checkpoint** — present the cluster map before generating or changing intents.
+4. **Interview gaps** — fill uncovered clusters using the design-mode interview rules.
+5. **Generate and check** — draft missing intents with canonical format, check collisions, then run simple format checks.
 
 ### Failure modes
 
-| Trigger                                                      | First fix                                              | Fallback                                             |
-| ------------------------------------------------------------ | ------------------------------------------------------ | ---------------------------------------------------- |
-| **Discovery scan fails** — skills directory missing or empty | Verify path, prompt user to confirm skills location    | Accept manual capability list, tag as `manual_input` |
-| **Clustering finds orphan capabilities**                     | Mark as `unclustered`, recommend creating a new intent | Keep orphan list for next audit cycle                |
+| Trigger                                  | First fix                                                  | Fallback                                             |
+| ---------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| **Discovery scan incomplete**            | Report which configured source could not be read           | Accept manual capability list, tag as `manual_input` |
+| **Clustering finds orphan capabilities** | Mark as `unclustered`, recommend creating a new intent     | Keep orphan list for next audit cycle                |
+| **User rejects cluster map**             | Ask which cluster boundary is wrong, then regroup narrowly | Keep inventory report without generating intents     |
 
 ### Anti-patterns
 
-| #   | Anti-pattern                                   | Why not                                      | Do instead                                            |
-| --- | ---------------------------------------------- | -------------------------------------------- | ----------------------------------------------------- |
-| 1   | **Run inventory without discovery/clustering** | Misses capabilities, produces orphan intents | Must follow order: discovery → clustering → interview |
-| 2   | **Skip cluster map checkpoint**                | User cannot calibrate, may miss gaps         | Always present cluster map before interview           |
-
----
-
-## Mode: evolve
-
-### When to use
-
-User explicitly asks to manually evolve runtime intent Markdown or inspect Evolution behavior.
-
-Keywords: "evolve intent", "調整 intent", "修 intent", "check evolution", "inspect evolution"
-
-**There is no pending-item workflow anymore.** Background Evolution reviews edit runtime intents directly and record outcomes in `~/.openclaw/plugins/skill-harness/evolution.json`.
-
-Read and follow `references/evolution.md` before manual intent evolution.
-
-### Workflow
-
-**Step 1 — Ground current state**
-
-Read the target runtime intent Markdown under `~/.openclaw/plugins/skill-harness/intents/`, the compact intent catalog, and relevant references.
-
-**Step 2 — Decide scope**
-
-Before changing routing metadata, filenames, or body sections, compare the filename-derived intent id, frontmatter triggers, examples, domain, fastpath metadata, and body:
-
-- If the filename id and metadata are correct and only the body drifted, refine the body back to the declared boundary.
-- If the body is more accurate than the current filename id or metadata, propose a rename or metadata update and ask for explicit confirmation before changing filenames or references.
-- If the body contains multiple responsibilities or an oversized boundary, propose a split plan and ask for explicit confirmation before creating/moving/deleting intent files.
-- If the mismatch is already fixed by current runtime intents, do nothing and report that no edit is needed.
-
-**Step 3 — Apply smallest safe edit**
-
-Apply only grounded runtime intent Markdown changes:
-
-- `create` → create a new narrow intent.
-- `refine` → update the target intent without broadening unrelated behavior.
-- `rename` → only after user confirmation; update filename-derived id and stale references together.
-- `split`/`merge` → only after user confirmation.
-
-Do not edit `evolution.json`; normal runtime review owns processed event records.
-
-**Step 4 — Validate**
-
-```bash
-pnpm test src/intent-validation.test.ts
-pnpm run test
-pnpm run build
-```
-
-**Step 5 — Report**
-
-Report affected files, validation results, and whether any staged edits were applied. Never commit or push unless the user explicitly asks.
-
-### Failure modes
-
-| Trigger                              | First fix                                        | Fallback                                                   |
-| ------------------------------------ | ------------------------------------------------ | ---------------------------------------------------------- |
-| **Target intent deleted or missing** | Re-read runtime intent directory and catalog     | Ask user whether to create a new intent                    |
-| **Validation fails before apply**    | Keep staged edits out of the runtime catalog     | Report validation errors and leave runtime files unchanged |
-| **Boundary change is broad**         | Present rename/split/merge plan for confirmation | Keep existing intent unchanged                             |
-
-### Anti-patterns
-
-| #   | Anti-pattern                                       | Why not                                       | Do instead                                       |
-| --- | -------------------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
-| 1   | **Process non-existent pending items**             | Evolution no longer stores pending items      | Inspect processedEvents or edit intents directly |
-| 2   | **Skip validation before handoff**                 | May introduce format errors or collisions     | Always run intent-validation, test, and build    |
-| 3   | **Manually edit `evolution.json` for normal work** | Bypasses processedEvents audit and migrations | Let runtime review record outcomes               |
+| #   | Anti-pattern                                   | Why not                                      | Do instead                                         |
+| --- | ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------- |
+| 1   | **Run inventory without discovery/clustering** | Misses capabilities, produces orphan intents | Follow order: discovery → clustering → calibration |
+| 2   | **Assume one hardcoded skill directory**       | OpenClaw may load bundled and runtime skills | Scan the active catalog and configured skill roots |
+| 3   | **Skip cluster map checkpoint**                | User cannot calibrate, may miss gaps         | Present cluster map before interview/generation    |
 
 ---
 
@@ -271,33 +117,16 @@ User wants to analyze intent complexity, find oversized intents, or upgrade inte
 
 Keywords: "extract intent", "intent too complex", "upgrade to skill", "intent 太長了", "拆分 intent", "check intent complexity", "哪些 intent 該變成技能"
 
-Read and follow `references/extract.md` for the full workflow.
-
 ### Workflow
 
-**Step 1 — Complexity scan**
+Read and follow `references/extract.md`. Keep these checkpoints visible:
 
-Score every intent using the complexity formula (line count, trigger count, example count, tool refs, sub-responsibility count). Output a ranked table with levels: 🟢 Healthy, 🟡 Monitor, 🟠 Warning, 🔴 Extract.
-
-**Step 2 — Sub-responsibility analysis**
-
-For each 🔴 or high 🟠 intent, identify distinct sub-responsibilities that could become independent skills. Propose an extraction plan showing what to extract and what remains.
-
-**🔴 CHECKPOINT**: Present the extraction plan to the user. Do not proceed without confirmation.
-
-**Step 3 — Draft skill blueprints**
-
-For each confirmed extraction, draft:
-
-- A `SKILL.md` for the new skill (workflow, tools, failure modes)
-- A slimmed-down intent (<50 lines) retaining only classification triggers + a skill hint
-
-**Step 4 — Deliver**
-
-- If `skill_workshop` tool is available → use `action=create` to create each skill, then update the intent file.
-- If `skill_workshop` tool is NOT available → ask the user whether to write the files or just show the drafts.
-
-Post-delivery: validate frontmatter, check trigger collisions, report results.
+1. **Complexity scan** — score runtime intents by size, routing metadata, tool/skill refs, and sub-responsibility count.
+2. **Sub-responsibility analysis** — identify independent responsibilities that could become skills.
+3. **Extraction checkpoint** — present the extraction plan and wait for confirmation.
+4. **Draft skill blueprints** — create proposed `SKILL.md` content and a slimmed intent.
+5. **Deliver with explicit write mode** — if the user approves writing, create/edit files with available file tools; otherwise deliver drafts only.
+6. **Check format** — verify skill frontmatter, trigger collisions, and slimmed intent shape.
 
 ### Failure modes
 
@@ -320,45 +149,35 @@ Post-delivery: validate frontmatter, check trigger collisions, report results.
 
 ## Shared resources
 
-### First-time setup (assets)
+### First-time setup assets
 
 When bootstrapping from scratch, copy example intent templates from `assets/`:
 
 - `assets/chat.md` / `assets/typo.md` — minimal behavior-only intents (no tools)
+- `assets/approve.md` / `assets/reject.md` — approval-flow intents
 - `assets/memory-lookup.md` / `assets/memory-compare.md` — memory retrieval SOPs
 
-### Validation commands
+### Format check principles
 
-Use test/build gates for runtime intent validation. The legacy Evolution tool has
-been removed; Evolution writes processed event records automatically.
+Use structured file/search tools to inspect intent format. Keep checks simple and local:
 
-```bash
-pnpm test src/intent-validation.test.ts
-pnpm run test
-pnpm run build
-```
-
-```bash
-# Check for trigger collisions
-grep -l "<trigger>" ~/.openclaw/plugins/skill-harness/intents/*.md
-
-# List all existing intent IDs
-find ~/.openclaw/plugins/skill-harness/intents -name '*.md' -exec basename {} .md \; | sort
-
-# Verify required sections exist
-grep -E "^(## Guidelines|## Skills & Tools|## Response Strategy|## Experience)" <file>
-```
+- Frontmatter exists, closes before the body, and has required fields with the right shapes.
+- Body sections appear in the canonical order from `references/format.md`.
+- Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
+- Skill/tool hints follow the expected Markdown shape.
+- Body text does not cross-reference other intent ids.
+- Proposed triggers do not obviously collide with existing runtime intent boundaries.
 
 ### Decision style
 
 - Recommend defaults confidently; keep cognitive load low.
 - Favor simple, maintainable intent boundaries over clever taxonomy.
+- Keep `SKILL.md` concise; put detailed mode-specific procedures in `references/*.md`.
 
 ### Test prompts (dry_run)
 
 | #   | Prompt                                           | Expected behavior                                                                                                 | Mode      |
 | --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------- |
-| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview Q1-Q4 → ground → draft → validate                               | design    |
+| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview → ground → draft → format check                                 | design    |
 | 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory |
-| 3   | "Refine the git intent wording"                  | Route to **evolve** → ground runtime intent → apply smallest safe edit → validate → report                        | evolve    |
-| 4   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract   |
+| 3   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract   |

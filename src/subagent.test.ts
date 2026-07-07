@@ -168,7 +168,7 @@ describe("runIntentInstructionSubagent", () => {
         modelRun: false,
         disableTools: false,
         toolsAllow: ["read"],
-        prompt: expect.stringContaining("You are an instruction writer."),
+        prompt: expect.stringContaining("You are an intention-hint writer."),
       }),
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(

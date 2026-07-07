@@ -682,26 +682,32 @@ describe("buildIntentInstructionPrompt", () => {
       ],
     });
 
-    expect(prompt).toContain("You are an instruction writer.");
+    expect(prompt).toContain("You are an intention-hint writer.");
     expect(prompt).not.toContain("You are an skill-harness writer.");
     expect(prompt).toContain(
       "Another model is preparing the final user-facing answer",
     );
-    expect(prompt).toContain("optional reference, not mandatory instructions");
     expect(prompt).toContain(
-      "Identify the user's intent from the latest message",
+      "optional reference material for the main agent, not mandatory instructions",
     );
+    expect(prompt).toContain("Identify the user's intent from latest_message");
     expect(prompt).toContain(
-      "Review the matched intent Markdown for relevant experience",
+      "Review the matched intent Markdown as a menu of possible experience",
     );
     expect(prompt).toContain("workflow");
-    expect(prompt).toContain("Rules:");
+    expect(prompt).toContain("## Output contract");
+    expect(prompt).toContain("## Relevance and alignment");
+    expect(prompt).toContain("## Skill recommendation");
+    expect(prompt).toContain("## Bounded SKILL.md reads");
+    expect(prompt).toContain("## Experience preservation");
+    expect(prompt).toContain("## Read-only and mutation safety");
+    expect(prompt).toContain("## Context and continuity");
+    expect(prompt).toContain("## Trust boundaries");
     expect(prompt).not.toContain("<rules>");
     expect(prompt).not.toContain("</rules>");
     expect(prompt.indexOf("<intent_metadata>")).toBeLessThan(
-      prompt.indexOf("Rules:"),
+      prompt.indexOf("## Output contract"),
     );
-    expect(prompt).toContain("Skill Recommendation");
     expect(prompt).toContain("Default to no explicit skill directives");
     expect(prompt).toContain("at most 1 explicit skill directive");
     expect(prompt).toContain("Use 2-3 directives only when");
@@ -713,8 +719,20 @@ describe("buildIntentInstructionPrompt", () => {
     );
     expect(prompt).toContain("MUST read skill: <skill-name> at <path>");
     expect(prompt).toContain("REQUIRED skill: <skill-name>");
-    expect(prompt).toContain("may use the read tool to inspect");
+    expect(prompt).toContain("Prefer not to read");
     expect(prompt).toContain("SKILL.md paths listed in intent_related_skills");
+    expect(prompt).toContain(
+      "Use reading only to judge whether a listed skill is more clearly suited to the latest task",
+    );
+    expect(prompt).toContain(
+      "write a more specific optional hint for the main agent",
+    );
+    expect(prompt).toContain(
+      "does not replace the main agent loading that skill",
+    );
+    expect(prompt).toContain(
+      "Do not summarize a skill as a substitute for the main agent's own skill read",
+    );
     expect(prompt).toContain(
       "If writing a concrete workflow depends on details not present in the skill description",
     );
@@ -789,7 +807,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("apply_patch");
     expect(prompt).toContain("繼續實作同題續聊");
     expect(prompt).toMatch(
-      /<latest_message>\n繼續實作同題續聊\n<\/latest_message>\n\nWrite the optional skill harness now\. Use latest_message as the decision source and output no surrounding analysis\.$/,
+      /<latest_message>\n繼續實作同題續聊\n<\/latest_message>\n\nWrite a concise optional execution hint now\. Use latest_message as the decision source and output no surrounding analysis\.$/,
     );
   });
 

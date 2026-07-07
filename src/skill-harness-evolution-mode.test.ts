@@ -9,32 +9,22 @@ const referencePath = path.resolve(
 );
 
 describe("skill-harness evolution mode", () => {
-  it("documents direct evolution without legacy tool surfaces", () => {
+  it("does not expose manual evolution workflow now handled by subagents", () => {
     const parsed = matter(fs.readFileSync(skillPath, "utf-8"));
-    const reference = fs.readFileSync(referencePath, "utf-8");
 
     expect(parsed.data).toMatchObject({
       name: "skill-harness",
       description: expect.stringContaining(
-        "Design, inventory, evolve, or extract intent definitions",
+        "Design, inventory, or extract intent definitions",
       ),
     });
     expect(parsed.data).not.toHaveProperty("disable-model-invocation");
-    expect(parsed.content).toContain("## Mode: evolve");
-    expect(parsed.content).toContain("references/evolution.md");
-
-    expect(reference).toContain(
-      "Evolution no longer creates or processes pending items",
+    expect(parsed.content).toContain(
+      "Background subagents handle automated self-improvement",
     );
-    expect(reference).toContain(
-      "serialized `ReviewQueue` with bounded `read`/`write`/`apply_patch` tools rooted at an isolated temporary workspace",
-    );
-    expect(reference).toContain("schemaVersion: 4");
-    expect(reference).toContain("processedEvents");
-    expect(reference).toContain("There is no `items` array");
-    expect(reference).not.toContain("skill_harness_evolution");
-    expect(reference).not.toContain("/skill-harness evolution");
-    expect(reference).toContain("get explicit confirmation before editing");
-    expect(reference).toContain("pnpm test src/intent-validation.test.ts");
+    expect(parsed.content).not.toContain("## Mode: evolve");
+    expect(parsed.content).not.toContain("references/evolution.md");
+    expect(parsed.content).not.toContain("Process an evolution finding");
+    expect(fs.existsSync(referencePath)).toBe(false);
   });
 });
