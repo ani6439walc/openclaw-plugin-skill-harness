@@ -153,6 +153,7 @@ const INTENT_CRAFT_RUBRIC = `Intent Markdown review rules:
 - Suggest trigger keyword additions only for stable phrases that clearly mean completed successful work, agent/routing correction, or explicit entity/context lookup learning; reject generic words like "ok", "好", "不要", and one-off wording. Suggest removals only with concrete false-positive evidence.
 - Entity-context reviews are limited to reusable lookup habits grounded in TOOLS.md, MEMORY.md, or paths containing memory that appear in snapshot text or sanitized read/search tool params. The reviewer may use read only on those explicit candidate files. If the source is absent, missing, or does not support a reusable habit, return no_finding. Never browse arbitrary filesystem paths, infer from entity-like tokens/domain words alone, or copy raw private memory into suggestedChange.
 - Do not propose or write changes to skills, tools, AGENTS.md, SOUL.md, or other production files. The only correction targets are runtime intent Markdown content and trigger keyword updates recorded by the host.
+- For split or merge operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to: rather than requesting extra file-management tools.
 - suggestedChange MUST be a JSON string, never an object or array. If you need structured patch details, serialize them as concise plain text inside the string.
 - Return no finding when the evidence does not justify a concrete intent Markdown improvement or trigger keyword suggestion.`;
 
@@ -974,9 +975,22 @@ export async function runReviewSubagent(params: {
     : `agent:${params.agentId}:skill-harness-review:${suffix}`;
   const prompt = buildReviewPrompt(params.snapshot, params.triggers);
   const beforeIntentFiles = snapshotIntentFiles(params.intentDirectory);
+  const candidates = reviewModelCandidates(params);
 
-  for (const [index, modelRef] of reviewModelCandidates(params).entries()) {
+  for (const [index, modelRef] of candidates.entries()) {
     const attemptRunId = index === 0 ? runId : `${runId}-retry-${index}`;
+    const hasFallbackAttempt = index < candidates.length - 1;
+    const retryRecoverableFailure = (
+      failure: ReviewSubagentResult,
+      retryable = true,
+    ): boolean => {
+      if (!retryable || !hasFallbackAttempt) return false;
+      logger.warn("evolution review retrying fallback after failed attempt", {
+        outcome: failure.outcome,
+        modelRef,
+      });
+      return true;
+    };
     const workspaceDir = createIntentWorkspace(beforeIntentFiles);
     try {
       const result = await params.api.runtime.agent.runEmbeddedAgent({
@@ -1014,7 +1028,12 @@ export async function runReviewSubagent(params: {
         logger.warn("evolution review result parse failed", {
           ...summarizeRawReply(rawReply),
         });
-        return { findings: [], outcome: "parse-failed" };
+        const failure: ReviewSubagentResult = {
+          findings: [],
+          outcome: "parse-failed",
+        };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
       }
       if (
         parsed.findings.length === 0 &&
@@ -1026,7 +1045,7 @@ export async function runReviewSubagent(params: {
           invalidFindingCount: parsed.invalidRequestedPositiveFindings,
           requestedPositiveFindings: parsed.requestedPositiveFindings,
         });
-        return {
+        const failure: ReviewSubagentResult = {
           findings: [],
           outcome: "schema-rejected",
           ...(parsed.schemaRejectionReasonCounts
@@ -1035,6 +1054,8 @@ export async function runReviewSubagent(params: {
               }
             : {}),
         };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
       }
       const afterIntentFiles = snapshotIntentFiles(workspaceDir);
       const changedIds = changedIntentIds(beforeIntentFiles, afterIntentFiles);
@@ -1047,35 +1068,41 @@ export async function runReviewSubagent(params: {
         ...new Set([...changedIds, ...intentFindingTargets]),
       ];
       if (changedIds.length > 0 && intentFindingTargets.size === 0) {
-        return {
+        const failure: ReviewSubagentResult = {
           findings: [],
           outcome: "validation-failed",
           validationErrors: [
             "review edited runtime intent files without returning an intent-markdown finding",
           ],
         };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
       }
       const undeclaredChangedIds = undeclaredIntentEdits(
         changedIds,
         intentFindingTargets,
       );
       if (undeclaredChangedIds.length > 0) {
-        return {
+        const failure: ReviewSubagentResult = {
           findings: [],
           outcome: "validation-failed",
           validationErrors: [
             `review edited undeclared runtime intent files: ${undeclaredChangedIds.join(", ")}`,
           ],
         };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
       }
       if (changedIds.length === 0 && intentFindingTargets.size > 0) {
-        return {
+        const failure: ReviewSubagentResult = {
           findings: [],
           outcome: "validation-failed",
           validationErrors: [
             "review returned an intent-markdown finding without editing runtime intent files",
           ],
         };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
       }
       const validation = validateIntentDirectory(
         workspaceDir,
@@ -1085,11 +1112,13 @@ export async function runReviewSubagent(params: {
         logger.warn("evolution review produced invalid runtime intents", {
           errors: validation.errors,
         });
-        return {
+        const failure: ReviewSubagentResult = {
           findings: [],
           outcome: "validation-failed",
           validationErrors: validation.errors,
         };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
       }
       const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
       const conflictIds = concurrentIntentConflicts(

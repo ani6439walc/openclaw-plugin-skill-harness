@@ -210,6 +210,9 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain(
       "suggestedChange must concisely summarize the file edit already applied",
     );
+    expect(prompt).toContain(
+      "For split or merge operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to:",
+    );
     expect(prompt).toContain('targetKind="trigger-keywords"');
     expect(prompt).toContain("triggerKeywords.successfulPattern");
     expect(prompt).toContain("triggerKeywords.behaviorFix");
@@ -1172,6 +1175,156 @@ describe("runReviewSubagent", () => {
     expect(fs.existsSync(path.join(intentDirectory, "temp.json"))).toBe(false);
   });
 
+  it("retries the fallback review model after parse failure", async () => {
+    const intentDirectory = createIntentDirectory();
+    const targetPath = path.join(intentDirectory, "social-casual.md");
+    const original = fs.readFileSync(targetPath, "utf-8");
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      if (runEmbeddedAgent.mock.calls.length === 1) {
+        fs.writeFileSync(
+          path.join(options.workspaceDir, "social-casual.md"),
+          original.replace("- Chat casually.", "- Invalid primary edit."),
+        );
+        return { payloads: [{ text: "not json" }] };
+      }
+
+      fs.writeFileSync(
+        path.join(options.workspaceDir, "social-casual.md"),
+        original.replace("- Chat casually.", "- Route tool support away."),
+      );
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "behavior-fix",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["social-casual"],
+                  dedupeKey: "tool-inquiry-boundary",
+                  summary: "Tool inquiries need a clearer boundary",
+                  evidence: ["User asked whether a tool exists"],
+                  correctionGoal: "Clarify the casual-chat boundary",
+                  suggestedChange: "Update social-casual.md Guidelines.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({
+          evolution: { enabled: true, modelFallback: "google/fallback-review" },
+        }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        changedIntentIds: ["social-casual"],
+        outcome: "applied",
+      }),
+    );
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+    expect(fs.readFileSync(targetPath, "utf-8")).toContain(
+      "- Route tool support away.",
+    );
+    expect(fs.readFileSync(targetPath, "utf-8")).not.toContain(
+      "- Invalid primary edit.",
+    );
+  });
+
+  it("retries the fallback review model after undeclared intent edits", async () => {
+    const intentDirectory = createIntentDirectory();
+    const socialPath = path.join(intentDirectory, "social-casual.md");
+    const otherPath = path.join(intentDirectory, "other.md");
+    const originalSocial = fs.readFileSync(socialPath, "utf-8");
+    const originalOther = fs.readFileSync(otherPath, "utf-8");
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.writeFileSync(
+        path.join(options.workspaceDir, "social-casual.md"),
+        originalSocial.replace(
+          "- Chat casually.",
+          "- Route tool support away.",
+        ),
+      );
+
+      if (runEmbeddedAgent.mock.calls.length === 1) {
+        fs.writeFileSync(
+          path.join(options.workspaceDir, "other.md"),
+          originalOther.replace(
+            "- Ask for context.",
+            "- Ask for specific context.",
+          ),
+        );
+      }
+
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "behavior-fix",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["social-casual"],
+                  dedupeKey: "tool-inquiry-boundary",
+                  summary: "Tool inquiries need a clearer boundary",
+                  evidence: ["User asked whether a tool exists"],
+                  correctionGoal: "Clarify the casual-chat boundary",
+                  suggestedChange: "Update social-casual.md Guidelines.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({
+          evolution: { enabled: true, modelFallback: "google/fallback-review" },
+        }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        changedIntentIds: ["social-casual"],
+        outcome: "applied",
+      }),
+    );
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+    expect(fs.readFileSync(socialPath, "utf-8")).toContain(
+      "- Route tool support away.",
+    );
+    expect(fs.readFileSync(otherPath, "utf-8")).toBe(originalOther);
+  });
+
   it("rejects successful review edits when the live target changed concurrently", async () => {
     const intentDirectory = createIntentDirectory();
     const targetPath = path.join(intentDirectory, "social-casual.md");
@@ -1217,7 +1370,9 @@ describe("runReviewSubagent", () => {
     await expect(
       runReviewSubagent({
         api,
-        config: resolveConfig({ evolution: { enabled: true } }),
+        config: resolveConfig({
+          evolution: { enabled: true, modelFallback: "google/fallback-review" },
+        }),
         agentId: "main",
         intentDirectory,
         modelRef: { provider: "google", model: "review" },
@@ -1231,6 +1386,7 @@ describe("runReviewSubagent", () => {
         "runtime intent files changed during review: social-casual",
       ],
     });
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
     expect(fs.readFileSync(targetPath, "utf-8")).toBe(concurrent);
   });
 
