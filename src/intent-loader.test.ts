@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { IntentCatalog } from "./intent-loader.js";
+import { resolveConfig } from "./config.js";
+import { filterIntentsForAgent, IntentCatalog } from "./intent-loader.js";
+import type { IntentCatalogEntry } from "./types.js";
 
 describe("IntentCatalog", () => {
   let root: string;
@@ -158,5 +160,103 @@ examples:
     const catalog = IntentCatalog.create(root);
     expect(catalog.load("intents", { silent: true })).toBe(0);
     expect(catalog.get()).toEqual([]);
+  });
+
+  describe("filterForAgent", () => {
+    const intents: IntentCatalogEntry[] = [
+      {
+        id: "CHAT",
+        definition: {
+          triggers: ["Social"],
+          examples: [],
+          domain: "chat",
+          fastpath: { keywords: [] },
+          prompt: "Chat hint",
+        },
+      },
+      {
+        id: "MEMORY_RECENT",
+        definition: {
+          triggers: ["Recall recent context"],
+          examples: [],
+          domain: "memory",
+          fastpath: { keywords: [] },
+          prompt: "Memory hint",
+        },
+      },
+      {
+        id: "TYPO",
+        definition: {
+          triggers: ["Typing error"],
+          examples: [],
+          domain: "typing",
+          fastpath: { keywords: [] },
+          prompt: "Typo hint",
+        },
+      },
+    ];
+
+    function testFilter(
+      intentDeny: Record<string, string[]>,
+      agentId: string | undefined,
+    ) {
+      const catalog = IntentCatalog.create(root);
+      catalog.setIntents(intents);
+      return catalog.filterForAgent(resolveConfig({ intentDeny }), agentId);
+    }
+
+    it("does not filter when agent has no matching deny entry", () => {
+      const result = testFilter({ main: ["TYPO"] }, "other");
+      expect(result.map((intent) => intent.id)).toEqual([
+        "CHAT",
+        "MEMORY_RECENT",
+        "TYPO",
+      ]);
+    });
+
+    it("filters exact intent ids for exact agent ids", () => {
+      const result = testFilter({ main: ["TYPO"] }, "main");
+      expect(result.map((intent) => intent.id)).toEqual([
+        "CHAT",
+        "MEMORY_RECENT",
+      ]);
+    });
+
+    it("supports wildcard agent ids and intent ids", () => {
+      const result = testFilter(
+        { "*": ["MEMORY_*"], "work-*": ["CH?T"] },
+        "work-main",
+      );
+      expect(result.map((intent) => intent.id)).toEqual(["TYPO"]);
+    });
+
+    it("matches patterns case-insensitively", () => {
+      const result = testFilter({ MAIN: ["typo"] }, "main");
+      expect(result.map((intent) => intent.id)).toEqual([
+        "CHAT",
+        "MEMORY_RECENT",
+      ]);
+    });
+  });
+});
+
+describe("filterIntentsForAgent", () => {
+  it("returns a copy when there are no deny patterns", () => {
+    const intents: IntentCatalogEntry[] = [
+      {
+        id: "CHAT",
+        definition: {
+          triggers: ["Social"],
+          examples: [],
+          domain: "chat",
+          fastpath: { keywords: [] },
+          prompt: "Chat hint",
+        },
+      },
+    ];
+
+    const result = filterIntentsForAgent(intents, resolveConfig({}), "main");
+    expect(result).toEqual(intents);
+    expect(result).not.toBe(intents);
   });
 });

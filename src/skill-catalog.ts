@@ -9,7 +9,6 @@ import type { AvailableSkill, IntentCatalogEntry } from "./types.js";
 
 const SKILL_REF_RE = /\bskill:\s*([A-Za-z0-9_-]+)/gi;
 const SKILL_INDEX_CACHE_TTL_MS = 60_000;
-const SKILL_INDEX_CACHE_MAX_ENTRIES = 128;
 const SKILL_INDEX_MAX_DEPTH = 32;
 const require = createRequire(import.meta.url);
 
@@ -29,14 +28,6 @@ function sweepExpiredSkillIndexes(nowMs: number): void {
     if (cached.expiresAtMs <= nowMs) {
       skillIndexCache.delete(root);
     }
-  }
-}
-
-function pruneOldestSkillIndexes(maxEntries: number): void {
-  while (skillIndexCache.size >= maxEntries) {
-    const oldestRoot = skillIndexCache.keys().next().value;
-    if (!oldestRoot) return;
-    skillIndexCache.delete(oldestRoot);
   }
 }
 
@@ -228,7 +219,6 @@ async function getCachedSkillIndex(
     disabledSkillNames: options.disabledSkillNames,
   });
   if (cacheTtlMs > 0) {
-    pruneOldestSkillIndexes(SKILL_INDEX_CACHE_MAX_ENTRIES);
     skillIndexCache.set(cacheKey, {
       expiresAtMs: nowMs + cacheTtlMs,
       index,

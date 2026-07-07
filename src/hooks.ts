@@ -24,7 +24,7 @@ import {
   defaultEvolutionLogWriter,
   type EvolutionLogWriter,
 } from "./evolution-log-writer.js";
-import { defaultReviewQueue, type ReviewQueue } from "./review-queue.js";
+import { enqueueReview } from "./review-queue.js";
 import { checkEvolutionTriggers } from "./trigger-checker.js";
 import {
   runReviewSubagent,
@@ -40,6 +40,7 @@ import {
   extractToolText,
   isInternalUserTurn,
   attachHistoricalIntents,
+  sanitizeConversationText,
 } from "./conversation-extract.js";
 import {
   isAllowedChatId,
@@ -98,6 +99,15 @@ interface PendingToolCall {
   ctx: { sessionId?: string; agentId?: string; sessionKey?: string };
 }
 
+function sanitizeHistoricalIntentRecords(
+  records: HistoricalIntentRecord[],
+): HistoricalIntentRecord[] {
+  return records.map((record) => ({
+    ...record,
+    input: sanitizeConversationText(record.input),
+  }));
+}
+
 const LOW_THINKING_EFFORTS = new Set(["off", "minimal", "low"]);
 
 function resolveReasoningEffort(
@@ -142,7 +152,7 @@ export type HookDeps = {
   catalog?: typeof defaultCatalog;
   tracker?: typeof defaultTracker;
   statsAggregator?: typeof defaultStatsAggregator;
-  reviewQueue?: Pick<ReviewQueue, "enqueue">;
+  reviewQueue?: { enqueue(task: () => Promise<void>): void };
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],
   ) => Promise<ReviewSubagentResult | undefined>;
@@ -440,7 +450,7 @@ export function createHookHandlers(deps: HookDeps) {
   const catalog = deps.catalog ?? defaultCatalog;
   const tracker = deps.tracker ?? defaultTracker;
   const statsAggregator = deps.statsAggregator ?? defaultStatsAggregator;
-  const reviewQueue = deps.reviewQueue ?? defaultReviewQueue;
+  const enqueueReviewTask = deps.reviewQueue?.enqueue ?? enqueueReview;
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier ?? runIntentionSubagent;
   const topicChecker = deps.topicChecker ?? runTopicSwitchSubagent;
@@ -597,10 +607,10 @@ export function createHookHandlers(deps: HookDeps) {
     historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
   } {
-    const latestUserMessage = event.prompt ?? "";
-    const historicalIntents = ctx.sessionId
-      ? tracker.getHistoricalIntentRecords(ctx.sessionId)
-      : [];
+    const latestUserMessage = sanitizeConversationText(event.prompt ?? "");
+    const historicalIntents = sanitizeHistoricalIntentRecords(
+      ctx.sessionId ? tracker.getHistoricalIntentRecords(ctx.sessionId) : [],
+    );
     const allTurns = attachHistoricalIntents(
       extractRecentTurns(event.messages),
       historicalIntents,
@@ -1006,8 +1016,7 @@ export function createHookHandlers(deps: HookDeps) {
     const result = params.classification.result;
     logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
 
-    if (params.classification.kind === "same-topic") {
-      logger.debug("topic unchanged; recording inherited intent only.");
+    const recordAndReturnDomainSkillsPrefix = async () => {
       recordPromptBuildResult({
         ctx: params.ctx,
         routing: params.routing,
@@ -1026,6 +1035,11 @@ export function createHookHandlers(deps: HookDeps) {
           }),
         ),
       );
+    };
+
+    if (params.classification.kind === "same-topic") {
+      logger.debug("topic unchanged; recording inherited intent only.");
+      return await recordAndReturnDomainSkillsPrefix();
     }
 
     // Safety fallback: skip intent instruction subagent and hint injection when topic unchanged
@@ -1033,24 +1047,7 @@ export function createHookHandlers(deps: HookDeps) {
       logger.debug(
         "topic unchanged; skipping intent instruction subagent and hint injection.",
       );
-      recordPromptBuildResult({
-        ctx: params.ctx,
-        routing: params.routing,
-        latestUserMessage: params.latestUserMessage,
-        trigger: params.classification.trigger,
-        result,
-        conversation: params.conversation,
-      });
-      return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(
-          result,
-          await resolvePromptDomainSkills({
-            agentId: params.routing.effectiveAgentId,
-            domain: result.domain,
-            availableIntents: params.availableIntents,
-          }),
-        ),
-      );
+      return await recordAndReturnDomainSkillsPrefix();
     }
 
     // Skip intent instruction subagent when confidence is too low
@@ -1058,48 +1055,14 @@ export function createHookHandlers(deps: HookDeps) {
       logger.debug(
         `confidence ${result.confidence} below 0.7; skipping intent instruction subagent and hint injection.`,
       );
-      recordPromptBuildResult({
-        ctx: params.ctx,
-        routing: params.routing,
-        latestUserMessage: params.latestUserMessage,
-        trigger: params.classification.trigger,
-        result,
-        conversation: params.conversation,
-      });
-      return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(
-          result,
-          await resolvePromptDomainSkills({
-            agentId: params.routing.effectiveAgentId,
-            domain: result.domain,
-            availableIntents: params.availableIntents,
-          }),
-        ),
-      );
+      return await recordAndReturnDomainSkillsPrefix();
     }
 
     if (!params.refreshedConfig.instruction.enabled) {
       logger.debug(
         "instruction writer disabled; injecting domain skills without generated hint.",
       );
-      recordPromptBuildResult({
-        ctx: params.ctx,
-        routing: params.routing,
-        latestUserMessage: params.latestUserMessage,
-        trigger: params.classification.trigger,
-        result,
-        conversation: params.conversation,
-      });
-      return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(
-          result,
-          await resolvePromptDomainSkills({
-            agentId: params.routing.effectiveAgentId,
-            domain: result.domain,
-            availableIntents: params.availableIntents,
-          }),
-        ),
-      );
+      return await recordAndReturnDomainSkillsPrefix();
     }
 
     const instructionModelRef = getInstructionModelRef(
@@ -1115,24 +1078,7 @@ export function createHookHandlers(deps: HookDeps) {
       logger.debug(
         "instruction writer model unavailable; injecting domain skills without generated hint.",
       );
-      recordPromptBuildResult({
-        ctx: params.ctx,
-        routing: params.routing,
-        latestUserMessage: params.latestUserMessage,
-        trigger: params.classification.trigger,
-        result,
-        conversation: params.conversation,
-      });
-      return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(
-          result,
-          await resolvePromptDomainSkills({
-            agentId: params.routing.effectiveAgentId,
-            domain: result.domain,
-            availableIntents: params.availableIntents,
-          }),
-        ),
-      );
+      return await recordAndReturnDomainSkillsPrefix();
     }
 
     emitPipelineEvent(
@@ -1518,7 +1464,7 @@ export function createHookHandlers(deps: HookDeps) {
     snapshot: Awaited<ReturnType<typeof buildEvolutionReviewSnapshot>>;
     triggers: ReturnType<typeof checkEvolutionTriggers>;
   }): void {
-    reviewQueue.enqueue(async () => {
+    enqueueReviewTask(async () => {
       const reviewResult = await reviewer({
         api,
         config: params.resolvedConfig,

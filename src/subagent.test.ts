@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
 import { resolveConfig } from "./config.js";
 import {
@@ -28,6 +28,10 @@ describe("buildIntentionEmbeddedRunParams", () => {
 });
 
 describe("runTopicSwitchSubagent", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("runs a tool-free topic checker with classifier config", async () => {
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [
@@ -104,6 +108,51 @@ describe("runTopicSwitchSubagent", () => {
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
       "topic=topic checker",
+    );
+  });
+
+  it("includes the configured user timezone offset in the prompt", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-10T18:06:00.000Z"));
+
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [
+        {
+          text: JSON.stringify({
+            keywords: ["timezone"],
+            topic: "User is checking timezone context.",
+            domain: "coding",
+            changed: true,
+            reason: "shift",
+            complexity: "low",
+          }),
+        },
+      ],
+    });
+    const api = {
+      config: {},
+      runtime: {
+        agent: { runEmbeddedAgent },
+        config: {
+          current: () => ({
+            agents: { defaults: { userTimezone: "Asia/Kolkata" } },
+          }),
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    await runTopicSwitchSubagent({
+      api,
+      config: resolveConfig({}),
+      agentId: "main",
+      latest: "continue timezone work",
+      domains: ["coding"],
+      history: [],
+      modelRef: { provider: "google", model: "test-intent" },
+    });
+
+    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
+      "[Wed 2026-06-10 23:36 GMT+5:30]",
     );
   });
 });
@@ -245,5 +294,32 @@ describe("runIntentInstructionSubagent", () => {
     });
 
     expect(result).toEqual({ error: "Model timed out" });
+  });
+});
+
+describe("buildIntentionEmbeddedRunParams", () => {
+  it("uses raw model mode with no built-in prompt sections or tools", () => {
+    const result = buildIntentionEmbeddedRunParams({
+      params: {
+        api: { config: { plugins: {} } } as unknown as OpenClawPluginApi,
+        config: resolveConfig({ timeoutMs: 4321, thinking: "low" }),
+        agentId: "main",
+        messageProvider: "telegram",
+        modelRef: { provider: "openai", model: "gpt-5-mini" },
+      },
+      subagentSessionId: "subagent-1",
+      subagentSessionKey: "main:skill-harness:abc",
+      prompt: "Classify this intent",
+    });
+
+    expect(result.modelRun).toBe(true);
+    expect(result.promptMode).toBe("none");
+    expect(result.disableTools).toBe(true);
+    expect(result.toolsAllow).toEqual([]);
+    expect(result.disableMessageTool).toBe(true);
+    expect(result.thinkLevel).toBe("low");
+    expect(result.sessionFile).toBe("/tmp/subagent-1.session.jsonl");
+    expect(result.workspaceDir).toBe("/tmp");
+    expect(result.agentDir).toBe("/tmp");
   });
 });

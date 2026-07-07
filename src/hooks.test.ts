@@ -995,6 +995,119 @@ describe("createHookHandlers topic switch flow", () => {
     );
   }
 
+  const metadataPrefix = `Conversation info (untrusted metadata):
+\`\`\`json
+{
+  "chat_id": "user:529296776637972480",
+  "message_id": "1524097597906620690",
+  "sender_id": "529296776637972480",
+  "sender": "烤雞堡",
+  "timestamp": "Wed 2026-07-08 00:59:43 GMT+8",
+  "inbound_event_kind": "user_request"
+}
+\`\`\`
+
+Sender (untrusted metadata):
+\`\`\`json
+{
+  "label": "烤雞堡 (529296776637972480)",
+  "id": "529296776637972480",
+  "name": "烤雞堡",
+  "username": "wei840222",
+  "tag": "wei840222"
+}
+\`\`\`
+
+System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
+
+  it("strips platform metadata from latest, historical, and recorded prompt text", async () => {
+    const rawLatest = `${metadataPrefix}\n\n進入 inventory 模式先 scan吧`;
+    const rawHistorical = `${metadataPrefix}\n\n跟我詳細解說 skill-harness 技能`;
+    const topicChecker = vi.fn().mockResolvedValue({
+      keywords: ["inventory", "scan"],
+      topic: "User wants inventory scanning.",
+      domain: "tools",
+      changed: true,
+      reason: "shift",
+      complexity: "medium" as const,
+    });
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "tool-reference",
+      reason: "inventory request",
+      keywords: ["inventory", "scan"],
+      topic: "User wants inventory scanning.",
+      domain: "tools",
+      topicChangeReason: "shift",
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const { handlers, record } = createTopicFlowHarness({
+      historicalIntents: [
+        {
+          input: rawHistorical,
+          intent: "tool-reference",
+          domain: "tools",
+          topic: "User requests skill-harness explanation.",
+          keywords: ["skill-harness", "explanation"],
+          topicChangeReason: "start",
+        },
+      ],
+      configRaw: { instruction: { enabled: false } },
+      topicChecker,
+      classifier,
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: rawLatest,
+        messages: [
+          {
+            role: "user",
+            content: rawLatest,
+            provenance: { kind: "external_user" },
+          },
+        ],
+      } as never,
+      ctx,
+    );
+
+    expect(topicChecker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        latest: "進入 inventory 模式先 scan吧",
+        conversation: [
+          expect.objectContaining({
+            role: "user",
+            text: "進入 inventory 模式先 scan吧",
+          }),
+        ],
+        history: [
+          expect.objectContaining({
+            input: "跟我詳細解說 skill-harness 技能",
+          }),
+        ],
+      }),
+    );
+    expect(classifier).toHaveBeenCalledWith(
+      expect.objectContaining({ latest: "進入 inventory 模式先 scan吧" }),
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          input: "進入 inventory 模式先 scan吧",
+          intent: expect.objectContaining({
+            input: [
+              expect.objectContaining({
+                role: "user",
+                text: "進入 inventory 模式先 scan吧",
+              }),
+            ],
+          }),
+        }),
+      }),
+    );
+  });
+
   it("uses exact keyword match to inject a prompt without subagent calls", async () => {
     const fastEvent = {
       prompt: " 謝 謝 ",

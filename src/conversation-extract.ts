@@ -303,7 +303,7 @@ export function isInternalUserTurn(params: {
   return promptHasInternalTurnSignal;
 }
 
-function stripMetadataBlocks(text: string): string {
+export function sanitizeConversationText(text: string): string {
   return text
     .replace(
       /<skill_harness_plugin\b[^>]*>[\s\S]*?<\/skill_harness_plugin>/gi,
@@ -315,6 +315,7 @@ function stripMetadataBlocks(text: string): string {
       " ",
     )
     .replace(/Sender \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi, " ")
+    .replace(/^\s*System:\s*\[[^\]]+\]\s*Model switched to .*$/gim, " ")
     .split(UNTRUSTED_CONTEXT_HEADER)
     .join(" ")
     .split(LEGACY_UNTRUSTED_CONTEXT_HEADERS[0])
@@ -355,7 +356,7 @@ export function extractRecentTurns(
     const role = typed.role;
     if (role !== "user" && role !== "assistant") continue;
 
-    const text = stripMetadataBlocks(extractTextContent(typed.content));
+    const text = sanitizeConversationText(extractTextContent(typed.content));
     if (!text || isHeartbeatMessage(role, text)) continue;
 
     if (role === "user") {

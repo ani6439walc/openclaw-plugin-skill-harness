@@ -422,28 +422,12 @@ function resolveCurrentTime(api: OpenClawPluginApi): string {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    timeZoneName: "shortOffset",
     hour12: false,
   });
   const parts = formatter.formatToParts(date);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-
-  const offsetStr = getTimezoneOffset(userTimezone, date);
+  const offsetStr = get("timeZoneName") || "GMT+0";
 
   return `[${dayOfWeek} ${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")} ${offsetStr}]`;
-}
-
-function getTimezoneOffset(timezone: string, date: Date): string {
-  const utcMs = new Date(
-    date.toLocaleString("en-US", { timeZone: "UTC" }),
-  ).getTime();
-  const tzMs = new Date(
-    date.toLocaleString("en-US", { timeZone: timezone }),
-  ).getTime();
-  const diffMinutes = Math.round((tzMs - utcMs) / 60000);
-  const sign = diffMinutes >= 0 ? "+" : "-";
-  const hours = Math.floor(Math.abs(diffMinutes) / 60);
-  const minutes = Math.abs(diffMinutes) % 60;
-  return minutes > 0
-    ? `GMT${sign}${hours}:${String(minutes).padStart(2, "0")}`
-    : `GMT${sign}${hours}`;
 }

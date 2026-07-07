@@ -1,24 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { ReviewQueue } from "./review-queue.js";
+import { enqueueReview, waitForReviewQueueIdle } from "./review-queue.js";
 
-describe("ReviewQueue", () => {
+describe("review queue", () => {
   it("runs background tasks sequentially and continues after failure", async () => {
-    const queue = new ReviewQueue();
     const order: number[] = [];
 
-    queue.enqueue(async () => {
+    enqueueReview(async () => {
       await Promise.resolve();
       order.push(1);
     });
-    queue.enqueue(async () => {
+    enqueueReview(async () => {
       order.push(2);
       throw new Error("failed");
     });
-    queue.enqueue(async () => {
+    enqueueReview(async () => {
       order.push(3);
     });
 
-    await queue.onIdle();
+    await waitForReviewQueueIdle();
     expect(order).toEqual([1, 2, 3]);
   });
 });
