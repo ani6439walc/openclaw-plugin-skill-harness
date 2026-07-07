@@ -69,6 +69,28 @@ def jules_headers():
     }
 
 
+def git_config_value(key):
+    result = subprocess.run(
+        ["git", "config", "--get", key],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return None
+
+
+def ensure_git_config(key, value):
+    if git_config_value(key):
+        return
+    subprocess.run(
+        ["git", "config", key, value],
+        check=True,
+        capture_output=True,
+    )
+
+
 def get_pr_diff(owner, repo, pr_number):
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
     return request("GET", url, github_headers("application/vnd.github.v3.diff"))
@@ -93,20 +115,10 @@ def create_diff_branch(pr_number, diff_text):
     with open(file_name, "w") as f:
         f.write(diff_text)
 
-    subprocess.run(
-        ["git", "config", "user.name", "github-actions[bot]"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        [
-            "git",
-            "config",
-            "user.email",
-            "41898282+github-actions[bot]@users.noreply.github.com",
-        ],
-        check=True,
-        capture_output=True,
+    ensure_git_config("user.name", "github-actions[bot]")
+    ensure_git_config(
+        "user.email",
+        "41898282+github-actions[bot]@users.noreply.github.com",
     )
 
     log(f"Creating branch {branch_name}...")

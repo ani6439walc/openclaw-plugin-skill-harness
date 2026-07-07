@@ -1126,17 +1126,22 @@ describe("runReviewSubagent", () => {
   it("cleans up temp files when atomic intent replacement fails", () => {
     const intentDirectory = createIntentDirectory();
     const file = "social-casual.md";
+    const deletionPath = path.join(intentDirectory, "other.md");
     fs.rmSync(path.join(intentDirectory, file));
     fs.mkdirSync(path.join(intentDirectory, file));
 
     expect(() =>
       applyIntentWorkspaceChanges({
         intentDirectory,
-        before: new Map([[file, "before"]]),
+        before: new Map([
+          ["other.md", fs.readFileSync(deletionPath, "utf-8")],
+          [file, "before"],
+        ]),
         after: new Map([[file, "after"]]),
-        changedIds: ["social-casual"],
+        changedIds: ["other", "social-casual"],
       }),
     ).toThrow();
+    expect(fs.existsSync(deletionPath)).toBe(true);
     expect(fs.readdirSync(intentDirectory)).not.toContain(
       expect.stringContaining(".tmp"),
     );

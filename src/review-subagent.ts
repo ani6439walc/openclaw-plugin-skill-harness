@@ -934,18 +934,26 @@ function concurrentIntentConflicts(
     .sort((a, b) => a.localeCompare(b));
 }
 
-function atomicWriteIntentFile(targetPath: string, content: string): void {
+interface StagedIntentWrite {
+  targetPath: string;
+  tempPath: string;
+}
+
+function stageIntentWrite(
+  targetPath: string,
+  content: string,
+): StagedIntentWrite {
   const tempPath = path.join(
     path.dirname(targetPath),
     `.${path.basename(targetPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
   );
   try {
     fs.writeFileSync(tempPath, content);
-    fs.renameSync(tempPath, targetPath);
   } catch (err) {
     fs.rmSync(tempPath, { force: true });
     throw err;
   }
+  return { targetPath, tempPath };
 }
 
 export function applyIntentWorkspaceChanges(params: {
@@ -955,15 +963,31 @@ export function applyIntentWorkspaceChanges(params: {
   changedIds: readonly string[];
 }): void {
   fs.mkdirSync(params.intentDirectory, { recursive: true });
-  for (const id of params.changedIds) {
-    const file = `${id}.md`;
-    const targetPath = path.join(params.intentDirectory, file);
-    const content = params.after.get(file);
-    if (content === undefined) {
-      if (params.before.has(file)) fs.rmSync(targetPath, { force: true });
-      continue;
+  const stagedWrites: StagedIntentWrite[] = [];
+  const deletions: string[] = [];
+  try {
+    for (const id of params.changedIds) {
+      const file = `${id}.md`;
+      const targetPath = path.join(params.intentDirectory, file);
+      const content = params.after.get(file);
+      if (content === undefined) {
+        if (params.before.has(file)) deletions.push(targetPath);
+        continue;
+      }
+      stagedWrites.push(stageIntentWrite(targetPath, content));
     }
-    atomicWriteIntentFile(targetPath, content);
+
+    for (const write of stagedWrites) {
+      fs.renameSync(write.tempPath, write.targetPath);
+    }
+    for (const targetPath of deletions) {
+      fs.rmSync(targetPath, { force: true });
+    }
+  } catch (err) {
+    for (const write of stagedWrites) {
+      fs.rmSync(write.tempPath, { force: true });
+    }
+    throw err;
   }
 }
 
