@@ -288,6 +288,26 @@ function stripToolOnlyFields(skill: AvailableSkill): AvailableSkill {
   return visible;
 }
 
+function normalizeSkillNames(names: readonly unknown[] | undefined): string[] {
+  if (!names) return [];
+  return names
+    .filter((name): name is string => typeof name === "string")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+function uniqueSkillNames(names: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(name);
+  }
+  return unique;
+}
+
 function sourcePriority(skill: AvailableSkill): number {
   return skill.source
     ? (SOURCE_PRIORITY.get(skill.source) ?? Number.MAX_SAFE_INTEGER)
@@ -356,9 +376,13 @@ export async function findAvailableSkill(
 export async function resolveAvailableSkills(
   params: SkillResolutionParams & {
     intentBody: string;
+    skillNames?: readonly string[];
   },
 ): Promise<AvailableSkill[]> {
-  const names = extractReferencedSkillNames(params.intentBody);
+  const names = uniqueSkillNames([
+    ...normalizeSkillNames(params.skillNames),
+    ...extractReferencedSkillNames(params.intentBody),
+  ]);
   if (names.length === 0) return [];
 
   const skills: AvailableSkill[] = [];
@@ -386,19 +410,23 @@ export async function resolveDomainSkills(params: {
   const domain = (params.domain ?? "").trim().toLowerCase();
   if (!domain) return [];
 
-  const intentBody = params.intents
-    .filter(
-      (intent) => intent.definition.domain.trim().toLowerCase() === domain,
-    )
+  const domainIntents = params.intents.filter(
+    (intent) => intent.definition.domain.trim().toLowerCase() === domain,
+  );
+  const intentBody = domainIntents
     .map((intent) => intent.definition.prompt)
     .join("\n");
+  const skillNames = domainIntents.flatMap(
+    (intent) => intent.definition.skills ?? [],
+  );
 
-  if (!intentBody.trim()) return [];
+  if (!intentBody.trim() && skillNames.length === 0) return [];
 
   return await resolveAvailableSkills({
     api: params.api,
     agentId: params.agentId,
     intentBody,
+    skillNames,
     bundledSkillsDir: params.bundledSkillsDir,
     cacheTtlMs: params.cacheTtlMs,
     nowMs: params.nowMs,

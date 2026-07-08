@@ -8,12 +8,12 @@ An OpenClaw plugin that pre-scans user intent before main-agent replies and inje
 ## Current Status (verified 2026-07-09)
 
 - Package version: `2026.6.11`; OpenClaw compatibility in `package.json` targets Plugin API and Gateway `>=2026.6.11`.
-- Branch state inspected on `main` at `987374c` (`♻️ refactor(subagent): extract shared runtime logic and rename embedded-agent to subagent`).
-- Recent implementation work focused on the `embedded-agent` → `subagent` naming cleanup, shared embedded sub-agent runtime defaults, direct runtime Intent Review, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and shared skill discovery/management for prompt hints plus `skill_list`, `skill_view`, and `skill_manage` tools.
+- Branch state inspected on `main` at `6e5d47f` (`✨ feat(topic-switch): add basis diagnostic and use deterministic prompt joining`).
+- Recent implementation work focused on the `embedded-agent` → `subagent` naming cleanup, shared embedded sub-agent runtime defaults, direct runtime Intent Review, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, deterministic topic prompt assembly, and shared skill discovery/management for prompt hints plus `skill_list`, `skill_view`, and `skill_manage` tools.
 - Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/skill-harness/intents`.
 - Codebase shape excluding dependencies/build output: 69 TypeScript files, 17 Markdown files, 3 JSON files, and 98 counted source/documentation/config files total.
-- TypeScript line split from direct file line counts: 40 runtime files / 10,460 lines, 26 test files / 13,728 lines, 3 root tooling/entry files / 30 lines; test/runtime line ratio is about 1.31x.
-- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 26 test files / 493 tests, and `pnpm run build` passes.
+- TypeScript line split from direct file line counts: 40 runtime files / 10,597 lines, 26 test files / 14,007 lines, 3 root tooling/entry files / 30 lines; test/runtime line ratio is about 1.32x.
+- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 26 test files / 497 tests, `pnpm run build` passes, and `pnpm pack --dry-run` succeeds.
 - Package hygiene note: `tsconfig.json` includes only `api.ts`, `index.ts`, and `src/**/*.ts`; current `pnpm pack --dry-run` output contains `dist/src/classification/subagent.*` and `dist/src/skills/*` with no stale `dist/src/classification/embedded-agent.*` or `dist/vitest.config.*` artifacts.
 - Dependency audit note: `pnpm audit --audit-level moderate` currently reports three moderate findings: transitive OpenClaw dependency findings for `protobufjs` and `tar`, plus `gray-matter > js-yaml`. Remediation should be coordinated with OpenClaw/gray-matter compatibility rather than patched blindly in this plugin.
 

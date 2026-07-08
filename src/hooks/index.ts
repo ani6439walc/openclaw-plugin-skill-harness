@@ -155,15 +155,13 @@ function findIntentDefinition(
     .find((entry) => entry.id.toLowerCase() === intentId.toLowerCase());
 }
 
-function findIntentBody(
-  intents: readonly { id: string; definition: { prompt: string } }[],
-  intent: string | undefined,
-): string {
+function findIntentEntry<
+  T extends { id: string; definition: { prompt: string; skills?: string[] } },
+>(intents: readonly T[], intent: string | undefined): T | undefined {
   const intentId = intent?.match(/^([A-Za-z0-9_-]+)/)?.[1];
-  if (!intentId) return FALLBACK_INTENT.prompt;
-  return (
-    intents.find((entry) => entry.id.toLowerCase() === intentId.toLowerCase())
-      ?.definition.prompt ?? FALLBACK_INTENT.prompt
+  if (!intentId) return;
+  return intents.find(
+    (entry) => entry.id.toLowerCase() === intentId.toLowerCase(),
   );
 }
 
@@ -963,7 +961,8 @@ export function createHookHandlers(deps: HookDeps) {
       "hint-generate",
       "started",
     );
-    const intentBody = findIntentBody(params.availableIntents, result.intent);
+    const intentEntry = findIntentEntry(params.availableIntents, result.intent);
+    const intentBody = intentEntry?.definition.prompt ?? FALLBACK_INTENT.prompt;
     const instructionResult = await instructionWriter({
       api,
       config: params.refreshedConfig,
@@ -979,6 +978,7 @@ export function createHookHandlers(deps: HookDeps) {
         agentId: params.routing.effectiveAgentId,
         bundledSkillsDir,
         intentBody,
+        skillNames: intentEntry?.definition.skills,
       }),
       messageProvider: params.ctx.messageProvider,
       modelRef: instructionModelRef,
@@ -1317,6 +1317,7 @@ export function createHookHandlers(deps: HookDeps) {
             agentId,
             bundledSkillsDir,
             intentBody: intentDefinition.definition.prompt,
+            skillNames: intentDefinition.definition.skills,
           })
         : [],
       intentCatalog: catalog.get().map((entry) => ({

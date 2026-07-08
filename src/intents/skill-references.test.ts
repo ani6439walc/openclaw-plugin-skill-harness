@@ -120,6 +120,48 @@ describe("skill catalog", () => {
     ]);
   });
 
+  it("loads skills listed in intent frontmatter", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    const bundled = path.join(tmp, "bundled");
+
+    writeSkill(
+      path.join(workspace, "skills"),
+      "frontmatter-skill",
+      "Frontmatter skill.",
+    );
+
+    const api = {
+      config: {},
+      runtime: {
+        state: { resolveStateDir: () => state },
+        agent: { resolveAgentWorkspaceDir: () => workspace },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    expect(
+      await resolveAvailableSkills({
+        api,
+        agentId: "main",
+        bundledSkillsDir: bundled,
+        intentBody: "## Guidelines\n\nNo inline skill references here.",
+        skillNames: ["frontmatter-skill"],
+      }),
+    ).toEqual([
+      {
+        name: "frontmatter-skill",
+        location: path.join(
+          workspace,
+          "skills",
+          "frontmatter-skill",
+          "SKILL.md",
+        ),
+        description: "Frontmatter skill.",
+      },
+    ]);
+  });
+
   it("filters disabled bundled skill entries from OpenClaw config", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
@@ -576,8 +618,9 @@ describe("skill catalog", () => {
               triggers: ["diagram"],
               examples: [],
               domain: "coding",
+              skills: ["architecture-diagram"],
               fastpath: { keywords: [] },
-              prompt: "Use skill: architecture-diagram.",
+              prompt: "Use diagrams when useful.",
             },
           },
           {

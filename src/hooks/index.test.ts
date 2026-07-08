@@ -2363,8 +2363,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["diagram"],
         examples: ["draw architecture"],
         domain: "coding",
+        skills: ["architecture-diagram"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\nUse skill: architecture-diagram.",
+        prompt: "## Guidelines\n\nDraw the requested architecture.",
       },
     };
     const testingIntent = {
@@ -2393,8 +2394,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["codegraph"],
         examples: ["analyze code graph"],
         domain: "coding",
+        skills: ["codegraph-analysis"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\nUse skill: codegraph-analysis.",
+        prompt: "## Guidelines\n\nAnalyze code graphs when requested.",
       },
     };
     const classifier = vi.fn().mockResolvedValue({
