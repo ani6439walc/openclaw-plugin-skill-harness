@@ -564,6 +564,7 @@ export function createHookHandlers(deps: HookDeps) {
       topicContext ? "completed" : "failed",
       topicContext
         ? {
+            basis: topicContext.basis,
             domain: topicContext.domain,
             keywords: topicContext.keywords,
             topic: topicContext.topic,
@@ -625,6 +626,7 @@ export function createHookHandlers(deps: HookDeps) {
           "topic-triage",
           "completed",
           {
+            basis: topicContext.basis,
             domain: result.domain,
             keywords: result.keywords,
             topic: result.topic,

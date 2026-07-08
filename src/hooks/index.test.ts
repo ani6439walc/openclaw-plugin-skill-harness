@@ -1606,6 +1606,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
   it("uses topic keyword similarity to skip the intent classifier", async () => {
     const topicContext = {
+      basis: "Latest asks for a git commit and matches the git domain.",
       keywords: ["comit"],
       topic: "User wants a git commit.",
       domain: "git",
@@ -1649,6 +1650,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         data: expect.objectContaining({
           phase: "topic-triage",
           state: "completed",
+          basis: "Latest asks for a git commit and matches the git domain.",
           changed: false,
         }),
       }),

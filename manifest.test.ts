@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 const manifest = JSON.parse(
   fs.readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf-8"),
 );
+const packageJson = JSON.parse(
+  fs.readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
+);
 
 describe("skill-harness manifest", () => {
   it("declares skill tools without legacy command surfaces", () => {
@@ -13,6 +16,11 @@ describe("skill-harness manifest", () => {
       "skill_manage",
     ]);
     expect(manifest).not.toHaveProperty("commandAliases");
+  });
+
+  it("keeps Prettier out of runtime dependencies", () => {
+    expect(packageJson.dependencies).not.toHaveProperty("prettier");
+    expect(packageJson.devDependencies).toHaveProperty("prettier");
   });
 
   it("matches the runtime contextWindow schema", () => {

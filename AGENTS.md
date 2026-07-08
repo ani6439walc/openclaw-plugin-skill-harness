@@ -103,7 +103,7 @@ Use the existing module boundaries:
 - `src/session/guards.ts`: session eligibility guards.
 - `src/*.test.ts`: tests are colocated with the module they protect.
 
-Conversation prompts are intentionally structured as XML-like blocks. Keep recent-turn context inside `<conversation_context>`, split historical topics with `<topic_segment>` and `<topic_boundary>`, and use compact topic-switch metadata names (`changed` and `reason`) in prompt-facing topic checker output. Persisted intent results may still store `topicChangeReason`; do not reintroduce separate `intentChange` state.
+Conversation prompts are intentionally structured as XML-like blocks. Keep recent-turn context inside `<conversation_context>`, split historical topics with `<topic_segment>` and `<topic_boundary>`, and use compact topic-switch metadata names (`changed` and `reason`) in prompt-facing topic checker output. Optional `basis` diagnostics are bounded visibility fields only and must not drive routing. Persisted intent results may still store `topicChangeReason`; do not reintroduce separate `intentChange` state.
 
 ## Coding Rules
 
@@ -115,7 +115,7 @@ Conversation prompts are intentionally structured as XML-like blocks. Keep recen
 - Keep code fail-open for plugin runtime paths. Log non-fatal problems with `logger.warn()` and avoid blocking the user flow for stats, seed copying, cleanup, or review failures.
 - Keep `src/plugin.ts` thin. If behavior grows, put it in a focused module or existing service and inject it through `createHookHandlers()` when tests need isolation.
 - Do not introduce broad abstractions just to reduce a few repeated lines. This plugin favors explicit lifecycle behavior over framework-style indirection.
-- Preserve compact helper-model contracts: prompts should end with short JSON/output reminders, use explicit enum values, and keep dynamic user/conversation text inside XML-like blocks.
+- Preserve compact helper-model contracts: prompts should end with short JSON/output reminders, use explicit enum values, and keep dynamic user/conversation text inside XML-like blocks. Prefer deterministic section joining for helper prompts; do not add runtime Markdown formatters that can rewrite dynamic evidence or add runtime dependencies.
 - Prefer deterministic checks before LLM work. Exact fastpath, same-topic inheritance, low-thinking behavior, confidence guards, and deny lists should remain cheap and local where possible.
 - Keep high-risk operations conservative. Deploy/delete/secret/production-like wording should not be routed through a weak deterministic shortcut without an explicit guard and tests.
 

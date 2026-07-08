@@ -5,7 +5,7 @@
 
 An OpenClaw plugin that pre-scans user intent before main-agent replies and injects routing hints via the `before_prompt_build` hook. It also tracks session-level metrics via `after_tool_call` and `agent_end`, then cleans up tracker state and session JSON retention via `session_end`.
 
-## Current Status (verified 2026-07-08)
+## Current Status (verified 2026-07-09)
 
 - Package version: `2026.6.11`; OpenClaw compatibility in `package.json` targets Plugin API and Gateway `>=2026.6.11`.
 - Branch state inspected on `main` at `987374c` (`♻️ refactor(subagent): extract shared runtime logic and rename embedded-agent to subagent`).
@@ -13,7 +13,7 @@ An OpenClaw plugin that pre-scans user intent before main-agent replies and inje
 - Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/skill-harness/intents`.
 - Codebase shape excluding dependencies/build output: 69 TypeScript files, 17 Markdown files, 3 JSON files, and 98 counted source/documentation/config files total.
 - TypeScript line split from direct file line counts: 40 runtime files / 10,460 lines, 26 test files / 13,728 lines, 3 root tooling/entry files / 30 lines; test/runtime line ratio is about 1.31x.
-- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 26 test files / 489 tests, `pnpm run build` passes, and `pnpm pack --dry-run` succeeds.
+- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 26 test files / 493 tests, and `pnpm run build` passes.
 - Package hygiene note: `tsconfig.json` includes only `api.ts`, `index.ts`, and `src/**/*.ts`; current `pnpm pack --dry-run` output contains `dist/src/classification/subagent.*` and `dist/src/skills/*` with no stale `dist/src/classification/embedded-agent.*` or `dist/vitest.config.*` artifacts.
 - Dependency audit note: `pnpm audit --audit-level moderate` currently reports three moderate findings: transitive OpenClaw dependency findings for `protobufjs` and `tar`, plus `gray-matter > js-yaml`. Remediation should be coordinated with OpenClaw/gray-matter compatibility rather than patched blindly in this plugin.
 
@@ -181,13 +181,17 @@ verified repository or tool evidence.
 
 Prompt assembly keeps static instructions, schema examples, and catalog data before
 dynamic conversation input, then closes helper prompts with a short final output
-contract after `</latest_message>`. Topic continuity and intent classifier prompts
-ask for exactly one raw JSON object with no Markdown code fences and no
-surrounding prose, which helps prompt-only JSON parsing on compact helper models.
-The topic checker still provides a
-complexity starting hint, but `parseIntentionResult()` lets the classifier's final
-complexity override it when the latest-message scope is simpler or broader than the
-topic hint.
+contract after `</latest_message>`. Topic checker prompt assembly uses deterministic
+section joining rather than runtime Markdown formatting, so section boundaries stay
+stable while dynamic `<latest_message>` and conversation text are preserved exactly.
+Topic continuity and intent classifier prompts ask for exactly one raw JSON object
+with no Markdown code fences and no surrounding prose, which helps prompt-only JSON
+parsing on compact helper models. The topic checker also asks for an optional
+bounded `basis` diagnostic: a short observable comparison between prior context and
+the latest message for logs/debugging only, never routing control. The topic checker
+still provides a complexity starting hint, but `parseIntentionResult()` lets the
+classifier's final complexity override it when the latest-message scope is simpler
+or broader than the topic hint.
 
 ### Session Data Structure
 
@@ -545,7 +549,9 @@ The following categories group intents by their ID prefix:
 
 Every tracked turn first runs a lightweight topic switch checker using the
 latest user message, recent conversation context, and recent session history
-(`intent`, `domain`, `keywords`, `topic`, `reason`, `complexity`).
+(`intent`, `domain`, `keywords`, `topic`, `reason`, `complexity`). The checker may
+return a bounded `basis` diagnostic for pipeline visibility, but routing decisions
+continue to use only the structured topic metadata.
 If the checker says the topic changed, or there is no historical
 intent to inherit, that topic context is passed into the classifier subagent.
 If the checker says the topic did not change, the plugin runs a local inherited

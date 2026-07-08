@@ -11,6 +11,7 @@ export type PipelinePhase =
 export type PipelineState = "started" | "completed" | "failed";
 
 export type PipelineMetadata = {
+  basis?: string;
   domain?: string;
   keywords?: string[];
   topic?: string;
