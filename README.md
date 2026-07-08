@@ -5,17 +5,17 @@
 
 An OpenClaw plugin that pre-scans user intent before main-agent replies and injects routing hints via the `before_prompt_build` hook. It also tracks session-level metrics via `after_tool_call` and `agent_end`, then cleans up tracker state and session JSON retention via `session_end`.
 
-## Current Status (verified 2026-07-06)
+## Current Status (verified 2026-07-08)
 
 - Package version: `2026.6.11`; OpenClaw compatibility in `package.json` targets Plugin API and Gateway `>=2026.6.11`.
-- Branch state inspected on `main` at `f803ae9` (`feat: inject domain skills prompt metadata (#48)`).
-- Recent implementation work focused on direct runtime Intent Review, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and recursive async skill-root indexing for workspace, state, plugin, and bundled skills.
+- Branch state inspected on `main` at `6ac9053` (`♻️ refactor(core): reorganize project layout and rename evolution to review`).
+- Recent implementation work focused on the `embedded-agent` → `subagent` naming cleanup, shared embedded sub-agent runtime defaults, direct runtime Intent Review, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and recursive async skill-root indexing for workspace, state, plugin, and bundled skills.
 - Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/skill-harness/intents`.
-- Codebase shape from `pygount` excluding dependencies/build output: 51 TypeScript files with 13,296 code lines, 15 Markdown files, 3 JSON files, and 70 counted files total.
-- TypeScript line split from direct file line counts: 25 runtime files / 8,716 lines, 23 test files / 11,384 lines, 3 root/tooling files / 30 lines; test/runtime line ratio is about 1.31x.
-- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 23 test files / 452 tests, `pnpm run build` passes, and `pnpm pack --dry-run` succeeds.
-- Package hygiene note: current `pnpm pack --dry-run` output still includes `dist/vitest.config.*` because `tsconfig.json` includes root `./*.ts`. Decide whether to keep publishing that harmless build artifact or narrow the TypeScript include/exclude list in a future cleanup.
-- Dependency audit note: `pnpm audit --audit-level moderate` currently reports transitive OpenClaw dependency findings for `protobufjs` and `tar`, plus `gray-matter > js-yaml`. Remediation should be coordinated with OpenClaw/gray-matter compatibility rather than patched blindly in this plugin.
+- Codebase shape from `pygount` excluding dependencies/build output: 55 TypeScript files with 14,075 code lines, 17 Markdown files, 3 JSON files, and 80 counted files total. Markdown is counted as comments by `pygount`.
+- TypeScript line split from direct file line counts: 33 runtime files / 8,883 lines, 21 test files / 12,685 lines, 1 root tooling file / 8 lines; test/runtime line ratio is about 1.43x.
+- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 21 test files / 474 tests, `pnpm run build` passes, and `pnpm pack --dry-run` succeeds.
+- Package hygiene note: `package.json` builds with `rm -rf dist && tsc`, and `tsconfig.json` includes only `api.ts`, `index.ts`, and `src/**/*.ts`; current `pnpm pack --dry-run` output contains `dist/src/classification/subagent.*` and no stale `dist/src/classification/embedded-agent.*` or `dist/vitest.config.*` artifacts.
+- Dependency audit note: `pnpm audit --audit-level moderate` currently reports three moderate findings: transitive OpenClaw dependency findings for `protobufjs` and `tar`, plus `gray-matter > js-yaml`. Remediation should be coordinated with OpenClaw/gray-matter compatibility rather than patched blindly in this plugin.
 
 ## Architecture
 
@@ -31,93 +31,73 @@ index.ts
        │
        ├─ types.ts → all shared type definitions
        ├─ review/types.ts → Intent Review types (ReviewState, ReviewSnapshot, ReviewFinding, ReviewSource)
+       ├─ subagent-runtime.ts → shared embedded sub-agent defaults and error extraction helpers
+       ├─ config.ts → resolveConfig() (zod schema validation with contextWindow)
        │
        ├─ intents/ → runtime intent Markdown module
        │    ├─ catalog.ts → loads intent .md files from $OPENCLAW_STATE_DIR/plugins/skill-harness/intents
        │    ├─ validation.ts → validates runtime intent Markdown for direct Review edits
        │    └─ skill-references.ts → resolves skill: <name> references from matched intent Markdown into SKILL.md metadata
        │
-       ├─ subagent.ts → topic switch, intent classification, and instruction-writing sub-agents
-       │    ├─ resolveCurrentTime() — timezone-aware local time formatting
-       │    ├─ buildIntentionEmbeddedRunParams() — builds isolated sub-agent run config
-       │    └─ uses constants.ts for FALLBACK_INTENT
-       │
-       ├─ hooks.ts → createHookHandlers()
-       │    ├─ onBeforePromptBuild → resolve intent → write session data → inject generated hint
-       │    ├─ onAfterToolCall → record() → write() (tracks tool usage)
-       │    ├─ onAgentEnd → record() → aggregate stats → enqueue review
-       │    ├─ onSessionEnd → cleanup() + cleanupExpired() (preserve ended sessions + 14-day retention)
-       │    └─ review/queue.ts → serialized background reviews
-       │
-       ├─ prompt.ts → prompt builders and parsers (pure functions — no API dependency)
-       │    ├─ JSON output contracts with filename-based intent ids and final one-object reminders
-       │    ├─ parseIntentionResult() — JSON parser with code-block tolerance and classifier complexity precedence
-       │    ├─ intent groups by semantic domain — routing overview only; exact ids come from the catalog
-       │    ├─ <current_time> — injects local timezone time
-       │    ├─ <conversation_context> — topic-segmented recent turns, omitted when empty
-       │    ├─ buildIntentInstructionPrompt() — condenses matched intent Markdown into main-agent instructions
-       │    ├─ buildPromptPrefix() — builds injected hint text
-       │    └─ uses constants.ts for complexity prompt defaults
-       │
-       ├─ classification/ → prompt, embedded-agent, and conversation classification flow
+       ├─ classification/ → prompt, subagent, and conversation classification flow
        │    ├─ prompts.ts → prompt builders and parsers
-       │    ├─ embedded-agent.ts → topic switch, intent classification, and instruction-writing sub-agents
+       │    ├─ subagent.ts → topic switch, intent classification, and instruction-writing sub-agents
        │    └─ conversation.ts → internal-turn filtering + per-turn historical intent context
+       │
+       ├─ hooks/ → OpenClaw hook module
+       │    ├─ index.ts → createHookHandlers()
+       │    │    ├─ onBeforePromptBuild → resolve intent → write session data → inject generated hint
+       │    │    ├─ onAfterToolCall / tool_result_persist → record persisted tool usage
+       │    │    ├─ onAgentEnd / before_agent_finalize → aggregate stats and enqueue review
+       │    │    └─ onSessionEnd → preserve ended session JSON + clean expired session files only
+       │    ├─ pipeline-events.ts → compact pipeline event emission
+       │    ├─ tool-tracking.ts → persisted tool result normalization helpers
+       │    └─ types.ts → hook dependency and local tool-call types
+       │
+       ├─ review/ → Intent Review module
+       │    ├─ triggers.ts → checkReviewTriggers() (eight configurable triggers plus runtime trigger keywords)
+       │    ├─ subagent.ts → buildReviewPrompt() + parseReviewFindingsDetailed() + runReviewSubagent()
+       │    ├─ queue.ts → serialized background reviews
+       │    └─ log-writer.ts + log.ts + trigger-keywords.ts → $OPENCLAW_STATE_DIR/plugins/skill-harness/review.json
        │
        ├─ session/ → session guards and JSON session persistence
        │    ├─ guards.ts → isEnabledForAgent(), isEligibleInteractiveSession(), and chat/session guards
        │    ├─ tracker.ts → SessionTracker using file-utils.ts and review/types.ts
        │    └─ $OPENCLAW_STATE_DIR/plugins/skill-harness/sessions/<sessionId>.json
        │
-       ├─ stats/aggregator.ts → StatsAggregator (atomic runtime usage aggregation)
-       │    ├─ uses file-utils.ts for fileExists(), readJsonFile(), safeWriteJson()
-       │    └─ $OPENCLAW_STATE_DIR/plugins/skill-harness/stats.json
-       │
-       ├─ review/ → Intent Review module
-       │    ├─ review/triggers.ts → checkReviewTriggers() (eight configurable triggers plus runtime trigger keywords)
-       │    ├─ review/subagent.ts → buildReviewPrompt() + parseReviewFindings() + runReviewSubagent()
-       │    └─ review/log-writer.ts + review/log.ts → $OPENCLAW_STATE_DIR/plugins/skill-harness/review.json
-       │         ├─ review/log-writer.ts records direct-review processedEvents and trigger keyword updates
-       │         └─ review/log.ts + review/trigger-keywords.ts validate review logs and trigger keyword defaults
-       │
-       ├─ hooks/ → OpenClaw hook module
-       │    ├─ index.ts → createHookHandlers()
-       │    ├─ pipeline-events.ts → compact pipeline event emission
-       │    ├─ tool-tracking.ts → persisted tool result normalization helpers
-       │    └─ types.ts → hook dependency and local tool-call types
-       │
-       └─ config.ts → resolveConfig() (zod schema validation with contextWindow)
-            ├─ uses constants.ts for DEFAULT_TIMEOUT_MS and default values
-            └─ uses types.ts for config type definitions
+       └─ stats/aggregator.ts → StatsAggregator (atomic runtime usage aggregation)
+            ├─ uses file-utils.ts for fileExists(), readJsonFile(), safeWriteJson()
+            └─ $OPENCLAW_STATE_DIR/plugins/skill-harness/stats.json
 ```
 
 ### Module Responsibilities
 
-| Module                             | Purpose                                                                                                                                                 |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plugin.ts`                        | Plugin entry point, initializes runtime data, seeds empty intent catalogs from skill assets, and registers hooks on OpenClaw lifecycle events           |
-| `hooks/index.ts`                   | Event handlers for prompt building, tool/agent tracking, lifecycle cleanup, stats, and review enqueueing                                                |
-| `hooks/pipeline-events.ts`         | Emits compact Skill Harness pipeline events for status consumers                                                                                        |
-| `hooks/tool-tracking.ts`           | Normalizes persisted tool-result payloads and tool-call keys                                                                                            |
-| `classification/embedded-agent.ts` | Runs tool-free topic switch, intent classification, and instruction-writing sub-agents with model selection                                             |
-| `classification/prompts.ts`        | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
-| `classification/conversation.ts`   | Extracts and truncates recent conversation turns for intent context                                                                                     |
-| `intents/catalog.ts`               | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                                                                 |
-| `file-utils.ts`                    | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                                      |
-| `constants.ts`                     | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                                       |
-| `types.ts`                         | All shared type definitions for plugin, config, intent, result, and turn shapes                                                                         |
-| `review/types.ts`                  | Shared types for Review pipeline — ReviewState, ReviewSnapshot, ReviewFinding, ReviewSource                                                             |
-| `session/tracker.ts`               | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
-| `session/guards.ts`                | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                                        |
-| `stats/aggregator.ts`              | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
-| `review/triggers.ts`               | Detect eight configurable Review triggers from completed turns using runtime trigger keywords                                                           |
-| `review/subagent.ts`               | Build trigger-specific review prompts and run the bounded read/write/apply_patch review sub-agent rooted at the runtime intents directory               |
-| `review/queue.ts`                  | Serialized promise queue for background reviews                                                                                                         |
-| `review/log-writer.ts`             | Record direct Intent Review outcomes and trigger keyword updates atomically into `review.json`                                                          |
-| `review/log.ts`                    | Validate/migrate the Review log schema and root `triggerKeywords`; legacy items are dropped during migration                                            |
-| `intents/validation.ts`            | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
-| `intents/skill-references.ts`      | Resolves intent Markdown `skill: <name>` references into available skill metadata                                                                       |
-| `config.ts`                        | Zod schema validation with defaults and clamping for plugin configuration                                                                               |
+| Module                           | Purpose                                                                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugin.ts`                      | Plugin entry point, initializes runtime data, seeds empty intent catalogs from skill assets, and registers hooks on OpenClaw lifecycle events           |
+| `hooks/index.ts`                 | Event handlers for prompt building, tool/agent tracking, lifecycle cleanup, stats, and review enqueueing                                                |
+| `hooks/pipeline-events.ts`       | Emits compact Skill Harness pipeline events for status consumers                                                                                        |
+| `hooks/tool-tracking.ts`         | Normalizes persisted tool-result payloads and tool-call keys                                                                                            |
+| `classification/subagent.ts`     | Runs tool-free topic switch, intent classification, and instruction-writing sub-agents with model selection                                             |
+| `subagent-runtime.ts`            | Shared embedded sub-agent run defaults and error-payload extraction helpers                                                                             |
+| `classification/prompts.ts`      | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
+| `classification/conversation.ts` | Extracts and truncates recent conversation turns for intent context                                                                                     |
+| `intents/catalog.ts`             | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                                                                 |
+| `file-utils.ts`                  | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                                      |
+| `constants.ts`                   | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                                       |
+| `types.ts`                       | All shared type definitions for plugin, config, intent, result, and turn shapes                                                                         |
+| `review/types.ts`                | Shared types for Review pipeline — ReviewState, ReviewSnapshot, ReviewFinding, ReviewSource                                                             |
+| `session/tracker.ts`             | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
+| `session/guards.ts`              | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                                        |
+| `stats/aggregator.ts`            | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
+| `review/triggers.ts`             | Detect eight configurable Review triggers from completed turns using runtime trigger keywords                                                           |
+| `review/subagent.ts`             | Build trigger-specific review prompts and run the bounded read/write/apply_patch review sub-agent rooted at the runtime intents directory               |
+| `review/queue.ts`                | Serialized promise queue for background reviews                                                                                                         |
+| `review/log-writer.ts`           | Record direct Intent Review outcomes and trigger keyword updates atomically into `review.json`                                                          |
+| `review/log.ts`                  | Validate/migrate the Review log schema and root `triggerKeywords`; legacy items are dropped during migration                                            |
+| `intents/validation.ts`          | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
+| `intents/skill-references.ts`    | Resolves intent Markdown `skill: <name>` references into available skill metadata                                                                       |
+| `config.ts`                      | Zod schema validation with defaults and clamping for plugin configuration                                                                               |
 
 Every `session_end` preserves the ended session in tracker memory and keeps its session JSON available for audit/reload. Each `session_end` additionally removes only session JSON files under the runtime `sessions/` directory whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch root-level `stats.json`, `review.json`, transcripts, or other plugin data.
 
@@ -468,7 +448,7 @@ target edits back to the runtime catalog, and record the event in `review.json`.
 
 ### Pure Function Prompt Building
 
-`buildIntentionPrompt()` takes no API dependency. Timezone resolution and time formatting happen in `classification/embedded-agent.ts` via `resolveCurrentTime()`. The pure function receives `currentTime?: string` and injects it directly into the prompt.
+`buildIntentionPrompt()` takes no API dependency. Timezone resolution and time formatting happen in `classification/subagent.ts` via `resolveCurrentTime()`. The pure function receives `currentTime?: string` and injects it directly into the prompt.
 
 ### JSON Output Format
 
@@ -663,7 +643,7 @@ influenced by internal task-completion traffic.
 ```bash
 pnpm run typecheck # TypeScript, no emit
 pnpm run test      # Vitest suite
-pnpm run build     # Compile to dist/
+pnpm run build     # Clean and compile dist/
 pnpm run format    # Prettier for md/json/ts files
 ```
 

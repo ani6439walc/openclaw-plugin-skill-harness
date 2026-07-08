@@ -40,6 +40,7 @@ Use `references/clustering.md`:
 - Assign each capability to exactly one primary cluster.
 - Compare each cluster to current runtime intents.
 - Mark clusters as covered, gap, overlap, or unclear.
+- Apply the domain-intent consistency criteria from `references/clustering.md` before presenting the cluster map.
 
 ## Step 4 — Calibration checkpoint
 
@@ -57,6 +58,7 @@ Use simple format checks instead of command-specific validation steps:
 - Body sections follow the required order.
 - Triggers/examples are concrete and non-duplicative.
 - New intents do not collide with existing runtime intent boundaries.
+- Domain-intent consistency criteria pass for every changed or newly proposed domain/intent relationship.
 - Skill/tool hints are formatted consistently.
 
 Report the inventory, proposed changes, and any unresolved ambiguities.

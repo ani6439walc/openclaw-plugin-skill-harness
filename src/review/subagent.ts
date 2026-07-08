@@ -27,6 +27,10 @@ import {
 } from "./log.js";
 import { normalizeKeywordList } from "./trigger-keywords.js";
 import { validateIntentDirectory } from "../intents/index.js";
+import {
+  buildEmbeddedSubagentRunDefaults,
+  extractEmbeddedRunError,
+} from "../subagent-runtime.js";
 import { extractPayloadText } from "../classification/index.js";
 
 export interface ReviewSubagentResult {
@@ -1268,21 +1272,26 @@ export async function runReviewSubagent(params: {
         workspaceDir,
         agentDir: workspaceDir,
         sessionFile: `/tmp/${attemptRunId}.session.jsonl`,
-        trigger: "manual",
+        ...buildEmbeddedSubagentRunDefaults(),
         modelRun: false,
         promptMode: "minimal",
         toolsAllow: ["read", "write", "apply_patch"],
         disableTools: false,
-        disableMessageTool: true,
-        allowGatewaySubagentBinding: true,
-        bootstrapContextMode: "lightweight",
-        verboseLevel: "off",
         thinkLevel: params.config.review.thinking,
-        reasoningLevel: "off",
-        silentExpected: true,
-        authProfileFailurePolicy: "local",
-        cleanupBundleMcpOnRunEnd: true,
       });
+      const embeddedError = extractEmbeddedRunError(result);
+      if (embeddedError) {
+        logger.warn("review subagent returned an error", {
+          error: embeddedError,
+          modelRef,
+        });
+        const failure: ReviewSubagentResult = {
+          findings: [],
+          outcome: "subagent-error",
+        };
+        if (retryRecoverableFailure(failure)) continue;
+        return failure;
+      }
       const rawReply = extractPayloadText(result);
       const parsed = parseReviewFindingsDetailed(rawReply, params.triggers);
       if (!parsed) {

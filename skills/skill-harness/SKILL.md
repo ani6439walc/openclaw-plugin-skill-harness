@@ -28,6 +28,7 @@ If ambiguous, ask one routing question: "Are you working on a single intent, aud
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
 - Check changed intent files for canonical format: valid frontmatter shape, required sections in order, concrete triggers/examples, consistent skill/tool hints, and no body cross-references to other intent ids.
+- When reviewing, creating, splitting, merging, or extracting intents, validate domain-intent consistency using `references/clustering.md`.
 
 ---
 

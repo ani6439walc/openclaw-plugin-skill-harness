@@ -34,6 +34,7 @@ Use structured file/search tools when available:
 - List runtime intent files under `~/.openclaw/plugins/skill-harness/intents/` or the user-provided runtime root.
 - Read the most similar intent Markdown files.
 - Search triggers/examples for overlap with the proposed boundary.
+- Check the proposed domain and neighboring intents against the domain-intent consistency criteria in `references/clustering.md`.
 
 Do not rely on shell-only listing/search examples when the host provides structured tools.
 
@@ -56,5 +57,6 @@ Before writing or showing the final draft, perform simple format checks:
 - Skill/tool hints follow `references/format.md`.
 - No body cross-references to other intent ids.
 - The target filename-derived id matches the declared boundary.
+- The chosen domain passes the domain-intent consistency criteria from `references/clustering.md`.
 
 If writing is approved, use the available file-editing tools to stage and apply the smallest safe change, then report what changed.

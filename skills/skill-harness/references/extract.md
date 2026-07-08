@@ -122,6 +122,7 @@ Use structured file/search tools to check:
 - The slimmed intent keeps enough triggers/examples for routing.
 - Skill hints follow `references/format.md`.
 - Proposed triggers do not obviously collide with remaining runtime intents.
+- The slimmed intent and any moved/renamed domain relationship pass the domain-intent consistency criteria in `references/clustering.md`.
 
 Report files created/modified, format-check results, and remaining pending extractions if any.
 

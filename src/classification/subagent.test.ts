@@ -5,7 +5,7 @@ import {
   buildIntentionEmbeddedRunParams,
   runIntentInstructionSubagent,
   runTopicSwitchSubagent,
-} from "./embedded-agent.js";
+} from "./subagent.js";
 
 describe("buildIntentionEmbeddedRunParams", () => {
   it("uses a run-specific session file", () => {
@@ -317,6 +317,13 @@ describe("buildIntentionEmbeddedRunParams", () => {
     expect(result.disableTools).toBe(true);
     expect(result.toolsAllow).toEqual([]);
     expect(result.disableMessageTool).toBe(true);
+    expect(result.allowGatewaySubagentBinding).toBe(true);
+    expect(result.bootstrapContextMode).toBe("lightweight");
+    expect(result.verboseLevel).toBe("off");
+    expect(result.reasoningLevel).toBe("off");
+    expect(result.silentExpected).toBe(true);
+    expect(result.authProfileFailurePolicy).toBe("local");
+    expect(result.cleanupBundleMcpOnRunEnd).toBe(true);
     expect(result.thinkLevel).toBe("low");
     expect(result.sessionFile).toBe("/tmp/subagent-1.session.jsonl");
     expect(result.workspaceDir).toBe("/tmp");

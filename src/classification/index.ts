@@ -15,4 +15,4 @@ export {
   runIntentInstructionSubagent,
   runIntentionSubagent,
   runTopicSwitchSubagent,
-} from "./embedded-agent.js";
+} from "./subagent.js";

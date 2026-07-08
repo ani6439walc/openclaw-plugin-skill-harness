@@ -1053,6 +1053,14 @@ describe("runReviewSubagent", () => {
         promptMode: "minimal",
         modelRun: false,
         disableTools: false,
+        disableMessageTool: true,
+        allowGatewaySubagentBinding: true,
+        bootstrapContextMode: "lightweight",
+        verboseLevel: "off",
+        reasoningLevel: "off",
+        silentExpected: true,
+        authProfileFailurePolicy: "local",
+        cleanupBundleMcpOnRunEnd: true,
         toolsAllow: ["read", "write", "apply_patch"],
         config: expect.objectContaining({
           tools: expect.objectContaining({
@@ -1071,6 +1079,29 @@ describe("runReviewSubagent", () => {
     expect(options.workspaceDir).not.toBe(intentDirectory);
     expect(options.agentDir).toBe(options.workspaceDir);
     expect(fs.existsSync(options.workspaceDir)).toBe(false);
+  });
+
+  it("reports embedded agent error payloads as subagent errors", async () => {
+    const intentDirectory = createIntentDirectory();
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [{ text: "Provider failed", isError: true }],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    const result = await runReviewSubagent({
+      api,
+      config: resolveConfig({ review: { enabled: true } }),
+      agentId: "main",
+      intentDirectory,
+      modelRef: { provider: "google", model: "review" },
+      snapshot,
+      triggers: ["weak-intent"],
+    });
+
+    expect(result).toEqual({ findings: [], outcome: "subagent-error" });
   });
 
   it("cleans up the isolated workspace if copying intent files fails", async () => {
