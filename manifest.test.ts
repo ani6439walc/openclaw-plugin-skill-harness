@@ -6,8 +6,8 @@ const manifest = JSON.parse(
 );
 
 describe("skill-harness manifest", () => {
-  it("does not declare legacy review tool or command surfaces", () => {
-    expect(manifest).not.toHaveProperty("contracts");
+  it("declares skill tools without legacy command surfaces", () => {
+    expect(manifest.contracts?.tools).toEqual(["skills_list", "skill_view"]);
     expect(manifest).not.toHaveProperty("commandAliases");
   });
 

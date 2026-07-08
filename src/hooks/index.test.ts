@@ -122,6 +122,46 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
     );
   });
 
+  it("records skill metadata from successful skill_view output", async () => {
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "session-1",
+    );
+    const record = vi.spyOn(defaultTracker, "record");
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const skillViewOutput = JSON.stringify({
+      success: true,
+      name: "skill-harness",
+      description: "Harness skills.",
+      path: "/skills/skill-harness/SKILL.md",
+      skill_dir: "/skills/skill-harness",
+    });
+
+    await createHandlers().onAfterToolCall(
+      {
+        toolName: "skill_view",
+        params: { name: "skill-harness" },
+        result: skillViewOutput,
+        durationMs: 1,
+      } as never,
+      { sessionKey: "agent:main:discord:channel:1490722656197152878" },
+    );
+
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          skillsUsed: [
+            expect.objectContaining({
+              name: "skill-harness",
+              path: "/skills/skill-harness/SKILL.md",
+              description: "Harness skills.",
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
   it("records skill metadata from persisted tool results when after_tool_call is unavailable", async () => {
     vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
       "session-1",

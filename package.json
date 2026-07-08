@@ -50,14 +50,15 @@
   },
   "dependencies": {
     "gray-matter": "4.0.3",
+    "typebox": "1.1.39",
     "zod": "4.4.3"
   },
   "peerDependencies": {
     "openclaw": "2026.6.11"
   },
   "devDependencies": {
-    "typescript": "6.0.3",
     "prettier": "3.9.4",
+    "typescript": "6.0.3",
     "vitest": "4.1.9"
   }
 }

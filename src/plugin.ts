@@ -21,6 +21,7 @@ import {
   type ReviewTriggerKeywords,
 } from "./review/trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
+import { registerSkillTools } from "./skills/index.js";
 import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -229,6 +230,7 @@ export function createPlugin(
       api.on("before_agent_finalize", handlers.onBeforeAgentFinalize);
       api.on("agent_end", handlers.onAgentEnd);
       api.on("session_end", handlers.onSessionEnd);
+      registerSkillTools(api);
     },
   });
 }

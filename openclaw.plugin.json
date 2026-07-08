@@ -5,6 +5,9 @@
   "activation": {
     "onStartup": true
   },
+  "contracts": {
+    "tools": ["skills_list", "skill_view"]
+  },
   "skills": ["./skills"],
   "uiHints": {
     "model": {

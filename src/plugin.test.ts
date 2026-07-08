@@ -72,12 +72,15 @@ describe("createPlugin", () => {
     );
   });
 
-  it("does not register legacy review tool or command surfaces", () => {
+  it("registers skill tools without legacy review command surfaces", () => {
     const api = createApi();
 
     createPlugin(api).register(api);
 
-    expect(api.registerTool).not.toHaveBeenCalled();
+    expect(api.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
+      "skills_list",
+      "skill_view",
+    ]);
     expect(api.registerCommand).not.toHaveBeenCalled();
   });
 

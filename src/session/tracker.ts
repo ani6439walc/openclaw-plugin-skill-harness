@@ -212,6 +212,10 @@ export function extractSkillInfo(
   toolParams: Record<string, unknown>,
   toolResult: unknown,
 ): SkillRecord | undefined {
+  if (toolName === "skill_view") {
+    return extractSkillViewInfo(toolResult);
+  }
+
   if (toolName === "exec") {
     return extractExecSkillInfo(toolParams, toolResult);
   }
@@ -221,6 +225,39 @@ export function extractSkillInfo(
   if (typeof filePath !== "string" || !filePath.endsWith("SKILL.md")) return;
 
   return extractSkillInfoFromMarkdown(filePath, toolResult);
+}
+
+function extractSkillViewInfo(toolResult: unknown): SkillRecord | undefined {
+  const text = typeof toolResult === "string" ? toolResult : null;
+  if (text === null) return;
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object") return;
+    const result = parsed as {
+      success?: unknown;
+      name?: unknown;
+      path?: unknown;
+      skill_dir?: unknown;
+      description?: unknown;
+    };
+    if (result.success !== true || typeof result.name !== "string") return;
+    const skillPath =
+      typeof result.path === "string"
+        ? result.path
+        : typeof result.skill_dir === "string"
+          ? path.join(result.skill_dir, "SKILL.md")
+          : undefined;
+    if (!skillPath) return;
+    return {
+      name: result.name,
+      path: skillPath,
+      description:
+        typeof result.description === "string" ? result.description : undefined,
+    };
+  } catch {
+    return;
+  }
 }
 
 function extractSkillInfoFromMarkdown(
