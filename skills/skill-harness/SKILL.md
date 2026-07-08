@@ -5,14 +5,14 @@ description: "Design, inventory, or extract intent definitions for the skill-har
 
 # Skill Harness
 
-Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), and complexity analysis or skill extraction (extract). Background subagents handle automated self-improvement; do not process evolution findings manually through this skill.
+Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), and complexity analysis or skill extraction (extract). Background subagents handle automated self-improvement; do not process review findings manually through this skill.
 
 ## Quick routing
 
 ```
 What does the user want?
-├─ Create/rename/split/merge/refine ONE intent → design
 ├─ Bootstrap or re-audit the ENTIRE catalog → inventory
+├─ Create/rename/split/merge/refine ONE intent → design
 └─ Check intent complexity / upgrade intents to skills → extract
 ```
 
@@ -28,6 +28,42 @@ If ambiguous, ask one routing question: "Are you working on a single intent, aud
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
 - Check changed intent files for canonical format: valid frontmatter shape, required sections in order, concrete triggers/examples, consistent skill/tool hints, and no body cross-references to other intent ids.
+
+---
+
+## Mode: inventory
+
+### When to use
+
+User wants to bootstrap or re-audit the **entire** intent system.
+
+Keywords: "audit intents", "bootstrap intents", "re-audit", "check intent coverage", "find missing intents"
+
+### Workflow
+
+Read and follow `references/inventory.md`. Keep these checkpoints visible:
+
+1. **Discovery scan** — use `references/discovery.md` to inventory bundled skills, configured/user skills, active tools, and existing runtime intents.
+2. **Clustering** — use `references/clustering.md`; group by user goal, not directory name.
+3. **Calibration checkpoint** — present the cluster map before generating or changing intents.
+4. **Interview gaps** — fill uncovered clusters using the design-mode interview rules.
+5. **Generate and check** — draft missing intents with canonical format, check collisions, then run simple format checks.
+
+### Failure modes
+
+| Trigger                                  | First fix                                                  | Fallback                                             |
+| ---------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| **Discovery scan incomplete**            | Report which configured source could not be read           | Accept manual capability list, tag as `manual_input` |
+| **Clustering finds orphan capabilities** | Mark as `unclustered`, recommend creating a new intent     | Keep orphan list for next audit cycle                |
+| **User rejects cluster map**             | Ask which cluster boundary is wrong, then regroup narrowly | Keep inventory report without generating intents     |
+
+### Anti-patterns
+
+| #   | Anti-pattern                                   | Why not                                      | Do instead                                         |
+| --- | ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------- |
+| 1   | **Run inventory without discovery/clustering** | Misses capabilities, produces orphan intents | Follow order: discovery → clustering → calibration |
+| 2   | **Assume one hardcoded skill directory**       | OpenClaw may load bundled and runtime skills | Scan the active catalog and configured skill roots |
+| 3   | **Skip cluster map checkpoint**                | User cannot calibrate, may miss gaps         | Present cluster map before interview/generation    |
 
 ---
 
@@ -70,42 +106,6 @@ Read and follow `references/design.md`. Keep these checkpoints visible:
 | 3   | **Skip format rules before writing**            | Inconsistent format breaks plugin parsing                      | Read `references/format.md` first                                    |
 | 4   | **Create a new intent when one already exists** | Causes duplication and collision                               | Check existing intents during interview                              |
 | 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately                         | Use concrete phrases or keywords                                     |
-
----
-
-## Mode: inventory
-
-### When to use
-
-User wants to bootstrap or re-audit the **entire** intent system.
-
-Keywords: "audit intents", "bootstrap intents", "re-audit", "check intent coverage", "find missing intents"
-
-### Workflow
-
-Read and follow `references/inventory.md`. Keep these checkpoints visible:
-
-1. **Discovery scan** — use `references/discovery.md` to inventory bundled skills, configured/user skills, active tools, and existing runtime intents.
-2. **Clustering** — use `references/clustering.md`; group by user goal, not directory name.
-3. **Calibration checkpoint** — present the cluster map before generating or changing intents.
-4. **Interview gaps** — fill uncovered clusters using the design-mode interview rules.
-5. **Generate and check** — draft missing intents with canonical format, check collisions, then run simple format checks.
-
-### Failure modes
-
-| Trigger                                  | First fix                                                  | Fallback                                             |
-| ---------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
-| **Discovery scan incomplete**            | Report which configured source could not be read           | Accept manual capability list, tag as `manual_input` |
-| **Clustering finds orphan capabilities** | Mark as `unclustered`, recommend creating a new intent     | Keep orphan list for next audit cycle                |
-| **User rejects cluster map**             | Ask which cluster boundary is wrong, then regroup narrowly | Keep inventory report without generating intents     |
-
-### Anti-patterns
-
-| #   | Anti-pattern                                   | Why not                                      | Do instead                                         |
-| --- | ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------- |
-| 1   | **Run inventory without discovery/clustering** | Misses capabilities, produces orphan intents | Follow order: discovery → clustering → calibration |
-| 2   | **Assume one hardcoded skill directory**       | OpenClaw may load bundled and runtime skills | Scan the active catalog and configured skill roots |
-| 3   | **Skip cluster map checkpoint**                | User cannot calibrate, may miss gaps         | Present cluster map before interview/generation    |
 
 ---
 
@@ -178,6 +178,6 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 
 | #   | Prompt                                           | Expected behavior                                                                                                 | Mode      |
 | --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------- |
-| 1   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview → ground → draft → format check                                 | design    |
-| 2   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory |
+| 1   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory |
+| 2   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview → ground → draft → format check                                 | design    |
 | 3   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract   |

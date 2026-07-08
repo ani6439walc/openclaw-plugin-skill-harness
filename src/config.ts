@@ -50,7 +50,7 @@ const DEFAULT_INSTRUCTION = {
   timeoutMs: 30_000,
 } as const;
 
-const DEFAULT_EVOLUTION = {
+const DEFAULT_REVIEW = {
   enabled: false,
   model: undefined,
   modelFallback: undefined,
@@ -86,7 +86,7 @@ const DEFAULT_CONFIG = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   complexityPrompts: DEFAULT_COMPLEXITY_PROMPTS,
   instruction: DEFAULT_INSTRUCTION,
-  evolution: DEFAULT_EVOLUTION,
+  review: DEFAULT_REVIEW,
 } satisfies ResolvedSkillHarnessPluginConfig;
 
 const StringListSchema = z
@@ -166,7 +166,7 @@ const InstructionSchema = z
     timeoutMs: boundedInt(30_000, 250, 600_000),
   })
   .catch(DEFAULT_INSTRUCTION);
-const EvolutionSchema = z
+const ReviewSchema = z
   .object({
     enabled: z.boolean().catch(false),
     model: z.string().optional().catch(undefined),
@@ -180,29 +180,29 @@ const EvolutionSchema = z
             enabled: enabledSchema,
             toolCalls: boundedInt(5, 1, 100),
           })
-          .catch(DEFAULT_EVOLUTION.triggers.skillCandidate),
+          .catch(DEFAULT_REVIEW.triggers.skillCandidate),
         processGap: z
           .object({
             enabled: enabledSchema,
             toolFailures: boundedInt(2, 1, 100),
           })
-          .catch(DEFAULT_EVOLUTION.triggers.processGap),
+          .catch(DEFAULT_REVIEW.triggers.processGap),
         successfulPattern: z
           .object({
             enabled: enabledSchema,
             toolCalls: boundedInt(5, 1, 100),
             keywords: StringListSchema.optional().catch(undefined),
           })
-          .catch(DEFAULT_EVOLUTION.triggers.successfulPattern),
+          .catch(DEFAULT_REVIEW.triggers.successfulPattern),
         satisfactionCheck: z
           .object({
             enabled: enabledSchema,
             everyTurns: boundedInt(10, 1, 1000),
           })
-          .catch(DEFAULT_EVOLUTION.triggers.satisfactionCheck),
+          .catch(DEFAULT_REVIEW.triggers.satisfactionCheck),
         missingIntent: z
           .object({ enabled: enabledSchema })
-          .catch(DEFAULT_EVOLUTION.triggers.missingIntent),
+          .catch(DEFAULT_REVIEW.triggers.missingIntent),
         weakIntent: z
           .object({
             enabled: enabledSchema,
@@ -211,23 +211,23 @@ const EvolutionSchema = z
               .catch(0.5)
               .transform((value) => Math.max(0, Math.min(1, value))),
           })
-          .catch(DEFAULT_EVOLUTION.triggers.weakIntent),
+          .catch(DEFAULT_REVIEW.triggers.weakIntent),
         behaviorFix: z
           .object({
             enabled: enabledSchema,
             keywords: StringListSchema.optional().catch(undefined),
           })
-          .catch(DEFAULT_EVOLUTION.triggers.behaviorFix),
+          .catch(DEFAULT_REVIEW.triggers.behaviorFix),
         entityContext: z
           .object({
             enabled: enabledSchema,
             keywords: StringListSchema.optional().catch(undefined),
           })
-          .catch(DEFAULT_EVOLUTION.triggers.entityContext),
+          .catch(DEFAULT_REVIEW.triggers.entityContext),
       })
-      .catch(DEFAULT_EVOLUTION.triggers),
+      .catch(DEFAULT_REVIEW.triggers),
   })
-  .catch(DEFAULT_EVOLUTION);
+  .catch(DEFAULT_REVIEW);
 
 const IntentDenySchema = z
   .record(z.string(), z.unknown())
@@ -261,7 +261,7 @@ const SkillHarnessConfigSchema = z
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 250, 120_000),
     complexityPrompts: ComplexityPromptsSchema,
     instruction: InstructionSchema,
-    evolution: EvolutionSchema,
+    review: ReviewSchema,
   })
   .catch(DEFAULT_CONFIG);
 

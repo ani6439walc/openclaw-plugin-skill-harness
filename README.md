@@ -9,7 +9,7 @@ An OpenClaw plugin that pre-scans user intent before main-agent replies and inje
 
 - Package version: `2026.6.11`; OpenClaw compatibility in `package.json` targets Plugin API and Gateway `>=2026.6.11`.
 - Branch state inspected on `main` at `f803ae9` (`feat: inject domain skills prompt metadata (#48)`).
-- Recent implementation work focused on direct runtime Intent Evolution, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and recursive async skill-root indexing for workspace, state, plugin, and bundled skills.
+- Recent implementation work focused on direct runtime Intent Review, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and recursive async skill-root indexing for workspace, state, plugin, and bundled skills.
 - Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/skill-harness/intents`.
 - Codebase shape from `pygount` excluding dependencies/build output: 51 TypeScript files with 13,296 code lines, 15 Markdown files, 3 JSON files, and 70 counted files total.
 - TypeScript line split from direct file line counts: 25 runtime files / 8,716 lines, 23 test files / 11,384 lines, 3 root/tooling files / 30 lines; test/runtime line ratio is about 1.31x.
@@ -30,24 +30,24 @@ index.ts
        │    └─ DEFAULT_TIMEOUT_MS, FALLBACK_INTENT, default complexity prompts, UNTRUSTED_CONTEXT_HEADER
        │
        ├─ types.ts → all shared type definitions
-       ├─ evolution-types.ts → Evolution review types (ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource)
+       ├─ review/types.ts → Intent Review types (ReviewState, ReviewSnapshot, ReviewFinding, ReviewSource)
        │
-       ├─ intent-loader.ts → runtime catalog
-       │    └─ loads intent .md files from $OPENCLAW_STATE_DIR/plugins/skill-harness/intents
+       ├─ intents/ → runtime intent Markdown module
+       │    ├─ catalog.ts → loads intent .md files from $OPENCLAW_STATE_DIR/plugins/skill-harness/intents
+       │    ├─ validation.ts → validates runtime intent Markdown for direct Review edits
+       │    └─ skill-references.ts → resolves skill: <name> references from matched intent Markdown into SKILL.md metadata
        │
        ├─ subagent.ts → topic switch, intent classification, and instruction-writing sub-agents
        │    ├─ resolveCurrentTime() — timezone-aware local time formatting
        │    ├─ buildIntentionEmbeddedRunParams() — builds isolated sub-agent run config
        │    └─ uses constants.ts for FALLBACK_INTENT
        │
-       ├─ skill-catalog.ts → resolves skill: <name> references from matched intent Markdown into SKILL.md metadata
-       │
        ├─ hooks.ts → createHookHandlers()
        │    ├─ onBeforePromptBuild → resolve intent → write session data → inject generated hint
        │    ├─ onAfterToolCall → record() → write() (tracks tool usage)
-       │    ├─ onAgentEnd → record() → aggregate stats → enqueue evolution review
+       │    ├─ onAgentEnd → record() → aggregate stats → enqueue review
        │    ├─ onSessionEnd → cleanup() + cleanupExpired() (preserve ended sessions + 14-day retention)
-       │    └─ review-queue.ts → ReviewQueue (serialized background evolution reviews)
+       │    └─ review/queue.ts → serialized background reviews
        │
        ├─ prompt.ts → prompt builders and parsers (pure functions — no API dependency)
        │    ├─ JSON output contracts with filename-based intent ids and final one-object reminders
@@ -59,28 +59,32 @@ index.ts
        │    ├─ buildPromptPrefix() — builds injected hint text
        │    └─ uses constants.ts for complexity prompt defaults
        │
-       ├─ hooks.ts → attachHistoricalIntents() → limitConversationTurns()
-       │    └─ conversation-extract.ts (internal-turn filtering + per-turn historical intent context)
+       ├─ classification/ → prompt, embedded-agent, and conversation classification flow
+       │    ├─ prompts.ts → prompt builders and parsers
+       │    ├─ embedded-agent.ts → topic switch, intent classification, and instruction-writing sub-agents
+       │    └─ conversation.ts → internal-turn filtering + per-turn historical intent context
        │
-       ├─ session-tracker.ts → SessionTracker (JSON session persistence)
-       │    ├─ uses file-utils.ts for fileExists(), readJsonFile(), safeWriteJson()
-       │    ├─ uses evolution-types.ts for ReviewState, ReviewSnapshot
+       ├─ session/ → session guards and JSON session persistence
+       │    ├─ guards.ts → isEnabledForAgent(), isEligibleInteractiveSession(), and chat/session guards
+       │    ├─ tracker.ts → SessionTracker using file-utils.ts and review/types.ts
        │    └─ $OPENCLAW_STATE_DIR/plugins/skill-harness/sessions/<sessionId>.json
        │
-       ├─ stats-aggregator.ts → StatsAggregator (atomic runtime usage aggregation)
+       ├─ stats/aggregator.ts → StatsAggregator (atomic runtime usage aggregation)
        │    ├─ uses file-utils.ts for fileExists(), readJsonFile(), safeWriteJson()
        │    └─ $OPENCLAW_STATE_DIR/plugins/skill-harness/stats.json
        │
-       ├─ trigger-checker.ts + review-subagent.ts → Intent Evolution review
-       │    ├─ trigger-checker.ts → checkEvolutionTriggers() (eight configurable triggers plus runtime trigger keywords)
-       │    ├─ review-subagent.ts → buildReviewPrompt() + parseReviewFindings() + runReviewSubagent()
-       │    └─ evolution-log-writer.ts + evolution-log.ts → $OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json
-       │         ├─ evolution-log-writer.ts records direct-review processedEvents and trigger keyword updates
-       │         └─ evolution-log.ts + evolution-trigger-keywords.ts validate evolution logs and trigger keyword defaults
+       ├─ review/ → Intent Review module
+       │    ├─ review/triggers.ts → checkReviewTriggers() (eight configurable triggers plus runtime trigger keywords)
+       │    ├─ review/subagent.ts → buildReviewPrompt() + parseReviewFindings() + runReviewSubagent()
+       │    └─ review/log-writer.ts + review/log.ts → $OPENCLAW_STATE_DIR/plugins/skill-harness/review.json
+       │         ├─ review/log-writer.ts records direct-review processedEvents and trigger keyword updates
+       │         └─ review/log.ts + review/trigger-keywords.ts validate review logs and trigger keyword defaults
        │
-       ├─ intent-validation.ts → runtime intent Markdown validation for direct Evolution edits
-       │
-       ├─ session.ts → session guards (isEnabledForAgent, isEligibleInteractiveSession, etc.)
+       ├─ hooks/ → OpenClaw hook module
+       │    ├─ index.ts → createHookHandlers()
+       │    ├─ pipeline-events.ts → compact pipeline event emission
+       │    ├─ tool-tracking.ts → persisted tool result normalization helpers
+       │    └─ types.ts → hook dependency and local tool-call types
        │
        └─ config.ts → resolveConfig() (zod schema validation with contextWindow)
             ├─ uses constants.ts for DEFAULT_TIMEOUT_MS and default values
@@ -89,31 +93,33 @@ index.ts
 
 ### Module Responsibilities
 
-| Module                    | Purpose                                                                                                                                                 |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plugin.ts`               | Plugin entry point, initializes runtime data, seeds empty intent catalogs from skill assets, and registers hooks on OpenClaw lifecycle events           |
-| `hooks.ts`                | Event handlers for prompt building, tool/agent tracking, and session cleanup                                                                            |
-| `subagent.ts`             | Runs tool-free topic switch, intent classification, and instruction-writing sub-agents with model selection                                             |
-| `skill-catalog.ts`        | Resolves `skill: <name>` references from matched intent Markdown into available skill metadata                                                          |
-| `intent-loader.ts`        | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                                                                 |
-| `file-utils.ts`           | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                                      |
-| `constants.ts`            | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                                       |
-| `types.ts`                | All shared type definitions for plugin, config, intent, result, and turn shapes                                                                         |
-| `evolution-types.ts`      | Shared types for Evolution pipeline — ReviewState, ReviewSnapshot, EvolutionFinding, EvolutionSource                                                    |
-| `session-tracker.ts`      | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
-| `stats-aggregator.ts`     | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
-| `trigger-checker.ts`      | Detect eight configurable Evolution triggers from completed turns using runtime trigger keywords                                                        |
-| `review-subagent.ts`      | Build trigger-specific review prompts and run the bounded read/write/apply_patch review sub-agent rooted at the runtime intents directory               |
-| `review-queue.ts`         | Serialized promise queue for background evolution reviews                                                                                               |
-| `evolution-log-writer.ts` | Record direct Evolution review outcomes and trigger keyword updates atomically into `evolution.json`                                                    |
-| `evolution-log.ts`        | Validate/migrate the Evolution log schema and root `triggerKeywords`; legacy items are dropped during migration                                         |
-| `intent-validation.ts`    | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
-| `conversation-extract.ts` | Extract and truncate recent conversation turns for intent context                                                                                       |
-| `prompt.ts`               | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
-| `session.ts`              | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                                        |
-| `config.ts`               | Zod schema validation with defaults and clamping for plugin configuration                                                                               |
+| Module                             | Purpose                                                                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugin.ts`                        | Plugin entry point, initializes runtime data, seeds empty intent catalogs from skill assets, and registers hooks on OpenClaw lifecycle events           |
+| `hooks/index.ts`                   | Event handlers for prompt building, tool/agent tracking, lifecycle cleanup, stats, and review enqueueing                                                |
+| `hooks/pipeline-events.ts`         | Emits compact Skill Harness pipeline events for status consumers                                                                                        |
+| `hooks/tool-tracking.ts`           | Normalizes persisted tool-result payloads and tool-call keys                                                                                            |
+| `classification/embedded-agent.ts` | Runs tool-free topic switch, intent classification, and instruction-writing sub-agents with model selection                                             |
+| `classification/prompts.ts`        | **Core prompt & parser** — builds topic/classification/instruction prompts, parses JSON results, and wraps injected hints with compact output contracts |
+| `classification/conversation.ts`   | Extracts and truncates recent conversation turns for intent context                                                                                     |
+| `intents/catalog.ts`               | Loads and catalogs intent definitions from YAML-frontmatter `.md` files                                                                                 |
+| `file-utils.ts`                    | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                                      |
+| `constants.ts`                     | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                                       |
+| `types.ts`                         | All shared type definitions for plugin, config, intent, result, and turn shapes                                                                         |
+| `review/types.ts`                  | Shared types for Review pipeline — ReviewState, ReviewSnapshot, ReviewFinding, ReviewSource                                                             |
+| `session/tracker.ts`               | Persist and clean up session data in runtime `sessions/` JSON files                                                                                     |
+| `session/guards.ts`                | Session eligibility guards (agent allow-list, chat type, internal run detection)                                                                        |
+| `stats/aggregator.ts`              | Aggregate idempotent runtime usage statistics into `stats.json`                                                                                         |
+| `review/triggers.ts`               | Detect eight configurable Review triggers from completed turns using runtime trigger keywords                                                           |
+| `review/subagent.ts`               | Build trigger-specific review prompts and run the bounded read/write/apply_patch review sub-agent rooted at the runtime intents directory               |
+| `review/queue.ts`                  | Serialized promise queue for background reviews                                                                                                         |
+| `review/log-writer.ts`             | Record direct Intent Review outcomes and trigger keyword updates atomically into `review.json`                                                          |
+| `review/log.ts`                    | Validate/migrate the Review log schema and root `triggerKeywords`; legacy items are dropped during migration                                            |
+| `intents/validation.ts`            | Validate Intent Markdown structure, IDs, targets, and catalog loading                                                                                   |
+| `intents/skill-references.ts`      | Resolves intent Markdown `skill: <name>` references into available skill metadata                                                                       |
+| `config.ts`                        | Zod schema validation with defaults and clamping for plugin configuration                                                                               |
 
-Every `session_end` preserves the ended session in tracker memory and keeps its session JSON available for audit/reload. Each `session_end` additionally removes only session JSON files under the runtime `sessions/` directory whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch root-level `stats.json`, `evolution.json`, transcripts, or other plugin data.
+Every `session_end` preserves the ended session in tracker memory and keeps its session JSON available for audit/reload. Each `session_end` additionally removes only session JSON files under the runtime `sessions/` directory whose modification time is strictly older than 14 days. Cleanup is fail-open and does not touch root-level `stats.json`, `review.json`, transcripts, or other plugin data.
 
 ### Hook Execution Flow
 
@@ -233,7 +239,7 @@ The versioned stats document contains:
 - `processedEvents`: event IDs retained for 90 days to prevent duplicate `agent_end` counting
 
 Skill hints in Intent Markdown (`skill: <name>`) are catalog candidates only. They
-describe possible skills the instruction writer and Evolution reviewer may reason
+describe possible skills the instruction writer and Intent Reviewer may reason
 about, but they are not counted as per-turn recommendations. When an intent is
 matched, referenced skills are resolved from the matched agent workspace
 `skills/`, `$OPENCLAW_STATE_DIR/skills/`, `$OPENCLAW_STATE_DIR/plugin-skills/`,
@@ -302,11 +308,11 @@ pnpm run build
             thinking: "medium", // instruction writer subagent thinking level
             timeoutMs: 30000,
           },
-          evolution: {
+          review: {
             enabled: false,
             model: "google/gemini-3-flash",
             modelFallback: "openai/gpt-5-mini",
-            thinking: "medium", // evolution review subagent thinking level
+            thinking: "medium", // review subagent thinking level
             timeoutMs: 30000,
             triggers: {
               skillCandidate: { enabled: true, toolCalls: 5 },
@@ -343,13 +349,13 @@ pnpm run build
 | `timeoutMs`         | `number`   | `3000`            | Max wait time for each scanner sub-agent run. Clamped to 250–120000ms.                                                                                                         |
 | `complexityPrompts` | `object`   | built-in          | Custom instruction-generation guidance per complexity level.                                                                                                                   |
 | `instruction`       | `object`   | enabled           | Instruction writer configuration. When disabled or model resolution fails, the hook injects `<domain_skills>` only if resolved domain skills exist, and skips generated hints. |
-| `evolution`         | `object`   | disabled          | Post-turn trigger review configuration. Findings and runtime trigger keywords are stored in `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json`.                        |
+| `review`            | `object`   | disabled          | Post-turn trigger review configuration. Findings and runtime trigger keywords are stored in `$OPENCLAW_STATE_DIR/plugins/skill-harness/review.json`.                           |
 
 `instruction.thinking` independently controls the instruction writer subagent,
-and `evolution.thinking` independently controls the Evolution review subagent.
+and `review.thinking` independently controls the Intent Review subagent.
 All thinking settings accept `off`, `minimal`, `low`, `medium`, `high`, `xhigh`,
 `adaptive`, or `max`. `instruction.model`, `instruction.modelFallback`, and
-`instruction.timeoutMs` mirror the Evolution review knobs but apply only to
+`instruction.timeoutMs` mirror the Intent Review knobs but apply only to
 generated instruction hints.
 
 `lowThinkingMode` controls main-agent low-thinking turns (`off`, `minimal`, or
@@ -359,9 +365,9 @@ and instruction writer LLM calls when no exact fastpath keyword matches. Use
 `full` to always run the complete scanner pipeline, or `off` to disable the
 plugin entirely for low-thinking turns.
 
-### Intent Evolution
+### Intent Review
 
-Intent Evolution is an opt-in direct runtime intent improvement pipeline. When
+Intent Review is an opt-in direct runtime intent improvement pipeline. When
 enabled, each completed tracked turn is checked for eight trigger types:
 
 | Trigger              | Default condition                                                                                                      | Intent Markdown correction target                                                                    |
@@ -380,7 +386,7 @@ sub-agent run rooted at the runtime intents directory. Each trigger receives a
 distinct review focus and correction goal, and may return no finding. Valid
 intent edits are applied directly to runtime `intents/*.md`, validated, and
 rolled back on validation failure. Trigger keyword findings update the same
-atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/skill-harness/evolution.json`
+atomic, event-idempotent `$OPENCLAW_STATE_DIR/plugins/skill-harness/review.json`
 document under `triggerKeywords.successfulPattern`, `triggerKeywords.behaviorFix`,
 and `triggerKeywords.entityContext`; legacy `openclaw.json` trigger `keywords`
 are accepted only as first-run or legacy migration seeds. `entity-context`
@@ -400,7 +406,7 @@ stable skill path. Depending on the trigger, it proposes a new intent draft or
 targeted changes to frontmatter, Guidelines, Skills & Tools, Response Strategy,
 Concrete Workflow, or Experience. It may also report `trigger-keywords` findings
 when the evidence supports a stable success/correction/entity-context phrase;
-the host records those keyword updates in `evolution.json`. It never proposes
+the host records those keyword updates in `review.json`. It never proposes
 changes to skills, tools, AGENTS.md, SOUL.md, or other production files.
 The review prompt is intentionally asymmetric: `behavior-fix` is recall-biased
 for explicit corrections and concrete misroutes, while `successful-pattern`,
@@ -415,15 +421,15 @@ The review sub-agent uses `runEmbeddedAgent` with `promptMode="minimal"`,
 the runtime intents directory. `apply_patch` is preferred for targeted edits,
 and `write` is available for full-file rewrites of runtime `intents/*.md`; the
 reviewer must not write bundled intents, source files, skills, config, or
-`evolution.json`. `read` is limited to the same runtime intents directory and is
+`review.json`. `read` is limited to the same runtime intents directory and is
 used only to inspect the files being edited. Trigger detection never reads file
 contents; the reviewer must not browse arbitrary filesystem paths or copy raw
-private memory. If the primary Evolution review model fails,
-the review is retried once with `evolution.modelFallback` when configured; parse
+private memory. If the primary Intent Review model fails,
+the review is retried once with `review.modelFallback` when configured; parse
 failures and provider errors are recorded as processed event outcomes instead of
 silently disappearing.
 
-`evolution.json` is protected like `stats.json`: both live at the runtime data
+`review.json` is protected like `stats.json`: both live at the runtime data
 root, are not loaded as session state, and are never removed by session
 lifecycle or 14-day retention cleanup. Schema v4 stores root `triggerKeywords`
 plus structured `processedEvents` observability. There is no `items` array and
@@ -446,25 +452,23 @@ raw model replies, secrets, or Zod error dumps. Intent Markdown findings include
 `targetKind: "trigger-keywords"`, `targetTrigger`, and keyword additions/removals.
 Legacy schema v1-v3 files migrate to v4 by preserving `triggerKeywords` and
 `processedEvents` and dropping stale `items`. Trigger keyword state is
-cached at plugin startup and refreshed after evolution log writes so hook
+cached at plugin startup and refreshed after review log writes so hook
 execution does not repeatedly read and parse the full log.
 
-### Direct Evolution Mode
+### Direct Review Mode
 
-Evolution no longer exposes `skill_harness_evolution` or `/skill-harness evolution`.
+Review no longer exposes a manual backlog tool or slash command.
 This is a breaking workflow change for users who relied on the legacy backlog
 tool or command; release notes should call it out prominently. Background reviews
-run through the serialized `ReviewQueue`, stage safe runtime intent edits in an
+run through `review/queue.ts`, stage safe runtime intent edits in an
 isolated temporary workspace, validate changed or targeted intents, copy validated
-target edits back to the runtime catalog, and record the event in `evolution.json`. Manual intent evolution is still documented in
-`skills/skill-harness/references/evolution.md`, but it operates on runtime intent
-files directly rather than pending queue items.
+target edits back to the runtime catalog, and record the event in `review.json`.
 
 ## Key Design Decisions
 
 ### Pure Function Prompt Building
 
-`buildIntentionPrompt()` takes no API dependency. Timezone resolution and time formatting happen in `subagent.ts` via `resolveCurrentTime()`. The pure function receives `currentTime?: string` and injects it directly into the prompt.
+`buildIntentionPrompt()` takes no API dependency. Timezone resolution and time formatting happen in `classification/embedded-agent.ts` via `resolveCurrentTime()`. The pure function receives `currentTime?: string` and injects it directly into the prompt.
 
 ### JSON Output Format
 
@@ -563,7 +567,7 @@ and plugin skill roots can still override them. Skill root indexes are cached
 briefly across prompt-build turns and are built with `fs.promises` so cache
 misses do not block the Node.js event loop while walking larger skill trees.
 Expired entries are swept before reuse, and the cache is size-bounded so missing
-skill references do not rescan entire roots on every turn. The Evolution review
+skill references do not rescan entire roots on every turn. The Intent Review
 prompt receives the same resolved skill metadata when a matched intent exists.
 
 The final main-agent prompt prefix includes a `<domain_skills>` XML block only
@@ -611,8 +615,8 @@ not match the user request or verified evidence.
 - When a historical user turn has a topic-change reason, prompt building closes the previous segment, inserts a `<topic_boundary>` with reason/topic metadata, and starts the next `<topic_segment>`
 - Historical records are matched by normalized user-message text, with duplicate messages paired newest-first
 - Classification rules use historical intent metadata as context while requiring fresh classification on topic switches
-- Same-topic continuation turns omit `topicChangeReason` and `current.intent.input` to avoid duplicating conversation snapshots, while keeping `current.intent.result` for tool tracking, stats, and Evolution
-- Extracted via `conversation-extract.ts` with configurable turn/char limits from `contextWindow` config
+- Same-topic continuation turns omit `topicChangeReason` and `current.intent.input` to avoid duplicating conversation snapshots, while keeping `current.intent.result` for tool tracking, stats, and Review
+- Extracted via `classification/conversation.ts` with configurable turn/char limits from `contextWindow` config
 
 ### Internal User Turns
 
@@ -676,10 +680,10 @@ The test suites cover:
 - Intent filtering via deny patterns
 - Internal/inter-session turn detection and conversation-history filtering
 - Per-turn historical intent matching, duplicate handling, and prompt injection
-- Eight Evolution triggers, thresholds, runtime trigger keywords, and multi-trigger turns
+- Eight Review triggers, thresholds, runtime trigger keywords, and multi-trigger turns
 - Skill Harness Skill review prompts, response parsing, and bounded read/write/apply_patch reviewer runs
-- Serialized background reviews and atomic, idempotent evolution log writes
+- Serialized background reviews and atomic, idempotent review log writes
 - Schema v1-v3-to-v4 migration, structured processed event records, staged direct intent edit validation/apply, and trigger keyword updates
-- Intent Markdown structure/catalog validation and manual direct Evolution mode
+- Intent Markdown structure/catalog validation and manual direct Review mode
 - Recursive async skill catalog indexing, symlink cycle guards, disabled bundled skill filtering, and domain skill prompt injection
-- Protection of root-level `evolution.json` from session loading and retention cleanup
+- Protection of root-level `review.json` from session loading and retention cleanup

@@ -20,7 +20,7 @@ export type ThinkLevel =
 
 export type LowThinkingMode = "fastpath-only" | "full" | "off";
 
-export type EvolutionTriggersConfig = {
+export type ReviewTriggersConfig = {
   skillCandidate?: { enabled?: boolean; toolCalls?: number };
   processGap?: { enabled?: boolean; toolFailures?: number };
   successfulPattern?: {
@@ -35,16 +35,16 @@ export type EvolutionTriggersConfig = {
   entityContext?: { enabled?: boolean; keywords?: string[] };
 };
 
-export type EvolutionConfig = {
+export type ReviewConfig = {
   enabled?: boolean;
   model?: string;
   modelFallback?: string;
   thinking?: ThinkLevel;
   timeoutMs?: number;
-  triggers?: EvolutionTriggersConfig;
+  triggers?: ReviewTriggersConfig;
 };
 
-export type ResolvedEvolutionConfig = {
+export type ResolvedReviewConfig = {
   enabled: boolean;
   model: string | undefined;
   modelFallback: string | undefined;
@@ -97,7 +97,7 @@ export type SkillHarnessPluginConfig = {
   timeoutMs?: number;
   complexityPrompts?: ComplexityPromptsConfig;
   instruction?: InstructionConfig;
-  evolution?: EvolutionConfig;
+  review?: ReviewConfig;
 };
 
 export type ResolvedSkillHarnessPluginConfig = {
@@ -115,7 +115,7 @@ export type ResolvedSkillHarnessPluginConfig = {
   timeoutMs: number;
   complexityPrompts: ResolvedComplexityPromptsConfig;
   instruction: ResolvedInstructionConfig;
-  evolution: ResolvedEvolutionConfig;
+  review: ResolvedReviewConfig;
 };
 
 export type IntentDefinition = {

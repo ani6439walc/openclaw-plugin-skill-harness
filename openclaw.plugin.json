@@ -216,9 +216,9 @@
         },
         "default": {}
       },
-      "evolution": {
+      "review": {
         "type": "object",
-        "description": "Optional post-turn Intent Evolution reviews and plugin-local backlog.",
+        "description": "Optional post-turn Intent Review runs and plugin-local backlog.",
         "additionalProperties": false,
         "properties": {
           "enabled": {
@@ -227,11 +227,11 @@
           },
           "model": {
             "type": "string",
-            "description": "Dedicated model for Evolution reviews."
+            "description": "Dedicated model for Intent Review runs."
           },
           "modelFallback": {
             "type": "string",
-            "description": "Fallback model retried when the primary Evolution review model fails."
+            "description": "Fallback model retried when the primary Intent Review model fails."
           },
           "thinking": {
             "type": "string",
@@ -245,7 +245,7 @@
               "adaptive",
               "max"
             ],
-            "description": "Thinking level for the Evolution review sub-agent.",
+            "description": "Thinking level for the Intent Review sub-agent.",
             "default": "medium"
           },
           "timeoutMs": {
@@ -298,7 +298,7 @@
                   "keywords": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Deprecated seed for triggerKeywords.successfulPattern in runtime evolution.json. Prefer editing evolution.json via the backlog workflow."
+                    "description": "Deprecated seed for triggerKeywords.successfulPattern in runtime review.json. Prefer editing review.json via the backlog workflow."
                   }
                 }
               },
@@ -343,7 +343,7 @@
                   "keywords": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Deprecated seed for triggerKeywords.behaviorFix in runtime evolution.json. Prefer editing evolution.json via the backlog workflow."
+                    "description": "Deprecated seed for triggerKeywords.behaviorFix in runtime review.json. Prefer editing review.json via the backlog workflow."
                   }
                 }
               },
@@ -355,7 +355,7 @@
                   "keywords": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Deprecated seed for triggerKeywords.entityContext in runtime evolution.json. Prefer editing evolution.json via the backlog workflow."
+                    "description": "Deprecated seed for triggerKeywords.entityContext in runtime review.json. Prefer editing review.json via the backlog workflow."
                   }
                 }
               }

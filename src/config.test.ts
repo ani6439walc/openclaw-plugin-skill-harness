@@ -29,7 +29,7 @@ describe("resolveConfig", () => {
       expect(result.contextWindow.assistant.chars).toBe(
         DEFAULT_RECENT_ASSISTANT_CHARS,
       );
-      expect(result.evolution).toMatchObject({
+      expect(result.review).toMatchObject({
         enabled: false,
         model: undefined,
         modelFallback: undefined,
@@ -79,10 +79,10 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("evolution", () => {
+  describe("review", () => {
     it("parses and clamps review and trigger settings", () => {
       const result = resolveConfig({
-        evolution: {
+        review: {
           enabled: true,
           model: "google/gemini-3-flash",
           modelFallback: "openai/gpt-5-mini",
@@ -104,7 +104,7 @@ describe("resolveConfig", () => {
         },
       });
 
-      expect(result.evolution).toMatchObject({
+      expect(result.review).toMatchObject({
         enabled: true,
         model: "google/gemini-3-flash",
         modelFallback: "openai/gpt-5-mini",
@@ -131,12 +131,22 @@ describe("resolveConfig", () => {
       const result = resolveConfig({
         thinking: "invalid",
         instruction: { thinking: "invalid" },
-        evolution: { thinking: "invalid" },
+        review: { thinking: "invalid" },
       });
 
       expect(result.thinking).toBe("medium");
       expect(result.instruction.thinking).toBe("medium");
-      expect(result.evolution.thinking).toBe("medium");
+      expect(result.review.thinking).toBe("medium");
+    });
+
+    it("ignores legacy evolution config after the review rename", () => {
+      const result = resolveConfig({
+        evolution: { enabled: true, model: "legacy/model" },
+      });
+
+      expect(result.review.enabled).toBe(false);
+      expect(result.review.model).toBeUndefined();
+      expect(result).not.toHaveProperty("evolution");
     });
 
     it("defaults low thinking mode to deterministic fastpath only", () => {

@@ -6,7 +6,7 @@ const manifest = JSON.parse(
 );
 
 describe("skill-harness manifest", () => {
-  it("does not declare legacy evolution tool or command surfaces", () => {
+  it("does not declare legacy review tool or command surfaces", () => {
     expect(manifest).not.toHaveProperty("contracts");
     expect(manifest).not.toHaveProperty("commandAliases");
   });
@@ -60,22 +60,22 @@ describe("skill-harness manifest", () => {
     expect(timeoutMs.maximum).toBe(120000);
   });
 
-  it("exposes disabled-by-default Evolution settings", () => {
-    const evolution = manifest.configSchema.properties.evolution;
-    expect(JSON.stringify(evolution)).not.toMatch(/self[- ]?evolution/i);
-    expect(evolution.description).toContain("Evolution reviews");
-    expect(evolution.properties.enabled.default).toBe(false);
-    expect(evolution.properties.timeoutMs).toMatchObject({
+  it("exposes disabled-by-default Review settings", () => {
+    const review = manifest.configSchema.properties.review;
+    expect(manifest.configSchema.properties).not.toHaveProperty("evolution");
+    expect(review.description).toContain("Intent Review runs");
+    expect(review.properties.enabled.default).toBe(false);
+    expect(review.properties.timeoutMs).toMatchObject({
       minimum: 250,
       maximum: 600000,
       default: 30000,
     });
     expect(
-      evolution.properties.triggers.properties.skillCandidate.properties
-        .toolCalls.default,
+      review.properties.triggers.properties.skillCandidate.properties.toolCalls
+        .default,
     ).toBe(5);
     expect(
-      evolution.properties.triggers.properties.weakIntent.properties
+      review.properties.triggers.properties.weakIntent.properties
         .confidenceBelow.default,
     ).toBe(0.5);
   });

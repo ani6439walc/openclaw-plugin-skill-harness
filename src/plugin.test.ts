@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger, type OpenClawPluginApi } from "../api.js";
 import { createPlugin, initializePluginDataRoot } from "./plugin.js";
-import { IntentCatalog } from "./intent-loader.js";
+import { IntentCatalog } from "./intents/index.js";
 
 describe("createPlugin", () => {
   let stateDir: string;
@@ -72,7 +72,7 @@ describe("createPlugin", () => {
     );
   });
 
-  it("does not register legacy evolution tool or command surfaces", () => {
+  it("does not register legacy review tool or command surfaces", () => {
     const api = createApi();
 
     createPlugin(api).register(api);
@@ -104,18 +104,18 @@ describe("createPlugin", () => {
     expect(fs.existsSync(path.join(dataRoot, "sessions", "stats.json"))).toBe(
       false,
     );
-    expect(
-      fs.existsSync(path.join(dataRoot, "sessions", "evolution.json")),
-    ).toBe(false);
+    expect(fs.existsSync(path.join(dataRoot, "sessions", "review.json"))).toBe(
+      false,
+    );
   });
 
-  it("keeps runtime stats and evolution files at the data-root level", () => {
+  it("keeps runtime stats and review files at the data-root level", () => {
     const api = createApi();
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(dataRoot, { recursive: true });
     fs.writeFileSync(path.join(dataRoot, "stats.json"), '{"stats":true}');
     fs.writeFileSync(
-      path.join(dataRoot, "evolution.json"),
+      path.join(dataRoot, "review.json"),
       '{"schemaVersion":4,"createdAt":"2026-07-01T00:00:00.000Z","updatedAt":"2026-07-01T00:00:00.000Z","processedEvents":{},"triggerKeywords":{}}',
     );
 
@@ -127,9 +127,45 @@ describe("createPlugin", () => {
     expect(fs.existsSync(path.join(dataRoot, "sessions", "stats.json"))).toBe(
       false,
     );
+    expect(fs.existsSync(path.join(dataRoot, "sessions", "review.json"))).toBe(
+      false,
+    );
+  });
+
+  it("migrates legacy review logs into review.json without deleting the source", () => {
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+    fs.mkdirSync(dataRoot, { recursive: true });
+    const legacyLog =
+      '{"schemaVersion":4,"createdAt":"2026-07-01T00:00:00.000Z","updatedAt":"2026-07-01T00:00:00.000Z","processedEvents":{},"triggerKeywords":{"successfulPattern":["done"]}}';
+    fs.writeFileSync(path.join(dataRoot, "evolution.json"), legacyLog);
+
+    initializePluginDataRoot({ dataRoot });
+
+    expect(fs.existsSync(path.join(dataRoot, "evolution.json"))).toBe(true);
     expect(
-      fs.existsSync(path.join(dataRoot, "sessions", "evolution.json")),
-    ).toBe(false);
+      JSON.parse(fs.readFileSync(path.join(dataRoot, "review.json"), "utf-8")),
+    ).toMatchObject({
+      schemaVersion: 4,
+      triggerKeywords: { successfulPattern: ["done"] },
+    });
+  });
+
+  it("does not overwrite an existing review.json during legacy review log migration", () => {
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+    fs.mkdirSync(dataRoot, { recursive: true });
+    const currentLog =
+      '{"schemaVersion":4,"createdAt":"2026-07-02T00:00:00.000Z","updatedAt":"2026-07-02T00:00:00.000Z","processedEvents":{},"triggerKeywords":{"successfulPattern":["current"]}}';
+    fs.writeFileSync(path.join(dataRoot, "review.json"), currentLog);
+    fs.writeFileSync(
+      path.join(dataRoot, "evolution.json"),
+      '{"schemaVersion":4,"createdAt":"2026-07-01T00:00:00.000Z","updatedAt":"2026-07-01T00:00:00.000Z","processedEvents":{},"triggerKeywords":{"successfulPattern":["legacy"]}}',
+    );
+
+    initializePluginDataRoot({ dataRoot });
+
+    expect(fs.readFileSync(path.join(dataRoot, "review.json"), "utf-8")).toBe(
+      currentLog,
+    );
   });
 
   it("loads runtime intents from the fixed data-root intents directory", () => {
@@ -141,19 +177,19 @@ describe("createPlugin", () => {
     expect(load).toHaveBeenCalledWith("intents");
   });
 
-  it("registers hooks when evolution trigger keyword cache is corrupt", () => {
+  it("registers hooks when review trigger keyword cache is corrupt", () => {
     const api = createApi();
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(dataRoot, { recursive: true });
-    fs.writeFileSync(path.join(dataRoot, "evolution.json"), "{ broken");
+    fs.writeFileSync(path.join(dataRoot, "review.json"), "{ broken");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 
     expect(() => createPlugin(api).register(api)).not.toThrow();
 
     expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
     expect(warn).toHaveBeenCalledWith(
-      "failed to read evolution trigger keywords",
-      expect.objectContaining({ path: path.join(dataRoot, "evolution.json") }),
+      "failed to read review trigger keywords",
+      expect.objectContaining({ path: path.join(dataRoot, "review.json") }),
     );
   });
 
@@ -256,7 +292,7 @@ describe("createPlugin", () => {
       '{"sessionId":"old-session"}',
     );
     fs.writeFileSync(path.join(oldSessions, "stats.json"), '{"old":true}');
-    fs.writeFileSync(path.join(oldSessions, "evolution.json"), '{"old":true}');
+    fs.writeFileSync(path.join(oldSessions, "review.json"), '{"old":true}');
 
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     try {
@@ -266,7 +302,7 @@ describe("createPlugin", () => {
         fs.existsSync(path.join(dataRoot, "sessions", "old-session.json")),
       ).toBe(false);
       expect(fs.existsSync(path.join(dataRoot, "stats.json"))).toBe(false);
-      expect(fs.existsSync(path.join(dataRoot, "evolution.json"))).toBe(false);
+      expect(fs.existsSync(path.join(dataRoot, "review.json"))).toBe(false);
     } finally {
       fs.rmSync(packageRoot, { recursive: true, force: true });
     }

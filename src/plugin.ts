@@ -7,22 +7,27 @@ import {
 } from "../api.js";
 import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { resolveConfig } from "./config.js";
-import { IntentCatalog } from "./intent-loader.js";
-import { SessionTracker } from "./session-tracker.js";
-import { StatsAggregator } from "./stats-aggregator.js";
-import { EvolutionLogWriter } from "./evolution-log-writer.js";
-import { readEvolutionTriggerKeywords } from "./evolution-log.js";
+import { IntentCatalog } from "./intents/index.js";
+import { SessionTracker } from "./session/index.js";
+import { StatsAggregator } from "./stats/index.js";
+import { ReviewLogWriter } from "./review/log-writer.js";
 import {
-  normalizeEvolutionTriggerKeywords,
-  type EvolutionTriggerKeywords,
-} from "./evolution-trigger-keywords.js";
-import { createHookHandlers, type HookDeps } from "./hooks.js";
+  readReviewLog,
+  readReviewTriggerKeywords,
+  writeReviewLogAtomic,
+} from "./review/log.js";
+import {
+  normalizeReviewTriggerKeywords,
+  type ReviewTriggerKeywords,
+} from "./review/trigger-keywords.js";
+import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   intentsPath,
-  evolutionLogPath,
+  legacyReviewLogPath,
+  reviewLogPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
   sessionsDirPath,
@@ -35,35 +40,34 @@ const EXAMPLE_INTENT_ASSETS_DIR = path.join(
   "assets",
 );
 
-function legacyTriggerKeywordSeedFromConfig(
+function reviewKeywordSeedFromConfig(
   config: ResolvedSkillHarnessPluginConfig,
-): Partial<EvolutionTriggerKeywords> | undefined {
-  const seed: Partial<EvolutionTriggerKeywords> = {};
-  if (config.evolution.triggers.successfulPattern.keywords !== undefined) {
-    seed.successfulPattern =
-      config.evolution.triggers.successfulPattern.keywords;
+): Partial<ReviewTriggerKeywords> | undefined {
+  const seed: Partial<ReviewTriggerKeywords> = {};
+  if (config.review.triggers.successfulPattern.keywords !== undefined) {
+    seed.successfulPattern = config.review.triggers.successfulPattern.keywords;
   }
-  if (config.evolution.triggers.behaviorFix.keywords !== undefined) {
-    seed.behaviorFix = config.evolution.triggers.behaviorFix.keywords;
+  if (config.review.triggers.behaviorFix.keywords !== undefined) {
+    seed.behaviorFix = config.review.triggers.behaviorFix.keywords;
   }
-  if (config.evolution.triggers.entityContext.keywords !== undefined) {
-    seed.entityContext = config.evolution.triggers.entityContext.keywords;
+  if (config.review.triggers.entityContext.keywords !== undefined) {
+    seed.entityContext = config.review.triggers.entityContext.keywords;
   }
   return Object.keys(seed).length > 0 ? seed : undefined;
 }
 
-function readEvolutionTriggerKeywordsFailOpen(
+function readReviewTriggerKeywordsFailOpen(
   logPath: string,
-  triggerKeywordSeed?: Partial<EvolutionTriggerKeywords>,
-): EvolutionTriggerKeywords {
+  triggerKeywordSeed?: Partial<ReviewTriggerKeywords>,
+): ReviewTriggerKeywords {
   try {
-    return readEvolutionTriggerKeywords(logPath, triggerKeywordSeed);
+    return readReviewTriggerKeywords(logPath, triggerKeywordSeed);
   } catch (err) {
-    logger.warn("failed to read evolution trigger keywords", {
+    logger.warn("failed to read review trigger keywords", {
       error: err,
       path: logPath,
     });
-    return normalizeEvolutionTriggerKeywords(triggerKeywordSeed);
+    return normalizeReviewTriggerKeywords(triggerKeywordSeed);
   }
 }
 
@@ -98,6 +102,24 @@ function seedExampleIntents(dataRoot: string, packageRoot: string): void {
   }
 }
 
+function migrateLegacyReviewLog(dataRoot: string): void {
+  const targetPath = reviewLogPath(dataRoot);
+  if (fs.existsSync(targetPath)) return;
+
+  const sourcePath = legacyReviewLogPath(dataRoot);
+  if (!fs.existsSync(sourcePath)) return;
+
+  try {
+    writeReviewLogAtomic(targetPath, readReviewLog(sourcePath));
+  } catch (err) {
+    logger.warn("failed to migrate legacy review log", {
+      error: err,
+      sourcePath,
+      targetPath,
+    });
+  }
+}
+
 export function initializePluginDataRoot({
   dataRoot,
   packageRoot = defaultPackageRoot,
@@ -124,6 +146,8 @@ export function initializePluginDataRoot({
       path: intentsPath(dataRoot),
     });
   }
+
+  migrateLegacyReviewLog(dataRoot);
 }
 
 export function createPlugin(
@@ -157,19 +181,19 @@ export function createPlugin(
       const catalog = IntentCatalog.create(dataRoot);
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
-      const logPath = evolutionLogPath(dataRoot);
-      let triggerKeywordCache = readEvolutionTriggerKeywordsFailOpen(
+      const logPath = reviewLogPath(dataRoot);
+      let triggerKeywordCache = readReviewTriggerKeywordsFailOpen(
         logPath,
-        legacyTriggerKeywordSeedFromConfig(config),
+        reviewKeywordSeedFromConfig(config),
       );
       const refreshTriggerKeywordCache = () => {
-        triggerKeywordCache = readEvolutionTriggerKeywordsFailOpen(
+        triggerKeywordCache = readReviewTriggerKeywordsFailOpen(
           logPath,
-          legacyTriggerKeywordSeedFromConfig(config),
+          reviewKeywordSeedFromConfig(config),
         );
       };
-      const evolutionLogWriter = EvolutionLogWriter.create(dataRoot, {
-        triggerKeywordSeed: () => legacyTriggerKeywordSeedFromConfig(config),
+      const reviewLogWriter = ReviewLogWriter.create(dataRoot, {
+        triggerKeywordSeed: () => reviewKeywordSeedFromConfig(config),
         onAfterWrite: refreshTriggerKeywordCache,
       });
 
@@ -185,7 +209,7 @@ export function createPlugin(
         catalog,
         tracker,
         statsAggregator,
-        evolutionLogWriter,
+        reviewLogWriter,
         triggerKeywords: () => triggerKeywordCache,
         dataRoot,
       };

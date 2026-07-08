@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as path from "node:path";
 import {
-  evolutionLogPath,
+  legacyReviewLogPath,
+  reviewLogPath,
   intentsPath,
   resolvePluginDataRoot,
   sessionsDirPath,
@@ -27,7 +28,8 @@ describe("plugin data paths", () => {
       path.join(dataRoot, "sessions", "session-1.json"),
     );
     expect(statsPath(dataRoot)).toBe(path.join(dataRoot, "stats.json"));
-    expect(evolutionLogPath(dataRoot)).toBe(
+    expect(reviewLogPath(dataRoot)).toBe(path.join(dataRoot, "review.json"));
+    expect(legacyReviewLogPath(dataRoot)).toBe(
       path.join(dataRoot, "evolution.json"),
     );
   });
