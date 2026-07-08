@@ -23,6 +23,10 @@ interface SkillIndexOptions {
 
 const skillIndexCache = new Map<string, CachedSkillIndex>();
 
+export function clearSkillIndexCache(): void {
+  skillIndexCache.clear();
+}
+
 function sweepExpiredSkillIndexes(nowMs: number): void {
   for (const [root, cached] of skillIndexCache) {
     if (cached.expiresAtMs <= nowMs) {

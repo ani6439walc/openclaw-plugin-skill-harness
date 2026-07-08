@@ -80,6 +80,7 @@ describe("createPlugin", () => {
     expect(api.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
       "skill_list",
       "skill_view",
+      "skill_manage",
     ]);
     expect(api.registerCommand).not.toHaveBeenCalled();
   });

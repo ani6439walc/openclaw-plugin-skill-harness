@@ -12,8 +12,8 @@ When enough information is collected, stop asking discovery questions and switch
 ## Safety checks
 
 - If the proposed design is still too broad or collides badly, do not force a final draft yet. Say what decision is still unresolved and ask the smallest next question.
-- Use the README's required skill/tool format (see `references/format.md`).
-- Do not invent ad-hoc labels or freeform tool prose when a concrete call shape is more appropriate.
+- Use the README's required frontmatter skills and experience format (see `references/format.md`).
+- Do not invent ad-hoc labels or recreate the legacy `## Skills & Tools` section.
 
 ## Collision warning format
 
@@ -35,4 +35,4 @@ Ask user to confirm resolution before proceeding to final draft.
 2. Show diff preview to user
 3. Confirm no conflicts
 4. Write to `~/.openclaw/plugins/skill-harness/intents/` on approval
-5. Run simple format checks: frontmatter shape, required section order, concrete triggers/examples, skill/tool hint shape, and no body cross-references to other intent ids.
+5. Run simple format checks: frontmatter shape, required section order, concrete triggers/examples, frontmatter `skills[]` shape, `## Experience` guidance shape, no legacy `## Skills & Tools`, and no body cross-references to other intent ids.

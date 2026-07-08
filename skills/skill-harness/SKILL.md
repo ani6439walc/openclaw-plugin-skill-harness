@@ -27,7 +27,7 @@ If ambiguous, ask one routing question: "Are you working on a single intent, aud
   - Runtime editable intents live under `~/.openclaw/plugins/skill-harness/intents/` unless the user provides another runtime root.
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
-- Check changed intent files for canonical format: valid frontmatter shape, required sections in order, concrete triggers/examples, consistent skill/tool hints, and no body cross-references to other intent ids.
+- Check changed intent files for canonical format: valid frontmatter shape, required sections in order, concrete triggers/examples, frontmatter `skills[]` when skill loading is needed, durable `## Experience` guidance when operational lessons are needed, no legacy `## Skills & Tools`, and no body cross-references to other intent ids.
 - When reviewing, creating, splitting, merging, or extracting intents, validate domain-intent consistency using `references/clustering.md`.
 
 ---
@@ -144,7 +144,7 @@ Read and follow `references/extract.md`. Keep these checkpoints visible:
 | --- | --------------------------------------- | ------------------------------- | --------------------------------------------------- |
 | 1   | **Auto-extract without confirmation**   | Destructive change to routing   | Always get explicit approval                        |
 | 2   | **Extract too aggressively**            | Creates skill sprawl            | Only extract truly independent sub-responsibilities |
-| 3   | **Leave intent empty after extraction** | Still needed for classification | Keep slimmed intent with triggers + skill hint      |
+| 3   | **Leave intent empty after extraction** | Still needed for classification | Keep slimmed intent with triggers + `skills[]`      |
 
 ---
 
@@ -165,7 +165,8 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 - Frontmatter exists, closes before the body, and has required fields with the right shapes.
 - Body sections appear in the canonical order from `references/format.md`.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
-- Skill/tool hints follow the expected Markdown shape.
+- Skill dependencies use frontmatter `skills[]`, and `## Experience` uses the expected skill/tool guidance shape.
+- Legacy `## Skills & Tools` sections are absent from new or updated intents.
 - Body text does not cross-reference other intent ids.
 - Proposed triggers do not obviously collide with existing runtime intent boundaries.
 

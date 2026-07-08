@@ -2449,14 +2449,14 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(result?.prependContext).toContain(
       "<name>test-driven-development</name>",
     );
-    expect(result?.prependContext).toContain(
+    expect(result?.prependContext).not.toContain(
       `<path>${path.join(state, "plugin-skills", "test-driven-development", "SKILL.md")}</path>`,
     );
     expect(result?.prependContext).toContain(
       "<description>Drive changes with tests.</description>",
     );
     expect(result?.prependContext).toContain("<name>codegraph-analysis</name>");
-    expect(result?.prependContext).toContain(
+    expect(result?.prependContext).not.toContain(
       `<path>${path.join(bundled, "codegraph-analysis", "SKILL.md")}</path>`,
     );
     expect(result?.prependContext).toContain(

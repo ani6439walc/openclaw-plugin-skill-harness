@@ -45,16 +45,17 @@ async function runTool(tool: unknown, params: Record<string, unknown>) {
 }
 
 describe("registerSkillTools", () => {
-  it("registers skill_list and skill_view tools", () => {
+  it("registers skill_list, skill_view, and skill_manage tools", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const api = createApi(path.join(tmp, "state"), path.join(tmp, "workspace"));
 
     registerSkillTools(api);
 
-    expect(api.registerTool).toHaveBeenCalledTimes(2);
+    expect(api.registerTool).toHaveBeenCalledTimes(3);
     expect(api.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
       "skill_list",
       "skill_view",
+      "skill_manage",
     ]);
   });
 
@@ -81,6 +82,34 @@ describe("registerSkillTools", () => {
       success: true,
       name: "writer",
       content: expect.stringContaining("# Writer"),
+    });
+  });
+
+  it("creates skills through skill_manage", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const api = createApi(stateDir, workspaceDir);
+    registerSkillTools(api);
+    const tools = new Map(
+      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
+    );
+
+    await expect(
+      runTool(tools.get("skill_manage"), {
+        action: "create",
+        name: "managed-skill",
+        content:
+          "---\nname: managed-skill\ndescription: Managed by tool.\n---\n\n# Managed Skill\n",
+      }),
+    ).resolves.toMatchObject({ success: true });
+
+    await expect(
+      runTool(tools.get("skill_view"), { name: "managed-skill" }),
+    ).resolves.toMatchObject({
+      success: true,
+      name: "managed-skill",
+      source: "managed",
     });
   });
 });

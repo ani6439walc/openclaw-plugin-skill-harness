@@ -4,6 +4,9 @@ fastpath:
   keywords:
     - "我之前"
     - "你記得"
+skills:
+  - treemd
+  - obsidian
 triggers:
   - "The user wants past records or prior information without a specific recent, comparative, emotional, or timeline focus."
   - "User is asking about past events, records, preferences, habits, or prior discussions without a clearly recent, comparative, emotional, or timeline-oriented focus"
@@ -21,21 +24,6 @@ examples:
 - Search recorded memory instead of guessing.
 - Use this intent for broad past recall without a narrow time window.
 - If memory is weak or missing, say so clearly.
-
-## Skills & Tools
-
-- Read a large Markdown memory note by section:
-  skill: treemd
-- List tags or inspect linked memory notes after a relevant file is found:
-  skill: obsidian
-- Extract tags from memory files for sentiment/context analysis:
-  ```bash
-  rg -o '#\S+' memory/YYYY-MM-DD.md | sort | uniq -c | sort -rn
-  ```
-- Search recorded memory:
-  memory_search({ query: "<trigram_keywords>", corpus: "memory", maxResults: 5, minScore: 0.1 })
-- Read the most relevant memory file when more detail is needed:
-  memory_get({ path: "<memory_file>" })
 
 ## Response Strategy
 
@@ -125,3 +113,11 @@ memory_search({
 - Synthesize the read content into a natural language reply, with source citations (e.g., `Source: memory/2026-04-08.md#L42`).
 - If information spans multiple files, merge and label each segment with its source date.
 - **Never fabricate details** not present in memory. If a gap exists, explicitly say "Ani has no record of this part."
+
+## Experience
+
+- Use `treemd` skill when a large Markdown memory note needs section-level navigation before deep reading.
+- Use `obsidian` skill after relevant notes are found to inspect tags, outgoing links, backlinks, and related memory structure.
+- Use semantic memory search as the primary retrieval path for recorded memory, with trigram-friendly keywords and a permissive threshold for personal facts, habits, and preferences.
+- Use direct memory reads to inspect the highest-value memory hit before synthesizing an answer.
+- Use lightweight tag extraction only as a supporting analysis step when sentiment, topic density, or tag context matters.

@@ -24,7 +24,7 @@ Minimum information before drafting:
 2. Required `domain`.
 3. Concrete triggers and examples.
 4. Optional fastpath keywords and hint.
-5. Skills/tools worth hinting.
+5. Skills worth listing in frontmatter and durable tool guidance worth moving into `## Experience`.
 6. Neighboring or colliding intents.
 
 ## Step 3 — Ground against existing intents
@@ -43,7 +43,9 @@ Do not rely on shell-only listing/search examples when the host provides structu
 Follow `references/format.md` exactly:
 
 - Required frontmatter: `triggers[]`, `examples[]`, `domain`; optional `fastpath`.
-- Required body sections: `## Guidelines`, optional `## Skills & Tools`, `## Response Strategy`, optional `## Concrete Workflow`, optional `## Experience`.
+- Optional frontmatter: `fastpath`, `skills[]`.
+- Required body sections: `## Guidelines`, `## Response Strategy`; optional `## Concrete Workflow`, optional `## Experience`.
+- Do not include `## Skills & Tools`; put skill names in frontmatter `skills[]`.
 - No body cross-references to other intent ids.
 
 ## Step 5 — Format check and delivery
@@ -54,7 +56,8 @@ Before writing or showing the final draft, perform simple format checks:
 - Required fields exist with the right shape.
 - Required body sections are present and ordered.
 - Trigger/example text is concrete enough for routing.
-- Skill/tool hints follow `references/format.md`.
+- Skill dependencies use frontmatter `skills[]`; any tool guidance follows the `## Concrete Workflow` and `## Experience` rules in `references/format.md`.
+- No legacy `## Skills & Tools` section remains.
 - No body cross-references to other intent ids.
 - The target filename-derived id matches the declared boundary.
 - The chosen domain passes the domain-intent consistency criteria from `references/clustering.md`.

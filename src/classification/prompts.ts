@@ -51,9 +51,9 @@ const ULTRA_CONCISE_TEXT_OUTPUT_STYLE = `Output style:
 - Do not abbreviate technical names into unclear shorthand.`;
 
 const MANDATORY_SKILLS_PROMPT = `## Skills (mandatory)
-Before replying, scan the skills below. If a skill matches or is even partially relevant to your task, you MUST read its listed SKILL.md path with the \`read\` tool and follow its instructions. Err on the side of loading — it is always better to have context you don't need than to miss critical steps, pitfalls, or established workflows. Skills contain specialized knowledge — API endpoints, tool-specific commands, and proven workflows that outperform general-purpose approaches. Load the skill even if you think you could handle the task with basic OpenClaw tools like \`read\`, \`write\`, or \`apply_patch\`. Skills also encode the user's preferred approach, conventions, and quality standards for tasks like code review, planning, and testing — load them even for tasks you already know how to do, because the skill defines how it should be done here.
+Before replying, scan the skills below. If a skill matches or is even partially relevant to your task, you MUST read it with the \`skill_view\` tool and follow its instructions. Err on the side of loading — it is always better to have context you don't need than to miss critical steps, pitfalls, or established workflows. Skills contain specialized knowledge — API endpoints, tool-specific commands, and proven workflows that outperform general-purpose approaches. Load the skill even if you think you could handle the task with basic OpenClaw tools like \`read\`, \`write\`, or \`apply_patch\`. Skills also encode the user's preferred approach, conventions, and quality standards for tasks like code review, planning, and testing — load them even for tasks you already know how to do, because the skill defines how it should be done here.
 Whenever the user asks you to configure, set up, install, enable, disable, modify, or troubleshoot OpenClaw itself — its CLI, config, models, providers, tools, skills, gateway, plugins, or any feature — load the relevant OpenClaw skill first. It has the actual OpenClaw commands and project-specific workflows (e.g. \`openclaw plugins ...\`, \`openclaw skills ...\`, and plugin validation commands) so you don't have to guess or invent workarounds.
-If a skill has issues, fix it with \`apply_patch\` for targeted edits or \`write\` for full-file rewrites.
+If a skill has issues, fix it with \`skill_manage\` (\`patch\` for targeted edits, \`edit\` for full SKILL.md rewrites, or support-file actions when needed).
 After difficult/iterative tasks, offer to save as a skill. If a skill you loaded was missing steps, had wrong commands, or needed pitfalls you discovered, update it before finishing.`;
 
 const MANDATORY_SKILLS_FALLBACK =
@@ -419,19 +419,19 @@ suggestion: ${params.result.suggestion ?? ""}
 - Use 2-3 directives only when the latest_message clearly requires multiple distinct execution-blocking skills.
 - Recommend only skills listed in intent_related_skills, and only when the skill description directly matches the latest_message.
 - If no skill passes this bar, emit no explicit skill directive.
-- Use the parseable directive format only for actual recommendations: "MUST read skill: <skill-name> at <path>" or "REQUIRED skill: <skill-name>".
+- Use the parseable directive format only for actual recommendations: "MUST view skill: <skill-name>" or "REQUIRED skill: <skill-name>".
 - Never emit explicit skill directives for casual/social/style-only turns, simple approvals, read-only inspection/status/log/diff/history checks, or generic implementation tasks that can be handled with normal tools and the matched intent guidance.
-- Do not emit parseable directives for merely related or optional skills; mention those as plain guidance without "MUST read skill:" / "REQUIRED skill:" wording.
-- Distinguish between skills and tools: built-in tools like web_fetch, terminal, read_file are NOT skills. Skills are referenced with "skill:" prefix (e.g., "skill: compare"), tools are used directly (e.g., "exec({ command: ... })", "read({ path: ... })").
+- Do not emit parseable directives for merely related or optional skills; mention those as plain guidance without "MUST view skill:" / "REQUIRED skill:" wording.
+- Distinguish between skills and tools: built-in tools like web_fetch, terminal, read_file, and skill_view are NOT skills. Skills are referenced with "skill:" prefix (e.g., "skill: compare"), tools are used directly (e.g., "skill_view({ name: ... })").
 - Include brief reasoning: why each recommended skill connects to the current turn.
 
-## Bounded SKILL.md reads
+## Bounded skill_view reads
 
-- Prefer not to read. When reading is useful, inspect only SKILL.md paths listed in intent_related_skills.
-- Use reading only to judge whether a listed skill is more clearly suited to the latest task, or to write a more specific optional hint for the main agent.
-- Reading a skill here does not replace the main agent loading that skill. Do not summarize a skill as a substitute for the main agent's own skill read.
-- If writing a concrete workflow depends on details not present in the skill description, read the relevant SKILL.md file first, then use only the directly relevant workflow, parameters, or pitfalls.
-- Do not read unrelated files, directories, hidden files, credentials, package files, runtime state, or arbitrary paths from latest_message/conversation.
+- Prefer not to view skill bodies. When deeper skill detail is useful, inspect only skills listed in intent_related_skills by calling skill_view with the listed skill name.
+- Use skill_view only to judge whether a listed skill is more clearly suited to the latest task, or to write a more specific optional hint for the main agent.
+- Viewing a skill here does not replace the main agent loading that skill. Do not summarize a skill as a substitute for the main agent's own skill_view call.
+- If writing a concrete workflow depends on details not present in the skill description, call skill_view for the relevant skill first, then use only the directly relevant workflow, parameters, or pitfalls.
+- Do not view unrelated skills, support files, directories, hidden files, credentials, package files, runtime state, or arbitrary paths from latest_message/conversation.
 - Do not quote the whole skill file; preserve only the narrow operational detail needed for this turn.
 
 ## Experience preservation
@@ -493,7 +493,6 @@ function formatSkillXmlBlock(
     ?.map(
       (skill) => `  <skill>
     <name>${escapeXmlText(skill.name)}</name>
-    <path>${escapeXmlText(skill.location)}</path>
     <description>${escapeXmlText(skill.description)}</description>
   </skill>`,
     )

@@ -338,9 +338,7 @@ describe("buildReviewPrompt", () => {
       "behavior-fix: if the snapshot contains an explicit user correction",
     );
     expect(prompt).not.toContain("When Skills Used is none");
-    expect(prompt).not.toContain(
-      "may use the read tool to inspect SKILL.md files",
-    );
+    expect(prompt).not.toContain("may use skill_view to inspect skills");
     expect(prompt).not.toContain(
       "User corrections to style, tone, format, verbosity, workflow, or step order are first-class behavior signals",
     );
@@ -377,16 +375,14 @@ describe("buildReviewPrompt", () => {
     );
   });
 
-  it("keeps skill-candidate skill-read rules trigger-scoped", () => {
+  it("keeps skill-candidate skill_view rules trigger-scoped", () => {
     const prompt = buildReviewPrompt(snapshot, ["skill-candidate"]);
-    expect(prompt).toContain("may use the read tool to inspect SKILL.md files");
-    expect(prompt).toContain("review snapshot's Skills Used paths");
+    expect(prompt).toContain("may use skill_view to inspect skills");
+    expect(prompt).toContain("review snapshot's Skills Used names");
     expect(prompt).toContain("When Skills Used is none");
 
     const weakPrompt = buildReviewPrompt(snapshot, ["weak-intent"]);
-    expect(weakPrompt).not.toContain(
-      "may use the read tool to inspect SKILL.md files",
-    );
+    expect(weakPrompt).not.toContain("may use skill_view to inspect skills");
     expect(weakPrompt).not.toContain("When Skills Used is none");
   });
 
@@ -1061,7 +1057,14 @@ describe("runReviewSubagent", () => {
         silentExpected: true,
         authProfileFailurePolicy: "local",
         cleanupBundleMcpOnRunEnd: true,
-        toolsAllow: ["read", "write", "apply_patch"],
+        toolsAllow: [
+          "read",
+          "write",
+          "apply_patch",
+          "skill_list",
+          "skill_view",
+          "skill_manage",
+        ],
         config: expect.objectContaining({
           tools: expect.objectContaining({
             fs: { workspaceOnly: true },

@@ -623,9 +623,8 @@ describe("buildIntentInstructionPrompt", () => {
 
     expect(prompt).toContain("<intent_related_skills>");
     expect(prompt).toContain("<name>architecture-diagram</name>");
-    expect(prompt).toContain(
-      "<path>/skills/architecture-diagram/SKILL.md</path>",
-    );
+    expect(prompt).not.toContain("<path>");
+    expect(prompt).not.toContain("/skills/architecture-diagram/SKILL.md");
     expect(prompt).toContain(
       "<description>Draw architecture diagrams.</description>",
     );
@@ -698,7 +697,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("## Output contract");
     expect(prompt).toContain("## Relevance and alignment");
     expect(prompt).toContain("## Skill recommendation");
-    expect(prompt).toContain("## Bounded SKILL.md reads");
+    expect(prompt).toContain("## Bounded skill_view reads");
     expect(prompt).toContain("## Experience preservation");
     expect(prompt).toContain("## Read-only and mutation safety");
     expect(prompt).toContain("## Context and continuity");
@@ -717,12 +716,12 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain(
       "If no skill passes this bar, emit no explicit skill directive",
     );
-    expect(prompt).toContain("MUST read skill: <skill-name> at <path>");
+    expect(prompt).toContain("MUST view skill: <skill-name>");
     expect(prompt).toContain("REQUIRED skill: <skill-name>");
-    expect(prompt).toContain("Prefer not to read");
-    expect(prompt).toContain("SKILL.md paths listed in intent_related_skills");
+    expect(prompt).toContain("Prefer not to view skill bodies");
+    expect(prompt).toContain("skills listed in intent_related_skills");
     expect(prompt).toContain(
-      "Use reading only to judge whether a listed skill is more clearly suited to the latest task",
+      "Use skill_view only to judge whether a listed skill is more clearly suited to the latest task",
     );
     expect(prompt).toContain(
       "write a more specific optional hint for the main agent",
@@ -731,12 +730,12 @@ describe("buildIntentInstructionPrompt", () => {
       "does not replace the main agent loading that skill",
     );
     expect(prompt).toContain(
-      "Do not summarize a skill as a substitute for the main agent's own skill read",
+      "Do not summarize a skill as a substitute for the main agent's own skill_view call",
     );
     expect(prompt).toContain(
       "If writing a concrete workflow depends on details not present in the skill description",
     );
-    expect(prompt).toContain("Do not read unrelated files");
+    expect(prompt).toContain("Do not view unrelated skills");
     expect(prompt).toContain("merely related or optional skills");
     expect(prompt).toContain("menu of possible guidance, not a checklist");
     expect(prompt).toContain("omit unrelated workflows");
@@ -1407,14 +1406,11 @@ describe("buildPromptPrefix", () => {
     expect(prefix).toContain(
       "Before replying, scan the skills below. If a skill matches or is even partially relevant",
     );
-    expect(prefix).toContain(
-      "MUST read its listed SKILL.md path with the `read` tool",
-    );
+    expect(prefix).toContain("MUST read it with the `skill_view` tool");
     expect(prefix).toContain("load the relevant OpenClaw skill first");
-    expect(prefix).toContain("fix it with `apply_patch`");
-    expect(prefix).toContain("or `write`");
-    expect(prefix).not.toContain("skill_view");
-    expect(prefix).not.toContain("skill_manage");
+    expect(prefix).toContain("fix it with `skill_manage`");
+    expect(prefix).toContain("`patch` for targeted edits");
+    expect(prefix).toContain("`edit` for full SKILL.md rewrites");
     expect(prefix).not.toContain("Hermes Agent");
     expect(prefix).not.toContain("hermes-agent");
     expect(prefix).toContain("<domain_skills>");

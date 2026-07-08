@@ -90,13 +90,32 @@ For each confirmed extraction:
 
 2. Draft the slimmed-down intent:
    - Keep only classification triggers and examples needed for routing.
-   - Replace detailed guidelines with a skill hint:
+   - Replace detailed guidelines with frontmatter `skills[]` plus concise routing guidance:
+
+     ```yaml
+     ---
+     triggers:
+       - "<retained trigger>"
+     examples:
+       - "<retained example>"
+     domain: "<domain>"
+     skills:
+       - <new-skill-name>
+     ---
+     ```
 
      ```markdown
-     ## Skills & Tools
+     ## Guidelines
 
-     - Load and follow the extracted skill workflow for detailed execution:
-       skill: <new-skill-name>
+     - Route this request to the extracted skill workflow for detailed execution.
+
+     ## Response Strategy
+
+     - Keep the intent focused on classification and handoff; do not duplicate the extracted workflow.
+
+     ## Experience
+
+     - Use `<new-skill-name>` skill when this intent matches and detailed execution is required.
      ```
 
    - Target: under 50 lines for the slimmed intent.
@@ -120,7 +139,8 @@ Use structured file/search tools to check:
 - New `SKILL.md` frontmatter exists and includes `name` and `description`.
 - The slimmed intent frontmatter has required fields with the right shapes.
 - The slimmed intent keeps enough triggers/examples for routing.
-- Skill hints follow `references/format.md`.
+- Skill dependencies are listed in frontmatter `skills[]`; no legacy `## Skills & Tools` section remains.
+- Experience entries follow `references/format.md`, including `Use `<skill-name>` skill when ...` phrasing for skill-specific guidance.
 - Proposed triggers do not obviously collide with remaining runtime intents.
 - The slimmed intent and any moved/renamed domain relationship pass the domain-intent consistency criteria in `references/clustering.md`.
 
@@ -141,6 +161,6 @@ Report files created/modified, format-check results, and remaining pending extra
 | --- | --------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
 | 1   | **Auto-extract without confirmation**   | Destructive change to intent routing           | Always present plan and get explicit approval                |
 | 2   | **Extract too aggressively**            | Creates skill sprawl, fragments related logic  | Only extract when sub-responsibilities are truly independent |
-| 3   | **Leave intent empty after extraction** | Intent still needed for classification routing | Keep slimmed intent with triggers + skill hint               |
+| 3   | **Leave intent empty after extraction** | Intent still needed for classification routing | Keep slimmed intent with triggers + frontmatter `skills[]`   |
 | 4   | **Ignore format rules when drafting**   | Inconsistent skill and intent structure        | Follow `references/format.md` and standard skill format      |
 | 5   | **Skip format checks after delivery**   | May break classification or skill loading      | Always run local format checks before reporting done         |

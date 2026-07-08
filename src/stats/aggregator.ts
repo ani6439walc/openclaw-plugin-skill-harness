@@ -155,7 +155,7 @@ function resolveIntentId(
 }
 
 const SKILL_RECOMMENDATION_PATTERN =
-  /^\s*(?:(?:[-*]|\d+\.)\s*)?(?:(?:MUST|REQUIRED)\s+(?:read\s+)?skill|強烈建議\s+(?:read\s+)?skill)\s*:\s*([^\s,;]+)/iu;
+  /^\s*(?:(?:[-*]|\d+\.)\s*)?(?:(?:MUST|REQUIRED)\s+(?:(?:read|view)\s+)?skill|強烈建議\s+(?:(?:read|view)\s+)?skill)\s*:\s*([^\s,;]+)/iu;
 
 function normalizeRecommendedSkillName(skill: string): string | undefined {
   const normalized = skill.replace(/^[`"']+|[`"'.!?]+$/g, "");

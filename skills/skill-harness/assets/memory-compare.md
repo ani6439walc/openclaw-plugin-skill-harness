@@ -1,5 +1,8 @@
 ---
 domain: "memory"
+skills:
+  - treemd
+  - obsidian
 triggers:
   - "The user wants two or more remembered subjects to be compared without merging them into a single recall path."
   - "User is asking about differences, similarities, trade-offs, or contrasts between two or more remembered subjects, periods, trips, approaches, or records"
@@ -16,19 +19,6 @@ examples:
 - Retrieve each subject separately before comparing them.
 - Keep the comparison neutral and based on recorded evidence.
 - Do not assume missing details for one side.
-
-## Skills & Tools
-
-- Read a large Markdown memory note by section:
-  skill: treemd
-- List tags or inspect linked memory notes after relevant files are found:
-  skill: obsidian
-- Search recorded memory for subject A:
-  memory_search({ query: "<subject_A_trigram_keywords>", corpus: "memory", maxResults: 5, minScore: 0.1 })
-- Search recorded memory for subject B:
-  memory_search({ query: "<subject_B_trigram_keywords>", corpus: "memory", maxResults: 5, minScore: 0.1 })
-- Read the most relevant memory note when more detail is needed:
-  memory_get({ path: "<memory_file>" })
 
 ## Response Strategy
 
@@ -116,3 +106,11 @@ memory_search({
 - If one side has significantly less data, clearly state "B has fewer records, comparison may be incomplete."
 - **Do not fabricate missing details** to "fill in" comparison tables. Leave blanks rather than invent.
 - Avoid table format (Discord style guide) — use bullet points instead.
+
+## Experience
+
+- Use `treemd` skill when a large Markdown memory note needs section-level navigation before comparing details.
+- Use `obsidian` skill after relevant files are found to inspect tags, links, backlinks, and possible shared context nodes.
+- Search each comparison subject independently; do not merge subject A and subject B into one query.
+- Use direct memory reads to inspect the highest-value note for each subject before aligning comparison dimensions.
+- Treat tool results asymmetrically when needed: if one subject has weaker retrieval evidence, keep that weakness visible instead of filling the gap from the stronger side.

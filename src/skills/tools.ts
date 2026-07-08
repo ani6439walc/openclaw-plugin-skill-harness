@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { OpenClawPluginApi } from "../../api.js";
 import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
+import { manageSkill } from "./manage.js";
 
 function jsonToolResult(data: unknown) {
   return {
@@ -23,6 +24,11 @@ function optionalStringParam(params: unknown, key: string): string | undefined {
 
 function requiredStringParam(params: unknown, key: string): string {
   return optionalStringParam(params, key) ?? "";
+}
+
+function booleanParam(params: unknown, key: string): boolean {
+  if (!params || typeof params !== "object") return false;
+  return (params as Record<string, unknown>)[key] === true;
 }
 
 function defaultAgentId(): string {
@@ -84,6 +90,90 @@ export function registerSkillTools(api: OpenClawPluginApi): void {
           agentId: defaultAgentId(),
           name: requiredStringParam(params, "name"),
           filePath: optionalStringParam(params, "file_path"),
+        }),
+      );
+    },
+  });
+
+  api.registerTool({
+    name: "skill_manage",
+    label: "Manage Skills",
+    description:
+      "Create, edit, patch, delete, and manage support files for OpenClaw skills. This is a required write-capable tool; validate names and paths before mutating skill files.",
+    parameters: Type.Object({
+      action: Type.Union([
+        Type.Literal("create"),
+        Type.Literal("patch"),
+        Type.Literal("edit"),
+        Type.Literal("delete"),
+        Type.Literal("write_file"),
+        Type.Literal("remove_file"),
+      ]),
+      name: Type.String({
+        description:
+          "Skill name. Use lowercase letters, numbers, dots, underscores, and hyphens; max 64 characters.",
+      }),
+      content: Type.Optional(
+        Type.String({
+          description:
+            "Full SKILL.md content with YAML frontmatter. Required for create/edit.",
+        }),
+      ),
+      old_string: Type.Optional(
+        Type.String({
+          description:
+            "Text to find for patch. Must be unique unless replace_all is true.",
+        }),
+      ),
+      new_string: Type.Optional(
+        Type.String({
+          description:
+            "Replacement text for patch. Can be an empty string to delete matched text.",
+        }),
+      ),
+      replace_all: Type.Optional(
+        Type.Boolean({
+          description:
+            "For patch: replace every occurrence instead of one unique match.",
+        }),
+      ),
+      category: Type.Optional(
+        Type.String({
+          description:
+            "Optional single-directory category for create. Creates stateDir/skills/<category>/<name>.",
+        }),
+      ),
+      file_path: Type.Optional(
+        Type.String({
+          description:
+            "Support file path for patch/write_file/remove_file. Must be under references/, templates/, scripts/, assets/, or examples/.",
+        }),
+      ),
+      file_content: Type.Optional(
+        Type.String({ description: "Content for write_file." }),
+      ),
+      absorbed_into: Type.Optional(
+        Type.String({
+          description:
+            "For delete: umbrella skill name when merged, or empty string when deleting with no forwarding target.",
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      return jsonToolResult(
+        await manageSkill({
+          api,
+          agentId: defaultAgentId(),
+          action: requiredStringParam(params, "action"),
+          name: requiredStringParam(params, "name"),
+          content: optionalStringParam(params, "content"),
+          oldString: optionalStringParam(params, "old_string"),
+          newString: optionalStringParam(params, "new_string"),
+          replaceAll: booleanParam(params, "replace_all"),
+          category: optionalStringParam(params, "category"),
+          filePath: optionalStringParam(params, "file_path"),
+          fileContent: optionalStringParam(params, "file_content"),
+          absorbedInto: optionalStringParam(params, "absorbed_into"),
         }),
       );
     },

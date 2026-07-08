@@ -59,6 +59,8 @@ Use simple format checks instead of command-specific validation steps:
 - Triggers/examples are concrete and non-duplicative.
 - New intents do not collide with existing runtime intent boundaries.
 - Domain-intent consistency criteria pass for every changed or newly proposed domain/intent relationship.
-- Skill/tool hints are formatted consistently.
+- Skill dependencies use frontmatter `skills[]`.
+- `## Experience` contains durable skill/tool guidance only; skill entries follow `references/format.md`, and tool entries usually describe capabilities instead of concrete tool names.
+- No legacy `## Skills & Tools` section remains.
 
 Report the inventory, proposed changes, and any unresolved ambiguities.

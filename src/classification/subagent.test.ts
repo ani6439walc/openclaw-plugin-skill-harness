@@ -158,7 +158,7 @@ describe("runTopicSwitchSubagent", () => {
 });
 
 describe("runIntentInstructionSubagent", () => {
-  it("runs a read-enabled instruction writer with classifier config", async () => {
+  it("runs a skill-tool-enabled instruction writer with classifier config", async () => {
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: "Use test-driven-development, then apply_patch." }],
     });
@@ -216,7 +216,7 @@ describe("runIntentInstructionSubagent", () => {
         promptMode: "minimal",
         modelRun: false,
         disableTools: false,
-        toolsAllow: ["read"],
+        toolsAllow: ["skill_view"],
         prompt: expect.stringContaining("You are an intention-hint writer."),
       }),
     );

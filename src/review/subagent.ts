@@ -67,7 +67,7 @@ const REVIEW_INSTRUCTIONS: Record<
       "Identify reusable skills, tools, execution sequences, tips, parameters, and pitfalls that the matched intent Markdown should preserve. When concrete skill usage or a tool-specific pitfall exists, prefer a small direct Experience edit over broad rewrites. Exclude one-off tool usage and capabilities outside the intent boundary.",
     goal: "Refine the matched intent Markdown's Skills & Tools, Concrete Workflow, or Experience section when the sequence or lesson is stable.",
     workflow:
-      "skill-candidate: accept small intent-local Experience notes only when concrete skill/tool evidence, parameters, recovery, or required ordering exists. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use the read tool to inspect SKILL.md files referenced by the review snapshot's Skills Used paths when the skill description is not enough to judge an intent-local improvement; read only relevant SKILL.md files.",
+      "skill-candidate: accept small intent-local Experience notes only when concrete skill/tool evidence, parameters, recovery, or required ordering exists. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
   },
   "process-gap": {
     focus:
@@ -202,7 +202,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 
 ### Target and mutation boundaries
 ${INTENT_CRAFT_RUBRIC_TARGET_RULES_MARKER}
-- For split or merge operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to: rather than requesting extra file-management tools.
+- For split or merge operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to: rather than requesting extra file-management tools. Use skill_list, skill_view, and skill_manage only for skill discovery, inspection, or explicit skill-file maintenance; do not use raw read/write/apply_patch against skill paths.
 ${INTENT_CRAFT_RUBRIC_NO_FINDING_RULE_MARKER}`;
 
 function buildIntentCraftRubric(includeTriggerKeywordRules: boolean): string {
@@ -1275,7 +1275,14 @@ export async function runReviewSubagent(params: {
         ...buildEmbeddedSubagentRunDefaults(),
         modelRun: false,
         promptMode: "minimal",
-        toolsAllow: ["read", "write", "apply_patch"],
+        toolsAllow: [
+          "read",
+          "write",
+          "apply_patch",
+          "skill_list",
+          "skill_view",
+          "skill_manage",
+        ],
         disableTools: false,
         thinkLevel: params.config.review.thinking,
       });

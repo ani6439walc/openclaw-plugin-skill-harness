@@ -78,6 +78,8 @@ export interface IntentInstructionSubagentResult {
   error?: string;
 }
 
+const INSTRUCTION_SKILL_TOOL_NAMES = ["skill_view"];
+
 export function getModelRef(
   api: OpenClawPluginApi,
   agentId: string,
@@ -307,7 +309,7 @@ export async function runIntentInstructionSubagent(params: {
       thinkLevel: params.config.instruction.thinking,
       modelRun: false,
       promptMode: "minimal",
-      toolsAllow: ["read"],
+      toolsAllow: INSTRUCTION_SKILL_TOOL_NAMES,
       disableTools: false,
     });
     const embeddedError = extractEmbeddedRunError(result);

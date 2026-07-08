@@ -34,7 +34,7 @@ describe("StatsAggregator", () => {
           complexity: "medium",
         },
         instructionText: [
-          "MUST read skill: git-master at /skills/git-master/SKILL.md",
+          "MUST view skill: git-master",
           "REQUIRED skill: dev-lifecycle",
         ].join("\n"),
       },
@@ -102,25 +102,31 @@ describe("StatsAggregator", () => {
     expect(
       extractRecommendedSkillsFromInstruction(
         [
-          "MUST read skill: prompt-engineering-expert at /skills/prompt-engineering-expert/SKILL.md",
+          "MUST view skill: prompt-engineering-expert",
           "REQUIRED skill: test-driven-development",
           "強烈建議 read skill: treemd",
+          "強烈建議 view skill: skill-viewer",
           "  skill: obsidian",
           "- skill: raw-candidate",
           "MUST read skill: prompt-engineering-expert at /duplicate/SKILL.md",
+          "MUST view skill: prompt-engineering-expert",
           "MUST read skill: `github-pr-workflow`",
           "REQUIRED skill: test-driven-development.",
           "MUST read skill: code-review-and-quality at /skills/code-review-and-quality/SKILL.md - needed to assess bot feedback",
+          "MUST view skill: code-review-and-quality - needed to assess bot feedback",
           "1. MUST read skill: numbered-skill at /skills/numbered-skill/SKILL.md",
+          "2. MUST view skill: numbered-view-skill",
         ].join("\n"),
       ),
     ).toEqual([
       "prompt-engineering-expert",
       "test-driven-development",
       "treemd",
+      "skill-viewer",
       "github-pr-workflow",
       "code-review-and-quality",
       "numbered-skill",
+      "numbered-view-skill",
     ]);
   });
 
