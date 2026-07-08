@@ -45,7 +45,7 @@ async function runTool(tool: unknown, params: Record<string, unknown>) {
 }
 
 describe("registerSkillTools", () => {
-  it("registers skills_list and skill_view tools", () => {
+  it("registers skill_list and skill_view tools", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const api = createApi(path.join(tmp, "state"), path.join(tmp, "workspace"));
 
@@ -53,7 +53,7 @@ describe("registerSkillTools", () => {
 
     expect(api.registerTool).toHaveBeenCalledTimes(2);
     expect(api.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
-      "skills_list",
+      "skill_list",
       "skill_view",
     ]);
   });
@@ -69,7 +69,7 @@ describe("registerSkillTools", () => {
     );
 
     await expect(
-      runTool(tools.get("skills_list"), { category: "workspace" }),
+      runTool(tools.get("skill_list"), { category: "workspace" }),
     ).resolves.toMatchObject({
       success: true,
       count: 1,

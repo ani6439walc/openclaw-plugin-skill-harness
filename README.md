@@ -9,7 +9,7 @@ An OpenClaw plugin that pre-scans user intent before main-agent replies and inje
 
 - Package version: `2026.6.11`; OpenClaw compatibility in `package.json` targets Plugin API and Gateway `>=2026.6.11`.
 - Branch state inspected on `main` at `987374c` (`♻️ refactor(subagent): extract shared runtime logic and rename embedded-agent to subagent`).
-- Recent implementation work focused on the `embedded-agent` → `subagent` naming cleanup, shared embedded sub-agent runtime defaults, direct runtime Intent Review, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and shared skill discovery for prompt hints plus `skills_list` / `skill_view` tools.
+- Recent implementation work focused on the `embedded-agent` → `subagent` naming cleanup, shared embedded sub-agent runtime defaults, direct runtime Intent Review, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and shared skill discovery for prompt hints plus `skill_list` / `skill_view` tools.
 - Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/skill-harness/intents`.
 - Codebase shape excluding dependencies/build output: 65 TypeScript files, 19 Markdown files, 3 JSON files, and 87 counted source/documentation/config files total.
 - TypeScript line split from direct file line counts: 37 runtime files / 9,437 lines, 25 test files / 13,166 lines, 4 root tooling/entry files / 144 lines; test/runtime line ratio is about 1.40x.
@@ -43,7 +43,7 @@ index.ts
        │    ├─ roots.ts → resolves workspace, agent, managed, bundled, extra, and plugin skill roots
        │    ├─ indexer.ts → recursively indexes nested SKILL.md files with precedence and cache handling
        │    ├─ files.ts → reads SKILL.md plus allowed support files with path containment checks
-       │    └─ tools.ts → registers skills_list and skill_view
+       │    └─ tools.ts → registers skill_list and skill_view
        │
        ├─ classification/ → prompt, subagent, and conversation classification flow
        │    ├─ prompts.ts → prompt builders and parsers
@@ -92,7 +92,7 @@ index.ts
 | `skills/roots.ts`                | Resolves OpenClaw skill roots in documented precedence order                                                                                            |
 | `skills/indexer.ts`              | Recursively indexes nested `SKILL.md` files, resolves intent skill references, and lists visible skills                                                 |
 | `skills/files.ts`                | Reads skill content and allowed linked support files with path traversal protection                                                                     |
-| `skills/tools.ts`                | Registers `skills_list` and `skill_view` OpenClaw tools                                                                                                 |
+| `skills/tools.ts`                | Registers `skill_list` and `skill_view` OpenClaw tools                                                                                                  |
 | `file-utils.ts`                  | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                                      |
 | `constants.ts`                   | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                                       |
 | `types.ts`                       | All shared type definitions for plugin, config, intent, result, and turn shapes                                                                         |
@@ -249,7 +249,7 @@ denominator applies to new tracked turns.
 
 The plugin registers two required OpenClaw tools for progressive skill access:
 
-- `skills_list` returns visible skill metadata, source, category, and path.
+- `skill_list` returns visible skill metadata, source, category, and path.
 - `skill_view` reads the resolved `SKILL.md`, or an allowed linked support file
   under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`.
   Support-file paths must be relative and remain inside the resolved skill

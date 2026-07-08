@@ -31,7 +31,7 @@ function defaultAgentId(): string {
 
 export function registerSkillTools(api: OpenClawPluginApi): void {
   api.registerTool({
-    name: "skills_list",
+    name: "skill_list",
     label: "List Skills",
     description:
       "List OpenClaw skills visible to the current agent. Returns metadata only; use skill_view to read full SKILL.md content or linked support files.",

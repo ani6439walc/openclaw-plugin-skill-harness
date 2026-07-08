@@ -78,7 +78,7 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
 
     expect(api.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
-      "skills_list",
+      "skill_list",
       "skill_view",
     ]);
     expect(api.registerCommand).not.toHaveBeenCalled();
