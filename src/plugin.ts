@@ -230,7 +230,9 @@ export function createPlugin(
       api.on("before_agent_finalize", handlers.onBeforeAgentFinalize);
       api.on("agent_end", handlers.onAgentEnd);
       api.on("session_end", handlers.onSessionEnd);
-      registerSkillTools(api);
+      registerSkillTools(api, {
+        getIntents: () => catalog.filterForAgent(config, "main"),
+      });
     },
   });
 }

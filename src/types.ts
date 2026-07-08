@@ -122,6 +122,7 @@ export type IntentDefinition = {
   triggers: string[];
   examples: string[];
   domain: string;
+  skills?: string[];
   fastpath: {
     keywords: string[];
     hint?: string;

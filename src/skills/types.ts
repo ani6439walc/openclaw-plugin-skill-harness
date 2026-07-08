@@ -1,11 +1,25 @@
-export type SkillSource =
-  | "workspace"
-  | "project-agent"
-  | "personal-agent"
-  | "managed"
-  | "bundled"
-  | "extra"
-  | "plugin";
+export const SKILL_SOURCE_ORDER = [
+  "workspace",
+  "project-agent",
+  "personal-agent",
+  "managed",
+  "plugin",
+  "bundled",
+  "extra",
+] as const;
+
+export type SkillSource = (typeof SKILL_SOURCE_ORDER)[number];
+
+export interface SkillUsageStats {
+  usage_turns: number;
+  recommended_turns: number;
+  adopted_turns: number;
+  adoption_rate: number;
+  last_used_at?: string;
+  last_7_days_usage: number;
+  lifecycle: "active" | "stale" | "archive" | "never-used";
+  needs_review: boolean;
+}
 
 export interface SkillRoot {
   path: string;
@@ -18,13 +32,14 @@ export interface AvailableSkill {
   location: string;
   description: string;
   source?: SkillSource;
-  category?: string;
+  domains?: string[];
 }
 
 export interface SkillResolutionParams {
   api: import("../../api.js").OpenClawPluginApi;
   agentId: string;
   bundledSkillsDir?: string;
+  intents?: readonly import("../types.js").IntentCatalogEntry[];
   cacheTtlMs?: number;
   nowMs?: number;
   homeDir?: string;
@@ -52,8 +67,9 @@ export type SkillReadResult =
       skill_dir?: string;
       linked_files?: LinkedSkillFiles;
       usage_hint?: string | null;
+      usage_stats: SkillUsageStats;
       source?: SkillSource;
-      category?: string;
+      domains: string[];
       readiness_status: "available";
     }
   | {
@@ -62,6 +78,7 @@ export type SkillReadResult =
       file: string;
       content: string;
       file_type: string;
+      domains: string[];
       is_binary?: boolean;
     }
   | {

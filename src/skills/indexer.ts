@@ -4,10 +4,18 @@ import path from "node:path";
 import matter from "gray-matter";
 import { logger, type OpenClawPluginApi } from "../../api.js";
 import type { IntentCatalogEntry } from "../types.js";
+import {
+  buildSkillDomainMap,
+  domainsForSkill,
+  extractReferencedSkillNames,
+} from "./domains.js";
 import { resolveSkillRoots } from "./roots.js";
+import { SKILL_SOURCE_ORDER } from "./types.js";
 import type { AvailableSkill, SkillResolutionParams } from "./types.js";
+import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 
-const SKILL_REF_RE = /\bskill:\s*([A-Za-z0-9_-]+)/gi;
+export { extractReferencedSkillNames } from "./domains.js";
+
 const SKILL_INDEX_CACHE_TTL_MS = 60_000;
 const SKILL_INDEX_MAX_DEPTH = 32;
 
@@ -22,6 +30,9 @@ interface SkillIndexOptions {
 }
 
 const skillIndexCache = new Map<string, CachedSkillIndex>();
+const SOURCE_PRIORITY = new Map(
+  SKILL_SOURCE_ORDER.map((source, index) => [source, index]),
+);
 
 export function clearSkillIndexCache(): void {
   skillIndexCache.clear();
@@ -44,15 +55,6 @@ function isMissingPathError(error: unknown): boolean {
   );
 }
 
-export function extractReferencedSkillNames(markdown: string): string[] {
-  const names: string[] = [];
-  for (const match of markdown.matchAll(SKILL_REF_RE)) {
-    const name = match[1]?.trim();
-    if (name) names.push(name);
-  }
-  return [...new Set(names)];
-}
-
 function fallbackDescription(content: string): string {
   const paragraph = content
     .split(/\n\s*\n/)
@@ -61,17 +63,7 @@ function fallbackDescription(content: string): string {
   return paragraph ?? "";
 }
 
-function categoryFromLocation(
-  root: string,
-  skillFilePath: string,
-): string | undefined {
-  const relative = path.relative(root, path.dirname(skillFilePath));
-  const [category] = relative.split(path.sep).filter(Boolean);
-  return category && category !== "." ? category : undefined;
-}
-
 async function readSkillFile(
-  root: string,
   filePath: string,
   source?: AvailableSkill["source"],
 ): Promise<AvailableSkill | undefined> {
@@ -92,7 +84,6 @@ async function readSkillFile(
       location: filePath,
       description,
       source,
-      category: categoryFromLocation(root, filePath),
     };
   } catch (err) {
     if (!isMissingPathError(err)) {
@@ -197,7 +188,6 @@ async function buildSkillIndex(
     const skillFileEntry = entries.find((entry) => entry.name === "SKILL.md");
     if (skillFileEntry && (await isSkillFileEntry(dir, skillFileEntry))) {
       const skill = await readSkillFile(
-        root,
         path.join(dir, "SKILL.md"),
         options.source,
       );
@@ -294,14 +284,24 @@ async function listSkillIndexes(
 }
 
 function stripToolOnlyFields(skill: AvailableSkill): AvailableSkill {
-  const { source: _source, category: _category, ...visible } = skill;
+  const { source: _source, ...visible } = skill;
   return visible;
 }
 
+function sourcePriority(skill: AvailableSkill): number {
+  return skill.source
+    ? (SOURCE_PRIORITY.get(skill.source) ?? Number.MAX_SAFE_INTEGER)
+    : Number.MAX_SAFE_INTEGER;
+}
+
 export async function listAvailableSkills(
-  params: SkillResolutionParams & { category?: string },
+  params: SkillResolutionParams & { source?: AvailableSkill["source"] },
 ): Promise<AvailableSkill[]> {
-  const category = params.category?.trim().toLowerCase();
+  const source = params.source?.trim().toLowerCase();
+  const usageStats = await readSkillUsageStats(params);
+  const domainsBySkill = params.intents
+    ? buildSkillDomainMap(params.intents)
+    : undefined;
   const skills: AvailableSkill[] = [];
   const seen = new Set<string>();
 
@@ -309,18 +309,27 @@ export async function listAvailableSkills(
     for (const skill of index.values()) {
       const key = skill.name.toLowerCase();
       if (seen.has(key)) continue;
-      if (
-        category &&
-        skill.category?.toLowerCase() !== category &&
-        skill.source?.toLowerCase() !== category
-      ) {
+      if (source && skill.source?.toLowerCase() !== source) {
         continue;
       }
       seen.add(key);
-      skills.push(skill);
+      skills.push({
+        ...skill,
+        ...(domainsBySkill
+          ? { domains: domainsForSkill(domainsBySkill, skill.name) }
+          : {}),
+      });
     }
   }
-  return skills;
+  return skills.sort((left, right) => {
+    const sourceComparison = sourcePriority(left) - sourcePriority(right);
+    if (sourceComparison !== 0) return sourceComparison;
+    const usageComparison =
+      skillUsageStatsForName(usageStats, right.name).usage_turns -
+      skillUsageStatsForName(usageStats, left.name).usage_turns;
+    if (usageComparison !== 0) return usageComparison;
+    return left.name.localeCompare(right.name);
+  });
 }
 
 export async function findAvailableSkill(
@@ -328,9 +337,19 @@ export async function findAvailableSkill(
 ): Promise<AvailableSkill | undefined> {
   const normalizedName = params.name.trim().toLowerCase();
   if (!normalizedName) return;
+  const domainsBySkill = params.intents
+    ? buildSkillDomainMap(params.intents)
+    : undefined;
   for (const index of await listSkillIndexes(params)) {
     const skill = index.get(normalizedName);
-    if (skill) return skill;
+    if (skill) {
+      return {
+        ...skill,
+        ...(domainsBySkill
+          ? { domains: domainsForSkill(domainsBySkill, skill.name) }
+          : {}),
+      };
+    }
   }
 }
 

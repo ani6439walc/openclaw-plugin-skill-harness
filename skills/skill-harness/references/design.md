@@ -25,7 +25,8 @@ Minimum information before drafting:
 3. Concrete triggers and examples.
 4. Optional fastpath keywords and hint.
 5. Skills worth listing in frontmatter and durable tool guidance worth moving into `## Experience`.
-6. Neighboring or colliding intents.
+6. Concrete shell commands or stable CLI equivalents that should be preserved in `## Experience`, including mcporter-backed documentation calls.
+7. Neighboring or colliding intents.
 
 ## Step 3 — Ground against existing intents
 
@@ -46,6 +47,7 @@ Follow `references/format.md` exactly:
 - Optional frontmatter: `fastpath`, `skills[]`.
 - Required body sections: `## Guidelines`, `## Response Strategy`; optional `## Concrete Workflow`, optional `## Experience`.
 - Do not include `## Skills & Tools`; put skill names in frontmatter `skills[]`.
+- Preserve concrete shell commands as bare commands in `## Experience`; for Context7, DeepWiki, or GoogleDeveloperKnowledge calls, add `mcporter` to `skills[]` and write the `mcporter call ...` command instead of MCP wrapper syntax.
 - No body cross-references to other intent ids.
 
 ## Step 5 — Format check and delivery
@@ -57,6 +59,7 @@ Before writing or showing the final draft, perform simple format checks:
 - Required body sections are present and ordered.
 - Trigger/example text is concrete enough for routing.
 - Skill dependencies use frontmatter `skills[]`; any tool guidance follows the `## Concrete Workflow` and `## Experience` rules in `references/format.md`.
+- Concrete shell commands and mcporter-backed documentation lookups are written as bare commands in `## Experience`; no `exec({ command: ... })` or vague runtime-capability wording remains.
 - No legacy `## Skills & Tools` section remains.
 - No body cross-references to other intent ids.
 - The target filename-derived id matches the declared boundary.

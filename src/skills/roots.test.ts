@@ -54,13 +54,13 @@ describe("resolveSkillRoots", () => {
         source: "managed",
         precedence: 3,
       },
-      { path: bundledSkillsDir, source: "bundled", precedence: 4 },
-      { path: extraDir, source: "extra", precedence: 5 },
       {
         path: path.join(stateDir, "plugin-skills"),
         source: "plugin",
-        precedence: 6,
+        precedence: 4,
       },
+      { path: bundledSkillsDir, source: "bundled", precedence: 5 },
+      { path: extraDir, source: "extra", precedence: 6 },
     ]);
   });
 

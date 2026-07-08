@@ -174,6 +174,11 @@ export class IntentCatalog {
         ? data.examples.filter((x): x is string => typeof x === "string")
         : [];
       const domain = typeof data.domain === "string" ? data.domain.trim() : "";
+      const skills = Array.isArray(data.skills)
+        ? data.skills
+            .filter((x): x is string => typeof x === "string" && !!x.trim())
+            .map((x) => x.trim())
+        : [];
       const fastpath = parseFastpath(data, entry, silent);
 
       if (!triggers.length) {
@@ -197,6 +202,7 @@ export class IntentCatalog {
         triggers,
         examples,
         domain,
+        ...(skills.length > 0 ? { skills } : {}),
         fastpath,
         prompt: parsed.content.trim(),
       };

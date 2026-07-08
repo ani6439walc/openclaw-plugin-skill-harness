@@ -8,6 +8,7 @@ import {
   resolveAvailableSkills,
 } from "./indexer.js";
 import type { OpenClawPluginApi } from "../../api.js";
+import type { IntentCatalogEntry } from "../types.js";
 
 function writeSkillAt(dir: string, name: string, description: string): void {
   fs.mkdirSync(dir, { recursive: true });
@@ -15,6 +16,20 @@ function writeSkillAt(dir: string, name: string, description: string): void {
     path.join(dir, "SKILL.md"),
     `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`,
   );
+}
+
+function writeStats(
+  stateDir: string,
+  skills: Record<string, { usageTurns: number }>,
+): void {
+  const statsFile = path.join(
+    stateDir,
+    "plugins",
+    "skill-harness",
+    "stats.json",
+  );
+  fs.mkdirSync(path.dirname(statsFile), { recursive: true });
+  fs.writeFileSync(statsFile, JSON.stringify({ schemaVersion: 1, skills }));
 }
 
 function createApi(stateDir: string, workspaceDir: string): OpenClawPluginApi {
@@ -71,6 +86,44 @@ describe("skill indexer", () => {
       "shared-skill",
       "Lower precedence copy.",
     );
+    writeSkillAt(
+      path.join(workspaceDir, "skills", "alpha"),
+      "alpha-skill",
+      "Lower usage workspace skill.",
+    );
+    writeSkillAt(
+      path.join(workspaceDir, "skills", "zeta"),
+      "zeta-skill",
+      "Higher usage workspace skill.",
+    );
+    writeSkillAt(
+      path.join(bundledSkillsDir, "aaa-bundle"),
+      "aaa-bundled-skill",
+      "Alphabetically first bundled skill.",
+    );
+    writeSkillAt(
+      path.join(bundledSkillsDir, "zzz-bundle"),
+      "zzz-bundled-skill",
+      "Alphabetically last bundled skill.",
+    );
+    writeStats(stateDir, {
+      "zeta-skill": { usageTurns: 8 },
+      "alpha-skill": { usageTurns: 2 },
+      "aaa-bundled-skill": { usageTurns: 0 },
+      "zzz-bundled-skill": { usageTurns: 0 },
+    });
+    const intents: IntentCatalogEntry[] = [
+      {
+        id: "workspace-skills",
+        definition: {
+          triggers: ["workspace"],
+          examples: ["workspace"],
+          domain: "workspace-domain",
+          fastpath: { keywords: [] },
+          prompt: "Use skill: shared-skill and skill: zeta-skill.",
+        },
+      },
+    ];
 
     const skills = await listAvailableSkills({
       api,
@@ -78,18 +131,23 @@ describe("skill indexer", () => {
       bundledSkillsDir,
       cacheTtlMs: 0,
       homeDir,
+      intents,
     });
 
     expect(skills.map((skill) => [skill.name, skill.source])).toEqual([
+      ["zeta-skill", "workspace"],
+      ["alpha-skill", "workspace"],
       ["shared-skill", "workspace"],
       ["project-skill", "project-agent"],
       ["personal-skill", "personal-agent"],
       ["managed-skill", "managed"],
-      ["bundled-skill", "bundled"],
       ["plugin-skill", "plugin"],
+      ["aaa-bundled-skill", "bundled"],
+      ["bundled-skill", "bundled"],
+      ["zzz-bundled-skill", "bundled"],
     ]);
     expect(skills.find((skill) => skill.name === "shared-skill")).toMatchObject(
-      { description: "Workspace wins." },
+      { description: "Workspace wins.", domains: ["workspace-domain"] },
     );
   });
 

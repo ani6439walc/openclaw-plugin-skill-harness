@@ -6,6 +6,7 @@ import type {
   SkillReadParams,
   SkillReadResult,
 } from "./types.js";
+import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 
 const SUPPORT_DIRECTORIES = [
   "references",
@@ -136,6 +137,7 @@ export async function readAvailableSkill(
   const skillDir = skillDirFromSkillPath(skill.location);
   if (!params.filePath) {
     try {
+      const usageStats = await readSkillUsageStats(params);
       return {
         success: true,
         name: skill.name,
@@ -145,8 +147,9 @@ export async function readAvailableSkill(
         skill_dir: skillDir,
         linked_files: await listLinkedSkillFiles(skillDir),
         usage_hint: null,
+        usage_stats: skillUsageStatsForName(usageStats, skill.name),
         source: skill.source,
-        category: skill.category,
+        domains: skill.domains ?? [],
         readiness_status: "available",
       };
     } catch (err) {
@@ -173,6 +176,7 @@ export async function readAvailableSkill(
       file: validation.normalizedFilePath,
       content: await fs.readFile(validation.resolvedPath, "utf-8"),
       file_type: path.extname(validation.normalizedFilePath),
+      domains: skill.domains ?? [],
     };
   } catch (err) {
     return {

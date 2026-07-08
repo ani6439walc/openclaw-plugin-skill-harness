@@ -141,6 +141,7 @@ Use structured file/search tools to check:
 - The slimmed intent keeps enough triggers/examples for routing.
 - Skill dependencies are listed in frontmatter `skills[]`; no legacy `## Skills & Tools` section remains.
 - Experience entries follow `references/format.md`, including `Use `<skill-name>` skill when ...` phrasing for skill-specific guidance.
+- Concrete shell commands and mcporter-backed documentation lookups remain as bare commands in `## Experience`; `mcporter` is included in `skills[]` when those commands are required.
 - Proposed triggers do not obviously collide with remaining runtime intents.
 - The slimmed intent and any moved/renamed domain relationship pass the domain-intent consistency criteria in `references/clustering.md`.
 

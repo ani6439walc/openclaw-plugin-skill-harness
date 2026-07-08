@@ -47,7 +47,6 @@ describe("manageSkill", () => {
       agentId: "main",
       action: "create",
       name: "drafting",
-      category: "writing",
       content: skillContent(),
       cacheTtlMs: 0,
     });
@@ -55,15 +54,8 @@ describe("manageSkill", () => {
     expect(created).toMatchObject({
       success: true,
       message: "Skill 'drafting' created.",
-      category: "writing",
     });
-    const skillPath = path.join(
-      stateDir,
-      "skills",
-      "writing",
-      "drafting",
-      "SKILL.md",
-    );
+    const skillPath = path.join(stateDir, "skills", "drafting", "SKILL.md");
     expect(fs.readFileSync(skillPath, "utf-8")).toContain("# drafting");
     await expect(
       findAvailableSkill({
@@ -75,7 +67,6 @@ describe("manageSkill", () => {
     ).resolves.toMatchObject({
       name: "drafting",
       source: "managed",
-      category: "writing",
       location: skillPath,
     });
 
@@ -105,14 +96,7 @@ describe("manageSkill", () => {
     ).resolves.toMatchObject({ success: true, replacements: 1 });
     expect(
       fs.readFileSync(
-        path.join(
-          stateDir,
-          "skills",
-          "writing",
-          "drafting",
-          "references",
-          "guide.md",
-        ),
+        path.join(stateDir, "skills", "drafting", "references", "guide.md"),
         "utf-8",
       ),
     ).toContain("New wording.");
@@ -143,14 +127,7 @@ describe("manageSkill", () => {
     ).resolves.toMatchObject({ success: true });
     expect(
       fs.existsSync(
-        path.join(
-          stateDir,
-          "skills",
-          "writing",
-          "drafting",
-          "references",
-          "guide.md",
-        ),
+        path.join(stateDir, "skills", "drafting", "references", "guide.md"),
       ),
     ).toBe(false);
 

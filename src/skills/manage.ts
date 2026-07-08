@@ -30,7 +30,6 @@ export interface SkillManageParams extends SkillResolutionParams {
   oldString?: string;
   newString?: string;
   replaceAll?: boolean;
-  category?: string;
   filePath?: string;
   fileContent?: string;
   absorbedInto?: string;
@@ -63,16 +62,6 @@ function validateName(name: string): string | undefined {
     return `Invalid skill name '${name}'. Use lowercase letters, numbers, hyphens, dots, and underscores. Must start with a letter or digit.`;
   }
   return;
-}
-
-function validateCategory(category: string | undefined): string | undefined {
-  if (category === undefined) return;
-  const trimmed = category.trim();
-  if (!trimmed) return;
-  if (trimmed.includes("/") || trimmed.includes("\\")) {
-    return `Invalid category '${category}'. Categories must be a single directory name.`;
-  }
-  return validateName(trimmed)?.replace("Skill name", "Category");
 }
 
 function validateContentSize(
@@ -132,10 +121,7 @@ function managedSkillsRoot(params: SkillResolutionParams): string {
 }
 
 function resolveNewSkillDir(params: SkillManageParams): string {
-  const category = params.category?.trim();
-  return category
-    ? path.join(managedSkillsRoot(params), category, params.name)
-    : path.join(managedSkillsRoot(params), params.name);
+  return path.join(managedSkillsRoot(params), params.name);
 }
 
 function skillDirFromPath(skillPath: string): string {
@@ -227,8 +213,6 @@ async function createSkill(
 ): Promise<SkillManageResult> {
   const nameError = validateName(params.name);
   if (nameError) return { success: false, error: nameError };
-  const categoryError = validateCategory(params.category);
-  if (categoryError) return { success: false, error: categoryError };
   if (!params.content) {
     return {
       success: false,
@@ -258,7 +242,6 @@ async function createSkill(
     message: `Skill '${params.name}' created.`,
     path: path.relative(managedSkillsRoot(params), skillDir) || params.name,
     skill_md: skillPath,
-    category: params.category?.trim() || undefined,
     _change: { description: parseDescription(params.content) },
     hint: `To add support files, call skill_manage(action='write_file', name='${params.name}', file_path='references/example.md', file_content='...').`,
   };

@@ -53,6 +53,10 @@ triggers:
 examples:
   - "spawn a subagent"
 domain: "agent"
+skills:
+  - code-review
+  - 123
+  - ""
 fastpath:
   hint: "Route lightweight agent dispatch requests directly."
   keywords:
@@ -74,6 +78,7 @@ fastpath:
           triggers: ["User manages agent workflow"],
           examples: ["spawn a subagent"],
           domain: "agent",
+          skills: ["code-review"],
           fastpath: {
             keywords: ["spawn", "派代理"],
             hint: "Route lightweight agent dispatch requests directly.",

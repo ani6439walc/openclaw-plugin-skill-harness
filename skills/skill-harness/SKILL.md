@@ -28,6 +28,7 @@ If ambiguous, ask one routing question: "Are you working on a single intent, aud
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
 - Check changed intent files for canonical format: valid frontmatter shape, required sections in order, concrete triggers/examples, frontmatter `skills[]` when skill loading is needed, durable `## Experience` guidance when operational lessons are needed, no legacy `## Skills & Tools`, and no body cross-references to other intent ids.
+- When preserving concrete shell commands or stable CLI equivalents for MCP documentation calls, write the bare command in `## Experience` instead of tool-wrapper syntax such as `exec({ command: ... })` or vague "runtime capability" language. For Bifrost-backed Context7, DeepWiki, or GoogleDeveloperKnowledge calls, add `mcporter` to frontmatter `skills[]` and document the matching `mcporter call ...` command.
 - When reviewing, creating, splitting, merging, or extracting intents, validate domain-intent consistency using `references/clustering.md`.
 
 ---
@@ -166,6 +167,7 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 - Body sections appear in the canonical order from `references/format.md`.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
 - Skill dependencies use frontmatter `skills[]`, and `## Experience` uses the expected skill/tool guidance shape.
+- Concrete shell commands and mcporter-backed documentation lookups are preserved as bare commands in `## Experience`, with `mcporter` listed in `skills[]` when needed.
 - Legacy `## Skills & Tools` sections are absent from new or updated intents.
 - Body text does not cross-reference other intent ids.
 - Proposed triggers do not obviously collide with existing runtime intent boundaries.

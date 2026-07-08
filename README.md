@@ -11,9 +11,9 @@ An OpenClaw plugin that pre-scans user intent before main-agent replies and inje
 - Branch state inspected on `main` at `987374c` (`♻️ refactor(subagent): extract shared runtime logic and rename embedded-agent to subagent`).
 - Recent implementation work focused on the `embedded-agent` → `subagent` naming cleanup, shared embedded sub-agent runtime defaults, direct runtime Intent Review, modern `runEmbeddedAgent` hint/review runs, reduced-noise skill recommendation stats, domain skill prompt metadata, and shared skill discovery/management for prompt hints plus `skill_list`, `skill_view`, and `skill_manage` tools.
 - Current first-install bundled intent assets are `approve`, `chat`, `memory-compare`, `memory-lookup`, `reject`, and `typo`; the active writable catalog still lives only under `$OPENCLAW_STATE_DIR/plugins/skill-harness/intents`.
-- Codebase shape excluding dependencies/build output: 67 TypeScript files, 17 Markdown files, 3 JSON files, and 87 counted source/documentation/config files total.
-- TypeScript line split from direct file line counts: 38 runtime files / 10,220 lines, 26 test files / 13,472 lines, 3 root tooling/entry files / 30 lines; test/runtime line ratio is about 1.32x.
-- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 26 test files / 488 tests, `pnpm run build` passes, and `pnpm pack --dry-run` succeeds.
+- Codebase shape excluding dependencies/build output: 69 TypeScript files, 17 Markdown files, 3 JSON files, and 98 counted source/documentation/config files total.
+- TypeScript line split from direct file line counts: 40 runtime files / 10,460 lines, 26 test files / 13,728 lines, 3 root tooling/entry files / 30 lines; test/runtime line ratio is about 1.31x.
+- Verification status: `pnpm run typecheck` passes, `pnpm run test` passes with 26 test files / 489 tests, `pnpm run build` passes, and `pnpm pack --dry-run` succeeds.
 - Package hygiene note: `tsconfig.json` includes only `api.ts`, `index.ts`, and `src/**/*.ts`; current `pnpm pack --dry-run` output contains `dist/src/classification/subagent.*` and `dist/src/skills/*` with no stale `dist/src/classification/embedded-agent.*` or `dist/vitest.config.*` artifacts.
 - Dependency audit note: `pnpm audit --audit-level moderate` currently reports three moderate findings: transitive OpenClaw dependency findings for `protobufjs` and `tar`, plus `gray-matter > js-yaml`. Remediation should be coordinated with OpenClaw/gray-matter compatibility rather than patched blindly in this plugin.
 
@@ -40,10 +40,12 @@ index.ts
        │    └─ skill-references.ts → intent-facing adapter for skill: <name> reference extraction
        │
        ├─ skills/ → shared OpenClaw skill discovery, viewing, management, and tool registration
-       │    ├─ roots.ts → resolves workspace, agent, managed, bundled, extra, and plugin skill roots
-       │    ├─ indexer.ts → recursively indexes nested SKILL.md files with precedence and cache handling
+       │    ├─ roots.ts → resolves workspace, agent, managed, plugin, bundled, and extra skill roots
+       │    ├─ indexer.ts → recursively indexes nested SKILL.md files with precedence, usage sorting, and cache handling
        │    ├─ files.ts → reads SKILL.md plus allowed support files with path containment checks
        │    ├─ manage.ts → creates, edits, patches, deletes, and manages skill support files
+       │    ├─ usage-stats.ts → reads stats.json skill usage counters for sorting and tool output
+       │    ├─ domains.ts → derives skill domains from the loaded intent catalog's frontmatter skills[] and body skill: references
        │    └─ tools.ts → registers skill_list, skill_view, and skill_manage
        │
        ├─ classification/ → prompt, subagent, and conversation classification flow
@@ -94,6 +96,7 @@ index.ts
 | `skills/indexer.ts`              | Recursively indexes nested `SKILL.md` files, resolves intent skill references, and lists visible skills                                                 |
 | `skills/files.ts`                | Reads skill content and allowed linked support files with path traversal protection                                                                     |
 | `skills/manage.ts`               | Implements `skill_manage` write actions for creating, editing, patching, deleting, and managing skill support files                                     |
+| `skills/domains.ts`              | Derives per-skill `domains` from the active intent catalog using frontmatter `skills[]` and body `skill: <name>` references                             |
 | `skills/tools.ts`                | Registers `skill_list`, `skill_view`, and `skill_manage` OpenClaw tools                                                                                 |
 | `file-utils.ts`                  | Shared filesystem helpers — atomic JSON I/O, directory management, path resolution                                                                      |
 | `constants.ts`                   | Shared defaults — timeouts, fallback intent, complexity prompts, untrusted header                                                                       |
@@ -251,19 +254,29 @@ denominator applies to new tracked turns.
 
 The plugin registers three required OpenClaw skill tools:
 
-- `skill_list` returns visible skill metadata, source, category, and path.
+- `skill_list` returns visible skill metadata, source, domains, and path.
+  `domains` is derived from the active intent catalog: each intent contributes
+  its `domain` to skills named in frontmatter `skills[]` or body `skill: <name>`
+  references. Unreferenced skills return `domains: []`. Results are
+  sorted by source precedence (`workspace`, `project-agent`, `personal-agent`,
+  `managed`, `plugin`, `bundled`, `extra`), then by `stats.json` usage count
+  descending, then by skill name ascending. It accepts an optional `source`
+  filter plus `offset`/`limit` pagination. Without `source`, all visible skills
+  are considered; without pagination params, it returns the first 150 skills and
+  reports `total`, `has_more`, and `next_offset` when more results are
+  available. Pass `show_stats: true` to include per-skill `usage_stats`.
 - `skill_view` reads the resolved `SKILL.md`, or an allowed linked support file
   under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`.
-  Support-file paths must be relative and remain inside the resolved skill
-  directory.
+  Main `SKILL.md` reads always include per-skill `usage_stats`; both main and
+  support-file reads include the same intent-derived `domains` array. Support
+  file paths must be relative and remain inside the resolved skill directory.
 - `skill_manage` is write-capable and intentionally required. It supports
   `create`, `edit`, `patch`, `delete`, `write_file`, and `remove_file` for
   skills visible through the same skill-root resolution path. New skills are
-  written under the OpenClaw state `skills/` root, optionally inside a single
-  category directory. It validates skill names, full `SKILL.md` frontmatter,
-  content size, support-file directories, path traversal, and delete targets;
-  support files may live under `references/`, `templates/`, `scripts/`,
-  `assets/`, or `examples/`.
+  written directly under the OpenClaw state `skills/` root. It validates skill
+  names, full `SKILL.md` frontmatter, content size, support-file directories,
+  path traversal, and delete targets; support files may live under
+  `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`.
 
 Rates use `0.0–1.0`. Skill lifecycle is `active` within 30 days, `stale` after 30 days, `archive` after 90 days, or `never-used` when recommended but never used. `needsReview` becomes true after at least five actual recommendations with adoption below `0.7`. All-time counters do not decrease when rolling data is pruned.
 

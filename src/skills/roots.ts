@@ -97,6 +97,12 @@ export function resolveSkillRoots(params: {
   pushRoot(
     roots,
     seen,
+    normalizePath(path.join(stateDir, "plugin-skills"), homeDir),
+    "plugin",
+  );
+  pushRoot(
+    roots,
+    seen,
     bundledSkillsDir ? normalizePath(bundledSkillsDir, homeDir) : undefined,
     "bundled",
   );
@@ -104,13 +110,6 @@ export function resolveSkillRoots(params: {
   for (const extraDir of readExtraSkillDirs(params.api.config)) {
     pushRoot(roots, seen, normalizePath(extraDir, homeDir), "extra");
   }
-
-  pushRoot(
-    roots,
-    seen,
-    normalizePath(path.join(stateDir, "plugin-skills"), homeDir),
-    "plugin",
-  );
 
   return roots;
 }

@@ -70,6 +70,19 @@ skills:
   - Avoid: `Use \`memory_search\` as the primary retrieval path...`
 - Keep concrete tool names in `## Experience` only when the name itself is the durable lesson and abstraction would make the guidance less useful.
 
+## Command guidance rule
+
+- If legacy guidance contains a concrete shell command or a concrete MCP call with a stable CLI equivalent, preserve the executable command in `## Experience` as a bare shell command.
+- Do not wrap commands in `exec({ command: ... })` or describe them as generic "local validation or command execution" guidance.
+- For mcporter-backed documentation calls such as Context7, DeepWiki, or GoogleDeveloperKnowledge, add `mcporter` to frontmatter `skills[]` and write the CLI command directly:
+
+  ```markdown
+  - Resolve a library name to a Context7 id before querying docs:
+    `mcporter call bifrost.Context7-resolve-library-id libraryName="<library>" query="<question>" --output json`
+  - Query Google developer documentation for product-specific claims:
+    `mcporter call bifrost.GoogleDeveloperKnowledge-answer_query query="<question>" --output json`
+  ```
+
 ## Experience inclusion rule
 
 - Include only durable lessons that help future turns with the same intent.
