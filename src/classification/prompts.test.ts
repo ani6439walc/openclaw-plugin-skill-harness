@@ -132,8 +132,9 @@ describe("buildIntentionPrompt", () => {
     expect(result).not.toContain('<turn role="user">');
     expect(result).toContain("[user] Hello there");
     expect(result).toContain(
-      '  <historical_intent>{"intent":"coding","domain":"coding"}</historical_intent>',
+      '<historical_intent>{"intent":"coding","domain":"coding"}</historical_intent>',
     );
+    expect(result).not.toContain("\n  <historical_intent>{");
     expect(result).not.toContain("<historical_intent>\n");
     expect(result).not.toContain("intent: coding");
     expect(result).not.toContain("domain: coding");
@@ -196,6 +197,7 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("### Trust Boundaries");
     expect(result).toContain("### Output Contract");
     expect(result).toContain("### Output Schema");
+    expect(result).toContain("### Complexity Levels");
     expect(result).toContain("### Examples");
     expect(result).toContain("### Output Style");
     expect(result).toContain("### Intent Catalog");
@@ -262,6 +264,59 @@ describe("buildIntentionPrompt", () => {
     );
     expect(result).toContain('"intent": "deploy"');
     expect(result).toContain("User wants to deploy to production");
+    expect(result.indexOf("### Output Contract")).toBeLessThan(
+      result.indexOf("### Output Schema"),
+    );
+    expect(result.indexOf("### Output Schema")).toBeLessThan(
+      result.indexOf("### Complexity Levels"),
+    );
+    expect(result.indexOf("### Complexity Levels")).toBeLessThan(
+      result.indexOf("### Output Style"),
+    );
+    expect(result.indexOf("### Output Style")).toBeLessThan(
+      result.indexOf("### Examples"),
+    );
+    expect(result.indexOf("### Examples")).toBeLessThan(
+      result.indexOf("### Intent Catalog"),
+    );
+  });
+
+  it("assembles intent classifier sections without repeated blank lines", () => {
+    const result = buildIntentionPrompt({
+      intents: mockIntents,
+      latest: "你好晚安馬卡巴卡",
+      topicContext: {
+        keywords: ["你好", "晚安", "馬卡巴卡"],
+        topic: "User sending a casual greeting and goodnight message.",
+        domain: "conversation-flow",
+        changed: true,
+        reason: "shift",
+        complexity: "low",
+      },
+      conversation: [
+        {
+          role: "user",
+          text: "過太爽",
+          historicalIntent: {
+            intent: "social-casual",
+            domain: "conversation-flow",
+            topic: "User making a brief casual remark.",
+            keywords: ["過太爽", "casual"],
+            topicChangeReason: "shift",
+          },
+        },
+      ],
+    });
+
+    expect(result).not.toMatch(/\n{3,}/);
+    expect(result).toContain("### Intent Catalog\n<intent_catalog>");
+    expect(result).toContain("</intent_catalog>\n\n<topic_switch_context>");
+    expect(result).toContain(
+      "</topic_switch_context>\n\n<conversation_context>",
+    );
+    expect(result).toMatch(
+      /<latest_message>\n你好晚安馬卡巴卡\n<\/latest_message>\n\nClassify the latest_message now\. Return raw JSON only\. Start with `\{` and end with `\}`\. No Markdown fences\.$/,
+    );
   });
 
   it("tells classifier to keep JSON string fields ultra-concise without losing semantics", () => {
