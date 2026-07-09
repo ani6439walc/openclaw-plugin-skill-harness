@@ -51,18 +51,27 @@ describe("buildIntentionPrompt", () => {
       latest: "hello",
     });
 
-    expect(result).toContain('<intent id="coding">');
-    expect(result).toContain('<intent id="debugging">');
+    expect(result).toContain("### Intent Catalog");
+    expect(result).toContain("<intent_catalog>");
+    expect(result).toContain("</intent_catalog>");
+    expect(result).toContain('<intent domain="coding" id="coding">');
+    expect(result).toContain('<intent domain="coding" id="debugging">');
+    expect(result).toContain('<intent domain="other" id="other">');
+    expect(result.indexOf("<intent_catalog>")).toBeLessThan(
+      result.indexOf('<intent domain="coding" id="coding">'),
+    );
+    expect(result.indexOf('<intent domain="other" id="other">')).toBeLessThan(
+      result.indexOf("</intent_catalog>"),
+    );
+    expect(result).not.toContain('<intent id="coding">');
     expect(result).not.toContain("name=");
     expect(result).toContain("triggers:");
     expect(result).toContain("- write code");
     expect(result).toContain("examples:");
     expect(result).toContain("- Write a function to sort an array");
-    expect(result).toContain(
-      "Intent groups by domain (routing overview only; choose the exact intent from the catalog below):",
-    );
-    expect(result).toContain("- coding: coding, debugging");
-    expect(result).toContain("- other: other");
+    expect(result).not.toContain("Intent groups by domain");
+    expect(result).not.toContain("- coding: coding, debugging");
+    expect(result).not.toContain("domain: coding");
     expect(result).not.toContain("Categories (grouped by ID prefix)");
   });
 
@@ -85,7 +94,7 @@ describe("buildIntentionPrompt", () => {
       latest: "hello",
     });
 
-    expect(result).toContain('<intent id="formerly-disabled">');
+    expect(result).toContain('<intent domain="test" id="formerly-disabled">');
     expect(result).toContain("- test");
   });
 
@@ -96,7 +105,7 @@ describe("buildIntentionPrompt", () => {
     });
 
     expect(result).toContain(FALLBACK_INTENT_ID);
-    expect(result).toContain('<intent id="other">');
+    expect(result).toContain('<intent domain="other" id="other">');
   });
 
   it("should include conversation history when provided", () => {
@@ -122,10 +131,12 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain('<topic_segment index="1">');
     expect(result).not.toContain('<turn role="user">');
     expect(result).toContain("[user] Hello there");
-    expect(result).toContain("<historical_intent>");
     expect(result).toContain(
-      "  <historical_intent>\n  intent: coding\n  domain: coding\n  </historical_intent>",
+      '  <historical_intent>{"intent":"coding","domain":"coding"}</historical_intent>',
     );
+    expect(result).not.toContain("<historical_intent>\n");
+    expect(result).not.toContain("intent: coding");
+    expect(result).not.toContain("domain: coding");
     expect(result).not.toContain("changed:");
     expect(result).not.toContain("reason: same-topic");
     expect(result).toContain("[assistant] Hi! How can I help?");
@@ -140,7 +151,7 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("I need help with code");
     expect(result).toContain("</latest_message>");
     expect(result).toMatch(
-      /<latest_message>\nI need help with code\n<\/latest_message>\n\nClassify the latest_message now\. Return exactly one raw JSON object with no Markdown code fences and no surrounding prose\.$/,
+      /<latest_message>\nI need help with code\n<\/latest_message>\n\nClassify the latest_message now\. Return raw JSON only\. Start with `\{` and end with `\}`\. No Markdown fences\.$/,
     );
   });
 
@@ -167,7 +178,7 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("test message");
   });
 
-  it("should include classification rules and output format", () => {
+  it("should include grouped classification rules and output contract", () => {
     const result = buildIntentionPrompt({
       intents: mockIntents,
       latest: "hello",
@@ -175,22 +186,34 @@ describe("buildIntentionPrompt", () => {
 
     expect(result).toContain("You are an intent classifier.");
     expect(result).not.toContain("You are an intent classification agent.");
-    expect(result).toContain("Classification rules:");
-    expect(result).toContain("Output format:");
-    expect(result).toContain("Intent catalog:");
+    expect(result).not.toContain("Classification rules:");
+    expect(result).not.toContain("Output format:");
+    expect(result).toContain("### Decision Procedure");
+    expect(result).toContain("### Core Classification Rules");
+    expect(result).toContain("### Topic Switch & Continuity");
+    expect(result).toContain("### Short Inputs, Corrections, and Bare Names");
+    expect(result).toContain("### Topic Switch Context Calibration");
+    expect(result).toContain("### Trust Boundaries");
+    expect(result).toContain("### Output Contract");
+    expect(result).toContain("### Output Schema");
+    expect(result).toContain("### Examples");
+    expect(result).toContain("### Output Style");
+    expect(result).toContain("### Intent Catalog");
     expect(result).not.toContain("<classification_rules>");
     expect(result).not.toContain("<output_format>");
-    expect(result).not.toContain("<intent_catalog>");
-    expect(result).not.toContain("</intent_catalog>");
+    expect(result).toContain("Return exactly one raw JSON object.");
+    expect(result).toContain("First character: `{`");
+    expect(result).toContain("Last character: `}`");
+    expect(result).toContain("No Markdown code fences");
     expect(result).toContain('"intent":');
     expect(result).toContain('"reason":');
     expect(result).toContain('"keywords":');
     expect(result).toContain('"confidence":');
     expect(result).toContain('"complexity":');
     expect(result).toContain("historical_intent");
-    expect(result).toContain("Topic switch");
+    expect(result).toContain("Topic Switch");
     expect(result).toContain(
-      "standalone request, a continuation, a correction, or a target clarification",
+      "standalone request, continuation, correction, or target clarification",
     );
     expect(result).toContain(
       "classify fresh from latest_message and topic_switch_context",
@@ -221,14 +244,21 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("topic_switch_context as routing evidence");
     expect(result).toContain("Do not copy the topic text as the intent");
     expect(result).toContain(
-      "Example when topic_switch_context is present (correction fragment):",
+      "Provide keywords as a JSON array of individual strings",
+    );
+    expect(result).toContain(
+      "Do not put a comma-joined keyword list inside one string",
+    );
+    expect(result).not.toContain("Do not join keywords with separators");
+    expect(result).toContain(
+      "Example: topic_switch_context present, correction fragment",
     );
     expect(result).toContain('"intent": "other"');
     expect(result).toContain(
       "Short corrected phrase clarifies the previous ambiguous request",
     );
     expect(result).toContain(
-      "Example when topic_switch_context is present (with keyword override):",
+      "Example: topic_switch_context present, keyword override",
     );
     expect(result).toContain('"intent": "deploy"');
     expect(result).toContain("User wants to deploy to production");
@@ -240,6 +270,7 @@ describe("buildIntentionPrompt", () => {
       latest: "hello",
     });
 
+    expect(result).toContain("### Output Style");
     expect(result).toContain("Output style:");
     expect(result).toContain("ultra-concise but semantics-preserving");
     expect(result).toContain(
@@ -1138,6 +1169,12 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("Output style:");
     expect(prompt).toContain("ultra-concise but semantics-preserving");
     expect(prompt).toContain("Prefer short fragments or compact bullets");
+    expect(prompt).toContain(
+      "Use compact order symbols such as `->` for simple step sequences when they preserve meaning",
+    );
+    expect(prompt).toContain(
+      "Use terse imperative-style fragments and omit the subject when meaning remains clear; do not turn optional guidance into mandatory commands",
+    );
     expect(prompt).toContain(
       "Preserve safety warnings, required ordering, verification steps, and exact technical names",
     );
