@@ -202,7 +202,9 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 
 ### Target and mutation boundaries
 ${INTENT_CRAFT_RUBRIC_TARGET_RULES_MARKER}
-- For split or merge operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to: rather than requesting extra file-management tools. Use skill_list, skill_view, and skill_manage only for skill discovery, inspection, or explicit skill-file maintenance; do not use raw read/write/apply_patch against skill paths.
+- For split or merge operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to: rather than requesting extra file-management tools.
+- Skill file maintenance is out of scope: do not list, create, edit, delete, or otherwise maintain skill files.
+- For non-skill-candidate reviews, use the review snapshot as the only skill evidence.
 ${INTENT_CRAFT_RUBRIC_NO_FINDING_RULE_MARKER}`;
 
 function buildIntentCraftRubric(includeTriggerKeywordRules: boolean): string {
@@ -852,6 +854,12 @@ ${formatReviewSnapshot(snapshot, { includeIntentCatalog })}
 Review the requested triggers now. Return exactly one raw JSON object with no Markdown code fences and no surrounding prose. suggestedChange MUST be a JSON string, never an object or array.`;
 }
 
+function buildReviewToolsAllow(triggers: readonly ReviewTrigger[]): string[] {
+  const tools = ["read", "write", "apply_patch"];
+  if (triggers.includes("skill-candidate")) tools.push("skill_view");
+  return tools;
+}
+
 function parseReviewFindingsDetailed(
   raw: string,
   requestedTriggers: readonly ReviewTrigger[],
@@ -1275,14 +1283,7 @@ export async function runReviewSubagent(params: {
         ...buildEmbeddedSubagentRunDefaults(),
         modelRun: false,
         promptMode: "minimal",
-        toolsAllow: [
-          "read",
-          "write",
-          "apply_patch",
-          "skill_list",
-          "skill_view",
-          "skill_manage",
-        ],
+        toolsAllow: buildReviewToolsAllow(params.triggers),
         disableTools: false,
         thinkLevel: params.config.review.thinking,
       });

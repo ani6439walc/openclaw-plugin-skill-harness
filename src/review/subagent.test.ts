@@ -1057,14 +1057,7 @@ describe("runReviewSubagent", () => {
         silentExpected: true,
         authProfileFailurePolicy: "local",
         cleanupBundleMcpOnRunEnd: true,
-        toolsAllow: [
-          "read",
-          "write",
-          "apply_patch",
-          "skill_list",
-          "skill_view",
-          "skill_manage",
-        ],
+        toolsAllow: ["read", "write", "apply_patch"],
         config: expect.objectContaining({
           tools: expect.objectContaining({
             fs: { workspaceOnly: true },
@@ -1082,6 +1075,38 @@ describe("runReviewSubagent", () => {
     expect(options.workspaceDir).not.toBe(intentDirectory);
     expect(options.agentDir).toBe(options.workspaceDir);
     expect(fs.existsSync(options.workspaceDir)).toBe(false);
+  });
+
+  it("allows skill_view only for skill-candidate reviews", async () => {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [{ text: '{"findings":[]}' }],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await runReviewSubagent({
+      api,
+      config: resolveConfig({ review: { enabled: true } }),
+      agentId: "main",
+      intentDirectory: createIntentDirectory(),
+      modelRef: { provider: "google", model: "review" },
+      snapshot,
+      triggers: ["skill-candidate"],
+    });
+
+    expect(runEmbeddedAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolsAllow: ["read", "write", "apply_patch", "skill_view"],
+      }),
+    );
+    expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
+      "skill_list",
+    );
+    expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
+      "skill_manage",
+    );
   });
 
   it("reports embedded agent error payloads as subagent errors", async () => {

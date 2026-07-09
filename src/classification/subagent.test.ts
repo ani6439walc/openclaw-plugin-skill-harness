@@ -107,7 +107,7 @@ describe("runTopicSwitchSubagent", () => {
       "<conversation_context>",
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
-      "topic: topic checker",
+      '<historical_intent>{"intent":"coding","domain":"coding","topic":"topic checker"}</historical_intent>',
     );
   });
 
