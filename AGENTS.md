@@ -68,7 +68,7 @@ Package root:
 Runtime data root:
 
 - Resolved at plugin registration with `api.runtime.state.resolveStateDir(process.env)`, then `resolvePluginDataRoot(stateDir, "skill-harness")`.
-- Normal local path: `~/.openclaw/plugins/skill-harness`.
+- With OpenClaw's default local state directory, the normal path is `~/.openclaw/plugins/skill-harness`.
 - Active runtime files live here:
   - `intents/*.md`
   - `sessions/<sessionId>.json`
@@ -77,9 +77,9 @@ Runtime data root:
 
 Rules:
 
-- The active intent catalog always loads from `~/.openclaw/plugins/skill-harness/intents`.
+- The active intent catalog always loads from `intentsPath(dataRoot)`; with the default local state directory this is `~/.openclaw/plugins/skill-harness/intents`.
 - `stats.json` and `review.json` are root-level runtime files. They must not be placed under `sessions/`.
-- Startup initialization may copy example intent files from `skills/skill-harness/assets/*.md` into an absent or empty runtime `intents/` directory.
+- Startup initialization may copy example intent files from `skills/skill-harness/assets/*.md` when the runtime `intents/` directory is absent or contains no Markdown files.
 - Startup initialization must not overwrite existing runtime intent files.
 
 ## Skill visibility policy
@@ -92,7 +92,7 @@ The indexer uses `skills.load.watchDebounceMs` as its cache TTL only when `skill
 
 Use the existing module boundaries:
 
-- `src/plugin.ts`: assembly layer. Resolve config, resolve runtime data root, initialize runtime directories, seed empty runtime intents from skill assets, instantiate runtime-scoped services, and register OpenClaw hooks.
+- `src/plugin.ts`: assembly layer. Resolve config and runtime data root, initialize runtime directories, seed a missing or Markdown-empty runtime intent catalog from skill assets, instantiate runtime-scoped services, and register OpenClaw hooks.
 - `src/hooks/index.ts`: hook behavior for prompt building, tracking, stats updates, review queueing, and cleanup. Keep OpenClaw event logic here, not in `plugin.ts`.
 - `src/config.ts`: Zod-backed config parsing, defaults, and clamps.
 - `src/file-utils.ts`: shared path helpers and atomic filesystem primitives.
@@ -103,7 +103,7 @@ Use the existing module boundaries:
 - `src/review/log.ts`: review log schema validation/migration and root trigger keyword state. Legacy `items` are dropped during migration; there is no tool/command action surface.
 - `src/subagent-runtime.ts`: shared embedded subagent run defaults and error-payload extraction helpers used by classification and review subagents.
 - `src/classification/prompts.ts`, `src/classification/subagent.ts`, `src/classification/conversation.ts`, `src/review/subagent.ts`, `src/review/triggers.ts`: classification and review logic.
-- `src/intents/skill-references.ts`: resolves `skill: <name>` references in intent Markdown into available `SKILL.md` metadata for instruction writing and Intent Review.
+- `src/intents/skill-references.ts`: resolves frontmatter `skills[]` dependencies and backward-compatible inline `skill: <name>` references into available `SKILL.md` metadata for instruction writing and Intent Review.
 - `src/review/queue.ts`: serializes background Intent Review work so hook handling stays fail-open.
 - `src/review/trigger-keywords.ts`: default and normalized runtime keyword sets for `successful-pattern`, `behavior-fix`, and `entity-context` triggers.
 - `src/session/guards.ts`: session eligibility guards.
@@ -171,7 +171,7 @@ When changing runtime paths, include tests for both the desired new location and
 
 ## Intent Files
 
-Runtime editable intents live in `~/.openclaw/plugins/skill-harness/intents/*.md`. First-install examples live in `skills/skill-harness/assets/*.md` and are copied only when the runtime intent directory is absent or empty.
+Runtime editable intents live under `intentsPath(dataRoot)`; with the default local state directory this is `~/.openclaw/plugins/skill-harness/intents/*.md`. First-install examples live in `skills/skill-harness/assets/*.md` and are copied only when the runtime intent directory is absent or contains no Markdown files.
 
 When changing first-install examples, edit `skills/skill-harness/assets/*.md` and run validation through the test suite. When changing a live local intent for the user's current OpenClaw environment, edit the runtime intent directory instead.
 
@@ -179,9 +179,9 @@ Intent markdown must keep valid YAML frontmatter and the expected sections used 
 
 ## Review Workflow
 
-Review no longer creates pending items or exposes a manual backlog tool or slash command. This is a breaking workflow change and must be highlighted in release notes. Background reviews are serialized through `src/review/queue.ts`, stage runtime intent edits in an isolated temporary workspace, validate changed/targeted intents, copy validated target edits back to `~/.openclaw/plugins/skill-harness/intents/*.md`, and record compact outcomes under `processedEvents` in `~/.openclaw/plugins/skill-harness/review.json`.
+Review no longer creates pending items or exposes a manual backlog tool or slash command. This is a breaking workflow change and must be highlighted in release notes. Background reviews are serialized through `src/review/queue.ts`, stage runtime intent edits in an isolated temporary workspace, validate changed/targeted intents, then reconcile validated creates, changes, and deletions back to `intentsPath(dataRoot)`. They record compact outcomes under `processedEvents` in `reviewLogPath(dataRoot)`; with the default local state directory that is `~/.openclaw/plugins/skill-harness/review.json`.
 
-Do not edit `~/.openclaw/plugins/skill-harness/review.json` manually for normal work. It stores schema v4 `triggerKeywords` plus `processedEvents`; legacy `items` are discarded during migration.
+Do not edit `reviewLogPath(dataRoot)` manually for normal work. It stores schema v4 `triggerKeywords` plus `processedEvents`; legacy `items` are discarded during migration.
 
 For manual runtime intent edits, read current runtime intent Markdown, make the smallest grounded change, then run at least:
 
@@ -198,7 +198,7 @@ For split, merge, rename, deletion, or any broad intent-boundary change, show th
 - Use `api.pluginConfig` plus `resolveLivePluginConfigObject()` for live plugin config.
 - Use `api.runtime.state.resolveStateDir(process.env)` for OpenClaw state directory resolution.
 - Use `api.runtime.agent.runEmbeddedAgent()` for embedded review/classifier runs; do not use legacy PI aliases.
-- When an embedded run needs the core `read` tool, keep `modelRun=false`, use `promptMode="minimal"`, set `disableTools=false`, and narrow `toolsAllow` to `["read"]`. Do not use `promptMode="none"`; OpenClaw treats that as a raw model run and skips tool construction.
+- Tool-free classifier runs may use `modelRun=false`, `promptMode="none"`, and `toolsAllow: []`. When an embedded workflow needs tools, use `modelRun=false`, `promptMode="minimal"`, `disableTools=false`, and an exact allowlist: the instruction writer uses `skill_view`; Intent Review uses `read`, `write`, and `apply_patch`, adding `skill_view` only for skill-candidate reviews. Do not use `promptMode="none"` for a run that needs tools because it skips tool construction.
 - If an SDK import path is uncertain or looks deprecated, verify it against the installed `openclaw` package before coding from memory.
 - Keep `zod` imports direct from `"zod"`; this plugin owns `zod` as a runtime dependency.
 

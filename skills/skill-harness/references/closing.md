@@ -35,5 +35,5 @@ Ask user to confirm resolution before proceeding to final draft.
 1. Write to a staging location first (e.g., `/tmp/intent-drafts/`)
 2. Show diff preview to user
 3. Confirm no conflicts
-4. Write to `~/.openclaw/plugins/skill-harness/intents/` on approval
+4. Write to the active OpenClaw-resolved runtime intent catalog on approval (normally `~/.openclaw/plugins/skill-harness/intents/` with the default local state directory)
 5. Run simple format checks: frontmatter shape, required section order, concrete triggers/examples, frontmatter `skills[]` shape, `## Experience` guidance shape, concrete command preservation, no legacy `## Skills & Tools`, and no body cross-references to other intent ids.

@@ -221,7 +221,7 @@
       },
       "review": {
         "type": "object",
-        "description": "Optional post-turn Intent Review runs and plugin-local backlog.",
+        "description": "Optional post-turn Intent Review runs that validate and apply bounded runtime intent improvements.",
         "additionalProperties": false,
         "properties": {
           "enabled": {
@@ -301,7 +301,7 @@
                   "keywords": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Deprecated seed for triggerKeywords.successfulPattern in runtime review.json. Prefer editing review.json via the backlog workflow."
+                    "description": "Deprecated seed for triggerKeywords.successfulPattern in runtime review.json. Prefer host-managed trigger keyword updates."
                   }
                 }
               },
@@ -346,7 +346,7 @@
                   "keywords": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Deprecated seed for triggerKeywords.behaviorFix in runtime review.json. Prefer editing review.json via the backlog workflow."
+                    "description": "Deprecated seed for triggerKeywords.behaviorFix in runtime review.json. Prefer host-managed trigger keyword updates."
                   }
                 }
               },
@@ -358,7 +358,7 @@
                   "keywords": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Deprecated seed for triggerKeywords.entityContext in runtime review.json. Prefer editing review.json via the backlog workflow."
+                    "description": "Deprecated seed for triggerKeywords.entityContext in runtime review.json. Prefer host-managed trigger keyword updates."
                   }
                 }
               }

@@ -61,7 +61,7 @@ graph TD
   J --> K[optional instruction writer]
   I --> L[inject skill_harness_plugin prefix]
   K --> L
-  F --> M[main agent replies]
+  F --> L
   L --> M
   M --> N[after_tool_call / agent_end / session_end]
   N --> O[stats + optional Intent Review]
@@ -69,17 +69,17 @@ graph TD
 
 ### 1. Runtime intent catalog
 
-Intent definitions are Markdown files under:
+Intent definitions use the OpenClaw runtime state directory. With the default local state directory, they are Markdown files under:
 
 ```text
 ~/.openclaw/plugins/skill-harness/intents/*.md
 ```
 
-On first install, the plugin seeds example intents from the bundled assets if the runtime intent directory is absent or empty. Existing runtime intents are never overwritten on startup.
+On first install, the plugin seeds example intents from the bundled assets if the runtime intent directory is absent or contains no Markdown intent files. Existing runtime intent Markdown files are never overwritten on startup.
 
 Each intent describes:
 
-- frontmatter metadata such as intent id, domain, triggers, examples, fastpath keywords, and related skills
+- a filename-derived intent ID plus frontmatter metadata such as domain, triggers, examples, fastpath keywords, and optional `skills[]` dependencies
 - workflow guidance for the instruction writer
 - pitfalls and experience notes that should be preserved when relevant
 
@@ -176,7 +176,7 @@ openclaw plugins inspect skill-harness
 openclaw plugins doctor
 ```
 
-After the plugin starts once, check that runtime data was created:
+After the plugin starts once, check that runtime data was created. This command uses the default local state directory:
 
 ```bash
 ls ~/.openclaw/plugins/skill-harness/intents
@@ -237,7 +237,7 @@ Skill Harness is configured through OpenClaw plugin config. A typical `openclaw.
 
 ## Customizing intents
 
-Runtime intents live here:
+Runtime intents use OpenClaw's runtime state directory. With the default local state directory, they live here:
 
 ```text
 ~/.openclaw/plugins/skill-harness/intents/*.md
@@ -249,7 +249,7 @@ Edit these files to teach Skill Harness your own routing boundaries and workflow
 - concrete trigger phrases and examples
 - domain metadata that matches the outcome the user wants
 - optional `fastpath.keywords` for deterministic shortcut cases
-- relevant `skill: <name>` references only when that skill should actually help
+- relevant frontmatter `skills[]` entries only when that skill should actually help
 - experience notes that preserve real pitfalls, commands, parameters, or verification steps
 
 The plugin also ships a bundled `skill-harness` skill for designing, inventorying, and extracting intent definitions. Use it when you want an agent to help maintain the runtime intent catalog.
@@ -262,9 +262,9 @@ Skill Harness registers three OpenClaw tools:
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `skill_list`   | Lists skills visible to the invoking agent, their sources, descriptions, derived domains, and optional usage stats or related skills. |
 | `skill_view`   | Reads a skill visible to the invoking agent, or an allowed support file, and always includes related skills.                          |
-| `skill_manage` | Creates, edits, patches, deletes, and manages visible skills and support files.                                                       |
+| `skill_manage` | Creates, edits, patches, deletes, and manages skills and support files through the main agent's resolved catalog.                     |
 
-These tools use the same skill-root resolution path as the prompt hints, so the main agent and Skill Harness reason over the same visible skill catalog.
+`skill_list` and `skill_view` use the same invoking-agent skill-root resolution as prompt hints, so each agent sees its own resolved catalog. `skill_manage` resolves existing skills through the main agent and creates new skills under the managed state root.
 
 `skill_list` omits `usage_stats` and `related_skills` by default. Pass `show_stats: true` and/or `show_related: true` to include those fields. `skill_list` and `skill_view` resolve the skill roots for the invoking agent, and `skill_view` always includes `related_skills`, including both declared and incoming visible relations.
 
@@ -276,7 +276,7 @@ The index cache follows OpenClaw's `skills.load` watcher settings. When `watch: 
 
 ## Runtime files
 
-Skill Harness keeps package files and runtime state separate.
+Skill Harness keeps package files and runtime state separate. The runtime data root is derived from OpenClaw's resolved state directory; the paths below show the default local location.
 
 | Path                                            | Purpose                                                         |
 | ----------------------------------------------- | --------------------------------------------------------------- |
@@ -298,7 +298,7 @@ Intent Review is disabled by default. When enabled, it watches completed turns f
 - explicit user correction phrases
 - bounded entity-context learning signals
 
-When a trigger fires, a background reviewer runs against the runtime intent directory only. It may create or patch runtime `intents/*.md`, validate the result, and record the outcome in `review.json`. It does not write source files, bundled skills, OpenClaw config, memory files, or arbitrary filesystem paths.
+When a trigger fires, a background reviewer runs against the runtime intent directory only. It may create, refine, split, or merge runtime `intents/*.md`. It validates the staged catalog before applying targeted changes and records the outcome in `review.json`. It does not write source files, bundled skills, OpenClaw config, memory files, or arbitrary filesystem paths.
 
 ## Development
 
@@ -353,7 +353,7 @@ Check these common causes:
 
 ### Runtime intents are missing
 
-Start OpenClaw once with the plugin enabled, then inspect:
+Start OpenClaw once with the plugin enabled, then inspect the default local runtime location:
 
 ```bash
 ls ~/.openclaw/plugins/skill-harness/intents

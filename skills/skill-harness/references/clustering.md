@@ -8,7 +8,7 @@ Goal: Group all capabilities by usage intent, not by directory name.
 
 2. Map each capability to **exactly one cluster** — no duplicates.
 
-3. Compare against existing runtime intents in `~/.openclaw/plugins/skill-harness/intents/`:
+3. Compare against existing runtime intents in the active OpenClaw-resolved catalog (normally `~/.openclaw/plugins/skill-harness/intents/` with the default local state directory):
    - **Covered**: existing intent already handles this cluster.
    - **Gaps**: no existing intent for this cluster → recommend new intent ID.
    - **Overlaps**: one cluster maps to multiple existing intents → recommend merge or split.

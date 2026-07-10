@@ -32,7 +32,7 @@ Minimum information before drafting:
 
 Use structured file/search tools when available:
 
-- List runtime intent files under `~/.openclaw/plugins/skill-harness/intents/` or the user-provided runtime root.
+- List runtime intent files in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`.
 - Read the most similar intent Markdown files.
 - Search triggers/examples for overlap with the proposed boundary.
 - Check the proposed domain and neighboring intents against the domain-intent consistency criteria in `references/clustering.md`.

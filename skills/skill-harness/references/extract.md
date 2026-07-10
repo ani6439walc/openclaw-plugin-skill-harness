@@ -17,7 +17,7 @@ Analyze intent complexity and recommend extracting oversized intents into standa
 
 ## Step 1 — Complexity scan
 
-Score every runtime intent under `~/.openclaw/plugins/skill-harness/intents/` or the user-provided runtime root.
+Score every runtime intent in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`.
 
 Use structured file/search tools where available:
 

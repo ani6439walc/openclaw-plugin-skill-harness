@@ -5,7 +5,6 @@ import { IntentCatalog } from "./catalog.js";
 
 const STANDARD_SECTIONS = [
   "Guidelines",
-  "Skills & Tools",
   "Response Strategy",
   "Concrete Workflow",
   "Experience",
@@ -54,6 +53,7 @@ export function validateIntentDirectory(
         : [];
       const domainRaw = data.domain;
       const fastpathRaw = data.fastpath;
+      const skillsRaw = data.skills;
       const body = parsed.content.trim();
 
       for (const staleField of ["id", "name", "enabled", "keywords"]) {
@@ -67,6 +67,13 @@ export function validateIntentDirectory(
         errors.push(`${file}: examples must contain at least one string`);
       if (typeof domainRaw !== "string" || !domainRaw.trim()) {
         errors.push(`${file}: domain must be a non-empty string`);
+      }
+      if (
+        skillsRaw !== undefined &&
+        (!Array.isArray(skillsRaw) ||
+          skillsRaw.some((value) => typeof value !== "string" || !value.trim()))
+      ) {
+        errors.push(`${file}: skills must contain only non-empty strings`);
       }
       if (fastpathRaw !== undefined) {
         if (
@@ -110,6 +117,11 @@ export function validateIntentDirectory(
       const headings = [...body.matchAll(/^## (.+)$/gm)].map((match) =>
         match[1].trim(),
       );
+      if (headings.includes("Skills & Tools")) {
+        errors.push(
+          `${file}: legacy ## Skills & Tools section is not allowed; move skill dependencies to frontmatter skills`,
+        );
+      }
       for (const section of STANDARD_SECTIONS) {
         if (headings.filter((heading) => heading === section).length > 1) {
           errors.push(`${file}: duplicate ## ${section} section`);

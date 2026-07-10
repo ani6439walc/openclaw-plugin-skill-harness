@@ -24,7 +24,7 @@ If ambiguous, ask one routing question: "Are you working on a single intent, aud
 - Treat shell snippets in older notes as implementation examples, not required commands. Use terminal only for package/test/build commands or when no structured tool exists.
 - Current source layout:
   - Bundled skill assets live under this skill directory, especially `assets/` and `references/`.
-  - Runtime editable intents live under `~/.openclaw/plugins/skill-harness/intents/` unless the user provides another runtime root.
+  - Runtime editable intents live in the active OpenClaw-resolved runtime intent catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`.
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
 - Check changed intent files for canonical format: valid frontmatter shape, required sections in order, concrete triggers/examples, frontmatter `skills[]` when skill loading is needed, durable `## Experience` guidance when operational lessons are needed, no legacy `## Skills & Tools`, and no body cross-references to other intent ids.

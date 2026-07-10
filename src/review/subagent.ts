@@ -65,14 +65,14 @@ const REVIEW_INSTRUCTIONS: Record<
   "skill-candidate": {
     focus:
       "Identify reusable skills, tools, execution sequences, tips, parameters, and pitfalls that the matched intent Markdown should preserve. When concrete skill usage or a tool-specific pitfall exists, prefer a small direct Experience edit over broad rewrites. Exclude one-off tool usage and capabilities outside the intent boundary.",
-    goal: "Refine the matched intent Markdown's Skills & Tools, Concrete Workflow, or Experience section when the sequence or lesson is stable.",
+    goal: "Refine the matched intent Markdown's frontmatter skills, Concrete Workflow, or Experience when the sequence or lesson is stable.",
     workflow:
       "skill-candidate: accept small intent-local Experience notes only when concrete skill/tool evidence, parameters, recovery, or required ordering exists. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
   },
   "process-gap": {
     focus:
       "Trace the failed execution and recovery path, then identify which missing intent guideline, tool call example, workflow step, or Experience pitfall would have prevented the gap.",
-    goal: "Refine the matched intent Markdown's Guidelines, Skills & Tools, Concrete Workflow, or Experience so future runs follow the successful path.",
+    goal: "Refine the matched intent Markdown's Guidelines, frontmatter skills, Concrete Workflow, or Experience so future runs follow the successful path.",
     workflow:
       "process-gap: reconstruct the failed path and successful recovery; preserve only the missing step, guard, parameter, or pitfall that would have prevented recurrence.",
   },
@@ -107,7 +107,7 @@ const REVIEW_INSTRUCTIONS: Record<
   "behavior-fix": {
     focus:
       "Compare the user correction with the matched intent's routed behavior and identify the specific Markdown instruction, domain, or fastpath hint/keyword that caused, allowed, or failed to prevent the mistake. Treat style, tone, format, verbosity, workflow, or step-order correction as first-class behavior evidence when concrete. When the snapshot shows an explicit user correction, misroute, or wrong tool/no-tool behavior with concrete evidence, prefer a narrow finding over no_finding.",
-    goal: "Refine the matched intent Markdown's domain, fastpath metadata, Guidelines, Response Strategy, Skills & Tools, Concrete Workflow, or Experience to encode the corrected behavior.",
+    goal: "Refine the matched intent Markdown's domain, fastpath metadata, frontmatter skills, Guidelines, Response Strategy, Concrete Workflow, or Experience to encode the corrected behavior.",
     workflow:
       "behavior-fix: if the snapshot contains an explicit user correction, style/tone/format/verbosity/workflow/step-order correction, concrete misroute, or wrong tool/no-tool behavior, prefer a narrow finding over no_finding; encode the smallest correction that would prevent recurrence. Also check whether the turn exposes a trigger keyword gap; suggest only stable phrases that clearly mean agent/routing correction.",
   },
@@ -170,16 +170,17 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 
 ### Intent shape and boundaries
 - Decide whether the evidence calls for creating, refining, splitting, or merging an intent. Prefer the smallest maintainable boundary.
-- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, and optional fastpath metadata.
+- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional fastpath metadata, and optional skills[].
 - Triggers describe the user goal and boundary; examples are realistic user messages; domain is the broad routing bucket.
 - fastpath.keywords are exact/similarity routing phrases. fastpath.hint is a short injected A1 hint for safe exact matches. Add or change fastpath only when evidence shows a stable short phrase or a fastpath misroute.
 - Do not create one-session intent boundaries; prefer the smallest durable class-level boundary that can help future turns.
 - Never mention another intent name or id inside an intent body. Express scope boundaries through frontmatter triggers, examples, domain, and fastpath.
 
 ### Body sections and execution guidance
-- The body guides execution and must use this order: ## Guidelines, ## Skills & Tools, ## Response Strategy, then optional ## Concrete Workflow, then optional ## Experience.
-- Put skill hints on an indented "skill: <name>" line beneath a descriptive list item.
-- Put concrete tool call shapes in Skills & Tools or workflow steps; do not use vague tool prose.
+- The body guides execution and must use this order: ## Guidelines, ## Response Strategy, then optional ## Concrete Workflow, then optional ## Experience.
+- Skill dependencies belong in frontmatter skills[]. Add only exact skill names that the intent should load or strongly prefer.
+- Do not create a ## Skills & Tools section. Migrate legacy skill lists into frontmatter skills[] and preserve durable guidance in Experience.
+- Put concrete tool call shapes in workflow steps; do not use vague tool prose.
 - Include Concrete Workflow for multi-step or sequence-sensitive intents. Use short numbered "### Step N — <name>" sections.
 - Use Experience for reusable tips, parameters, pitfalls, stable skill/tool lessons, and recovery notes that help future turns with the same intent.
 - User preference embedding: when the user expresses a style, format, readability, verbosity, or workflow preference for this task class, preserve it in the relevant intent Markdown, not only memory. Memory captures who the user is or current operational state; intent Markdown captures how to perform this task class for that user.

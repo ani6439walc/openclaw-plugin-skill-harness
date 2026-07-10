@@ -27,9 +27,6 @@ fastpath:
 ## Guidelines
 - Do it.
 
-## Skills & Tools
-- Use tools.
-
 ## Response Strategy
 - Respond.
 `;
@@ -58,6 +55,44 @@ fastpath:
       valid: true,
       errors: [],
     });
+  });
+
+  it("accepts non-empty skill dependencies only in frontmatter", () => {
+    fs.writeFileSync(
+      path.join(dir, "one.md"),
+      valid().replace(
+        'domain: "test"',
+        'domain: "test"\nskills:\n  - skill-lifecycle\n  - skill-harness',
+      ),
+    );
+
+    expect(validateIntentDirectory(dir)).toMatchObject({
+      valid: true,
+      errors: [],
+    });
+  });
+
+  it("rejects legacy Skills & Tools sections and invalid skills metadata", () => {
+    fs.writeFileSync(
+      path.join(dir, "legacy.md"),
+      `${valid()}\n## Skills & Tools\n- skill-lifecycle\n  - skill: skill-lifecycle\n`,
+    );
+    fs.writeFileSync(
+      path.join(dir, "invalid-skills.md"),
+      valid().replace(
+        'domain: "test"',
+        'domain: "test"\nskills: skill-lifecycle',
+      ),
+    );
+
+    const result = validateIntentDirectory(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join("\n")).toContain(
+      "legacy.md: legacy ## Skills & Tools section is not allowed; move skill dependencies to frontmatter skills",
+    );
+    expect(result.errors.join("\n")).toContain(
+      "invalid-skills.md: skills must contain only non-empty strings",
+    );
   });
 
   it("rejects duplicate Experience sections and bad section order", () => {
@@ -213,9 +248,10 @@ domain: ""
     fs.writeFileSync(path.join(dir, "one.md"), valid());
     fs.writeFileSync(
       path.join(dir, "ONE.md"),
-      valid()
-        .replace("## Skills & Tools", "## Response Strategy")
-        .replace("## Response Strategy\n- Respond.", "## Guidelines\n- Again."),
+      valid().replace(
+        "## Response Strategy\n- Respond.",
+        "## Guidelines\n- Again.",
+      ),
     );
     const result = validateIntentDirectory(dir, ["MISSING"]);
     expect(result.valid).toBe(false);
