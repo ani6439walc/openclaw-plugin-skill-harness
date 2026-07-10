@@ -9,7 +9,10 @@ import {
   buildDomainSkillsPromptPrefix,
   formatDomainSkills,
 } from "./prompts.js";
-import { UNTRUSTED_CONTEXT_HEADER } from "../constants.js";
+import {
+  DEFAULT_LOW_COMPLEXITY_PROMPT,
+  UNTRUSTED_CONTEXT_HEADER,
+} from "../constants.js";
 import type {
   IntentCatalogEntry,
   IntentionResult,
@@ -17,6 +20,82 @@ import type {
   RecentTurn,
 } from "../types.js";
 import { FALLBACK_INTENT, FALLBACK_INTENT_ID } from "../constants.js";
+
+function conversationContextFrom(prompt: string): string {
+  const openingTag = "<conversation_context>";
+  const closingTag = "</conversation_context>";
+  const start = prompt.lastIndexOf(openingTag);
+  const end = prompt.indexOf(closingTag, start);
+  if (start === -1 || end === -1) {
+    throw new Error("expected conversation context in prompt");
+  }
+  return prompt.slice(start, end + closingTag.length);
+}
+
+describe("conversation context prompt serialization", () => {
+  it("uses the topic checker compact format for every subagent prompt", () => {
+    const conversation: RecentTurn[] = [
+      {
+        role: "user",
+        text: "Implement the topic checker.",
+        historicalIntent: {
+          intent: "coding",
+          domain: "coding",
+          topic: "Implementing the topic checker.",
+          keywords: ["topic", "checker"],
+        },
+      },
+      { role: "assistant", text: "I will add a focused test first." },
+      {
+        role: "user",
+        text: "Now update the documentation.",
+        historicalIntent: {
+          intent: "documentation",
+          domain: "docs",
+          topic: "Updating documentation.",
+          keywords: ["update", "documentation"],
+          topicChangeReason: "shift",
+        },
+      },
+      { role: "assistant", text: "I will inspect the relevant README." },
+    ];
+    const topicCheckerPrompt = buildTopicSwitchPrompt({
+      latest: "Continue the documentation update.",
+      history: [],
+      conversation,
+    });
+    const intentClassifierPrompt = buildIntentionPrompt({
+      latest: "Continue the documentation update.",
+      intents: [],
+      conversation,
+    });
+    const hintWriterPrompt = buildIntentInstructionPrompt({
+      latest: "Continue the documentation update.",
+      result: {
+        intent: "other",
+        reason: "User is continuing the current task.",
+        domain: "docs",
+        confidence: 0.9,
+        complexity: "medium",
+      },
+      intentBody: "Use the current task context.",
+      complexityContext: "Use balanced verification.",
+      conversation,
+    });
+
+    const topicCheckerContext = conversationContextFrom(topicCheckerPrompt);
+    expect(topicCheckerContext).toContain(
+      '<historical_intent>{"intent":"coding","domain":"coding","topic":"Implementing the topic checker.","keywords":["topic","checker"]}</historical_intent>',
+    );
+    expect(topicCheckerContext).toContain(
+      '<topic_boundary>{"reason":"shift","topic":"Updating documentation."}</topic_boundary>',
+    );
+    expect([
+      conversationContextFrom(intentClassifierPrompt),
+      conversationContextFrom(hintWriterPrompt),
+    ]).toEqual([topicCheckerContext, topicCheckerContext]);
+  });
+});
 
 describe("buildIntentionPrompt", () => {
   const mockIntents: IntentCatalogEntry[] = [
@@ -1001,7 +1080,7 @@ describe("parseTopicSwitchResult", () => {
 });
 
 describe("buildIntentInstructionPrompt", () => {
-  it("includes intent-related skills when provided", () => {
+  it("includes candidate skills when provided", () => {
     const prompt = buildIntentInstructionPrompt({
       latest: "draw architecture",
       result: {
@@ -1023,7 +1102,7 @@ describe("buildIntentInstructionPrompt", () => {
         "<complexity_context>Use a balanced flow.</complexity_context>",
     });
 
-    expect(prompt).toContain("<intent_related_skills>");
+    expect(prompt).toContain("<candidate_skills>");
     expect(prompt).toContain("<name>architecture-diagram</name>");
     expect(prompt).not.toContain("<path>");
     expect(prompt).not.toContain("/skills/architecture-diagram/SKILL.md");
@@ -1032,7 +1111,7 @@ describe("buildIntentInstructionPrompt", () => {
     );
   });
 
-  it("omits intent-related skills when none are provided", () => {
+  it("omits candidate skills when none are provided", () => {
     const prompt = buildIntentInstructionPrompt({
       latest: "draw architecture",
       result: {
@@ -1047,7 +1126,7 @@ describe("buildIntentInstructionPrompt", () => {
         "<complexity_context>Use a balanced flow.</complexity_context>",
     });
 
-    expect(prompt).not.toContain("<intent_related_skills>");
+    expect(prompt).not.toContain("<candidate_skills>");
   });
 
   it("includes the matched intent body, latest message, and instruction requirements", () => {
@@ -1083,7 +1162,7 @@ describe("buildIntentInstructionPrompt", () => {
       ],
     });
 
-    expect(prompt).toContain("You are an intention-hint writer.");
+    expect(prompt).toContain("You are a hint writer.");
     expect(prompt).not.toContain("You are an skill-harness writer.");
     expect(prompt).toContain(
       "Another model is preparing the final user-facing answer",
@@ -1093,10 +1172,12 @@ describe("buildIntentInstructionPrompt", () => {
     );
     expect(prompt).toContain("Identify the user's intent from latest_message");
     expect(prompt).toContain(
-      "Review the matched intent Markdown as a menu of possible experience",
+      "Review the intent guidelines as a menu of possible experience",
     );
     expect(prompt).toContain("workflow");
-    expect(prompt).toContain("## Output contract");
+    expect(prompt).toContain("## Output guidelines");
+    expect(prompt).not.toContain("## Output contract");
+    expect(prompt).not.toContain("## Output style");
     expect(prompt).toContain("## Relevance and alignment");
     expect(prompt).toContain("## Skill recommendation");
     expect(prompt).toContain("## Bounded skill_view reads");
@@ -1106,14 +1187,14 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("## Trust boundaries");
     expect(prompt).not.toContain("<rules>");
     expect(prompt).not.toContain("</rules>");
-    expect(prompt.indexOf("## Output contract")).toBeLessThan(
+    expect(prompt.indexOf("## Output guidelines")).toBeLessThan(
       prompt.indexOf("<intent_metadata>"),
     );
     expect(prompt).toContain("Default to no explicit skill directives");
     expect(prompt).toContain("at most 1 explicit skill directive");
     expect(prompt).toContain("Use 2-3 directives only when");
     expect(prompt).toContain(
-      "Recommend only skills listed in intent_related_skills",
+      "Recommend only skills listed in candidate_skills",
     );
     expect(prompt).toContain(
       "If no skill passes this bar, emit no explicit skill directive",
@@ -1121,7 +1202,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("MUST view skill: <skill-name>");
     expect(prompt).toContain("REQUIRED skill: <skill-name>");
     expect(prompt).toContain("Prefer not to view skill bodies");
-    expect(prompt).toContain("skills listed in intent_related_skills");
+    expect(prompt).toContain("skills listed in candidate_skills");
     expect(prompt).toContain(
       "Use skill_view only to judge whether a listed skill is more clearly suited to the latest task",
     );
@@ -1158,7 +1239,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain(
       "minimal inspection commands and a concise reporting shape",
     );
-    expect(prompt).toContain("complexity_context only to tune");
+    expect(prompt).toContain("execution_mode only to tune");
     expect(prompt).toContain("conversation context only to resolve references");
     expect(prompt).toContain(
       "Use topicChangeReason only as a carry-over guard",
@@ -1195,13 +1276,13 @@ describe("buildIntentInstructionPrompt", () => {
     );
     expect(prompt).not.toContain("changed:");
     expect(prompt).toContain(
-      "<complexity_context>Use a balanced flow.</complexity_context>",
+      "<execution_mode>\nUse a balanced flow.\n</execution_mode>",
     );
     expect(prompt).toContain("<conversation_context>");
     expect(prompt).not.toContain('<turn role="user">');
     expect(prompt).toContain("[user] 先做 topic checker");
     expect(prompt).toContain(
-      "  <historical_intent>\n  intent: coding\n  domain: coding\n  topic: topic / checker\n  keywords: topic, checker\n  </historical_intent>",
+      '<historical_intent>{"intent":"coding","domain":"coding","topic":"topic / checker","keywords":["topic","checker"]}</historical_intent>',
     );
     expect(prompt).toContain("[assistant] 我會先接流程");
     expect(prompt).toContain("Use test-driven-development");
@@ -1244,14 +1325,17 @@ describe("buildIntentInstructionPrompt", () => {
     const staticBoundary = prompt.indexOf("## Trust boundaries");
     const dynamicSections = [
       "<intent_metadata>",
-      "<intent_related_skills>",
-      "<complexity_context>",
-      "<matched_intent_markdown>",
+      "<intent_guidelines>",
+      "<candidate_skills>",
       "<conversation_context>",
+      "<execution_mode>",
       "<latest_message>",
     ];
 
     expect(prompt).not.toMatch(/\n{3,}/);
+    expect(prompt).not.toContain("<matched_intent_markdown>");
+    expect(prompt).not.toContain("<intent_related_skills>");
+    expect(prompt).not.toContain("<complexity_context>");
     expect(staticBoundary).toBeGreaterThan(-1);
     expect(staticBoundary).toBeLessThan(prompt.indexOf(dynamicSections[0]));
     for (let index = 1; index < dynamicSections.length; index += 1) {
@@ -1262,6 +1346,27 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt.indexOf("<latest_message>")).toBeLessThan(
       prompt.indexOf("Write a concise optional execution hint now."),
     );
+  });
+
+  it("wraps raw default complexity guidance in execution mode", () => {
+    const prompt = buildIntentInstructionPrompt({
+      latest: "Check the current status.",
+      result: {
+        intent: "other",
+        reason: "User asked for a direct status check.",
+        domain: "other",
+        confidence: 0.95,
+        complexity: "low",
+      },
+      intentBody: "Answer the latest request directly.",
+      complexityContext: DEFAULT_LOW_COMPLEXITY_PROMPT,
+    });
+
+    expect(DEFAULT_LOW_COMPLEXITY_PROMPT).not.toContain("<complexity_context>");
+    expect(prompt).toContain(
+      `<execution_mode>\n${DEFAULT_LOW_COMPLEXITY_PROMPT}\n</execution_mode>`,
+    );
+    expect(prompt).not.toContain("<complexity_context>");
   });
 
   it("tells instruction writer to output ultra-concise guidance without losing semantics", () => {
@@ -1279,7 +1384,8 @@ describe("buildIntentInstructionPrompt", () => {
         "<complexity_context>Use a balanced flow.</complexity_context>",
     });
 
-    expect(prompt).toContain("Output style:");
+    expect(prompt).toContain("## Output guidelines");
+    expect(prompt).not.toContain("## Output style");
     expect(prompt).toContain("ultra-concise but semantics-preserving");
     expect(prompt).toContain("Prefer short fragments or compact bullets");
     expect(prompt).toContain(

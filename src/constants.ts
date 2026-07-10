@@ -25,8 +25,7 @@ export const FALLBACK_INTENT: IntentDefinition = {
     "No predefined intent detected. Main Agent should determine the user's true intent and choose an appropriate strategy.",
 };
 
-export const DEFAULT_LOW_COMPLEXITY_PROMPT = `<complexity_context>
-You are working on LOW / QUICK tasks.
+export const DEFAULT_LOW_COMPLEXITY_PROMPT = `You are working on LOW / QUICK tasks.
 
 Execution mindset:
 - Fast, focused, minimal overhead.
@@ -38,11 +37,9 @@ Approach:
 - For direct answers or status checks, answer concisely and stop.
 - For explicit tiny edits, make the minimal change and run the cheapest relevant verification.
 - If suggesting a smaller/fast path, frame it as optional guidance with concrete boundaries and expected output.
-- Mention only what changed and the verification result.
-</complexity_context>`;
+- Mention only what changed and the verification result.`;
 
-export const DEFAULT_MEDIUM_COMPLEXITY_PROMPT = `<complexity_context>
-You are working on MEDIUM / STANDARD tasks.
+export const DEFAULT_MEDIUM_COMPLEXITY_PROMPT = `You are working on MEDIUM / STANDARD tasks.
 
 Balanced execution mindset:
 - Think first, then act; avoid both rushed patches and ceremonial planning.
@@ -62,11 +59,9 @@ Approach:
 - Avoid durable workboards or subagent dispatch unless the task expands into high-complexity territory.
 - Make a solid implementation with appropriate error handling.
 - Include targeted tests or checks for the riskiest behavior.
-- Report concise outcome, validation, and any remaining blocker.
-</complexity_context>`;
+- Report concise outcome, validation, and any remaining blocker.`;
 
-export const DEFAULT_HIGH_COMPLEXITY_PROMPT = `<complexity_context>
-You are working on HIGH / DEEP tasks.
+export const DEFAULT_HIGH_COMPLEXITY_PROMPT = `You are working on HIGH / DEEP tasks.
 
 Deep execution mindset:
 - This is a complex or broad-impact task. Depth is expected; rushing is a failure mode.
@@ -99,5 +94,4 @@ Approach:
 - Design for maintainability without inventing abstractions before they are earned.
 - Include robust error handling, edge-case coverage, and regression tests where applicable.
 - Verify with the strongest practical signal: targeted tests, typecheck/build, and real-surface smoke checks when behavior crosses boundaries.
-- Report the completed phases, evidence, risks, and any explicit blocker.
-</complexity_context>`;
+- Report the completed phases, evidence, risks, and any explicit blocker.`;

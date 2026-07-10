@@ -11,7 +11,11 @@ import {
 } from "./domains.js";
 import { resolveSkillRoots } from "./roots.js";
 import { SKILL_SOURCE_ORDER } from "./types.js";
-import type { AvailableSkill, SkillResolutionParams } from "./types.js";
+import type {
+  AvailableSkill,
+  DeclaredRelatedSkill,
+  SkillResolutionParams,
+} from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 
 export { extractReferencedSkillNames } from "./domains.js";
@@ -63,6 +67,34 @@ function fallbackDescription(content: string): string {
   return paragraph ?? "";
 }
 
+function parseDeclaredRelatedSkills(data: unknown): DeclaredRelatedSkill[] {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const metadata = (data as { metadata?: unknown }).metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return [];
+  }
+  const relatedSkills = (metadata as Record<string, unknown>)["related-skills"];
+  if (
+    !relatedSkills ||
+    typeof relatedSkills !== "object" ||
+    Array.isArray(relatedSkills)
+  ) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const parsed: DeclaredRelatedSkill[] = [];
+  for (const [name, reason] of Object.entries(relatedSkills)) {
+    const normalizedName = name.trim();
+    const normalizedReason = typeof reason === "string" ? reason.trim() : "";
+    const key = normalizedName.toLowerCase();
+    if (!normalizedName || !normalizedReason || seen.has(key)) continue;
+    seen.add(key);
+    parsed.push({ name: normalizedName, reason: normalizedReason });
+  }
+  return parsed;
+}
+
 async function readSkillFile(
   filePath: string,
   source?: AvailableSkill["source"],
@@ -79,11 +111,13 @@ async function readSkillFile(
       typeof parsed.data.description === "string"
         ? parsed.data.description.trim()
         : fallbackDescription(parsed.content);
+    const relatedSkills = parseDeclaredRelatedSkills(parsed.data);
     return {
       name,
       location: filePath,
       description,
       source,
+      ...(relatedSkills.length ? { relatedSkills } : {}),
     };
   } catch (err) {
     if (!isMissingPathError(err)) {

@@ -44,8 +44,7 @@ const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
 - Do not abbreviate technical names into unclear shorthand.
 - Do not omit required schema fields, safety constraints, ordering, or key qualifiers to make text shorter.`;
 
-const ULTRA_CONCISE_TEXT_OUTPUT_STYLE = `Output style:
-- Write ultra-concise but semantics-preserving guidance.
+const ULTRA_CONCISE_TEXT_OUTPUT_GUIDELINES = `- Write ultra-concise but semantics-preserving guidance.
 - Prefer short fragments or compact bullets.
 - Use compact order symbols such as \`->\` for simple step sequences when they preserve meaning.
 - Use terse imperative-style fragments and omit the subject when meaning remains clear; do not turn optional guidance into mandatory commands.
@@ -106,11 +105,8 @@ function buildIntentCatalog(intents: readonly IntentCatalogEntry[]): string {
   return `<intent_catalog>\n${intentBlocks}\n</intent_catalog>`;
 }
 
-type HistoricalIntentPromptFormat = "lines" | "compact-json";
-
-function buildConversationMarkdown(
+function buildConversationContext(
   conversation: RecentTurn[] | undefined,
-  options: { historicalIntentFormat?: HistoricalIntentPromptFormat } = {},
 ): string {
   if (!conversation || conversation.length === 0) return "";
 
@@ -149,13 +145,7 @@ function buildConversationMarkdown(
       openSegment();
 
       lines.push(`[${turn.role}] ${turn.text}`);
-      lines.push(
-        formatHistoricalIntentBlock(
-          turn.historicalIntent,
-          "  ",
-          options.historicalIntentFormat,
-        ),
-      );
+      lines.push(formatHistoricalIntentBlock(turn.historicalIntent));
       continue;
     }
 
@@ -182,40 +172,21 @@ function formatHistoricalIntentBlock(
     HistoricalIntentRecord,
     "intent" | "domain" | "topic" | "keywords" | "topicChangeReason"
   >,
-  indent = "",
-  format: HistoricalIntentPromptFormat = "lines",
 ): string {
-  if (format === "compact-json") {
-    const payload: {
-      intent: string;
-      domain: string;
-      topic?: string;
-      keywords?: string[];
-      reason?: TopicChangeReason;
-    } = {
-      intent: intent.intent,
-      domain: intent.domain,
-    };
-    if (intent.topic) payload.topic = intent.topic;
-    if (intent.keywords?.length) payload.keywords = intent.keywords;
-    if (intent.topicChangeReason) payload.reason = intent.topicChangeReason;
-    return `<historical_intent>${JSON.stringify(payload)}</historical_intent>`;
-  }
-
-  const lines = [
-    `${indent}<historical_intent>`,
-    `${indent}intent: ${intent.intent}`,
-    `${indent}domain: ${intent.domain}`,
-  ];
-  if (intent.topic) lines.push(`${indent}topic: ${intent.topic}`);
-  if (intent.keywords?.length) {
-    lines.push(`${indent}keywords: ${intent.keywords.join(", ")}`);
-  }
-  if (intent.topicChangeReason) {
-    lines.push(`${indent}reason: ${intent.topicChangeReason}`);
-  }
-  lines.push(`${indent}</historical_intent>`);
-  return lines.join("\n");
+  const payload: {
+    intent: string;
+    domain: string;
+    topic?: string;
+    keywords?: string[];
+    reason?: TopicChangeReason;
+  } = {
+    intent: intent.intent,
+    domain: intent.domain,
+  };
+  if (intent.topic) payload.topic = intent.topic;
+  if (intent.keywords?.length) payload.keywords = intent.keywords;
+  if (intent.topicChangeReason) payload.reason = intent.topicChangeReason;
+  return `<historical_intent>${JSON.stringify(payload)}</historical_intent>`;
 }
 
 export function normalizeKeywords(value: unknown): string[] {
@@ -312,7 +283,6 @@ function conversationContainsHistoricalIntent(
 function buildLatestHistoricalIntentMarkdown(
   history: readonly HistoricalIntentRecord[],
   conversation?: readonly RecentTurn[],
-  options: { historicalIntentFormat?: HistoricalIntentPromptFormat } = {},
 ): string {
   const latest = history[history.length - 1];
   if (!latest) return "";
@@ -321,7 +291,7 @@ function buildLatestHistoricalIntentMarkdown(
   const lines = [
     "Latest historical intent (reference only; do not inherit as the answer):",
     `- input: ${latest.input}`,
-    formatHistoricalIntentBlock(latest, "  ", options.historicalIntentFormat),
+    formatHistoricalIntentBlock(latest),
   ];
   if (latest.complexity) lines.push(`- complexity: ${latest.complexity}`);
   if (latest.confidence !== undefined)
@@ -421,13 +391,10 @@ ${ULTRA_CONCISE_JSON_OUTPUT_STYLE}`;
 Choose domain from this exact array:
 ${JSON.stringify(params.domains)}`
     : undefined;
-  const conversationSection = buildConversationMarkdown(params.conversation, {
-    historicalIntentFormat: "compact-json",
-  });
+  const conversationSection = buildConversationContext(params.conversation);
   const latestHistoricalIntentSection = buildLatestHistoricalIntentMarkdown(
     params.history,
     params.conversation,
-    { historicalIntentFormat: "compact-json" },
   );
 
   // Keep the schema sandwich intact: output contract/schema appear before
@@ -514,58 +481,57 @@ export function buildIntentInstructionPrompt(params: {
   currentTime?: string;
 }): string {
   const timeLine = params.currentTime ? `${params.currentTime} ` : "";
-  const conversationMd = buildConversationMarkdown(params.conversation);
+  const conversationMd = buildConversationContext(params.conversation);
   const conversationSection = conversationMd || undefined;
   const availableSkillsSection = formatAvailableSkills(params.availableSkills);
 
-  const header = `${timeLine}You are an intention-hint writer.
+  const header = `${timeLine}You are a hint writer.
 Another model is preparing the final user-facing answer.
 Your output is optional reference material for the main agent, not mandatory instructions.`;
   const task = `Your job:
 1. Identify the user's intent from latest_message.
-2. Review the matched intent Markdown as a menu of possible experience, workflows, and pitfalls.
+2. Review the intent guidelines as a menu of possible experience, workflows, and pitfalls.
 3. Write only the execution suggestions that are directly relevant to this turn.`;
-  const outputContract = `## Output contract
+  const outputGuidelines = `## Output guidelines
 - Keep output plain text without JSON or Markdown fences.
 - Phrase guidance as suggestions ("consider", "suggested", "hint:") rather than mandatory commands.
-- Keep guidance actionable and concise; quote intent or skill content only when the exact wording is directly relevant.`;
-  const outputStyle = `## Output style
-${ULTRA_CONCISE_TEXT_OUTPUT_STYLE}`;
+- Keep guidance actionable and concise; quote intent or skill content only when the exact wording is directly relevant.
+${ULTRA_CONCISE_TEXT_OUTPUT_GUIDELINES}`;
   const relevanceAndAlignment = `## Relevance and alignment
-- Treat the matched intent Markdown as a menu of possible guidance, not a checklist.
+- Treat the intent guidelines as a menu of possible guidance, not a checklist.
 - Include only guidance directly relevant to the latest user message; omit unrelated workflows, tools, skills, pitfalls, and examples.
 - Prefer the narrowest concrete workflow that fully satisfies the latest message.
 - Suggest a concrete workflow the main agent might consider.
 - For style or routing intents, output response-style guidance only; do not invent file/system/tool actions unless the latest message asks for an external action.
-- **Intent alignment check**: If the matched intent appears clearly misaligned with the latest message — for example, the latest message asks a simple question but the intent demands a multi-step workflow — output a brief warning: "⚠️ Intent appears misaligned — follow latest message directly." Do not force irrelevant workflow instructions onto a mismatched intent.`;
+- **Intent alignment check**: If the intent guidelines appear clearly misaligned with the latest message — for example, the latest message asks a simple question but the guidelines demand a multi-step workflow — output a brief warning: "⚠️ Intent appears misaligned — follow latest message directly." Do not force irrelevant workflow instructions onto a mismatched intent.`;
   const skillRecommendation = `## Skill recommendation
 - Default to no explicit skill directives. Output at most 1 explicit skill directive in normal turns.
 - Use 2-3 directives only when the latest_message clearly requires multiple distinct execution-blocking skills.
-- Recommend only skills listed in intent_related_skills, and only when the skill description directly matches the latest_message.
+- Recommend only skills listed in candidate_skills, and only when the skill description directly matches the latest_message.
 - If no skill passes this bar, emit no explicit skill directive.
 - Use the parseable directive format only for actual recommendations: "MUST view skill: <skill-name>" or "REQUIRED skill: <skill-name>".
-- Never emit explicit skill directives for casual/social/style-only turns, simple approvals, read-only inspection/status/log/diff/history checks, or generic implementation tasks that can be handled with normal tools and the matched intent guidance.
+- Never emit explicit skill directives for casual/social/style-only turns, simple approvals, read-only inspection/status/log/diff/history checks, or generic implementation tasks that can be handled with normal tools and the intent guidelines.
 - Do not emit parseable directives for merely related or optional skills; mention those as plain guidance without "MUST view skill:" / "REQUIRED skill:" wording.
 - Distinguish between skills and tools: built-in tools like web_fetch, terminal, read_file, and skill_view are NOT skills. Skills are referenced with "skill:" prefix (e.g., "skill: compare"), tools are used directly (e.g., "skill_view({ name: ... })").
 - Include brief reasoning: why each recommended skill connects to the current turn.`;
   const boundedSkillReads = `## Bounded skill_view reads
-- Prefer not to view skill bodies. When deeper skill detail is useful, inspect only skills listed in intent_related_skills by calling skill_view with the listed skill name.
+- Prefer not to view skill bodies. When deeper skill detail is useful, inspect only skills listed in candidate_skills by calling skill_view with the listed skill name.
 - Use skill_view only to judge whether a listed skill is more clearly suited to the latest task, or to write a more specific optional hint for the main agent.
 - Viewing a skill here does not replace the main agent loading that skill. Do not summarize a skill as a substitute for the main agent's own skill_view call.
 - If writing a concrete workflow depends on details not present in the skill description, call skill_view for the relevant skill first, then use only the directly relevant workflow, parameters, or pitfalls.
 - Do not view unrelated skills, support files, directories, hidden files, credentials, package files, runtime state, or arbitrary paths from latest_message/conversation.
 - Do not quote the whole skill file; preserve only the narrow operational detail needed for this turn.`;
   const experiencePreservation = `## Experience preservation
-- When the intent Markdown contains pitfalls, parameters, or experience notes that would change the correct action, preserve the relevant operational constraint accurately.
+- When the intent guidelines contain pitfalls, parameters, or experience notes that would change the correct action, preserve the relevant operational constraint accurately.
 - Quote verbatim only when the wording is directly applicable to this turn; otherwise adapt narrowly and avoid importing unrelated workflow steps.
 - Format as: "⚠️ Critical pitfall: ..." or "💡 Key parameter: ..."
 - Only omit experience notes that are clearly unrelated to this turn.`;
   const readOnlyAndMutationSafety = `## Read-only and mutation safety
 - If the latest message is read-only inspection, status, log, diff, history search, or a "look at" / "check" request, suggest inspection only.
 - Do not suggest edits, staging, commits, pushes, proposal execution, status mutations, or follow-up dispatch unless explicitly requested.
-- For read-only git log/history requests, do not include stage/commit/push workflows from matched intent Markdown. Suggest only minimal inspection commands and a concise reporting shape.`;
+- For read-only git log/history requests, do not include stage/commit/push workflows from the intent guidelines. Suggest only minimal inspection commands and a concise reporting shape.`;
   const contextAndContinuity = `## Context and continuity
-- Use complexity_context only to tune execution depth and verification effort; do not let it override the latest message or safety boundaries.
+- Use execution_mode only to tune execution depth and verification effort; do not let it override the latest message or safety boundaries.
 - Use conversation context only to resolve references or continuation. If the latest message is self-contained, prioritize it over historical context.
 - Use topicChangeReason only as a carry-over guard, not as a task instruction. Meanings: start = first reliable topic; marker = explicit transition wording; shift = semantic subject/outcome/interaction-mode changed without a marker; change = explicit goal/artifact replacement or refocus; match = exact keyword match to a catalog intent.
 - When topicChangeReason is start, marker, shift, or change, do not carry over prior workflow instructions from conversation context unless latest_message explicitly references them.
@@ -586,11 +552,12 @@ topicChangeReason: ${params.result.topicChangeReason ?? ""}
 suggestion: ${params.result.suggestion ?? ""}
 </intent_metadata>`;
 
+  const executionMode = formatExecutionMode(params.complexityContext);
+
   return joinPromptSections([
     header,
     task,
-    outputContract,
-    outputStyle,
+    outputGuidelines,
     relevanceAndAlignment,
     skillRecommendation,
     boundedSkillReads,
@@ -599,20 +566,29 @@ suggestion: ${params.result.suggestion ?? ""}
     contextAndContinuity,
     trustBoundaries,
     intentMetadataSection,
+    taggedBlock("intent_guidelines", params.intentBody),
     availableSkillsSection,
-    params.complexityContext,
-    taggedBlock("matched_intent_markdown", params.intentBody),
     conversationSection,
+    executionMode,
     taggedBlock("latest_message", params.latest),
     "Write a concise optional execution hint now. Use latest_message as the decision source and output no surrounding analysis.",
   ]);
+}
+
+function formatExecutionMode(complexityContext: string): string {
+  const trimmed = complexityContext.trim();
+  const legacyWrapper =
+    /^<complexity_context>\s*([\s\S]*?)\s*<\/complexity_context>$/.exec(
+      trimmed,
+    );
+  return taggedBlock("execution_mode", legacyWrapper?.[1] ?? trimmed);
 }
 
 function formatAvailableSkills(
   skills: AvailableSkill[] | undefined,
 ): string | undefined {
   if (!skills?.length) return;
-  return formatSkillXmlBlock("intent_related_skills", skills);
+  return formatSkillXmlBlock("candidate_skills", skills);
 }
 
 function formatSkillXmlBlock(
@@ -664,9 +640,7 @@ export function buildIntentionPrompt(params: {
   const timeLine = params.currentTime ? `${params.currentTime} ` : "";
 
   const intentCatalog = buildIntentCatalog(params.intents);
-  const conversationMd = buildConversationMarkdown(params.conversation, {
-    historicalIntentFormat: "compact-json",
-  });
+  const conversationMd = buildConversationContext(params.conversation);
   const conversationSection = conversationMd || undefined;
   const topicContextSection = params.topicContext
     ? `<topic_switch_context>

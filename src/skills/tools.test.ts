@@ -24,13 +24,22 @@ function createApi(
   };
 }
 
-function writeSkill(workspaceDir: string, name = "writer"): void {
+function writeSkill(
+  workspaceDir: string,
+  name = "writer",
+  relatedSkills: Record<string, string> = {},
+): void {
   const skillDir = path.join(workspaceDir, "skills", name);
   const heading = name === "writer" ? "Writer" : name;
+  const relatedSkillsFrontmatter = Object.entries(relatedSkills).length
+    ? `metadata:\n  related-skills:\n${Object.entries(relatedSkills)
+        .map(([relatedName, reason]) => `    ${relatedName}: ${reason}`)
+        .join("\n")}\n`
+    : "";
   fs.mkdirSync(skillDir, { recursive: true });
   fs.writeFileSync(
     path.join(skillDir, "SKILL.md"),
-    `---\nname: ${name}\ndescription: Write well.\n---\n\n# ${heading}\n`,
+    `---\nname: ${name}\ndescription: Write well.\n${relatedSkillsFrontmatter}---\n\n# ${heading}\n`,
   );
 }
 
@@ -184,6 +193,167 @@ describe("registerSkillTools", () => {
         adoption_rate: 0.4,
       },
     });
+  });
+
+  it("lists direct related skills in both declared directions", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const api = createApi(path.join(tmp, "state"), workspaceDir);
+    writeSkill(workspaceDir, "nextjs", {
+      react: "React fundamentals and patterns.",
+      unavailable: "Must not appear because this skill is not visible.",
+    });
+    writeSkill(workspaceDir, "react", {
+      nextjs: "Next.js App Router and deployment.",
+    });
+    registerSkillTools(api);
+    const tools = new Map(
+      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
+    );
+
+    const result = await runTool(tools.get("skill_list"), {
+      source: "workspace",
+    });
+    const skillsByName = new Map(
+      result.skills.map((skill: { name: string }) => [skill.name, skill]),
+    );
+
+    expect(skillsByName.get("nextjs")).toMatchObject({
+      related_skills: [
+        {
+          name: "react",
+          reason: "React fundamentals and patterns.",
+          direction: "current_to_related",
+        },
+        {
+          name: "react",
+          reason: "Next.js App Router and deployment.",
+          direction: "related_to_current",
+        },
+      ],
+    });
+    expect(skillsByName.get("react")).toMatchObject({
+      related_skills: [
+        {
+          name: "nextjs",
+          reason: "Next.js App Router and deployment.",
+          direction: "current_to_related",
+        },
+        {
+          name: "nextjs",
+          reason: "React fundamentals and patterns.",
+          direction: "related_to_current",
+        },
+      ],
+    });
+  });
+
+  it("builds incoming related skills before pagination", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const api = createApi(path.join(tmp, "state"), workspaceDir);
+    writeSkill(workspaceDir, "alpha", {
+      beta: "Alpha delegates the next step to beta.",
+    });
+    writeSkill(workspaceDir, "beta");
+    registerSkillTools(api);
+    const tools = new Map(
+      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
+    );
+
+    await expect(
+      runTool(tools.get("skill_list"), {
+        source: "workspace",
+        offset: 1,
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({
+      skills: [
+        {
+          name: "beta",
+          related_skills: [
+            {
+              name: "alpha",
+              reason: "Alpha delegates the next step to beta.",
+              direction: "related_to_current",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("excludes filtered and shadowed skills from incoming relations", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    const api = createApi(stateDir, workspaceDir);
+    writeSkill(workspaceDir, "target");
+    writeSkill(workspaceDir, "shadowed");
+    writeSkill(stateDir, "managed-source", {
+      target: "Visible only without a source filter.",
+    });
+    writeSkill(stateDir, "shadowed", {
+      target: "Must not survive workspace precedence.",
+    });
+    registerSkillTools(api);
+    const tools = new Map(
+      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
+    );
+
+    const workspaceOnly = await runTool(tools.get("skill_list"), {
+      source: "workspace",
+    });
+    expect(
+      workspaceOnly.skills.find(
+        (skill: { name: string }) => skill.name === "target",
+      ),
+    ).toMatchObject({ related_skills: [] });
+
+    const allSources = await runTool(tools.get("skill_list"), {});
+    expect(
+      allSources.skills.find(
+        (skill: { name: string }) => skill.name === "target",
+      ),
+    ).toMatchObject({
+      related_skills: [
+        {
+          name: "managed-source",
+          reason: "Visible only without a source filter.",
+          direction: "related_to_current",
+        },
+      ],
+    });
+  });
+
+  it("ignores related skill formats outside metadata.related-skills", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const api = createApi(path.join(tmp, "state"), workspaceDir);
+    writeSkill(workspaceDir, "target");
+    const sourceDir = path.join(workspaceDir, "skills", "legacy-source");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sourceDir, "SKILL.md"),
+      "---\nname: legacy-source\ndescription: Legacy relation format.\nmetadata:\n  hermes:\n    related_skills:\n      - target\n---\n\n# Legacy Source\n",
+    );
+    registerSkillTools(api);
+    const tools = new Map(
+      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
+    );
+
+    const result = await runTool(tools.get("skill_list"), {
+      source: "workspace",
+    });
+
+    expect(
+      result.skills.find(
+        (skill: { name: string }) => skill.name === "legacy-source",
+      ),
+    ).toMatchObject({ related_skills: [] });
+    expect(
+      result.skills.find((skill: { name: string }) => skill.name === "target"),
+    ).toMatchObject({ related_skills: [] });
   });
 
   it("paginates skill_list with a default page size of 150", async () => {

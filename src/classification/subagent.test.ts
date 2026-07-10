@@ -217,7 +217,7 @@ describe("runIntentInstructionSubagent", () => {
         modelRun: false,
         disableTools: false,
         toolsAllow: ["skill_view"],
-        prompt: expect.stringContaining("You are an intention-hint writer."),
+        prompt: expect.stringContaining("You are a hint writer."),
       }),
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
@@ -230,7 +230,7 @@ describe("runIntentInstructionSubagent", () => {
       "<conversation_context>",
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
-      "topic: continuation",
+      '<historical_intent>{"intent":"coding","topic":"continuation"}</historical_intent>',
     );
   });
 

@@ -21,6 +21,11 @@ export interface SkillUsageStats {
   needs_review: boolean;
 }
 
+export interface DeclaredRelatedSkill {
+  name: string;
+  reason: string;
+}
+
 export interface SkillRoot {
   path: string;
   source: SkillSource;
@@ -33,6 +38,7 @@ export interface AvailableSkill {
   description: string;
   source?: SkillSource;
   domains?: string[];
+  relatedSkills?: DeclaredRelatedSkill[];
 }
 
 export interface SkillResolutionParams {

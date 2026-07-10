@@ -3,7 +3,7 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
 import { manageSkill } from "./manage.js";
-import type { SkillSource } from "./types.js";
+import type { AvailableSkill, SkillSource } from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 import type { IntentCatalogEntry } from "../types.js";
 
@@ -63,6 +63,61 @@ function defaultAgentId(): string {
   return "main";
 }
 
+type RelatedSkillDirection = "current_to_related" | "related_to_current";
+
+interface RelatedSkillResult {
+  name: string;
+  reason: string;
+  direction: RelatedSkillDirection;
+}
+
+function relatedSkillsBySkillName(
+  skills: readonly AvailableSkill[],
+): Map<string, RelatedSkillResult[]> {
+  const visibleSkills = new Map(
+    skills.map((skill) => [skill.name.toLowerCase(), skill]),
+  );
+  const outgoingBySkill = new Map<string, RelatedSkillResult[]>();
+  const incomingBySkill = new Map<string, RelatedSkillResult[]>();
+
+  for (const skill of skills) {
+    const skillName = skill.name.toLowerCase();
+    for (const relation of skill.relatedSkills ?? []) {
+      const target = visibleSkills.get(relation.name.toLowerCase());
+      if (!target || target.name.toLowerCase() === skillName) continue;
+
+      const outgoing = outgoingBySkill.get(skillName) ?? [];
+      outgoing.push({
+        name: target.name,
+        reason: relation.reason,
+        direction: "current_to_related",
+      });
+      outgoingBySkill.set(skillName, outgoing);
+
+      const targetName = target.name.toLowerCase();
+      const incoming = incomingBySkill.get(targetName) ?? [];
+      incoming.push({
+        name: skill.name,
+        reason: relation.reason,
+        direction: "related_to_current",
+      });
+      incomingBySkill.set(targetName, incoming);
+    }
+  }
+
+  return new Map(
+    skills.map((skill) => {
+      const skillName = skill.name.toLowerCase();
+      const incoming = incomingBySkill.get(skillName) ?? [];
+      incoming.sort((left, right) => left.name.localeCompare(right.name));
+      return [
+        skillName,
+        [...(outgoingBySkill.get(skillName) ?? []), ...incoming],
+      ];
+    }),
+  );
+}
+
 export function registerSkillTools(
   api: OpenClawPluginApi,
   options: RegisterSkillToolsOptions = {},
@@ -71,7 +126,7 @@ export function registerSkillTools(
     name: "skill_list",
     label: "List Skills",
     description:
-      "List OpenClaw skills visible to the current agent. Returns metadata only; use skill_view to read full SKILL.md content or linked support files.",
+      "List OpenClaw skills visible to the current agent. Each related_skills entry is a direct optional relation: current_to_related is declared by the returned skill, while related_to_current is declared by another visible skill. Use skill_view to read full SKILL.md content or linked support files.",
     parameters: Type.Object({
       source: Type.Optional(
         Type.Union([
@@ -113,6 +168,7 @@ export function registerSkillTools(
         source: optionalStringParam(params, "source") as
           SkillSource | undefined,
       });
+      const relatedSkills = relatedSkillsBySkillName(skills);
       const page = skills.slice(offset, offset + limit);
       const nextOffset = offset + page.length;
       const hasMore = nextOffset < skills.length;
@@ -133,6 +189,7 @@ export function registerSkillTools(
           source: skill.source,
           domains: skill.domains ?? [],
           path: skill.location,
+          related_skills: relatedSkills.get(skill.name.toLowerCase()) ?? [],
           ...(usageStats
             ? { usage_stats: skillUsageStatsForName(usageStats, skill.name) }
             : {}),
