@@ -356,6 +356,12 @@ describe("buildIntentionPrompt", () => {
       "You may override them based on the selected intent's characteristics",
     );
     expect(result).toContain(
+      "Output your final complexity in the JSON. If the domain or keywords change from the topic switch estimate, output them as well to override the routing context.",
+    );
+    expect(result).not.toContain(
+      "Output your final complexity, domain, and keywords in the JSON.",
+    );
+    expect(result).toContain(
       "Required only when topic_switch_context is absent",
     );
     expect(result).toContain(
@@ -1100,8 +1106,8 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("## Trust boundaries");
     expect(prompt).not.toContain("<rules>");
     expect(prompt).not.toContain("</rules>");
-    expect(prompt.indexOf("<intent_metadata>")).toBeLessThan(
-      prompt.indexOf("## Output contract"),
+    expect(prompt.indexOf("## Output contract")).toBeLessThan(
+      prompt.indexOf("<intent_metadata>"),
     );
     expect(prompt).toContain("Default to no explicit skill directives");
     expect(prompt).toContain("at most 1 explicit skill directive");
@@ -1206,6 +1212,58 @@ describe("buildIntentInstructionPrompt", () => {
     );
   });
 
+  it("groups dynamic context after static instruction sections", () => {
+    const prompt = buildIntentInstructionPrompt({
+      latest: "檢查這個 PR 的 diff",
+      result: {
+        intent: "code-inspection",
+        reason: "User wants a read-only review.",
+        domain: "software",
+        keywords: ["PR", "diff", "review"],
+        topic: "User wants to inspect a pull request diff.",
+        topicChangeReason: "shift",
+        confidence: 0.95,
+        complexity: "medium",
+      },
+      intentBody: "## Workflow\n\nInspect the diff before suggesting changes.",
+      availableSkills: [
+        {
+          name: "code-review-and-quality",
+          location: "/skills/code-review-and-quality/SKILL.md",
+          description: "Reviews code quality and regressions.",
+        },
+      ],
+      complexityContext:
+        "<complexity_context>Use targeted verification.</complexity_context>",
+      conversation: [
+        { role: "user", text: "上一個任務是重構 prompt" },
+        { role: "assistant", text: "已完成初步規劃" },
+      ],
+    });
+
+    const staticBoundary = prompt.indexOf("## Trust boundaries");
+    const dynamicSections = [
+      "<intent_metadata>",
+      "<intent_related_skills>",
+      "<complexity_context>",
+      "<matched_intent_markdown>",
+      "<conversation_context>",
+      "<latest_message>",
+    ];
+
+    expect(prompt).not.toMatch(/\n{3,}/);
+    expect(staticBoundary).toBeGreaterThan(-1);
+    expect(staticBoundary).toBeLessThan(prompt.indexOf(dynamicSections[0]));
+    for (let index = 1; index < dynamicSections.length; index += 1) {
+      expect(prompt.indexOf(dynamicSections[index - 1])).toBeLessThan(
+        prompt.indexOf(dynamicSections[index]),
+      );
+    }
+    expect(prompt.indexOf("<latest_message>")).toBeLessThan(
+      prompt.indexOf("Write a concise optional execution hint now."),
+    );
+  });
+
   it("tells instruction writer to output ultra-concise guidance without losing semantics", () => {
     const prompt = buildIntentInstructionPrompt({
       latest: "繼續實作同題續聊",
@@ -1232,6 +1290,32 @@ describe("buildIntentInstructionPrompt", () => {
     );
     expect(prompt).toContain(
       "Preserve safety warnings, required ordering, verification steps, and exact technical names",
+    );
+  });
+
+  it("uses advisory output guidance without weakening read-only safety", () => {
+    const prompt = buildIntentInstructionPrompt({
+      latest: "只要查看最近的 git log",
+      result: {
+        intent: "git-history",
+        reason: "User requested a read-only history lookup.",
+        domain: "software",
+        confidence: 0.95,
+        complexity: "low",
+      },
+      intentBody: "## Workflow\n\nInspect recent history.",
+      complexityContext:
+        "<complexity_context>Use minimal verification.</complexity_context>",
+    });
+
+    expect(prompt).toContain(
+      "Keep output plain text without JSON or Markdown fences.",
+    );
+    expect(prompt).toContain(
+      'Phrase guidance as suggestions ("consider", "suggested", "hint:") rather than mandatory commands.',
+    );
+    expect(prompt).toContain(
+      "Do not suggest edits, staging, commits, pushes, proposal execution, status mutations, or follow-up dispatch unless explicitly requested.",
     );
   });
 });
