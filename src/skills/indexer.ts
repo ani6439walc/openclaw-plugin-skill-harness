@@ -9,7 +9,11 @@ import {
   domainsForSkill,
   extractReferencedSkillNames,
 } from "./domains.js";
-import { resolveSkillRoots } from "./roots.js";
+import {
+  DEFAULT_SKILL_INDEX_CACHE_TTL_MS,
+  resolveSkillIndexCacheTtlMs,
+  resolveSkillRoots,
+} from "./roots.js";
 import { SKILL_SOURCE_ORDER } from "./types.js";
 import type {
   AvailableSkill,
@@ -20,7 +24,6 @@ import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 
 export { extractReferencedSkillNames } from "./domains.js";
 
-const SKILL_INDEX_CACHE_TTL_MS = 60_000;
 const SKILL_INDEX_MAX_DEPTH = 32;
 
 interface CachedSkillIndex {
@@ -261,11 +264,11 @@ async function getCachedSkillIndex(
   options: { cacheTtlMs?: number; nowMs?: number } & SkillIndexOptions = {},
 ): Promise<Map<string, AvailableSkill>> {
   const nowMs = options.nowMs ?? Date.now();
-  const cacheTtlMs = options.cacheTtlMs ?? SKILL_INDEX_CACHE_TTL_MS;
+  const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_SKILL_INDEX_CACHE_TTL_MS;
   const disabledCacheKey = options.disabledSkillNames
     ? [...options.disabledSkillNames].sort().join(",")
     : "";
-  const cacheKey = `${root}\0${options.source ?? ""}\0${disabledCacheKey}`;
+  const cacheKey = `${root}\0${options.source ?? ""}\0${disabledCacheKey}\0${cacheTtlMs}`;
   sweepExpiredSkillIndexes(nowMs);
 
   const cached = skillIndexCache.get(cacheKey);
@@ -294,6 +297,8 @@ async function listSkillIndexes(
   params: SkillResolutionParams,
 ): Promise<Array<Map<string, AvailableSkill>>> {
   const stateDir = params.api.runtime.state.resolveStateDir(process.env);
+  const cacheTtlMs =
+    params.cacheTtlMs ?? resolveSkillIndexCacheTtlMs(params.api.config);
   let disabledBundledSkillNames: Set<string> | undefined;
   const getDisabledBundledSkillNames = async () => {
     disabledBundledSkillNames ??= await readDisabledBundledSkillNames(stateDir);
@@ -304,7 +309,7 @@ async function listSkillIndexes(
   for (const root of resolveSkillRoots(params)) {
     indexes.push(
       await getCachedSkillIndex(root.path, {
-        cacheTtlMs: params.cacheTtlMs,
+        cacheTtlMs,
         disabledSkillNames:
           root.source === "bundled"
             ? await getDisabledBundledSkillNames()

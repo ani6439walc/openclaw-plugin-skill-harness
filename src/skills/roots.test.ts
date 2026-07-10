@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveSkillRoots } from "./roots.js";
+import { resolveSkillIndexCacheTtlMs, resolveSkillRoots } from "./roots.js";
 import type { OpenClawPluginApi } from "../../api.js";
 
 function createApi(params: {
@@ -22,6 +22,22 @@ function createApi(params: {
 }
 
 describe("resolveSkillRoots", () => {
+  it("uses the OpenClaw skill watcher debounce as the index cache TTL", () => {
+    expect(
+      resolveSkillIndexCacheTtlMs({
+        skills: { load: { watch: true, watchDebounceMs: 5_000 } },
+      }),
+    ).toBe(5_000);
+    expect(
+      resolveSkillIndexCacheTtlMs({
+        skills: { load: { watch: false, watchDebounceMs: 5_000 } },
+      }),
+    ).toBe(60_000);
+    expect(
+      resolveSkillIndexCacheTtlMs({ skills: { load: { watch: true } } }),
+    ).toBe(60_000);
+  });
+
   it("orders documented OpenClaw skill roots by precedence", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-roots-"));
     const workspaceDir = path.join(tmp, "workspace");

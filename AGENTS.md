@@ -82,6 +82,12 @@ Rules:
 - Startup initialization may copy example intent files from `skills/skill-harness/assets/*.md` into an absent or empty runtime `intents/` directory.
 - Startup initialization must not overwrite existing runtime intent files.
 
+## Skill visibility policy
+
+`skill_list` and `skill_view` deliberately inventory every skill in the invoking agent's resolved roots. The invoking agent ID selects its workspace roots, but the indexer must not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists. This is an intentional product boundary: these tools expose the root inventory, subject only to source precedence and disabled bundled skill entries. Do not add `resolveAgentSkillsFilter()` or equivalent filtering unless Baby explicitly changes this policy; that change requires focused tests plus README and migration documentation.
+
+The indexer uses `skills.load.watchDebounceMs` as its cache TTL only when `skills.load.watch` is `true`; otherwise it retains the 60-second default. This is polling, not a filesystem watcher. Keep the TTL in the cache key so live configuration changes cannot reuse indexes created under a different refresh interval.
+
 ## Source Map
 
 Use the existing module boundaries:

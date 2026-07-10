@@ -3,7 +3,8 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
 import { manageSkill } from "./manage.js";
-import type { AvailableSkill, SkillSource } from "./types.js";
+import { relatedSkillsBySkillName } from "./related.js";
+import type { SkillSource } from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 import type { IntentCatalogEntry } from "../types.js";
 
@@ -63,167 +64,146 @@ function defaultAgentId(): string {
   return "main";
 }
 
-type RelatedSkillDirection = "current_to_related" | "related_to_current";
-
-interface RelatedSkillResult {
-  name: string;
-  reason: string;
-  direction: RelatedSkillDirection;
-}
-
-function relatedSkillsBySkillName(
-  skills: readonly AvailableSkill[],
-): Map<string, RelatedSkillResult[]> {
-  const visibleSkills = new Map(
-    skills.map((skill) => [skill.name.toLowerCase(), skill]),
-  );
-  const outgoingBySkill = new Map<string, RelatedSkillResult[]>();
-  const incomingBySkill = new Map<string, RelatedSkillResult[]>();
-
-  for (const skill of skills) {
-    const skillName = skill.name.toLowerCase();
-    for (const relation of skill.relatedSkills ?? []) {
-      const target = visibleSkills.get(relation.name.toLowerCase());
-      if (!target || target.name.toLowerCase() === skillName) continue;
-
-      const outgoing = outgoingBySkill.get(skillName) ?? [];
-      outgoing.push({
-        name: target.name,
-        reason: relation.reason,
-        direction: "current_to_related",
-      });
-      outgoingBySkill.set(skillName, outgoing);
-
-      const targetName = target.name.toLowerCase();
-      const incoming = incomingBySkill.get(targetName) ?? [];
-      incoming.push({
-        name: skill.name,
-        reason: relation.reason,
-        direction: "related_to_current",
-      });
-      incomingBySkill.set(targetName, incoming);
-    }
-  }
-
-  return new Map(
-    skills.map((skill) => {
-      const skillName = skill.name.toLowerCase();
-      const incoming = incomingBySkill.get(skillName) ?? [];
-      incoming.sort((left, right) => left.name.localeCompare(right.name));
-      return [
-        skillName,
-        [...(outgoingBySkill.get(skillName) ?? []), ...incoming],
-      ];
-    }),
-  );
+function toolAgentId(context: { agentId?: string }): string | undefined {
+  return context.agentId?.trim() || undefined;
 }
 
 export function registerSkillTools(
   api: OpenClawPluginApi,
   options: RegisterSkillToolsOptions = {},
 ): void {
-  api.registerTool({
-    name: "skill_list",
-    label: "List Skills",
-    description:
-      "List OpenClaw skills visible to the current agent. Each related_skills entry is a direct optional relation: current_to_related is declared by the returned skill, while related_to_current is declared by another visible skill. Use skill_view to read full SKILL.md content or linked support files.",
-    parameters: Type.Object({
-      source: Type.Optional(
-        Type.Union([
-          Type.Literal("workspace"),
-          Type.Literal("project-agent"),
-          Type.Literal("personal-agent"),
-          Type.Literal("managed"),
-          Type.Literal("bundled"),
-          Type.Literal("extra"),
-          Type.Literal("plugin"),
-        ]),
-      ),
-      offset: Type.Optional(
-        Type.Number({
-          description:
-            "Zero-based result offset for pagination. Defaults to 0.",
+  api.registerTool(
+    (toolContext) => {
+      const agentId = toolAgentId(toolContext);
+      if (!agentId) return null;
+      return {
+        name: "skill_list",
+        label: "List Skills",
+        description:
+          "List OpenClaw skills visible to the current agent. Set show_related to include direct optional relations: current-to-related is declared by the returned skill, while related-to-current is declared by another visible skill. Use skill_view to read full SKILL.md content or linked support files.",
+        parameters: Type.Object({
+          source: Type.Optional(
+            Type.Union([
+              Type.Literal("workspace"),
+              Type.Literal("project-agent"),
+              Type.Literal("personal-agent"),
+              Type.Literal("managed"),
+              Type.Literal("bundled"),
+              Type.Literal("extra"),
+              Type.Literal("plugin"),
+            ]),
+          ),
+          offset: Type.Optional(
+            Type.Number({
+              description:
+                "Zero-based result offset for pagination. Defaults to 0.",
+            }),
+          ),
+          limit: Type.Optional(
+            Type.Number({
+              description:
+                "Maximum number of skills to return. Defaults to 150 and is capped at 500.",
+            }),
+          ),
+          show_stats: Type.Optional(
+            Type.Boolean({
+              description:
+                "When true, include per-skill usage statistics from stats.json in each returned skill.",
+            }),
+          ),
+          show_related: Type.Optional(
+            Type.Boolean({
+              description:
+                "When true, include direct related skills in each returned skill.",
+            }),
+          ),
         }),
-      ),
-      limit: Type.Optional(
-        Type.Number({
-          description:
-            "Maximum number of skills to return. Defaults to 150 and is capped at 500.",
-        }),
-      ),
-      show_stats: Type.Optional(
-        Type.Boolean({
-          description:
-            "When true, include per-skill usage statistics from stats.json in each returned skill.",
-        }),
-      ),
-    }),
-    async execute(_toolCallId, params) {
-      const { offset, limit } = paginationParams(params);
-      const showStats = booleanParam(params, "show_stats");
-      const skills = await listAvailableSkills({
-        api,
-        agentId: defaultAgentId(),
-        intents: options.getIntents?.(),
-        source: optionalStringParam(params, "source") as
-          SkillSource | undefined,
-      });
-      const relatedSkills = relatedSkillsBySkillName(skills);
-      const page = skills.slice(offset, offset + limit);
-      const nextOffset = offset + page.length;
-      const hasMore = nextOffset < skills.length;
-      const usageStats = showStats
-        ? await readSkillUsageStats({ api, agentId: defaultAgentId() })
-        : undefined;
-      return jsonToolResult({
-        success: true,
-        total: skills.length,
-        count: page.length,
-        offset,
-        limit,
-        has_more: hasMore,
-        ...(hasMore ? { next_offset: nextOffset } : {}),
-        skills: page.map((skill) => ({
-          name: skill.name,
-          description: skill.description,
-          source: skill.source,
-          domains: skill.domains ?? [],
-          path: skill.location,
-          related_skills: relatedSkills.get(skill.name.toLowerCase()) ?? [],
-          ...(usageStats
-            ? { usage_stats: skillUsageStatsForName(usageStats, skill.name) }
-            : {}),
-        })),
-      });
+        async execute(_toolCallId, params) {
+          const { offset, limit } = paginationParams(params);
+          const showStats = booleanParam(params, "show_stats");
+          const showRelated = booleanParam(params, "show_related");
+          const skills = await listAvailableSkills({
+            api,
+            agentId,
+            intents: options.getIntents?.(),
+            source: optionalStringParam(params, "source") as
+              SkillSource | undefined,
+          });
+          const relatedSkills = showRelated
+            ? relatedSkillsBySkillName(skills)
+            : undefined;
+          const page = skills.slice(offset, offset + limit);
+          const nextOffset = offset + page.length;
+          const hasMore = nextOffset < skills.length;
+          const usageStats = showStats
+            ? await readSkillUsageStats({ api, agentId })
+            : undefined;
+          return jsonToolResult({
+            success: true,
+            total: skills.length,
+            count: page.length,
+            offset,
+            limit,
+            has_more: hasMore,
+            ...(hasMore ? { next_offset: nextOffset } : {}),
+            skills: page.map((skill) => ({
+              name: skill.name,
+              description: skill.description,
+              source: skill.source,
+              domains: skill.domains ?? [],
+              path: skill.location,
+              ...(relatedSkills
+                ? {
+                    related_skills:
+                      relatedSkills.get(skill.name.toLowerCase()) ?? [],
+                  }
+                : {}),
+              ...(usageStats
+                ? {
+                    usage_stats: skillUsageStatsForName(usageStats, skill.name),
+                  }
+                : {}),
+            })),
+          });
+        },
+      };
     },
-  });
+    { name: "skill_list" },
+  );
 
-  api.registerTool({
-    name: "skill_view",
-    label: "View Skill",
-    description:
-      "Read a visible OpenClaw skill's SKILL.md content, or read one of its linked support files under references, templates, scripts, assets, or examples.",
-    parameters: Type.Object({
-      name: Type.String({ description: "Skill name to read." }),
-      file_path: Type.Optional(
-        Type.String({
-          description:
-            "Optional support file path under references/, templates/, scripts/, assets/, or examples/.",
+  api.registerTool(
+    (toolContext) => {
+      const agentId = toolAgentId(toolContext);
+      if (!agentId) return null;
+      return {
+        name: "skill_view",
+        label: "View Skill",
+        description:
+          "Read a visible OpenClaw skill's SKILL.md content, or read one of its linked support files under references, templates, scripts, assets, or examples.",
+        parameters: Type.Object({
+          name: Type.String({ description: "Skill name to read." }),
+          file_path: Type.Optional(
+            Type.String({
+              description:
+                "Optional support file path under references/, templates/, scripts/, assets/, or examples/.",
+            }),
+          ),
         }),
-      ),
-    }),
-    async execute(_toolCallId, params) {
-      return jsonToolResult(
-        await readAvailableSkill({
-          api,
-          agentId: defaultAgentId(),
-          name: requiredStringParam(params, "name"),
-          filePath: optionalStringParam(params, "file_path"),
-          intents: options.getIntents?.(),
-        }),
-      );
+        async execute(_toolCallId, params) {
+          return jsonToolResult(
+            await readAvailableSkill({
+              api,
+              agentId,
+              name: requiredStringParam(params, "name"),
+              filePath: optionalStringParam(params, "file_path"),
+              intents: options.getIntents?.(),
+            }),
+          );
+        },
+      };
     },
-  });
+    { name: "skill_view" },
+  );
 
   api.registerTool({
     name: "skill_manage",

@@ -26,6 +26,14 @@ export interface DeclaredRelatedSkill {
   reason: string;
 }
 
+export type RelatedSkillDirection = "current-to-related" | "related-to-current";
+
+export interface RelatedSkillResult {
+  name: string;
+  reason: string;
+  direction: RelatedSkillDirection;
+}
+
 export interface SkillRoot {
   path: string;
   source: SkillSource;
@@ -74,6 +82,7 @@ export type SkillReadResult =
       linked_files?: LinkedSkillFiles;
       usage_hint?: string | null;
       usage_stats: SkillUsageStats;
+      related_skills: RelatedSkillResult[];
       source?: SkillSource;
       domains: string[];
       readiness_status: "available";
@@ -85,6 +94,7 @@ export type SkillReadResult =
       content: string;
       file_type: string;
       domains: string[];
+      related_skills: RelatedSkillResult[];
       is_binary?: boolean;
     }
   | {

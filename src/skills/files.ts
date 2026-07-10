@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { findAvailableSkill, listAvailableSkills } from "./indexer.js";
+import { relatedSkillsBySkillName } from "./related.js";
 import type {
   LinkedSkillFiles,
   SkillReadParams,
@@ -135,6 +136,10 @@ export async function readAvailableSkill(
   }
 
   const skillDir = skillDirFromSkillPath(skill.location);
+  const relatedSkills =
+    relatedSkillsBySkillName(await listAvailableSkills(params)).get(
+      skill.name.toLowerCase(),
+    ) ?? [];
   if (!params.filePath) {
     try {
       const usageStats = await readSkillUsageStats(params);
@@ -148,6 +153,7 @@ export async function readAvailableSkill(
         linked_files: await listLinkedSkillFiles(skillDir),
         usage_hint: null,
         usage_stats: skillUsageStatsForName(usageStats, skill.name),
+        related_skills: relatedSkills,
         source: skill.source,
         domains: skill.domains ?? [],
         readiness_status: "available",
@@ -177,6 +183,7 @@ export async function readAvailableSkill(
       content: await fs.readFile(validation.resolvedPath, "utf-8"),
       file_type: path.extname(validation.normalizedFilePath),
       domains: skill.domains ?? [],
+      related_skills: relatedSkills,
     };
   } catch (err) {
     return {

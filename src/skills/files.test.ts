@@ -134,6 +134,7 @@ describe("readAvailableSkill", () => {
       file: "references/style.md",
       content: "Style guide",
       file_type: ".md",
+      related_skills: [],
     });
   });
 

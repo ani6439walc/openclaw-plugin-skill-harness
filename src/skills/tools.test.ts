@@ -8,15 +8,22 @@ import type { IntentCatalogEntry } from "../types.js";
 
 function createApi(
   stateDir: string,
-  workspaceDir: string,
+  workspaceDirs: string | Record<string, string>,
 ): OpenClawPluginApi & {
   registerTool: ReturnType<typeof vi.fn>;
 } {
+  const workspaceDirForAgent = (agentId: string) =>
+    typeof workspaceDirs === "string"
+      ? workspaceDirs
+      : (workspaceDirs[agentId] ?? "");
   return {
     config: {},
     runtime: {
       state: { resolveStateDir: () => stateDir },
-      agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+      agent: {
+        resolveAgentWorkspaceDir: (_config, agentId) =>
+          workspaceDirForAgent(agentId),
+      },
     },
     registerTool: vi.fn(),
   } as unknown as OpenClawPluginApi & {
@@ -93,6 +100,28 @@ async function runTool(tool: unknown, params: Record<string, unknown>) {
   return JSON.parse(result.content[0]?.text ?? "{}");
 }
 
+function toolsForAgent(
+  api: ReturnType<typeof createApi>,
+  agentId = "main",
+): Map<string, unknown> {
+  return new Map(
+    api.registerTool.mock.calls.flatMap(([registeredTool]) => {
+      const resolved =
+        typeof registeredTool === "function"
+          ? (registeredTool as (context: { agentId?: string }) => unknown)({
+              agentId,
+            })
+          : registeredTool;
+      const tools = Array.isArray(resolved) ? resolved : [resolved];
+      return tools.flatMap((tool) =>
+        tool && typeof tool === "object" && "name" in tool
+          ? [[tool.name, tool] as const]
+          : [],
+      );
+    }),
+  );
+}
+
 describe("registerSkillTools", () => {
   it("registers skill_list, skill_view, and skill_manage tools", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
@@ -101,11 +130,52 @@ describe("registerSkillTools", () => {
     registerSkillTools(api);
 
     expect(api.registerTool).toHaveBeenCalledTimes(3);
-    expect(api.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
+    expect([...toolsForAgent(api).keys()]).toEqual([
       "skill_list",
       "skill_view",
       "skill_manage",
     ]);
+    const toolsWithoutAgent = toolsForAgent(api, "");
+    expect(toolsWithoutAgent.has("skill_list")).toBe(false);
+    expect(toolsWithoutAgent.has("skill_view")).toBe(false);
+  });
+
+  it("resolves skills for the agent that invokes the tool", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const stateDir = path.join(tmp, "state");
+    const mainWorkspace = path.join(tmp, "main-workspace");
+    const analystWorkspace = path.join(tmp, "analyst-workspace");
+    const api = createApi(stateDir, {
+      analyst: analystWorkspace,
+      main: mainWorkspace,
+    });
+    writeSkill(mainWorkspace, "main-only");
+    writeSkill(analystWorkspace, "analyst-only");
+    registerSkillTools(api);
+
+    const mainTools = toolsForAgent(api, "main");
+    const analystTools = toolsForAgent(api, "analyst");
+
+    await expect(
+      runTool(mainTools.get("skill_list"), {}),
+    ).resolves.toMatchObject({
+      skills: expect.arrayContaining([
+        expect.objectContaining({ name: "main-only" }),
+      ]),
+    });
+    await expect(
+      runTool(analystTools.get("skill_list"), {}),
+    ).resolves.toMatchObject({
+      skills: expect.arrayContaining([
+        expect.objectContaining({ name: "analyst-only" }),
+      ]),
+    });
+    await expect(
+      runTool(analystTools.get("skill_view"), { name: "main-only" }),
+    ).resolves.toMatchObject({
+      success: false,
+      available_skills: expect.arrayContaining(["analyst-only"]),
+    });
   });
 
   it("lists and views available skills", async () => {
@@ -126,9 +196,7 @@ describe("registerSkillTools", () => {
       },
     });
     registerSkillTools(api, { getIntents: () => TOOL_TEST_INTENTS });
-    const tools = new Map(
-      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
-    );
+    const tools = toolsForAgent(api);
 
     await expect(
       runTool(tools.get("skill_list"), { source: "workspace" }),
@@ -148,6 +216,7 @@ describe("registerSkillTools", () => {
       source: "workspace",
     });
     expect(listWithoutStats.skills[0]).not.toHaveProperty("usage_stats");
+    expect(listWithoutStats.skills[0]).not.toHaveProperty("related_skills");
 
     await expect(
       runTool(tools.get("skill_list"), {
@@ -207,12 +276,20 @@ describe("registerSkillTools", () => {
       nextjs: "Next.js App Router and deployment.",
     });
     registerSkillTools(api);
-    const tools = new Map(
-      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
-    );
+    const tools = toolsForAgent(api);
+
+    const resultWithoutRelatedSkills = await runTool(tools.get("skill_list"), {
+      source: "workspace",
+    });
+    expect(
+      resultWithoutRelatedSkills.skills.every(
+        (skill: Record<string, unknown>) => !("related_skills" in skill),
+      ),
+    ).toBe(true);
 
     const result = await runTool(tools.get("skill_list"), {
       source: "workspace",
+      show_related: true,
     });
     const skillsByName = new Map(
       result.skills.map((skill: { name: string }) => [skill.name, skill]),
@@ -223,12 +300,12 @@ describe("registerSkillTools", () => {
         {
           name: "react",
           reason: "React fundamentals and patterns.",
-          direction: "current_to_related",
+          direction: "current-to-related",
         },
         {
           name: "react",
           reason: "Next.js App Router and deployment.",
-          direction: "related_to_current",
+          direction: "related-to-current",
         },
       ],
     });
@@ -237,12 +314,30 @@ describe("registerSkillTools", () => {
         {
           name: "nextjs",
           reason: "Next.js App Router and deployment.",
-          direction: "current_to_related",
+          direction: "current-to-related",
         },
         {
           name: "nextjs",
           reason: "React fundamentals and patterns.",
-          direction: "related_to_current",
+          direction: "related-to-current",
+        },
+      ],
+    });
+
+    await expect(
+      runTool(tools.get("skill_view"), { name: "nextjs" }),
+    ).resolves.toMatchObject({
+      success: true,
+      related_skills: [
+        {
+          name: "react",
+          reason: "React fundamentals and patterns.",
+          direction: "current-to-related",
+        },
+        {
+          name: "react",
+          reason: "Next.js App Router and deployment.",
+          direction: "related-to-current",
         },
       ],
     });
@@ -257,15 +352,14 @@ describe("registerSkillTools", () => {
     });
     writeSkill(workspaceDir, "beta");
     registerSkillTools(api);
-    const tools = new Map(
-      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
-    );
+    const tools = toolsForAgent(api);
 
     await expect(
       runTool(tools.get("skill_list"), {
         source: "workspace",
         offset: 1,
         limit: 1,
+        show_related: true,
       }),
     ).resolves.toMatchObject({
       skills: [
@@ -275,7 +369,7 @@ describe("registerSkillTools", () => {
             {
               name: "alpha",
               reason: "Alpha delegates the next step to beta.",
-              direction: "related_to_current",
+              direction: "related-to-current",
             },
           ],
         },
@@ -297,12 +391,11 @@ describe("registerSkillTools", () => {
       target: "Must not survive workspace precedence.",
     });
     registerSkillTools(api);
-    const tools = new Map(
-      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
-    );
+    const tools = toolsForAgent(api);
 
     const workspaceOnly = await runTool(tools.get("skill_list"), {
       source: "workspace",
+      show_related: true,
     });
     expect(
       workspaceOnly.skills.find(
@@ -310,7 +403,9 @@ describe("registerSkillTools", () => {
       ),
     ).toMatchObject({ related_skills: [] });
 
-    const allSources = await runTool(tools.get("skill_list"), {});
+    const allSources = await runTool(tools.get("skill_list"), {
+      show_related: true,
+    });
     expect(
       allSources.skills.find(
         (skill: { name: string }) => skill.name === "target",
@@ -320,7 +415,7 @@ describe("registerSkillTools", () => {
         {
           name: "managed-source",
           reason: "Visible only without a source filter.",
-          direction: "related_to_current",
+          direction: "related-to-current",
         },
       ],
     });
@@ -338,12 +433,11 @@ describe("registerSkillTools", () => {
       "---\nname: legacy-source\ndescription: Legacy relation format.\nmetadata:\n  hermes:\n    related_skills:\n      - target\n---\n\n# Legacy Source\n",
     );
     registerSkillTools(api);
-    const tools = new Map(
-      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
-    );
+    const tools = toolsForAgent(api);
 
     const result = await runTool(tools.get("skill_list"), {
       source: "workspace",
+      show_related: true,
     });
 
     expect(
@@ -364,9 +458,7 @@ describe("registerSkillTools", () => {
       writeSkill(workspaceDir, `skill-${String(index).padStart(3, "0")}`);
     }
     registerSkillTools(api);
-    const tools = new Map(
-      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
-    );
+    const tools = toolsForAgent(api);
 
     await expect(
       runTool(tools.get("skill_list"), { source: "workspace" }),
@@ -414,9 +506,7 @@ describe("registerSkillTools", () => {
     const stateDir = path.join(tmp, "state");
     const api = createApi(stateDir, workspaceDir);
     registerSkillTools(api);
-    const tools = new Map(
-      api.registerTool.mock.calls.map(([tool]) => [tool.name, tool]),
-    );
+    const tools = toolsForAgent(api);
 
     await expect(
       runTool(tools.get("skill_manage"), {

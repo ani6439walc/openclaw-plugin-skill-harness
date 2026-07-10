@@ -5,6 +5,18 @@ import type { OpenClawPluginApi } from "../../api.js";
 import type { SkillRoot, SkillSource } from "./types.js";
 
 const require = createRequire(import.meta.url);
+export const DEFAULT_SKILL_INDEX_CACHE_TTL_MS = 60_000;
+
+function readSkillLoadConfig(
+  config: unknown,
+): Record<string, unknown> | undefined {
+  if (!config || typeof config !== "object") return;
+  const skills = (config as { skills?: unknown }).skills;
+  if (!skills || typeof skills !== "object") return;
+  const load = (skills as { load?: unknown }).load;
+  if (!load || typeof load !== "object" || Array.isArray(load)) return;
+  return load as Record<string, unknown>;
+}
 
 function normalizePath(input: string, homeDir: string): string | undefined {
   const trimmed = input.trim();
@@ -17,16 +29,25 @@ function normalizePath(input: string, homeDir: string): string | undefined {
 }
 
 function readExtraSkillDirs(config: unknown): string[] {
-  if (!config || typeof config !== "object") return [];
-  const skills = (config as { skills?: unknown }).skills;
-  if (!skills || typeof skills !== "object") return [];
-  const load = (skills as { load?: unknown }).load;
-  if (!load || typeof load !== "object") return [];
-  const extraDirs = (load as { extraDirs?: unknown }).extraDirs;
+  const extraDirs = readSkillLoadConfig(config)?.extraDirs;
   if (!Array.isArray(extraDirs)) return [];
   return extraDirs.filter(
     (entry): entry is string => typeof entry === "string",
   );
+}
+
+export function resolveSkillIndexCacheTtlMs(config: unknown): number {
+  const load = readSkillLoadConfig(config);
+  if (load?.watch !== true) return DEFAULT_SKILL_INDEX_CACHE_TTL_MS;
+  const debounceMs = load.watchDebounceMs;
+  if (
+    typeof debounceMs !== "number" ||
+    !Number.isFinite(debounceMs) ||
+    debounceMs < 0
+  ) {
+    return DEFAULT_SKILL_INDEX_CACHE_TTL_MS;
+  }
+  return Math.floor(debounceMs);
 }
 
 function defaultBundledSkillsDir(): string | undefined {

@@ -32,9 +32,13 @@ function writeStats(
   fs.writeFileSync(statsFile, JSON.stringify({ schemaVersion: 1, skills }));
 }
 
-function createApi(stateDir: string, workspaceDir: string): OpenClawPluginApi {
+function createApi(
+  stateDir: string,
+  workspaceDir: string,
+  config: unknown = {},
+): OpenClawPluginApi {
   return {
-    config: {},
+    config,
     runtime: {
       state: { resolveStateDir: () => stateDir },
       agent: { resolveAgentWorkspaceDir: () => workspaceDir },
@@ -43,6 +47,48 @@ function createApi(stateDir: string, workspaceDir: string): OpenClawPluginApi {
 }
 
 describe("skill indexer", () => {
+  it("refreshes the index using the configured skill watcher debounce", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const api = createApi(stateDir, workspaceDir, {
+      skills: { load: { watch: true, watchDebounceMs: 5_000 } },
+    });
+    const skillDir = path.join(workspaceDir, "skills", "cached");
+
+    writeSkillAt(skillDir, "cached-skill", "Initial description.");
+    const initialSkills = await listAvailableSkills({
+      api,
+      agentId: "main",
+      nowMs: 0,
+    });
+    expect(
+      initialSkills.find((skill) => skill.name === "cached-skill"),
+    ).toMatchObject({
+      description: "Initial description.",
+    });
+
+    writeSkillAt(skillDir, "cached-skill", "Updated description.");
+    const cachedSkills = await listAvailableSkills({
+      api,
+      agentId: "main",
+      nowMs: 4_999,
+    });
+    expect(
+      cachedSkills.find((skill) => skill.name === "cached-skill"),
+    ).toMatchObject({
+      description: "Initial description.",
+    });
+    const refreshedSkills = await listAvailableSkills({
+      api,
+      agentId: "main",
+      nowMs: 5_000,
+    });
+    expect(
+      refreshedSkills.find((skill) => skill.name === "cached-skill"),
+    ).toMatchObject({ description: "Updated description." });
+  });
+
   it("lists nested skills across all roots using first-root precedence", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
     const workspaceDir = path.join(tmp, "workspace");
