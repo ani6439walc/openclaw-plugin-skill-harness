@@ -161,6 +161,11 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "first-class intent signals, not memory-only signals",
   "Encode the correction as an explicit step, Response Strategy rule, or Experience pitfall",
   "reusable fix/workaround/debugging path",
+  "high tool-call turn reveals a reusable way to reduce future calls",
+  "batch independent reads/searches",
+  "short one-purpose script",
+  "safe pipeline",
+  "more specific skill",
   "non-trivial tool-use pattern",
   "classification ambiguity",
   "fastpath gap",
@@ -211,6 +216,10 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "result-shaping parameter/configuration",
   "dependency or asset path",
   "required step ordering",
+  "Tool-call compression lessons are recordable",
+  "stable batching pattern",
+  "safe command pipeline",
+  "explicit skill route",
   "Routine tool usage",
   "Never capture environment-dependent failures as durable restrictions",
   "post-migration path mismatches",
@@ -275,7 +284,7 @@ describe("buildReviewPrompt", () => {
   it.each([
     [
       "skill-candidate",
-      "matched intent Markdown should preserve",
+      "tool-call compression tactics",
       "frontmatter skills, Concrete Workflow, or Experience",
     ],
     [
@@ -330,7 +339,7 @@ describe("buildReviewPrompt", () => {
     expect(prompt).not.toContain("missing-intent: Review focus:");
     expect(prompt).not.toContain("successful-pattern: stay precision-biased");
     expect(prompt).not.toContain(
-      "skill-candidate: accept small intent-local Experience notes",
+      "skill-candidate: first look for the smallest reusable Experience or Concrete Workflow edit",
     );
     expect(prompt).not.toContain(
       "entity-context: stay bounded to explicit TOOLS.md",
@@ -414,7 +423,13 @@ describe("buildReviewPrompt", () => {
       "successful-pattern: stay precision-biased; routine success is no_finding unless there is reusable ordering, parameters, recovery, or pitfalls",
     );
     expect(prompt).toContain(
-      "skill-candidate: accept small intent-local Experience notes only when concrete skill/tool evidence, parameters, recovery, or required ordering exists",
+      "skill-candidate: first look for the smallest reusable Experience or Concrete Workflow edit",
+    );
+    expect(prompt).toContain(
+      "When the trigger came from many tool calls, explicitly check whether future turns could use batched reads, one-purpose scripts, safe pipelines, reusable command templates, or a more specific skill",
+    );
+    expect(prompt).toContain(
+      "use the Intent Catalog to choose an existing umbrella intent before returning outside-intent-scope",
     );
     expect(prompt).toContain(
       "entity-context: stay bounded to explicit TOOLS.md, MEMORY.md, or memory-path signals and never copy raw private memory",
@@ -428,14 +443,18 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("Entity-context reviews are limited");
   });
 
-  it("biases examples toward no finding and repeats a final raw JSON contract after the snapshot", () => {
+  it("biases examples toward positive findings and repeats a final raw JSON contract after the snapshot", () => {
     const prompt = buildReviewPrompt(snapshot, ["skill-candidate"]);
 
     expect(prompt).toContain(
-      '{"findings":[{"trigger":"skill-candidate","hasFinding":false}]}',
+      "Example positive finding structure for a small intent Markdown edit already applied in the review workspace:",
     );
-    expect(prompt).not.toContain(
-      '{"trigger":"skill-candidate","hasFinding":true',
+    expect(prompt).toContain('{"trigger":"skill-candidate","hasFinding":true');
+    expect(prompt).toContain(
+      "Fallback no-finding structure for requested triggers only when no concrete improvement is justified:",
+    );
+    expect(prompt).toContain(
+      '{"findings":[{"trigger":"skill-candidate","hasFinding":false}]}',
     );
     expect(prompt).toContain("no Markdown code fences");
 
@@ -499,24 +518,23 @@ describe("buildReviewPrompt", () => {
     );
   });
 
+  it.each(["successful-pattern", "process-gap", "entity-context"] as const)(
+    "omits the full intent catalog for %s reviews",
+    (trigger) => {
+      const prompt = buildReviewPrompt(snapshot, [trigger]);
+
+      expect(prompt).toContain("## Matched Intent");
+      expect(prompt).toContain("- ID: other");
+      expect(prompt).toContain("## Available Skills");
+      expect(prompt).not.toContain("## Intent Catalog");
+      expect(prompt).toContain(
+        "The Intent Catalog section is omitted for these triggers",
+      );
+    },
+  );
+
   it.each([
     "skill-candidate",
-    "successful-pattern",
-    "process-gap",
-    "entity-context",
-  ] as const)("omits the full intent catalog for %s reviews", (trigger) => {
-    const prompt = buildReviewPrompt(snapshot, [trigger]);
-
-    expect(prompt).toContain("## Matched Intent");
-    expect(prompt).toContain("- ID: other");
-    expect(prompt).toContain("## Available Skills");
-    expect(prompt).not.toContain("## Intent Catalog");
-    expect(prompt).toContain(
-      "The Intent Catalog section is omitted for these triggers",
-    );
-  });
-
-  it.each([
     "missing-intent",
     "weak-intent",
     "behavior-fix",

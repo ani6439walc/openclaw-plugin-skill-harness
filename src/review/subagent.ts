@@ -64,10 +64,10 @@ const REVIEW_INSTRUCTIONS: Record<
 > = {
   "skill-candidate": {
     focus:
-      "Identify reusable skills, tools, execution sequences, tips, parameters, and pitfalls that the matched intent Markdown should preserve. When concrete skill usage or a tool-specific pitfall exists, prefer a small direct Experience edit over broad rewrites. Exclude one-off tool usage and capabilities outside the intent boundary.",
+      "Identify reusable skills, tools, execution sequences, tool-call compression tactics, tips, parameters, and pitfalls that the matched intent Markdown or an existing catalog intent should preserve. When concrete skill usage, required ordering, recovery, a tool-specific pitfall, or a safe way to reduce future tool calls exists, prefer a small direct Experience or Concrete Workflow edit over no_finding. Exclude one-off tool usage and capabilities outside durable intent boundaries.",
     goal: "Refine the matched intent Markdown's frontmatter skills, Concrete Workflow, or Experience when the sequence or lesson is stable.",
     workflow:
-      "skill-candidate: accept small intent-local Experience notes only when concrete skill/tool evidence, parameters, recovery, or required ordering exists. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
+      "skill-candidate: first look for the smallest reusable Experience or Concrete Workflow edit: concrete skill/tool evidence, stable parameters, recovery, pitfalls, required ordering, or tool-call compression. When the trigger came from many tool calls, explicitly check whether future turns could use batched reads, one-purpose scripts, safe pipelines, reusable command templates, or a more specific skill to reduce repeated calls. Prefer updating the matched intent; if it is the wrong boundary, use the Intent Catalog to choose an existing umbrella intent before returning outside-intent-scope. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
   },
   "process-gap": {
     focus:
@@ -121,6 +121,7 @@ const REVIEW_INSTRUCTIONS: Record<
 };
 
 const CATALOG_CONTEXT_TRIGGERS = new Set<ReviewTrigger>([
+  "skill-candidate",
   "missing-intent",
   "weak-intent",
   "behavior-fix",
@@ -157,6 +158,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - Act when the snapshot shows a user correction to style, tone, format, readability, verbosity, workflow, step ordering, tool choice, routing, or response strategy. Frustration phrases such as "stop doing that", "too verbose", "do not format it that way", "why explain", "just answer", "you always do Y", or explicit "remember this" are first-class intent signals, not memory-only signals.
 - Act when the user corrects the workflow, method, or step order. Encode the correction as an explicit step, Response Strategy rule, or Experience pitfall in the intent that governs that task class.
 - Act when the agent needed repeated attempts, hit a durable pitfall, recovered through a reusable fix/workaround/debugging path, or discovered stable parameters, paths, prerequisites, or ordering.
+- Act when a high tool-call turn reveals a reusable way to reduce future calls: batch independent reads/searches, assemble a short one-purpose script, use a safe pipeline or reusable command template, or route to a more specific skill that already encodes the workflow.
 - Act when a successful turn reveals a reusable workflow, checklist, template, decision step, verification pattern, non-trivial tool-use pattern, or compact response strategy that is missing from the matched intent.
 - Act when routing evidence shows classification ambiguity, a missing/weak trigger, missing example, wrong domain, fastpath gap, or false-positive keyword.
 - Act when the current intent Markdown is too vague, too narrow, overlapping another intent boundary, missing a needed skill/tool hint, or inconsistent with observed agent behavior.
@@ -198,6 +200,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - If a tool failed because of setup state, capture the fix method instead: install command, configuration step, environment variable, retry order, or diagnostic check. Prefer adding that fix to an existing setup/troubleshooting intent or the matched intent's Experience; never encode "this tool cannot work" as a standalone limitation.
 - "Nothing to save." is a real outcome, but not the default. Use it only when the conversation went smoothly, produced no user correction, and taught no new reusable technique.
 - Skill/tool experience lessons are recordable only when they capture a skill-specific pitfall and fix, error message or localization path, result-shaping parameter/configuration, reusable prompt/template/workflow, dependency or asset path, project entry point/module location, or required step ordering.
+- Tool-call compression lessons are recordable when they replace repeated manual calls with a stable batching pattern, short one-purpose script, safe command pipeline, reusable query/template, or explicit skill route. Preserve the exact command shape only when it is low-risk and reusable; otherwise preserve the decision rule and guardrails.
 - Routine tool usage, pure theory, and one-time operations are not recordable by themselves. Preserve them only when the snapshot shows a reusable pitfall, required ordering, stable parameter, recovery path, or skill/tool-specific lesson not already covered by the matched intent.
 - When evidence resembles an external learning entry, distill only the reusable title, context, solution steps, key paths, parameters, and keywords that directly improve the matched intent; do not propose external file formats or writes.
 
@@ -218,8 +221,8 @@ function buildIntentCraftRubric(includeTriggerKeywordRules: boolean): string {
 - For trigger keyword updates, reject generic words like "ok", "好", "不要", and one-off wording. Suggest removals only with concrete false-positive evidence.`
     : "";
   const noFindingRule = includeTriggerKeywordRules
-    ? "- Return no finding when the evidence does not justify a concrete intent Markdown improvement or trigger keyword suggestion."
-    : "- Return no finding when the evidence does not justify a concrete intent Markdown improvement.";
+    ? "- Before returning no finding, check whether a small Experience, Response Strategy, Concrete Workflow, frontmatter, or trigger keyword update would save future work. Return no finding only when the evidence still does not justify a concrete intent Markdown improvement or trigger keyword suggestion."
+    : "- Before returning no finding, check whether a small Experience, Response Strategy, Concrete Workflow, or frontmatter update would save future work. Return no finding only when the evidence still does not justify a concrete intent Markdown improvement.";
 
   return INTENT_CRAFT_RUBRIC_BASE.replace(
     INTENT_CRAFT_RUBRIC_TARGET_RULES_MARKER,
@@ -803,10 +806,11 @@ If matchedIntent is absent, return hasFinding=false unless the requested trigger
     })
     .join("\n\n");
 
-  const exampleFindings = triggers
+  const exampleNoFindings = triggers
     .map((trigger) => `{"trigger":"${trigger}","hasFinding":false}`)
     .join(",");
   const reasonCodeExampleTrigger = triggers[0] ?? "skill-candidate";
+  const positiveExampleTrigger = triggers[0] ?? "skill-candidate";
   const intentCraftRubric = buildIntentCraftRubric(
     keywordContract.includeRules,
   );
@@ -830,8 +834,11 @@ ${triggerPrompts}
 Output format: Return exactly one raw JSON object with no Markdown code fences and no surrounding prose. Do not write analysis, reasoning, or commentary outside the JSON. The entire response should be parseable by JSON.parse without cleanup.
 ${ULTRA_CONCISE_REVIEW_OUTPUT_STYLE}
 
-Example no-finding structure for the requested triggers:
-{"findings":[${exampleFindings}]}
+Example positive finding structure for a small intent Markdown edit already applied in the review workspace:
+{"findings":[{"trigger":"${positiveExampleTrigger}","hasFinding":true,"targetKind":"intent-markdown","operation":"refine","targetIntentIds":["matched-intent-id"],"dedupeKey":"stable-short-key","summary":"Preserve reusable workflow lesson","evidence":["Concrete snapshot evidence"],"correctionGoal":"Add a reusable Experience note","suggestedChange":"Added a concise Experience bullet with the reusable ordering, parameter, or pitfall."}]}
+
+Fallback no-finding structure for requested triggers only when no concrete improvement is justified:
+{"findings":[${exampleNoFindings}]}
 
 For hasFinding=false items:
 - reasonCode is optional but SHOULD be one of: ${NO_FINDING_REASON_CODE_LIST}.
@@ -1323,6 +1330,7 @@ export async function runReviewSubagent(params: {
         logger.warn("review findings rejected by schema", {
           invalidFindingCount: parsed.invalidRequestedPositiveFindings,
           requestedPositiveFindings: parsed.requestedPositiveFindings,
+          schemaRejectionReasonCounts: parsed.schemaRejectionReasonCounts,
         });
         const failure: ReviewSubagentResult = {
           findings: [],
