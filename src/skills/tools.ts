@@ -5,12 +5,15 @@ import { readAvailableSkill } from "./files.js";
 import { manageSkill } from "./manage.js";
 import { relatedSkillsBySkillName } from "./related.js";
 import { searchAvailableSkills } from "./search.js";
-import type { SkillSource } from "./types.js";
+import { SKILL_SOURCE_ORDER, type SkillSource } from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 import type { IntentCatalogEntry } from "../types.js";
 
 const DEFAULT_SKILL_LIST_LIMIT = 150;
 const MAX_SKILL_LIST_LIMIT = 500;
+const SKILL_SOURCE_SCHEMA = Type.Union(
+  SKILL_SOURCE_ORDER.map((source) => Type.Literal(source)),
+);
 
 export interface RegisterSkillToolsOptions {
   getIntents?: (agentId: string) => readonly IntentCatalogEntry[];
@@ -102,17 +105,7 @@ export function registerSkillTools(
         description:
           "List OpenClaw skills visible to the current agent. Set show_related to include direct optional relations: current-to-related is declared by the returned skill, while related-to-current is declared by another visible skill. Use skill_view to read full SKILL.md content or linked support files.",
         parameters: Type.Object({
-          source: Type.Optional(
-            Type.Union([
-              Type.Literal("workspace"),
-              Type.Literal("project-agent"),
-              Type.Literal("personal-agent"),
-              Type.Literal("managed"),
-              Type.Literal("bundled"),
-              Type.Literal("extra"),
-              Type.Literal("plugin"),
-            ]),
-          ),
+          source: Type.Optional(SKILL_SOURCE_SCHEMA),
           offset: Type.Optional(
             Type.Number({
               description:
@@ -204,17 +197,7 @@ export function registerSkillTools(
           query: Type.Optional(
             Type.String({ description: "Natural-language search phrase." }),
           ),
-          source: Type.Optional(
-            Type.Union([
-              Type.Literal("workspace"),
-              Type.Literal("project-agent"),
-              Type.Literal("personal-agent"),
-              Type.Literal("managed"),
-              Type.Literal("bundled"),
-              Type.Literal("extra"),
-              Type.Literal("plugin"),
-            ]),
-          ),
+          source: Type.Optional(SKILL_SOURCE_SCHEMA),
           domains: Type.Optional(
             Type.Array(Type.String(), {
               description: "Case-insensitive domain filters with OR semantics.",
