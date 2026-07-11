@@ -2,10 +2,6 @@ import crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  DEFAULT_PROVIDER,
-  parseModelRef,
-} from "openclaw/plugin-sdk/agent-runtime";
 import { z } from "zod";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
@@ -981,34 +977,6 @@ export function parseReviewFindings(
   return parseReviewFindingsDetailed(raw, requestedTriggers)?.findings;
 }
 
-function reviewModelCandidates(params: {
-  config: ResolvedSkillHarnessPluginConfig;
-  modelRef: { provider: string; model: string };
-}): { provider: string; model: string }[] {
-  const candidates = [params.modelRef];
-  const fallback = params.config.review.modelFallback;
-  if (fallback) {
-    try {
-      const parsed = parseModelRef(fallback, DEFAULT_PROVIDER);
-      if (
-        parsed &&
-        !candidates.some(
-          (candidate) =>
-            candidate.provider === parsed.provider &&
-            candidate.model === parsed.model,
-        )
-      ) {
-        candidates.push({ provider: parsed.provider, model: parsed.model });
-      }
-    } catch (err) {
-      logger.debug("skipping invalid review fallback model", {
-        error: err,
-      });
-    }
-  }
-  return candidates;
-}
-
 function asObjectRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -1253,218 +1221,196 @@ export async function runReviewSubagent(params: {
     : `agent:${params.agentId}:skill-harness-review:${suffix}`;
   const prompt = buildReviewPrompt(params.snapshot, params.triggers);
   const beforeIntentFiles = snapshotIntentFiles(params.intentDirectory);
-  const candidates = reviewModelCandidates(params);
-
-  for (const [index, modelRef] of candidates.entries()) {
-    const attemptRunId = index === 0 ? runId : `${runId}-retry-${index}`;
-    const hasFallbackAttempt = index < candidates.length - 1;
-    const retryRecoverableFailure = (
-      failure: ReviewSubagentResult,
-      retryable = true,
-    ): boolean => {
-      if (!retryable || !hasFallbackAttempt) return false;
-      logger.warn("review retrying fallback after failed attempt", {
-        outcome: failure.outcome,
-        modelRef,
+  const workspaceDir = createIntentWorkspace(beforeIntentFiles);
+  try {
+    const result = await params.api.runtime.agent.runEmbeddedAgent({
+      sessionId: runId,
+      sessionKey,
+      agentId: params.agentId,
+      messageProvider: params.messageProvider,
+      config: withReviewWorkspaceOnlyFsPolicy(
+        params.api.config,
+        params.agentId,
+      ),
+      prompt,
+      provider: params.modelRef.provider,
+      model: params.modelRef.model,
+      timeoutMs: params.config.review.timeoutMs,
+      runId,
+      workspaceDir,
+      agentDir: workspaceDir,
+      sessionFile: `/tmp/${runId}.session.jsonl`,
+      ...buildEmbeddedSubagentRunDefaults(),
+      modelRun: false,
+      promptMode: "minimal",
+      toolsAllow: buildReviewToolsAllow(params.triggers),
+      disableTools: false,
+      thinkLevel: params.config.review.thinking,
+    });
+    const embeddedError = extractEmbeddedRunError(result);
+    if (embeddedError) {
+      logger.warn("review subagent returned an error", {
+        error: embeddedError,
+        modelRef: params.modelRef,
       });
-      return true;
-    };
-    const workspaceDir = createIntentWorkspace(beforeIntentFiles);
-    try {
-      const result = await params.api.runtime.agent.runEmbeddedAgent({
-        sessionId: attemptRunId,
-        sessionKey,
-        agentId: params.agentId,
-        messageProvider: params.messageProvider,
-        config: withReviewWorkspaceOnlyFsPolicy(
-          params.api.config,
-          params.agentId,
-        ),
-        prompt,
-        provider: modelRef.provider,
-        model: modelRef.model,
-        timeoutMs: params.config.review.timeoutMs,
-        runId: attemptRunId,
-        workspaceDir,
-        agentDir: workspaceDir,
-        sessionFile: `/tmp/${attemptRunId}.session.jsonl`,
-        ...buildEmbeddedSubagentRunDefaults(),
-        modelRun: false,
-        promptMode: "minimal",
-        toolsAllow: buildReviewToolsAllow(params.triggers),
-        disableTools: false,
-        thinkLevel: params.config.review.thinking,
+      const failure: ReviewSubagentResult = {
+        findings: [],
+        outcome: "subagent-error",
+      };
+      return failure;
+    }
+    const rawReply = extractPayloadText(result);
+    const parsed = parseReviewFindingsDetailed(rawReply, params.triggers);
+    if (!parsed) {
+      logger.warn("review result parse failed", {
+        ...summarizeRawReply(rawReply),
       });
-      const embeddedError = extractEmbeddedRunError(result);
-      if (embeddedError) {
-        logger.warn("review subagent returned an error", {
-          error: embeddedError,
-          modelRef,
-        });
-        const failure: ReviewSubagentResult = {
-          findings: [],
-          outcome: "subagent-error",
-        };
-        if (retryRecoverableFailure(failure)) continue;
-        return failure;
-      }
-      const rawReply = extractPayloadText(result);
-      const parsed = parseReviewFindingsDetailed(rawReply, params.triggers);
-      if (!parsed) {
-        logger.warn("review result parse failed", {
-          ...summarizeRawReply(rawReply),
-        });
-        const failure: ReviewSubagentResult = {
-          findings: [],
-          outcome: "parse-failed",
-        };
-        if (retryRecoverableFailure(failure)) continue;
-        return failure;
-      }
-      if (
-        parsed.findings.length === 0 &&
-        parsed.requestedPositiveFindings > 0 &&
-        parsed.invalidRequestedPositiveFindings ===
-          parsed.requestedPositiveFindings
-      ) {
-        logger.warn("review findings rejected by schema", {
-          invalidFindingCount: parsed.invalidRequestedPositiveFindings,
-          requestedPositiveFindings: parsed.requestedPositiveFindings,
-          schemaRejectionReasonCounts: parsed.schemaRejectionReasonCounts,
-        });
-        const failure: ReviewSubagentResult = {
-          findings: [],
-          outcome: "schema-rejected",
-          ...(parsed.schemaRejectionReasonCounts
-            ? {
-                schemaRejectionReasonCounts: parsed.schemaRejectionReasonCounts,
-              }
-            : {}),
-        };
-        if (retryRecoverableFailure(failure)) continue;
-        return failure;
-      }
-      const afterIntentFiles = snapshotIntentFiles(workspaceDir);
-      const changedIds = changedIntentIds(beforeIntentFiles, afterIntentFiles);
-      const intentFindingTargets = new Set(
-        parsed.findings
-          .filter((finding) => finding.targetKind === "intent-markdown")
-          .flatMap((finding) => finding.targetIntentIds),
-      );
-      if (changedIds.length > 0 && intentFindingTargets.size === 0) {
-        const failure: ReviewSubagentResult = {
-          findings: [],
-          outcome: "validation-failed",
-          validationErrors: [
-            "review edited runtime intent files without returning an intent-markdown finding",
-          ],
-        };
-        if (retryRecoverableFailure(failure)) continue;
-        return failure;
-      }
-      const undeclaredChangedIds = undeclaredIntentEdits(
-        changedIds,
-        intentFindingTargets,
-      );
-      if (undeclaredChangedIds.length > 0) {
-        const failure: ReviewSubagentResult = {
-          findings: [],
-          outcome: "validation-failed",
-          validationErrors: [
-            `review edited undeclared runtime intent files: ${undeclaredChangedIds.join(", ")}`,
-          ],
-        };
-        if (retryRecoverableFailure(failure)) continue;
-        return failure;
-      }
-      if (changedIds.length === 0 && intentFindingTargets.size > 0) {
-        const failure: ReviewSubagentResult = {
-          findings: [],
-          outcome: "validation-failed",
-          validationErrors: [
-            "review returned an intent-markdown finding without editing runtime intent files",
-          ],
-        };
-        if (retryRecoverableFailure(failure)) continue;
-        return failure;
-      }
-      const declaredUnchangedIds = declaredIntentTargetsWithoutEdits(
-        intentFindingTargets,
-        changedIds,
-      );
-      if (declaredUnchangedIds.length > 0) {
-        const failure: ReviewSubagentResult = {
-          findings: [],
-          outcome: "validation-failed",
-          validationErrors: [
-            `review declared unchanged runtime intent files: ${declaredUnchangedIds.join(", ")}`,
-          ],
-        };
-        if (retryRecoverableFailure(failure)) continue;
-        return failure;
-      }
-      if (changedIds.length > 0) {
-        const validation = validateIntentDirectory(
-          workspaceDir,
-          existingIntentValidationTargets(
-            changedIds,
-            intentFindingTargets,
-            afterIntentFiles,
-          ),
-        );
-        if (!validation.valid) {
-          logger.warn("review produced invalid runtime intents", {
-            errors: validation.errors,
-          });
-          const failure: ReviewSubagentResult = {
-            findings: [],
-            outcome: "validation-failed",
-            validationErrors: validation.errors,
-          };
-          if (retryRecoverableFailure(failure)) continue;
-          return failure;
-        }
-      }
-      const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
-      const conflictIds = concurrentIntentConflicts(
-        beforeIntentFiles,
-        liveIntentFiles,
-        changedIds,
-      );
-      if (conflictIds.length > 0) {
-        logger.warn("review skipped concurrent runtime intent edits", {
-          conflictIntentIds: conflictIds,
-        });
-        return {
-          findings: [],
-          outcome: "validation-failed",
-          validationErrors: [
-            `runtime intent files changed during review: ${conflictIds.join(", ")}`,
-          ],
-        };
-      }
-      applyIntentWorkspaceChanges({
-        intentDirectory: params.intentDirectory,
-        before: beforeIntentFiles,
-        after: afterIntentFiles,
-        changedIds,
+      const failure: ReviewSubagentResult = {
+        findings: [],
+        outcome: "parse-failed",
+      };
+      return failure;
+    }
+    if (
+      parsed.findings.length === 0 &&
+      parsed.requestedPositiveFindings > 0 &&
+      parsed.invalidRequestedPositiveFindings ===
+        parsed.requestedPositiveFindings
+    ) {
+      logger.warn("review findings rejected by schema", {
+        invalidFindingCount: parsed.invalidRequestedPositiveFindings,
+        requestedPositiveFindings: parsed.requestedPositiveFindings,
+        schemaRejectionReasonCounts: parsed.schemaRejectionReasonCounts,
       });
-      return {
-        findings: parsed.findings,
-        ...(changedIds.length > 0 ? { changedIntentIds: changedIds } : {}),
-        outcome:
-          parsed.findings.length > 0 || changedIds.length > 0
-            ? "applied"
-            : "nofinding",
-        ...(parsed.noFindingReasonCounts
-          ? { noFindingReasonCounts: parsed.noFindingReasonCounts }
+      const failure: ReviewSubagentResult = {
+        findings: [],
+        outcome: "schema-rejected",
+        ...(parsed.schemaRejectionReasonCounts
+          ? {
+              schemaRejectionReasonCounts: parsed.schemaRejectionReasonCounts,
+            }
           : {}),
       };
-    } catch (err) {
-      logger.warn("review subagent error", { error: err, modelRef });
-    } finally {
-      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      return failure;
     }
+    const afterIntentFiles = snapshotIntentFiles(workspaceDir);
+    const changedIds = changedIntentIds(beforeIntentFiles, afterIntentFiles);
+    const intentFindingTargets = new Set(
+      parsed.findings
+        .filter((finding) => finding.targetKind === "intent-markdown")
+        .flatMap((finding) => finding.targetIntentIds),
+    );
+    if (changedIds.length > 0 && intentFindingTargets.size === 0) {
+      const failure: ReviewSubagentResult = {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: [
+          "review edited runtime intent files without returning an intent-markdown finding",
+        ],
+      };
+      return failure;
+    }
+    const undeclaredChangedIds = undeclaredIntentEdits(
+      changedIds,
+      intentFindingTargets,
+    );
+    if (undeclaredChangedIds.length > 0) {
+      const failure: ReviewSubagentResult = {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: [
+          `review edited undeclared runtime intent files: ${undeclaredChangedIds.join(", ")}`,
+        ],
+      };
+      return failure;
+    }
+    if (changedIds.length === 0 && intentFindingTargets.size > 0) {
+      const failure: ReviewSubagentResult = {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: [
+          "review returned an intent-markdown finding without editing runtime intent files",
+        ],
+      };
+      return failure;
+    }
+    const declaredUnchangedIds = declaredIntentTargetsWithoutEdits(
+      intentFindingTargets,
+      changedIds,
+    );
+    if (declaredUnchangedIds.length > 0) {
+      const failure: ReviewSubagentResult = {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: [
+          `review declared unchanged runtime intent files: ${declaredUnchangedIds.join(", ")}`,
+        ],
+      };
+      return failure;
+    }
+    if (changedIds.length > 0) {
+      const validation = validateIntentDirectory(
+        workspaceDir,
+        existingIntentValidationTargets(
+          changedIds,
+          intentFindingTargets,
+          afterIntentFiles,
+        ),
+      );
+      if (!validation.valid) {
+        logger.warn("review produced invalid runtime intents", {
+          errors: validation.errors,
+        });
+        const failure: ReviewSubagentResult = {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: validation.errors,
+        };
+        return failure;
+      }
+    }
+    const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
+    const conflictIds = concurrentIntentConflicts(
+      beforeIntentFiles,
+      liveIntentFiles,
+      changedIds,
+    );
+    if (conflictIds.length > 0) {
+      logger.warn("review skipped concurrent runtime intent edits", {
+        conflictIntentIds: conflictIds,
+      });
+      return {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: [
+          `runtime intent files changed during review: ${conflictIds.join(", ")}`,
+        ],
+      };
+    }
+    applyIntentWorkspaceChanges({
+      intentDirectory: params.intentDirectory,
+      before: beforeIntentFiles,
+      after: afterIntentFiles,
+      changedIds,
+    });
+    return {
+      findings: parsed.findings,
+      ...(changedIds.length > 0 ? { changedIntentIds: changedIds } : {}),
+      outcome:
+        parsed.findings.length > 0 || changedIds.length > 0
+          ? "applied"
+          : "nofinding",
+      ...(parsed.noFindingReasonCounts
+        ? { noFindingReasonCounts: parsed.noFindingReasonCounts }
+        : {}),
+    };
+  } catch (err) {
+    logger.warn("review subagent error", {
+      error: err,
+      modelRef: params.modelRef,
+    });
+  } finally {
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
   }
 
   return { findings: [], outcome: "subagent-error" };

@@ -3,9 +3,134 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import {
   buildIntentionEmbeddedRunParams,
+  getInstructionModelRef,
+  getModelRef,
+  getReviewModelRef,
   runIntentInstructionSubagent,
   runTopicSwitchSubagent,
 } from "./subagent.js";
+
+describe("model resolution", () => {
+  const api = {
+    config: {
+      agents: { defaults: { model: { primary: "anthropic/agent-primary" } } },
+    },
+  } as unknown as OpenClawPluginApi;
+  const currentRun = {
+    modelProviderId: "openai",
+    modelId: "session-model",
+  };
+
+  it("prefers the explicit scanner model", () => {
+    expect(
+      getModelRef(
+        api,
+        "main",
+        resolveConfig({
+          model: "bifrost/explicit",
+          modelFallback: "google/fallback",
+        }),
+        currentRun,
+      ),
+    ).toEqual({ provider: "bifrost", model: "explicit" });
+  });
+
+  it("prefers the current session over the agent primary and scanner fallback", () => {
+    expect(
+      getModelRef(
+        api,
+        "main",
+        resolveConfig({ modelFallback: "google/fallback" }),
+        currentRun,
+      ),
+    ).toEqual({ provider: "openai", model: "session-model" });
+  });
+
+  it("prefers the agent primary over the scanner fallback", () => {
+    expect(
+      getModelRef(
+        api,
+        "main",
+        resolveConfig({ modelFallback: "google/fallback" }),
+        {},
+      ),
+    ).toEqual({ provider: "anthropic", model: "agent-primary" });
+  });
+
+  it("uses the scanner fallback only when no earlier model resolves", () => {
+    expect(
+      getModelRef(
+        { config: {} } as OpenClawPluginApi,
+        "main",
+        resolveConfig({ modelFallback: "google/fallback" }),
+        {},
+      ),
+    ).toEqual({ provider: "google", model: "fallback" });
+  });
+
+  it("applies the same priority to instruction model resolution", () => {
+    expect(
+      getInstructionModelRef(
+        api,
+        "main",
+        resolveConfig({
+          modelFallback: "google/scanner-fallback",
+          instruction: { modelFallback: "google/instruction-fallback" },
+        }),
+        currentRun,
+      ),
+    ).toEqual({ provider: "openai", model: "session-model" });
+  });
+
+  it("applies the same priority to review model resolution", () => {
+    expect(
+      getReviewModelRef(
+        api,
+        "main",
+        resolveConfig({
+          review: {
+            model: "bifrost/review-explicit",
+            modelFallback: "google/review-fallback",
+          },
+        }),
+        currentRun,
+      ),
+    ).toEqual({ provider: "bifrost", model: "review-explicit" });
+
+    expect(
+      getReviewModelRef(
+        api,
+        "main",
+        resolveConfig({
+          review: { modelFallback: "google/review-fallback" },
+        }),
+        currentRun,
+      ),
+    ).toEqual({ provider: "openai", model: "session-model" });
+
+    expect(
+      getReviewModelRef(
+        api,
+        "main",
+        resolveConfig({
+          review: { modelFallback: "google/review-fallback" },
+        }),
+        {},
+      ),
+    ).toEqual({ provider: "anthropic", model: "agent-primary" });
+
+    expect(
+      getReviewModelRef(
+        { config: {} } as OpenClawPluginApi,
+        "main",
+        resolveConfig({
+          review: { modelFallback: "google/review-fallback" },
+        }),
+        {},
+      ),
+    ).toEqual({ provider: "google", model: "review-fallback" });
+  });
+});
 
 describe("buildIntentionEmbeddedRunParams", () => {
   it("uses a run-specific session file", () => {

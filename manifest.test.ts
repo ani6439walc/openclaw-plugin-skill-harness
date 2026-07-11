@@ -72,11 +72,37 @@ describe("skill-harness manifest", () => {
     expect(timeoutMs.maximum).toBe(120000);
   });
 
+  it("does not apply null defaults to optional model strings", () => {
+    const properties = manifest.configSchema.properties;
+    const optionalModels = [
+      properties.model,
+      properties.modelFallback,
+      properties.instruction.properties.model,
+      properties.instruction.properties.modelFallback,
+      properties.review.properties.model,
+      properties.review.properties.modelFallback,
+    ];
+
+    for (const model of optionalModels) {
+      expect(model.type).toBe("string");
+      expect(model).not.toHaveProperty("default");
+    }
+  });
+
   it("exposes disabled-by-default Review settings", () => {
     const review = manifest.configSchema.properties.review;
     expect(manifest.configSchema.properties).not.toHaveProperty("evolution");
     expect(review.description).toContain("Intent Review runs");
     expect(review.properties.enabled.default).toBe(false);
+    expect(review.properties.model.description).toContain(
+      "inherits the top-level model",
+    );
+    expect(review.properties.modelFallback.description).toContain(
+      "Last-resort Intent Review model",
+    );
+    expect(review.properties.modelFallback.description).toContain(
+      "not a runtime retry model",
+    );
     expect(review.properties.timeoutMs).toMatchObject({
       minimum: 250,
       maximum: 600000,
@@ -98,10 +124,13 @@ describe("skill-harness manifest", () => {
     expect(instruction.description).toContain("instruction writer");
     expect(instruction.properties.enabled.default).toBe(true);
     expect(instruction.properties.model.description).toContain(
-      "Dedicated model",
+      "Explicit dedicated model",
     );
     expect(instruction.properties.modelFallback.description).toContain(
-      "Fallback model",
+      "Last-resort instruction writer model",
+    );
+    expect(instruction.properties.modelFallback.description).toContain(
+      "not a runtime retry model",
     );
     expect(instruction.properties.thinking).toMatchObject({
       default: "medium",
