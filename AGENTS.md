@@ -103,7 +103,7 @@ Use the existing module boundaries:
 - `src/review/log.ts`: review log schema validation/migration and root trigger keyword state. Legacy `items` are dropped during migration; there is no tool/command action surface.
 - `src/subagent-runtime.ts`: shared embedded subagent run defaults and error-payload extraction helpers used by classification and review subagents.
 - `src/classification/prompts.ts`, `src/classification/subagent.ts`, `src/classification/conversation.ts`, `src/review/subagent.ts`, `src/review/triggers.ts`: classification and review logic.
-- `src/intents/skill-references.ts`: resolves frontmatter `skills[]` dependencies and backward-compatible inline `skill: <name>` references into available `SKILL.md` metadata for instruction writing and Intent Review.
+- `src/intents/skill-references.ts`: resolves frontmatter `skills[]` dependencies into available `SKILL.md` metadata for instruction writing and Intent Review. Intent prompt/body text is not scanned for skill references.
 - `src/review/queue.ts`: serializes background Intent Review work so hook handling stays fail-open.
 - `src/review/trigger-keywords.ts`: default and normalized runtime keyword sets for `successful-pattern`, `behavior-fix`, and `entity-context` triggers.
 - `src/session/guards.ts`: session eligibility guards.
@@ -198,7 +198,7 @@ For split, merge, rename, deletion, or any broad intent-boundary change, show th
 - Use `api.pluginConfig` plus `resolveLivePluginConfigObject()` for live plugin config.
 - Use `api.runtime.state.resolveStateDir(process.env)` for OpenClaw state directory resolution.
 - Use `api.runtime.agent.runEmbeddedAgent()` for embedded review/classifier runs; do not use legacy PI aliases.
-- Tool-free classifier runs may use `modelRun=false`, `promptMode="none"`, and `toolsAllow: []`. When an embedded workflow needs tools, use `modelRun=false`, `promptMode="minimal"`, `disableTools=false`, and an exact allowlist: the instruction writer uses `skill_view`; Intent Review uses `read`, `write`, and `apply_patch`, adding `skill_view` only for skill-candidate reviews. Do not use `promptMode="none"` for a run that needs tools because it skips tool construction.
+- Tool-free classifier runs may use `modelRun=false`, `promptMode="none"`, and `toolsAllow: []`. When an embedded workflow needs tools, use `modelRun=false`, `promptMode="minimal"`, `disableTools=false`, and an exact allowlist: the instruction writer uses `skill_view` and `skill_search`; Intent Review uses `read`, `write`, and `apply_patch`, adding `skill_view` only for skill-candidate reviews. The instruction writer must return raw JSON with exactly `instruction_hint` and the intentionally spelled `additional_candinate_skills`; resolved additional names are deduplicated into the main agent's injected skill candidates. Do not use `promptMode="none"` for a run that needs tools because it skips tool construction.
 - If an SDK import path is uncertain or looks deprecated, verify it against the installed `openclaw` package before coding from memory.
 - Keep `zod` imports direct from `"zod"`; this plugin owns `zod` as a runtime dependency.
 

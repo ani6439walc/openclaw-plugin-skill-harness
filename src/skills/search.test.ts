@@ -53,7 +53,7 @@ describe("normalizeSearchText", () => {
 });
 
 describe("buildSkillIntentReferenceMap", () => {
-  it("deduplicates one intent referenced by frontmatter and prompt body", () => {
+  it("uses only frontmatter skills and ignores prompt body references", () => {
     const references = buildSkillIntentReferenceMap([
       {
         id: "writer-workflow",
@@ -66,10 +66,21 @@ describe("buildSkillIntentReferenceMap", () => {
           prompt: "Use skill: writer for workflow prose.",
         },
       },
+      {
+        id: "legacy-body-reference",
+        definition: {
+          triggers: ["legacy"],
+          examples: [],
+          domain: "writing",
+          fastpath: { keywords: [] },
+          prompt: "Use skill: body-only-skill.",
+        },
+      },
     ]);
 
     expect(references.get("writer")).toHaveLength(1);
     expect(references.get("writer")?.[0]?.id).toBe("writer-workflow");
+    expect(references.has("body-only-skill")).toBe(false);
   });
 });
 

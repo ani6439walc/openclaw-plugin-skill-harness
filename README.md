@@ -30,7 +30,7 @@ When enabled, Skill Harness provides four main capabilities:
 
 2. **Skill and hint injection**
    - Finds skills related to the matched intent.
-   - Injects `<domain_skills>` and an optional `## Instruction Hint`.
+   - Injects `<domain_skill_candidates>` and an optional `## Instruction Hint`.
    - Tells the main agent which skills may need to be read and which workflows or pitfalls should be preserved.
 
 3. **Runtime statistics**
@@ -100,7 +100,7 @@ When deterministic routing is not enough, Skill Harness runs bounded helper suba
 
 - **topic checker**: decides whether the latest message continues the previous topic or starts a new one
 - **intent classifier**: returns structured JSON for intent, domain, topic, confidence, keywords, and complexity
-- **instruction writer**: converts the matched intent and related skills into short, optional guidance for the main agent
+- **instruction writer**: converts the matched intent, its frontmatter `skills[]`, and their direct visible related skills into short, optional guidance for the main agent; prompt/body text is not scanned for `skill: <name>` references. It returns raw JSON with `instruction_hint` and `additional_candinate_skills`. If candidate descriptions do not yield a suitable recommendation, it may use one bounded parallel tool round containing 1–3 `skill_view` calls for promising candidates and 1–3 `skill_search` queries, then reconsider once. Resolved additional skill names are deduplicated into the injected `domain_skill_candidates`; unknown or invisible names are ignored.
 - **Intent Review reviewer**: optional post-turn reviewer that improves runtime intents when configured triggers fire
 
 All helper outputs are treated as guidance, not user-visible final answers.
@@ -112,7 +112,20 @@ The final injection is wrapped in:
 ```xml
 <skill_harness_plugin>
   <context_policy>...</context_policy>
-  <domain_skills>...</domain_skills>
+  <domain_skill_candidates>
+    <skill>
+      <name>...</name>
+      <description>...</description>
+      <path>...</path>
+      <related_skills>
+        <related_skill>
+          <name>...</name>
+          <reason>...</reason>
+          <direction>current-to-related | related-to-current</direction>
+        </related_skill>
+      </related_skills>
+    </skill>
+  </domain_skill_candidates>
   ## Instruction Hint
   ...
 </skill_harness_plugin>
@@ -121,6 +134,7 @@ The final injection is wrapped in:
 The policy tells the main agent:
 
 - relevant listed skills should be loaded when they match the actual request
+- each domain skill candidate includes its resolved `path` plus direct visible `related_skills` metadata; related skills remain optional rather than automatically required
 - irrelevant skill hints should be ignored if classification is wrong
 - generated instruction hints are advisory and must still be checked against the latest user request and verified context
 

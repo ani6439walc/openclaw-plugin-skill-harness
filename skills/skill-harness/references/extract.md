@@ -24,7 +24,7 @@ Use structured file/search tools where available:
 - List all intent Markdown files.
 - Count lines per intent.
 - Parse frontmatter to count triggers and examples.
-- Search body sections for skill/tool references.
+- Inspect frontmatter `skills[]` for skill dependencies and body sections for tool references.
 - Read suspiciously large intents to identify distinct sub-responsibilities.
 
 ### Complexity score
@@ -85,7 +85,7 @@ For each confirmed extraction:
 1. Draft a `SKILL.md` following standard skill format:
    - frontmatter with `name` and `description`
    - clear workflow steps derived from the intent's guidelines
-   - tool and skill references preserved from the original intent
+   - frontmatter skill dependencies and body tool references preserved from the original intent
    - failure modes and anti-patterns if the original intent included them
 
 2. Draft the slimmed-down intent:

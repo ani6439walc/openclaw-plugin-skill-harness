@@ -18,8 +18,8 @@ describe("StatsAggregator", () => {
     definition: {
       triggers: ["commit"],
       examples: [],
-      prompt:
-        "Use these skills:\n  skill: git-master\nskill: git-master\nskill: dev-lifecycle",
+      skills: ["git-master", "dev-lifecycle"],
+      prompt: "Follow the version-control workflow.",
     },
   };
 

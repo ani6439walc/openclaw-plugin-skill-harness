@@ -1,5 +1,5 @@
 export {
-  extractReferencedSkillNames,
   resolveAvailableSkills,
+  resolveAvailableSkillsWithRelated,
   resolveDomainSkills,
 } from "../skills/indexer.js";

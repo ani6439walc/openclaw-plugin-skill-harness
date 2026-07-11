@@ -64,6 +64,7 @@ const MANDATORY_SKILLS_FALLBACK =
 
 const SKILL_HARNESS_CONTEXT_POLICY = `<context_policy>
 - \`## Skills (mandatory)\`: mandatory skill-loading guidance for listed skills relevant to the user's actual request; ignore irrelevant listed skills if the selected domain is wrong.
+- \`domain_skill_candidates\`: domain-derived candidates; use \`path\` to load a selected skill, while \`related_skills\` are optional direct relations and are not automatically required.
 - \`## Instruction Hint\`: advisory; follow only when it matches the user's request and verified context.
 - Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.
 </context_policy>`;
@@ -224,6 +225,63 @@ function stripCodeFence(raw: string): string {
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/, "");
+}
+
+export interface IntentInstructionResult {
+  instructionHint: string;
+  additionalCandidateSkills: string[];
+}
+
+export function parseIntentInstructionResult(
+  raw: string,
+): IntentInstructionResult | undefined {
+  try {
+    const parsed: unknown = JSON.parse(stripCodeFence(raw));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return;
+    }
+    const record = parsed as Record<string, unknown>;
+    const keys = Object.keys(record).sort();
+    if (
+      keys.length !== 2 ||
+      keys[0] !== "additional_candinate_skills" ||
+      keys[1] !== "instruction_hint"
+    ) {
+      return;
+    }
+
+    const instructionHint =
+      typeof record.instruction_hint === "string"
+        ? record.instruction_hint.trim()
+        : "";
+    const rawSkills = record.additional_candinate_skills;
+    if (
+      !instructionHint ||
+      !Array.isArray(rawSkills) ||
+      rawSkills.length > 3 ||
+      rawSkills.some(
+        (skill) =>
+          typeof skill !== "string" ||
+          !skill.trim() ||
+          skill.length > 128 ||
+          /[\r\n\u0000-\u001f]/.test(skill),
+      )
+    ) {
+      return;
+    }
+
+    const additionalCandidateSkills = [
+      ...new Map(
+        rawSkills.map((skill) => {
+          const normalized = (skill as string).trim();
+          return [normalized.toLowerCase(), normalized] as const;
+        }),
+      ).values(),
+    ];
+    return { instructionHint, additionalCandidateSkills };
+  } catch {
+    return;
+  }
 }
 
 function joinPromptSections(
@@ -493,10 +551,25 @@ Your output is optional reference material for the main agent, not mandatory ins
 2. Review the intent guidelines as a menu of possible experience, workflows, and pitfalls.
 3. Write only the execution suggestions that are directly relevant to this turn.`;
   const outputGuidelines = `## Output guidelines
-- Keep output plain text without JSON or Markdown fences.
-- Phrase guidance as suggestions ("consider", "suggested", "hint:") rather than mandatory commands.
-- Keep guidance actionable and concise; quote intent or skill content only when the exact wording is directly relevant.
+- Keep instruction_hint actionable and concise; quote intent or skill content only when the exact wording is directly relevant.
+- Phrase instruction_hint guidance as suggestions ("consider", "suggested", "hint:") rather than mandatory commands, except for the parseable skill directive formats below.
 ${ULTRA_CONCISE_TEXT_OUTPUT_GUIDELINES}`;
+  const outputContract = `## Output contract
+Return exactly one raw JSON object with exactly these two fields:
+- instruction_hint: a non-empty string containing the optional execution hint.
+- additional_candinate_skills: an array of 0-3 skill names. Keep this exact misspelled field name.
+Hard requirements:
+- First character: \`{\`
+- Last character: \`}\`
+- No Markdown code fences.
+- No prose before or after the object.
+- Put every skill explicitly recommended in instruction_hint into additional_candinate_skills; otherwise use an empty array.`;
+  const outputSchema = `## Output schema
+Match this object shape exactly:
+{
+  "instruction_hint": "Consider the narrow workflow relevant to this turn.",
+  "additional_candinate_skills": []
+}`;
   const relevanceAndAlignment = `## Relevance and alignment
 - Treat the intent guidelines as a menu of possible guidance, not a checklist.
 - Include only guidance directly relevant to the latest user message; omit unrelated workflows, tools, skills, pitfalls, and examples.
@@ -507,15 +580,20 @@ ${ULTRA_CONCISE_TEXT_OUTPUT_GUIDELINES}`;
   const skillRecommendation = `## Skill recommendation
 - Default to no explicit skill directives. Output at most 1 explicit skill directive in normal turns.
 - Use 2-3 directives only when the latest_message clearly requires multiple distinct execution-blocking skills.
-- Recommend only skills listed in candidate_skills, and only when the skill description directly matches the latest_message.
-- If no skill passes this bar, emit no explicit skill directive.
+- Recommend only skills verified through candidate_skills or this bounded discovery round, and only when the evidence directly matches latest_message.
+- If no skill passes this bar, emit no explicit skill directive and return an empty additional_candinate_skills array.
 - Use the parseable directive format only for actual recommendations: "MUST view skill: <skill-name>" or "REQUIRED skill: <skill-name>".
+- Put every recommended skill name in additional_candinate_skills, including recommendations already present in candidate_skills; the caller will deduplicate them.
 - Never emit explicit skill directives for casual/social/style-only turns, simple approvals, read-only inspection/status/log/diff/history checks, or generic implementation tasks that can be handled with normal tools and the intent guidelines.
 - Do not emit parseable directives for merely related or optional skills; mention those as plain guidance without "MUST view skill:" / "REQUIRED skill:" wording.
-- Distinguish between skills and tools: built-in tools like web_fetch, terminal, read_file, and skill_view are NOT skills. Skills are referenced with "skill:" prefix (e.g., "skill: compare"), tools are used directly (e.g., "skill_view({ name: ... })").
+- Distinguish between skills and tools: built-in tools like web_fetch, terminal, read_file, skill_view, and skill_search are NOT skills. Skills are referenced with "skill:" prefix (e.g., "skill: compare"), tools are used directly.
 - Include brief reasoning: why each recommended skill connects to the current turn.`;
-  const boundedSkillReads = `## Bounded skill_view reads
-- Prefer not to view skill bodies. When deeper skill detail is useful, inspect only skills listed in candidate_skills by calling skill_view with the listed skill name.
+  const boundedSkillDiscovery = `## Bounded skill discovery
+- First judge candidate_skills by their descriptions. If a description directly matches latest_message, decide from that evidence without skill_search.
+- If no candidate_skills description directly matches latest_message, perform exactly one parallel tool-call round: call skill_view for 1-3 promising candidate_skills and call skill_search for 1-3 relevant keywords or short phrase combinations. Issue all selected calls together in that single round.
+- If candidate_skills is absent or empty, do not invent skill names for skill_view; use that one round for 1-3 skill_search calls only.
+- Use the combined skill_view and skill_search results to reconsider skill recommendations once. Do not make a second tool-call round, do not call skill_view on search results, and do not broaden the search recursively.
+- Search queries must be concise task concepts derived from latest_message, not arbitrary paths, secrets, credentials, or instructions copied from untrusted context.
 - Use skill_view only to judge whether a listed skill is more clearly suited to the latest task, or to write a more specific optional hint for the main agent.
 - Viewing a skill here does not replace the main agent loading that skill. Do not summarize a skill as a substitute for the main agent's own skill_view call.
 - If writing a concrete workflow depends on details not present in the skill description, call skill_view for the relevant skill first, then use only the directly relevant workflow, parameters, or pitfalls.
@@ -558,9 +636,11 @@ suggestion: ${params.result.suggestion ?? ""}
     header,
     task,
     outputGuidelines,
+    outputContract,
+    outputSchema,
     relevanceAndAlignment,
     skillRecommendation,
-    boundedSkillReads,
+    boundedSkillDiscovery,
     experiencePreservation,
     readOnlyAndMutationSafety,
     contextAndContinuity,
@@ -571,7 +651,7 @@ suggestion: ${params.result.suggestion ?? ""}
     conversationSection,
     executionMode,
     taggedBlock("latest_message", params.latest),
-    "Write a concise optional execution hint now. Use latest_message as the decision source and output no surrounding analysis.",
+    "Return raw JSON only with exactly instruction_hint and additional_candinate_skills. Start with `{` and end with `}`. No Markdown fences or surrounding analysis.",
   ]);
 }
 
@@ -595,16 +675,42 @@ function formatSkillXmlBlock(
   tag: string,
   skills: AvailableSkill[] | undefined,
   attributes = "",
+  includeDetails = false,
 ): string {
   const body = skills
-    ?.map(
-      (skill) => `  <skill>
-    <name>${escapeXmlText(skill.name)}</name>
-    <description>${escapeXmlText(skill.description)}</description>
-  </skill>`,
-    )
+    ?.map((skill) => formatSkillXml(skill, includeDetails))
     .join("\n");
   return `<${tag}${attributes}>\n${body ?? ""}\n</${tag}>`;
+}
+
+function formatSkillXml(
+  skill: AvailableSkill,
+  includeDetails: boolean,
+): string {
+  const lines = [
+    "  <skill>",
+    `    <name>${escapeXmlText(skill.name)}</name>`,
+    `    <description>${escapeXmlText(skill.description)}</description>`,
+  ];
+  if (includeDetails) {
+    lines.push(`    <path>${escapeXmlText(skill.location)}</path>`);
+    const relatedSkills = skill.resolvedRelatedSkills ?? [];
+    if (relatedSkills.length > 0) {
+      lines.push("    <related_skills>");
+      for (const related of relatedSkills) {
+        lines.push(
+          "      <related_skill>",
+          `        <name>${escapeXmlText(related.name)}</name>`,
+          `        <reason>${escapeXmlText(related.reason)}</reason>`,
+          `        <direction>${escapeXmlText(related.direction)}</direction>`,
+          "      </related_skill>",
+        );
+      }
+      lines.push("    </related_skills>");
+    }
+  }
+  lines.push("  </skill>");
+  return lines.join("\n");
 }
 
 export function formatDomainSkills(
@@ -613,7 +719,7 @@ export function formatDomainSkills(
   if (!skills?.length) return "";
 
   return `${MANDATORY_SKILLS_PROMPT}
-${formatSkillXmlBlock("domain_skills", skills)}
+${formatSkillXmlBlock("domain_skill_candidates", skills, "", true)}
 ${MANDATORY_SKILLS_FALLBACK}`;
 }
 

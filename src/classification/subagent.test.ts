@@ -283,9 +283,16 @@ describe("runTopicSwitchSubagent", () => {
 });
 
 describe("runIntentInstructionSubagent", () => {
-  it("runs a skill-tool-enabled instruction writer with classifier config", async () => {
+  it("parses structured hints and enables both skill discovery tools", async () => {
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
-      payloads: [{ text: "Use test-driven-development, then apply_patch." }],
+      payloads: [
+        {
+          text: JSON.stringify({
+            instruction_hint: "Use test-driven-development, then apply_patch.",
+            additional_candinate_skills: ["test-driven-development"],
+          }),
+        },
+      ],
     });
     const api = {
       config: {},
@@ -330,7 +337,8 @@ describe("runIntentInstructionSubagent", () => {
     });
 
     expect(result).toEqual({
-      text: "Use test-driven-development, then apply_patch.",
+      instructionHint: "Use test-driven-development, then apply_patch.",
+      additionalCandidateSkills: ["test-driven-development"],
     });
     expect(runEmbeddedAgent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -341,7 +349,7 @@ describe("runIntentInstructionSubagent", () => {
         promptMode: "minimal",
         modelRun: false,
         disableTools: false,
-        toolsAllow: ["skill_view"],
+        toolsAllow: ["skill_view", "skill_search"],
         prompt: expect.stringContaining("You are a hint writer."),
       }),
     );
@@ -359,7 +367,7 @@ describe("runIntentInstructionSubagent", () => {
     );
   });
 
-  it("reports no text when the instruction writer returns an empty payload", async () => {
+  it("reports invalid JSON when the instruction writer returns an empty payload", async () => {
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: "   " }],
     });
@@ -387,7 +395,7 @@ describe("runIntentInstructionSubagent", () => {
     });
 
     expect(result).toEqual({
-      error: "instruction writer produced no text",
+      error: "instruction writer produced invalid JSON",
     });
   });
 

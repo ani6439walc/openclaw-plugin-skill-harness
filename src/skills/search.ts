@@ -1,5 +1,4 @@
 import type { IntentCatalogEntry } from "../types.js";
-import { extractReferencedSkillNames } from "./domains.js";
 import { listAvailableSkills } from "./indexer.js";
 import { relatedSkillsBySkillName } from "./related.js";
 import { skillSourcePriority } from "./types.js";
@@ -386,11 +385,8 @@ export function searchSkillDocuments(
   };
 }
 
-function referencedSkillNames(intent: IntentCatalogEntry): string[] {
-  return [
-    ...(intent.definition.skills ?? []),
-    ...extractReferencedSkillNames(intent.definition.prompt),
-  ];
+function frontmatterSkillNames(intent: IntentCatalogEntry): string[] {
+  return intent.definition.skills ?? [];
 }
 
 export function buildSkillIntentReferenceMap(
@@ -406,7 +402,7 @@ export function buildSkillIntentReferenceMap(
       fastpathKeywords: intent.definition.fastpath.keywords,
     };
     const names = new Set(
-      referencedSkillNames(intent)
+      frontmatterSkillNames(intent)
         .map((name) => normalizeSearchText(name))
         .filter(Boolean),
     );

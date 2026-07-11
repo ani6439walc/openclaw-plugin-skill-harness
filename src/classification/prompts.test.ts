@@ -3,6 +3,7 @@ import {
   buildIntentInstructionPrompt,
   buildIntentionPrompt,
   buildTopicSwitchPrompt,
+  parseIntentInstructionResult,
   parseIntentionResult,
   parseTopicSwitchResult,
   buildPromptPrefix,
@@ -1176,11 +1177,14 @@ describe("buildIntentInstructionPrompt", () => {
     );
     expect(prompt).toContain("workflow");
     expect(prompt).toContain("## Output guidelines");
-    expect(prompt).not.toContain("## Output contract");
+    expect(prompt).toContain("## Output contract");
+    expect(prompt).toContain("## Output schema");
+    expect(prompt).toContain('"instruction_hint"');
+    expect(prompt).toContain('"additional_candinate_skills"');
     expect(prompt).not.toContain("## Output style");
     expect(prompt).toContain("## Relevance and alignment");
     expect(prompt).toContain("## Skill recommendation");
-    expect(prompt).toContain("## Bounded skill_view reads");
+    expect(prompt).toContain("## Bounded skill discovery");
     expect(prompt).toContain("## Experience preservation");
     expect(prompt).toContain("## Read-only and mutation safety");
     expect(prompt).toContain("## Context and continuity");
@@ -1194,15 +1198,22 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("at most 1 explicit skill directive");
     expect(prompt).toContain("Use 2-3 directives only when");
     expect(prompt).toContain(
-      "Recommend only skills listed in candidate_skills",
+      "Recommend only skills verified through candidate_skills or this bounded discovery round",
     );
     expect(prompt).toContain(
       "If no skill passes this bar, emit no explicit skill directive",
     );
     expect(prompt).toContain("MUST view skill: <skill-name>");
     expect(prompt).toContain("REQUIRED skill: <skill-name>");
-    expect(prompt).toContain("Prefer not to view skill bodies");
-    expect(prompt).toContain("skills listed in candidate_skills");
+    expect(prompt).toContain(
+      "If no candidate_skills description directly matches latest_message",
+    );
+    expect(prompt).toContain("exactly one parallel tool-call round");
+    expect(prompt).toContain("skill_view for 1-3 promising candidate_skills");
+    expect(prompt).toContain(
+      "skill_search for 1-3 relevant keywords or short phrase combinations",
+    );
+    expect(prompt).toContain("Do not make a second tool-call round");
     expect(prompt).toContain(
       "Use skill_view only to judge whether a listed skill is more clearly suited to the latest task",
     );
@@ -1217,6 +1228,9 @@ describe("buildIntentInstructionPrompt", () => {
     );
     expect(prompt).toContain(
       "If writing a concrete workflow depends on details not present in the skill description",
+    );
+    expect(prompt).toContain(
+      "Put every recommended skill name in additional_candinate_skills",
     );
     expect(prompt).toContain("Do not view unrelated skills");
     expect(prompt).toContain("merely related or optional skills");
@@ -1289,7 +1303,7 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain("apply_patch");
     expect(prompt).toContain("繼續實作同題續聊");
     expect(prompt).toMatch(
-      /<latest_message>\n繼續實作同題續聊\n<\/latest_message>\n\nWrite a concise optional execution hint now\. Use latest_message as the decision source and output no surrounding analysis\.$/,
+      /<latest_message>\n繼續實作同題續聊\n<\/latest_message>\n\nReturn raw JSON only with exactly instruction_hint and additional_candinate_skills\..*No Markdown fences or surrounding analysis\.$/,
     );
   });
 
@@ -1344,7 +1358,9 @@ describe("buildIntentInstructionPrompt", () => {
       );
     }
     expect(prompt.indexOf("<latest_message>")).toBeLessThan(
-      prompt.indexOf("Write a concise optional execution hint now."),
+      prompt.indexOf(
+        "Return raw JSON only with exactly instruction_hint and additional_candinate_skills.",
+      ),
     );
   });
 
@@ -1415,14 +1431,53 @@ describe("buildIntentInstructionPrompt", () => {
     });
 
     expect(prompt).toContain(
-      "Keep output plain text without JSON or Markdown fences.",
+      "Return exactly one raw JSON object with exactly these two fields",
     );
     expect(prompt).toContain(
-      'Phrase guidance as suggestions ("consider", "suggested", "hint:") rather than mandatory commands.',
+      'Phrase instruction_hint guidance as suggestions ("consider", "suggested", "hint:") rather than mandatory commands',
     );
     expect(prompt).toContain(
       "Do not suggest edits, staging, commits, pushes, proposal execution, status mutations, or follow-up dispatch unless explicitly requested.",
     );
+  });
+});
+
+describe("parseIntentInstructionResult", () => {
+  it("parses the exact two-field JSON contract", () => {
+    expect(
+      parseIntentInstructionResult(
+        JSON.stringify({
+          instruction_hint: "  MUST view skill: focused-review  ",
+          additional_candinate_skills: [" focused-review "],
+        }),
+      ),
+    ).toEqual({
+      instructionHint: "MUST view skill: focused-review",
+      additionalCandidateSkills: ["focused-review"],
+    });
+  });
+
+  it("rejects legacy plain text and the corrected-but-unsupported field spelling", () => {
+    expect(parseIntentInstructionResult("Use focused-review.")).toBeUndefined();
+    expect(
+      parseIntentInstructionResult(
+        JSON.stringify({
+          instruction_hint: "Use focused-review.",
+          additional_candidate_skills: ["focused-review"],
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("rejects more than three additional skill names", () => {
+    expect(
+      parseIntentInstructionResult(
+        JSON.stringify({
+          instruction_hint: "Use the matching skills.",
+          additional_candinate_skills: ["one", "two", "three", "four"],
+        }),
+      ),
+    ).toBeUndefined();
   });
 });
 
@@ -1906,14 +1961,31 @@ describe("buildPromptPrefix", () => {
           name: "test-driven-development",
           location: "/skills/test-driven-development/SKILL.md",
           description: "Drive changes with tests.",
+          resolvedRelatedSkills: [
+            {
+              name: "systematic-debugging",
+              reason: "Use root-cause debugging before changing code.",
+              direction: "current-to-related",
+            },
+          ],
         },
       ],
     );
 
     expect(prefix).toContain("## Instruction Hint");
     expect(prefix).toContain("Run tests first, then edit with apply_patch.");
-    expect(prefix).toContain("<domain_skills>");
-    expect(prefix!.indexOf("<domain_skills>")).toBeLessThan(
+    expect(prefix).toContain("<domain_skill_candidates>");
+    expect(prefix).toContain(
+      "<path>/skills/test-driven-development/SKILL.md</path>",
+    );
+    expect(prefix).toContain("<related_skills>");
+    expect(prefix).toContain("<related_skill>");
+    expect(prefix).toContain("<name>systematic-debugging</name>");
+    expect(prefix).toContain(
+      "<reason>Use root-cause debugging before changing code.</reason>",
+    );
+    expect(prefix).toContain("<direction>current-to-related</direction>");
+    expect(prefix!.indexOf("<domain_skill_candidates>")).toBeLessThan(
       prefix!.indexOf("\n## Instruction Hint\n"),
     );
     expect(prefix!.indexOf("\n## Instruction Hint\n")).toBeLessThan(
@@ -2005,27 +2077,28 @@ describe("buildPromptPrefix", () => {
     expect(prefix).toContain("`edit` for full SKILL.md rewrites");
     expect(prefix).not.toContain("Hermes Agent");
     expect(prefix).not.toContain("hermes-agent");
-    expect(prefix).toContain("<domain_skills>");
+    expect(prefix).toContain("<domain_skill_candidates>");
+    expect(prefix).not.toContain("<related_skills>");
     expect(prefix).toContain(
       "Only proceed without loading a skill if genuinely none are relevant to the task.",
     );
     expect(prefix!.indexOf("\n## Skills (mandatory)\n")).toBeLessThan(
-      prefix!.indexOf("<domain_skills>"),
+      prefix!.indexOf("<domain_skill_candidates>"),
     );
-    expect(prefix!.indexOf("</domain_skills>")).toBeLessThan(
+    expect(prefix!.indexOf("</domain_skill_candidates>")).toBeLessThan(
       prefix!.indexOf(
         "Only proceed without loading a skill if genuinely none are relevant to the task.",
       ),
     );
   });
 
-  it("omits domain_skills and skill guidance when no domain skills exist", () => {
+  it("omits domain_skill_candidates and skill guidance when no domain skills exist", () => {
     for (const skills of [undefined, []]) {
       const formatted = formatDomainSkills(skills);
 
       expect(formatted).toBe("");
       expect(formatted).not.toContain("## Skills (mandatory)");
-      expect(formatted).not.toContain("<domain_skills>");
+      expect(formatted).not.toContain("<domain_skill_candidates>");
       expect(formatted).not.toContain(
         "Before replying, scan the skills below.",
       );
@@ -2047,7 +2120,7 @@ describe("buildPromptPrefix", () => {
     expect(buildDomainSkillsPromptPrefix(result, [])).toBeUndefined();
   });
 
-  it("emits instruction hints without empty domain_skills wrappers", () => {
+  it("emits instruction hints without empty domain_skill_candidates wrappers", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants code",
@@ -2066,8 +2139,8 @@ describe("buildPromptPrefix", () => {
     expect(prefix).toContain('<skill_harness_plugin confidence="90%"');
     expect(prefix).toContain("## Instruction Hint");
     expect(prefix).toContain("Run tests first, then edit with apply_patch.");
-    expect(prefix).not.toContain("<domain_skills>");
-    expect(prefix).not.toContain("</domain_skills>");
+    expect(prefix).not.toContain("<domain_skill_candidates>");
+    expect(prefix).not.toContain("</domain_skill_candidates>");
     expect(prefix).not.toContain("\n## Skills (mandatory)\n");
     expect(prefix).not.toContain(
       "Only proceed without loading a skill if genuinely none are relevant to the task.",

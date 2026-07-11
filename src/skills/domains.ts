@@ -1,16 +1,5 @@
 import type { IntentCatalogEntry } from "../types.js";
 
-const SKILL_REF_RE = /\bskill:\s*([A-Za-z0-9_-]+)/gi;
-
-export function extractReferencedSkillNames(markdown: string): string[] {
-  const names: string[] = [];
-  for (const match of markdown.matchAll(SKILL_REF_RE)) {
-    const name = match[1]?.trim();
-    if (name) names.push(name);
-  }
-  return [...new Set(names)];
-}
-
 function normalizeSkillNames(names: readonly unknown[] | undefined): string[] {
   if (!names) return [];
   const normalized = names
@@ -20,11 +9,8 @@ function normalizeSkillNames(names: readonly unknown[] | undefined): string[] {
   return [...new Set(normalized)];
 }
 
-function referencedSkillNamesForIntent(intent: IntentCatalogEntry): string[] {
-  return [
-    ...normalizeSkillNames(intent.definition.skills),
-    ...extractReferencedSkillNames(intent.definition.prompt),
-  ];
+function frontmatterSkillNamesForIntent(intent: IntentCatalogEntry): string[] {
+  return normalizeSkillNames(intent.definition.skills);
 }
 
 export function buildSkillDomainMap(
@@ -34,7 +20,7 @@ export function buildSkillDomainMap(
   for (const intent of intents ?? []) {
     const domain = intent.definition.domain.trim();
     if (!domain) continue;
-    for (const skillName of referencedSkillNamesForIntent(intent)) {
+    for (const skillName of frontmatterSkillNamesForIntent(intent)) {
       const key = skillName.toLowerCase();
       const domains = domainsBySkill.get(key) ?? new Set<string>();
       domains.add(domain);

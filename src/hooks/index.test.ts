@@ -342,8 +342,9 @@ description: Navigate Tokyo.
         triggers: ["commit"],
         examples: [],
         domain: "git",
+        skills: ["git-master"],
         fastpath: { keywords: [] },
-        prompt: "skill: git-master",
+        prompt: "Follow the version-control workflow.",
       },
     };
     vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
@@ -383,8 +384,9 @@ description: Navigate Tokyo.
         triggers: ["skill"],
         examples: [],
         domain: "agent-ops",
+        skills: ["vue"],
         fastpath: { keywords: [] },
-        prompt: "skill: vue",
+        prompt: "Follow the skill workflow.",
       },
     };
     vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
@@ -433,8 +435,9 @@ description: Navigate Tokyo.
         triggers: ["skill"],
         examples: [],
         domain: "agent-ops",
+        skills: ["skill-harness"],
         fastpath: { keywords: [] },
-        prompt: "skill: skill-harness",
+        prompt: "Follow the skill workflow.",
       },
     };
     vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
@@ -498,8 +501,9 @@ description: Navigate Tokyo.
         triggers: ["skill"],
         examples: [],
         domain: "agent-ops",
+        skills: ["skill-lifecycle"],
         fastpath: { keywords: [] },
-        prompt: "skill: skill-lifecycle",
+        prompt: "Follow the skill lifecycle workflow.",
       },
     };
     vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
@@ -583,8 +587,9 @@ description: Navigate Tokyo.
         triggers: ["Unmatched requests"],
         examples: ["help"],
         domain: "other",
+        skills: ["analysis"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\n- Ask for context.\n  skill: analysis",
+        prompt: "## Guidelines\n\n- Ask for context.",
       },
     };
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
@@ -905,12 +910,22 @@ describe("createHookHandlers topic switch flow", () => {
     },
   };
 
-  function writeSkill(root: string, name: string, description: string): void {
+  function writeSkill(
+    root: string,
+    name: string,
+    description: string,
+    relatedSkills: Record<string, string> = {},
+  ): void {
     const dir = path.join(root, name);
+    const relatedSkillsFrontmatter = Object.entries(relatedSkills).length
+      ? `metadata:\n  related-skills:\n${Object.entries(relatedSkills)
+          .map(([relatedName, reason]) => `    ${relatedName}: ${reason}`)
+          .join("\n")}\n`
+      : "";
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "SKILL.md"),
-      `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`,
+      `---\nname: ${name}\ndescription: ${description}\n${relatedSkillsFrontmatter}---\n\n# ${name}\n`,
     );
   }
 
@@ -964,7 +979,8 @@ describe("createHookHandlers topic switch flow", () => {
     const instructionWriter =
       params.instructionWriter ??
       vi.fn().mockResolvedValue({
-        text: "Follow the generated coding instructions.",
+        instructionHint: "Follow the generated coding instructions.",
+        additionalCandidateSkills: [],
       });
     const emitAgentEvent = emitHostAgentEvent;
     const rawConfig = {
@@ -2025,7 +2041,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
           data: expect.objectContaining({
             phase: "hint-generate",
             state: "failed",
-            error: "instruction writer produced no text",
+            error: "instruction writer produced invalid JSON",
           }),
         }),
       );
@@ -2375,6 +2391,12 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       path.join(workspace, "skills"),
       "architecture-diagram",
       "Draw architecture diagrams.",
+      { "visual-design": "Use visual design guidance for polished diagrams." },
+    );
+    writeSkill(
+      path.join(workspace, "skills"),
+      "visual-design",
+      "Polish visual presentation.",
     );
     writeSkill(
       path.join(state, "plugin-skills"),
@@ -2383,6 +2405,11 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
     writeSkill(path.join(state, "skills"), "blogwatcher", "Watch blogs.");
     writeSkill(bundled, "codegraph-analysis", "Analyze code graphs.");
+    writeSkill(
+      bundled,
+      "search-discovered-skill",
+      "A skill discovered by the hint writer.",
+    );
 
     const skillIntent = {
       id: "architecture",
@@ -2401,8 +2428,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["test"],
         examples: ["add tests"],
         domain: "coding",
+        skills: ["test-driven-development"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\nUse skill: test-driven-development.",
+        prompt: "## Guidelines\n\nUse test-driven development.",
       },
     };
     const researchIntent = {
@@ -2411,8 +2439,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["research"],
         examples: ["watch blogs"],
         domain: "research",
+        skills: ["blogwatcher"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\nUse skill: blogwatcher.",
+        prompt: "## Guidelines\n\nWatch relevant blogs.",
       },
     };
     const codegraphIntent = {
@@ -2436,10 +2465,20 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       confidence: 0.95,
       complexity: "medium" as const,
     });
-    const { handlers, instructionWriter } = createTopicFlowHarness({
+    const instructionWriter = vi.fn().mockResolvedValue({
+      instructionHint:
+        "MUST view skill: search-discovered-skill — it directly matches this turn.",
+      additionalCandidateSkills: [
+        "search-discovered-skill",
+        "architecture-diagram",
+        "missing-skill",
+      ],
+    });
+    const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [skillIntent, testingIntent, researchIntent, codegraphIntent],
       classifier,
+      instructionWriter,
       bundledSkillsDir: bundled,
       api: {
         runtime: {
@@ -2460,7 +2499,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(instructionWriter).toHaveBeenCalledWith(
       expect.objectContaining({
         availableSkills: [
-          {
+          expect.objectContaining({
             name: "architecture-diagram",
             location: path.join(
               workspace,
@@ -2469,30 +2508,62 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               "SKILL.md",
             ),
             description: "Draw architecture diagrams.",
-          },
+          }),
+          expect.objectContaining({
+            name: "visual-design",
+            location: path.join(
+              workspace,
+              "skills",
+              "visual-design",
+              "SKILL.md",
+            ),
+            description: "Polish visual presentation.",
+          }),
         ],
       }),
     );
-    expect(result?.prependContext).toContain("<domain_skills>");
+    expect(result?.prependContext).toContain("<domain_skill_candidates>");
     expect(result?.prependContext).toContain(
       "<name>architecture-diagram</name>",
     );
     expect(result?.prependContext).toContain(
       "<name>test-driven-development</name>",
     );
-    expect(result?.prependContext).not.toContain(
+    expect(result?.prependContext).toContain(
       `<path>${path.join(state, "plugin-skills", "test-driven-development", "SKILL.md")}</path>`,
     );
     expect(result?.prependContext).toContain(
       "<description>Drive changes with tests.</description>",
     );
     expect(result?.prependContext).toContain("<name>codegraph-analysis</name>");
-    expect(result?.prependContext).not.toContain(
+    expect(result?.prependContext).toContain(
       `<path>${path.join(bundled, "codegraph-analysis", "SKILL.md")}</path>`,
     );
     expect(result?.prependContext).toContain(
       "<description>Analyze code graphs.</description>",
     );
+    expect(result?.prependContext).toContain("<related_skills>");
+    expect(result?.prependContext).toContain("<related_skill>");
+    expect(result?.prependContext).toContain("<name>visual-design</name>");
+    expect(result?.prependContext).toContain(
+      "<reason>Use visual design guidance for polished diagrams.</reason>",
+    );
+    expect(result?.prependContext).toContain(
+      "<direction>current-to-related</direction>",
+    );
+    expect(result?.prependContext).toContain(
+      "<name>search-discovered-skill</name>",
+    );
+    expect(result?.prependContext).toContain(
+      `<path>${path.join(bundled, "search-discovered-skill", "SKILL.md")}</path>`,
+    );
+    expect(result?.prependContext).not.toContain("missing-skill");
+    expect(result?.prependContext).toContain(
+      "MUST view skill: search-discovered-skill — it directly matches this turn.",
+    );
+    expect(
+      result?.prependContext.match(/<name>architecture-diagram<\/name>/g),
+    ).toHaveLength(1);
     expect(result?.prependContext).not.toContain("blogwatcher");
   });
 

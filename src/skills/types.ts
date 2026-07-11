@@ -57,6 +57,7 @@ export interface AvailableSkill {
   source?: SkillSource;
   domains?: string[];
   relatedSkills?: DeclaredRelatedSkill[];
+  resolvedRelatedSkills?: RelatedSkillResult[];
 }
 
 export interface SkillResolutionParams {

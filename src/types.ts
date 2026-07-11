@@ -155,6 +155,11 @@ export type AvailableSkill = {
   name: string;
   location: string;
   description: string;
+  resolvedRelatedSkills?: Array<{
+    name: string;
+    reason: string;
+    direction: "current-to-related" | "related-to-current";
+  }>;
 };
 
 export type HistoricalIntent = Pick<

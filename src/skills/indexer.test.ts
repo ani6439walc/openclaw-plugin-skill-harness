@@ -165,8 +165,9 @@ describe("skill indexer", () => {
           triggers: ["workspace"],
           examples: ["workspace"],
           domain: "workspace-domain",
+          skills: ["shared-skill", "zeta-skill"],
           fastpath: { keywords: [] },
-          prompt: "Use skill: shared-skill and skill: zeta-skill.",
+          prompt: "Use the workspace skill workflow.",
         },
       },
     ];
@@ -212,7 +213,7 @@ describe("skill indexer", () => {
       resolveAvailableSkills({
         api,
         agentId: "main",
-        intentBody: "Use skill: testing-skill and skill: missing.",
+        skillNames: ["testing-skill", "missing"],
         cacheTtlMs: 0,
       }),
     ).resolves.toEqual([

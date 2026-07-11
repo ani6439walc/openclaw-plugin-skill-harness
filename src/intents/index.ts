@@ -5,8 +5,8 @@ export {
 } from "./catalog.js";
 export type { IntentValidationResult } from "./validation.js";
 export { validateIntentDirectory } from "./validation.js";
-export { extractReferencedSkillNames } from "./skill-references.js";
 export {
   resolveAvailableSkills,
+  resolveAvailableSkillsWithRelated,
   resolveDomainSkills,
 } from "../skills/indexer.js";

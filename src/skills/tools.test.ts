@@ -69,8 +69,9 @@ const TOOL_TEST_INTENTS: IntentCatalogEntry[] = [
       triggers: ["agent workflow"],
       examples: ["agent workflow"],
       domain: "agent-ops",
+      skills: ["writer"],
       fastpath: { keywords: [] },
-      prompt: "Use skill: writer when drafting workflow text.",
+      prompt: "Use the writer workflow when drafting workflow text.",
     },
   },
 ];

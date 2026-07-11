@@ -3,7 +3,6 @@ import path from "node:path";
 import os from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import {
-  extractReferencedSkillNames,
   resolveAvailableSkills,
   resolveDomainSkills,
 } from "./skill-references.js";
@@ -38,15 +37,7 @@ function writeOpenClawSkillEntries(
 }
 
 describe("skill catalog", () => {
-  it("extracts unique skill references from intent markdown", () => {
-    expect(
-      extractReferencedSkillNames(
-        "Use skill: architecture-diagram and skill: test-driven-development. Again skill: architecture-diagram.",
-      ),
-    ).toEqual(["architecture-diagram", "test-driven-development"]);
-  });
-
-  it("loads referenced skills from workspace, personal, plugin, and bundled roots", async () => {
+  it("loads selected skills from workspace, personal, plugin, and bundled roots", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -83,8 +74,13 @@ describe("skill catalog", () => {
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
-        intentBody:
-          "skill: agent-orchestration\nskill: analysis\nskill: prompt-engineering\nskill: blogwatcher\nskill: missing",
+        skillNames: [
+          "agent-orchestration",
+          "analysis",
+          "prompt-engineering",
+          "blogwatcher",
+          "missing",
+        ],
       }),
     ).toEqual([
       {
@@ -145,7 +141,6 @@ describe("skill catalog", () => {
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
-        intentBody: "## Guidelines\n\nNo inline skill references here.",
         skillNames: ["frontmatter-skill"],
       }),
     ).toEqual([
@@ -218,8 +213,13 @@ describe("skill catalog", () => {
           agentId: "main",
           bundledSkillsDir: bundled,
           cacheTtlMs: 0,
-          intentBody:
-            "skill: disabled-bundled\nskill: disabled-frontmatter\nskill: nested-disabled\nskill: nested-enabled\nskill: enabled-bundled",
+          skillNames: [
+            "disabled-bundled",
+            "disabled-frontmatter",
+            "nested-disabled",
+            "nested-enabled",
+            "enabled-bundled",
+          ],
         }),
       ).toEqual([
         {
@@ -298,8 +298,12 @@ describe("skill catalog", () => {
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
-        intentBody:
-          "skill: deep-workspace\nskill: deep-state\nskill: deep-plugin\nskill: deep-bundled",
+        skillNames: [
+          "deep-workspace",
+          "deep-state",
+          "deep-plugin",
+          "deep-bundled",
+        ],
       }),
     ).toEqual([
       {
@@ -400,7 +404,7 @@ describe("skill catalog", () => {
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
-        intentBody: "skill: symlink-dir-skill\nskill: symlink-file-skill",
+        skillNames: ["symlink-dir-skill", "symlink-file-skill"],
       }),
     ).toEqual([
       {
@@ -451,8 +455,7 @@ describe("skill catalog", () => {
           agentId: "main",
           bundledSkillsDir: bundled,
           nowMs: 1_000,
-          intentBody:
-            "skill: missing-one\nskill: missing-two\nskill: missing-three",
+          skillNames: ["missing-one", "missing-two", "missing-three"],
         }),
       ).toEqual([]);
 
@@ -462,7 +465,7 @@ describe("skill catalog", () => {
           agentId: "main",
           bundledSkillsDir: bundled,
           nowMs: 1_001,
-          intentBody: "skill: missing-four\nskill: missing-five",
+          skillNames: ["missing-four", "missing-five"],
         }),
       ).toEqual([]);
 
@@ -510,7 +513,7 @@ describe("skill catalog", () => {
         bundledSkillsDir: bundled,
         cacheTtlMs: 10,
         nowMs: 1_000,
-        intentBody: "skill: late-skill",
+        skillNames: ["late-skill"],
       }),
     ).toEqual([]);
 
@@ -523,7 +526,7 @@ describe("skill catalog", () => {
         bundledSkillsDir: bundled,
         cacheTtlMs: 10,
         nowMs: 1_005,
-        intentBody: "skill: late-skill",
+        skillNames: ["late-skill"],
       }),
     ).toEqual([]);
 
@@ -534,7 +537,7 @@ describe("skill catalog", () => {
         bundledSkillsDir: bundled,
         cacheTtlMs: 10,
         nowMs: 1_011,
-        intentBody: "skill: late-skill",
+        skillNames: ["late-skill"],
       }),
     ).toEqual([
       {
@@ -568,7 +571,7 @@ describe("skill catalog", () => {
         api,
         agentId: "main",
         bundledSkillsDir: "",
-        intentBody: "skill: workspace-only\nskill: missing",
+        skillNames: ["workspace-only", "missing"],
       }),
     ).toEqual([
       {
@@ -629,8 +632,9 @@ describe("skill catalog", () => {
               triggers: ["test"],
               examples: [],
               domain: "coding",
+              skills: ["test-driven-development"],
               fastpath: { keywords: [] },
-              prompt: "Use skill: test-driven-development.",
+              prompt: "Use test-driven development.",
             },
           },
           {
@@ -639,8 +643,9 @@ describe("skill catalog", () => {
               triggers: ["research"],
               examples: [],
               domain: "research",
+              skills: ["blogwatcher"],
               fastpath: { keywords: [] },
-              prompt: "Use skill: blogwatcher.",
+              prompt: "Watch relevant blogs.",
             },
           },
         ],
@@ -655,6 +660,7 @@ describe("skill catalog", () => {
           "SKILL.md",
         ),
         description: "Draw architecture diagrams.",
+        resolvedRelatedSkills: [],
       },
       {
         name: "test-driven-development",
@@ -665,6 +671,7 @@ describe("skill catalog", () => {
           "SKILL.md",
         ),
         description: "Drive changes with tests.",
+        resolvedRelatedSkills: [],
       },
     ]);
   });
@@ -693,7 +700,7 @@ describe("skill catalog", () => {
             examples: [],
             domain: "coding",
             fastpath: { keywords: [] },
-            prompt: "Use skill: architecture-diagram.",
+            prompt: "Use architecture diagrams when useful.",
           },
         },
       ],

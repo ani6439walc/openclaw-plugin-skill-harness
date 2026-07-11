@@ -57,6 +57,7 @@ import {
 } from "../classification/index.js";
 import {
   resolveAvailableSkills,
+  resolveAvailableSkillsWithRelated,
   resolveDomainSkills,
 } from "../intents/index.js";
 import { FALLBACK_INTENT } from "../constants.js";
@@ -973,17 +974,16 @@ export function createHookHandlers(deps: HookDeps) {
       latest: params.latestUserMessage,
       result,
       intentBody,
-      availableSkills: await resolveAvailableSkills({
+      availableSkills: await resolveAvailableSkillsWithRelated({
         api,
         agentId: params.routing.effectiveAgentId,
         bundledSkillsDir,
-        intentBody,
         skillNames: intentEntry?.definition.skills,
       }),
       messageProvider: params.ctx.messageProvider,
       modelRef: instructionModelRef,
     });
-    const instructionText = instructionResult.text;
+    const instructionText = instructionResult.instructionHint;
     if (instructionText) {
       emitPipelineEvent(
         params.ctx,
@@ -997,7 +997,7 @@ export function createHookHandlers(deps: HookDeps) {
     } else {
       const instructionError =
         instructionResult.error?.trim() ||
-        "instruction writer produced no text";
+        "instruction writer produced invalid JSON";
       emitPipelineEvent(
         params.ctx,
         params.routing.resolvedSessionKey,
@@ -1019,16 +1019,35 @@ export function createHookHandlers(deps: HookDeps) {
       conversation: params.conversation,
     });
 
+    const domainSkills = await resolvePromptDomainSkills({
+      agentId: params.routing.effectiveAgentId,
+      domain: result.domain,
+      availableIntents: params.availableIntents,
+    });
+    const additionalSkills = instructionResult.additionalCandidateSkills?.length
+      ? await resolveAvailableSkills({
+          api,
+          agentId: params.routing.effectiveAgentId,
+          bundledSkillsDir,
+          skillNames: instructionResult.additionalCandidateSkills,
+        })
+      : [];
+    const seenSkillNames = new Set(
+      domainSkills.map((skill) => skill.name.toLowerCase()),
+    );
+    for (const skill of additionalSkills) {
+      const normalizedName = skill.name.toLowerCase();
+      if (seenSkillNames.has(normalizedName)) continue;
+      seenSkillNames.add(normalizedName);
+      domainSkills.push(skill);
+    }
+
     const promptPrefix = buildPromptPrefix(
       result,
       params.availableIntents,
       params.refreshedConfig,
       instructionText,
-      await resolvePromptDomainSkills({
-        agentId: params.routing.effectiveAgentId,
-        domain: result.domain,
-        availableIntents: params.availableIntents,
-      }),
+      domainSkills,
     );
     return promptPrefix ? { prependContext: promptPrefix } : undefined;
   }
@@ -1316,7 +1335,6 @@ export function createHookHandlers(deps: HookDeps) {
             api,
             agentId,
             bundledSkillsDir,
-            intentBody: intentDefinition.definition.prompt,
             skillNames: intentDefinition.definition.skills,
           })
         : [],

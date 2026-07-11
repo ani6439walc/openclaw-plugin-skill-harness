@@ -11,6 +11,7 @@ import {
   buildIntentInstructionPrompt,
   buildIntentionPrompt,
   buildTopicSwitchPrompt,
+  parseIntentInstructionResult,
   parseIntentionResult,
   parseTopicSwitchResult,
   type TopicSwitchResult,
@@ -74,11 +75,12 @@ export function extractPayloadText(result: { payloads?: unknown[] }): string {
 }
 
 export interface IntentInstructionSubagentResult {
-  text?: string;
+  instructionHint?: string;
+  additionalCandidateSkills?: string[];
   error?: string;
 }
 
-const INSTRUCTION_SKILL_TOOL_NAMES = ["skill_view"];
+const INSTRUCTION_SKILL_TOOL_NAMES = ["skill_view", "skill_search"];
 
 type ModelRef = { provider: string; model: string };
 
@@ -333,18 +335,15 @@ export async function runIntentInstructionSubagent(params: {
     }
 
     const rawReply = extractPayloadText(result);
-    const instruction = rawReply
-      .replace(/^```(?:markdown|md|text)?\s*/i, "")
-      .replace(/\s*```$/, "")
-      .trim();
+    const instruction = parseIntentInstructionResult(rawReply);
 
     if (!instruction) {
-      logger.warn("Intent instruction result was empty", {
+      logger.warn("Intent instruction result parse failed", {
         intent: params.result.intent,
       });
-      return { error: "instruction writer produced no text" };
+      return { error: "instruction writer produced invalid JSON" };
     }
-    return { text: instruction };
+    return instruction;
   } catch (err) {
     logger.warn("Intent instruction subagent error", { error: err });
     return { error: formatEmbeddedError(err) ?? "instruction writer threw" };

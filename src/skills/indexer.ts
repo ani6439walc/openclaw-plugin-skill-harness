@@ -4,16 +4,13 @@ import path from "node:path";
 import matter from "gray-matter";
 import { logger, type OpenClawPluginApi } from "../../api.js";
 import type { IntentCatalogEntry } from "../types.js";
-import {
-  buildSkillDomainMap,
-  domainsForSkill,
-  extractReferencedSkillNames,
-} from "./domains.js";
+import { buildSkillDomainMap, domainsForSkill } from "./domains.js";
 import {
   DEFAULT_SKILL_INDEX_CACHE_TTL_MS,
   resolveSkillIndexCacheTtlMs,
   resolveSkillRoots,
 } from "./roots.js";
+import { relatedSkillsBySkillName } from "./related.js";
 import { skillSourcePriority } from "./types.js";
 import type {
   AvailableSkill,
@@ -22,8 +19,6 @@ import type {
   SkillUsageStats,
 } from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
-
-export { extractReferencedSkillNames } from "./domains.js";
 
 const SKILL_INDEX_MAX_DEPTH = 32;
 
@@ -410,14 +405,10 @@ export async function findAvailableSkill(
 
 export async function resolveAvailableSkills(
   params: SkillResolutionParams & {
-    intentBody: string;
     skillNames?: readonly string[];
   },
 ): Promise<AvailableSkill[]> {
-  const names = uniqueSkillNames([
-    ...normalizeSkillNames(params.skillNames),
-    ...extractReferencedSkillNames(params.intentBody),
-  ]);
+  const names = uniqueSkillNames(normalizeSkillNames(params.skillNames));
   if (names.length === 0) return [];
 
   const skills: AvailableSkill[] = [];
@@ -431,6 +422,62 @@ export async function resolveAvailableSkills(
     seen.add(skill.name.toLowerCase());
   }
   return skills;
+}
+
+async function resolveVisibleSkillRelations(params: SkillResolutionParams) {
+  const skills = await listAvailableSkills({
+    ...params,
+    usageStats: {},
+  });
+  return {
+    skillsByName: new Map(
+      skills.map((skill) => [skill.name.toLowerCase(), skill]),
+    ),
+    relationsByName: relatedSkillsBySkillName(skills),
+  };
+}
+
+function withResolvedRelatedSkills(
+  skill: AvailableSkill,
+  relationsByName: ReadonlyMap<
+    string,
+    NonNullable<AvailableSkill["resolvedRelatedSkills"]>
+  >,
+): AvailableSkill {
+  return {
+    ...stripToolOnlyFields(skill),
+    resolvedRelatedSkills: relationsByName.get(skill.name.toLowerCase()) ?? [],
+  };
+}
+
+export async function resolveAvailableSkillsWithRelated(
+  params: SkillResolutionParams & {
+    skillNames?: readonly string[];
+  },
+): Promise<AvailableSkill[]> {
+  const directSkills = await resolveAvailableSkills(params);
+  if (directSkills.length === 0) return [];
+
+  const { skillsByName, relationsByName } =
+    await resolveVisibleSkillRelations(params);
+  const resolved = directSkills.map((skill) =>
+    withResolvedRelatedSkills(skill, relationsByName),
+  );
+  const seen = new Set(resolved.map((skill) => skill.name.toLowerCase()));
+
+  for (const skill of directSkills) {
+    for (const relation of relationsByName.get(skill.name.toLowerCase()) ??
+      []) {
+      const key = relation.name.toLowerCase();
+      if (seen.has(key)) continue;
+      const relatedSkill = skillsByName.get(key);
+      if (!relatedSkill) continue;
+      resolved.push(withResolvedRelatedSkills(relatedSkill, relationsByName));
+      seen.add(key);
+    }
+  }
+
+  return resolved;
 }
 
 export async function resolveDomainSkills(params: {
@@ -448,22 +495,24 @@ export async function resolveDomainSkills(params: {
   const domainIntents = params.intents.filter(
     (intent) => intent.definition.domain.trim().toLowerCase() === domain,
   );
-  const intentBody = domainIntents
-    .map((intent) => intent.definition.prompt)
-    .join("\n");
   const skillNames = domainIntents.flatMap(
     (intent) => intent.definition.skills ?? [],
   );
 
-  if (!intentBody.trim() && skillNames.length === 0) return [];
+  if (skillNames.length === 0) return [];
 
-  return await resolveAvailableSkills({
+  const skills = await resolveAvailableSkills({
     api: params.api,
     agentId: params.agentId,
-    intentBody,
     skillNames,
     bundledSkillsDir: params.bundledSkillsDir,
     cacheTtlMs: params.cacheTtlMs,
     nowMs: params.nowMs,
   });
+  if (skills.length === 0) return [];
+
+  const { relationsByName } = await resolveVisibleSkillRelations(params);
+  return skills.map((skill) =>
+    withResolvedRelatedSkills(skill, relationsByName),
+  );
 }
