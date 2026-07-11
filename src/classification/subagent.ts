@@ -107,9 +107,7 @@ function resolveModelRefChain(
   if (beforeAgentModel) return beforeAgentModel;
 
   const agentModelRef = resolveAgentEffectiveModelPrimary(api.config, agentId);
-  return (
-    resolveFirstModelRef([agentModelRef]) ?? resolveFirstModelRef(afterAgent)
-  );
+  return resolveFirstModelRef([agentModelRef, ...afterAgent]);
 }
 
 export function getModelRef(
