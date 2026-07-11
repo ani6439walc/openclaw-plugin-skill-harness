@@ -1,6 +1,6 @@
 # Agent Guide: Skill Harness
 
-This repository is an OpenClaw plugin. It classifies the user's intent before the main reply, injects a routing hint through `before_prompt_build`, records per-session runtime data, aggregates usage stats, and optionally applies direct Review intent edits.
+This repository is an OpenClaw plugin. It appends fixed skill-discovery system context to authorized main-agent turns, classifies eligible user intent, prepends dynamic routing hints through `before_prompt_build`, records per-session runtime data, aggregates usage stats, and optionally applies direct Review intent edits.
 
 Use this file as the working contract for coding agents. The README explains the product in more detail; this guide explains how to change the code safely.
 
@@ -84,7 +84,7 @@ Rules:
 
 ## Skill visibility policy
 
-`skill_list` and `skill_view` deliberately inventory every skill in the invoking agent's resolved roots. The invoking agent ID selects its workspace roots, but the indexer must not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists. This is an intentional product boundary: these tools expose the root inventory, subject only to source precedence and disabled bundled skill entries. Do not add `resolveAgentSkillsFilter()` or equivalent filtering unless Baby explicitly changes this policy; that change requires focused tests plus README and migration documentation.
+`skill_list`, `skill_search`, and `skill_view` deliberately inventory every skill in the invoking agent's resolved roots. The invoking agent ID selects its workspace roots, but the indexer must not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists. This is an intentional product boundary: these tools expose the root inventory, subject only to source precedence and disabled bundled skill entries. Do not add `resolveAgentSkillsFilter()` or equivalent filtering unless Baby explicitly changes this policy; that change requires focused tests plus README and migration documentation.
 
 The indexer uses `skills.load.watchDebounceMs` as its cache TTL only when `skills.load.watch` is `true`; otherwise it retains the 60-second default. This is polling, not a filesystem watcher. Keep the TTL in the cache key so live configuration changes cannot reuse indexes created under a different refresh interval.
 
@@ -94,6 +94,7 @@ Use the existing module boundaries:
 
 - `src/plugin.ts`: assembly layer. Resolve config and runtime data root, initialize runtime directories, seed a missing or Markdown-empty runtime intent catalog from skill assets, instantiate runtime-scoped services, and register OpenClaw hooks.
 - `src/hooks/index.ts`: hook behavior for prompt building, tracking, stats updates, review queueing, and cleanup. Keep OpenClaw event logic here, not in `plugin.ts`.
+- `src/hooks/system-context.ts`: fixed `appendSystemContext` skill-discovery contract. Keep runtime skill names, paths, intent results, and generated hints out of this string.
 - `src/config.ts`: Zod-backed config parsing, defaults, and clamps.
 - `src/file-utils.ts`: shared path helpers and atomic filesystem primitives.
 - `src/intents/catalog.ts`: runtime intent catalog loading.
@@ -110,6 +111,10 @@ Use the existing module boundaries:
 - `src/*.test.ts`: tests are colocated with the module they protect.
 
 Conversation prompts are intentionally structured as XML-like blocks. Keep recent-turn context inside `<conversation_context>`, split historical topics with `<topic_segment>` and `<topic_boundary>`, and use compact topic-switch metadata names (`changed` and `reason`) in prompt-facing topic checker output. Optional `basis` diagnostics are bounded visibility fields only and must not drive routing. Persisted intent results may still store `topicChangeReason`; do not reintroduce separate `intentChange` state.
+
+Prompt-build authorization has two layers. First resolve the canonical agent/session and enforce configured agent, chat-type, and chat-ID scope. Then exclude Skill Harness embedded-agent sessions, generic/Review subagents, dreaming sessions, and active-memory sessions from all injection. Authorized internal/inter-session, non-user, and trigger-omitted turns receive fixed `appendSystemContext` only; eligible external-user turns may additionally receive dynamic `prependContext`. Once static authorization succeeds, dynamic fallbacks and failures must preserve the fixed system context.
+
+Do not repeat fixed mandatory/tool guidance inside dynamic `<skill_harness_plugin>` output. Dynamic context contains only its context policy, `domain_skill_candidates`, and optional `## Instruction Hint`. The `before_prompt_build` hook does not expose final per-turn tool names; normal main-agent availability of registered Skill Harness tools is a deployment contract, while restricted runs must obey their narrower tool allowlist.
 
 ## Coding Rules
 

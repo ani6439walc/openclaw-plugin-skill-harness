@@ -6,6 +6,7 @@ export {
   resolveCanonicalSessionKeyFromSessionId,
   resolveStatusUpdateAgentId,
   shouldSkipIntentAnalysis,
+  shouldSkipSkillSystemContext,
 } from "./guards.js";
 export type {
   IntentState,

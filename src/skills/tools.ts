@@ -103,7 +103,7 @@ export function registerSkillTools(
         name: "skill_list",
         label: "List Skills",
         description:
-          "List OpenClaw skills visible to the current agent. Set show_related to include direct optional relations: current-to-related is declared by the returned skill, while related-to-current is declared by another visible skill. Use skill_view to read full SKILL.md content or linked support files.",
+          "List OpenClaw skills visible to the current agent. Use only when the task is broad, terminology is uncertain, or focused search is insufficient. Set show_related to include direct optional relations: current-to-related is declared by the returned skill, while related-to-current is declared by another visible skill. Use skill_view to read full SKILL.md content or linked support files.",
         parameters: Type.Object({
           source: Type.Optional(SKILL_SOURCE_SCHEMA),
           offset: Type.Optional(
@@ -192,7 +192,7 @@ export function registerSkillTools(
         name: "skill_search",
         label: "Search Skills",
         description:
-          "Search OpenClaw skills visible to the current agent using deterministic lexical ranking across skill metadata, derived domains, intent references, and related skill names. Results are discovery candidates; use skill_view before following a skill workflow.",
+          "Search OpenClaw skills visible to the current agent using deterministic lexical ranking across skill metadata, derived domains, intent references, and related skill names. Use focused search when injected candidates do not match the current task. Results are discovery candidates; use skill_view before following a skill workflow.",
         parameters: Type.Object({
           query: Type.Optional(
             Type.String({ description: "Natural-language search phrase." }),
@@ -269,7 +269,7 @@ export function registerSkillTools(
         name: "skill_view",
         label: "View Skill",
         description:
-          "Read a visible OpenClaw skill's SKILL.md content, or read one of its linked support files under references, templates, scripts, assets, or examples.",
+          "Read a visible OpenClaw skill's SKILL.md content, or read one of its linked support files under references, templates, scripts, assets, or examples. Read the complete skill before following its workflow.",
         parameters: Type.Object({
           name: Type.String({ description: "Skill name to read." }),
           file_path: Type.Optional(
@@ -299,7 +299,7 @@ export function registerSkillTools(
     name: "skill_manage",
     label: "Manage Skills",
     description:
-      "Create, edit, patch, delete, and manage support files for OpenClaw skills. This is a required write-capable tool; validate names and paths before mutating skill files.",
+      "Create, edit, patch, delete, and manage support files for OpenClaw skills. Use only when available and authorized. This is a write-capable tool; validate names and paths before mutating skill files and prefer focused patches.",
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal("create"),

@@ -41,6 +41,7 @@ import {
   isEnabledForAgent,
   resolveStatusUpdateAgentId,
   shouldSkipIntentAnalysis,
+  shouldSkipSkillSystemContext,
   resolveCanonicalSessionKeyFromSessionId,
 } from "../session/index.js";
 import {
@@ -75,6 +76,7 @@ import {
   resolveToolCallKey,
   resolveToolResultText,
 } from "./tool-tracking.js";
+import { SKILL_HARNESS_SYSTEM_CONTEXT } from "./system-context.js";
 export type { HookDeps } from "./types.js";
 
 function sanitizeHistoricalIntentRecords(
@@ -140,9 +142,12 @@ function recordTrackedSession(
 }
 
 function toPromptBuildResult(
-  prependContext: string | undefined,
-): PluginHookBeforePromptBuildResult | undefined {
-  return prependContext ? { prependContext } : undefined;
+  prependContext?: string,
+): PluginHookBeforePromptBuildResult {
+  return {
+    ...(prependContext ? { prependContext } : {}),
+    appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+  };
 }
 
 function findIntentDefinition(
@@ -408,7 +413,7 @@ export function createHookHandlers(deps: HookDeps) {
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const recordedToolCalls = new Set<string>();
 
-  function resolvePromptBuildRouting(
+  function resolvePromptBuildScope(
     ctx: PluginHookAgentContext,
   ): { effectiveAgentId: string; resolvedSessionKey?: string } | undefined {
     const resolvedAgentId = resolveStatusUpdateAgentId(ctx);
@@ -425,11 +430,6 @@ export function createHookHandlers(deps: HookDeps) {
     // Use current config for early checks. These must run before refreshing live config.
     const currentConfig = config();
     if (!isEnabledForAgent(currentConfig, resolvedAgentId)) return;
-    if (
-      !isEligibleInteractiveSession({ ...ctx, sessionKey: resolvedSessionKey })
-    ) {
-      return;
-    }
 
     const resolvedSessionKeyForChecks = resolvedSessionKey ?? ctx.sessionKey;
     if (
@@ -741,7 +741,7 @@ export function createHookHandlers(deps: HookDeps) {
 
   function recordPromptBuildResult(params: {
     ctx: PluginHookAgentContext;
-    routing: NonNullable<ReturnType<typeof resolvePromptBuildRouting>>;
+    routing: NonNullable<ReturnType<typeof resolvePromptBuildScope>>;
     latestUserMessage: string;
     trigger: IntentTrigger;
     result: IntentionResult;
@@ -805,7 +805,7 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function handleExactKeywordPromptBuild(params: {
     ctx: PluginHookAgentContext;
-    routing: NonNullable<ReturnType<typeof resolvePromptBuildRouting>>;
+    routing: NonNullable<ReturnType<typeof resolvePromptBuildScope>>;
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
     latestUserMessage: string;
     historicalIntents: HistoricalIntentRecord[];
@@ -875,12 +875,12 @@ export function createHookHandlers(deps: HookDeps) {
         availableIntents: params.availableIntents,
       }),
     );
-    return promptPrefix ? { prependContext: promptPrefix } : undefined;
+    return toPromptBuildResult(promptPrefix);
   }
 
   async function handleClassifiedPromptBuild(params: {
     ctx: PluginHookAgentContext;
-    routing: NonNullable<ReturnType<typeof resolvePromptBuildRouting>>;
+    routing: NonNullable<ReturnType<typeof resolvePromptBuildScope>>;
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
     latestUserMessage: string;
     conversation: ReturnType<typeof limitConversationTurns>;
@@ -1049,7 +1049,7 @@ export function createHookHandlers(deps: HookDeps) {
       instructionText,
       domainSkills,
     );
-    return promptPrefix ? { prependContext: promptPrefix } : undefined;
+    return toPromptBuildResult(promptPrefix);
   }
 
   async function onBeforePromptBuild(
@@ -1057,14 +1057,26 @@ export function createHookHandlers(deps: HookDeps) {
     ctx: PluginHookAgentContext,
   ): Promise<PluginHookBeforePromptBuildResult | undefined> {
     let resolvedSessionKey = ctx.sessionKey;
+    let staticContextEligible = false;
     try {
-      // Early return checks FIRST (before refresh calls)
-      if (shouldSkipIntentAnalysis(ctx)) return;
-      if (isInternalUserTurn(event)) return;
-
-      const routing = resolvePromptBuildRouting(ctx);
+      const routing = resolvePromptBuildScope(ctx);
       if (!routing) return;
       resolvedSessionKey = routing.resolvedSessionKey ?? resolvedSessionKey;
+
+      const resolvedContext = {
+        ...ctx,
+        sessionKey: resolvedSessionKey,
+      };
+      if (shouldSkipSkillSystemContext(resolvedContext)) return;
+
+      staticContextEligible = true;
+      if (shouldSkipIntentAnalysis(resolvedContext)) {
+        return toPromptBuildResult();
+      }
+      if (isInternalUserTurn(event)) return toPromptBuildResult();
+      if (!isEligibleInteractiveSession(resolvedContext)) {
+        return toPromptBuildResult();
+      }
 
       // THEN refresh config and intents
       refreshLiveConfigFromRuntime();
@@ -1073,7 +1085,7 @@ export function createHookHandlers(deps: HookDeps) {
         logger.debug(
           "low thinking mode is off; skipping intention scan for low reasoning effort.",
         );
-        return;
+        return toPromptBuildResult();
       }
       const { latestUserMessage, historicalIntents, conversation } =
         buildConversationContext(event, ctx, refreshedConfig);
@@ -1081,7 +1093,7 @@ export function createHookHandlers(deps: HookDeps) {
       refreshIntents();
       if (catalog.count === 0) {
         logger.debug("no intents loaded; skipping intention scan.");
-        return;
+        return toPromptBuildResult();
       }
 
       logger.debug(
@@ -1113,7 +1125,7 @@ export function createHookHandlers(deps: HookDeps) {
         logger.debug(
           "low thinking fastpath-only mode found no exact keyword match; skipping LLM-based intent analysis.",
         );
-        return;
+        return toPromptBuildResult();
       }
 
       const modelRef = getModelRef(
@@ -1125,7 +1137,7 @@ export function createHookHandlers(deps: HookDeps) {
           modelId: ctx.modelId,
         },
       );
-      if (!modelRef) return;
+      if (!modelRef) return toPromptBuildResult();
 
       const classification = await classifyPromptBuild({
         ctx,
@@ -1141,7 +1153,7 @@ export function createHookHandlers(deps: HookDeps) {
 
       if (!classification) {
         logger.debug("intention subagent failed; skipping hint injection.");
-        return;
+        return toPromptBuildResult();
       }
 
       return await handleClassifiedPromptBuild({
@@ -1156,7 +1168,7 @@ export function createHookHandlers(deps: HookDeps) {
       });
     } catch (err) {
       logger.warn("before_prompt_build hook error", { error: err });
-      return;
+      return staticContextEligible ? toPromptBuildResult() : undefined;
     }
   }
 

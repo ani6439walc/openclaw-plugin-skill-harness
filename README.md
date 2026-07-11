@@ -29,8 +29,9 @@ When enabled, Skill Harness provides four main capabilities:
    - Handles same-topic continuations, explicit topic switches, short messages, correction fragments, bare names, and similar edge cases.
 
 2. **Skill and hint injection**
+   - Appends fixed skill-discovery guidance to authorized main-agent turns.
    - Finds skills related to the matched intent.
-   - Injects `<domain_skill_candidates>` and an optional `## Instruction Hint`.
+   - Prepends dynamic `<domain_skill_candidates>` and an optional `## Instruction Hint` for eligible user turns.
    - Tells the main agent which skills may need to be read and which workflows or pitfalls should be preserved.
 
 3. **Runtime statistics**
@@ -48,18 +49,23 @@ Skill Harness works through OpenClaw lifecycle hooks.
 
 ```mermaid
 graph TD
-  A[User message] --> B[before_prompt_build]
-  B --> C{eligible session?}
+  A[Agent turn] --> B[before_prompt_build]
+  B --> C{agent and chat scope allowed?}
   C -->|no| Z[skip fail-open]
-  C -->|yes| D[load live config + runtime intents]
+  C -->|yes| Q{excluded session?}
+  Q -->|yes| Z
+  Q -->|no| P[append fixed skill system context]
+  P --> R{eligible external-user turn?}
+  R -->|no| M[continue with static context only]
+  R -->|yes| D[load live config + runtime intents]
   D --> E{exact fastpath keyword?}
-  E -->|yes| F[inject fastpath hint]
+  E -->|yes| F[prepend fastpath hint]
   E -->|no| G[topic checker]
   G --> H{same topic?}
   H -->|yes| I[inherit previous intent]
   H -->|no| J[domain keyword similarity or classifier]
   J --> K[optional instruction writer]
-  I --> L[inject skill_harness_plugin prefix]
+  I --> L[prepend skill_harness_plugin context]
   K --> L
   F --> L
   L --> M
@@ -105,9 +111,13 @@ When deterministic routing is not enough, Skill Harness runs bounded helper suba
 
 All helper outputs are treated as guidance, not user-visible final answers.
 
-### 4. Prompt prefix injection
+### 4. Static system context and dynamic prompt context
 
-The final injection is wrapped in:
+After agent and chat scope checks pass, Skill Harness returns a fixed `appendSystemContext` for the main agent. It requires active skill discovery and documents the four Skill Harness tools, but contains no runtime skill inventory, skill paths, intent result, or generated hint. Internal/inter-session turns, explicit non-user triggers, and turns with an omitted trigger receive this static context without running classification.
+
+Skill Harness returns no context for its own embedded-agent sessions, generic subagent sessions, Intent Review subagents, dreaming sessions, or active-memory sessions. These exclusions take precedence over trigger type. Disabled agents, disallowed or unknown chat types, and chat-ID allow/deny rules also prevent both static and dynamic injection.
+
+Eligible external-user turns may additionally receive dynamic `prependContext`. The dynamic injection is wrapped in:
 
 ```xml
 <skill_harness_plugin>
@@ -133,16 +143,19 @@ The final injection is wrapped in:
 
 The policy tells the main agent:
 
-- relevant listed skills should be loaded when they match the actual request
 - each domain skill candidate includes its resolved `path` plus direct visible `related_skills` metadata; related skills remain optional rather than automatically required
 - irrelevant skill hints should be ignored if classification is wrong
 - generated instruction hints are advisory and must still be checked against the latest user request and verified context
+
+Fixed mandatory guidance is not repeated inside this dynamic block. If an injected candidate or hint does not fit the current task, the static workflow directs the main agent to use focused `skill_search` and then read selected results with `skill_view`.
+
+The static prompt describes the four registered tools with availability-conditional wording and requires the agent to use only tools actually exposed to that turn. Current OpenClaw `before_prompt_build` hooks do not expose the final per-turn tool-name set, so normal main-agent availability of the registered Skill Harness tools is a deployment contract rather than a runtime-detected fact. Restricted runs must obey their narrower tool allowlist and workflow.
 
 ### 5. Fail-open design
 
 Skill Harness should improve routing, not block OpenClaw.
 
-If config loading, classification, stats, or review fails, the plugin logs the issue and lets the main agent continue without the hint. Review failures do not block the user reply.
+If config loading, classification, stats, or review fails, the plugin logs the issue and lets the main agent continue. After static authorization succeeds, dynamic routing failures preserve the fixed system context while omitting the failed hint. Review failures do not block the user reply.
 
 ## Installation
 
@@ -274,12 +287,12 @@ The plugin also ships a bundled `skill-harness` skill for designing, inventoryin
 
 Skill Harness registers four OpenClaw tools:
 
-| Tool           | Purpose                                                                                                                                                                          |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skill_list`   | Lists skills visible to the invoking agent, their sources, descriptions, derived domains, and optional usage stats or related skills.                                            |
-| `skill_search` | Searches visible skills with deterministic lexical ranking across names, descriptions, domains, intent metadata, and related skill names. Results are discovery candidates only. |
-| `skill_view`   | Reads a skill visible to the invoking agent, or an allowed support file, and always includes related skills.                                                                     |
-| `skill_manage` | Creates, edits, patches, deletes, and manages skills and support files through the main agent's resolved catalog.                                                                |
+| Tool           | Purpose                                                                                                                             |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `skill_list`   | Broad inventory fallback when the task is broad, terminology is uncertain, or focused search is insufficient.                       |
+| `skill_search` | Focused deterministic discovery when injected candidates do not match the task. Results are candidates only.                        |
+| `skill_view`   | Reads a visible skill or allowed support file. Read the complete skill before following its workflow.                               |
+| `skill_manage` | Authorized, write-capable skill maintenance through the main agent's resolved catalog; prefer focused patches and verify mutations. |
 
 `skill_list`, `skill_search`, and `skill_view` use the same invoking-agent skill-root resolution as prompt hints, so each agent sees its own resolved catalog. Intent metadata used to derive domains and search matches is also filtered for the invoking agent. `skill_manage` resolves existing skills through the main agent and creates new skills under the managed state root.
 

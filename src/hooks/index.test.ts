@@ -5,6 +5,7 @@ import path from "node:path";
 import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import { createHookHandlers } from "./index.js";
+import { SKILL_HARNESS_SYSTEM_CONTEXT } from "./system-context.js";
 import { defaultTracker } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { defaultCatalog, filterIntentsForAgent } from "../intents/index.js";
@@ -753,7 +754,7 @@ describe("createHookHandlers internal turn guards", () => {
     vi.restoreAllMocks();
   });
 
-  it("skips inter-session turns before refreshing config or intents", async () => {
+  it("injects static context for inter-session turns without refreshing config or intents", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
     const refreshIntents = vi.fn();
     const handlers = createHookHandlers({
@@ -784,12 +785,14 @@ describe("createHookHandlers internal turn guards", () => {
       },
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
     expect(refreshIntents).not.toHaveBeenCalled();
   });
 
-  it("skips legacy inter-session marker turns before refreshing config", async () => {
+  it("injects static context for legacy inter-session marker turns", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
@@ -811,11 +814,13 @@ describe("createHookHandlers internal turn guards", () => {
       },
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
   });
 
-  it("skips the protected subagent completion envelope before refreshing config", async () => {
+  it("injects static context for protected internal completion envelopes", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
@@ -837,6 +842,143 @@ describe("createHookHandlers internal turn guards", () => {
         trigger: "user",
         agentId: "main",
         sessionKey: "agent:main:direct:123",
+      },
+    );
+
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
+    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+  });
+
+  it("injects static context for a scoped non-user trigger without dynamic work", async () => {
+    const refreshLiveConfigFromRuntime = vi.fn();
+    const refreshIntents = vi.fn();
+    const handlers = createHookHandlers({
+      api: { config: {} } as OpenClawPluginApi,
+      config: () => resolveConfig({}),
+      refreshLiveConfigFromRuntime,
+      refreshIntents,
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      { prompt: "heartbeat", messages: [] },
+      {
+        trigger: "heartbeat",
+        agentId: "main",
+        sessionKey: "agent:main:direct:123",
+      },
+    );
+
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
+    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+    expect(refreshIntents).not.toHaveBeenCalled();
+  });
+
+  it("injects static context when trigger is omitted but the session is scoped", async () => {
+    const refreshLiveConfigFromRuntime = vi.fn();
+    const refreshIntents = vi.fn();
+    const handlers = createHookHandlers({
+      api: { config: {} } as OpenClawPluginApi,
+      config: () => resolveConfig({}),
+      refreshLiveConfigFromRuntime,
+      refreshIntents,
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      { prompt: "background task", messages: [] },
+      {
+        agentId: "main",
+        sessionKey: "agent:main:direct:123",
+      },
+    );
+
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
+    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+    expect(refreshIntents).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "agent:main:direct:123:skill-harness:hint",
+    "agent:main:direct:123:subagent:worker",
+    "agent:main:dreaming-narrative-light-123",
+    "agent:main:direct:123:active-memory:worker",
+  ])("does not inject into excluded session %s", async (sessionKey) => {
+    const handlers = createHookHandlers({
+      api: { config: {} } as OpenClawPluginApi,
+      config: () => resolveConfig({}),
+      refreshLiveConfigFromRuntime: vi.fn(),
+      refreshIntents: vi.fn(),
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      { prompt: "internal task", messages: [] },
+      {
+        trigger: "manual",
+        agentId: "main",
+        sessionKey,
+      },
+    );
+
+    expect(result).toBeUndefined();
+  });
+
+  it.each([
+    {
+      label: "disabled agent",
+      config: { agents: ["other"] },
+    },
+    {
+      label: "disallowed chat type",
+      config: { allowedChatTypes: ["group"] },
+    },
+    {
+      label: "chat id absent from allowlist",
+      config: { allowedChatIds: ["direct:999"] },
+    },
+    {
+      label: "denied chat id",
+      config: { deniedChatIds: ["direct:123"] },
+    },
+  ])("does not inject for $label", async ({ config }) => {
+    const handlers = createHookHandlers({
+      api: { config: {} } as OpenClawPluginApi,
+      config: () => resolveConfig(config as never),
+      refreshLiveConfigFromRuntime: vi.fn(),
+      refreshIntents: vi.fn(),
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      { prompt: "background task", messages: [] },
+      {
+        trigger: "heartbeat",
+        agentId: "main",
+        sessionKey: "agent:main:direct:123",
+      },
+    );
+
+    expect(result).toBeUndefined();
+  });
+
+  it("fails closed when chat type cannot be resolved", async () => {
+    const refreshLiveConfigFromRuntime = vi.fn();
+    const handlers = createHookHandlers({
+      api: { config: {} } as OpenClawPluginApi,
+      config: () => resolveConfig({}),
+      refreshLiveConfigFromRuntime,
+      refreshIntents: vi.fn(),
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      { prompt: "background task", messages: [] },
+      {
+        trigger: "heartbeat",
+        agentId: "main",
+        sessionKey: "agent:main:main",
       },
     );
 
@@ -1232,7 +1374,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
@@ -1276,7 +1420,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       reasoningEffort: "low",
     } as never);
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
@@ -1302,7 +1448,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       reasoningEffort: "minimal",
     } as never);
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
@@ -1586,6 +1734,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
 
     expect(result?.prependContext).toContain("<skill_harness_plugin");
+    expect(result?.appendSystemContext).toBe(SKILL_HARNESS_SYSTEM_CONTEXT);
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -1667,7 +1816,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ctx,
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(topicChecker).toHaveBeenCalledWith(
       expect.objectContaining({ domains: ["chat", "git"] }),
@@ -1928,7 +2079,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ctx,
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalledWith(
@@ -1963,7 +2116,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
@@ -2018,7 +2173,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalled();
   });
@@ -2096,7 +2253,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
@@ -2135,7 +2294,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
@@ -2626,7 +2787,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).not.toHaveBeenCalled();
     expect(instructionWriter).not.toHaveBeenCalled();
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
         "intent-classify:started",
@@ -2672,7 +2835,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining(["pipeline-failed:failed"]),
     );
@@ -2706,7 +2871,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       sessionKey: undefined,
     });
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
   });
 
   it("uses the session key as the pipeline run id when runId is unavailable", async () => {

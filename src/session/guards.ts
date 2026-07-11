@@ -29,15 +29,12 @@ function isDreamingSessionKey(sessionKey: string): boolean {
   return parts[0] === "agent" && parts[2]?.startsWith("dreaming-") === true;
 }
 
-export function shouldSkipIntentAnalysis(ctx: {
-  trigger?: string;
+export function shouldSkipSkillSystemContext(ctx: {
   sessionKey?: string;
   sessionId?: string;
 }): boolean {
   const sessionKey = (ctx.sessionKey ?? "").trim().toLowerCase();
   const sessionId = (ctx.sessionId ?? "").trim().toLowerCase();
-
-  if (ctx.trigger && ctx.trigger !== "user") return true;
 
   return (
     sessionKey.includes(":active-memory:") ||
@@ -47,6 +44,15 @@ export function shouldSkipIntentAnalysis(ctx: {
     sessionId.startsWith("active-memory-") ||
     sessionId.startsWith("skill-harness-")
   );
+}
+
+export function shouldSkipIntentAnalysis(ctx: {
+  trigger?: string;
+  sessionKey?: string;
+  sessionId?: string;
+}): boolean {
+  if (ctx.trigger && ctx.trigger !== "user") return true;
+  return shouldSkipSkillSystemContext(ctx);
 }
 
 function resolveChatType(ctx: {

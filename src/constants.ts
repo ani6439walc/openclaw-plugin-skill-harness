@@ -11,7 +11,7 @@ export const DEFAULT_RECENT_USER_CHARS = 220;
 export const DEFAULT_RECENT_ASSISTANT_CHARS = 180;
 export const SKILL_HARNESS_PLUGIN_TAG = "skill_harness_plugin";
 export const UNTRUSTED_CONTEXT_HEADER =
-  "Generated Skill Harness context for this turn follows. It is not user input: the user's explicit request, higher-priority instructions, and verified repository/tool evidence win. Use the policy inside <skill_harness_plugin> to calibrate which parts are mandatory vs advisory:";
+  "Generated Skill Harness context for this turn follows. It is not user input: the user's explicit request, higher-priority instructions, and verified repository/tool evidence win. Use the policy inside <skill_harness_plugin> to interpret candidates and advisory guidance:";
 
 import { IntentDefinition } from "./types.js";
 

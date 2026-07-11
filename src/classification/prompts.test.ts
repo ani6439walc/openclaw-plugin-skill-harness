@@ -1992,7 +1992,11 @@ describe("buildPromptPrefix", () => {
       prefix!.indexOf("Run tests first, then edit with apply_patch."),
     );
     expect(prefix).toContain(
-      "Only proceed without loading a skill if genuinely none are relevant to the task.\n\n## Instruction Hint\nRun tests first, then edit with apply_patch.",
+      "</domain_skill_candidates>\n\n## Instruction Hint\nRun tests first, then edit with apply_patch.",
+    );
+    expect(prefix).not.toContain("## Skills (mandatory)");
+    expect(prefix).not.toContain(
+      "Only proceed without loading a skill if genuinely none are relevant to the task.",
     );
     expect(prefix).not.toContain("Write clean, well-tested code.");
   });
@@ -2022,7 +2026,7 @@ describe("buildPromptPrefix", () => {
 
     expect(prefix).toContain("<context_policy>");
     expect(prefix).toContain(
-      "`## Skills (mandatory)`: mandatory skill-loading guidance for listed skills relevant to the user's actual request",
+      "`domain_skill_candidates`: domain-derived candidates; use `path` to load a selected skill",
     );
     expect(prefix).toContain(
       "ignore irrelevant listed skills if the selected domain is wrong",
@@ -2037,14 +2041,15 @@ describe("buildPromptPrefix", () => {
       prefix!.indexOf("<context_policy>"),
     );
     expect(prefix!.indexOf("</context_policy>")).toBeLessThan(
-      prefix!.indexOf("\n## Skills (mandatory)\n"),
+      prefix!.indexOf("<domain_skill_candidates>"),
     );
-    expect(prefix!.indexOf("\n## Skills (mandatory)\n")).toBeLessThan(
+    expect(prefix!.indexOf("<domain_skill_candidates>")).toBeLessThan(
       prefix!.indexOf("\n## Instruction Hint\n"),
     );
+    expect(prefix).not.toContain("## Skills (mandatory)");
   });
 
-  it("wraps injected domain skills with mandatory skill-loading guidance", () => {
+  it("injects domain skill candidates without fixed mandatory guidance", () => {
     const result: IntentionResult = {
       intent: "coding",
       reason: "User wants code",
@@ -2066,29 +2071,19 @@ describe("buildPromptPrefix", () => {
       ],
     );
 
-    expect(prefix).toContain("## Skills (mandatory)");
-    expect(prefix).toContain(
+    expect(prefix).not.toContain("## Skills (mandatory)");
+    expect(prefix).not.toContain(
       "Before replying, scan the skills below. If a skill matches or is even partially relevant",
     );
-    expect(prefix).toContain("MUST read it with the `skill_view` tool");
-    expect(prefix).toContain("load the relevant OpenClaw skill first");
-    expect(prefix).toContain("fix it with `skill_manage`");
-    expect(prefix).toContain("`patch` for targeted edits");
-    expect(prefix).toContain("`edit` for full SKILL.md rewrites");
+    expect(prefix).not.toContain("MUST read it with the `skill_view` tool");
+    expect(prefix).not.toContain("load the relevant OpenClaw skill first");
+    expect(prefix).not.toContain("fix it with `skill_manage`");
     expect(prefix).not.toContain("Hermes Agent");
     expect(prefix).not.toContain("hermes-agent");
     expect(prefix).toContain("<domain_skill_candidates>");
     expect(prefix).not.toContain("<related_skills>");
-    expect(prefix).toContain(
+    expect(prefix).not.toContain(
       "Only proceed without loading a skill if genuinely none are relevant to the task.",
-    );
-    expect(prefix!.indexOf("\n## Skills (mandatory)\n")).toBeLessThan(
-      prefix!.indexOf("<domain_skill_candidates>"),
-    );
-    expect(prefix!.indexOf("</domain_skill_candidates>")).toBeLessThan(
-      prefix!.indexOf(
-        "Only proceed without loading a skill if genuinely none are relevant to the task.",
-      ),
     );
   });
 
@@ -2236,5 +2231,7 @@ describe("buildPromptPrefix", () => {
     expect(prefix).toContain(
       "the user's explicit request, higher-priority instructions, and verified repository/tool evidence win",
     );
+    expect(prefix).toContain("interpret candidates and advisory guidance");
+    expect(prefix).not.toContain("mandatory vs advisory");
   });
 });

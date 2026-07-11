@@ -8,6 +8,7 @@ import {
   isEligibleInteractiveSession,
   resolveCanonicalSessionKeyFromSessionId,
   resolveStatusUpdateAgentId,
+  shouldSkipSkillSystemContext,
   shouldSkipIntentAnalysis,
 } from "./guards.js";
 
@@ -135,6 +136,55 @@ describe("shouldSkipIntentAnalysis", () => {
       shouldSkipIntentAnalysis({
         trigger: "user",
         sessionKey: "agent:main:discord:direct:123",
+        sessionId: "session-123",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldSkipSkillSystemContext", () => {
+  it.each([
+    {
+      label: "active-memory session key",
+      context: {
+        sessionKey: "agent:main:discord:direct:123:active-memory:abc",
+      },
+    },
+    {
+      label: "active-memory session id",
+      context: { sessionId: "active-memory-xyz" },
+    },
+    {
+      label: "skill-harness session key",
+      context: {
+        sessionKey: "agent:main:discord:direct:123:skill-harness:abc",
+      },
+    },
+    {
+      label: "skill-harness session id",
+      context: { sessionId: "skill-harness-xyz" },
+    },
+    {
+      label: "generic subagent session",
+      context: {
+        sessionKey: "agent:main:discord:direct:123:subagent:abc",
+      },
+    },
+    {
+      label: "dreaming session",
+      context: {
+        sessionKey: "agent:main:dreaming-narrative-light-83a0e00c357f",
+      },
+    },
+  ])("skips $label", ({ context }) => {
+    expect(shouldSkipSkillSystemContext(context)).toBe(true);
+  });
+
+  it("does not skip a normal main-agent session because its trigger is non-user", () => {
+    expect(
+      shouldSkipSkillSystemContext({
+        trigger: "heartbeat",
+        sessionKey: "agent:main:direct:123",
         sessionId: "session-123",
       }),
     ).toBe(false);

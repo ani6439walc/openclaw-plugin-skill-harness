@@ -53,18 +53,8 @@ const ULTRA_CONCISE_TEXT_OUTPUT_GUIDELINES = `- Write ultra-concise but semantic
 - Keep code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged.
 - Do not abbreviate technical names into unclear shorthand.`;
 
-const MANDATORY_SKILLS_PROMPT = `## Skills (mandatory)
-Before replying, scan the skills below. If a skill matches or is even partially relevant to your task, you MUST read it with the \`skill_view\` tool and follow its instructions. Err on the side of loading — it is always better to have context you don't need than to miss critical steps, pitfalls, or established workflows. Skills contain specialized knowledge — API endpoints, tool-specific commands, and proven workflows that outperform general-purpose approaches. Load the skill even if you think you could handle the task with basic OpenClaw tools like \`read\`, \`write\`, or \`apply_patch\`. Skills also encode the user's preferred approach, conventions, and quality standards for tasks like code review, planning, and testing — load them even for tasks you already know how to do, because the skill defines how it should be done here.
-Whenever the user asks you to configure, set up, install, enable, disable, modify, or troubleshoot OpenClaw itself — its CLI, config, models, providers, tools, skills, gateway, plugins, or any feature — load the relevant OpenClaw skill first. It has the actual OpenClaw commands and project-specific workflows (e.g. \`openclaw plugins ...\`, \`openclaw skills ...\`, and plugin validation commands) so you don't have to guess or invent workarounds.
-If a skill has issues, fix it with \`skill_manage\` (\`patch\` for targeted edits, \`edit\` for full SKILL.md rewrites, or support-file actions when needed).
-After difficult/iterative tasks, offer to save as a skill. If a skill you loaded was missing steps, had wrong commands, or needed pitfalls you discovered, update it before finishing.`;
-
-const MANDATORY_SKILLS_FALLBACK =
-  "Only proceed without loading a skill if genuinely none are relevant to the task.";
-
 const SKILL_HARNESS_CONTEXT_POLICY = `<context_policy>
-- \`## Skills (mandatory)\`: mandatory skill-loading guidance for listed skills relevant to the user's actual request; ignore irrelevant listed skills if the selected domain is wrong.
-- \`domain_skill_candidates\`: domain-derived candidates; use \`path\` to load a selected skill, while \`related_skills\` are optional direct relations and are not automatically required.
+- \`domain_skill_candidates\`: domain-derived candidates; use \`path\` to load a selected skill, while \`related_skills\` are optional direct relations and are not automatically required; ignore irrelevant listed skills if the selected domain is wrong.
 - \`## Instruction Hint\`: advisory; follow only when it matches the user's request and verified context.
 - Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.
 </context_policy>`;
@@ -718,9 +708,7 @@ export function formatDomainSkills(
 ): string {
   if (!skills?.length) return "";
 
-  return `${MANDATORY_SKILLS_PROMPT}
-${formatSkillXmlBlock("domain_skill_candidates", skills, "", true)}
-${MANDATORY_SKILLS_FALLBACK}`;
+  return formatSkillXmlBlock("domain_skill_candidates", skills, "", true);
 }
 
 function escapeXmlText(value: string): string {

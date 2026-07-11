@@ -144,6 +144,31 @@ describe("registerSkillTools", () => {
     expect(toolsWithoutAgent.has("skill_view")).toBe(false);
   });
 
+  it("describes focused discovery, required reading, and authorized mutation", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const api = createApi(path.join(tmp, "state"), path.join(tmp, "workspace"));
+    registerSkillTools(api);
+    const tools = toolsForAgent(api);
+    const description = (name: string) =>
+      (tools.get(name) as { description: string }).description;
+
+    expect(description("skill_search")).toContain(
+      "Use focused search when injected candidates do not match the current task",
+    );
+    expect(description("skill_search")).toContain(
+      "use skill_view before following a skill workflow",
+    );
+    expect(description("skill_list")).toContain(
+      "Use only when the task is broad, terminology is uncertain, or focused search is insufficient",
+    );
+    expect(description("skill_view")).toContain(
+      "Read the complete skill before following its workflow",
+    );
+    expect(description("skill_manage")).toContain(
+      "Use only when available and authorized",
+    );
+  });
+
   it("searches with the invoking agent's skill roots and filtered intents", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const stateDir = path.join(tmp, "state");
