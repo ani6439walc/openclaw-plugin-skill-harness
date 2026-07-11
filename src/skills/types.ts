@@ -10,6 +10,16 @@ export const SKILL_SOURCE_ORDER = [
 
 export type SkillSource = (typeof SKILL_SOURCE_ORDER)[number];
 
+const SKILL_SOURCE_PRIORITY = new Map(
+  SKILL_SOURCE_ORDER.map((source, index) => [source, index]),
+);
+
+export function skillSourcePriority(source: SkillSource | undefined): number {
+  return source
+    ? (SKILL_SOURCE_PRIORITY.get(source) ?? Number.MAX_SAFE_INTEGER)
+    : Number.MAX_SAFE_INTEGER;
+}
+
 export interface SkillUsageStats {
   usage_turns: number;
   recommended_turns: number;

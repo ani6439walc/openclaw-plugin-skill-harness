@@ -81,7 +81,7 @@ describe("createPlugin", () => {
       api.registerTool.mock.calls.map(([tool, options]) =>
         typeof tool === "function" ? options?.name : tool.name,
       ),
-    ).toEqual(["skill_list", "skill_view", "skill_manage"]);
+    ).toEqual(["skill_list", "skill_search", "skill_view", "skill_manage"]);
     expect(api.registerCommand).not.toHaveBeenCalled();
   });
 

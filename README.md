@@ -256,23 +256,26 @@ The plugin also ships a bundled `skill-harness` skill for designing, inventoryin
 
 ## Skill tools exposed to OpenClaw
 
-Skill Harness registers three OpenClaw tools:
+Skill Harness registers four OpenClaw tools:
 
-| Tool           | Purpose                                                                                                                               |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `skill_list`   | Lists skills visible to the invoking agent, their sources, descriptions, derived domains, and optional usage stats or related skills. |
-| `skill_view`   | Reads a skill visible to the invoking agent, or an allowed support file, and always includes related skills.                          |
-| `skill_manage` | Creates, edits, patches, deletes, and manages skills and support files through the main agent's resolved catalog.                     |
+| Tool           | Purpose                                                                                                                                                                          |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skill_list`   | Lists skills visible to the invoking agent, their sources, descriptions, derived domains, and optional usage stats or related skills.                                            |
+| `skill_search` | Searches visible skills with deterministic lexical ranking across names, descriptions, domains, intent metadata, and related skill names. Results are discovery candidates only. |
+| `skill_view`   | Reads a skill visible to the invoking agent, or an allowed support file, and always includes related skills.                                                                     |
+| `skill_manage` | Creates, edits, patches, deletes, and manages skills and support files through the main agent's resolved catalog.                                                                |
 
-`skill_list` and `skill_view` use the same invoking-agent skill-root resolution as prompt hints, so each agent sees its own resolved catalog. `skill_manage` resolves existing skills through the main agent and creates new skills under the managed state root.
+`skill_list`, `skill_search`, and `skill_view` use the same invoking-agent skill-root resolution as prompt hints, so each agent sees its own resolved catalog. Intent metadata used to derive domains and search matches is also filtered for the invoking agent. `skill_manage` resolves existing skills through the main agent and creates new skills under the managed state root.
 
 `skill_list` omits `usage_stats` and `related_skills` by default. Pass `show_stats: true` and/or `show_related: true` to include those fields. `skill_list` and `skill_view` resolve the skill roots for the invoking agent, and `skill_view` always includes `related_skills`, including both declared and incoming visible relations.
 
+`skill_search` requires at least one non-empty `query`, `source`, `domains`, or `keywords` criterion. It defaults to 20 results and caps `limit` at 100. Search is case-insensitive, applies Unicode normalization, treats `domains` as a case-insensitive OR filter, and returns match evidence by default. Pass `show_matches: false` for a compact response, or opt into `usage_stats` and `related_skills` with `show_stats: true` and `show_related: true`. Search results help callers choose a candidate; callers should still use `skill_view` before following a skill workflow. Search does not replace the `before_prompt_build` routing pipeline.
+
 ### Visibility policy
 
-Skill Harness deliberately treats `skill_list` and `skill_view` as an inventory of the invoking agent's resolved skill roots. It does **not** apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists while indexing those roots. The invoking agent still selects its workspace roots, but the tool result remains an unfiltered inventory from those roots, subject to source precedence and disabled bundled skill entries. Do not add `resolveAgentSkillsFilter()` or equivalent per-agent allowlist filtering without an explicit product decision and matching migration, documentation, and tests.
+Skill Harness deliberately treats `skill_list`, `skill_search`, and `skill_view` as an inventory of the invoking agent's resolved skill roots. It does **not** apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists while indexing those roots. The invoking agent still selects its workspace roots, but the tool result remains an unfiltered inventory from those roots, subject to source precedence and disabled bundled skill entries. Do not add `resolveAgentSkillsFilter()` or equivalent per-agent allowlist filtering without an explicit product decision and matching migration, documentation, and tests.
 
-The index cache follows OpenClaw's `skills.load` watcher settings. When `watch: true` and `watchDebounceMs` is a valid non-negative number, `watchDebounceMs` becomes the cache TTL; otherwise Skill Harness retains the 60-second default. This is cache polling rather than a filesystem watcher, so a skill file change is observed on the next list or view operation after the selected TTL expires.
+The index cache follows OpenClaw's `skills.load` watcher settings. When `watch: true` and `watchDebounceMs` is a valid non-negative number, `watchDebounceMs` becomes the cache TTL; otherwise Skill Harness retains the 60-second default. This is cache polling rather than a filesystem watcher, so a skill file change is observed on the next list, search, or view operation after the selected TTL expires.
 
 ## Runtime files
 

@@ -35,6 +35,7 @@ function writeSkill(
   workspaceDir: string,
   name = "writer",
   relatedSkills: Record<string, string> = {},
+  description = "Write well.",
 ): void {
   const skillDir = path.join(workspaceDir, "skills", name);
   const heading = name === "writer" ? "Writer" : name;
@@ -46,7 +47,7 @@ function writeSkill(
   fs.mkdirSync(skillDir, { recursive: true });
   fs.writeFileSync(
     path.join(skillDir, "SKILL.md"),
-    `---\nname: ${name}\ndescription: Write well.\n${relatedSkillsFrontmatter}---\n\n# ${heading}\n`,
+    `---\nname: ${name}\ndescription: ${description}\n${relatedSkillsFrontmatter}---\n\n# ${heading}\n`,
   );
 }
 
@@ -123,21 +124,163 @@ function toolsForAgent(
 }
 
 describe("registerSkillTools", () => {
-  it("registers skill_list, skill_view, and skill_manage tools", () => {
+  it("registers skill_list, skill_search, skill_view, and skill_manage tools", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const api = createApi(path.join(tmp, "state"), path.join(tmp, "workspace"));
 
     registerSkillTools(api);
 
-    expect(api.registerTool).toHaveBeenCalledTimes(3);
+    expect(api.registerTool).toHaveBeenCalledTimes(4);
     expect([...toolsForAgent(api).keys()]).toEqual([
       "skill_list",
+      "skill_search",
       "skill_view",
       "skill_manage",
     ]);
     const toolsWithoutAgent = toolsForAgent(api, "");
     expect(toolsWithoutAgent.has("skill_list")).toBe(false);
+    expect(toolsWithoutAgent.has("skill_search")).toBe(false);
     expect(toolsWithoutAgent.has("skill_view")).toBe(false);
+  });
+
+  it("searches with the invoking agent's skill roots and filtered intents", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const stateDir = path.join(tmp, "state");
+    const mainWorkspace = path.join(tmp, "main-workspace");
+    const analystWorkspace = path.join(tmp, "analyst-workspace");
+    const api = createApi(stateDir, {
+      analyst: analystWorkspace,
+      main: mainWorkspace,
+    });
+    writeSkill(mainWorkspace, "main-only", {}, "Main workspace skill.");
+    writeSkill(
+      analystWorkspace,
+      "analyst-only",
+      {},
+      "Analyst workspace skill.",
+    );
+    const getIntents = vi.fn((agentId: string): IntentCatalogEntry[] => [
+      {
+        id: `${agentId}-workflow`,
+        definition: {
+          triggers: [`${agentId}-private-secret`],
+          examples: [],
+          domain: agentId,
+          fastpath: { keywords: [] },
+          skills: [`${agentId}-only`],
+          prompt: "",
+        },
+      },
+    ]);
+    registerSkillTools(api, { getIntents });
+
+    const analystSearch = toolsForAgent(api, "analyst").get("skill_search");
+    await expect(
+      runTool(analystSearch, { query: "analyst-private-secret" }),
+    ).resolves.toMatchObject({
+      success: true,
+      skills: [
+        {
+          name: "analyst-only",
+          matched_intents: [{ id: "analyst-workflow" }],
+        },
+      ],
+    });
+    await expect(
+      runTool(analystSearch, { query: "main-private-secret" }),
+    ).resolves.toMatchObject({ success: true, total: 0, skills: [] });
+    expect(getIntents).toHaveBeenCalledWith("analyst");
+  });
+
+  it("validates search criteria and keeps verbose search fields opt-in", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const api = createApi(path.join(tmp, "state"), workspaceDir);
+    writeSkill(workspaceDir, "react", {}, "React forms and components.");
+    registerSkillTools(api);
+    const search = toolsForAgent(api).get("skill_search");
+
+    await expect(runTool(search, { query: "   " })).resolves.toEqual({
+      success: false,
+      error: "query or at least one filter is required",
+    });
+
+    const defaultResult = await runTool(search, { query: "react" });
+    expect(defaultResult.skills[0]).toMatchObject({
+      name: "react",
+      matched_fields: ["name", "description"],
+    });
+    expect(defaultResult.skills[0]).not.toHaveProperty("usage_stats");
+    expect(defaultResult.skills[0]).not.toHaveProperty("related_skills");
+
+    const compactResult = await runTool(search, {
+      query: "react",
+      show_matches: false,
+      show_stats: true,
+      show_related: true,
+    });
+    expect(compactResult.skills[0]).toHaveProperty("usage_stats");
+    expect(compactResult.skills[0]).toHaveProperty("related_skills");
+    expect(compactResult.skills[0]).not.toHaveProperty("matched_fields");
+    expect(compactResult.skills[0]).not.toHaveProperty("matched_intents");
+  });
+
+  it("builds related search metadata before applying domain filters", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const api = createApi(path.join(tmp, "state"), workspaceDir);
+    writeSkill(workspaceDir, "nextjs", {
+      react: "React fundamentals.",
+    });
+    writeSkill(workspaceDir, "react");
+    const intents: IntentCatalogEntry[] = [
+      {
+        id: "web-framework",
+        definition: {
+          triggers: ["web framework"],
+          examples: [],
+          domain: "web",
+          fastpath: { keywords: [] },
+          skills: ["nextjs"],
+          prompt: "",
+        },
+      },
+      {
+        id: "frontend-library",
+        definition: {
+          triggers: ["frontend library"],
+          examples: [],
+          domain: "frontend",
+          fastpath: { keywords: [] },
+          skills: ["react"],
+          prompt: "",
+        },
+      },
+    ];
+    registerSkillTools(api, { getIntents: () => intents });
+
+    await expect(
+      runTool(toolsForAgent(api).get("skill_search"), {
+        query: "react",
+        domains: ["web"],
+        show_related: true,
+      }),
+    ).resolves.toMatchObject({
+      success: true,
+      skills: [
+        {
+          name: "nextjs",
+          score: 15,
+          matched_fields: ["related_skills"],
+          related_skills: [
+            expect.objectContaining({
+              name: "react",
+              direction: "current-to-related",
+            }),
+          ],
+        },
+      ],
+    });
   });
 
   it("resolves skills for the agent that invokes the tool", async () => {
