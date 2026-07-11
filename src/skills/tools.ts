@@ -4,6 +4,7 @@ import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
 import { manageSkill } from "./manage.js";
 import { relatedSkillsBySkillName } from "./related.js";
+import { searchAvailableSkills } from "./search.js";
 import type { SkillSource } from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 import type { IntentCatalogEntry } from "../types.js";
@@ -12,7 +13,7 @@ const DEFAULT_SKILL_LIST_LIMIT = 150;
 const MAX_SKILL_LIST_LIMIT = 500;
 
 export interface RegisterSkillToolsOptions {
-  getIntents?: () => readonly IntentCatalogEntry[];
+  getIntents?: (agentId: string) => readonly IntentCatalogEntry[];
 }
 
 function jsonToolResult(data: unknown) {
@@ -33,6 +34,16 @@ function optionalStringParam(params: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function optionalStringArrayParam(
+  params: unknown,
+  key: string,
+): string[] | undefined {
+  if (!params || typeof params !== "object") return;
+  const value = (params as Record<string, unknown>)[key];
+  if (!Array.isArray(value)) return;
+  return value.filter((item): item is string => typeof item === "string");
+}
+
 function requiredStringParam(params: unknown, key: string): string {
   return optionalStringParam(params, key) ?? "";
 }
@@ -40,6 +51,15 @@ function requiredStringParam(params: unknown, key: string): string {
 function booleanParam(params: unknown, key: string): boolean {
   if (!params || typeof params !== "object") return false;
   return (params as Record<string, unknown>)[key] === true;
+}
+
+function optionalBooleanParam(
+  params: unknown,
+  key: string,
+): boolean | undefined {
+  if (!params || typeof params !== "object") return;
+  const value = (params as Record<string, unknown>)[key];
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function optionalIntegerParam(
@@ -125,7 +145,7 @@ export function registerSkillTools(
           const skills = await listAvailableSkills({
             api,
             agentId,
-            intents: options.getIntents?.(),
+            intents: options.getIntents?.(agentId),
             source: optionalStringParam(params, "source") as
               SkillSource | undefined,
           });
@@ -176,6 +196,93 @@ export function registerSkillTools(
       const agentId = toolAgentId(toolContext);
       if (!agentId) return null;
       return {
+        name: "skill_search",
+        label: "Search Skills",
+        description:
+          "Search OpenClaw skills visible to the current agent using deterministic lexical ranking across skill metadata, derived domains, intent references, and related skill names. Results are discovery candidates; use skill_view before following a skill workflow.",
+        parameters: Type.Object({
+          query: Type.Optional(
+            Type.String({ description: "Natural-language search phrase." }),
+          ),
+          source: Type.Optional(
+            Type.Union([
+              Type.Literal("workspace"),
+              Type.Literal("project-agent"),
+              Type.Literal("personal-agent"),
+              Type.Literal("managed"),
+              Type.Literal("bundled"),
+              Type.Literal("extra"),
+              Type.Literal("plugin"),
+            ]),
+          ),
+          domains: Type.Optional(
+            Type.Array(Type.String(), {
+              description: "Case-insensitive domain filters with OR semantics.",
+            }),
+          ),
+          keywords: Type.Optional(
+            Type.Array(Type.String(), {
+              description: "Additional lexical search tokens.",
+            }),
+          ),
+          offset: Type.Optional(
+            Type.Number({
+              description:
+                "Zero-based result offset for pagination. Defaults to 0.",
+            }),
+          ),
+          limit: Type.Optional(
+            Type.Number({
+              description:
+                "Maximum number of results. Defaults to 20 and is capped at 100.",
+            }),
+          ),
+          show_stats: Type.Optional(
+            Type.Boolean({
+              description: "When true, include per-skill usage statistics.",
+            }),
+          ),
+          show_related: Type.Optional(
+            Type.Boolean({
+              description: "When true, include visible related skills.",
+            }),
+          ),
+          show_matches: Type.Optional(
+            Type.Boolean({
+              description:
+                "When false, omit matched_fields and matched_intents. Defaults to true.",
+            }),
+          ),
+        }),
+        async execute(_toolCallId, params) {
+          return jsonToolResult(
+            await searchAvailableSkills({
+              api,
+              agentId,
+              intents: options.getIntents?.(agentId),
+              query: optionalStringParam(params, "query"),
+              source: optionalStringParam(params, "source") as
+                SkillSource | undefined,
+              domains: optionalStringArrayParam(params, "domains"),
+              keywords: optionalStringArrayParam(params, "keywords"),
+              offset: optionalIntegerParam(params, "offset"),
+              limit: optionalIntegerParam(params, "limit"),
+              showStats: booleanParam(params, "show_stats"),
+              showRelated: booleanParam(params, "show_related"),
+              showMatches: optionalBooleanParam(params, "show_matches") ?? true,
+            }),
+          );
+        },
+      };
+    },
+    { name: "skill_search" },
+  );
+
+  api.registerTool(
+    (toolContext) => {
+      const agentId = toolAgentId(toolContext);
+      if (!agentId) return null;
+      return {
         name: "skill_view",
         label: "View Skill",
         description:
@@ -196,7 +303,7 @@ export function registerSkillTools(
               agentId,
               name: requiredStringParam(params, "name"),
               filePath: optionalStringParam(params, "file_path"),
-              intents: options.getIntents?.(),
+              intents: options.getIntents?.(agentId),
             }),
           );
         },

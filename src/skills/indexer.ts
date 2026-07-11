@@ -14,11 +14,12 @@ import {
   resolveSkillIndexCacheTtlMs,
   resolveSkillRoots,
 } from "./roots.js";
-import { SKILL_SOURCE_ORDER } from "./types.js";
+import { skillSourcePriority } from "./types.js";
 import type {
   AvailableSkill,
   DeclaredRelatedSkill,
   SkillResolutionParams,
+  SkillUsageStats,
 } from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 
@@ -37,9 +38,6 @@ interface SkillIndexOptions {
 }
 
 const skillIndexCache = new Map<string, CachedSkillIndex>();
-const SOURCE_PRIORITY = new Map(
-  SKILL_SOURCE_ORDER.map((source, index) => [source, index]),
-);
 
 export function clearSkillIndexCache(): void {
   skillIndexCache.clear();
@@ -347,17 +345,14 @@ function uniqueSkillNames(names: readonly string[]): string[] {
   return unique;
 }
 
-function sourcePriority(skill: AvailableSkill): number {
-  return skill.source
-    ? (SOURCE_PRIORITY.get(skill.source) ?? Number.MAX_SAFE_INTEGER)
-    : Number.MAX_SAFE_INTEGER;
-}
-
 export async function listAvailableSkills(
-  params: SkillResolutionParams & { source?: AvailableSkill["source"] },
+  params: SkillResolutionParams & {
+    source?: AvailableSkill["source"];
+    usageStats?: Record<string, SkillUsageStats>;
+  },
 ): Promise<AvailableSkill[]> {
   const source = params.source?.trim().toLowerCase();
-  const usageStats = await readSkillUsageStats(params);
+  const usageStats = params.usageStats ?? (await readSkillUsageStats(params));
   const domainsBySkill = params.intents
     ? buildSkillDomainMap(params.intents)
     : undefined;
@@ -381,7 +376,8 @@ export async function listAvailableSkills(
     }
   }
   return skills.sort((left, right) => {
-    const sourceComparison = sourcePriority(left) - sourcePriority(right);
+    const sourceComparison =
+      skillSourcePriority(left.source) - skillSourcePriority(right.source);
     if (sourceComparison !== 0) return sourceComparison;
     const usageComparison =
       skillUsageStatsForName(usageStats, right.name).usage_turns -
