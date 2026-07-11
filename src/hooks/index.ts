@@ -680,7 +680,7 @@ export function createHookHandlers(deps: HookDeps) {
               complexity: result.complexity,
               confidence: result.confidence,
             }
-          : { result: "classifier returned no result" },
+          : { error: "classifier returned no result" },
       );
     }
 
@@ -996,14 +996,14 @@ export function createHookHandlers(deps: HookDeps) {
       );
     } else {
       const instructionError =
-        instructionResult.error ?? "instruction writer produced no text";
+        instructionResult.error?.trim() ||
+        "instruction writer produced no text";
       emitPipelineEvent(
         params.ctx,
         params.routing.resolvedSessionKey,
         "hint-generate",
         "failed",
         {
-          reason: instructionError,
           error: instructionError,
         },
       );

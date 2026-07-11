@@ -1484,7 +1484,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(topicChecker).toHaveBeenCalledOnce();
   });
 
-  it("emits topic checker no-context failures as errors", async () => {
+  it("emits topic checker no-context failures with only an error", async () => {
     const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
       topicChecker: vi.fn().mockResolvedValue(undefined),
@@ -1492,23 +1492,39 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+    const failedEvent = emittedPipelineEvents(emitAgentEvent).find(
+      (event) =>
+        event.data.phase === "topic-triage" && event.data.state === "failed",
+    );
+    expect(failedEvent?.data).toEqual(
       expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "topic-triage",
-          state: "failed",
-          error: "topic checker returned no context",
-        }),
+        error: "topic checker returned no context",
       }),
     );
-    expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
+    expect(failedEvent?.data).not.toHaveProperty("reason");
+    expect(failedEvent?.data).not.toHaveProperty("result");
+  });
+
+  it("emits classifier no-result failures with only an error", async () => {
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      topicChecker: vi.fn().mockResolvedValue(undefined),
+      classifier: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    const failedEvent = emittedPipelineEvents(emitAgentEvent).find(
+      (event) =>
+        event.data.phase === "intent-classify" && event.data.state === "failed",
+    );
+    expect(failedEvent?.data).toEqual(
       expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "topic-triage",
-          result: "skipped by no topic context",
-        }),
+        error: "classifier returned no result",
       }),
     );
+    expect(failedEvent?.data).not.toHaveProperty("reason");
+    expect(failedEvent?.data).not.toHaveProperty("result");
   });
 
   it.each([
@@ -1991,60 +2007,66 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(record).toHaveBeenCalled();
   });
 
-  it("reports instruction generation failure when writer reports no text", async () => {
-    const instructionWriter = vi.fn().mockResolvedValue({
-      error: "instruction writer produced no text",
-    });
-    const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
-      historicalIntents: [],
-      instructionWriter,
-    });
+  it.each([undefined, "", "   "])(
+    "reports a concrete instruction generation failure for missing error %j",
+    async (error) => {
+      const instructionWriter = vi.fn().mockResolvedValue({ error });
+      const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
+        historicalIntents: [],
+        instructionWriter,
+      });
 
-    const result = await handlers.onBeforePromptBuild(event, ctx);
+      const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(instructionWriter).toHaveBeenCalledOnce();
-    expect(result?.prependContext).toContain("<skill_harness_plugin");
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "hint-generate",
-          state: "failed",
-          reason: "instruction writer produced no text",
-          error: "instruction writer produced no text",
+      expect(instructionWriter).toHaveBeenCalledOnce();
+      expect(result?.prependContext).toContain("<skill_harness_plugin");
+      expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            phase: "hint-generate",
+            state: "failed",
+            error: "instruction writer produced no text",
+          }),
         }),
-      }),
-    );
-    expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "hint-generate",
-          state: "completed",
+      );
+      const failedEvent = emittedPipelineEvents(emitAgentEvent).find(
+        (event) =>
+          event.data.phase === "hint-generate" && event.data.state === "failed",
+      );
+      expect(failedEvent?.data).not.toHaveProperty("reason");
+      expect(failedEvent?.data).not.toHaveProperty("result");
+      expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            phase: "hint-generate",
+            state: "completed",
+          }),
         }),
-      }),
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            input: expect.arrayContaining([
-              expect.objectContaining({
-                role: "user",
-                text: "implement topic checker",
+      );
+      expect(record).toHaveBeenCalledWith(
+        "session-1",
+        expect.objectContaining({
+          current: expect.objectContaining({
+            intent: expect.objectContaining({
+              input: expect.arrayContaining([
+                expect.objectContaining({
+                  role: "user",
+                  text: "implement topic checker",
+                }),
+              ]),
+              result: expect.objectContaining({
+                intent: "social-casual",
+                topicChangeReason: "start",
               }),
-            ]),
-            result: expect.objectContaining({
-              intent: "social-casual",
-              topicChangeReason: "start",
             }),
           }),
         }),
-      }),
-    );
-    expect(
-      record.mock.calls[0][1].current.intent.instructionText,
-    ).toBeUndefined();
-  });
+      );
+      expect(
+        record.mock.calls[0][1].current.intent.instructionText,
+      ).toBeUndefined();
+    },
+  );
 
   it("skips instruction writer hints when instruction config is disabled", async () => {
     const { handlers, instructionWriter, record, emitAgentEvent } =
@@ -2142,11 +2164,16 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         data: expect.objectContaining({
           phase: "hint-generate",
           state: "failed",
-          reason: "Model timed out",
           error: "Model timed out",
         }),
       }),
     );
+    const failedEvent = emittedPipelineEvents(emitAgentEvent).find(
+      (event) =>
+        event.data.phase === "hint-generate" && event.data.state === "failed",
+    );
+    expect(failedEvent?.data).not.toHaveProperty("reason");
+    expect(failedEvent?.data).not.toHaveProperty("result");
     expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
