@@ -225,8 +225,8 @@ Skill Harness is configured through OpenClaw plugin config. A typical `openclaw.
 | `allowedChatIds`      | `[]`              | Optional allow-list of chat IDs. Empty means no allow-list restriction.                |
 | `deniedChatIds`       | `[]`              | Chat IDs that should always skip Skill Harness.                                        |
 | `intentDeny`          | `{}`              | Per-agent deny-list for intent IDs; supports wildcard-style agent keys and intent IDs. |
-| `model`               | `null`            | Lightweight scanner model. Empty means use the agent default.                          |
-| `modelFallback`       | `null`            | Fallback scanner model when the primary model cannot be resolved.                      |
+| `model`               | `null`            | Explicit lightweight scanner model; see resolution order below.                        |
+| `modelFallback`       | `null`            | Last-resort scanner model; see resolution order below.                                 |
 | `thinking`            | `"medium"`        | Thinking level for the intent classifier helper.                                       |
 | `lowThinkingMode`     | `"fastpath-only"` | Behavior when the main agent uses off/minimal/low thinking.                            |
 | `queryMode`           | `"recent"`        | Context sent to scanner: latest message, recent turns, or full history.                |
@@ -234,6 +234,8 @@ Skill Harness is configured through OpenClaw plugin config. A typical `openclaw.
 | `timeoutMs`           | `3000`            | Time budget for each scanner helper run.                                               |
 | `instruction.enabled` | `true`            | Whether to generate short instruction hints after intent classification.               |
 | `review.enabled`      | `false`           | Whether to run post-turn Intent Review and update runtime intents.                     |
+
+Topic Checker, Intent Classifier, Hint Writer, and Intent Review models all resolve in this order: explicit configured model, current session model, agent primary model, then configured fallback. Topic Checker and Intent Classifier share the top-level `model` and `modelFallback`. Hint Writer and Intent Review inherit those top-level values when their dedicated `instruction.*` or `review.*` model fields are unset. Every fallback is a resolution-time last resort; model errors, timeouts, parse failures, and validation failures fail open without a runtime retry.
 
 ## Customizing intents
 

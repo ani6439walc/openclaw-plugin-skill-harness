@@ -1496,7 +1496,7 @@ describe("runReviewSubagent", () => {
     expect(fs.existsSync(path.join(intentDirectory, "temp.json"))).toBe(false);
   });
 
-  it("retries the fallback review model after parse failure", async () => {
+  it("fails open without retrying the fallback review model after parse failure", async () => {
     const intentDirectory = createIntentDirectory();
     const targetPath = path.join(intentDirectory, "social-casual.md");
     const original = fs.readFileSync(targetPath, "utf-8");
@@ -1553,22 +1553,15 @@ describe("runReviewSubagent", () => {
         snapshot,
         triggers: ["behavior-fix"],
       }),
-    ).resolves.toEqual(
-      expect.objectContaining({
-        changedIntentIds: ["social-casual"],
-        outcome: "applied",
-      }),
-    );
-    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
-    expect(fs.readFileSync(targetPath, "utf-8")).toContain(
-      "- Route tool support away.",
-    );
+    ).resolves.toEqual({ findings: [], outcome: "parse-failed" });
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
+    expect(fs.readFileSync(targetPath, "utf-8")).toBe(original);
     expect(fs.readFileSync(targetPath, "utf-8")).not.toContain(
       "- Invalid primary edit.",
     );
   });
 
-  it("retries the fallback review model after undeclared intent edits", async () => {
+  it("fails open without retrying after undeclared intent edits", async () => {
     const intentDirectory = createIntentDirectory();
     const socialPath = path.join(intentDirectory, "social-casual.md");
     const otherPath = path.join(intentDirectory, "other.md");
@@ -1633,16 +1626,15 @@ describe("runReviewSubagent", () => {
         snapshot,
         triggers: ["behavior-fix"],
       }),
-    ).resolves.toEqual(
-      expect.objectContaining({
-        changedIntentIds: ["social-casual"],
-        outcome: "applied",
-      }),
-    );
-    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
-    expect(fs.readFileSync(socialPath, "utf-8")).toContain(
-      "- Route tool support away.",
-    );
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "validation-failed",
+      validationErrors: [
+        "review edited undeclared runtime intent files: other",
+      ],
+    });
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
+    expect(fs.readFileSync(socialPath, "utf-8")).toBe(originalSocial);
     expect(fs.readFileSync(otherPath, "utf-8")).toBe(originalOther);
   });
 
@@ -2031,7 +2023,7 @@ describe("runReviewSubagent", () => {
     });
   });
 
-  it("retries review with review modelFallback after a primary model error", async () => {
+  it("fails open without retrying review modelFallback after a primary model error", async () => {
     const runEmbeddedAgent = vi
       .fn()
       .mockRejectedValueOnce(new Error("LLM idle timeout"))
@@ -2062,19 +2054,15 @@ describe("runReviewSubagent", () => {
       triggers: ["weak-intent"],
     });
 
-    expect(result).toEqual({ findings: [], outcome: "nofinding" });
-    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({ findings: [], outcome: "subagent-error" });
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
     expect(runEmbeddedAgent).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ provider: "bifrost", model: "glm-5" }),
     );
-    expect(runEmbeddedAgent).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ provider: "google", model: "review-fallback" }),
-    );
   });
 
-  it("returns subagent-error when primary and fallback review runs fail", async () => {
+  it("returns subagent-error without invoking the configured fallback", async () => {
     const runEmbeddedAgent = vi
       .fn()
       .mockRejectedValue(new Error("all cooldown"));
@@ -2096,7 +2084,7 @@ describe("runReviewSubagent", () => {
         triggers: ["weak-intent"],
       }),
     ).resolves.toEqual({ findings: [], outcome: "subagent-error" });
-    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
   });
 
   it("logs parse failures without raw model replies", async () => {

@@ -80,41 +80,52 @@ export interface IntentInstructionSubagentResult {
 
 const INSTRUCTION_SKILL_TOOL_NAMES = ["skill_view"];
 
-export function getModelRef(
-  api: OpenClawPluginApi,
-  agentId: string,
-  config: ResolvedSkillHarnessPluginConfig,
-  currentRun: { modelProviderId?: string; modelId?: string },
-): { provider: string; model: string } | undefined {
-  const candidates: (string | undefined)[] = [
-    config.model,
-    config.modelFallback,
-    currentRun.modelProviderId && currentRun.modelId
-      ? `${currentRun.modelProviderId}/${currentRun.modelId}`
-      : undefined,
-  ];
-  for (const ref of candidates) {
+type ModelRef = { provider: string; model: string };
+
+function resolveFirstModelRef(
+  refs: readonly (string | undefined)[],
+): ModelRef | undefined {
+  for (const ref of refs) {
     if (!ref) continue;
     try {
       const parsed = parseModelRef(ref, DEFAULT_PROVIDER);
       if (parsed) return { provider: parsed.provider, model: parsed.model };
     } catch (err) {
-      logger.debug("skipping invalid model ref", { error: err });
-    }
-  }
-  const agentModelRef = resolveAgentEffectiveModelPrimary(api.config, agentId);
-  if (agentModelRef) {
-    try {
-      const parsed = parseModelRef(agentModelRef, DEFAULT_PROVIDER);
-      if (parsed) return { provider: parsed.provider, model: parsed.model };
-    } catch (err) {
-      logger.debug("skipping invalid agent model ref", {
-        error: err,
-        agentModelRef,
-      });
+      logger.debug("skipping invalid model ref", { error: err, modelRef: ref });
     }
   }
   return;
+}
+
+function resolveModelRefChain(
+  api: OpenClawPluginApi,
+  agentId: string,
+  beforeAgent: readonly (string | undefined)[],
+  afterAgent: readonly (string | undefined)[] = [],
+): ModelRef | undefined {
+  const beforeAgentModel = resolveFirstModelRef(beforeAgent);
+  if (beforeAgentModel) return beforeAgentModel;
+
+  const agentModelRef = resolveAgentEffectiveModelPrimary(api.config, agentId);
+  return resolveFirstModelRef([agentModelRef, ...afterAgent]);
+}
+
+export function getModelRef(
+  api: OpenClawPluginApi,
+  agentId: string,
+  config: ResolvedSkillHarnessPluginConfig,
+  currentRun: { modelProviderId?: string; modelId?: string },
+): ModelRef | undefined {
+  const currentModelRef =
+    currentRun.modelProviderId && currentRun.modelId
+      ? `${currentRun.modelProviderId}/${currentRun.modelId}`
+      : undefined;
+  return resolveModelRefChain(
+    api,
+    agentId,
+    [config.model, currentModelRef],
+    [config.modelFallback],
+  );
 }
 
 export function getReviewModelRef(
@@ -122,16 +133,16 @@ export function getReviewModelRef(
   agentId: string,
   config: ResolvedSkillHarnessPluginConfig,
   currentRun: { modelProviderId?: string; modelId?: string },
-): { provider: string; model: string } | undefined {
-  return getModelRef(
+): ModelRef | undefined {
+  const currentModelRef =
+    currentRun.modelProviderId && currentRun.modelId
+      ? `${currentRun.modelProviderId}/${currentRun.modelId}`
+      : undefined;
+  return resolveModelRefChain(
     api,
     agentId,
-    {
-      ...config,
-      model: config.review.model ?? config.model,
-      modelFallback: config.review.modelFallback ?? config.modelFallback,
-    },
-    currentRun,
+    [config.review.model ?? config.model, currentModelRef],
+    [config.review.modelFallback ?? config.modelFallback],
   );
 }
 

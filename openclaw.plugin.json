@@ -69,13 +69,11 @@
       },
       "model": {
         "type": "string",
-        "description": "Lightweight model for the intention scanner (e.g. google/gemini-3-flash). If null, falls back to the agent's default model.",
-        "default": null
+        "description": "Explicit lightweight model for the intention scanner (e.g. google/gemini-3-flash). If unset, resolves from the current session model, then the agent primary model, then modelFallback."
       },
       "modelFallback": {
         "type": "string",
-        "description": "Fallback model when config.model cannot be resolved.",
-        "default": null
+        "description": "Last-resort scanner model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
       },
       "thinking": {
         "type": "string",
@@ -189,11 +187,11 @@
           },
           "model": {
             "type": "string",
-            "description": "Dedicated model for instruction writer hints."
+            "description": "Explicit dedicated model for instruction writer hints. If unset, inherits the top-level model before current-session and agent-primary resolution."
           },
           "modelFallback": {
             "type": "string",
-            "description": "Fallback model when the primary instruction writer model cannot be resolved."
+            "description": "Last-resort instruction writer model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
           },
           "thinking": {
             "type": "string",
@@ -230,11 +228,11 @@
           },
           "model": {
             "type": "string",
-            "description": "Dedicated model for Intent Review runs."
+            "description": "Explicit dedicated model for Intent Review runs. If unset, inherits the top-level model before current-session and agent-primary resolution."
           },
           "modelFallback": {
             "type": "string",
-            "description": "Fallback model retried when the primary Intent Review model fails."
+            "description": "Last-resort Intent Review model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
           },
           "thinking": {
             "type": "string",
