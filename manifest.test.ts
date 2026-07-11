@@ -12,6 +12,7 @@ describe("skill-harness manifest", () => {
   it("declares skill tools without legacy command surfaces", () => {
     expect(manifest.contracts?.tools).toEqual([
       "skill_list",
+      "skill_search",
       "skill_view",
       "skill_manage",
     ]);

@@ -6,7 +6,7 @@
     "onStartup": true
   },
   "contracts": {
-    "tools": ["skill_list", "skill_view", "skill_manage"]
+    "tools": ["skill_list", "skill_search", "skill_view", "skill_manage"]
   },
   "skills": ["./skills"],
   "uiHints": {
