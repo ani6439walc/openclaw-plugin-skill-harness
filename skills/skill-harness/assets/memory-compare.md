@@ -1,15 +1,15 @@
 ---
 domain: "memory"
+triggers:
+  - "The user wants two or more remembered subjects to be compared without merging them into a single recall path."
+  - "The user asks to compare differences, similarities, trade-offs, or contrasts between two or more subjects explicitly tied to prior discussions, saved notes, or remembered records."
+examples:
+  - "Of the two approaches we discussed earlier, which one was better?"
+  - "What's the difference between last month's and this month's saved records?"
+  - "How does my recorded Japan trip compare with my recorded Chiayi trip?"
 skills:
   - treemd
   - obsidian
-triggers:
-  - "The user wants two or more remembered subjects to be compared without merging them into a single recall path."
-  - "User is asking about differences, similarities, trade-offs, or contrasts between two or more remembered subjects, periods, trips, approaches, or records"
-examples:
-  - "Which of these two approaches is better?"
-  - "What's the difference between last month's and this month's data?"
-  - "How does the Japan trip compare to the Chiayi trip?"
 ---
 
 ## Guidelines
@@ -40,7 +40,7 @@ subjects                                dimensions
 ### Step 1 — Extract Comparison Subjects
 
 - Identify **Subject A** and **Subject B** (or more) from the user's question.
-- ❌ "Compare Japan and Chiayi" → ✅ A = `Japan business trip travel`, B = `Chiayi trip`
+- ❌ "Compare Japan and Chiayi" → ✅ Resolve the recorded subjects as A = `Japan business trip travel`, B = `Chiayi trip`
 - If subjects are vague ("that one" vs "this one"), resolve the specific referent from conversation context.
 - If unable to identify two subjects, fall back to general memory lookup.
 

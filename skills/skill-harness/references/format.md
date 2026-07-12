@@ -4,7 +4,7 @@ Rules for generating intent definition files. The canonical format spec lives in
 
 ## Required section order
 
-1. YAML frontmatter (`triggers[]`, `examples[]`, required `domain`, optional `fastpath`, optional `skills[]`)
+1. YAML frontmatter (required `domain`, `triggers[]`, `examples[]`, optional `fastpath`, optional `skills[]`)
 2. `## Guidelines`
 3. `## Response Strategy`
 4. `## Concrete Workflow` (optional)
@@ -16,11 +16,11 @@ Do not create a `## Skills & Tools` section. That section is legacy-only; migrat
 
 ```yaml
 ---
+domain: "memory"
 triggers:
-  - "Concrete user-goal boundary phrase"
+  - "The user asks to compare two previously recorded trips."
 examples:
-  - "Realistic user message"
-domain: "one-domain"
+  - "How did my recorded Japan trip compare with my Chiayi trip?"
 fastpath:
   hint: "Optional short A1 injected hint."
   keywords:

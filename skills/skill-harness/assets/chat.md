@@ -1,36 +1,31 @@
 ---
 domain: "chat"
-fastpath:
-  hint: "Treat this as a lightweight social/casual interaction. Reply naturally and briefly; do not force a workflow."
-  keywords:
-    - "hi"
-    - "hello"
-    - "hey"
-    - "嗨"
-    - "哈囉"
-    - "你好"
-    - "早"
-    - "早安"
-    - "晚安"
-    - "謝謝"
-    - "感謝"
-    - "thanks"
-    - "thank you"
-    - "thx"
-    - "辛苦了"
-    - "累"
-    - "好累"
-    - "想睡"
-    - "抱抱"
 triggers:
-  - "This is a normal social interaction without a concrete task or request."
-  - "User is engaging in casual social interaction without a concrete task, such as greeting, thanking, small talk, sharing mood, or making a light reaction"
+  - "The user's complete message is a normal social interaction and contains no concrete task or request."
+  - "The user's complete message only greets, thanks, makes small talk, shares a mood, or gives a light reaction without asking for action."
 examples:
   - "Good morning~"
   - "Thanks, that was really helpful"
   - "Nice weather today"
   - "Feeling a bit tired today"
   - "hi"
+fastpath:
+  hint: "Treat this as a lightweight social/casual interaction. Reply naturally and briefly; do not force a workflow."
+  keywords:
+    - "hi"
+    - "hello"
+    - "hey"
+    - "good morning"
+    - "good night"
+    - "thanks"
+    - "thank you"
+    - "thx"
+    - "appreciate it"
+    - "nice work"
+    - "I'm tired"
+    - "so tired"
+    - "sleepy"
+    - "hug"
 ---
 
 ## Guidelines
@@ -45,4 +40,5 @@ examples:
 - Match the user's emotional tone (greeting, thanks, fatigue, excitement).
 - Keep replies brief — no need to fill silence with content.
 - If the user expresses tiredness or stress, switch to supportive mode.
-- Never escalate to tool usage or structured workflows.
+- When the complete message contains no concrete task, do not introduce tools or a structured workflow.
+- If the message also contains a task or request, route by that task instead of this chat intent.

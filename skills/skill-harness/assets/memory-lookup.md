@@ -1,12 +1,5 @@
 ---
 domain: "memory"
-fastpath:
-  keywords:
-    - "我之前"
-    - "你記得"
-skills:
-  - treemd
-  - obsidian
 triggers:
   - "The user wants past records or prior information without a specific recent, comparative, emotional, or timeline focus."
   - "User is asking about past events, records, preferences, habits, or prior discussions without a clearly recent, comparative, emotional, or timeline-oriented focus"
@@ -15,6 +8,13 @@ examples:
   - "What do I usually order at that restaurant?"
   - "Help me find the settings notes about Talos"
   - "What travel plans did I mention before?"
+fastpath:
+  keywords:
+    - "I mentioned before"
+    - "do you remember"
+skills:
+  - treemd
+  - obsidian
 ---
 
 ## Guidelines
@@ -41,11 +41,12 @@ extract     semantic      validate      deep-read    synthesize
 keywords    search        results       + expand
 ```
 
-### Step 1 — Extract Search Keywords
+### Step 1 — Extract High-Signal Search Terms
 
-- Convert the user's natural language query into 3–5 CJK keywords, **nouns separated by spaces** (trigram optimization).
+- Preserve the user's language and extract 3–5 high-signal nouns, entities, or canonical identifiers. Do not translate names merely to fit a keyword format.
+- For languages without consistent word boundaries, separate distinct entities, nouns, or concepts with spaces.
 - ❌ `Query settings for Talos` → ✅ `Talos config settings`
-- ❌ `What travel plans were mentioned before` → ✅ `travel plans trip`
+- ❌ `What travel plans did I mention before?` → ✅ `travel plans itinerary`
 - Extract entity names from `[[MEMORY.md]]` entries (people, projects, places): `Talos`, `GCP PCA`, `Chiayi`.
 - If the query mentions a specific tool or project, use its canonical name (e.g., `Kubernetes` not `k8s cluster mgmt`).
 
@@ -55,7 +56,7 @@ keywords    search        results       + expand
 
 ```javascript
 memory_search({
-  query: "<trigram_keywords>",
+  query: "<high_signal_terms>",
   corpus: "memory",
   maxResults: 5,
   minScore: 0.1,
@@ -118,6 +119,6 @@ memory_search({
 
 - Use `treemd` skill when a large Markdown memory note needs section-level navigation before deep reading.
 - Use `obsidian` skill after relevant notes are found to inspect tags, outgoing links, backlinks, and related memory structure.
-- Use semantic memory search as the primary retrieval path for recorded memory, with trigram-friendly keywords and a permissive threshold for personal facts, habits, and preferences.
+- Use semantic memory search as the primary retrieval path for recorded memory, with language-preserving high-signal terms and a permissive threshold for personal facts, habits, and preferences.
 - Use direct memory reads to inspect the highest-value memory hit before synthesizing an answer.
 - Use lightweight tag extraction only as a supporting analysis step when sentiment, topic density, or tag context matters.
