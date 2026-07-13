@@ -99,9 +99,9 @@
       "timeoutMs": {
         "type": "integer",
         "minimum": 250,
-        "maximum": 120000,
+        "maximum": 60000,
         "description": "Budget in milliseconds for each intention scanner sub-agent run.",
-        "default": 3000
+        "default": 10000
       },
       "queryMode": {
         "type": "string",
@@ -211,8 +211,8 @@
           "timeoutMs": {
             "type": "integer",
             "minimum": 250,
-            "maximum": 600000,
-            "default": 30000
+            "maximum": 120000,
+            "default": 20000
           }
         },
         "default": {}
@@ -251,9 +251,9 @@
           },
           "timeoutMs": {
             "type": "integer",
-            "minimum": 250,
-            "maximum": 600000,
-            "default": 30000
+            "minimum": 60000,
+            "maximum": 1800000,
+            "default": 180000
           },
           "triggers": {
             "type": "object",
