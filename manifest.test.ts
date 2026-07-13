@@ -70,7 +70,7 @@ describe("skill-harness manifest", () => {
   it("keeps timeoutMs aligned with the runtime schema", () => {
     const timeoutMs = manifest.configSchema.properties.timeoutMs;
     expect(timeoutMs.minimum).toBe(250);
-    expect(timeoutMs.maximum).toBe(120000);
+    expect(timeoutMs.maximum).toBe(60000);
   });
 
   it("does not apply null defaults to optional model strings", () => {
@@ -105,9 +105,9 @@ describe("skill-harness manifest", () => {
       "not a runtime retry model",
     );
     expect(review.properties.timeoutMs).toMatchObject({
-      minimum: 250,
-      maximum: 600000,
-      default: 30000,
+      minimum: 60000,
+      maximum: 1800000,
+      default: 180000,
     });
     expect(
       review.properties.triggers.properties.skillCandidate.properties.toolCalls
@@ -148,8 +148,8 @@ describe("skill-harness manifest", () => {
     });
     expect(instruction.properties.timeoutMs).toMatchObject({
       minimum: 250,
-      maximum: 600000,
-      default: 30000,
+      maximum: 120000,
+      default: 20000,
     });
     expect(instruction.properties).not.toHaveProperty("triggers");
   });

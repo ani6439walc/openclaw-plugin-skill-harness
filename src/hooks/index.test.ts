@@ -1337,6 +1337,13 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
       "topic-triage:completed",
     );
+    expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
+    expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe(
+      "pipeline:completed",
+    );
+    expect(emittedPipelineEvents(emitAgentEvent).at(-1)?.data).toEqual(
+      expect.objectContaining({ durationMs: expect.any(Number) }),
+    );
     expect(JSON.stringify(emittedPipelineEvents(emitAgentEvent))).not.toMatch(
       /fastpath-a[12]/i,
     );
@@ -2401,6 +2408,10 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
     expect(instructionWriter).toHaveBeenCalledOnce();
     expect(result?.prependContext).toContain("<skill_harness_plugin");
+    expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
+    expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe(
+      "pipeline:completed",
+    );
     expect(emittedPhaseStates(emitAgentEvent)).toEqual(
       expect.arrayContaining([
         "topic-triage:started",
@@ -2826,7 +2837,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(record.mock.calls[0][1].current.intent.input).toBeUndefined();
   });
 
-  it("does not emit pipeline failure details when classification throws", async () => {
+  it("emits a bounded terminal pipeline failure when classification throws", async () => {
     const classifier = vi.fn().mockRejectedValue("classifier string failure");
     const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
@@ -2838,8 +2849,16 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(result).toEqual({
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining(["pipeline-failed:failed"]),
+    expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
+    expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe("pipeline:failed");
+    expect(emittedPipelineEvents(emitAgentEvent).at(-1)?.data).toEqual(
+      expect.objectContaining({
+        error: "skill-harness pipeline execution failed",
+        durationMs: expect.any(Number),
+      }),
+    );
+    expect(JSON.stringify(emittedPipelineEvents(emitAgentEvent))).not.toContain(
+      "classifier string failure",
     );
   });
 

@@ -47,6 +47,8 @@ When enabled, Skill Harness provides four main capabilities:
 
 Skill Harness works through OpenClaw lifecycle hooks.
 
+Eligible dynamic routing emits an explicit `plugin:skill-harness` lifecycle around its phase events. `pipeline:started` is emitted before any exact fast path or model-backed phase runs; `pipeline:completed` is emitted only after no further phase can run and carries the producer-measured `durationMs`. Unexpected exceptions emit `pipeline:failed` with the same duration contract. Consumers should use this parent lifecycle for overall status and timing rather than treating an individual phase completion as the end of the pipeline.
+
 ```mermaid
 graph TD
   A[Agent turn] --> B[before_prompt_build]

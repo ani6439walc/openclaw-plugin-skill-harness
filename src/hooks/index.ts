@@ -1052,6 +1052,28 @@ export function createHookHandlers(deps: HookDeps) {
     return toPromptBuildResult(promptPrefix);
   }
 
+  async function runPromptBuildPipeline<T>(
+    ctx: PluginHookAgentContext,
+    sessionKey: string | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const startedAtMs = Date.now();
+    emitPipelineEvent(ctx, sessionKey, "pipeline", "started");
+    try {
+      const result = await operation();
+      emitPipelineEvent(ctx, sessionKey, "pipeline", "completed", {
+        durationMs: Math.max(0, Date.now() - startedAtMs),
+      });
+      return result;
+    } catch (error) {
+      emitPipelineEvent(ctx, sessionKey, "pipeline", "failed", {
+        error: "skill-harness pipeline execution failed",
+        durationMs: Math.max(0, Date.now() - startedAtMs),
+      });
+      throw error;
+    }
+  }
+
   async function onBeforePromptBuild(
     event: PluginHookBeforePromptBuildEvent,
     ctx: PluginHookAgentContext,
@@ -1109,16 +1131,21 @@ export function createHookHandlers(deps: HookDeps) {
         availableIntents,
       );
       if (exactKeywordMatch) {
-        return handleExactKeywordPromptBuild({
+        return await runPromptBuildPipeline(
           ctx,
-          routing,
-          refreshedConfig,
-          latestUserMessage,
-          historicalIntents,
-          conversation,
-          availableIntents,
-          exactKeywordMatch,
-        });
+          routing.resolvedSessionKey,
+          () =>
+            handleExactKeywordPromptBuild({
+              ctx,
+              routing,
+              refreshedConfig,
+              latestUserMessage,
+              historicalIntents,
+              conversation,
+              availableIntents,
+              exactKeywordMatch,
+            }),
+        );
       }
 
       if (shouldUseDeterministicLowThinkingMode(ctx, refreshedConfig)) {
@@ -1139,33 +1166,39 @@ export function createHookHandlers(deps: HookDeps) {
       );
       if (!modelRef) return toPromptBuildResult();
 
-      const classification = await classifyPromptBuild({
+      return await runPromptBuildPipeline(
         ctx,
-        refreshedConfig,
-        effectiveAgentId: routing.effectiveAgentId,
-        resolvedSessionKey: routing.resolvedSessionKey,
-        latestUserMessage,
-        historicalIntents,
-        conversation,
-        modelRef,
-        availableIntents,
-      });
+        routing.resolvedSessionKey,
+        async () => {
+          const classification = await classifyPromptBuild({
+            ctx,
+            refreshedConfig,
+            effectiveAgentId: routing.effectiveAgentId,
+            resolvedSessionKey: routing.resolvedSessionKey,
+            latestUserMessage,
+            historicalIntents,
+            conversation,
+            modelRef,
+            availableIntents,
+          });
 
-      if (!classification) {
-        logger.debug("intention subagent failed; skipping hint injection.");
-        return toPromptBuildResult();
-      }
+          if (!classification) {
+            logger.debug("intention subagent failed; skipping hint injection.");
+            return toPromptBuildResult();
+          }
 
-      return await handleClassifiedPromptBuild({
-        ctx,
-        routing,
-        refreshedConfig,
-        latestUserMessage,
-        conversation,
-        availableIntents,
-        classification,
-        modelRef,
-      });
+          return await handleClassifiedPromptBuild({
+            ctx,
+            routing,
+            refreshedConfig,
+            latestUserMessage,
+            conversation,
+            availableIntents,
+            classification,
+            modelRef,
+          });
+        },
+      );
     } catch (err) {
       logger.warn("before_prompt_build hook error", { error: err });
       return staticContextEligible ? toPromptBuildResult() : undefined;

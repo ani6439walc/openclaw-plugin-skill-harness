@@ -114,6 +114,8 @@ Conversation prompts are intentionally structured as XML-like blocks. Keep recen
 
 Prompt-build authorization has two layers. First resolve the canonical agent/session and enforce configured agent, chat-type, and chat-ID scope. Then exclude Skill Harness embedded-agent sessions, generic/Review subagents, dreaming sessions, and active-memory sessions from all injection. Authorized internal/inter-session, non-user, and trigger-omitted turns receive fixed `appendSystemContext` only; eligible external-user turns may additionally receive dynamic `prependContext`. Once static authorization succeeds, dynamic fallbacks and failures must preserve the fixed system context.
 
+Eligible dynamic routing must emit one parent `pipeline:started` event before any exact or model-backed phase and exactly one terminal `pipeline:completed` or `pipeline:failed` event after no further phase can run. Terminal parent events carry producer-measured `durationMs`; phase events remain nested progress details. Do not make consumers infer overall completion from `topic-triage`, `intent-classify`, or `hint-generate` completion.
+
 Do not repeat fixed mandatory/tool guidance inside dynamic `<skill_harness_plugin>` output. Dynamic context contains only its context policy, `domain_skill_candidates`, and optional `## Instruction Hint`. The `before_prompt_build` hook does not expose final per-turn tool names; normal main-agent availability of registered Skill Harness tools is a deployment contract, while restricted runs must obey their narrower tool allowlist.
 
 ## Coding Rules

@@ -6,7 +6,7 @@ const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
 export type PipelinePhase =
-  "topic-triage" | "intent-classify" | "hint-generate";
+  "pipeline" | "topic-triage" | "intent-classify" | "hint-generate";
 
 export type PipelineState = "started" | "completed" | "failed";
 
@@ -22,6 +22,7 @@ export type PipelineMetadata = {
   confidence?: number;
   result?: string;
   error?: string;
+  durationMs?: number;
 };
 
 function cleanPipelineEventData(
