@@ -178,13 +178,15 @@ function buildInheritedIntentResult(
   return {
     intent: latest.intent,
     reason: "Topic unchanged; inherited previous intent",
-    keywords: latest.keywords ? [...latest.keywords] : undefined,
-    domain: latest.domain ?? FALLBACK_INTENT.domain,
-    topic: latest.topic,
+    keywords: [...topicContext.keywords],
+    domain: topicContext.domain || FALLBACK_INTENT.domain,
+    topic: topicContext.topic,
     confidence: latest.confidence ?? 0.8,
     complexity: topicContext.complexity,
   };
 }
+
+const TOPIC_CONTINUITY_INHERIT_CONFIDENCE = 0.8;
 
 function resolveIntentId(intent: string | undefined): string | undefined {
   return intent?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
@@ -569,6 +571,7 @@ export function createHookHandlers(deps: HookDeps) {
             topic: topicContext.topic,
             changed: isTopicContextChanged(topicContext),
             reason: resolveTopicChangeReason(topicContext),
+            confidence: topicContext.confidence,
             complexity: topicContext.complexity,
           }
         : { error: "topic checker returned no context" },
@@ -576,9 +579,13 @@ export function createHookHandlers(deps: HookDeps) {
 
     const latestHistoricalIntent =
       params.historicalIntents[params.historicalIntents.length - 1];
-    if (
-      topicContext &&
+    const isSameTopic =
+      topicContext !== undefined &&
       !isTopicContextChanged(topicContext) &&
+      getTopicContextReason(topicContext) === "same-topic";
+    if (
+      isSameTopic &&
+      topicContext.confidence >= TOPIC_CONTINUITY_INHERIT_CONFIDENCE &&
       latestHistoricalIntent
     ) {
       return {
@@ -593,7 +600,7 @@ export function createHookHandlers(deps: HookDeps) {
 
     let result: IntentionResult | undefined;
     let topicKeywordSimilarityMatched = false;
-    if (topicContext) {
+    if (topicContext && !isSameTopic) {
       const topicKeywordSimilarityMatch = findTopicKeywordSimilarityIntent(
         params.latestUserMessage,
         topicContext.domain,
@@ -631,6 +638,7 @@ export function createHookHandlers(deps: HookDeps) {
             topic: result.topic,
             changed: isTopicContextChanged(topicContext),
             reason: result.topicChangeReason,
+            confidence: topicContext.confidence,
             complexity: result.complexity,
           },
         );

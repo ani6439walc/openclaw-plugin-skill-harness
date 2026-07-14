@@ -162,11 +162,12 @@ describe("runTopicSwitchSubagent", () => {
       payloads: [
         {
           text: JSON.stringify({
+            basis: "Latest message continues the topic checker implementation.",
             keywords: [" Topic ", "Checker"],
             topic: "User is continuing work on the topic checker.",
             domain: "coding",
-            changed: false,
             reason: "same-topic",
+            confidence: 0.92,
             complexity: "medium",
           }),
         },
@@ -211,11 +212,13 @@ describe("runTopicSwitchSubagent", () => {
     });
 
     expect(result).toEqual({
+      basis: "Latest message continues the topic checker implementation.",
       keywords: ["topic", "checker"],
       topic: "User is continuing work on the topic checker.",
       domain: "coding",
       changed: false,
-      reason: undefined,
+      reason: "same-topic",
+      confidence: 0.92,
       complexity: "medium",
     });
     expect(runEmbeddedAgent).toHaveBeenCalledWith(
@@ -225,7 +228,9 @@ describe("runTopicSwitchSubagent", () => {
         timeoutMs: 4321,
         thinkLevel: "low",
         disableTools: true,
-        prompt: expect.stringContaining("You are a topic checker."),
+        prompt: expect.stringContaining(
+          "You are a topic and routing-continuity checker.",
+        ),
       }),
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
@@ -244,11 +249,12 @@ describe("runTopicSwitchSubagent", () => {
       payloads: [
         {
           text: JSON.stringify({
+            basis: "Latest message asks about timezone context.",
             keywords: ["timezone"],
             topic: "User is checking timezone context.",
             domain: "coding",
-            changed: true,
             reason: "shift",
+            confidence: 0.9,
             complexity: "low",
           }),
         },

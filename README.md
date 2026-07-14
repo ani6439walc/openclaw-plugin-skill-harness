@@ -63,10 +63,13 @@ graph TD
   D --> E{exact fastpath keyword?}
   E -->|yes| F[prepend fastpath hint]
   E -->|no| G[topic checker]
-  G --> H{same topic?}
+  G --> H{same topic, confidence at least 0.8, and history?}
   H -->|yes| I[inherit previous intent]
-  H -->|no| J[domain keyword similarity or classifier]
-  J --> K[optional instruction writer]
+  H -->|no| S{same topic?}
+  S -->|yes| T[full intent classifier]
+  S -->|no| J[domain keyword similarity or classifier]
+  T --> K[optional instruction writer]
+  J --> K
   I --> L[prepend skill_harness_plugin context]
   K --> L
   F --> L
@@ -96,7 +99,8 @@ Each intent describes:
 The plugin prefers cheap deterministic checks before calling helper models:
 
 - exact `fastpath.keywords` match can inject a short hint immediately
-- topic checker can detect same-topic continuation and inherit the previous intent
+- topic checker can inherit the previous intent only for same-topic results with confidence at or above `0.8` and available history; inherited results keep the prior intent/confidence but refresh topic, domain, keywords, and complexity from the latest topic check
+- uncertain same-topic results and same-topic results without history bypass keyword similarity and use the full intent classifier
 - domain keyword similarity can route clear cases before full classification
 - low-thinking turns can skip LLM scanner calls while preserving deterministic fastpaths
 
@@ -106,7 +110,7 @@ This keeps routine routing cheap and reduces unnecessary helper-model work.
 
 When deterministic routing is not enough, Skill Harness runs bounded helper subagents:
 
-- **topic checker**: decides whether the latest message continues the previous topic or starts a new one
+- **topic checker**: returns required `basis`, `reason`, continuity `confidence`, keywords, topic, domain, and downstream-task complexity; host code derives the internal `changed` flag from `reason`
 - **intent classifier**: returns structured JSON for intent, domain, topic, confidence, keywords, and complexity
 - **instruction writer**: converts the matched intent, its frontmatter `skills[]`, and their direct visible related skills into short, optional guidance for the main agent; prompt/body text is not scanned for `skill: <name>` references. It returns raw JSON with `instruction_hint` and `additional_candinate_skills`. If candidate descriptions do not yield a suitable recommendation, it may use one bounded parallel tool round containing 1–3 `skill_view` calls for promising candidates and 1–3 `skill_search` queries, then reconsider once. Resolved additional skill names are deduplicated into the injected `domain_skill_candidates`; unknown or invisible names are ignored.
 - **Intent Review reviewer**: optional post-turn reviewer that improves runtime intents when configured triggers fire

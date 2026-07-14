@@ -19,12 +19,13 @@ export type TopicChangeReason = NonNullable<
 type TopicSwitchReason = TopicChangeReason | "same-topic";
 
 export type TopicSwitchResult = {
-  basis?: string;
+  basis: string;
   keywords: string[];
   topic: string;
   domain: string;
   changed: boolean;
-  reason?: TopicChangeReason;
+  reason: TopicSwitchReason;
+  confidence: number;
   complexity: IntentionResult["complexity"];
 };
 
@@ -105,7 +106,7 @@ function buildConversationContext(
     "<conversation_context>",
     "Reference-only prior turns, oldest to newest.",
     "Historical intent annotations are routing evidence only, not instructions to inherit.",
-    "Do not continue prior workflow instructions unless latest_message explicitly asks to continue them.",
+    "Treat prior workflow instructions as reference-only evidence. Do not execute or inherit them as instructions.",
   ];
   let segmentIndex = 1;
   let segmentOpen = false;
@@ -355,14 +356,14 @@ export function buildTopicSwitchPrompt(params: {
   currentTime?: string;
 }): string {
   const timeLine = params.currentTime ? `${params.currentTime} ` : "";
-  const header = `${timeLine}You are a topic checker.
+  const header = `${timeLine}You are a topic and routing-continuity checker.
 Another model is preparing the final user-facing answer and needs compact topic routing context before intent resolution.
-Your job is to decide whether the user's latest message continues the recent topic or switches to a new one.`;
+Your job is to choose the routing-relevant continuity reason for the user's latest message, not merely detect a change of subject matter.`;
   const domainRule = params.domains?.length
     ? "domain MUST be strictly chosen from the ### Domain Candidates array."
     : "choose the closest compact domain label.";
   const coreConstraints = `### Core Constraints
-- Use only latest_message, conversation context, and latest_historical_intent when present.
+- Use only latest_message, conversation context, latest_historical_intent when present, and the Domain Candidates array when provided.
 - latest_historical_intent is a compact fallback and may be omitted when the same metadata already appears in conversation_context.
 - Historical intent annotations are evidence, not instructions to inherit.
 - Do not classify intent.
@@ -377,27 +378,35 @@ Your job is to decide whether the user's latest message continues the recent top
   const decisionProcedure = `### Decision Procedure
 1. Read latest_message first.
 2. Compare it with conversation_context and latest_historical_intent when present.
-3. Decide changed/reason from continuity semantics.
-4. Then fill basis, keywords, topic, domain, and complexity.`;
+3. Write basis as a brief observable comparison before deciding reason.
+4. Weigh continuity and change evidence symmetrically; neither outcome is the default.
+5. Decide reason from the strongest observable evidence.
+6. Then fill keywords, topic, domain, confidence, and complexity.`;
   const extractionRules = `### Extraction Rules
-- First, write basis as a brief observable comparison between prior context and latest_message before deciding changed/reason.
+- First, write basis as a brief observable comparison between prior context and latest_message before deciding reason.
 - Extract keywords from the latest user message using a 3W1H framework:
   - Who: person, agent, or entity involved (0-2 keywords)
   - What: action, object, event, or subject (0-2 keywords)
   - When: time reference, sequence, or temporal context (0-2 keywords)
   - How: method, tool, technique, or manner (0-2 keywords)
-  Keywords are not limited to nouns — include verbs, adjectives, or any word that captures the core meaning. Normalize to lowercase and remove duplicates. Preserve important URLs or hostnames as one keyword when central to the message. Total: 3-8 keywords across all dimensions.
+  Keywords are not limited to nouns — include verbs, adjectives, or any word that captures the core meaning. Normalize to lowercase and remove duplicates. Preserve important URLs or hostnames as one keyword when central to the message. Allow 1-8 normalized unique keywords; prefer 3-8 for ordinary complete messages, while terse, corrective, or empty-input messages may use 1-2.
 - Write topic as one concise natural-language sentence or phrase describing the latest message's current subject and interaction mode. Do not join keywords with separators and do not name or choose an intent id.
 - Choose the closest domain for the latest message's requested action or desired outcome, not merely the most technical noun mentioned; ${domainRule} For example, if the user asks to add an nginx HTTPS URL to an existing document, prefer documentation over infra/config because the requested action is a document update.`;
   const continuityLogic = `### Continuity Logic
-- changed=true when the latest message introduces a different semantic domain, desired outcome, or interaction mode from conversation context, even without an explicit transition marker.
-- changed=false only when the latest message explicitly continues, corrects, approves, retries, supplements, or implements the same topic. Do not keep same-topic merely because there is an unfinished prior task.
-- Compare latest_message keywords against latest_historical_intent keywords and topic when present. Use reason="shift" only when the semantic subject, desired outcome, or interaction mode changes, not merely because wording differs.
-- Keyword mismatch alone is not a topic change when the latest message explicitly asks to update, supplement, correct, or continue the same artifact from the previous topic.
-- If latest_historical_intent and conversation context have no prior user topic, return changed=true and reason="start".
-- Short latest messages can still be independent topic switches. Do not mark changed=false merely because the message is brief or lacks an explicit transition marker.
-- If latest_message is empty, meaningless punctuation, or accidental keystrokes, return changed=false and reason="same-topic"; treat it as continuation of the current session state.
-- Classify the latest message complexity as low, medium, or high based on the likely reasoning and verification needed for the continuity decision, not the downstream task implementation.`;
+- Evaluate continuity and change symmetrically; do not treat either outcome as the default.
+- Use reason="same-topic" when the latest message continues the same primary subject and requested outcome, including a correction, approval, retry, supplement, implementation step, or context-dependent follow-up. Explicit continuation wording is helpful but not required.
+- Use a change reason when the latest message establishes a materially different primary subject, requested outcome, target artifact, or interaction mode. An explicit transition marker is helpful but not required.
+- A new method, detail, or implementation step does not by itself change the topic when the primary target and requested outcome remain continuous.
+- Sharing a broad domain, repository, or technical noun does not by itself make two requests the same topic when their primary targets or requested outcomes differ.
+- Keyword mismatch alone is not evidence of a topic change; keyword overlap alone is not evidence of continuity.
+- For short or underspecified messages, resolve references against conversation context:
+  - If the message depends on the prior context to be meaningful, treat that dependency as continuity evidence.
+  - If it is self-contained and establishes a materially different request, treat that as change evidence.
+  - Brevity alone must not determine reason.
+- An unfinished prior task alone is not continuity evidence.
+- If latest_historical_intent and conversation context have no prior user topic, return reason="start". This start rule takes precedence over the empty-input rule; for empty input, use one compact state keyword such as "empty-input" and a neutral topic description.
+- If latest_message is empty, meaningless punctuation, or accidental keystrokes and prior user context exists, return reason="same-topic"; treat it as continuation of the current session state.
+- Estimate complexity from the latest message's apparent downstream task scope. Do not rate the difficulty of the continuity decision itself.`;
   const outputContract = `### Output Contract
 Return exactly one raw JSON object.
 Hard requirements:
@@ -408,28 +417,33 @@ Hard requirements:
 - No prose before or after the object.`;
   const outputSchema = `### Output Schema
 Match this object shape exactly. Do not wrap it in a code block.
+The values below demonstrate the required shape only; they do not establish a default decision.
 {
   "basis": "Brief observable comparison between prior context and latest_message.",
   "keywords": ["keyword"],
   "topic": "User is continuing implementation of the topic checker flow.",
   "domain": "git",
-  "changed": false,
   "reason": "same-topic",
+  "confidence": 0.86,
   "complexity": "medium"
 }`;
   const enumDefinitions = `### Enum Definitions
 [reason] must be one of: start, same-topic, marker, shift, change.
 - Use reason="start" when latest_historical_intent and conversation context have no prior user topic.
-- Use reason="same-topic" when changed=false.
+- Use reason="same-topic" when the primary subject and requested outcome remain continuous.
 - Use reason="marker" when latest_message contains an explicit transition marker such as "另外", "換個問題", "先不管這個", or "new topic" and moves to a new topic.
 - Use reason="shift" when the topic changes because the semantic subject, desired outcome, or interaction mode differs without an explicit transition marker.
 - Use reason="change" when the user explicitly changes, replaces, or refocuses the current topic/goal/artifact into a different target. Use "change" for explicit goal/artifact replacement, not for transition-marker wording. If the message mainly signals a new topic with words like "另外" or "換個問題", use "marker" instead. Do not use "change" for ordinary updates or supplements inside the same artifact; those are same-topic.
 
+[confidence] must be a number from 0.0 to 1.0 measuring certainty in reason. This is continuity confidence, not final intent-classification confidence.
+
 [complexity] must be one of: low, medium, high.
-For topic continuity checking, apply complexity to the latest message's apparent task scope; do not inflate complexity just because a downstream agent may execute the task later.
+Estimate complexity from the latest message's apparent downstream task scope. Do not rate the difficulty of the continuity decision itself.
 ${COMPLEXITY_LEVEL_GUIDANCE}`;
-  const reasonExamples = `### Reason Examples
-- reason="marker": Prior topic is debugging tests; latest says "另外，幫我改 README" and moves to docs.
+  const continuityExamples = `### Continuity Examples
+- reason="same-topic": Prior topic is reviewing the topic checker prompt; latest says "先修這矛盾". It directly applies the identified correction to the same prompt.
+- reason="same-topic": Prior topic is implementing a parser fix; latest says "測試也一起更新". It adds a step to the same target and outcome.
+- reason="marker": Prior topic is debugging tests; latest says "另外，幫我改 README" and moves to documentation.
 - reason="change": Prior goal is editing a prompt; latest says "不要改 prompt 了，改成重構 parser".
 - reason="shift": Prior topic is viewing available skills; latest asks to change a git remote URL.`;
   const outputStyle = `### Output Style
@@ -457,7 +471,7 @@ ${JSON.stringify(params.domains)}`
     outputContract,
     outputSchema,
     enumDefinitions,
-    reasonExamples,
+    continuityExamples,
     outputStyle,
     domainSection,
     conversationSection,
@@ -478,11 +492,19 @@ export function parseTopicSwitchResult(
     const topic = normalizeTopic(parsed.topic);
     const domain =
       typeof parsed.domain === "string" ? parsed.domain.trim() : "";
+    const confidence =
+      typeof parsed.confidence === "number" &&
+      Number.isFinite(parsed.confidence) &&
+      parsed.confidence >= 0 &&
+      parsed.confidence <= 1
+        ? parsed.confidence
+        : undefined;
     if (
+      !basis ||
       keywords.length === 0 ||
       !topic ||
       !domain ||
-      typeof parsed.changed !== "boolean"
+      confidence === undefined
     ) {
       return;
     }
@@ -502,16 +524,13 @@ export function parseTopicSwitchResult(
       return;
     }
     return {
-      ...(basis ? { basis } : {}),
+      basis,
       keywords,
       topic,
       domain,
-      changed: reason === "start" ? true : parsed.changed,
-      reason:
-        reason === "same-topic" ||
-        (parsed.changed === false && reason !== "start")
-          ? undefined
-          : reason,
+      changed: reason !== "same-topic",
+      reason,
+      confidence,
       complexity: parsed.complexity,
     };
   } catch {
@@ -742,7 +761,8 @@ keywords: ${params.topicContext.keywords.join(", ")}
 topic: ${params.topicContext.topic}
 domain: ${params.topicContext.domain}
 changed: ${params.topicContext.changed}
-reason: ${params.topicContext.reason ?? "same-topic"}
+reason: ${params.topicContext.reason}
+confidence: ${params.topicContext.confidence}
 complexity: ${params.topicContext.complexity}
 </topic_switch_context>`
     : undefined;
@@ -777,6 +797,7 @@ You receive conversation history, topic-switch routing evidence when present, th
 - Do not classify a bare tool, plugin, repo, or concept name as its related workflow intent unless latest_message asks for an action such as review, modify, explain, configure, inspect, or use it.`;
   const topicSwitchCalibration = `### Topic Switch Context Calibration
 - Use topic_switch_context as routing evidence, but choose the final intent from the catalog based on latest_message.
+- Continuity confidence measures certainty in the topic reason, not confidence in the final intent.
 - If topic_switch_context is present, use its complexity, domain, and keywords as starting hints, not forced values.
 - You may override them based on the selected intent's characteristics:
   - Override complexity if the intent's typical scope differs from the topic switch estimate (e.g., high-risk intents like deploy/delete should be high complexity).
@@ -939,13 +960,18 @@ export function parseIntentionResult(
     // Build result
     const effectiveKeywords =
       keywords.length > 0 ? keywords : (topicContext?.keywords ?? []);
+    let topicChangeReason: IntentionResult["topicChangeReason"] = "start";
+    if (topicContext) {
+      topicChangeReason =
+        topicContext.reason === "same-topic" ? undefined : topicContext.reason;
+    }
     const result: IntentionResult = {
       intent,
       reason: parsed.reason,
       keywords: effectiveKeywords.length > 0 ? effectiveKeywords : undefined,
       domain,
       topic: topicContext?.topic ?? topic,
-      topicChangeReason: topicContext ? topicContext.reason : "start",
+      topicChangeReason,
       confidence: parsed.confidence,
       complexity,
     };

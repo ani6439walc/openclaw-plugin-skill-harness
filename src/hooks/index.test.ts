@@ -2055,25 +2055,28 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
   });
 
   it("keeps same-topic inheritance ahead of topic keyword similarity", async () => {
-    const { handlers, classifier, instructionWriter, record } =
+    const { handlers, classifier, instructionWriter, record, emitAgentEvent } =
       createTopicFlowHarness({
         historicalIntents: [
           {
             input: "commit this",
             intent: "version-control",
-            keywords: ["commit"],
-            topic: "User wants a git commit.",
+            keywords: ["legacy-keyword"],
+            topic: "Legacy commit topic.",
+            domain: "legacy-git",
             confidence: 0.9,
             complexity: "medium",
           },
         ],
         intents: [versionControlIntent],
         topicChecker: vi.fn().mockResolvedValue({
-          keywords: ["commit"],
+          basis: "Latest message continues the commit workflow.",
+          keywords: ["commit", "follow-up"],
           topic: "User is still discussing a git commit.",
           domain: "git",
           changed: false,
           reason: "same-topic" as const,
+          confidence: 0.8,
           complexity: "low" as const,
         }),
       });
@@ -2098,7 +2101,73 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
           input: "commit it",
           intent: expect.objectContaining({
             trigger: "same-topic",
+            result: expect.objectContaining({
+              intent: "version-control",
+              keywords: ["commit", "follow-up"],
+              topic: "User is still discussing a git commit.",
+              domain: "git",
+              confidence: 0.9,
+              complexity: "low",
+            }),
           }),
+        }),
+      }),
+    );
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "topic-triage",
+          state: "completed",
+          confidence: 0.8,
+        }),
+      }),
+    );
+  });
+
+  it("routes low-confidence same-topic results through the classifier", async () => {
+    const topicContext = {
+      basis: "Latest message may continue the commit workflow.",
+      keywords: ["commit"],
+      topic: "User may still be discussing a git commit.",
+      domain: "git",
+      changed: false,
+      reason: "same-topic" as const,
+      confidence: 0.79,
+      complexity: "low" as const,
+    };
+    const { handlers, classifier, record } = createTopicFlowHarness({
+      historicalIntents: [
+        {
+          input: "commit this",
+          intent: "version-control",
+          keywords: ["commit"],
+          topic: "User wants a git commit.",
+          domain: "git",
+          confidence: 0.9,
+          complexity: "medium",
+        },
+      ],
+      intents: [versionControlIntent],
+      topicChecker: vi.fn().mockResolvedValue(topicContext),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "commit it",
+        messages: [{ role: "user", content: "commit it" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
+    expect(classifier).toHaveBeenCalledWith(
+      expect.objectContaining({ topicContext }),
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({ trigger: "classifier" }),
         }),
       }),
     );
@@ -2765,10 +2834,13 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
   it("records same-topic continuations without classifier or hint events", async () => {
     const topicContext = {
+      basis: "Latest message continues the topic checker implementation.",
       keywords: ["topic", "checker"],
       topic: "User is continuing work on the topic checker.",
+      domain: "coding",
       changed: false,
       reason: "same-topic" as const,
+      confidence: 0.9,
       complexity: "low" as const,
     };
     const {
