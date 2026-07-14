@@ -2575,11 +2575,11 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
-  it("falls back to topic context when classifier omits or malforms optional routing fields", async () => {
+  it("derives final domain from the selected intent despite wrong topic and model domains", async () => {
     const topicContext = {
       keywords: ["deploy", "production", "kubernetes"],
       topic: "User is switching to a production deployment.",
-      domain: "git",
+      domain: "chat",
       changed: true,
       reason: "marker" as const,
       complexity: "high" as const,
@@ -2615,9 +2615,45 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       expect.objectContaining({
         result: expect.objectContaining({
           keywords: ["deploy", "production", "kubernetes"],
-          domain: "infra",
+          domain: "git",
           complexity: "high",
           previousTopic: "topic / checker",
+        }),
+      }),
+    );
+  });
+
+  it("derives the fallback domain for an explicit other classification", async () => {
+    const topicContext = {
+      keywords: ["unclear", "request"],
+      topic: "User request is unclear.",
+      domain: "git",
+      changed: true,
+      reason: "shift" as const,
+      complexity: "low" as const,
+    };
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "other",
+      reason: "No catalog intent adequately explains the request",
+      keywords: ["unclear", "request"],
+      domain: "infra",
+      confidence: 0.9,
+      complexity: "low" as const,
+    });
+    const { handlers, instructionWriter } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [versionControlIntent],
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue(topicContext),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(instructionWriter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          intent: "other",
+          domain: "other",
         }),
       }),
     );
@@ -2854,10 +2890,10 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       historicalIntents: [
         {
           input: "plan topic checker",
-          intent: "coding",
+          intent: "social-casual",
           keywords: ["topic", "checker"],
           topic: "topic / checker",
-          domain: "coding",
+          domain: "chat",
           confidence: 0.85,
           complexity: "high",
         },
@@ -2896,8 +2932,8 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
           input: "implement topic checker",
           intent: expect.objectContaining({
             result: expect.objectContaining({
-              intent: "coding",
-              domain: "coding",
+              intent: "social-casual",
+              domain: "chat",
             }),
           }),
         }),

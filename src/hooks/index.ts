@@ -174,12 +174,13 @@ function findIntentEntry<
 function buildInheritedIntentResult(
   latest: HistoricalIntentRecord,
   topicContext: NonNullable<Awaited<ReturnType<typeof runTopicSwitchSubagent>>>,
+  domain: string,
 ): IntentionResult {
   return {
     intent: latest.intent,
     reason: "Topic unchanged; inherited previous intent",
     keywords: [...topicContext.keywords],
-    domain: topicContext.domain || FALLBACK_INTENT.domain,
+    domain,
     topic: topicContext.topic,
     confidence: latest.confidence ?? 0.8,
     complexity: topicContext.complexity,
@@ -594,6 +595,10 @@ export function createHookHandlers(deps: HookDeps) {
         result: buildInheritedIntentResult(
           latestHistoricalIntent,
           topicContext,
+          findIntentDomain(
+            params.availableIntents,
+            latestHistoricalIntent.intent,
+          ),
         ),
       };
     }
@@ -700,12 +705,7 @@ export function createHookHandlers(deps: HookDeps) {
       if (!topicKeywordSimilarityMatched) {
         applyTopicContextToResult(result, topicContext, latestHistoricalIntent);
       }
-      if (!topicContext) {
-        result.domain = findIntentDomain(
-          params.availableIntents,
-          result.intent,
-        );
-      }
+      result.domain = findIntentDomain(params.availableIntents, result.intent);
       return { kind: "classified", trigger, result };
     }
     return;
