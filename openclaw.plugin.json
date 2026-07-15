@@ -153,29 +153,6 @@
         },
         "default": {}
       },
-      "complexityPrompts": {
-        "type": "object",
-        "description": "Custom instruction-generation guidance for each complexity level.",
-        "properties": {
-          "low": {
-            "type": "string",
-            "description": "Custom prompt for low-complexity tasks (simple, quick questions).",
-            "default": ""
-          },
-          "medium": {
-            "type": "string",
-            "description": "Custom prompt for medium-complexity tasks (standard multi-step work).",
-            "default": ""
-          },
-          "high": {
-            "type": "string",
-            "description": "Custom prompt for high-complexity tasks (complex multi-file changes, architecture decisions).",
-            "default": ""
-          }
-        },
-        "additionalProperties": false,
-        "default": {}
-      },
       "instruction": {
         "type": "object",
         "description": "Optional instruction writer hints injected after intent classification. When disabled, only available domain skills are injected and generated hints are skipped.",

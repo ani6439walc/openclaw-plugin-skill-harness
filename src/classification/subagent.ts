@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { readFile } from "node:fs/promises";
 import {
   DEFAULT_PROVIDER,
   parseModelRef,
@@ -6,7 +7,10 @@ import {
 } from "openclaw/plugin-sdk/agent-runtime";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
-import { FALLBACK_INTENT_ID } from "../constants.js";
+import {
+  FALLBACK_INTENT_ID,
+  INSTRUCTION_COMPLEXITY_PROMPTS,
+} from "../constants.js";
 import {
   buildIntentInstructionPrompt,
   buildIntentionPrompt,
@@ -22,6 +26,7 @@ import {
   extractEmbeddedRunError,
   formatEmbeddedError,
 } from "../subagent-runtime.js";
+import { validateInstructionSkillEvidence } from "./instruction-skill-evidence.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
@@ -75,7 +80,7 @@ export function extractPayloadText(result: { payloads?: unknown[] }): string {
 }
 
 export interface IntentInstructionSubagentResult {
-  instructionHint?: string;
+  instructionHint?: string | null;
   additionalCandidateSkills?: string[];
   error?: string;
 }
@@ -304,14 +309,13 @@ export async function runIntentInstructionSubagent(params: {
     result: params.result,
     intentBody: params.intentBody,
     availableSkills: params.availableSkills,
-    complexityContext:
-      params.config.complexityPrompts[params.result.complexity],
+    complexityContext: INSTRUCTION_COMPLEXITY_PROMPTS[params.result.complexity],
     conversation: params.conversation,
     currentTime: resolveCurrentTime(params.api),
   });
 
   try {
-    const result = await params.api.runtime.agent.runEmbeddedAgent({
+    const runParams = {
       ...buildIntentionEmbeddedRunParams({
         params,
         subagentSessionId,
@@ -321,10 +325,16 @@ export async function runIntentInstructionSubagent(params: {
       timeoutMs: params.config.instruction.timeoutMs,
       thinkLevel: params.config.instruction.thinking,
       modelRun: false,
-      promptMode: "minimal",
+      promptMode: "minimal" as const,
       toolsAllow: INSTRUCTION_SKILL_TOOL_NAMES,
       disableTools: false,
-    });
+      skillsSnapshot: {
+        prompt: "",
+        skills: [],
+        resolvedSkills: [],
+      },
+    };
+    const result = await params.api.runtime.agent.runEmbeddedAgent(runParams);
     const embeddedError = extractEmbeddedRunError(result);
     if (embeddedError) {
       logger.warn("Intent instruction subagent returned an error", {
@@ -342,6 +352,28 @@ export async function runIntentInstructionSubagent(params: {
         intent: params.result.intent,
       });
       return { error: "instruction writer produced invalid JSON" };
+    }
+    const transcript = await readFile(runParams.sessionFile, "utf8").catch(
+      () => "",
+    );
+    const resultMeta = result.meta as
+      { agentMeta?: { toolSummary?: unknown } } | undefined;
+    if (
+      !validateInstructionSkillEvidence({
+        additionalCandidateSkills: instruction.additionalCandidateSkills,
+        availableSkillNames: (params.availableSkills ?? []).map(
+          (skill) => skill.name,
+        ),
+        transcript,
+        toolSummary: resultMeta?.agentMeta?.toolSummary,
+      })
+    ) {
+      logger.warn("Intent instruction skill discovery validation failed", {
+        intent: params.result.intent,
+      });
+      return {
+        error: "instruction writer violated skill discovery contract",
+      };
     }
     return instruction;
   } catch (err) {

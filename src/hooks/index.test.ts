@@ -2256,6 +2256,127 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(record).toHaveBeenCalled();
   });
 
+  it.each([
+    { confidence: 0.79, shouldRun: false },
+    { confidence: 0.8, shouldRun: true },
+  ])(
+    "uses 0.8 as the instruction writer confidence gate for $confidence",
+    async ({ confidence, shouldRun }) => {
+      const classifier = vi.fn().mockResolvedValue({
+        intent: "coding",
+        reason: "User wants implementation",
+        keywords: ["topic", "flow"],
+        topic: "User wants implementation help for the topic flow.",
+        domain: "coding",
+        topicChangeReason: "start",
+        confidence,
+        complexity: "medium" as const,
+      });
+      const { handlers, instructionWriter } = createTopicFlowHarness({
+        historicalIntents: [],
+        classifier,
+      });
+
+      await handlers.onBeforePromptBuild(event, ctx);
+
+      if (shouldRun) {
+        expect(instructionWriter).toHaveBeenCalledOnce();
+      } else {
+        expect(instructionWriter).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("treats a nullable instruction result as a successful no-op", async () => {
+    const instructionWriter = vi.fn().mockResolvedValue({
+      instructionHint: null,
+      additionalCandidateSkills: [],
+    });
+    const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      instructionWriter,
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(instructionWriter).toHaveBeenCalledOnce();
+    expect(result?.prependContext).toBeUndefined();
+    expect(result?.appendSystemContext).toContain("## Skills (mandatory)");
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "hint-generate",
+          state: "completed",
+        }),
+      }),
+    );
+    expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "hint-generate",
+          state: "failed",
+        }),
+      }),
+    );
+    expect(
+      record.mock.calls[0][1].current.intent.instructionText,
+    ).toBeUndefined();
+  });
+
+  it("preserves domain skill candidates for a nullable instruction result", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-null-hint-skills-"));
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    writeSkill(
+      path.join(workspace, "skills"),
+      "domain-test-skill",
+      "Guide the domain workflow.",
+    );
+    const codingIntent: IntentCatalogEntry = {
+      id: "coding",
+      definition: {
+        triggers: ["implement"],
+        examples: ["implement topic checker"],
+        domain: "coding",
+        skills: ["domain-test-skill"],
+        fastpath: { keywords: [] },
+        prompt: "## Guidelines\n\nImplement the requested change.",
+      },
+    };
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "coding",
+      reason: "User wants implementation",
+      keywords: ["topic", "checker"],
+      topic: "User wants topic checker implementation.",
+      domain: "coding",
+      topicChangeReason: "start",
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const instructionWriter = vi.fn().mockResolvedValue({
+      instructionHint: null,
+      additionalCandidateSkills: [],
+    });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [codingIntent],
+      classifier,
+      instructionWriter,
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => state },
+          agent: { resolveAgentWorkspaceDir: () => workspace },
+        },
+      } as unknown as Partial<OpenClawPluginApi>,
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result?.prependContext).toContain("<domain_skill_candidates>");
+    expect(result?.prependContext).toContain("<name>domain-test-skill</name>");
+    expect(result?.prependContext).not.toContain("\n## Instruction Hint\n");
+  });
+
   it.each([undefined, "", "   "])(
     "reports a concrete instruction generation failure for missing error %j",
     async (error) => {
@@ -2743,13 +2864,8 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       complexity: "medium" as const,
     });
     const instructionWriter = vi.fn().mockResolvedValue({
-      instructionHint:
-        "MUST view skill: search-discovered-skill — it directly matches this turn.",
-      additionalCandidateSkills: [
-        "search-discovered-skill",
-        "architecture-diagram",
-        "missing-skill",
-      ],
+      instructionHint: "Consider the directly applicable discovered workflow.",
+      additionalCandidateSkills: ["search-discovered-skill"],
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
@@ -2834,9 +2950,8 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(result?.prependContext).toContain(
       `<path>${path.join(bundled, "search-discovered-skill", "SKILL.md")}</path>`,
     );
-    expect(result?.prependContext).not.toContain("missing-skill");
     expect(result?.prependContext).toContain(
-      "MUST view skill: search-discovered-skill — it directly matches this turn.",
+      "Consider the directly applicable discovered workflow.",
     );
     expect(
       result?.prependContext.match(/<name>architecture-diagram<\/name>/g),

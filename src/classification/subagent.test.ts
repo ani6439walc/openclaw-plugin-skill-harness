@@ -1,6 +1,8 @@
+import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
+import { INSTRUCTION_COMPLEXITY_PROMPTS } from "../constants.js";
 import {
   buildIntentionEmbeddedRunParams,
   getInstructionModelRef,
@@ -295,7 +297,7 @@ describe("runIntentInstructionSubagent", () => {
         {
           text: JSON.stringify({
             instruction_hint: "Use test-driven-development, then apply_patch.",
-            additional_candinate_skills: ["test-driven-development"],
+            additional_candinate_skills: [],
           }),
         },
       ],
@@ -311,6 +313,9 @@ describe("runIntentInstructionSubagent", () => {
         model: "google/test-intent",
         thinking: "high",
         timeoutMs: 9999,
+        complexityPrompts: {
+          medium: "CUSTOM_CONFIG_COMPLEXITY_PROMPT",
+        },
         instruction: {
           enabled: true,
           model: "google/test-instruction",
@@ -344,7 +349,7 @@ describe("runIntentInstructionSubagent", () => {
 
     expect(result).toEqual({
       instructionHint: "Use test-driven-development, then apply_patch.",
-      additionalCandidateSkills: ["test-driven-development"],
+      additionalCandidateSkills: [],
     });
     expect(runEmbeddedAgent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -356,6 +361,11 @@ describe("runIntentInstructionSubagent", () => {
         modelRun: false,
         disableTools: false,
         toolsAllow: ["skill_view", "skill_search"],
+        skillsSnapshot: {
+          prompt: "",
+          skills: [],
+          resolvedSkills: [],
+        },
         prompt: expect.stringContaining("You are a hint writer."),
       }),
     );
@@ -363,7 +373,13 @@ describe("runIntentInstructionSubagent", () => {
       "Use test-driven-development",
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
-      "Classify the latest message turn-locally",
+      "Use the resolved intent from intent_metadata as the task boundary",
+    );
+    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
+      INSTRUCTION_COMPLEXITY_PROMPTS.medium,
+    );
+    expect(runEmbeddedAgent.mock.calls[0][0].prompt).not.toContain(
+      "CUSTOM_CONFIG_COMPLEXITY_PROMPT",
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
       "<conversation_context>",
@@ -371,6 +387,174 @@ describe("runIntentInstructionSubagent", () => {
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
       '<historical_intent>{"intent":"coding","topic":"continuation"}</historical_intent>',
     );
+  });
+
+  it("rejects an additional skill without search and view evidence", async () => {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [
+        {
+          text: JSON.stringify({
+            instruction_hint: "Use the discovered release workflow.",
+            additional_candinate_skills: ["shipping-and-launch"],
+          }),
+        },
+      ],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    const result = await runIntentInstructionSubagent({
+      api,
+      config: resolveConfig({}),
+      agentId: "main",
+      sessionKey: "agent:main:test",
+      latest: "Prepare a safe release",
+      result: {
+        intent: "coding",
+        reason: "Release task",
+        domain: "coding",
+        confidence: 0.9,
+        complexity: "medium",
+      },
+      intentBody: "Ship safely.",
+      modelRef: { provider: "openai", model: "gpt-5.6-sol" },
+    });
+
+    expect(result).toEqual({
+      error: "instruction writer violated skill discovery contract",
+    });
+  });
+
+  it("accepts a new skill with matching search and view evidence", async () => {
+    let sessionFile: string | undefined;
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      sessionFile = options.sessionFile;
+      fs.writeFileSync(
+        sessionFile,
+        [
+          JSON.stringify({
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [
+                {
+                  type: "toolCall",
+                  id: "search-1",
+                  name: "skill_search",
+                  arguments: { query: "release safety", limit: 3 },
+                },
+              ],
+            },
+          }),
+          JSON.stringify({
+            type: "message",
+            message: {
+              role: "toolResult",
+              toolCallId: "search-1",
+              toolName: "skill_search",
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    success: true,
+                    skills: [{ name: "shipping-and-launch" }],
+                  }),
+                },
+              ],
+            },
+          }),
+          JSON.stringify({
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [
+                {
+                  type: "toolCall",
+                  id: "view-1",
+                  name: "skill_view",
+                  arguments: { name: "shipping-and-launch" },
+                },
+              ],
+            },
+          }),
+          JSON.stringify({
+            type: "message",
+            message: {
+              role: "toolResult",
+              toolCallId: "view-1",
+              toolName: "skill_view",
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    success: true,
+                    name: "shipping-and-launch",
+                  }),
+                },
+              ],
+            },
+          }),
+        ].join("\n"),
+      );
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              instruction_hint: "Use the verified release workflow.",
+              additional_candinate_skills: ["shipping-and-launch"],
+            }),
+          },
+        ],
+        meta: {
+          agentMeta: {
+            toolSummary: {
+              calls: 2,
+              tools: ["skill_search", "skill_view"],
+              failures: 0,
+            },
+          },
+        },
+      };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    try {
+      const result = await runIntentInstructionSubagent({
+        api,
+        config: resolveConfig({}),
+        agentId: "main",
+        sessionKey: "agent:main:test",
+        latest: "Prepare a safe release",
+        result: {
+          intent: "coding",
+          reason: "Release task",
+          domain: "coding",
+          confidence: 0.9,
+          complexity: "medium",
+        },
+        intentBody: "Ship safely.",
+        availableSkills: [
+          {
+            name: "test-driven-development",
+            location: "/skills/test-driven-development/SKILL.md",
+            description: "Drive changes with tests.",
+          },
+        ],
+        modelRef: { provider: "openai", model: "gpt-5.6-sol" },
+      });
+
+      expect(result).toEqual({
+        instructionHint: "Use the verified release workflow.",
+        additionalCandidateSkills: ["shipping-and-launch"],
+      });
+    } finally {
+      if (sessionFile) fs.rmSync(sessionFile, { force: true });
+    }
   });
 
   it("reports invalid JSON when the instruction writer returns an empty payload", async () => {

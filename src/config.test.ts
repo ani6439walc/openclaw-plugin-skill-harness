@@ -7,9 +7,6 @@ import {
   DEFAULT_RECENT_ASSISTANT_TURNS,
   DEFAULT_RECENT_USER_CHARS,
   DEFAULT_RECENT_ASSISTANT_CHARS,
-  DEFAULT_LOW_COMPLEXITY_PROMPT,
-  DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
-  DEFAULT_HIGH_COMPLEXITY_PROMPT,
 } from "./constants.js";
 
 describe("resolveConfig", () => {
@@ -431,25 +428,8 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("complexityPrompts", () => {
-    it("should use default prompts when not provided", () => {
-      const result = resolveConfig({});
-      expect(result.complexityPrompts.low).toBe(DEFAULT_LOW_COMPLEXITY_PROMPT);
-      expect(result.complexityPrompts.low).toContain(
-        "frame it as optional guidance with concrete boundaries and expected output",
-      );
-      expect(result.complexityPrompts.low).not.toContain(
-        "MUST DO / MUST NOT DO",
-      );
-      expect(result.complexityPrompts.medium).toBe(
-        DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
-      );
-      expect(result.complexityPrompts.high).toBe(
-        DEFAULT_HIGH_COMPLEXITY_PROMPT,
-      );
-    });
-
-    it("should parse custom complexity prompts", () => {
+  describe("removed settings", () => {
+    it("should ignore the removed complexityPrompts setting", () => {
       const result = resolveConfig({
         complexityPrompts: {
           low: "Custom low prompt",
@@ -457,54 +437,28 @@ describe("resolveConfig", () => {
           high: "Custom high prompt",
         },
       });
-      expect(result.complexityPrompts.low).toBe("Custom low prompt");
-      expect(result.complexityPrompts.medium).toBe("Custom medium prompt");
-      expect(result.complexityPrompts.high).toBe("Custom high prompt");
-    });
 
-    it("should use default for empty or whitespace-only prompts", () => {
-      const result = resolveConfig({
-        complexityPrompts: {
-          low: "",
-          medium: "   ",
-          high: "Valid prompt",
-        },
-      });
-      expect(result.complexityPrompts.low).toBe(DEFAULT_LOW_COMPLEXITY_PROMPT);
-      expect(result.complexityPrompts.medium).toBe(
-        DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
-      );
-      expect(result.complexityPrompts.high).toBe("Valid prompt");
+      expect(result).not.toHaveProperty("complexityPrompts");
     });
+  });
 
+  describe("contextWindow partial overrides", () => {
     it("should support missing nested config and partial overrides", () => {
-      const emptyNested = resolveConfig({
-        contextWindow: {},
-        complexityPrompts: {},
-      });
+      const emptyNested = resolveConfig({ contextWindow: {} });
       expect(emptyNested.contextWindow.user.turns).toBe(
         DEFAULT_RECENT_USER_TURNS,
       );
       expect(emptyNested.contextWindow.assistant.turns).toBe(
         DEFAULT_RECENT_ASSISTANT_TURNS,
       );
-      expect(emptyNested.complexityPrompts.low).toBe(
-        DEFAULT_LOW_COMPLEXITY_PROMPT,
-      );
 
       const partial = resolveConfig({
         contextWindow: { user: { turns: 7 } },
-        complexityPrompts: { medium: "Custom medium only" },
       } as never);
       expect(partial.contextWindow.user.turns).toBe(7);
       expect(partial.contextWindow.user.chars).toBe(DEFAULT_RECENT_USER_CHARS);
       expect(partial.contextWindow.assistant.turns).toBe(
         DEFAULT_RECENT_ASSISTANT_TURNS,
-      );
-      expect(partial.complexityPrompts.low).toBe(DEFAULT_LOW_COMPLEXITY_PROMPT);
-      expect(partial.complexityPrompts.medium).toBe("Custom medium only");
-      expect(partial.complexityPrompts.high).toBe(
-        DEFAULT_HIGH_COMPLEXITY_PROMPT,
       );
     });
   });

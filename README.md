@@ -112,7 +112,7 @@ When deterministic routing is not enough, Skill Harness runs bounded helper suba
 
 - **topic checker**: returns required `basis`, `reason`, continuity `confidence`, keywords, topic, domain, and downstream-task complexity; host code derives the internal `changed` flag from `reason`
 - **intent classifier**: returns structured JSON for intent, domain, topic, confidence, keywords, and complexity
-- **instruction writer**: converts the matched intent, its frontmatter `skills[]`, and their direct visible related skills into short, optional guidance for the main agent; prompt/body text is not scanned for `skill: <name>` references. It returns raw JSON with `instruction_hint` and `additional_candinate_skills`. If candidate descriptions do not yield a suitable recommendation, it may use one bounded parallel tool round containing 1–3 `skill_view` calls for promising candidates and 1–3 `skill_search` queries, then reconsider once. Resolved additional skill names are deduplicated into the injected `domain_skill_candidates`; unknown or invisible names are ignored.
+- **instruction writer**: runs only when classifier confidence is at least `0.8` and treats the resolved intent as the task boundary. It returns raw JSON with an optional `instruction_hint` plus `additional_candinate_skills`, the sole machine-readable channel for new skill candidates. When existing evidence is insufficient, it chooses one bounded branch: either read one existing candidate, or run one focused `skill_search` (limited to three results) followed by one `skill_view` of the strongest new result. Only a newly searched and viewed skill may appear in the array, with at most one entry. The host validates the tool order, results, viewed name, and returned candidate against the embedded-run trace; missing, mismatched, failed, or over-budget evidence invalidates the generated result while preserving classifier/domain fail-open guidance. Existing intent/domain candidates are not repeated there. If no incremental guidance is justified, the writer returns `instruction_hint: null` with an empty array; this is a successful no-op, so domain candidates remain available without injecting an instruction hint. Resolved additional skill names are deduplicated into `domain_skill_candidates`; unknown or invisible names are ignored.
 - **Intent Review reviewer**: optional post-turn reviewer that improves runtime intents when configured triggers fire
 
 All helper outputs are treated as guidance, not user-visible final answers.
@@ -152,6 +152,7 @@ The policy tells the main agent:
 - each domain skill candidate includes its resolved `path` plus direct visible `related_skills` metadata; related skills remain optional rather than automatically required
 - irrelevant skill hints should be ignored if classification is wrong
 - generated instruction hints are advisory and must still be checked against the latest user request and verified context
+- instruction-writer depth and suggested verification use fixed built-in calibration for each complexity level; they do not define main-agent execution, planning, delegation, or scheduling policy
 
 Fixed mandatory guidance is not repeated inside this dynamic block. If an injected candidate or hint does not fit the current task, the static workflow directs the main agent to use focused `skill_search` and then read selected results with `skill_view`.
 
@@ -388,6 +389,7 @@ Check these common causes:
 - chat ID is blocked by `deniedChatIds`
 - main agent uses low thinking and `lowThinkingMode` is `off` or `fastpath-only` without a fastpath match
 - scanner model cannot be resolved and no fallback is configured
+- classifier confidence is below `0.8`, which skips the optional instruction writer while preserving available domain candidates
 
 ### Runtime intents are missing
 

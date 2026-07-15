@@ -89,6 +89,7 @@ function sanitizeHistoricalIntentRecords(
 }
 
 const LOW_THINKING_EFFORTS = new Set(["off", "minimal", "low"]);
+const INSTRUCTION_WRITER_MIN_CONFIDENCE = 0.8;
 
 function resolveReasoningEffort(
   ctx: PluginHookAgentContext,
@@ -934,9 +935,9 @@ export function createHookHandlers(deps: HookDeps) {
     }
 
     // Skip intent instruction subagent when confidence is too low
-    if ((result.confidence ?? 0) < 0.7) {
+    if ((result.confidence ?? 0) < INSTRUCTION_WRITER_MIN_CONFIDENCE) {
       logger.debug(
-        `confidence ${result.confidence} below 0.7; skipping intent instruction subagent and hint injection.`,
+        `confidence ${result.confidence} below ${INSTRUCTION_WRITER_MIN_CONFIDENCE}; skipping intent instruction subagent and hint injection.`,
       );
       return await recordAndReturnDomainSkillsPrefix();
     }
@@ -991,7 +992,7 @@ export function createHookHandlers(deps: HookDeps) {
       messageProvider: params.ctx.messageProvider,
       modelRef: instructionModelRef,
     });
-    const instructionText = instructionResult.instructionHint;
+    const instructionText = instructionResult.instructionHint ?? undefined;
     if (instructionText) {
       emitPipelineEvent(
         params.ctx,
@@ -1001,6 +1002,13 @@ export function createHookHandlers(deps: HookDeps) {
         {
           result: instructionText,
         },
+      );
+    } else if (instructionResult.instructionHint === null) {
+      emitPipelineEvent(
+        params.ctx,
+        params.routing.resolvedSessionKey,
+        "hint-generate",
+        "completed",
       );
     } else {
       const instructionError =
@@ -1054,7 +1062,7 @@ export function createHookHandlers(deps: HookDeps) {
       result,
       params.availableIntents,
       params.refreshedConfig,
-      instructionText,
+      instructionResult.instructionHint,
       domainSkills,
     );
     return toPromptBuildResult(promptPrefix);

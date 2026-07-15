@@ -1,15 +1,3 @@
-export type ComplexityPromptsConfig = {
-  low?: string;
-  medium?: string;
-  high?: string;
-};
-
-export type ResolvedComplexityPromptsConfig = {
-  low: string;
-  medium: string;
-  high: string;
-};
-
 export type ContextWindow = {
   user: { turns: number; chars: number };
   assistant: { turns: number; chars: number };
@@ -95,7 +83,6 @@ export type SkillHarnessPluginConfig = {
   queryMode?: string;
   contextWindow?: ContextWindow;
   timeoutMs?: number;
-  complexityPrompts?: ComplexityPromptsConfig;
   instruction?: InstructionConfig;
   review?: ReviewConfig;
 };
@@ -113,7 +100,6 @@ export type ResolvedSkillHarnessPluginConfig = {
   queryMode: "message" | "recent" | "full";
   contextWindow: ContextWindow;
   timeoutMs: number;
-  complexityPrompts: ResolvedComplexityPromptsConfig;
   instruction: ResolvedInstructionConfig;
   review: ResolvedReviewConfig;
 };

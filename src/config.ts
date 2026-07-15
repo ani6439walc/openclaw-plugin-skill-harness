@@ -6,9 +6,6 @@ import {
   DEFAULT_RECENT_ASSISTANT_TURNS,
   DEFAULT_RECENT_USER_CHARS,
   DEFAULT_RECENT_ASSISTANT_CHARS,
-  DEFAULT_LOW_COMPLEXITY_PROMPT,
-  DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
-  DEFAULT_HIGH_COMPLEXITY_PROMPT,
 } from "./constants.js";
 import type {
   ContextWindow,
@@ -34,12 +31,6 @@ const DEFAULT_CONTEXT_WINDOW: ContextWindow = {
     turns: DEFAULT_RECENT_ASSISTANT_TURNS,
     chars: DEFAULT_RECENT_ASSISTANT_CHARS,
   },
-};
-
-const DEFAULT_COMPLEXITY_PROMPTS = {
-  low: DEFAULT_LOW_COMPLEXITY_PROMPT,
-  medium: DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
-  high: DEFAULT_HIGH_COMPLEXITY_PROMPT,
 };
 
 const DEFAULT_INSTRUCTION = {
@@ -84,7 +75,6 @@ const DEFAULT_CONFIG = {
   queryMode: DEFAULT_QUERY_MODE,
   contextWindow: DEFAULT_CONTEXT_WINDOW,
   timeoutMs: DEFAULT_TIMEOUT_MS,
-  complexityPrompts: DEFAULT_COMPLEXITY_PROMPTS,
   instruction: DEFAULT_INSTRUCTION,
   review: DEFAULT_REVIEW,
 } satisfies ResolvedSkillHarnessPluginConfig;
@@ -115,12 +105,6 @@ const boundedInt = (fallback: number, min: number, max: number) =>
     .catch(fallback)
     .transform((value) => clampInt(value, fallback, min, max));
 
-const promptString = (fallback: string) =>
-  z
-    .string()
-    .catch(fallback)
-    .transform((value) => (value.trim() ? value : fallback));
-
 const UserContextWindowSchema = z
   .object({
     turns: boundedInt(DEFAULT_RECENT_USER_TURNS, 0, 20),
@@ -141,14 +125,6 @@ const ContextWindowSchema = z
     assistant: AssistantContextWindowSchema,
   })
   .catch(DEFAULT_CONTEXT_WINDOW);
-
-const ComplexityPromptsSchema = z
-  .object({
-    low: promptString(DEFAULT_LOW_COMPLEXITY_PROMPT),
-    medium: promptString(DEFAULT_MEDIUM_COMPLEXITY_PROMPT),
-    high: promptString(DEFAULT_HIGH_COMPLEXITY_PROMPT),
-  })
-  .catch(DEFAULT_COMPLEXITY_PROMPTS);
 
 const enabledSchema = z.boolean().catch(true);
 const ThinkLevelSchema = z
@@ -259,7 +235,6 @@ const SkillHarnessConfigSchema = z
     queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
     contextWindow: ContextWindowSchema,
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 250, 120_000),
-    complexityPrompts: ComplexityPromptsSchema,
     instruction: InstructionSchema,
     review: ReviewSchema,
   })
