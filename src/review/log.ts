@@ -47,6 +47,7 @@ export type NoFindingReasonCounts = Partial<
 
 export const SCHEMA_REJECTION_REASON_CODES = [
   "missing-required-field",
+  "missing-trigger-decision",
   "missing-target",
   "invalid-operation",
   "invalid-trigger-keyword-target",

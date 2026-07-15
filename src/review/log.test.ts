@@ -138,6 +138,7 @@ describe("review log", () => {
           },
           schemaRejectionReasonCounts: {
             "missing-target": 2,
+            "missing-trigger-decision": 1,
             "raw zod message should not survive": 99,
           },
         },
@@ -151,6 +152,7 @@ describe("review log", () => {
       },
       schemaRejectionReasonCounts: {
         "missing-target": 2,
+        "missing-trigger-decision": 1,
       },
     });
   });

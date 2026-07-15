@@ -188,6 +188,8 @@ Intent markdown must keep valid YAML frontmatter and the expected sections used 
 
 Review no longer creates pending items or exposes a manual backlog tool or slash command. This is a breaking workflow change and must be highlighted in release notes. Background reviews are serialized through `src/review/queue.ts`, stage runtime intent edits in an isolated temporary workspace, validate changed/targeted intents, then reconcile validated creates, changes, and deletions back to `intentsPath(dataRoot)`. They record compact outcomes under `processedEvents` in `reviewLogPath(dataRoot)`; with the default local state directory that is `~/.openclaw/plugins/skill-harness/review.json`.
 
+Review prompt maintenance must preserve evidence-gated action bias. Global rules may prefer the smallest valid correction only after lens, trigger-specific evidence, durability, scope, and current-workspace coverage checks pass; each trigger owns its evidence criteria. Treat the queued review snapshot as historical evidence and current files in the isolated workspace as authoritative content. Every requested trigger must have at least one valid positive or no-finding decision before a run is accepted. Missing or schema-invalid decisions must not satisfy coverage and are recorded through the sanitized `missing-trigger-decision` schema-rejection reason.
+
 Do not edit `reviewLogPath(dataRoot)` manually for normal work. It stores schema v4 `triggerKeywords` plus `processedEvents`; legacy `items` are discarded during migration.
 
 For manual runtime intent edits, read current runtime intent Markdown, make the smallest grounded change, then run at least:

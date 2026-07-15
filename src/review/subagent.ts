@@ -48,6 +48,7 @@ export interface ReviewSubagentResult {
 
 interface ReviewParseResult {
   findings: ReviewFinding[];
+  missingRequestedTriggers: ReviewTrigger[];
   requestedPositiveFindings: number;
   invalidRequestedPositiveFindings: number;
   noFindingReasonCounts?: NoFindingReasonCounts;
@@ -63,7 +64,7 @@ const REVIEW_INSTRUCTIONS: Record<
       "Identify reusable skills, tools, execution sequences, tool-call compression tactics, tips, parameters, and pitfalls that the matched intent Markdown or an existing catalog intent should preserve. When concrete skill usage, required ordering, recovery, a tool-specific pitfall, or a safe way to reduce future tool calls exists, prefer a small direct Experience or Concrete Workflow edit over no_finding. Exclude one-off tool usage and capabilities outside durable intent boundaries.",
     goal: "Refine the matched intent Markdown's frontmatter skills, Concrete Workflow, or Experience when the sequence or lesson is stable.",
     workflow:
-      "skill-candidate: first look for the smallest reusable Experience or Concrete Workflow edit: concrete skill/tool evidence, stable parameters, recovery, pitfalls, required ordering, or tool-call compression. When the trigger came from many tool calls, explicitly check whether future turns could use batched reads, one-purpose scripts, safe pipelines, reusable command templates, or a more specific skill to reduce repeated calls. Prefer updating the matched intent; if it is the wrong boundary, use the Intent Catalog to choose an existing umbrella intent before returning outside-intent-scope. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
+      "skill-candidate: first look for the smallest reusable Experience or Concrete Workflow refinement: concrete skill/tool evidence, stable parameters, recovery, pitfalls, required ordering, or tool-call compression. When the trigger came from many tool calls, explicitly check whether future turns could use batched reads, one-purpose scripts, safe pipelines, reusable command templates, or a more specific skill to reduce repeated calls. Prefer refining the matched intent; if it is the wrong boundary, use the Intent Catalog to choose an existing umbrella intent to refine before returning outside-intent-scope. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
   },
   "process-gap": {
     focus:
@@ -84,28 +85,28 @@ const REVIEW_INSTRUCTIONS: Record<
       "Inspect recent turns for dissatisfaction, repeated requests, style/format complaints, verbosity complaints, workflow corrections, or routing corrections that reveal an intent boundary, body guidance, style, format, verbosity, workflow, or response-strategy problem. Return no_finding without evidence.",
     goal: "Refine the relevant intent Markdown's boundary, examples, Guidelines, or Response Strategy; recommend split or merge only when evidence shows a collision.",
     workflow:
-      "satisfaction-check: map dissatisfaction to the smallest boundary, body guidance, style, format, verbosity, workflow, or Response Strategy correction; user corrections to style, tone, format, verbosity, workflow, or step order are first-class behavior signals when grounded in snapshot evidence; recommend split or merge only with collision evidence.",
+      "satisfaction-check: map dissatisfaction to the smallest boundary, body guidance, style, format, verbosity, workflow, or Response Strategy correction; user corrections to style, tone, format, verbosity, workflow, or step order are first-class behavior signals when grounded in snapshot evidence. Preserve a task-class scoped preference in Response Strategy, Concrete Workflow, or Experience rather than as a global personality note. Prefer refine; split or merge only with concrete collision evidence.",
   },
   "missing-intent": {
     focus:
       "Extract the uncategorized user goal, its stable class boundary, representative trigger descriptions, examples, required skills/tools, and execution strategy. Check that it is not merely a refinement of an existing intent or a one-session artifact.",
     goal: "Draft a stable class-level intent Markdown definition that follows the bundled skill-harness Skill format.",
     workflow:
-      "missing-intent: first rule out existing intent refinement or catalog coverage; prefer refining an existing intent over creating a narrow new one; create only stable class-level intents, never one-session artifacts.",
+      "missing-intent: first rule out existing intent refinement or catalog coverage; prefer refining an existing intent over create; use create only for a stable class-level goal that no existing intent can absorb without becoming vague or overlapping, never for a one-session artifact.",
   },
   "weak-intent": {
     focus:
       "Explain the classification ambiguity, likely matched intent, neighboring collision, and missing or misleading trigger/example/domain/fastpath coverage.",
     goal: "Refine the matched intent Markdown frontmatter triggers/examples/domain/fastpath and clarify its boundary without adding classification prose to the body.",
     workflow:
-      "weak-intent: focus on frontmatter triggers, examples, domain, fastpath, and boundary clarity; do not add execution body prose for classification-only ambiguity.",
+      "weak-intent: focus on frontmatter triggers, examples, domain, fastpath, and boundary clarity; prefer refine and do not add execution body prose for classification-only ambiguity. Use split or merge only when concrete neighboring-collision evidence proves refinement cannot preserve a clear class-level boundary.",
   },
   "behavior-fix": {
     focus:
       "Compare the user correction with the matched intent's routed behavior and identify the specific Markdown instruction, domain, or fastpath hint/keyword that caused, allowed, or failed to prevent the mistake. Treat style, tone, format, verbosity, workflow, or step-order correction as first-class behavior evidence when concrete. When the snapshot shows an explicit user correction, misroute, or wrong tool/no-tool behavior with concrete evidence, prefer a narrow finding over no_finding.",
     goal: "Refine the matched intent Markdown's domain, fastpath metadata, frontmatter skills, Guidelines, Response Strategy, Concrete Workflow, or Experience to encode the corrected behavior.",
     workflow:
-      "behavior-fix: if the snapshot contains an explicit user correction, style/tone/format/verbosity/workflow/step-order correction, concrete misroute, or wrong tool/no-tool behavior, prefer a narrow finding over no_finding; encode the smallest correction that would prevent recurrence. Also check whether the turn exposes a trigger keyword gap; suggest only stable phrases that clearly mean agent/routing correction.",
+      "behavior-fix: if the snapshot contains an explicit user correction, style/tone/format/verbosity/workflow/step-order correction, concrete misroute, or wrong tool/no-tool behavior, prefer a narrow finding over no_finding; encode the smallest correction that would prevent recurrence. Preserve a task-class scoped behavior preference in Response Strategy, Concrete Workflow, or Experience rather than as a global personality note. Prefer refine; use split or merge only with concrete boundary-collision evidence. Also check whether the turn exposes a trigger keyword gap; suggest only stable phrases that clearly mean agent/routing correction.",
   },
   "entity-context": {
     focus:
@@ -145,29 +146,23 @@ const INTENT_CRAFT_RUBRIC_NO_FINDING_RULE_MARKER = "{{NO_FINDING_RULE}}";
 
 const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 
-### Proactive review posture
-- Review the snapshot as an opportunity to improve the intent library, not as a passive audit. Most reviewable sessions should yield at least one small intent improvement when a requested trigger has concrete evidence.
-- Treat hasFinding=false as a high bar: use it only when the requested trigger is the wrong lens, the evidence is transient/one-off, or there is no concrete change that would improve future routing or execution guidance.
-- The target library shape is class-level intents with rich, maintainable Markdown sections, not a flat list of one-intent-per-session artifacts. This decides how to update existing intents, not whether to update at all.
-
-### Action signals
-- Act when the snapshot shows a user correction to style, tone, format, readability, verbosity, workflow, step ordering, tool choice, routing, or response strategy. Frustration phrases such as "stop doing that", "too verbose", "do not format it that way", "why explain", "just answer", "you always do Y", or explicit "remember this" are first-class intent signals, not memory-only signals.
-- Act when the user corrects the workflow, method, or step order. Encode the correction as an explicit step, Response Strategy rule, or Experience pitfall in the intent that governs that task class.
-- Act when the agent needed repeated attempts, hit a durable pitfall, recovered through a reusable fix/workaround/debugging path, or discovered stable parameters, paths, prerequisites, or ordering.
-- Act when a high tool-call turn reveals a reusable way to reduce future calls: batch independent reads/searches, assemble a short one-purpose script, use a safe pipeline or reusable command template, or route to a more specific skill that already encodes the workflow.
-- Act when a successful turn reveals a reusable workflow, checklist, template, decision step, verification pattern, non-trivial tool-use pattern, or compact response strategy that is missing from the matched intent.
-- Act when routing evidence shows classification ambiguity, a missing/weak trigger, missing example, wrong domain, fastpath gap, or false-positive keyword.
-- Act when the current intent Markdown is too vague, too narrow, overlapping another intent boundary, missing a needed skill/tool hint, or inconsistent with observed agent behavior.
-- Act when a skill or intent guidance referenced during the session is wrong, missing a required step, stale, or misleading. Since this reviewer edits only intents, patch the relevant intent Markdown to correct the skill hint, workflow step, pitfall, or selection guidance; do not edit skill files.
+### Proactive correction posture
+- Review every requested trigger actively and look for the smallest durable correction that would improve future routing or execution.
+- Evaluate each requested trigger independently. First confirm that the trigger is the right lens and that the snapshot contains concrete, reusable evidence for that trigger.
+- Confirm that the lesson is durable, in scope for an allowed target, and not already covered by the current workspace intent.
+- Once those gates pass, prefer applying the smallest valid correction over returning hasFinding=false.
+- In that evidence-qualified case, hasFinding=false is a high bar: use it only when the apparent lesson is already covered, transient, privacy-sensitive, outside the intent boundary, or cannot support a concrete valid change.
+- A trigger firing is an opportunity to investigate, not evidence by itself. Do not invent evidence, import another trigger's criteria, or edit merely to increase the finding rate.
+- The target library shape is class-level intents with rich, maintainable Markdown sections, not a flat list of one-intent-per-session artifacts.
 
 ### Target preference order
 - Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small preference, workflow, trigger, fastpath, Response Strategy, Concrete Workflow, or Experience improvements.
 - If the matched intent is absent or clearly wrong, prefer updating an existing class-level/umbrella intent from the Intent Catalog when catalog context is available and one intent already covers the broader task class.
-- Create a new intent only when no matched or catalog intent can naturally absorb the learning without becoming vague or overlapping. Keep the new intent class-level, not conversation-specific.
+- Use only operations justified by the requested trigger's workflow. Prefer refine; create, split, or merge only when that trigger's concrete evidence establishes the corresponding class-level boundary change.
 - Do not create support files or propose references/templates/scripts. Preserve conversation-specific but reusable details directly inside the relevant intent Markdown, usually as concise Experience bullets, Concrete Workflow steps, or Response Strategy rules.
 
 ### Intent shape and boundaries
-- Decide whether the evidence calls for creating, refining, splitting, or merging an intent. Prefer the smallest maintainable boundary.
+- Prefer the smallest maintainable boundary and the least disruptive operation allowed by the requested trigger workflow.
 - Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional fastpath metadata, and optional skills[].
 - Triggers describe the user goal and boundary; examples are realistic user messages; domain is the broad routing bucket.
 - fastpath.keywords are exact/similarity routing phrases. fastpath.hint is a short injected A1 hint for safe exact matches. Add or change fastpath only when evidence shows a stable short phrase or a fastpath misroute.
@@ -181,23 +176,18 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - Put concrete tool call shapes in workflow steps; do not use vague tool prose.
 - Include Concrete Workflow for multi-step or sequence-sensitive intents. Use short numbered "### Step N — <name>" sections.
 - Use Experience for reusable tips, parameters, pitfalls, stable skill/tool lessons, and recovery notes that help future turns with the same intent.
-- User preference embedding: when the user expresses a style, format, readability, verbosity, or workflow preference for this task class, preserve it in the relevant intent Markdown, not only memory. Memory captures who the user is or current operational state; intent Markdown captures how to perform this task class for that user.
-- When the user complains about how the task was handled, encode the lesson as a concise Experience pitfall, Response Strategy rule, or Concrete Workflow step in the intent that governs the task. Keep it task-class scoped rather than a global personality note.
 - If two existing intents appear to overlap, mention the overlap in the finding summary or suggestedChange so the background curator can consider larger consolidation. Do not perform broad consolidation unless the requested trigger and evidence justify a concrete class-level intent edit.
 
 ### Recordability filter
 - The core question is whether the lesson will save future time.
-- General workflow lessons are recordable only when they are reusable workflows or decision steps, costly recovery paths, critical parameters/settings/prerequisites, stable user preference or style rules, multi-attempt successful solutions with failure reasons and success conditions, reusable templates/checklists/formats, or stable external dependency/resource locations.
-- General workflow lessons are not recordable when they are one-off Q&A, pure conceptual explanations or general knowledge without concrete steps, decision criteria, or direct improvement to the matched intent's Guidelines, Response Strategy, Concrete Workflow, or Experience.
-- Never capture environment-dependent failures as durable restrictions: missing binaries, fresh-install errors, post-migration path mismatches, "command not found", unconfigured credentials, or uninstalled packages. The user can fix those environment states; they are not persistent rules.
+- A lesson is recordable only when the requested trigger's own criteria establish a concrete, reusable lesson and a direct improvement to an allowed target in the matched intent's frontmatter, Guidelines, Response Strategy, Concrete Workflow, or Experience.
+- One-off Q&A, pure conceptual explanations, general knowledge, and session narratives are not recordable without that trigger-specific qualification.
+- Never capture transient environment state as a durable restriction: missing binaries, fresh-install errors, post-migration path mismatches, "command not found", unconfigured credentials, or uninstalled packages are not persistent limitations.
 - Never capture negative claims about tools or features such as "browser tool does not work", "X tool is broken", or "cannot use Y from execute_code". Those claims harden into future refusal reasons after the actual issue is fixed.
-- Never capture conversation-specific temporary errors that were resolved before the conversation ended. If retry succeeded, the durable lesson is the retry/fix pattern, not the initial failure.
+- Never capture conversation-specific temporary errors that were resolved before the conversation ended. A successful retry does not qualify the fix by itself; apply only the requested trigger's evidence criteria.
 - Never capture one-task narratives such as "summarize today's market" or "analyze this PR" as a new class-level intent unless the conversation produced a reusable method, preference, or correction.
-- If a tool failed because of setup state, capture the fix method instead: install command, configuration step, environment variable, retry order, or diagnostic check. Prefer adding that fix to an existing setup/troubleshooting intent or the matched intent's Experience; never encode "this tool cannot work" as a standalone limitation.
-- "Nothing to save." is a real outcome, but not the default. Use it only when the conversation went smoothly, produced no user correction, and taught no new reusable technique.
-- Skill/tool experience lessons are recordable only when they capture a skill-specific pitfall and fix, error message or localization path, result-shaping parameter/configuration, reusable prompt/template/workflow, dependency or asset path, project entry point/module location, or required step ordering.
-- Tool-call compression lessons are recordable when they replace repeated manual calls with a stable batching pattern, short one-purpose script, safe command pipeline, reusable query/template, or explicit skill route. Preserve the exact command shape only when it is low-risk and reusable; otherwise preserve the decision rule and guardrails.
-- Routine tool usage, pure theory, and one-time operations are not recordable by themselves. Preserve them only when the snapshot shows a reusable pitfall, required ordering, stable parameter, recovery path, or skill/tool-specific lesson not already covered by the matched intent.
+- Record a setup or recovery step only when the requested trigger's criteria independently establish that it is stable and broadly reusable for the task class. Preserve the fix, conditions, and verification—not the temporary failure claim—and never encode "this tool cannot work" as a standalone limitation.
+- Routine tool usage, pure theory, and one-time operations are not recordable by themselves.
 - When evidence resembles an external learning entry, distill only the reusable title, context, solution steps, key paths, parameters, and keywords that directly improve the matched intent; do not propose external file formats or writes.
 
 ### Target and mutation boundaries
@@ -217,12 +207,12 @@ function buildIntentCraftRubric(includeTriggerKeywordRules: boolean): string {
 - For trigger keyword updates, reject generic words like "ok", "好", "不要", and one-off wording. Suggest removals only with concrete false-positive evidence.`
     : "";
   const noFindingRule = includeTriggerKeywordRules
-    ? "- Before returning no finding, check whether a small Experience, Response Strategy, Concrete Workflow, frontmatter, or trigger keyword update would save future work. Return no finding only when the evidence still does not justify a concrete intent Markdown improvement or trigger keyword suggestion."
-    : "- Before returning no finding, check whether a small Experience, Response Strategy, Concrete Workflow, or frontmatter update would save future work. Return no finding only when the evidence still does not justify a concrete intent Markdown improvement.";
+    ? "- After the requested trigger passes its evidence, durability, scope, and coverage gates, prefer the smallest valid Experience, Response Strategy, Concrete Workflow, frontmatter, or trigger keyword correction. Return no finding only when no valid in-scope correction remains."
+    : "- After the requested trigger passes its evidence, durability, scope, and coverage gates, prefer the smallest valid Experience, Response Strategy, Concrete Workflow, or frontmatter correction. Return no finding only when no valid in-scope correction remains.";
 
   return INTENT_CRAFT_RUBRIC_BASE.replace(
     INTENT_CRAFT_RUBRIC_TARGET_RULES_MARKER,
-    `${triggerKeywordRules}${correctionTargetRule}`,
+    `${triggerKeywordRules}\n${correctionTargetRule}`,
   ).replace(INTENT_CRAFT_RUBRIC_NO_FINDING_RULE_MARKER, noFindingRule);
 }
 
@@ -741,6 +731,7 @@ export function formatReviewSnapshot(
 
 interface TriggerKeywordPromptContract {
   includeRules: boolean;
+  rolePurpose: string;
   targetArtifactShape: string;
   reviewTargetLabel: string;
   outputContract: string;
@@ -757,6 +748,8 @@ function buildTriggerKeywordPromptContract(
   if (keywordUpdateTriggers.length === 0) {
     return {
       includeRules: false,
+      rolePurpose:
+        "Your sole purpose is to improve the content and routing quality of runtime intent Markdown.",
       targetArtifactShape:
         "Target artifact shape: directly edit runtime intent Markdown files when evidence supports a change, and return JSON describing what changed.",
       reviewTargetLabel: "runtime intent Markdown",
@@ -771,6 +764,8 @@ function buildTriggerKeywordPromptContract(
     .join(", ");
   return {
     includeRules: true,
+    rolePurpose:
+      "Your sole purpose is to improve runtime intent Markdown and, for the requested keyword-capable triggers, propose host-recorded trigger keyword adjustments.",
     targetArtifactShape:
       "Target artifact shape: directly edit runtime intent Markdown files when evidence supports a change, and return JSON describing what changed. For requested trigger keyword updates, return JSON only; the host records them in review.json.",
     reviewTargetLabel:
@@ -798,28 +793,28 @@ If matchedIntent is absent, return hasFinding=false unless the requested trigger
   const triggerPrompts = triggers
     .map((trigger) => {
       const instruction = REVIEW_INSTRUCTIONS[trigger];
-      return `${trigger}: Review focus: ${instruction.focus}\nCorrection goal: ${instruction.goal}\nReview workflow: First decide whether this trigger is the right lens. If not, return hasFinding=false with reasonCode="wrong-trigger". Then ask whether the evidence directly improves ${keywordContract.reviewTargetLabel}. If not, return hasFinding=false with the closest reasonCode. ${instruction.workflow}`;
+      return `${trigger}: Review focus: ${instruction.focus}\nCorrection goal: ${instruction.goal}\nReview workflow: First decide whether this trigger is the right lens. If not, return hasFinding=false with reasonCode="wrong-trigger". Apply only this trigger's concrete evidence criteria; trigger activation alone is not evidence. Check durability, privacy, target scope, and whether the current workspace target already covers the lesson. If those gates pass, prefer the smallest valid correction to ${keywordContract.reviewTargetLabel}. Otherwise return hasFinding=false with the closest reasonCode. ${instruction.workflow}`;
     })
     .join("\n\n");
 
   const exampleNoFindings = triggers
     .map((trigger) => `{"trigger":"${trigger}","hasFinding":false}`)
     .join(",");
-  const reasonCodeExampleTrigger = triggers[0] ?? "skill-candidate";
-  const positiveExampleTrigger = triggers[0] ?? "skill-candidate";
   const intentCraftRubric = buildIntentCraftRubric(
     keywordContract.includeRules,
   );
 
   return `You are an intent reviewer.
 This is an intent review, not a general audit, skill writer, repository refactor, or passive transcript summary.
-Your sole purpose is to improve the content and routing quality of skill-harness intents/*.md files.
+${keywordContract.rolePurpose}
 ${keywordContract.targetArtifactShape}
 Hard rules — do not violate:
 Review only the requested triggers. Each trigger is independent and may return hasFinding=false.
 Do not perform unrequested trigger work. Do not turn one requested review into a different trigger review, split, or merge recommendation unless that trigger was requested and the evidence supports it.
 Do not invent evidence. Modify only runtime intent Markdown files in the current workspace. Do not touch bundled/package intents, skills, config, source code, state JSON, or any path outside the runtime intents directory.
-Use the Matched Intent section inside review_snapshot as the source of truth for the current intent Markdown.
+The review_snapshot is historical routing and turn evidence; its Matched Intent section is not authoritative current file content.
+Before editing an existing intent, read its current Markdown file in the review workspace.
+Treat the current workspace file as canonical for file content and already-covered decisions. Preserve current workspace content when it differs from the Matched Intent snapshot; do not rewrite a file from the snapshot body.
 ${catalogGuidance}
 
 ${intentCraftRubric}
@@ -830,8 +825,10 @@ ${triggerPrompts}
 Output format: Return exactly one raw JSON object with no Markdown code fences and no surrounding prose. Do not write analysis, reasoning, or commentary outside the JSON. The entire response should be parseable by JSON.parse without cleanup.
 ${ULTRA_CONCISE_REVIEW_OUTPUT_STYLE}
 
-Example positive finding structure for a small intent Markdown edit already applied in the review workspace:
-{"findings":[{"trigger":"${positiveExampleTrigger}","hasFinding":true,"targetKind":"intent-markdown","operation":"refine","targetIntentIds":["matched-intent-id"],"dedupeKey":"stable-short-key","summary":"Preserve reusable workflow lesson","evidence":["Concrete snapshot evidence"],"correctionGoal":"Add a reusable Experience note","suggestedChange":"Added a concise Experience bullet with the reusable ordering, parameter, or pitfall."}]}
+Decision completeness:
+- Every requested trigger must have at least one valid decision: one or more hasFinding=true items, or one hasFinding=false item when no valid correction remains.
+- Finding order does not indicate priority; evaluate every requested trigger independently.
+- Unrequested or schema-invalid findings do not satisfy this requirement.
 
 Fallback no-finding structure for requested triggers only when no concrete improvement is justified:
 {"findings":[${exampleNoFindings}]}
@@ -839,7 +836,6 @@ Fallback no-finding structure for requested triggers only when no concrete impro
 For hasFinding=false items:
 - reasonCode is optional but SHOULD be one of: ${NO_FINDING_REASON_CODE_LIST}.
 - Use reasonCode to make negative decisions auditable; do not add evidence, correctionGoal, suggestedChange, or target fields to no-finding items.
-- Example with reasonCode: {"trigger":"${reasonCodeExampleTrigger}","hasFinding":false,"reasonCode":"insufficient-evidence"}
 
 For every hasFinding=true item:
 - For intent Markdown changes, first apply the smallest valid edit to the runtime intent Markdown file, then set targetKind="intent-markdown" or omit targetKind for backward compatibility; operation must be create, refine, split, or merge; targetIntentIds must list every existing or proposed intent ID affected by the change.
@@ -876,6 +872,7 @@ function parseReviewFindingsDetailed(
       : ReviewResponseSchema.parse(extractMalformedFindingsResponse(raw));
     const requested = new Set<string>(requestedTriggers);
     const findings: ReviewFinding[] = [];
+    const validDecisionTriggers = new Set<string>();
     const noFindingReasonCounts: Partial<Record<NoFindingReasonCode, number>> =
       {};
     const schemaRejectionReasonCounts: Partial<
@@ -912,13 +909,17 @@ function parseReviewFindingsDetailed(
       }
       const finding = result.data;
       if (!finding.hasFinding) {
-        if (requested.has(finding.trigger) && finding.reasonCode) {
-          noFindingReasonCounts[finding.reasonCode] =
-            (noFindingReasonCounts[finding.reasonCode] ?? 0) + 1;
+        if (requested.has(finding.trigger)) {
+          validDecisionTriggers.add(finding.trigger);
+          if (finding.reasonCode) {
+            noFindingReasonCounts[finding.reasonCode] =
+              (noFindingReasonCounts[finding.reasonCode] ?? 0) + 1;
+          }
         }
         continue;
       }
       if (!requested.has(finding.trigger)) continue;
+      validDecisionTriggers.add(finding.trigger);
       if ("targetTrigger" in finding) {
         findings.push({
           trigger: finding.trigger as ReviewTrigger,
@@ -956,6 +957,13 @@ function parseReviewFindingsDetailed(
       : undefined;
     return {
       findings,
+      missingRequestedTriggers: [
+        ...new Set(
+          requestedTriggers.filter(
+            (trigger) => !validDecisionTriggers.has(trigger),
+          ),
+        ),
+      ],
       requestedPositiveFindings,
       invalidRequestedPositiveFindings,
       ...(normalizedReasonCounts
@@ -1268,6 +1276,22 @@ export async function runReviewSubagent(params: {
       const failure: ReviewSubagentResult = {
         findings: [],
         outcome: "parse-failed",
+      };
+      return failure;
+    }
+    if (parsed.missingRequestedTriggers.length > 0) {
+      const schemaRejectionReasonCounts: SchemaRejectionReasonCounts = {
+        ...parsed.schemaRejectionReasonCounts,
+        "missing-trigger-decision": parsed.missingRequestedTriggers.length,
+      };
+      logger.warn("review omitted requested trigger decisions", {
+        missingDecisionCount: parsed.missingRequestedTriggers.length,
+        schemaRejectionReasonCounts,
+      });
+      const failure: ReviewSubagentResult = {
+        findings: [],
+        outcome: "schema-rejected",
+        schemaRejectionReasonCounts,
       };
       return failure;
     }

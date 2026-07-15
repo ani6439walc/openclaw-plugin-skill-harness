@@ -248,6 +248,7 @@ describe("ReviewLogWriter", () => {
         } as never,
         schemaRejectionReasonCounts: {
           "missing-required-field": 1,
+          "missing-trigger-decision": 1,
           nope: 4,
         } as never,
       }),
@@ -257,7 +258,10 @@ describe("ReviewLogWriter", () => {
       outcome: "schema-rejected",
       validationErrors: ["bad.md: missing ## Guidelines"],
       noFindingReasonCounts: { "routine-tool-use": 2 },
-      schemaRejectionReasonCounts: { "missing-required-field": 1 },
+      schemaRejectionReasonCounts: {
+        "missing-required-field": 1,
+        "missing-trigger-decision": 1,
+      },
     });
   });
 });

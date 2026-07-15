@@ -339,6 +339,8 @@ Intent Review is disabled by default. When enabled, it watches completed turns f
 
 When a trigger fires, a background reviewer runs against the runtime intent directory only. It may create, refine, split, or merge runtime `intents/*.md`. It validates the staged catalog before applying targeted changes and records the outcome in `review.json`. It does not write source files, bundled skills, OpenClaw config, memory files, or arbitrary filesystem paths.
 
+The reviewer evaluates each requested trigger independently. Trigger activation starts an investigation but is not evidence by itself; after trigger-specific evidence, durability, scope, and existing coverage qualify a correction, the reviewer prefers the smallest valid change over a no-finding result. The staged workspace copy is authoritative for current intent content, while the queued review snapshot remains historical turn and routing evidence. Every accepted review run must contain a valid positive or no-finding decision for every requested trigger; omitted or schema-invalid decisions are recorded as `schema-rejected` with sanitized `missing-trigger-decision` counts.
+
 ## Development
 
 From the repository root:
