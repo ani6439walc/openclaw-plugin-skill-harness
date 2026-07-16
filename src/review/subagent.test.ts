@@ -612,7 +612,7 @@ describe("buildReviewPrompt", () => {
       prompt
         .trim()
         .endsWith(
-          "suggestedChange MUST be a JSON string, never an object or array.",
+          "Trigger keyword updates are JSON-only findings; do not write to or edit review.json. The host will record these in review.json for you.",
         ),
     ).toBe(true);
   });
