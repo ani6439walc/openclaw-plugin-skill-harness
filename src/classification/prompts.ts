@@ -608,12 +608,19 @@ Use this exact successful no-op shape when guidance would only repeat existing e
 - Suggest a concrete workflow the main agent might consider.
 - For style or routing intents, output response-style guidance only; do not invent file/system/tool actions unless the latest message asks for an external action.
 - If intent guidelines are clearly misaligned or provide no reliable incremental guidance, use bounded evidence recovery below. If recovery cannot verify applicable guidance, return the successful no-op shape.`;
+  const existingSkillNames = (params.availableSkills ?? []).map((s) => s.name);
+  const existingSkillNamesStr =
+    existingSkillNames.length > 0
+      ? existingSkillNames.map((name) => `"${name}"`).join(", ")
+      : "none";
+
   // Keep newly-discovered-only recommendation rules; max-1 is still relaxed separately.
   const skillRecommendation = `## Skill recommendation
 - Default to an empty additional_candinate_skills array.
-- additional_candinate_skills is the only source of new skill candidates; instruction_hint may describe workflow details but must not tell the main agent to load a skill.
+- CRITICAL: If you did not execute any tool calls (skill_search or skill_view) in this run, you have discovered zero new skills. In this case, additional_candinate_skills MUST be empty: [].
+- additional_candinate_skills is the only source of new skill candidates; instruction_hint may describe workflow details but must not tell the main agent to load, import, or consider any specific skill by name (e.g. do not say "consider loading k8s skill" or "load grafana").
 - Include only skills that were newly discovered by skill_search and directly verified by skill_view during this run.
-- Existing candidate_skills must not be repeated in additional_candinate_skills; they are already supplied through the classifier/domain path.
+- Existing candidate_skills must not be repeated in additional_candinate_skills; they are already supplied through the classifier/domain path. Specifically, you MUST NOT include any of the following already-available skills: ${existingSkillNamesStr}.
 - Never add a skill for casual/social/style-only turns, simple approvals, routine read-only inspection, or when normal tools and existing evidence are sufficient.
 - Distinguish between skills and tools: built-in tools like web_fetch, terminal, read_file, skill_view, and skill_search are NOT skills. Skills are referenced with "skill:" prefix (e.g., "skill: compare"), tools are used directly.
 - Add a newly discovered skill only when its viewed workflow directly matches latest_message.`;
