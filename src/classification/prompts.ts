@@ -244,7 +244,8 @@ export function parseIntentInstructionResult(
       instructionHint === undefined ||
       instructionHint === "" ||
       !Array.isArray(rawSkills) ||
-      rawSkills.length > 1 ||
+      // Temporarily disabled: reject more than one additional skill.
+      // rawSkills.length > 1 ||
       (instructionHint === null && rawSkills.length > 0) ||
       rawSkills.some(
         (skill) =>
@@ -575,10 +576,12 @@ Your output is optional reference material for the main agent, not mandatory ins
 - Keep instruction_hint actionable and concise; quote intent or skill content only when the exact wording is directly relevant.
 - Phrase instruction_hint guidance as suggestions ("consider", "suggested", "hint:") rather than mandatory commands.
 ${ULTRA_CONCISE_TEXT_OUTPUT_GUIDELINES}`;
+  // Temporarily disabled output contract wording:
+  // - additional_candinate_skills: an array containing 0 or 1 skill name.
   const outputContract = `## Output contract
 Return exactly one raw JSON object with exactly these two fields:
 - instruction_hint: a concise string or null when no incremental guidance is available.
-- additional_candinate_skills: an array containing 0 or 1 skill name. Keep this exact misspelled field name.
+- additional_candinate_skills: an array of skill names discovered and verified in this run. Keep this exact misspelled field name.
 Hard requirements:
 - First character: \`{\`
 - Last character: \`}\`
@@ -605,10 +608,11 @@ Use this exact successful no-op shape when guidance would only repeat existing e
 - Suggest a concrete workflow the main agent might consider.
 - For style or routing intents, output response-style guidance only; do not invent file/system/tool actions unless the latest message asks for an external action.
 - If intent guidelines are clearly misaligned or provide no reliable incremental guidance, use bounded evidence recovery below. If recovery cannot verify applicable guidance, return the successful no-op shape.`;
+  // Keep newly-discovered-only recommendation rules; max-1 is still relaxed separately.
   const skillRecommendation = `## Skill recommendation
 - Default to an empty additional_candinate_skills array.
 - additional_candinate_skills is the only source of new skill candidates; instruction_hint may describe workflow details but must not tell the main agent to load a skill.
-- Include at most one skill, and only when it was newly discovered by skill_search and directly verified by skill_view during this run.
+- Include only skills that were newly discovered by skill_search and directly verified by skill_view during this run.
 - Existing candidate_skills must not be repeated in additional_candinate_skills; they are already supplied through the classifier/domain path.
 - Never add a skill for casual/social/style-only turns, simple approvals, routine read-only inspection, or when normal tools and existing evidence are sufficient.
 - Distinguish between skills and tools: built-in tools like web_fetch, terminal, read_file, skill_view, and skill_search are NOT skills. Skills are referenced with "skill:" prefix (e.g., "skill: compare"), tools are used directly.

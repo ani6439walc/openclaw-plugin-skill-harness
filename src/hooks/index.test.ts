@@ -158,6 +158,87 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
               description: "Harness skills.",
             }),
           ],
+          toolCalls: [
+            expect.objectContaining({
+              name: "skill_view",
+              success: true,
+              error: undefined,
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("records result-level skill tool failures as explicit failures", async () => {
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "session-1",
+    );
+    const record = vi.spyOn(defaultTracker, "record");
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const failureOutput = JSON.stringify({
+      success: false,
+      error: "Skill not found: missing-skill",
+    });
+
+    await createHandlers().onAfterToolCall(
+      {
+        toolName: "skill_view",
+        params: { name: "missing-skill" },
+        result: failureOutput,
+        durationMs: 1,
+      } as never,
+      { sessionKey: "agent:main:discord:channel:1490722656197152878" },
+    );
+
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          skillsUsed: undefined,
+          toolCalls: [
+            expect.objectContaining({
+              name: "skill_view",
+              success: false,
+              result: undefined,
+              error: failureOutput,
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("does not treat read file content containing success false as a tool failure", async () => {
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "session-1",
+    );
+    const record = vi.spyOn(defaultTracker, "record");
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const fileContent = JSON.stringify({ success: false, value: "fixture" });
+
+    await createHandlers().onAfterToolCall(
+      {
+        toolName: "read",
+        params: { path: "/repo/fixture.json" },
+        result: fileContent,
+        durationMs: 1,
+      } as never,
+      { sessionKey: "agent:main:discord:channel:1490722656197152878" },
+    );
+
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          toolCalls: [
+            expect.objectContaining({
+              name: "read",
+              success: true,
+              result: fileContent,
+              error: undefined,
+            }),
+          ],
         }),
       }),
     );
@@ -219,6 +300,64 @@ description: Navigate Tokyo.
             expect.objectContaining({
               name: "read",
               result: skillOutput.slice(0, 200),
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("records persisted result-level failures as explicit failures", async () => {
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "session-1",
+    );
+    const record = vi.spyOn(defaultTracker, "record");
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const failureOutput = JSON.stringify({
+      success: false,
+      error: "query or at least one filter is required",
+    });
+    const handlers = createHandlers();
+
+    await handlers.onBeforeToolCall(
+      {
+        toolName: "skill_search",
+        params: {},
+        toolCallId: "call-search-failure",
+      } as never,
+      {
+        sessionKey: "agent:main:discord:direct:529296776637972480",
+        toolName: "skill_search",
+        toolCallId: "call-search-failure",
+      } as never,
+    );
+    handlers.onToolResultPersist(
+      {
+        toolName: "skill_search",
+        toolCallId: "call-search-failure",
+        message: {
+          role: "toolResult",
+          content: [{ type: "text", text: failureOutput }],
+        },
+      } as never,
+      {
+        sessionKey: "agent:main:discord:direct:529296776637972480",
+        toolName: "skill_search",
+        toolCallId: "call-search-failure",
+      } as never,
+    );
+
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          skillsUsed: undefined,
+          toolCalls: [
+            expect.objectContaining({
+              name: "skill_search",
+              success: false,
+              result: undefined,
+              error: failureOutput,
             }),
           ],
         }),

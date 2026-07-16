@@ -72,6 +72,7 @@ export interface SessionState {
     params: Record<string, unknown>;
     result?: string;
     error?: string;
+    success?: boolean;
     durationMs?: number;
   }>;
   result?: string;
@@ -99,29 +100,46 @@ const REVIEW_PARAM_MAX_CHARS = 500;
 const SAFE_REVIEW_PARAM_KEYS = new Set([
   "command",
   "cwd",
+  "domains",
   "filePath",
   "file_path",
+  "keywords",
   "limit",
   "name",
   "offset",
   "path",
   "pattern",
   "query",
+  "show_matches",
+  "show_related",
+  "show_stats",
   "skillName",
+  "source",
   "url",
   "urls",
   "workdir",
 ]);
 
+const JSON_REVIEW_PARAM_KEYS = new Set(["domains", "keywords"]);
+
 const SENSITIVE_REVIEW_PARAM_KEY_PATTERN =
   /api[_-]?key|authorization|body|content|cookie|credential|headers|password|prompt|secret|text|token/i;
 
-function stringifyReviewParamValue(value: unknown): string | undefined {
+function stringifyReviewParamValue(
+  value: unknown,
+  key?: string,
+): string | undefined {
   if (value === null || value === undefined) return;
   if (["string", "number", "boolean"].includes(typeof value)) {
     return truncate(String(value), REVIEW_PARAM_MAX_CHARS);
   }
   if (Array.isArray(value)) {
+    if (key && JSON_REVIEW_PARAM_KEYS.has(key)) {
+      const strings = value.filter(
+        (item): item is string => typeof item === "string",
+      );
+      return truncate(JSON.stringify(strings), REVIEW_PARAM_MAX_CHARS);
+    }
     return truncate(
       value
         .map((item) => stringifyReviewParamValue(item))
@@ -140,13 +158,16 @@ function sanitizeToolParamsForReview(
   for (const [key, value] of Object.entries(params)) {
     if (SENSITIVE_REVIEW_PARAM_KEY_PATTERN.test(key)) continue;
     if (!SAFE_REVIEW_PARAM_KEYS.has(key)) continue;
-    const stringified = stringifyReviewParamValue(value);
+    const stringified = stringifyReviewParamValue(value, key);
     if (stringified) sanitized[key] = stringified;
   }
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
-function createReviewState(state: SessionState): ReviewState {
+function createReviewState(
+  state: SessionState,
+  options?: { preserveFullResult?: boolean },
+): ReviewState {
   return {
     input: truncate(state.input, 1000),
     intent: state.intent?.result ? { ...state.intent.result } : undefined,
@@ -155,9 +176,12 @@ function createReviewState(state: SessionState): ReviewState {
       name: call.name,
       params: sanitizeToolParamsForReview(call.params),
       error: truncate(call.error, 500),
+      success: typeof call.success === "boolean" ? call.success : undefined,
       durationMs: call.durationMs,
     })),
-    result: truncate(state.result, 1500),
+    result: options?.preserveFullResult
+      ? state.result
+      : truncate(state.result, 1500),
     error: truncate(state.error, 500),
     timestamps: state.timestamps ? { ...state.timestamps } : undefined,
   };
@@ -457,7 +481,9 @@ export class SessionTracker {
       eventId: `${sessionId}:${start}`,
       turnNumber: completedStates.length,
       current: createReviewState(session.current),
-      recent: completedStates.slice(-10, -1).map(createReviewState),
+      recent: completedStates
+        .slice(-10, -1)
+        .map((state) => createReviewState(state, { preserveFullResult: true })),
       intentCatalog: [],
     };
   }

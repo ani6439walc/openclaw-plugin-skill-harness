@@ -152,6 +152,36 @@ describe("validateInstructionSkillEvidence", () => {
         toolSummary: summary(2, ["skill_search", "skill_view"]),
       }),
     ).toBe(false);
+    // Temporarily relaxed max-1: multiple search hits are allowed when the viewed
+    // skill is included and every additional skill is present in search results.
+    const multiSearchThenView = transcript(
+      {
+        id: "search-multi",
+        name: "skill_search",
+        arguments: { query: "release safety", limit: 3 },
+        result: {
+          success: true,
+          skills: [
+            { name: "shipping-and-launch" },
+            { name: "release-checklist" },
+          ],
+        },
+      },
+      {
+        id: "view-multi",
+        name: "skill_view",
+        arguments: { name: "shipping-and-launch" },
+        result: { success: true, name: "shipping-and-launch" },
+      },
+    );
+    expect(
+      validateInstructionSkillEvidence({
+        additionalCandidateSkills: ["shipping-and-launch", "release-checklist"],
+        availableSkillNames: ["existing-skill"],
+        transcript: multiSearchThenView,
+        toolSummary: summary(2, ["skill_search", "skill_view"]),
+      }),
+    ).toBe(true);
   });
 
   it("rejects missing, failed, reordered, or over-budget tool evidence", () => {

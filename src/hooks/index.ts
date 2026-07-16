@@ -1236,11 +1236,14 @@ export function createHookHandlers(deps: HookDeps) {
       pendingToolCalls.delete(toolCallKey);
       return;
     }
-    const output = event.result ?? event.error ?? "";
+    const failed =
+      event.error !== undefined ||
+      isToolResultError(event.result, event.toolName);
+    const output = event.error ?? event.result ?? "";
     const outputStr =
       typeof output === "string" ? output : extractToolText(output);
     const truncatedOutput = outputStr.slice(0, 200);
-    const skillUsed = event.error
+    const skillUsed = failed
       ? undefined
       : extractSkillInfo(event.toolName, event.params, outputStr);
 
@@ -1250,8 +1253,9 @@ export function createHookHandlers(deps: HookDeps) {
           {
             name: event.toolName,
             params: event.params,
-            result: event.error ? undefined : truncatedOutput,
-            error: event.error ? truncatedOutput : undefined,
+            result: failed ? undefined : truncatedOutput,
+            error: failed ? truncatedOutput : undefined,
+            success: !failed,
             durationMs: event.durationMs,
           },
         ],
@@ -1301,9 +1305,8 @@ export function createHookHandlers(deps: HookDeps) {
 
     const outputStr = resolveToolResultText(event.message);
     const truncatedOutput = outputStr.slice(0, 200);
-    const error = isToolResultError(event.message)
-      ? truncatedOutput
-      : undefined;
+    const failed = isToolResultError(event.message, toolName);
+    const error = failed ? truncatedOutput : undefined;
     const params = pending?.params ?? {};
     const trackingCtx = resolveTrackingContext({
       ...pending?.ctx,
@@ -1320,8 +1323,9 @@ export function createHookHandlers(deps: HookDeps) {
           {
             name: toolName,
             params,
-            result: error ? undefined : truncatedOutput,
+            result: failed ? undefined : truncatedOutput,
             error,
+            success: !failed,
           },
         ],
         skillsUsed: skillUsed ? [skillUsed] : undefined,

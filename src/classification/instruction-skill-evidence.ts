@@ -160,10 +160,12 @@ function successfulSearchNames(call: ToolTraceCall): Set<string> | undefined {
 export function validateInstructionSkillEvidence(
   params: ValidateInstructionSkillEvidenceParams,
 ): boolean {
-  if (params.additionalCandidateSkills.length > 1) return false;
+  // Temporarily disabled: reject more than one additional skill.
+  // if (params.additionalCandidateSkills.length > 1) return false;
   const additional: string[] = [];
   for (const candidate of params.additionalCandidateSkills) {
     const normalized = normalizedName(candidate);
+    // Keep invalid/blank name rejection (名稱不合法).
     if (!normalized) return false;
     additional.push(normalized);
   }
@@ -198,9 +200,10 @@ export function validateInstructionSkillEvidence(
   const viewedName = successfulViewName(calls[1]);
   if (!searchNames || !viewedName || !searchNames.has(viewedName)) return false;
   if (additional.length === 0) return true;
+  // Max-1 is relaxed, but every additional skill must still be newly discovered
+  // (not already available), present in search results, and include the viewed skill.
   return (
-    additional.length === 1 &&
-    additional[0] === viewedName &&
-    !available.has(viewedName)
+    additional.every((name) => searchNames.has(name) && !available.has(name)) &&
+    additional.includes(viewedName)
   );
 }

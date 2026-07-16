@@ -1307,7 +1307,7 @@ describe("SessionTracker", () => {
   });
 
   describe("getReviewSnapshot", () => {
-    it("returns a detached, truncated snapshot with a tracked turn number", () => {
+    it("returns a detached snapshot with bounded Current and full Recent results", () => {
       for (let index = 1; index <= 11; index += 1) {
         tracker.record("review-session", {
           agentId: "main",
@@ -1328,11 +1328,18 @@ describe("SessionTracker", () => {
                   path: "/repo/src/review-subagent.ts",
                   command: `pnpm run test ${"x".repeat(600)}`,
                   urls: ["https://example.com/a", "https://example.com/b"],
+                  source: "managed",
+                  domains: ["development", "testing"],
+                  keywords: ["review", "prompt"],
+                  show_stats: true,
+                  show_related: false,
+                  show_matches: true,
                   secret: "do-not-copy",
                   content: "do-not-copy-content",
                 },
                 result: "do-not-copy",
                 error: "e".repeat(600),
+                success: false,
               },
             ],
             result: "r".repeat(2000),
@@ -1354,14 +1361,22 @@ describe("SessionTracker", () => {
       expect(snapshot?.recent).toHaveLength(9);
       expect(snapshot?.current.input).toHaveLength(1000);
       expect(snapshot?.current.result).toHaveLength(1500);
+      expect(snapshot?.recent[0]?.result).toHaveLength(2000);
       expect(snapshot?.current.toolCalls?.[0]).toEqual({
         name: "exec",
         params: {
           path: "/repo/src/review-subagent.ts",
           command: `pnpm run test ${"x".repeat(486)}`,
           urls: "https://example.com/a, https://example.com/b",
+          source: "managed",
+          domains: '["development","testing"]',
+          keywords: '["review","prompt"]',
+          show_stats: "true",
+          show_related: "false",
+          show_matches: "true",
         },
         error: "e".repeat(500),
+        success: false,
       });
       expect(snapshot?.current.toolCalls?.[0].params).not.toHaveProperty(
         "secret",

@@ -1,5 +1,11 @@
 import { extractToolText } from "../classification/index.js";
 
+const STRUCTURED_RESULT_TOOL_NAMES = new Set([
+  "skill_list",
+  "skill_search",
+  "skill_view",
+]);
+
 export function resolveToolCallKey(params: {
   toolCallId?: string;
   runId?: string;
@@ -30,10 +36,29 @@ export function resolveToolResultText(message: unknown): string {
   return extractToolText(message);
 }
 
-export function isToolResultError(message: unknown): boolean {
-  return (
+export function isToolResultError(
+  message: unknown,
+  toolName?: string,
+): boolean {
+  if (
     typeof message === "object" &&
     message !== null &&
     (message as { isError?: unknown }).isError === true
-  );
+  ) {
+    return true;
+  }
+
+  if (!toolName || !STRUCTURED_RESULT_TOOL_NAMES.has(toolName)) return false;
+
+  const output = resolveToolResultText(message);
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      (parsed as { success?: unknown }).success === false
+    );
+  } catch {
+    return false;
+  }
 }

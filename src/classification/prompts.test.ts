@@ -1420,7 +1420,8 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain(
       "Default to an empty additional_candinate_skills array",
     );
-    expect(prompt).toContain("Include at most one skill");
+    // Max-1 is still relaxed; newly-discovered-only rules stay.
+    // expect(prompt).toContain("Include at most one skill");
     expect(prompt).toContain(
       "newly discovered by skill_search and directly verified by skill_view",
     );
@@ -1722,7 +1723,8 @@ describe("parseIntentInstructionResult", () => {
     ).toBeUndefined();
   });
 
-  it("rejects more than one additional skill name", () => {
+  it("accepts more than one additional skill name", () => {
+    // Temporarily relaxed: max-1 additional skill restriction is disabled.
     expect(
       parseIntentInstructionResult(
         JSON.stringify({
@@ -1730,7 +1732,10 @@ describe("parseIntentInstructionResult", () => {
           additional_candinate_skills: ["one", "two"],
         }),
       ),
-    ).toBeUndefined();
+    ).toEqual({
+      instructionHint: "Use the matching skills.",
+      additionalCandidateSkills: ["one", "two"],
+    });
   });
 
   it("rejects parseable inline skill directives", () => {

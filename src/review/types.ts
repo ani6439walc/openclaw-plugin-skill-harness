@@ -20,6 +20,7 @@ export type ReviewState = {
     name: string;
     params?: Record<string, string>;
     error?: string;
+    success?: boolean;
     durationMs?: number;
   }>;
   result?: string;
