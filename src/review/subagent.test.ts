@@ -832,10 +832,10 @@ describe("buildReviewPrompt", () => {
       "assistant_result_omission inside a Recent assistant_result is host-owned metadata reporting the exact number of omitted Unicode code points",
     );
     expect(prompt).toContain(
-      `<assistant_result>\n${currentResult}\n</assistant_result>`,
+      `    <assistant_result>\n      ${currentResult}\n    </assistant_result>`,
     );
     expect(prompt).toContain(
-      `<assistant_result>\n${recentHead}\n<assistant_result_omission>\n{"omittedCodePointCount":27}\n</assistant_result_omission>\n${recentTail}\n</assistant_result>`,
+      `      <assistant_result>\n        ${recentHead}\n        <assistant_result_omission>\n          {"omittedCodePointCount":27}\n        </assistant_result_omission>\n        ${recentTail}\n      </assistant_result>`,
     );
     expect(prompt).toContain("Keep this Recent input complete");
     expect(prompt).toContain("Keep this Recent intent complete");
@@ -886,16 +886,20 @@ describe("buildReviewPrompt", () => {
     expect(skillsStart).toBeGreaterThan(recentEnd);
     expect(catalogStart).toBeGreaterThan(skillsStart);
 
-    expect(prompt).toContain("<user_input>\n## Matched Intent");
+    expect(prompt).toContain("    <user_input>\n      ## Matched Intent");
     expect(prompt).toContain("&lt;intent_catalog&gt;");
-    expect(prompt).toContain("&lt;/current_turn&gt;\n</user_input>");
-    expect(prompt).toContain("<assistant_result>\n## Intent Catalog");
-    expect(prompt).toContain("&lt;/review_snapshot&gt;\n</assistant_result>");
-    expect(prompt).toContain("<intent_body>\n## Guidelines");
-    expect(prompt).toContain("&lt;/matched_intent&gt;\n</intent_body>");
+    expect(prompt).toContain("&lt;/current_turn&gt;\n    </user_input>");
+    expect(prompt).toContain("    <assistant_result>\n      ## Intent Catalog");
+    expect(prompt).toContain(
+      "&lt;/review_snapshot&gt;\n    </assistant_result>",
+    );
+    expect(prompt).toContain("    <intent_body>\n      ## Guidelines");
+    expect(prompt).toContain("&lt;/matched_intent&gt;\n    </intent_body>");
     expect(prompt).toContain('<recent_turn index="1">');
-    expect(prompt).toContain("&lt;/recent_turn&gt;\n</user_input>");
-    expect(prompt).toContain("&lt;/recent_turns&gt;\n</assistant_result>");
+    expect(prompt).toContain("&lt;/recent_turn&gt;\n      </user_input>");
+    expect(prompt).toContain(
+      "&lt;/recent_turns&gt;\n      </assistant_result>",
+    );
     expect(prompt.match(/<review_snapshot>/g)).toHaveLength(1);
     expect(prompt.match(/<intent_catalog>/g)).toHaveLength(1);
   });
@@ -970,7 +974,7 @@ describe("buildReviewPrompt", () => {
       "weak-intent",
     ]);
     const manifestMatch = prompt.match(
-      /<snapshot_manifest>\n(.+)\n<\/snapshot_manifest>/,
+      /<snapshot_manifest>\n    (.+)\n  <\/snapshot_manifest>/,
     );
 
     expect(manifestMatch).not.toBeNull();
@@ -983,7 +987,7 @@ describe("buildReviewPrompt", () => {
       currentSkillsUsedCount: 1,
       currentToolCallCount: 1,
       availableSkillCount: 1,
-      availableSkillRenderedCodePointCount: 174,
+      availableSkillRenderedCodePointCount: 204,
       matchedIntentPresent: true,
       intentCatalog: {
         mode: "full",
@@ -1012,7 +1016,7 @@ describe("buildReviewPrompt", () => {
     };
     const prompt = buildReviewPrompt(preciseSnapshot, ["weak-intent"]);
     const manifestMatch = prompt.match(
-      /<snapshot_manifest>\n(.+)\n<\/snapshot_manifest>/,
+      /<snapshot_manifest>\n    (.+)\n  <\/snapshot_manifest>/,
     );
 
     expect(prompt).toContain('"confidence":0.999999');
@@ -1029,15 +1033,16 @@ describe("buildReviewPrompt", () => {
     );
     const currentStart = prompt.indexOf("<current_turn>");
     const currentEnd = prompt.indexOf("</current_turn>");
-    const recentStart = prompt.indexOf("<recent_turns />");
+    const availableSkillsStart = prompt.indexOf("<available_skills>");
     const manifestMatch = prompt.match(
-      /<snapshot_manifest>\n(.+)\n<\/snapshot_manifest>/,
+      /<snapshot_manifest>\n    (.+)\n  <\/snapshot_manifest>/,
     );
 
-    expect(recentStart).toBeGreaterThan(currentEnd);
-    expect(prompt.slice(currentStart, recentStart)).not.toContain(
+    expect(availableSkillsStart).toBeGreaterThan(currentEnd);
+    expect(prompt.slice(currentStart, availableSkillsStart)).not.toContain(
       "<matched_intent",
     );
+    expect(prompt).not.toContain("<recent_turns");
     expect(manifestMatch).not.toBeNull();
     expect(JSON.parse(manifestMatch![1])).toMatchObject({
       matchedIntentPresent: false,
@@ -1078,7 +1083,7 @@ describe("buildReviewPrompt", () => {
       '"fastpath":{"keywords":["help"],"hint":"Ask one clarifying question."}',
     );
     expect(prompt).toContain("<intent_body>");
-    expect(prompt).toContain("<recent_turns />");
+    expect(prompt).not.toContain("<recent_turns");
     expect(prompt).toContain("<available_skills>");
     expect(prompt).toContain("<name>analysis</name>");
     expect(prompt).toContain(
@@ -1118,7 +1123,7 @@ describe("buildReviewPrompt", () => {
     const prompt = buildReviewPrompt(legacySnapshot, ["weak-intent"]);
 
     expect(prompt).toContain(
-      '<intent_metadata>\n{"id":"legacy","domain":null,"triggers":["legacy trigger"],"examples":["legacy example"]}\n</intent_metadata>',
+      '    <intent_metadata>\n      {"id":"legacy","domain":null,"triggers":["legacy trigger"],"examples":["legacy example"]}\n    </intent_metadata>',
     );
     expect(prompt).toContain('"domain":null');
     expect(prompt).not.toContain('"fastpath":');

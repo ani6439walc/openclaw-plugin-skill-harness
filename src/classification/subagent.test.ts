@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import { INSTRUCTION_COMPLEXITY_PROMPTS } from "../constants.js";
+import { indentXmlLines } from "../xml-format.js";
 import {
   buildIntentionEmbeddedRunParams,
   getInstructionModelRef,
@@ -435,7 +436,7 @@ describe("runIntentInstructionSubagent", () => {
       "Use the resolved intent from intent_metadata as the task boundary",
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
-      INSTRUCTION_COMPLEXITY_PROMPTS.medium,
+      indentXmlLines(INSTRUCTION_COMPLEXITY_PROMPTS.medium),
     );
     expect(runEmbeddedAgent.mock.calls[0][0].prompt).not.toContain(
       "CUSTOM_CONFIG_COMPLEXITY_PROMPT",

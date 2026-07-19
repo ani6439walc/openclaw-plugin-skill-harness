@@ -192,99 +192,139 @@ function projectionReadySnapshot(): ReviewSnapshot {
 }
 
 const expectedFullSnapshot = `<review_snapshot>
-<snapshot_manifest>
-{"requestedTriggers":["behavior-fix"],"currentIntent":"intent-review","intentConfidence":0.92,"recentTurnCount":1,"currentSkillsUsedCount":1,"currentToolCallCount":2,"availableSkillCount":2,"availableSkillRenderedCodePointCount":411,"matchedIntentPresent":true,"intentCatalog":{"mode":"full","originalCount":2,"includedCount":2,"omittedCount":0,"fallbackReason":"cross-domain-keyword-neighbor-missing"}}
-</snapshot_manifest>
+  <snapshot_manifest>
+    {"requestedTriggers":["behavior-fix"],"currentIntent":"intent-review","intentConfidence":0.92,"recentTurnCount":1,"currentSkillsUsedCount":1,"currentToolCallCount":2,"availableSkillCount":2,"availableSkillRenderedCodePointCount":467,"matchedIntentPresent":true,"intentCatalog":{"mode":"full","originalCount":2,"includedCount":2,"omittedCount":0,"fallbackReason":"cross-domain-keyword-neighbor-missing"}}
+  </snapshot_manifest>
 
-<current_turn>
-<turn_metadata>
-{"turnNumber":7,"startedAt":"2026-07-15T09:00:00.000Z","endedAt":"2026-07-15T09:01:20.000Z"}
-</turn_metadata>
+  <current_turn>
+    <turn_metadata>
+      {"turnNumber":7,"startedAt":"2026-07-15T09:00:00.000Z","endedAt":"2026-07-15T09:01:20.000Z"}
+    </turn_metadata>
 
-<user_input>
-請檢查目前 intent 是否已涵蓋這個修正。
-</user_input>
+    <user_input>
+      請檢查目前 intent 是否已涵蓋這個修正。
+    </user_input>
 
-<intent_metadata>
-{"intent":"intent-review","domain":"development","confidence":0.92,"complexity":"medium","reason":"Review existing intent coverage.","topic":"Intent Review behavior","keywords":["intent","review","boundary"],"topicChangeReason":"match","suggestion":"Inspect the current intent before proposing changes."}
-</intent_metadata>
+    <intent_metadata>
+      {"intent":"intent-review","domain":"development","confidence":0.92,"complexity":"medium","reason":"Review existing intent coverage.","topic":"Intent Review behavior","keywords":["intent","review","boundary"],"topicChangeReason":"match","suggestion":"Inspect the current intent before proposing changes."}
+    </intent_metadata>
 
-<skills_used>
-<skill>
-<name>source-driven-development</name>
-<description>Ground decisions in authoritative sources.</description>
-<path>/resolved/path/source-driven-development/SKILL.md</path>
-</skill>
-</skills_used>
+    <skills_used>
+      <skill>
+        <name>source-driven-development</name>
+        <description>Ground decisions in authoritative sources.</description>
+        <path>/resolved/path/source-driven-development/SKILL.md</path>
+      </skill>
+    </skills_used>
 
-<tool_calls>
-<tool_call>{"kind":"single","name":"read","params":{"path":"src/review/subagent.ts","offset":"1","limit":"200"},"durationMs":18}</tool_call>
-<tool_call>{"kind":"single","name":"skill_view","params":{"name":"prompt-engineering-expert"},"durationMs":42}</tool_call>
-</tool_calls>
+    <tool_calls>
+      <tool_call>{"kind":"single","name":"read","params":{"path":"src/review/subagent.ts","offset":"1","limit":"200"},"durationMs":18}</tool_call>
+      <tool_call>{"kind":"single","name":"skill_view","params":{"name":"prompt-engineering-expert"},"durationMs":42}</tool_call>
+    </tool_calls>
 
-<assistant_result>
-目前 matched intent 已涵蓋主要流程，但 correction evidence 的邊界仍需收斂。
-</assistant_result>
-</current_turn>
+    <assistant_result>
+      目前 matched intent 已涵蓋主要流程，但 correction evidence 的邊界仍需收斂。
+    </assistant_result>
+  </current_turn>
 
-<matched_intent>
-<intent_metadata>
-{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}
-</intent_metadata>
+  <matched_intent>
+    <intent_metadata>
+      {"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}
+    </intent_metadata>
 
-<intent_body>
-Use current workspace intent files as canonical content.
+    <intent_body>
+      Use current workspace intent files as canonical content.
 
-Only propose durable intent-level corrections supported by the review evidence.
-</intent_body>
-</matched_intent>
+      Only propose durable intent-level corrections supported by the review evidence.
+    </intent_body>
+  </matched_intent>
 
-<recent_turns>
-<recent_turn index="1">
-<turn_metadata>
-{"startedAt":"2026-07-15T08:40:00.000Z","endedAt":"2026-07-15T08:41:00.000Z"}
-</turn_metadata>
+  <recent_turns>
+    <recent_turn index="1">
+      <turn_metadata>
+        {"startedAt":"2026-07-15T08:40:00.000Z","endedAt":"2026-07-15T08:41:00.000Z"}
+      </turn_metadata>
 
-<user_input>
-不是新增 intent，我是要修正現有邊界。
-</user_input>
+      <user_input>
+        不是新增 intent，我是要修正現有邊界。
+      </user_input>
 
-<intent_metadata>
-{"intent":"intent-review","domain":"development","confidence":0.88,"complexity":"medium","reason":"The user corrected the requested review operation.","topic":"Intent boundary correction","keywords":["intent","correction"],"topicChangeReason":"match"}
-</intent_metadata>
+      <intent_metadata>
+        {"intent":"intent-review","domain":"development","confidence":0.88,"complexity":"medium","reason":"The user corrected the requested review operation.","topic":"Intent boundary correction","keywords":["intent","correction"],"topicChangeReason":"match"}
+      </intent_metadata>
 
-<skills_used />
+      <tool_calls>
+        <tool_call>{"kind":"single","name":"read","params":{"path":"skills/skill-harness/assets/intent-review.md"},"durationMs":14}</tool_call>
+      </tool_calls>
 
-<tool_calls>
-<tool_call>{"kind":"single","name":"read","params":{"path":"skills/skill-harness/assets/intent-review.md"},"durationMs":14}</tool_call>
-</tool_calls>
+      <assistant_result>
+        已確認應檢查既有 intent，而不是建立新的 intent。
+      </assistant_result>
+    </recent_turn>
+  </recent_turns>
 
-<assistant_result>
-已確認應檢查既有 intent，而不是建立新的 intent。
-</assistant_result>
-</recent_turn>
-</recent_turns>
+  <available_skills>
+    <skill>
+      <name>source-driven-development</name>
+      <description>Ground decisions in authoritative sources.</description>
+      <path>/resolved/path/source-driven-development/SKILL.md</path>
+    </skill>
+    <skill>
+      <name>prompt-engineering-expert</name>
+      <description>Advanced prompt engineering guidance.</description>
+      <path>/resolved/path/prompt-engineering-expert/SKILL.md</path>
+    </skill>
+  </available_skills>
 
-<available_skills>
-<skill>
-<name>source-driven-development</name>
-<description>Ground decisions in authoritative sources.</description>
-<path>/resolved/path/source-driven-development/SKILL.md</path>
-</skill>
-<skill>
-<name>prompt-engineering-expert</name>
-<description>Advanced prompt engineering guidance.</description>
-<path>/resolved/path/prompt-engineering-expert/SKILL.md</path>
-</skill>
-</available_skills>
-
-<intent_catalog>
-<intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}</intent>
-<intent>{"id":"debugging","domain":"development","triggers":[],"examples":[],"fastpath":{"keywords":["debug","failure"]}}</intent>
-</intent_catalog>
+  <intent_catalog>
+    <intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}</intent>
+    <intent>{"id":"debugging","domain":"development","triggers":[],"examples":[],"fastpath":{"keywords":["debug","failure"]}}</intent>
+  </intent_catalog>
 </review_snapshot>`;
 
 describe("formatReviewSnapshot", () => {
+  it("indents each nested review snapshot level by two spaces", () => {
+    const output = formatReviewSnapshot(fullSnapshot, {
+      includeIntentCatalog: true,
+      requestedTriggers: ["behavior-fix"],
+    });
+
+    expect(output).toContain(
+      `<review_snapshot>
+  <snapshot_manifest>
+    {"requestedTriggers":["behavior-fix"]`,
+    );
+    expect(output).toContain(
+      `  <current_turn>
+    <turn_metadata>
+      {"turnNumber":7`,
+    );
+    expect(output).toContain(
+      `    <skills_used>
+      <skill>
+        <name>source-driven-development</name>
+        <description>Ground decisions in authoritative sources.</description>
+        <path>/resolved/path/source-driven-development/SKILL.md</path>
+      </skill>
+    </skills_used>`,
+    );
+    expect(output).toContain(
+      `  <recent_turns>
+    <recent_turn index="1">
+      <turn_metadata>`,
+    );
+    expect(output).toContain(
+      `  <available_skills>
+    <skill>
+      <name>source-driven-development</name>`,
+    );
+    expect(output).toContain(
+      `  <intent_catalog>
+    <intent>{"id":"intent-review"`,
+    );
+    expect(output.endsWith("\n</review_snapshot>")).toBe(true);
+  });
+
   it("serializes the confirmed full canonical snapshot exactly", () => {
     expect(
       formatReviewSnapshot(fullSnapshot, {
@@ -292,6 +332,16 @@ describe("formatReviewSnapshot", () => {
         requestedTriggers: ["behavior-fix"],
       }),
     ).toBe(expectedFullSnapshot);
+  });
+
+  it("omits skills_used blocks when no skill use was observed", () => {
+    const output = formatReviewSnapshot({
+      ...fullSnapshot,
+      current: { ...fullSnapshot.current, skillsUsed: [] },
+    });
+
+    expect(output).toContain('"currentSkillsUsedCount":0');
+    expect(output).not.toContain("<skills_used");
   });
 
   it("renders a projected catalog with exact manifest accounting and local reasons", () => {
@@ -362,24 +412,60 @@ describe("formatReviewSnapshot", () => {
         availableSkills: skills,
       });
       const manifestMatch = output.match(
-        /<snapshot_manifest>\n([^\n]+)\n<\/snapshot_manifest>/,
+        /  <snapshot_manifest>\n    ([^\n]+)\n  <\/snapshot_manifest>/,
       );
       const skillsMatch = output.match(
-        /<available_skills(?: \/>|>[\s\S]*?<\/available_skills>)/,
+        /(  <available_skills>[\s\S]*?\n  <\/available_skills>)/,
       );
 
       expect(manifestMatch).not.toBeNull();
-      expect(skillsMatch).not.toBeNull();
+      if (skills.length === 0) {
+        expect(skillsMatch).toBeNull();
+      } else {
+        expect(skillsMatch).not.toBeNull();
+      }
       const manifest = JSON.parse(manifestMatch![1]!) as {
         availableSkillCount: number;
         availableSkillRenderedCodePointCount: number;
       };
       expect(manifest.availableSkillCount).toBe(skills.length);
       expect(manifest.availableSkillRenderedCodePointCount).toBe(
-        Array.from(skillsMatch![0]).length,
+        skillsMatch ? Array.from(skillsMatch[0]).length : 0,
       );
     },
   );
+
+  it("renders multiline skill descriptions as nested payloads and measures the final block", () => {
+    const output = formatReviewSnapshot({
+      ...fullSnapshot,
+      availableSkills: [
+        {
+          name: "multiline-skill",
+          description: "First <line>\n\n  nested-description",
+          location: "/skills/multiline/SKILL.md",
+        },
+      ],
+    });
+    const manifestMatch = output.match(
+      /  <snapshot_manifest>\n    ([^\n]+)\n  <\/snapshot_manifest>/,
+    );
+    const skillsMatch = output.match(
+      /(  <available_skills>[\s\S]*?\n  <\/available_skills>)/,
+    );
+
+    expect(output).toContain(`      <description>
+        First &lt;line&gt;
+
+          nested-description
+      </description>`);
+    expect(skillsMatch).not.toBeNull();
+    const manifest = JSON.parse(manifestMatch![1]!) as {
+      availableSkillRenderedCodePointCount: number;
+    };
+    expect(manifest.availableSkillRenderedCodePointCount).toBe(
+      Array.from(skillsMatch![0]).length,
+    );
+  });
 
   it("keeps a Recent assistant result of exactly 1,000 Unicode code points unchanged", () => {
     const result = `<&>${"😀".repeat(997)}`;
@@ -389,7 +475,7 @@ describe("formatReviewSnapshot", () => {
     });
 
     expect(output).toContain(
-      `<assistant_result>\n&lt;&amp;&gt;${"😀".repeat(997)}\n</assistant_result>`,
+      `      <assistant_result>\n        &lt;&amp;&gt;${"😀".repeat(997)}\n      </assistant_result>`,
     );
     expect(output).not.toContain("<assistant_result_omission>");
   });
@@ -416,7 +502,7 @@ describe("formatReviewSnapshot", () => {
     });
 
     expect(output).toContain(
-      `<assistant_result>\n${"😀".repeat(499)}&lt;\n<assistant_result_omission>\n{"omittedCodePointCount":8}\n</assistant_result_omission>\n&gt;${"🧠".repeat(499)}\n</assistant_result>`,
+      `      <assistant_result>\n        ${"😀".repeat(499)}&lt;\n        <assistant_result_omission>\n          {"omittedCodePointCount":8}\n        </assistant_result_omission>\n        &gt;${"🧠".repeat(499)}\n      </assistant_result>`,
     );
     expect(output).not.toContain("&lt;hidden&gt;");
     expect(output).toContain("不是新增 intent，我是要修正現有邊界。");
@@ -426,7 +512,7 @@ describe("formatReviewSnapshot", () => {
       '<tool_call>{"kind":"group","name":"read","params":{"path":"README.md"},"callCount":3',
     );
     expect(output).toContain(
-      "<agent_error>\nrecent failure &lt;/agent_error&gt;\n</agent_error>",
+      "      <agent_error>\n        recent failure &lt;/agent_error&gt;\n      </agent_error>",
     );
   });
 
@@ -461,7 +547,7 @@ describe("formatReviewSnapshot", () => {
     });
 
     expect(output).toContain(
-      `<assistant_result>\n&lt;current&gt;${"😀".repeat(1_001)}&lt;/current&gt;\n</assistant_result>`,
+      `    <assistant_result>\n      &lt;current&gt;${"😀".repeat(1_001)}&lt;/current&gt;\n    </assistant_result>`,
     );
     expect(output).not.toContain("<assistant_result_omission>");
   });
@@ -621,7 +707,7 @@ describe("formatReviewSnapshot", () => {
     });
 
     expect(output).toContain("<current_turn>");
-    expect(output).toContain("<tool_calls />");
+    expect(output).not.toContain("<current_turn>\n<tool_calls");
     expect(output).toContain('<recent_turn index="1">');
     expect(output).toContain(
       '<tool_call>{"kind":"group","name":"skill_view","params":{"name":"source-driven-development"},"callCount":3,"durationMs":{"knownCount":3,"originalCount":3,"min":8,"max":8}}</tool_call>',
@@ -714,7 +800,7 @@ describe("formatReviewSnapshot", () => {
     );
   });
 
-  it("uses self-closing empty fields and reports trigger-level catalog omission", () => {
+  it("omits empty optional evidence while retaining required boundaries", () => {
     const output = formatReviewSnapshot(
       {
         ...fullSnapshot,
@@ -735,18 +821,63 @@ describe("formatReviewSnapshot", () => {
       },
     );
 
-    expect(output).toContain("<user_input />");
-    expect(output).toContain("<skills_used />");
-    expect(output).toContain("<tool_calls />");
-    expect(output).toContain("<assistant_result />");
+    expect(output).toContain("<review_snapshot>");
+    expect(output).toContain("<snapshot_manifest>");
+    expect(output).toContain("<current_turn>");
+    expect(output).toContain("<intent_metadata>");
+    expect(output).not.toContain("<user_input");
+    expect(output).not.toContain("<skills_used");
+    expect(output).not.toContain("<tool_calls");
+    expect(output).not.toContain("<assistant_result");
+    expect(output).not.toContain("<agent_error");
     expect(output).not.toContain("<matched_intent");
-    expect(output).toContain("<recent_turns />");
-    expect(output).toContain("<available_skills />");
+    expect(output).not.toContain("<recent_turns");
+    expect(output).not.toContain("<available_skills");
     expect(output).not.toContain("<intent_catalog>");
     expect(output).toContain(
       '"intentCatalog":{"mode":"omitted","originalCount":2,"includedCount":0,"omittedCount":2}',
     );
+    expect(output).toContain('"availableSkillRenderedCodePointCount":0');
     expect(output).toContain('"confidence":0.999999');
+  });
+
+  it("omits whitespace-only optional text and empty Recent fields", () => {
+    const output = formatReviewSnapshot({
+      ...fullSnapshot,
+      current: {
+        ...fullSnapshot.current,
+        input: "  \n\t",
+        result: "\n  ",
+        error: "\t",
+        skillsUsed: [],
+        toolCalls: [],
+      },
+      recent: [{}],
+      availableSkills: [],
+    });
+    expect(output).toContain('    <recent_turn index="1">\n    </recent_turn>');
+    expect(output).not.toContain("<user_input");
+    expect(output).not.toContain("<skills_used");
+    expect(output).not.toContain("<tool_calls");
+    expect(output).not.toContain("<assistant_result");
+    expect(output).not.toContain("<agent_error");
+  });
+
+  it("retains matched intent metadata while omitting a blank intent body", () => {
+    const output = formatReviewSnapshot({
+      ...fullSnapshot,
+      matchedIntent: {
+        ...fullSnapshot.matchedIntent!,
+        definition: {
+          ...fullSnapshot.matchedIntent!.definition,
+          prompt: " \n\t",
+        },
+      },
+    });
+
+    expect(output).toContain("<matched_intent>");
+    expect(output).toContain('"id":"intent-review"');
+    expect(output).not.toContain("<intent_body");
   });
 
   it("escapes forged boundaries while retaining canonical wrappers", () => {

@@ -1,4 +1,5 @@
 import type { AvailableSkill } from "../types.js";
+import { indentXmlLines } from "../xml-format.js";
 import {
   projectIntentCatalog,
   type CatalogProjection,
@@ -14,8 +15,10 @@ function escapeSnapshotText(value: unknown): string {
 }
 
 type ReviewSnapshotBlockName =
+  | "review_snapshot"
   | "snapshot_manifest"
   | "current_turn"
+  | "recent_turn"
   | "recent_turns"
   | "turn_metadata"
   | "user_input"
@@ -27,15 +30,28 @@ type ReviewSnapshotBlockName =
   | "agent_error"
   | "matched_intent"
   | "intent_body"
+  | "skill"
+  | "name"
+  | "description"
+  | "path"
   | "available_skills"
   | "intent_catalog";
 
-function wrapReviewSnapshotBlock(
+function wrapRequiredReviewSnapshotBlock(
   name: ReviewSnapshotBlockName,
   content: string,
+  attributes = "",
 ): string {
-  if (!content) return `<${name} />`;
-  return `<${name}>\n${content}\n</${name}>`;
+  if (!content.trim()) return `<${name}${attributes}>\n</${name}>`;
+  return `<${name}${attributes}>\n${indentXmlLines(content)}\n</${name}>`;
+}
+
+function wrapOptionalReviewSnapshotBlock(
+  name: ReviewSnapshotBlockName,
+  content: string,
+): string | undefined {
+  if (!content.trim()) return undefined;
+  return wrapRequiredReviewSnapshotBlock(name, content);
 }
 
 function stringifySnapshotJson(value: unknown): string {
@@ -180,17 +196,28 @@ function formatSkill(skill: {
   description?: string;
   path: string;
 }): string {
-  return [
-    "<skill>",
-    `<name>${escapeSnapshotText(skill.name)}</name>`,
-    skill.description
-      ? `<description>${escapeSnapshotText(skill.description)}</description>`
-      : undefined,
-    `<path>${escapeSnapshotText(skill.path)}</path>`,
-    "</skill>",
-  ]
-    .filter((line): line is string => line !== undefined)
-    .join("\n");
+  return wrapRequiredReviewSnapshotBlock(
+    "skill",
+    [
+      formatSkillTextElement("name", skill.name),
+      skill.description
+        ? formatSkillTextElement("description", skill.description)
+        : undefined,
+      formatSkillTextElement("path", skill.path),
+    ]
+      .filter((line): line is string => line !== undefined)
+      .join("\n"),
+  );
+}
+
+function formatSkillTextElement(
+  name: "name" | "description" | "path",
+  value: string,
+): string {
+  const content = escapeSnapshotText(value).replaceAll("\r", "&#xD;");
+  return content.includes("\n")
+    ? wrapRequiredReviewSnapshotBlock(name, content)
+    : `<${name}>${content}</${name}>`;
 }
 
 function formatSkillsUsed(
@@ -222,7 +249,7 @@ function formatAssistantResult(
     escapeSnapshotText(
       codePoints.slice(0, RECENT_RESULT_HEAD_CODE_POINTS).join(""),
     ),
-    wrapReviewSnapshotBlock(
+    wrapRequiredReviewSnapshotBlock(
       "assistant_result_omission",
       stringifySnapshotJson({ omittedCodePointCount }),
     ),
@@ -233,7 +260,7 @@ function formatAssistantResult(
 }
 
 function formatAvailableSkills(skills: readonly AvailableSkill[] | undefined) {
-  return wrapReviewSnapshotBlock(
+  return wrapOptionalReviewSnapshotBlock(
     "available_skills",
     skills
       ?.map((skill) =>
@@ -258,54 +285,71 @@ function formatReviewState(
   addDefined(metadata, "endedAt", state.timestamps?.end);
 
   const fields = [
-    wrapReviewSnapshotBlock(
+    wrapOptionalReviewSnapshotBlock(
       "turn_metadata",
       Object.keys(metadata).length > 0 ? stringifySnapshotJson(metadata) : "",
     ),
-    wrapReviewSnapshotBlock(
+    wrapOptionalReviewSnapshotBlock(
       "user_input",
-      state.input ? escapeSnapshotText(state.input) : "",
+      state.input?.trim() ? escapeSnapshotText(state.input) : "",
     ),
-    wrapReviewSnapshotBlock(
+    wrapOptionalReviewSnapshotBlock(
       "intent_metadata",
       formatIntentMetadata(state.intent),
     ),
-    wrapReviewSnapshotBlock("skills_used", formatSkillsUsed(state.skillsUsed)),
-    wrapReviewSnapshotBlock("tool_calls", formatToolCalls(state.toolCalls)),
-    wrapReviewSnapshotBlock(
+    state.skillsUsed?.length
+      ? wrapRequiredReviewSnapshotBlock(
+          "skills_used",
+          formatSkillsUsed(state.skillsUsed),
+        )
+      : undefined,
+    wrapOptionalReviewSnapshotBlock(
+      "tool_calls",
+      formatToolCalls(state.toolCalls),
+    ),
+    wrapOptionalReviewSnapshotBlock(
       "assistant_result",
       formatAssistantResult(state.result, blockName === "recent_turn"),
     ),
-  ];
-  if (state.error) {
+  ].filter((field): field is string => field !== undefined);
+  if (state.error?.trim()) {
     fields.push(
-      wrapReviewSnapshotBlock("agent_error", escapeSnapshotText(state.error)),
+      wrapRequiredReviewSnapshotBlock(
+        "agent_error",
+        escapeSnapshotText(state.error),
+      ),
     );
   }
   const content = fields.join("\n\n");
   if (blockName === "recent_turn") {
-    return `<recent_turn index="${options.recentIndex}">\n${content}\n</recent_turn>`;
+    return wrapRequiredReviewSnapshotBlock(
+      "recent_turn",
+      content,
+      ` index="${options.recentIndex}"`,
+    );
   }
-  return wrapReviewSnapshotBlock("current_turn", content);
+  return wrapRequiredReviewSnapshotBlock("current_turn", content);
 }
 
 function formatMatchedIntent(snapshot: ReviewSnapshot): string | undefined {
   const intent = snapshot.matchedIntent;
   if (!intent) return undefined;
-  return wrapReviewSnapshotBlock(
+  return wrapRequiredReviewSnapshotBlock(
     "matched_intent",
     [
-      wrapReviewSnapshotBlock(
+      wrapRequiredReviewSnapshotBlock(
         "intent_metadata",
         stringifySnapshotJson(formatIntentEntryMetadata(intent)),
       ),
-      wrapReviewSnapshotBlock(
+      wrapOptionalReviewSnapshotBlock(
         "intent_body",
-        intent.definition.prompt
+        intent.definition.prompt.trim()
           ? escapeSnapshotText(intent.definition.prompt)
           : "",
       ),
-    ].join("\n\n"),
+    ]
+      .filter((field): field is string => field !== undefined)
+      .join("\n\n"),
   );
 }
 
@@ -342,8 +386,10 @@ function formatIntentEntryMetadata(
   return metadata;
 }
 
-function formatIntentCatalog(projection: CatalogProjection): string {
-  return wrapReviewSnapshotBlock(
+function formatIntentCatalog(
+  projection: CatalogProjection,
+): string | undefined {
+  return wrapOptionalReviewSnapshotBlock(
     "intent_catalog",
     projection.entries
       .map(
@@ -395,7 +441,7 @@ function formatSnapshotManifest(
     matchedIntentPresent: snapshot.matchedIntent !== undefined,
     intentCatalog,
   };
-  return wrapReviewSnapshotBlock(
+  return wrapRequiredReviewSnapshotBlock(
     "snapshot_manifest",
     stringifySnapshotJson(manifest),
   );
@@ -416,7 +462,7 @@ export function formatReviewSnapshot(
     omittedCount: snapshot.intentCatalog.length,
   };
   const availableSkills = formatAvailableSkills(snapshot.availableSkills);
-  const recent = wrapReviewSnapshotBlock(
+  const recent = wrapOptionalReviewSnapshotBlock(
     "recent_turns",
     snapshot.recent
       .map((state, index) =>
@@ -429,7 +475,7 @@ export function formatReviewSnapshot(
     formatSnapshotManifest(
       snapshot,
       options,
-      Array.from(availableSkills).length,
+      availableSkills ? Array.from(indentXmlLines(availableSkills)).length : 0,
       catalogManifest,
     ),
     formatReviewState("current_turn", snapshot.current, {
@@ -442,5 +488,5 @@ export function formatReviewSnapshot(
   ]
     .filter((block): block is string => block !== undefined)
     .join("\n\n");
-  return `<review_snapshot>\n${blocks}\n</review_snapshot>`;
+  return wrapRequiredReviewSnapshotBlock("review_snapshot", blocks);
 }
