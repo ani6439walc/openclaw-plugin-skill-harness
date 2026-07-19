@@ -1483,6 +1483,13 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(emittedPipelineEvents(emitAgentEvent).at(-1)?.data).toEqual(
       expect.objectContaining({ durationMs: expect.any(Number) }),
     );
+    expect(
+      emittedPipelineEvents(emitAgentEvent).find(
+        (entry) =>
+          entry.data.phase === "topic-triage" &&
+          entry.data.state === "completed",
+      )?.data,
+    ).not.toHaveProperty("complexity");
     expect(JSON.stringify(emittedPipelineEvents(emitAgentEvent))).not.toMatch(
       /fastpath-a[12]/i,
     );
@@ -1956,7 +1963,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       changed: false,
       reason: undefined,
       confidence: 0.9,
-      complexity: "low" as const,
     };
     const {
       handlers,
@@ -2001,6 +2007,16 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         }),
       }),
     );
+    const completedTopicTriageEvents = emittedPipelineEvents(
+      emitAgentEvent,
+    ).filter(
+      (entry) =>
+        entry.data.phase === "topic-triage" && entry.data.state === "completed",
+    );
+    expect(completedTopicTriageEvents.length).toBeGreaterThan(0);
+    for (const entry of completedTopicTriageEvents) {
+      expect(entry.data).not.toHaveProperty("complexity");
+    }
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
       "intent-classify:completed",
     );
@@ -2028,6 +2044,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               topic: "User wants a git commit.",
               domain: "git",
               confidence: expect.closeTo(0.833, 0.01),
+              complexity: "medium",
               topicChangeReason: undefined,
             }),
           }),
@@ -2347,7 +2364,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
           changed: false,
           reason: "same-topic" as const,
           confidence: 0.8,
-          complexity: "low" as const,
         }),
       });
 
@@ -2377,7 +2393,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               topic: "User is still discussing a git commit.",
               domain: "git",
               confidence: 0.9,
-              complexity: "low",
+              complexity: "medium",
             }),
           }),
         }),
@@ -2438,6 +2454,51 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       expect.objectContaining({
         current: expect.objectContaining({
           intent: expect.objectContaining({ trigger: "classifier" }),
+        }),
+      }),
+    );
+  });
+
+  it("defaults inherited complexity to medium when historical complexity is missing", async () => {
+    const { handlers, record } = createTopicFlowHarness({
+      historicalIntents: [
+        {
+          input: "commit this",
+          intent: "version-control",
+          keywords: ["commit"],
+          topic: "User wants a git commit.",
+          domain: "git",
+          confidence: 0.9,
+        },
+      ],
+      intents: [versionControlIntent],
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "Latest message continues the commit workflow.",
+        keywords: ["commit", "follow-up"],
+        topic: "User is still discussing a git commit.",
+        domain: "git",
+        changed: false,
+        reason: "same-topic" as const,
+        confidence: 0.8,
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "commit it",
+        messages: [{ role: "user", content: "commit it" }],
+      } as never,
+      ctx,
+    );
+
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            trigger: "same-topic",
+            result: expect.objectContaining({ complexity: "medium" }),
+          }),
         }),
       }),
     );
@@ -2959,7 +3020,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(instructionWriter).toHaveBeenCalledWith(
       expect.objectContaining({
         result: expect.objectContaining({
-          complexity: "medium", // classifier value preserved, not topicContext override
+          complexity: "medium", // classifier value preserved
           previousTopic: "topic / checker",
         }),
       }),
@@ -2973,7 +3034,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       domain: "chat",
       changed: true,
       reason: "marker" as const,
-      complexity: "high" as const,
     };
     const classifier = vi.fn().mockResolvedValue({
       intent: "version-control",
@@ -2981,7 +3041,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       keywords: "deploy" as unknown as string[],
       domain: "infra",
       confidence: 0.95,
-      complexity: undefined,
+      complexity: "medium" as const,
     });
     const { handlers, instructionWriter } = createTopicFlowHarness({
       historicalIntents: [
@@ -3007,7 +3067,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         result: expect.objectContaining({
           keywords: ["deploy", "production", "kubernetes"],
           domain: "git",
-          complexity: "high",
+          complexity: "medium",
           previousTopic: "topic / checker",
         }),
       }),

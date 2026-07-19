@@ -105,9 +105,9 @@ Each intent describes:
 The plugin prefers cheap deterministic checks before calling helper models:
 
 - exact `fastpath.keywords` match can inject a short hint immediately
-- topic checker can inherit the previous intent only for same-topic results with joint confidence at or above `0.8` and available history; inherited results keep the prior intent/confidence but refresh topic, domain, keywords, and complexity from the latest topic check
+- topic checker can inherit the previous intent only for same-topic results with joint confidence at or above `0.8` and available history; inherited results keep the prior intent, confidence, and complexity (defaulting missing legacy complexity to `medium`) while refreshing topic, domain, and keywords from the latest topic check
 - uncertain same-topic results and same-topic results without history bypass keyword similarity and reach the classifier path
-- domain keyword similarity can route clear changed-topic cases only when the same joint-confidence threshold passes
+- domain keyword similarity can route clear changed-topic cases only when the same joint-confidence threshold passes; these deterministic results use `medium` complexity
 - turns that reach the classifier use a deterministic conservative candidate projection when the current domain plus high confidence, authorized same-topic history, or exact candidate evidence provides enough support; missing or weak evidence uses the post-deny full catalog without a second classifier call
 - projected candidates preserve canonical catalog order and include the predicted domain, `candidate.scope: cross-flow` intents, authorized low-confidence history, and exact matches against manual `candidate.keywords` or normalized intent IDs; denied and removed intents cannot be reintroduced
 - exact projection phrases use NFKC, locale-independent lowercasing, and collapsed whitespace with boundary-safe matching; punctuation remains literal, so hyphens and underscores are not interchangeable aliases
@@ -120,8 +120,8 @@ This keeps routine routing cheap and reduces unnecessary helper-model work.
 
 When deterministic routing is not enough, Skill Harness runs bounded helper subagents:
 
-- **topic checker**: returns required `basis`, `reason`, joint `confidence`, keywords, topic, domain, and downstream-task complexity; confidence measures the combined correctness of reason, domain, and keywords, while host code derives the internal `changed` flag from `reason`
-- **intent classifier**: returns structured JSON for intent, domain, topic, confidence, keywords, and complexity
+- **topic checker**: returns required `basis`, `reason`, joint `confidence`, keywords, topic, and domain; confidence measures the combined correctness of reason, domain, and keywords, while host code derives the internal `changed` flag from `reason`
+- **intent classifier**: returns structured JSON for intent, domain, topic, confidence, keywords, and the final complexity for model-classified turns
 - **instruction writer**: runs only when classifier confidence is at least `0.8` and treats the resolved intent as the task boundary. It returns raw JSON with an optional `instruction_hint` plus `additional_candinate_skills`, the sole machine-readable channel for new skill candidates. When existing evidence is insufficient, it chooses one bounded branch: either read one existing candidate, or run one focused `skill_search` (limited to three results) followed by one `skill_view` of the strongest new result. Only a newly searched and viewed skill may appear in the array, with at most one entry. The host validates the tool order, results, viewed name, and returned candidate against the embedded-run trace; missing, mismatched, failed, or over-budget evidence invalidates the generated result while preserving classifier/domain fail-open guidance. Existing intent/domain candidates are not repeated there. If no incremental guidance is justified, the writer returns `instruction_hint: null` with an empty array; this is a successful no-op, so domain candidates remain available without injecting an instruction hint. Resolved additional skill names are deduplicated into `domain_skill_candidates`; unknown or invisible names are ignored.
 - **Intent Review reviewer**: optional post-turn reviewer that improves runtime intents when configured triggers fire
 

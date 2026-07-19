@@ -232,7 +232,6 @@ describe("runTopicSwitchSubagent", () => {
             domain: "coding",
             reason: "same-topic",
             confidence: 0.92,
-            complexity: "medium",
           }),
         },
       ],
@@ -283,7 +282,6 @@ describe("runTopicSwitchSubagent", () => {
       changed: false,
       reason: "same-topic",
       confidence: 0.92,
-      complexity: "medium",
     });
     expect(runEmbeddedAgent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -319,7 +317,6 @@ describe("runTopicSwitchSubagent", () => {
             domain: "coding",
             reason: "shift",
             confidence: 0.9,
-            complexity: "low",
           }),
         },
       ],

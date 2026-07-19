@@ -248,7 +248,7 @@ function buildInheritedIntentResult(
     domain,
     topic: topicContext.topic,
     confidence: latest.confidence ?? 0.8,
-    complexity: topicContext.complexity,
+    complexity: latest.complexity ?? "medium",
   };
 }
 
@@ -575,8 +575,6 @@ export function createHookHandlers(deps: HookDeps) {
   ): void {
     if (topicContext) {
       const topicChangeReason = resolveTopicChangeReason(topicContext);
-      // Intent Classifier may override complexity; only use topicContext as fallback
-      result.complexity = result.complexity ?? topicContext.complexity;
       // Intent Classifier may override keywords; only use topicContext as fallback
       const classifierKeywords = Array.isArray(result.keywords)
         ? result.keywords
@@ -640,7 +638,6 @@ export function createHookHandlers(deps: HookDeps) {
             changed: isTopicContextChanged(topicContext),
             reason: resolveTopicChangeReason(topicContext),
             confidence: topicContext.confidence,
-            complexity: topicContext.complexity,
           }
         : { error: "topic checker returned no context" },
     );
@@ -700,7 +697,7 @@ export function createHookHandlers(deps: HookDeps) {
             ? latestHistoricalIntent?.topic
             : undefined,
           confidence: topicKeywordSimilarityMatch.score,
-          complexity: topicContext.complexity,
+          complexity: "medium",
         };
         emitPipelineEvent(
           params.ctx,
@@ -715,7 +712,6 @@ export function createHookHandlers(deps: HookDeps) {
             changed: isTopicContextChanged(topicContext),
             reason: result.topicChangeReason,
             confidence: topicContext.confidence,
-            complexity: result.complexity,
           },
         );
         emitPipelineEvent(
@@ -975,7 +971,6 @@ export function createHookHandlers(deps: HookDeps) {
         topic: result.topic,
         changed: result.topicChangeReason !== undefined,
         reason: result.topicChangeReason,
-        complexity: result.complexity,
       },
     );
     if (!params.refreshedConfig.instruction.enabled) {

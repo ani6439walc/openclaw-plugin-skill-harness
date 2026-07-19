@@ -491,21 +491,20 @@ describe("buildIntentionPrompt", () => {
         changed: false,
         reason: "same-topic",
         confidence: 0.72,
-        complexity: "low",
       },
     });
 
     expect(result).toContain(
-      "use its complexity and keywords as starting hints, not forced values",
+      "Use topic_switch_context keywords as starting hints, not forced values",
     );
     expect(result).toContain(
       "Treat topic_switch_context.domain as pre-classification routing evidence only",
     );
     expect(result).toContain(
-      "Always output one final complexity value in the JSON; do not omit it because topic_switch_context already contains one",
+      "Always output one final complexity value in the JSON",
     );
     expect(result).toContain(
-      "Recalibrate complexity from the operation latest_message actually requests: execution depth, scope, side effects, reversibility, and required verification",
+      "Determine complexity independently from the operation latest_message actually requests: execution depth, scope, side effects, reversibility, and required verification",
     );
     expect(result).toContain(
       "Mentioning, explaining, reviewing, inspecting, or discussing a high-risk action does not make the task high complexity by itself",
@@ -664,7 +663,7 @@ describe("buildTopicSwitchPrompt", () => {
       "5. Decide reason from the strongest observable evidence.",
     );
     expect(prompt).toContain(
-      "6. Fill keywords, topic, domain, and complexity, then set confidence from the joint correctness of reason, domain, and keywords.",
+      "6. Fill keywords, topic, and domain, then set confidence from the joint correctness of reason, domain, and keywords.",
     );
     expect(prompt.indexOf("3. Write basis")).toBeLessThan(
       prompt.indexOf("4. Weigh continuity and change evidence"),
@@ -699,26 +698,14 @@ describe("buildTopicSwitchPrompt", () => {
     expect(prompt).toContain(
       "[reason] must be one of: start, same-topic, marker, shift, change.",
     );
-    expect(prompt).toContain(
-      "Estimate complexity from the latest message's apparent downstream task scope",
-    );
-    expect(prompt).toContain(
-      "Do not rate the difficulty of the continuity decision itself",
-    );
+    expect(prompt).not.toContain("complexity");
     expect(prompt).toContain(
       "[confidence] must be a number from 0.0 to 1.0 measuring joint certainty that reason, domain, and keywords are correct for latest_message",
     );
     expect(prompt).toContain(
       "Allow 1-8 normalized unique keywords; prefer 3-8 for ordinary complete messages",
     );
-    expect(prompt).toContain("Complexity levels:");
-    expect(prompt).toContain(
-      '"low": simple greeting, acknowledgment, straightforward question or task',
-    );
-    expect(prompt).toContain(
-      '"medium": task requiring moderate context analysis',
-    );
-    expect(prompt).toContain('"high": multi-step investigation');
+
     expect(prompt).not.toContain(
       "reason must be one of: start, same-topic, marker, shift, match.",
     );
@@ -1075,7 +1062,6 @@ describe("parseTopicSwitchResult", () => {
         domain: "coding",
         reason: "same-topic",
         confidence: 0.91,
-        complexity: "medium",
       }),
       { domains: ["coding", "chat"] },
     );
@@ -1089,11 +1075,10 @@ describe("parseTopicSwitchResult", () => {
       changed: false,
       reason: "same-topic",
       confidence: 0.91,
-      complexity: "medium",
     });
   });
 
-  it("accepts fenced JSON and rejects invalid reasons", () => {
+  it("accepts fenced JSON, ignores legacy complexity, and rejects invalid reasons", () => {
     expect(
       parseTopicSwitchResult(
         '```json\n{"basis":"Explicit transition marker introduces deployment work.","keywords":["deploy"],"topic":"User is switching to deployment work.","domain":"infra","reason":"marker","confidence":0.95,"complexity":"high"}\n```',
@@ -1106,7 +1091,6 @@ describe("parseTopicSwitchResult", () => {
       changed: true,
       reason: "marker",
       confidence: 0.95,
-      complexity: "high",
     });
 
     expect(
@@ -1119,21 +1103,6 @@ describe("parseTopicSwitchResult", () => {
           reason: "invalid",
           confidence: 0.9,
           complexity: "medium",
-        }),
-        { domains: ["infra"] },
-      ),
-    ).toBeUndefined();
-
-    expect(
-      parseTopicSwitchResult(
-        JSON.stringify({
-          basis: "Latest message introduces deployment work.",
-          keywords: ["deploy"],
-          topic: "User is switching to deployment work.",
-          domain: "infra",
-          reason: "marker",
-          confidence: 0.9,
-          complexity: "huge",
         }),
         { domains: ["infra"] },
       ),
