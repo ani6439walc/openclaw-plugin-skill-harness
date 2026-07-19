@@ -1655,37 +1655,81 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).not.toContain("<complexity_context>");
   });
 
-  it("calibrates verification to task depth without prescribing host workflows", () => {
-    expect(DEFAULT_LOW_COMPLEXITY_PROMPT).toContain(
-      "smallest direct verification",
-    );
-    expect(DEFAULT_LOW_COMPLEXITY_PROMPT).toContain(
-      "Do not suggest broad investigation, delegation, full-suite testing",
-    );
-
-    expect(DEFAULT_MEDIUM_COMPLEXITY_PROMPT).toContain(
-      "single dominant risk, constraint, or affected user-facing surface",
-    );
-    expect(DEFAULT_MEDIUM_COMPLEXITY_PROMPT).toContain(
-      "Increase verification depth, not task scope",
-    );
-
-    expect(DEFAULT_HIGH_COMPLEXITY_PROMPT).toContain(
-      "dominant uncertainty, irreversible decision, or failure mode",
-    );
-    expect(DEFAULT_HIGH_COMPLEXITY_PROMPT).toContain(
-      "smallest evidence set that establishes the requested outcome",
-    );
-
-    for (const prompt of [
+  it("frames complexity as optional hint calibration for the main agent", () => {
+    const prompts = [
       DEFAULT_LOW_COMPLEXITY_PROMPT,
       DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
       DEFAULT_HIGH_COMPLEXITY_PROMPT,
-    ]) {
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain("The main agent is handling a");
+      expect(prompt).toContain(
+        "Calibrate only the optional instruction_hint for that task",
+      );
+      expect(prompt).toContain("Optional hint content:");
+      expect(prompt).toContain("Evidence to suggest:");
+      expect(prompt).not.toContain("You are working on");
+    }
+  });
+
+  it("orders complexity guidance from risk through evidence without prescribing host workflows", () => {
+    const requiredSnippets = new Map([
+      [
+        DEFAULT_LOW_COMPLEXITY_PROMPT,
+        [
+          "smallest direct observation",
+          "Omit broader investigation, delegation, full-suite testing",
+        ],
+      ],
+      [
+        DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
+        [
+          "single dominant risk, constraint, or affected user-facing surface",
+          "one narrow recommended path and its decision criterion",
+          "Increase evidence depth, not task scope",
+        ],
+      ],
+      [
+        DEFAULT_HIGH_COMPLEXITY_PROMPT,
+        [
+          "dominant uncertainty, irreversible decision, or failure mode",
+          "smallest decision boundary and evidence needed to resolve it",
+          "directly relevant source or observed output",
+          "load-bearing phases, dependencies, and decision points",
+          "bounded sibling-path sweep",
+          "passing altered expectation alone is not completion evidence",
+          "smallest evidence set that establishes the requested outcome",
+        ],
+      ],
+    ]);
+
+    for (const [prompt, snippets] of requiredSnippets) {
+      for (const snippet of snippets) {
+        expect(prompt).toContain(snippet);
+      }
       expect(prompt).not.toContain("TDD (MANDATORY");
       expect(prompt).not.toContain("codegraph_explore");
       expect(prompt).not.toContain("subagent_type");
     }
+
+    expect(
+      DEFAULT_MEDIUM_COMPLEXITY_PROMPT.indexOf("single dominant risk"),
+    ).toBeLessThan(
+      DEFAULT_MEDIUM_COMPLEXITY_PROMPT.indexOf("one narrow recommended path"),
+    );
+    expect(
+      DEFAULT_HIGH_COMPLEXITY_PROMPT.indexOf("dominant uncertainty"),
+    ).toBeLessThan(
+      DEFAULT_HIGH_COMPLEXITY_PROMPT.indexOf("smallest decision boundary"),
+    );
+    expect(DEFAULT_HIGH_COMPLEXITY_PROMPT).not.toContain(
+      "comprehensive guidance with detailed workflow",
+    );
+    expect(DEFAULT_HIGH_COMPLEXITY_PROMPT).not.toContain("compact plan");
+    expect(DEFAULT_HIGH_COMPLEXITY_PROMPT).not.toContain(
+      "adversarial verification lens",
+    );
   });
 
   it("tells instruction writer to output ultra-concise guidance without losing semantics", () => {

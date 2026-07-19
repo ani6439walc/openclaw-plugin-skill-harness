@@ -25,48 +25,50 @@ export const FALLBACK_INTENT: IntentDefinition = {
     "No predefined intent detected. Main Agent should determine the user's true intent and choose an appropriate strategy.",
 };
 
-export const DEFAULT_LOW_COMPLEXITY_PROMPT = `You are working on LOW / QUICK tasks.
+export const DEFAULT_LOW_COMPLEXITY_PROMPT = `The main agent is handling a LOW / QUICK task.
+Calibrate only the optional instruction_hint for that task.
 
-Hint depth calibration:
-- Provide minimal, focused guidance.
-- Keep suggestions concise and direct.
-- Avoid extensive workflow detail or multi-step ordering.
-- Focus on the immediate action and expected outcome.
+Optional hint content:
+- Suggest only the immediate action and expected outcome.
+- Keep the hint minimal, direct, and specific to the current turn.
+- Omit multi-step sequencing unless ordering is necessary for correctness.
 
-Verification guidance:
-- If behavior changes, suggest only the smallest direct verification that confirms it.
-- Do not elaborate on testing strategy or edge cases unless explicitly requested.
-- Do not suggest broad investigation, delegation, full-suite testing, rollback planning, or edge-case inventories unless the task explicitly requires them.`;
+Evidence to suggest:
+- If behavior changes, suggest the smallest direct observation that confirms it.
+- Omit broader investigation, delegation, full-suite testing, rollback planning, and edge-case inventories unless latest_message explicitly requires them.`;
 
-export const DEFAULT_MEDIUM_COMPLEXITY_PROMPT = `You are working on MEDIUM / STANDARD tasks.
+export const DEFAULT_MEDIUM_COMPLEXITY_PROMPT = `The main agent is handling a MEDIUM / STANDARD task.
+Calibrate only the optional instruction_hint for that task.
 
-Hint depth calibration:
-- Provide balanced guidance with appropriate detail.
-- Include relevant workflow steps in logical order when helpful.
-- Identify the single dominant risk, constraint, or affected user-facing surface before suggesting verification.
-- Mention only key pitfalls or constraints that affect the approach.
-- Balance completeness with conciseness.
+Optional hint content:
+- Start with the single dominant risk, constraint, or affected user-facing surface.
+- Suggest one narrow recommended path and its decision criterion; add only the necessary steps in logical order.
+- When success is not already observable, name one concrete success condition.
+- Preserve only pitfalls or reversibility details that could change the recommendation.
 
-Verification guidance:
-- Suggest the smallest verification that directly exercises the affected surface or dominant risk.
-- Include relevant test categories only for code changes with a credible test seam.
-- Mention rollback considerations only for relevant state-changing operations.
-- Increase verification depth, not task scope. Avoid unrelated cleanup, redesign, or generic full-suite recommendations.`;
+Evidence to suggest:
+- Suggest the smallest observation that directly exercises the affected surface or dominant risk.
+- Mention test categories only for code changes with a credible test seam.
+- Mention rollback only for relevant state-changing operations.
+- Increase evidence depth, not task scope; omit unrelated cleanup, redesign, and generic full-suite recommendations.`;
 
-export const DEFAULT_HIGH_COMPLEXITY_PROMPT = `You are working on HIGH / DEEP tasks.
+export const DEFAULT_HIGH_COMPLEXITY_PROMPT = `The main agent is handling a HIGH / DEEP task.
+Calibrate only the optional instruction_hint for that task.
 
-Hint depth calibration:
-- Provide comprehensive guidance with detailed workflow.
-- Include phased approach with dependencies and verification points.
-- Identify the dominant uncertainty, irreversible decision, or failure mode before recommending a workflow.
-- Highlight critical pitfalls, constraints, and decision points.
-- Emphasize risk assessment and reversibility considerations.
+Optional hint content:
+- Start with the dominant uncertainty, irreversible decision, or failure mode.
+- When unresolved scope, dependencies, or outward/irreversible risk could change the recommendation, state the smallest decision boundary and evidence needed to resolve it; otherwise retain one recommended path.
+- Ground recommendations about unfamiliar APIs, repository behavior, or task-specific claims in a directly relevant source or observed output.
+- Suggest only the load-bearing phases, dependencies, and decision points; keep the hint concise rather than turning it into an end-to-end playbook.
+- Mention critical risks or reversibility details only when they could change the recommendation.
 
-Verification guidance:
-- Suggest focused discovery, planning, or review only when it can change the implementation choice; do not prescribe host-specific tools or delegation.
-- Recommend proportionate evidence for the core behavior plus the most material edge or regression risk, using the user-facing surface when practical.
+Evidence to suggest:
+- Tie evidence to the core behavior and most material edge or regression risk; when a dominant assumption matters, name one proportionate observation that could disconfirm it.
+- When a verification claim relies on a changed check, surface whether it traces to a user-stated requirement, documented intended behavior, or an independent observed surface; a passing altered expectation alone is not completion evidence.
+- For a defect, consider a bounded sibling-path sweep only when the same construct could plausibly recur; surface extra scope rather than expanding silently.
+- Suggest additional discovery, planning, or review only when it could change the implementation choice; do not prescribe host-specific tools or delegation.
 - Preserve authorization, rollback, and safety considerations for relevant state-changing or irreversible operations.
-- Stop after the smallest evidence set that establishes the requested outcome; do not add ceremonial or unrelated work.`;
+- If evidence cannot support the key decision, surface the observed blocker; otherwise stop after the smallest evidence set that establishes the requested outcome.`;
 
 export const INSTRUCTION_COMPLEXITY_PROMPTS = {
   low: DEFAULT_LOW_COMPLEXITY_PROMPT,

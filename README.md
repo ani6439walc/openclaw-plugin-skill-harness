@@ -162,7 +162,7 @@ The policy tells the main agent:
 - each domain skill candidate includes its resolved `path` plus direct visible `related_skills` metadata; related skills remain optional rather than automatically required
 - irrelevant skill hints should be ignored if classification is wrong
 - generated instruction hints are advisory and must still be checked against the latest user request and verified context
-- when complexity is known, instruction-writer depth and suggested verification use fixed built-in calibration for that level, including proportionate surface-based verification and scope containment; missing complexity does not fall back to `medium`. These calibrations do not define main-agent execution, planning, delegation, or scheduling policy
+- when complexity is known, instruction-writer depth and suggested verification use fixed built-in calibration for that level, including proportionate surface-based verification, evidence-grounded decisions, uncertainty and assumption disclosure, verification integrity, and scope containment; missing complexity does not fall back to `medium`. These calibrations do not define main-agent execution, planning, delegation, or scheduling policy
 
 Fixed mandatory guidance is not repeated inside this dynamic block. If an injected candidate or hint does not fit the current task, the static workflow directs the main agent to use focused `skill_search` and then read selected results with `skill_view`.
 
