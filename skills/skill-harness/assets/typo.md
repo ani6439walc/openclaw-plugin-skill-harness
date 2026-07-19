@@ -1,5 +1,7 @@
 ---
 domain: "chat"
+candidate:
+  scope: "cross-flow"
 triggers:
   - "The user's message likely contains misspellings or damaged text that should be interpreted before responding."
   - "User input contains obvious typos, garbled text, or truncated text that makes the intended meaning unclear"

@@ -33,6 +33,9 @@ import {
   isInternalUserTurn,
   attachHistoricalIntents,
   sanitizeConversationText,
+  projectIntentCandidates,
+  measureIntentCatalogCodePoints,
+  type IntentProjection,
 } from "../classification/index.js";
 import {
   isAllowedChatId,
@@ -66,6 +69,7 @@ import { intentsPath } from "../file-utils.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
+  IntentProjectionTelemetry,
   IntentTrigger,
   IntentionResult,
 } from "../types.js";
@@ -90,6 +94,66 @@ function sanitizeHistoricalIntentRecords(
 
 const LOW_THINKING_EFFORTS = new Set(["off", "minimal", "low"]);
 const INSTRUCTION_WRITER_MIN_CONFIDENCE = 0.8;
+const TOPIC_PROJECTION_CONFIDENCE = 0.8;
+const MAX_PROJECTION_CANDIDATE_IDS = 128;
+const MAX_PROJECTION_MATCHED_KEYWORDS = 32;
+const MAX_PROJECTION_KEYWORD_CHARS = 200;
+
+function measureProjectionCatalogs(
+  originalIntents: readonly IntentCatalogEntry[],
+  candidateIntents: readonly IntentCatalogEntry[],
+): Pick<
+  IntentProjectionTelemetry,
+  "originalCatalogCodePoints" | "candidateCatalogCodePoints"
+> {
+  try {
+    return {
+      originalCatalogCodePoints:
+        measureIntentCatalogCodePoints(originalIntents),
+      candidateCatalogCodePoints:
+        measureIntentCatalogCodePoints(candidateIntents),
+    };
+  } catch (error) {
+    logger.warn("failed to measure intent projection catalogs", { error });
+    return {};
+  }
+}
+
+function toIntentProjectionTelemetry(params: {
+  projection: IntentProjection;
+  originalIntents: readonly IntentCatalogEntry[];
+  durationMs: number;
+}): IntentProjectionTelemetry {
+  const { projection, originalIntents, durationMs } = params;
+  return {
+    decision: projection.decision,
+    effectiveInput: projection.decision,
+    ...(projection.fallbackReason
+      ? { fallbackReason: projection.fallbackReason }
+      : {}),
+    originalIntentCount: projection.originalIntentCount,
+    candidateIntentCount: projection.candidateIntentCount,
+    ...measureProjectionCatalogs(originalIntents, projection.candidateIntents),
+    durationMs,
+    candidateIntentIds: projection.candidateIntents
+      .slice(0, MAX_PROJECTION_CANDIDATE_IDS)
+      .map((intent) => intent.id),
+    candidateSelections: projection.candidateSelections
+      .slice(0, MAX_PROJECTION_CANDIDATE_IDS)
+      .map((selection) => ({
+        intentId: selection.intentId,
+        selectionReasons: [...selection.selectionReasons],
+        matchedKeywords: selection.matchedKeywords
+          .slice(0, MAX_PROJECTION_MATCHED_KEYWORDS)
+          .map((keyword) => keyword.slice(0, MAX_PROJECTION_KEYWORD_CHARS)),
+      })),
+    supportReasons: [...projection.supportReasons],
+    selectionReasons: [...projection.selectionReasons],
+    matchedKeywords: projection.matchedKeywords
+      .slice(0, MAX_PROJECTION_MATCHED_KEYWORDS)
+      .map((keyword) => keyword.slice(0, MAX_PROJECTION_KEYWORD_CHARS)),
+  };
+}
 
 function resolveReasoningEffort(
   ctx: PluginHookAgentContext,
@@ -394,11 +458,13 @@ type PromptBuildClassification =
       kind: "same-topic";
       trigger: IntentTrigger;
       result: IntentionResult;
+      intentProjection?: undefined;
     }
   | {
       kind: "classified";
       trigger: IntentTrigger;
       result: IntentionResult;
+      intentProjection?: IntentProjectionTelemetry;
     };
 
 export function createHookHandlers(deps: HookDeps) {
@@ -606,7 +672,11 @@ export function createHookHandlers(deps: HookDeps) {
 
     let result: IntentionResult | undefined;
     let topicKeywordSimilarityMatched = false;
-    if (topicContext && !isSameTopic) {
+    if (
+      topicContext &&
+      topicContext.confidence >= TOPIC_PROJECTION_CONFIDENCE &&
+      !isSameTopic
+    ) {
       const topicKeywordSimilarityMatch = findTopicKeywordSimilarityIntent(
         params.latestUserMessage,
         topicContext.domain,
@@ -662,27 +732,74 @@ export function createHookHandlers(deps: HookDeps) {
         );
       }
     }
+    let intentProjection: IntentProjectionTelemetry | undefined;
     if (!result) {
+      const projectionStartedAtMs = Date.now();
+      let projection: IntentProjection;
+      try {
+        projection = projectIntentCandidates({
+          intents: params.availableIntents,
+          latest: params.latestUserMessage,
+          topicContext,
+          latestHistoricalIntent,
+        });
+      } catch (error) {
+        logger.warn("intent candidate projection failed; using full catalog", {
+          error,
+        });
+        projection = {
+          decision: "full-fallback",
+          originalIntentCount: params.availableIntents.length,
+          candidateIntentCount: params.availableIntents.length,
+          effectiveIntents: [...params.availableIntents],
+          candidateIntents: [...params.availableIntents],
+          projected: false,
+          supportReasons: [],
+          selectionReasons: [],
+          candidateSelections: [],
+          matchedKeywords: [],
+          fallbackReason: "selector-error",
+        };
+      }
+      intentProjection = toIntentProjectionTelemetry({
+        projection,
+        originalIntents: params.availableIntents,
+        durationMs: Math.max(0, Date.now() - projectionStartedAtMs),
+      });
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
         "intent-classify",
         "started",
       );
-      result = await classifier({
-        api,
-        config: params.refreshedConfig,
-        agentId: params.effectiveAgentId,
-        sessionKey: params.resolvedSessionKey,
-        sessionId: params.ctx.sessionId,
-        conversation: params.conversation,
-        latest: params.latestUserMessage,
-        messageProvider: params.ctx.messageProvider,
-        channelId: params.ctx.channelId,
-        modelRef: params.modelRef,
-        intents: params.availableIntents,
-        topicContext: topicContext ?? undefined,
-      });
+      try {
+        result = await classifier({
+          api,
+          config: params.refreshedConfig,
+          agentId: params.effectiveAgentId,
+          sessionKey: params.resolvedSessionKey,
+          sessionId: params.ctx.sessionId,
+          conversation: params.conversation,
+          latest: params.latestUserMessage,
+          messageProvider: params.ctx.messageProvider,
+          channelId: params.ctx.channelId,
+          modelRef: params.modelRef,
+          intents: projection.effectiveIntents,
+          topicContext: topicContext ?? undefined,
+        });
+      } catch (error) {
+        recordPromptBuildSession({
+          sessionId: params.ctx.sessionId,
+          resolvedSessionKey: params.resolvedSessionKey,
+          fallbackSessionKey: params.ctx.sessionKey,
+          effectiveAgentId: params.effectiveAgentId,
+          latestUserMessage: params.latestUserMessage,
+          trigger: "classifier",
+          intentProjection,
+          conversation: params.conversation,
+        });
+        throw error;
+      }
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
@@ -697,6 +814,18 @@ export function createHookHandlers(deps: HookDeps) {
             }
           : { error: "classifier returned no result" },
       );
+      if (!result) {
+        recordPromptBuildSession({
+          sessionId: params.ctx.sessionId,
+          resolvedSessionKey: params.resolvedSessionKey,
+          fallbackSessionKey: params.ctx.sessionKey,
+          effectiveAgentId: params.effectiveAgentId,
+          latestUserMessage: params.latestUserMessage,
+          trigger: "classifier",
+          intentProjection,
+          conversation: params.conversation,
+        });
+      }
     }
 
     if (result) {
@@ -707,7 +836,7 @@ export function createHookHandlers(deps: HookDeps) {
         applyTopicContextToResult(result, topicContext, latestHistoricalIntent);
       }
       result.domain = findIntentDomain(params.availableIntents, result.intent);
-      return { kind: "classified", trigger, result };
+      return { kind: "classified", trigger, result, intentProjection };
     }
     return;
   }
@@ -719,8 +848,9 @@ export function createHookHandlers(deps: HookDeps) {
     effectiveAgentId: string;
     latestUserMessage: string;
     trigger: IntentTrigger;
-    result: IntentionResult;
+    result?: IntentionResult;
     instructionText?: string;
+    intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): void {
     const sessionKey = params.resolvedSessionKey ?? params.fallbackSessionKey;
@@ -735,12 +865,15 @@ export function createHookHandlers(deps: HookDeps) {
       current: {
         input: params.latestUserMessage,
         intent: {
-          ...(params.result.topicChangeReason
+          ...(params.result?.topicChangeReason
             ? { input: params.conversation }
             : {}),
           trigger: params.trigger,
-          result: params.result,
+          ...(params.result ? { result: params.result } : {}),
           instructionText: params.instructionText,
+          ...(params.intentProjection
+            ? { intentProjection: params.intentProjection }
+            : {}),
         },
         timestamps: { start: new Date().toISOString() },
       },
@@ -755,6 +888,7 @@ export function createHookHandlers(deps: HookDeps) {
     trigger: IntentTrigger;
     result: IntentionResult;
     instructionText?: string;
+    intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): void {
     recordPromptBuildSession({
@@ -766,6 +900,7 @@ export function createHookHandlers(deps: HookDeps) {
       trigger: params.trigger,
       result: params.result,
       instructionText: params.instructionText,
+      intentProjection: params.intentProjection,
       conversation: params.conversation,
     });
   }
@@ -907,6 +1042,7 @@ export function createHookHandlers(deps: HookDeps) {
         latestUserMessage: params.latestUserMessage,
         trigger: params.classification.trigger,
         result,
+        intentProjection: params.classification.intentProjection,
         conversation: params.conversation,
       });
       return toPromptBuildResult(
@@ -1032,6 +1168,7 @@ export function createHookHandlers(deps: HookDeps) {
       trigger: params.classification.trigger,
       result,
       instructionText,
+      intentProjection: params.classification.intentProjection,
       conversation: params.conversation,
     });
 
@@ -1412,6 +1549,16 @@ export function createHookHandlers(deps: HookDeps) {
           keywords: [...(entry.definition.fastpath?.keywords ?? [])],
           hint: entry.definition.fastpath?.hint,
         },
+        ...(entry.definition.candidate
+          ? {
+              candidate: {
+                ...entry.definition.candidate,
+                ...(entry.definition.candidate.keywords
+                  ? { keywords: [...entry.definition.candidate.keywords] }
+                  : {}),
+              },
+            }
+          : {}),
       })),
     };
   }

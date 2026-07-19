@@ -40,7 +40,7 @@ export type ReviewSnapshot = {
   availableSkills?: AvailableSkill[];
   intentCatalog: Array<
     { id: string } & Pick<IntentDefinition, "triggers" | "examples"> &
-      Partial<Pick<IntentDefinition, "domain" | "fastpath">>
+      Partial<Pick<IntentDefinition, "domain" | "fastpath" | "candidate">>
   >;
 };
 

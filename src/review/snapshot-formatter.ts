@@ -329,6 +329,15 @@ function formatIntentEntryMetadata(
       ...(fastpath.hint !== undefined ? { hint: fastpath.hint } : {}),
     };
   }
+  const candidate = definition.candidate;
+  if (candidate) {
+    metadata.candidate = {
+      ...(candidate.scope !== undefined ? { scope: candidate.scope } : {}),
+      ...(candidate.keywords !== undefined
+        ? { keywords: [...candidate.keywords] }
+        : {}),
+    };
+  }
   if (selectionReasons) metadata.selectionReasons = [...selectionReasons];
   return metadata;
 }

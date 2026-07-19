@@ -473,6 +473,39 @@ describe("SessionTracker", () => {
         }),
       ).toBe("latest-prompt-session");
     });
+
+    it("resolves a projection-only classifier attempt for turn finalization", () => {
+      tracker.record("projection-session", {
+        sessionKey: "agent:main:direct:projection",
+        current: {
+          input: "classify this",
+          intent: {
+            trigger: "classifier",
+            intentProjection: {
+              decision: "full-fallback",
+              effectiveInput: "full-fallback",
+              fallbackReason: "missing-topic-context",
+              originalIntentCount: 5,
+              candidateIntentCount: 5,
+              durationMs: 1,
+              candidateIntentIds: [],
+              candidateSelections: [],
+              supportReasons: [],
+              selectionReasons: [],
+              matchedKeywords: [],
+            },
+          },
+          timestamps: { start: "2026-07-06T16:20:00.000Z" },
+        },
+      });
+
+      expect(tracker.hasIntentData("projection-session")).toBe(false);
+      expect(
+        tracker.resolveCurrentSessionId({
+          sessionKey: "agent:main:direct:projection",
+        }),
+      ).toBe("projection-session");
+    });
   });
 
   describe("write", () => {
@@ -1392,6 +1425,41 @@ describe("SessionTracker", () => {
     it("skips incomplete current turns", () => {
       tracker.record("incomplete", { current: { input: "hello" } });
       expect(tracker.getReviewSnapshot("incomplete")).toBeUndefined();
+    });
+
+    it("does not copy projection telemetry into Review evidence", () => {
+      tracker.record("projection-review", {
+        current: {
+          input: "review this",
+          intent: {
+            result: {
+              intent: "code-review",
+              reason: "test",
+              domain: "development",
+              confidence: 0.9,
+              complexity: "low",
+            },
+            intentProjection: {
+              decision: "projected",
+              effectiveInput: "projected",
+              originalIntentCount: 60,
+              candidateIntentCount: 8,
+              durationMs: 2,
+              candidateIntentIds: ["code-review"],
+              candidateSelections: [],
+              supportReasons: ["high-overall-confidence"],
+              selectionReasons: ["predicted-domain"],
+              matchedKeywords: [],
+            },
+          },
+          timestamps: { start: "2026-07-19T00:00:00.000Z" },
+        },
+      });
+
+      const snapshot = tracker.getReviewSnapshot("projection-review");
+      expect(snapshot).toBeDefined();
+      expect(JSON.stringify(snapshot)).not.toContain("intentProjection");
+      expect(JSON.stringify(snapshot)).not.toContain("originalIntentCount");
     });
   });
 });

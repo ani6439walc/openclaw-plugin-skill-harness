@@ -89,6 +89,12 @@ function buildIntentCatalog(intents: readonly IntentCatalogEntry[]): string {
   return `<intent_catalog>\n${intentBlocks}\n</intent_catalog>`;
 }
 
+export function measureIntentCatalogCodePoints(
+  intents: readonly IntentCatalogEntry[],
+): number {
+  return Array.from(buildIntentCatalog(intents)).length;
+}
+
 function buildConversationContext(
   conversation: RecentTurn[] | undefined,
 ): string {
@@ -394,7 +400,7 @@ Your job is to choose the routing-relevant continuity reason for the user's late
 3. Write basis as a brief observable comparison before deciding reason.
 4. Weigh continuity and change evidence symmetrically; neither outcome is the default.
 5. Decide reason from the strongest observable evidence.
-6. Then fill keywords, topic, domain, confidence, and complexity.`;
+6. Fill keywords, topic, domain, and complexity, then set confidence from the joint correctness of reason, domain, and keywords.`;
   const extractionRules = `### Extraction Rules
 - First, write basis as a brief observable comparison between prior context and latest_message before deciding reason.
 - Extract keywords from the latest user message using a 3W1H framework:
@@ -448,7 +454,7 @@ The values below demonstrate the required shape only; they do not establish a de
 - Use reason="shift" when the topic changes because the semantic subject, desired outcome, or interaction mode differs without an explicit transition marker.
 - Use reason="change" when the user explicitly changes, replaces, or refocuses the current topic/goal/artifact into a different target. Use "change" for explicit goal/artifact replacement, not for transition-marker wording. If the message mainly signals a new topic with words like "另外" or "換個問題", use "marker" instead. Do not use "change" for ordinary updates or supplements inside the same artifact; those are same-topic.
 
-[confidence] must be a number from 0.0 to 1.0 measuring certainty in reason. This is continuity confidence, not final intent-classification confidence.
+[confidence] must be a number from 0.0 to 1.0 measuring joint certainty that reason, domain, and keywords are correct for latest_message. This is topic-routing confidence, not final intent-classification confidence.
 
 [complexity] must be one of: low, medium, high.
 Estimate complexity from the latest message's apparent downstream task scope. Do not rate the difficulty of the continuity decision itself.
@@ -822,7 +828,7 @@ You receive conversation history, topic-switch routing evidence when present, th
 - Do not classify a bare tool, plugin, repo, or concept name as its related workflow intent unless latest_message asks for an action such as review, modify, explain, configure, inspect, or use it.`;
   const topicSwitchCalibration = `### Topic Switch Context Calibration
 - Use topic_switch_context as routing evidence, but choose the final intent from the catalog based on latest_message.
-- Continuity confidence measures certainty in the topic reason, not confidence in the final intent.
+- Topic-checker confidence measures joint certainty that reason, domain, and keywords are correct for the latest request; it is not final intent-classification confidence.
 - If topic_switch_context is present, use its complexity and keywords as starting hints, not forced values.
 - Treat topic_switch_context.domain as pre-classification routing evidence only; never output or preserve it as the final domain.
 - Recalibrate complexity from the operation latest_message actually requests: execution depth, scope, side effects, reversibility, and required verification.

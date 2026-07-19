@@ -72,6 +72,67 @@ fastpath:
     });
   });
 
+  it("accepts valid candidate metadata", () => {
+    fs.writeFileSync(
+      path.join(dir, "one.md"),
+      valid().replace(
+        'domain: "test"',
+        'domain: "test"\ncandidate:\n  scope: cross-flow\n  keywords:\n    - "approval"\n    - "核准"',
+      ),
+    );
+
+    expect(validateIntentDirectory(dir)).toMatchObject({
+      valid: true,
+      errors: [],
+    });
+  });
+
+  it("rejects unknown or invalid candidate metadata", () => {
+    fs.writeFileSync(
+      path.join(dir, "bad-scope.md"),
+      valid().replace(
+        'domain: "test"',
+        'domain: "test"\ncandidate:\n  scope: global',
+      ),
+    );
+    fs.writeFileSync(
+      path.join(dir, "bad-keywords.md"),
+      valid().replace(
+        'domain: "test"',
+        'domain: "test"\ncandidate:\n  keywords:\n    - ""\n    - 123',
+      ),
+    );
+    fs.writeFileSync(
+      path.join(dir, "unknown-field.md"),
+      valid().replace(
+        'domain: "test"',
+        'domain: "test"\ncandidate:\n  scope: cross-flow\n  weight: 2',
+      ),
+    );
+    fs.writeFileSync(
+      path.join(dir, "not-object.md"),
+      valid().replace(
+        'domain: "test"',
+        'domain: "test"\ncandidate: cross-flow',
+      ),
+    );
+
+    const result = validateIntentDirectory(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join("\n")).toContain(
+      "bad-scope.md: candidate.scope must be cross-flow when provided",
+    );
+    expect(result.errors.join("\n")).toContain(
+      "bad-keywords.md: candidate.keywords must contain only non-empty strings",
+    );
+    expect(result.errors.join("\n")).toContain(
+      "unknown-field.md: candidate contains unsupported field weight",
+    );
+    expect(result.errors.join("\n")).toContain(
+      "not-object.md: candidate must be an object",
+    );
+  });
+
   it("rejects legacy Skills & Tools sections and invalid skills metadata", () => {
     fs.writeFileSync(
       path.join(dir, "legacy.md"),

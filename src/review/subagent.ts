@@ -95,10 +95,10 @@ const REVIEW_INSTRUCTIONS: Record<
   },
   "weak-intent": {
     focus:
-      "Explain the classification ambiguity, likely matched intent, neighboring collision, and missing or misleading trigger/example/domain/fastpath coverage.",
-    goal: "Refine the matched intent Markdown frontmatter triggers/examples/domain/fastpath and clarify its boundary without adding classification prose to the body.",
+      "Explain the classification ambiguity, likely matched intent, neighboring collision, and missing or misleading trigger/example/domain/fastpath/candidate coverage.",
+    goal: "Refine the matched intent Markdown frontmatter triggers/examples/domain/fastpath/candidate metadata and clarify its boundary without adding classification prose to the body.",
     workflow:
-      "weak-intent: focus on frontmatter triggers, examples, domain, fastpath, and boundary clarity; prefer refine and do not add execution body prose for classification-only ambiguity. Use split or merge only when concrete neighboring-collision evidence proves refinement cannot preserve a clear class-level boundary.",
+      "weak-intent: focus on frontmatter triggers, examples, domain, fastpath, candidate metadata, and boundary clarity; prefer refine and do not add execution body prose for classification-only ambiguity. Use split or merge only when concrete neighboring-collision evidence proves refinement cannot preserve a clear class-level boundary.",
   },
   "behavior-fix": {
     focus:
@@ -162,9 +162,11 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 
 ### Intent shape and boundaries
 - Prefer the smallest maintainable boundary and the least disruptive operation allowed by the requested trigger workflow.
-- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional fastpath metadata, and optional skills[].
+- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional fastpath metadata, optional candidate metadata, and optional skills[].
 - Triggers describe the user goal and boundary; examples are realistic user messages; domain is the broad routing bucket.
 - fastpath.keywords are exact/similarity routing phrases. fastpath.hint is a short injected A1 hint for safe exact matches. Add or change fastpath only when evidence shows a stable short phrase or a fastpath misroute.
+- candidate.scope="cross-flow" keeps a durable domain-independent intent in conservative classifier projections. Add it only when the intent must remain available across unrelated domains.
+- candidate.keywords are manual exact projection evidence, not fastpaths or body guidance. Do not infer candidate.keywords from one review snapshot; require telemetry or labeled evidence plus positive-match and collision fixtures.
 - Do not create one-session intent boundaries; prefer the smallest durable class-level boundary that can help future turns.
 - Never mention another intent name or id inside an intent body. Express scope boundaries through frontmatter triggers, examples, domain, and fastpath.
 

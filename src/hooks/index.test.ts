@@ -1816,7 +1816,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
   });
 
   it("emits classifier no-result failures with only an error", async () => {
-    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+    const { handlers, emitAgentEvent, record } = createTopicFlowHarness({
       historicalIntents: [],
       topicChecker: vi.fn().mockResolvedValue(undefined),
       classifier: vi.fn().mockResolvedValue(undefined),
@@ -1835,6 +1835,22 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
     expect(failedEvent?.data).not.toHaveProperty("reason");
     expect(failedEvent?.data).not.toHaveProperty("result");
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          input: "implement topic checker",
+          intent: expect.objectContaining({
+            trigger: "classifier",
+            intentProjection: expect.objectContaining({
+              decision: "full-fallback",
+              fallbackReason: "missing-topic-context",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty("result");
   });
 
   it.each([
@@ -1939,6 +1955,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       domain: "git",
       changed: false,
       reason: undefined,
+      confidence: 0.9,
       complexity: "low" as const,
     };
     const {
@@ -2019,6 +2036,115 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
+  it("requires high overall topic confidence for the keyword-similarity bypass", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "User wants a git commit",
+      confidence: 0.9,
+      complexity: "low" as const,
+    });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The git domain is plausible but the routing evidence is weak.",
+        keywords: ["comit"],
+        topic: "User may want a git commit.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.79,
+        complexity: "low" as const,
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "please comit this",
+        messages: [{ role: "user", content: "please comit this" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
+  });
+
+  it("sends only projected candidates to the classifier and records its manifest", async () => {
+    const operationsIntent: IntentCatalogEntry = {
+      id: "deployment",
+      definition: {
+        triggers: ["deploy"],
+        examples: ["deploy this"],
+        domain: "operations",
+        fastpath: { keywords: [] },
+        prompt: "## Guidelines\n\n- Deploy safely.",
+      },
+    };
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "User wants repository maintenance",
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const { handlers, record } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent, operationsIntent],
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis:
+          "The latest request is repository maintenance in the git domain.",
+        keywords: ["repository", "maintenance"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+        complexity: "medium" as const,
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "maintain this repository",
+        messages: [{ role: "user", content: "maintain this repository" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.objectContaining({ intents: [versionControlIntent] }),
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            intentProjection: expect.objectContaining({
+              decision: "projected",
+              effectiveInput: "projected",
+              originalIntentCount: 3,
+              candidateIntentCount: 1,
+              candidateIntentIds: ["version-control"],
+              candidateSelections: [
+                {
+                  intentId: "version-control",
+                  selectionReasons: ["predicted-domain"],
+                  matchedKeywords: [],
+                },
+              ],
+              selectionReasons: ["predicted-domain"],
+              matchedKeywords: [],
+              originalCatalogCodePoints: expect.any(Number),
+              candidateCatalogCodePoints: expect.any(Number),
+              durationMs: expect.any(Number),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it("uses topic keyword similarity to write an instruction on changed topics", async () => {
     const { handlers, classifier, instructionWriter } = createTopicFlowHarness({
       historicalIntents: [],
@@ -2029,6 +2155,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         domain: "git",
         changed: true,
         reason: "start" as const,
+        confidence: 0.9,
         complexity: "low" as const,
       }),
     });
@@ -2074,6 +2201,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         domain: "git",
         changed: true,
         reason: "start" as const,
+        confidence: 0.9,
         complexity: "low" as const,
       }),
     });
@@ -2109,6 +2237,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         domain: "infra",
         changed: true,
         reason: "start" as const,
+        confidence: 0.9,
         complexity: "high" as const,
       }),
     });
@@ -2144,6 +2273,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         domain: "docs",
         changed: true,
         reason: "start" as const,
+        confidence: 0.9,
         complexity: "low" as const,
       }),
     });
@@ -2178,6 +2308,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         domain: "git",
         changed: true,
         reason: "start" as const,
+        confidence: 0.9,
         complexity: "low" as const,
       }),
     });
@@ -3099,26 +3230,41 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
   });
 
   it("falls back to classifier-only when topic checker returns no result", async () => {
-    const { handlers, classifier, topicChecker } = createTopicFlowHarness({
-      historicalIntents: [
-        {
-          input: "plan topic checker",
-          intent: "coding",
-          keywords: ["topic", "checker"],
-          topic: "topic / checker",
-          domain: "coding",
-          confidence: 0.8,
-          complexity: "medium",
-        },
-      ],
-      topicChecker: vi.fn().mockResolvedValue(undefined),
-    });
+    const { handlers, classifier, topicChecker, record } =
+      createTopicFlowHarness({
+        historicalIntents: [
+          {
+            input: "plan topic checker",
+            intent: "coding",
+            keywords: ["topic", "checker"],
+            topic: "topic / checker",
+            domain: "coding",
+            confidence: 0.8,
+            complexity: "medium",
+          },
+        ],
+        topicChecker: vi.fn().mockResolvedValue(undefined),
+      });
 
     await handlers.onBeforePromptBuild(event, ctx);
 
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ topicContext: undefined }),
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            intentProjection: expect.objectContaining({
+              decision: "full-fallback",
+              effectiveInput: "full-fallback",
+              fallbackReason: "missing-topic-context",
+            }),
+          }),
+        }),
+      }),
     );
   });
 
@@ -3201,7 +3347,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
   it("emits a bounded terminal pipeline failure when classification throws", async () => {
     const classifier = vi.fn().mockRejectedValue("classifier string failure");
-    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+    const { handlers, emitAgentEvent, record } = createTopicFlowHarness({
       historicalIntents: [],
       classifier,
     });
@@ -3222,6 +3368,18 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(JSON.stringify(emittedPipelineEvents(emitAgentEvent))).not.toContain(
       "classifier string failure",
     );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            trigger: "classifier",
+            intentProjection: expect.any(Object),
+          }),
+        }),
+      }),
+    );
+    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty("result");
   });
 
   it("resolves the session key before fail-open classifier errors", async () => {

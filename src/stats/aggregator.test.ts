@@ -242,6 +242,305 @@ describe("StatsAggregator", () => {
     });
   });
 
+  it("aggregates projected and fallback telemetry with bounded daily counters", () => {
+    aggregator.record(
+      "projected-session",
+      createState({
+        intent: {
+          result: {
+            intent: "version-control",
+            reason: "projected",
+            confidence: 0.9,
+            complexity: "medium",
+          },
+          intentProjection: {
+            decision: "projected",
+            effectiveInput: "projected",
+            originalIntentCount: 60,
+            candidateIntentCount: 8,
+            originalCatalogCodePoints: 46_000,
+            candidateCatalogCodePoints: 7_000,
+            durationMs: 2,
+            candidateIntentIds: ["version-control"],
+            candidateSelections: [
+              {
+                intentId: "version-control",
+                selectionReasons: ["predicted-domain"],
+                matchedKeywords: [],
+              },
+            ],
+            supportReasons: ["high-overall-confidence"],
+            selectionReasons: ["predicted-domain", "cross-flow"],
+            matchedKeywords: [],
+          },
+        },
+      }),
+      intent,
+    );
+    aggregator.record(
+      "fallback-session",
+      createState({
+        intent: {
+          result: {
+            intent: "version-control",
+            reason: "fallback",
+            confidence: 0.7,
+            complexity: "medium",
+          },
+          intentProjection: {
+            decision: "full-fallback",
+            effectiveInput: "full-fallback",
+            fallbackReason: "insufficient-evidence",
+            originalIntentCount: 60,
+            candidateIntentCount: 6,
+            originalCatalogCodePoints: 46_000,
+            candidateCatalogCodePoints: 5_000,
+            durationMs: 4,
+            candidateIntentIds: ["version-control"],
+            candidateSelections: [
+              {
+                intentId: "version-control",
+                selectionReasons: ["predicted-domain"],
+                matchedKeywords: [],
+              },
+            ],
+            supportReasons: [],
+            selectionReasons: ["predicted-domain"],
+            matchedKeywords: [],
+          },
+        },
+        timestamps: {
+          start: "2026-06-11T00:02:00.000Z",
+          end: "2026-06-11T00:03:00.000Z",
+        },
+      }),
+      intent,
+    );
+
+    const stats = readStats();
+    expect(stats.schemaVersion).toBe(2);
+    expect(stats.projection).toMatchObject({
+      eligibleTurns: 2,
+      projectedTurns: 1,
+      fullFallbackTurns: 1,
+      projectedRate: 0.5,
+      fullFallbackRate: 0.5,
+      averageOriginalIntentCount: 60,
+      averageCandidateIntentCount: 7,
+      catalogMeasurementTurns: 2,
+      averageOriginalCatalogCodePoints: 46_000,
+      averageCandidateCatalogCodePoints: 6_000,
+      averageDurationMs: 3,
+      fallbackReasons: { "insufficient-evidence": 1 },
+      supportReasons: { "high-overall-confidence": 1 },
+      selectionReasons: { "predicted-domain": 2, "cross-flow": 1 },
+    });
+    expect(stats.daily["2026-06-11"].projection).toEqual({
+      eligibleTurns: 2,
+      projectedTurns: 1,
+      fullFallbackTurns: 1,
+      fallbackReasons: { "insufficient-evidence": 1 },
+    });
+  });
+
+  it("counts projection-only classifier failures without inventing an intent turn", () => {
+    expect(
+      aggregator.record(
+        "projection-only-session",
+        createState({
+          intent: {
+            intentProjection: {
+              decision: "full-fallback",
+              effectiveInput: "full-fallback",
+              fallbackReason: "missing-topic-context",
+              originalIntentCount: 60,
+              candidateIntentCount: 60,
+              durationMs: 2,
+              candidateIntentIds: [],
+              candidateSelections: [],
+              supportReasons: [],
+              selectionReasons: [],
+              matchedKeywords: [],
+            },
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    const stats = readStats();
+    expect(stats.summary.turns).toBe(0);
+    expect(stats.intents).toEqual({});
+    expect(stats.projection).toMatchObject({
+      eligibleTurns: 1,
+      projectedTurns: 0,
+      fullFallbackTurns: 1,
+      fallbackReasons: { "missing-topic-context": 1 },
+    });
+    expect(stats.daily["2026-06-11"]).toMatchObject({
+      turns: 0,
+      intents: {},
+      projection: {
+        eligibleTurns: 1,
+        projectedTurns: 0,
+        fullFallbackTurns: 1,
+        fallbackReasons: { "missing-topic-context": 1 },
+      },
+    });
+  });
+
+  it("bounds projection fallback reason keys", () => {
+    for (let index = 0; index < 34; index += 1) {
+      aggregator.record(
+        `reason-session-${index}`,
+        createState({
+          intent: {
+            result: {
+              intent: "version-control",
+              reason: "fallback",
+              confidence: 0.7,
+              complexity: "medium",
+            },
+            intentProjection: {
+              decision: "full-fallback",
+              effectiveInput: "full-fallback",
+              fallbackReason: `reason-${index}`,
+              originalIntentCount: 60,
+              candidateIntentCount: 6,
+              durationMs: 1,
+              candidateIntentIds: ["version-control"],
+              candidateSelections: [
+                {
+                  intentId: "version-control",
+                  selectionReasons: ["predicted-domain"],
+                  matchedKeywords: [],
+                },
+              ],
+              supportReasons: [],
+              selectionReasons: ["predicted-domain"],
+              matchedKeywords: [],
+            },
+          },
+        }),
+        intent,
+      );
+    }
+
+    const reasons = readStats().projection.fallbackReasons;
+    expect(Object.keys(reasons)).toHaveLength(32);
+    expect(reasons.other).toBe(3);
+  });
+
+  it("migrates a valid v1 file without losing existing data", () => {
+    aggregator.record("legacy-session", createState(), intent);
+    const statsPath = path.join(tempDir, "stats.json");
+    const legacy = readStats();
+    legacy.schemaVersion = 1;
+    delete legacy.projection;
+    for (const bucket of Object.values(legacy.daily) as Array<
+      Record<string, unknown>
+    >) {
+      delete bucket.projection;
+    }
+    fs.writeFileSync(statsPath, JSON.stringify(legacy));
+
+    expect(
+      aggregator.record(
+        "new-session",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(true);
+
+    const migrated = readStats();
+    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.createdAt).toBe(legacy.createdAt);
+    expect(migrated.summary.turns).toBe(2);
+    expect(migrated.intents["version-control"].turns).toBe(2);
+    expect(migrated.processedEvents).toMatchObject(legacy.processedEvents);
+    expect(migrated.projection.eligibleTurns).toBe(0);
+    expect(migrated.daily["2026-06-11"].projection.eligibleTurns).toBe(0);
+  });
+
+  it.each([
+    [
+      "too many keys",
+      Object.fromEntries(
+        Array.from({ length: 33 }, (_, index) => [`reason-${index}`, 1]),
+      ),
+    ],
+    ["an overlong key", { ["x".repeat(81)]: 1 }],
+  ])("preserves v2 stats with %s in a projection reason map", (_, reasons) => {
+    aggregator.record("existing-session", createState(), intent);
+    const statsPath = path.join(tempDir, "stats.json");
+    const invalid = readStats();
+    invalid.projection.fallbackReasons = reasons;
+    const serialized = JSON.stringify(invalid);
+    fs.writeFileSync(statsPath, serialized);
+
+    expect(
+      aggregator.record(
+        "new-session",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(false);
+    expect(fs.readFileSync(statsPath, "utf-8")).toBe(serialized);
+  });
+
+  it.each([
+    [
+      "an invalid processed-event timestamp",
+      (legacy: Record<string, unknown>) => {
+        legacy.processedEvents = { event: "not-a-date" };
+      },
+    ],
+    [
+      "an invalid UTC daily key",
+      (legacy: Record<string, unknown>) => {
+        const daily = legacy.daily as Record<string, unknown>;
+        legacy.daily = { garbage: daily["2026-06-11"] };
+      },
+    ],
+  ])("preserves v1 stats containing %s", (_, mutate) => {
+    aggregator.record("existing-session", createState(), intent);
+    const statsPath = path.join(tempDir, "stats.json");
+    const legacy = readStats() as Record<string, unknown>;
+    legacy.schemaVersion = 1;
+    delete legacy.projection;
+    for (const bucket of Object.values(
+      legacy.daily as Record<string, Record<string, unknown>>,
+    )) {
+      delete bucket.projection;
+    }
+    mutate(legacy);
+    const serialized = JSON.stringify(legacy);
+    fs.writeFileSync(statsPath, serialized);
+
+    expect(
+      aggregator.record(
+        "new-session",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(false);
+    expect(fs.readFileSync(statsPath, "utf-8")).toBe(serialized);
+  });
+
   it("counts actual instruction recommendations instead of catalog candidates", () => {
     const noisyIntent: IntentCatalogEntry = {
       id: "prompt-engineering",
@@ -536,6 +835,17 @@ describe("StatsAggregator", () => {
     expect(aggregator.record("session-3", createState(), intent)).toBe(false);
     expect(JSON.parse(fs.readFileSync(statsPath, "utf-8"))).toEqual(
       malformedNestedStats,
+    );
+
+    const malformedV2Stats = {
+      ...malformedNestedStats,
+      schemaVersion: 2,
+      projection: {},
+    };
+    fs.writeFileSync(statsPath, JSON.stringify(malformedV2Stats));
+    expect(aggregator.record("session-4", createState(), intent)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(statsPath, "utf-8"))).toEqual(
+      malformedV2Stats,
     );
   });
 });

@@ -1,5 +1,7 @@
 ---
 domain: "follow-up"
+candidate:
+  scope: "cross-flow"
 triggers:
   - "The user gives a short rejection, correction, cancellation, or wait signal that depends on the previous turn."
   - "User says something is wrong, rejects a suggestion, cancels a proposed action, or corrects their previous message without a full new task."

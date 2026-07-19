@@ -53,6 +53,7 @@ export function validateIntentDirectory(
         : [];
       const domainRaw = data.domain;
       const fastpathRaw = data.fastpath;
+      const candidateRaw = data.candidate;
       const skillsRaw = data.skills;
       const body = parsed.content.trim();
 
@@ -100,6 +101,43 @@ export function validateIntentDirectory(
             (typeof fastpath.hint !== "string" || !fastpath.hint.trim())
           ) {
             errors.push(`${file}: fastpath.hint must be a non-empty string`);
+          }
+        }
+      }
+      if (candidateRaw !== undefined) {
+        if (
+          typeof candidateRaw !== "object" ||
+          !candidateRaw ||
+          Array.isArray(candidateRaw)
+        ) {
+          errors.push(`${file}: candidate must be an object`);
+        } else {
+          const candidate = candidateRaw as Record<string, unknown>;
+          for (const field of Object.keys(candidate)) {
+            if (!new Set(["scope", "keywords"]).has(field)) {
+              errors.push(
+                `${file}: candidate contains unsupported field ${field}`,
+              );
+            }
+          }
+          if (
+            candidate.scope !== undefined &&
+            candidate.scope !== "cross-flow"
+          ) {
+            errors.push(
+              `${file}: candidate.scope must be cross-flow when provided`,
+            );
+          }
+          if (
+            candidate.keywords !== undefined &&
+            (!Array.isArray(candidate.keywords) ||
+              candidate.keywords.some(
+                (value) => typeof value !== "string" || !value.trim(),
+              ))
+          ) {
+            errors.push(
+              `${file}: candidate.keywords must contain only non-empty strings`,
+            );
           }
         }
       }

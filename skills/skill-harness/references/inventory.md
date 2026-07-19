@@ -57,6 +57,7 @@ Use simple format checks instead of command-specific validation steps:
 - Frontmatter exists and required fields have the right shape.
 - Body sections follow the required order.
 - Triggers/examples are concrete and non-duplicative.
+- Optional `candidate.scope` and `candidate.keywords` are justified by durable cross-domain evidence and collision checks rather than inferred from one session.
 - New intents do not collide with existing runtime intent boundaries.
 - Domain-intent consistency criteria pass for every changed or newly proposed domain/intent relationship.
 - Skill dependencies use frontmatter `skills[]`.

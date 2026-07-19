@@ -4,6 +4,7 @@ import type {
   RecentTurn,
   IntentionResult,
   IntentTrigger,
+  IntentProjectionTelemetry,
   HistoricalIntentRecord,
 } from "../types.js";
 import type { ReviewSnapshot, ReviewState } from "../review/types.js";
@@ -61,6 +62,7 @@ export interface IntentState {
   trigger?: IntentTrigger;
   result?: IntentionResult;
   instructionText?: string;
+  intentProjection?: IntentProjectionTelemetry;
 }
 
 export interface SessionState {
@@ -450,7 +452,12 @@ export class SessionTracker {
       let bestMatch: { sessionId: string; startMs: number } | undefined;
       for (const [sessionId, session] of this.sessionData.entries()) {
         if (session.sessionKey !== sessionKey) continue;
-        if (!session.current?.intent?.result) continue;
+        if (
+          !session.current?.intent?.result &&
+          !session.current?.intent?.intentProjection
+        ) {
+          continue;
+        }
         const startMs = Date.parse(session.current.timestamps?.start ?? "");
         if (Number.isNaN(startMs)) continue;
         if (!bestMatch || startMs > bestMatch.startMs) {
@@ -460,8 +467,14 @@ export class SessionTracker {
       if (bestMatch) return bestMatch.sessionId;
     }
 
-    if (params.sessionId && this.hasIntentData(params.sessionId)) {
-      return params.sessionId;
+    if (params.sessionId) {
+      const state = this.sessionData.get(params.sessionId)?.current;
+      if (
+        this.hasIntentData(params.sessionId) ||
+        state?.intent?.intentProjection
+      ) {
+        return params.sessionId;
+      }
     }
   }
 
@@ -568,6 +581,10 @@ export class SessionTracker {
         }
         if (data.current.intent.instructionText !== undefined) {
           current.intent.instructionText = data.current.intent.instructionText;
+        }
+        if (data.current.intent.intentProjection !== undefined) {
+          current.intent.intentProjection =
+            data.current.intent.intentProjection;
         }
       }
       if (data.current.result !== undefined) {

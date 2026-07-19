@@ -1,5 +1,7 @@
 ---
 domain: "follow-up"
+candidate:
+  scope: "cross-flow"
 triggers:
   - "The user gives a short affirmative, agreement, approval, or readiness signal that depends on the previous turn."
   - "User simply agrees, confirms, or says to proceed without introducing a new concrete task."

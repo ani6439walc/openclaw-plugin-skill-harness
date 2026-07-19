@@ -35,7 +35,7 @@ When enabled, Skill Harness provides four main capabilities:
    - Tells the main agent which skills may need to be read and which workflows or pitfalls should be preserved.
 
 3. **Runtime statistics**
-   - Records the intent, skills, tools, confidence, and complexity used for each tracked turn.
+   - Records the intent, skills, tools, confidence, complexity, and conservative classifier-projection measurements used for each tracked turn.
    - Aggregates data into `stats.json` so you can see which skills were recommended, adopted, stale, or in need of review.
 
 4. **Intent Review (optional)**
@@ -63,13 +63,19 @@ graph TD
   D --> E{exact fastpath keyword?}
   E -->|yes| F[prepend fastpath hint]
   E -->|no| G[topic checker]
-  G --> H{same topic, confidence at least 0.8, and history?}
+  G --> H{same topic, joint confidence at least 0.8, and history?}
   H -->|yes| I[inherit previous intent]
-  H -->|no| S{same topic?}
-  S -->|yes| T[full intent classifier]
-  S -->|no| J[domain keyword similarity or classifier]
-  T --> K[optional instruction writer]
-  J --> K
+  H -->|no| S{changed topic and joint confidence at least 0.8?}
+  S -->|yes| J{domain keyword similarity match?}
+  J -->|yes| K[optional instruction writer]
+  J -->|no| T
+  S -->|no| T[classifier path]
+  T --> U{conservative candidate gate?}
+  U -->|yes| V[projected intent catalog]
+  U -->|no| W[full-catalog fallback]
+  V --> K
+  W --> K
+
   I --> L[prepend skill_harness_plugin context]
   K --> L
   F --> L
@@ -90,7 +96,7 @@ On first install, the plugin seeds example intents from the bundled assets if th
 
 Each intent describes:
 
-- a filename-derived intent ID plus frontmatter metadata such as domain, triggers, examples, fastpath keywords, and optional `skills[]` dependencies
+- a filename-derived intent ID plus frontmatter metadata such as domain, triggers, examples, fastpath keywords, optional classifier-only `candidate` metadata, and optional `skills[]` dependencies
 - workflow guidance for the instruction writer
 - pitfalls and experience notes that should be preserved when relevant
 
@@ -99,9 +105,13 @@ Each intent describes:
 The plugin prefers cheap deterministic checks before calling helper models:
 
 - exact `fastpath.keywords` match can inject a short hint immediately
-- topic checker can inherit the previous intent only for same-topic results with confidence at or above `0.8` and available history; inherited results keep the prior intent/confidence but refresh topic, domain, keywords, and complexity from the latest topic check
-- uncertain same-topic results and same-topic results without history bypass keyword similarity and use the full intent classifier
-- domain keyword similarity can route clear cases before full classification
+- topic checker can inherit the previous intent only for same-topic results with joint confidence at or above `0.8` and available history; inherited results keep the prior intent/confidence but refresh topic, domain, keywords, and complexity from the latest topic check
+- uncertain same-topic results and same-topic results without history bypass keyword similarity and reach the classifier path
+- domain keyword similarity can route clear changed-topic cases only when the same joint-confidence threshold passes
+- turns that reach the classifier use a deterministic conservative candidate projection when the current domain plus high confidence, authorized same-topic history, or exact candidate evidence provides enough support; missing or weak evidence uses the post-deny full catalog without a second classifier call
+- projected candidates preserve canonical catalog order and include the predicted domain, `candidate.scope: cross-flow` intents, authorized low-confidence history, and exact matches against manual `candidate.keywords` or normalized intent IDs; denied and removed intents cannot be reintroduced
+- exact projection phrases use NFKC, locale-independent lowercasing, and collapsed whitespace with boundary-safe matching; punctuation remains literal, so hyphens and underscores are not interchangeable aliases
+- the bounded session manifest records the decision, original/candidate counts, canonical candidate IDs, and per-candidate selection reasons and matched metadata keywords; classifier parse failures and thrown classifier calls still count as eligible projection attempts without inventing an intent result
 - low-thinking turns can skip LLM scanner calls while preserving deterministic fastpaths
 
 This keeps routine routing cheap and reduces unnecessary helper-model work.
@@ -110,7 +120,7 @@ This keeps routine routing cheap and reduces unnecessary helper-model work.
 
 When deterministic routing is not enough, Skill Harness runs bounded helper subagents:
 
-- **topic checker**: returns required `basis`, `reason`, continuity `confidence`, keywords, topic, domain, and downstream-task complexity; host code derives the internal `changed` flag from `reason`
+- **topic checker**: returns required `basis`, `reason`, joint `confidence`, keywords, topic, domain, and downstream-task complexity; confidence measures the combined correctness of reason, domain, and keywords, while host code derives the internal `changed` flag from `reason`
 - **intent classifier**: returns structured JSON for intent, domain, topic, confidence, keywords, and complexity
 - **instruction writer**: runs only when classifier confidence is at least `0.8` and treats the resolved intent as the task boundary. It returns raw JSON with an optional `instruction_hint` plus `additional_candinate_skills`, the sole machine-readable channel for new skill candidates. When existing evidence is insufficient, it chooses one bounded branch: either read one existing candidate, or run one focused `skill_search` (limited to three results) followed by one `skill_view` of the strongest new result. Only a newly searched and viewed skill may appear in the array, with at most one entry. The host validates the tool order, results, viewed name, and returned candidate against the embedded-run trace; missing, mismatched, failed, or over-budget evidence invalidates the generated result while preserving classifier/domain fail-open guidance. Existing intent/domain candidates are not repeated there. If no incremental guidance is justified, the writer returns `instruction_hint: null` with an empty array; this is a successful no-op, so domain candidates remain available without injecting an instruction hint. Resolved additional skill names are deduplicated into `domain_skill_candidates`; unknown or invisible names are ignored.
 - **Intent Review reviewer**: optional post-turn reviewer that improves runtime intents when configured triggers fire
@@ -317,14 +327,16 @@ The index cache follows OpenClaw's `skills.load` watcher settings. When `watch: 
 
 Skill Harness keeps package files and runtime state separate. The runtime data root is derived from OpenClaw's resolved state directory; the paths below show the default local location.
 
-| Path                                            | Purpose                                                         |
-| ----------------------------------------------- | --------------------------------------------------------------- |
-| `~/.openclaw/plugins/skill-harness/intents/`    | Editable runtime intent catalog.                                |
-| `~/.openclaw/plugins/skill-harness/sessions/`   | Per-session JSON snapshots for audit and review context.        |
-| `~/.openclaw/plugins/skill-harness/stats.json`  | Aggregated intent, skill, tool, routing, and daily usage stats. |
-| `~/.openclaw/plugins/skill-harness/review.json` | Intent Review trigger keywords and processed event outcomes.    |
+| Path                                            | Purpose                                                                    |
+| ----------------------------------------------- | -------------------------------------------------------------------------- |
+| `~/.openclaw/plugins/skill-harness/intents/`    | Editable runtime intent catalog.                                           |
+| `~/.openclaw/plugins/skill-harness/sessions/`   | Per-session JSON snapshots for audit and review context.                   |
+| `~/.openclaw/plugins/skill-harness/stats.json`  | Schema-v2 intent, skill, tool, routing, projection, and daily usage stats. |
+| `~/.openclaw/plugins/skill-harness/review.json` | Intent Review trigger keywords and processed event outcomes.               |
 
 Session cleanup preserves the ended session and only removes expired `sessions/*.json` files. It does not delete root-level `stats.json`, root-level `review.json`, intent files, skills, transcripts, or package files.
+
+`stats.json` schema v2 adds bounded classifier-projection aggregates: eligible/projected/full-fallback counts and rates, average original/candidate intent counts and rendered catalog code points, average projection duration, reason counts, and daily projection counters. Classifier-bound attempts remain eligible when result parsing or classifier execution fails, but those attempts do not increment intent-turn summaries. Valid v1 files migrate on the next recorded turn without losing existing intent, skill, tool, routing, daily, or processed-event data. Invalid files remain untouched and fail open. Skill usage readers remain version-agnostic and accept both schemas.
 
 ## Intent Review
 

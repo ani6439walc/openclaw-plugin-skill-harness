@@ -109,6 +109,10 @@ export type IntentDefinition = {
   examples: string[];
   domain: string;
   skills?: string[];
+  candidate?: {
+    scope?: "cross-flow";
+    keywords?: string[];
+  };
   fastpath: {
     keywords: string[];
     hint?: string;
@@ -119,6 +123,36 @@ export type IntentDefinition = {
 export type IntentCatalogEntry = {
   id: string;
   definition: IntentDefinition;
+};
+
+export type IntentProjectionSelectionReason =
+  | "cross-flow"
+  | "predicted-domain"
+  | "authorized-history"
+  | "candidate-keyword"
+  | "intent-id";
+
+export type IntentProjectionSupportReason =
+  "high-overall-confidence" | "authorized-history" | "exact-evidence";
+
+export type IntentProjectionTelemetry = {
+  decision: "projected" | "full-fallback";
+  effectiveInput: "projected" | "full-fallback";
+  fallbackReason?: string;
+  originalIntentCount: number;
+  candidateIntentCount: number;
+  originalCatalogCodePoints?: number;
+  candidateCatalogCodePoints?: number;
+  durationMs: number;
+  candidateIntentIds: string[];
+  candidateSelections: Array<{
+    intentId: string;
+    selectionReasons: IntentProjectionSelectionReason[];
+    matchedKeywords: string[];
+  }>;
+  supportReasons: IntentProjectionSupportReason[];
+  selectionReasons: IntentProjectionSelectionReason[];
+  matchedKeywords: string[];
 };
 
 export type IntentionResult = {

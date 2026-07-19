@@ -99,11 +99,11 @@ Use the existing module boundaries:
 - `src/file-utils.ts`: shared path helpers and atomic filesystem primitives.
 - `src/intents/catalog.ts`: runtime intent catalog loading.
 - `src/session/tracker.ts`: session JSON state under `dataRoot/sessions`.
-- `src/stats/aggregator.ts`: usage aggregation into `dataRoot/stats.json`.
+- `src/stats/aggregator.ts`: usage and candidate-projection aggregation into schema-v2 `dataRoot/stats.json`, including explicit valid-v1 migration.
 - `src/review/log-writer.ts`: direct Intent Review outcomes and trigger keyword updates into `dataRoot/review.json`.
 - `src/review/log.ts`: review log schema validation/migration and root trigger keyword state. Legacy `items` are dropped during migration; there is no tool/command action surface.
 - `src/subagent-runtime.ts`: shared embedded subagent run defaults and error-payload extraction helpers used by classification and review subagents.
-- `src/classification/prompts.ts`, `src/classification/subagent.ts`, `src/classification/conversation.ts`, `src/review/subagent.ts`, `src/review/triggers.ts`: classification and review logic.
+- `src/classification/prompts.ts`, `src/classification/subagent.ts`, `src/classification/conversation.ts`, `src/classification/candidates.ts`, `src/review/subagent.ts`, `src/review/triggers.ts`: classification, conservative candidate projection, and review logic.
 - `src/review/snapshot-formatter.ts`: task-oriented Review snapshot serialization, host-owned manifest metadata, semantic evidence wrappers, and final-boundary escaping.
 - `src/intents/skill-references.ts`: resolves frontmatter `skills[]` dependencies into available `SKILL.md` metadata for instruction writing and Intent Review. Intent prompt/body text is not scanned for skill references.
 - `src/review/queue.ts`: serializes background Intent Review work so hook handling stays fail-open.
@@ -111,7 +111,9 @@ Use the existing module boundaries:
 - `src/session/guards.ts`: session eligibility guards.
 - `src/*.test.ts`: tests are colocated with the module they protect.
 
-Conversation prompts are intentionally structured as XML-like blocks. Keep recent-turn context inside `<conversation_context>` and split historical topics with `<topic_segment>` and `<topic_boundary>`. Prompt-facing topic checker output requires bounded `basis`, `reason`, continuity `confidence`, keywords, topic, domain, and downstream-task complexity; it must not ask the model for `changed`. Host parsing derives `changed` exclusively from `reason`. Same-topic inheritance requires confidence at or above `0.8` plus historical intent data, keeps only the prior intent and intent confidence, and refreshes topic, domain, keywords, and complexity from the latest topic check. Uncertain same-topic results must reach the full classifier rather than keyword similarity. Persisted intent results may still store `topicChangeReason`; do not reintroduce separate `intentChange` state.
+Conversation prompts are intentionally structured as XML-like blocks. Keep recent-turn context inside `<conversation_context>` and split historical topics with `<topic_segment>` and `<topic_boundary>`. Prompt-facing topic checker output requires bounded `basis`, `reason`, joint `confidence`, keywords, topic, domain, and downstream-task complexity; confidence measures the combined correctness of reason, domain, and keywords, and the prompt must not ask the model for `changed`. Host parsing derives `changed` exclusively from `reason`. Same-topic inheritance requires confidence at or above `0.8` plus historical intent data, keeps only the prior intent and intent confidence, and refreshes topic, domain, keywords, and complexity from the latest topic check. Topic-keyword similarity also requires confidence at or above `0.8`; uncertain results reach the classifier path instead. Persisted intent results may still store `topicChangeReason`; do not reintroduce separate `intentChange` state.
+
+Classifier candidate projection is direct and deterministic; there is no rollout mode or configuration switch. Compute candidates only from the current post-deny catalog. Preserve canonical order, include the predicted domain, `candidate.scope: cross-flow`, authorized low-confidence same-topic history, and boundary-safe exact evidence from manual `candidate.keywords` or normalized intent IDs. Matching uses NFKC, locale-independent lowercasing, and collapsed whitespace without treating hyphens and underscores as aliases. A valid domain plus high joint confidence, authorized history, or exact evidence can support projection; missing/unknown topic data, weak unsupported evidence, empty/no-reduction candidates, or selector failures must use a single full-catalog classifier call. Never retry the classifier with a second catalog. Candidate telemetry includes the decision, counts, and bounded per-candidate provenance; classifier failures remain projection-eligible without creating an intent result. It must not be copied into Intent Review turn evidence.
 
 Prompt-build authorization has two layers. First resolve the canonical agent/session and enforce configured agent, chat-type, and chat-ID scope. Then exclude Skill Harness embedded-agent sessions, generic/Review subagents, dreaming sessions, and active-memory sessions from all injection. Authorized internal/inter-session, non-user, and trigger-omitted turns receive fixed `appendSystemContext` only; eligible external-user turns may additionally receive dynamic `prependContext`. Once static authorization succeeds, dynamic fallbacks and failures must preserve the fixed system context.
 
@@ -183,7 +185,7 @@ Runtime editable intents live under `intentsPath(dataRoot)`; with the default lo
 
 When changing first-install examples, edit `skills/skill-harness/assets/*.md` and run validation through the test suite. When changing a live local intent for the user's current OpenClaw environment, edit the runtime intent directory instead.
 
-Intent markdown must keep valid YAML frontmatter and the expected sections used by `src/intents/validation.ts` and the skill-harness skill references.
+Intent markdown must keep valid YAML frontmatter and the expected sections used by `src/intents/validation.ts` and the skill-harness skill references. Optional `candidate.scope` must equal `cross-flow`; manual `candidate.keywords` require durable exact-match evidence and collision fixtures and must not be inferred from one session.
 
 ## Review Workflow
 

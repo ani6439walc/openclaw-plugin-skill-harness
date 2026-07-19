@@ -8,6 +8,7 @@ import {
   getInstructionModelRef,
   getModelRef,
   getReviewModelRef,
+  runIntentionSubagent,
   runIntentInstructionSubagent,
   runTopicSwitchSubagent,
 } from "./subagent.js";
@@ -151,6 +152,67 @@ describe("buildIntentionEmbeddedRunParams", () => {
     expect(result.sessionFile).toBe(
       "/tmp/skill-harness-test-run.session.jsonl",
     );
+  });
+});
+
+describe("runIntentionSubagent", () => {
+  const intents = [
+    {
+      id: "allowed",
+      definition: {
+        triggers: ["allowed work"],
+        examples: ["do allowed work"],
+        domain: "development",
+        skills: [],
+        fastpath: { keywords: [] },
+        prompt: "## Guidelines\n- Do allowed work.",
+      },
+    },
+  ];
+
+  async function runWithIntent(intent: string) {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [
+        {
+          text: JSON.stringify({
+            intent,
+            reason: "The request matches the selected intent.",
+            keywords: ["allowed"],
+            topic: "Allowed work",
+            domain: "development",
+            confidence: 0.9,
+            complexity: "low",
+          }),
+        },
+      ],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+    const result = await runIntentionSubagent({
+      api,
+      config: resolveConfig({}),
+      agentId: "main",
+      latest: "do allowed work",
+      modelRef: { provider: "google", model: "intent" },
+      intents,
+    });
+    return { result, runEmbeddedAgent };
+  }
+
+  it("rejects an intent excluded from the supplied classifier catalog", async () => {
+    const { result, runEmbeddedAgent } = await runWithIntent("excluded");
+
+    expect(result).toBeUndefined();
+    expect(runEmbeddedAgent).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the explicit fallback intent valid", async () => {
+    const { result, runEmbeddedAgent } = await runWithIntent("other");
+
+    expect(result?.intent).toBe("other");
+    expect(runEmbeddedAgent).toHaveBeenCalledOnce();
   });
 });
 

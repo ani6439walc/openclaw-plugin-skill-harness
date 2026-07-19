@@ -4,7 +4,7 @@ Rules for generating intent definition files. The canonical format spec lives in
 
 ## Required section order
 
-1. YAML frontmatter (required `domain`, `triggers[]`, `examples[]`, optional `fastpath`, optional `skills[]`)
+1. YAML frontmatter (required `domain`, `triggers[]`, `examples[]`, optional `fastpath`, optional `candidate`, optional `skills[]`)
 2. `## Guidelines`
 3. `## Response Strategy`
 4. `## Concrete Workflow` (optional)
@@ -25,6 +25,10 @@ fastpath:
   hint: "Optional short A1 injected hint."
   keywords:
     - "optional exact or fuzzy keyword"
+candidate:
+  scope: "cross-flow"
+  keywords:
+    - "optional manual exact projection phrase"
 skills:
   - "optional-skill-name"
 ---
@@ -34,6 +38,8 @@ skills:
 - `skills` is optional and must be a list of exact skill names. Use it only for skills the intent should load or strongly prefer.
 - `fastpath.keywords` is optional. A1 uses it for exact-match only when `fastpath.hint` is present; A2 uses it for domain-scoped keyword similarity even without a hint.
 - `fastpath.hint` should be short. It is injected directly on A1 hits instead of the full intent body.
+- `candidate` is optional classifier-projection metadata. `candidate.scope`, when present, must be `cross-flow`; use it only when the intent must remain available across unrelated domains.
+- `candidate.keywords` are manual exact projection evidence, not fastpaths and not body guidance. Normalize/deduplicate for matching with NFKC, locale-independent lowercasing, and collapsed whitespace without rewriting source text or treating hyphens and underscores as aliases. Require durable telemetry or labeled evidence plus positive-match and collision fixtures; never infer them from one session.
 
 ## Concrete Workflow inclusion rule
 

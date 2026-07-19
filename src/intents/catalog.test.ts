@@ -62,6 +62,11 @@ fastpath:
   keywords:
     - "spawn"
     - "派代理"
+candidate:
+  scope: cross-flow
+  keywords:
+    - "  agent dispatch  "
+    - "代理派送"
 ---
 ## Guidelines
 - Route by filename.
@@ -82,6 +87,10 @@ fastpath:
           fastpath: {
             keywords: ["spawn", "派代理"],
             hint: "Route lightweight agent dispatch requests directly.",
+          },
+          candidate: {
+            scope: "cross-flow",
+            keywords: ["  agent dispatch  ", "代理派送"],
           },
           prompt: "## Guidelines\n- Route by filename.",
         },
@@ -135,6 +144,30 @@ keywords:
     expect(catalog.get()[0]?.definition.fastpath).toEqual({
       keywords: ["old"],
     });
+  });
+
+  it("omits invalid candidate metadata instead of coercing it", () => {
+    fs.writeFileSync(
+      path.join(root, "intents", "invalid-candidate.md"),
+      `---
+triggers: ["route"]
+examples: ["route this"]
+domain: "routing"
+candidate:
+  scope: global
+  keywords:
+    - "valid"
+    - ""
+    - 123
+---
+## Guidelines
+- Route carefully.
+`,
+    );
+
+    const catalog = IntentCatalog.create(root);
+    expect(catalog.load("intents", { silent: true })).toBe(1);
+    expect(catalog.get()[0]?.definition.candidate).toBeUndefined();
   });
 
   it("skips files without triggers or domain", () => {

@@ -78,6 +78,47 @@ function parseFastpath(
   return hint ? { keywords, hint } : { keywords };
 }
 
+function parseCandidate(
+  data: Record<string, unknown>,
+): IntentDefinition["candidate"] | undefined {
+  if (data.candidate === undefined) return;
+  if (
+    !data.candidate ||
+    typeof data.candidate !== "object" ||
+    Array.isArray(data.candidate)
+  ) {
+    return;
+  }
+
+  const candidate = data.candidate as Record<string, unknown>;
+  if (
+    Object.keys(candidate).some((key) => !["scope", "keywords"].includes(key))
+  ) {
+    return;
+  }
+  if (candidate.scope !== undefined && candidate.scope !== "cross-flow") {
+    return;
+  }
+  if (
+    candidate.keywords !== undefined &&
+    (!Array.isArray(candidate.keywords) ||
+      candidate.keywords.some(
+        (value) => typeof value !== "string" || !value.trim(),
+      ))
+  ) {
+    return;
+  }
+
+  const keywords = Array.isArray(candidate.keywords)
+    ? [...candidate.keywords]
+    : undefined;
+  if (candidate.scope === undefined && keywords === undefined) return;
+  return {
+    ...(candidate.scope === "cross-flow" ? { scope: candidate.scope } : {}),
+    ...(keywords ? { keywords } : {}),
+  };
+}
+
 export function filterIntentsForAgent(
   intents: readonly IntentCatalogEntry[],
   config: ResolvedSkillHarnessPluginConfig,
@@ -180,6 +221,7 @@ export class IntentCatalog {
             .map((x) => x.trim())
         : [];
       const fastpath = parseFastpath(data, entry, silent);
+      const candidate = parseCandidate(data);
 
       if (!triggers.length) {
         if (!silent) {
@@ -203,6 +245,7 @@ export class IntentCatalog {
         examples,
         domain,
         ...(skills.length > 0 ? { skills } : {}),
+        ...(candidate ? { candidate } : {}),
         fastpath,
         prompt: parsed.content.trim(),
       };

@@ -532,7 +532,7 @@ describe("buildIntentionPrompt", () => {
     );
     expect(result).toContain('"confidence":0.72');
     expect(result).toContain(
-      "Continuity confidence measures certainty in the topic reason, not confidence in the final intent",
+      "Topic-checker confidence measures joint certainty that reason, domain, and keywords are correct for the latest request",
     );
   });
 });
@@ -664,7 +664,7 @@ describe("buildTopicSwitchPrompt", () => {
       "5. Decide reason from the strongest observable evidence.",
     );
     expect(prompt).toContain(
-      "6. Then fill keywords, topic, domain, confidence, and complexity.",
+      "6. Fill keywords, topic, domain, and complexity, then set confidence from the joint correctness of reason, domain, and keywords.",
     );
     expect(prompt.indexOf("3. Write basis")).toBeLessThan(
       prompt.indexOf("4. Weigh continuity and change evidence"),
@@ -706,7 +706,7 @@ describe("buildTopicSwitchPrompt", () => {
       "Do not rate the difficulty of the continuity decision itself",
     );
     expect(prompt).toContain(
-      "[confidence] must be a number from 0.0 to 1.0 measuring certainty in reason",
+      "[confidence] must be a number from 0.0 to 1.0 measuring joint certainty that reason, domain, and keywords are correct for latest_message",
     );
     expect(prompt).toContain(
       "Allow 1-8 normalized unique keywords; prefer 3-8 for ordinary complete messages",
@@ -1238,7 +1238,7 @@ describe("parseTopicSwitchResult", () => {
     ).toBeUndefined();
   });
 
-  it("requires continuity confidence within the inclusive unit interval", () => {
+  it("requires joint topic confidence within the inclusive unit interval", () => {
     const valid = {
       basis: "Latest message continues the same implementation.",
       keywords: ["commit"],

@@ -167,6 +167,30 @@ describe("projectIntentCatalog", () => {
     expect(reversed).toEqual(forward);
   });
 
+  it("uses candidate metadata in duplicate-ID deterministic tie-breaking", () => {
+    const withoutCandidate = catalogEntry("same-domain", "development");
+    const withCandidate = {
+      ...withoutCandidate,
+      candidate: { scope: "cross-flow" as const, keywords: ["z"] },
+    };
+    const baseCatalog = projectionCatalog.filter(
+      (entry) => entry.id !== "same-domain",
+    );
+    const forward = projectIntentCatalog(
+      snapshot([...baseCatalog, withCandidate, withoutCandidate]),
+      ["behavior-fix"],
+    );
+    const reversed = projectIntentCatalog(
+      snapshot([...baseCatalog, withoutCandidate, withCandidate]),
+      ["behavior-fix"],
+    );
+
+    expect(reversed).toEqual(forward);
+    expect(
+      forward.entries.find((entry) => entry.entry.id === "same-domain")?.entry,
+    ).toEqual(withCandidate);
+  });
+
   it.each([
     {
       name: "matched intent is absent",

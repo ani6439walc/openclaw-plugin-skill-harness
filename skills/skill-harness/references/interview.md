@@ -25,9 +25,10 @@ Confirm these fields in order:
 5. `triggers`
 6. `examples`
 7. optional `fastpath.keywords` and short `fastpath.hint`
-8. body scope
-9. skills and tools worth hinting
-10. collision check with existing intents
+8. optional cross-flow candidate scope or manual exact candidate keywords
+9. body scope
+10. skills and tools worth hinting
+11. collision check with existing intents
 
 ## Rules
 
@@ -36,6 +37,7 @@ Confirm these fields in order:
 - Prefer narrowing scope over making a broad catch-all intent.
 - If the user is describing an existing intent, say so directly.
 - If two intents are colliding, recommend the smallest clean split.
+- Do not propose `candidate.keywords` from a single example or review session. Require durable cross-domain evidence and check both intended matches and neighboring collisions.
 - Do not write the final intent file until the boundary is clear.
 - **No cross-references in body**: the markdown body must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, and fastpath metadata. (See `references/format.md` for full spec.)
 
