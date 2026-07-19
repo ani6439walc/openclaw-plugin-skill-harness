@@ -24,6 +24,7 @@
   ],
   "files": [
     "README.md",
+    "docs/**",
     "package.json",
     "openclaw.plugin.json",
     "dist",
