@@ -490,7 +490,7 @@ describe("runIntentInstructionSubagent", () => {
     expect(prompt).not.toContain("<execution_mode>");
   });
 
-  it("rejects an additional skill without search and view evidence", async () => {
+  it("drops an unverified additional skill while preserving the valid hint", async () => {
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [
         {
@@ -524,7 +524,8 @@ describe("runIntentInstructionSubagent", () => {
     });
 
     expect(result).toEqual({
-      error: "instruction writer violated skill discovery contract",
+      instructionHint: "Use the discovered release workflow.",
+      additionalCandidateSkills: [],
     });
   });
 

@@ -375,11 +375,15 @@ export async function runIntentInstructionSubagent(params: {
         toolSummary: resultMeta?.agentMeta?.toolSummary,
       })
     ) {
-      logger.warn("Intent instruction skill discovery validation failed", {
-        intent: params.result.intent,
-      });
+      logger.warn(
+        "Intent instruction skill discovery validation failed; discarding unverified skill candidates",
+        {
+          intent: params.result.intent,
+        },
+      );
       return {
-        error: "instruction writer violated skill discovery contract",
+        instructionHint: instruction.instructionHint,
+        additionalCandidateSkills: [],
       };
     }
     return instruction;
