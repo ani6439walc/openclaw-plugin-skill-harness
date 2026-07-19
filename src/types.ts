@@ -155,6 +155,8 @@ export type IntentProjectionTelemetry = {
   matchedKeywords: string[];
 };
 
+export type IntentComplexity = "low" | "medium" | "high";
+
 export type IntentionResult = {
   intent: string;
   reason: string;
@@ -165,7 +167,11 @@ export type IntentionResult = {
   topicChangeReason?: "start" | "marker" | "shift" | "change" | "match";
   previousTopic?: string;
   confidence: number;
-  complexity: "low" | "medium" | "high";
+  complexity?: IntentComplexity;
+};
+
+export type ClassifiedIntentionResult = IntentionResult & {
+  complexity: IntentComplexity;
 };
 
 export type IntentTrigger =

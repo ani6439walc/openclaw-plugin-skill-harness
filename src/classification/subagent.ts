@@ -10,6 +10,7 @@ import { logger } from "../../api.js";
 import {
   FALLBACK_INTENT_ID,
   INSTRUCTION_COMPLEXITY_PROMPTS,
+  isIntentComplexity,
 } from "../constants.js";
 import {
   buildIntentInstructionPrompt,
@@ -28,6 +29,7 @@ import {
 } from "../subagent-runtime.js";
 import { validateInstructionSkillEvidence } from "./instruction-skill-evidence.js";
 import type {
+  ClassifiedIntentionResult,
   HistoricalIntentRecord,
   IntentCatalogEntry,
   IntentionResult,
@@ -184,7 +186,7 @@ export async function runIntentionSubagent(params: {
   modelRef: { provider: string; model: string };
   intents: readonly IntentCatalogEntry[];
   topicContext?: TopicSwitchResult;
-}): Promise<IntentionResult | undefined> {
+}): Promise<ClassifiedIntentionResult | undefined> {
   const { subagentSessionId, subagentSessionKey } =
     createSubagentSessionIdentity(params, {
       runPrefix: "skill-harness",
@@ -309,7 +311,12 @@ export async function runIntentInstructionSubagent(params: {
     result: params.result,
     intentBody: params.intentBody,
     availableSkills: params.availableSkills,
-    complexityContext: INSTRUCTION_COMPLEXITY_PROMPTS[params.result.complexity],
+    ...(isIntentComplexity(params.result.complexity)
+      ? {
+          complexityContext:
+            INSTRUCTION_COMPLEXITY_PROMPTS[params.result.complexity],
+        }
+      : {}),
     conversation: params.conversation,
     currentTime: resolveCurrentTime(params.api),
   });

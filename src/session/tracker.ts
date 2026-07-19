@@ -18,6 +18,7 @@ import {
   readJsonFile,
   safeWriteJson,
 } from "../file-utils.js";
+import { isIntentComplexity } from "../constants.js";
 
 const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const DEFAULT_MIGRATED_DOMAIN = "other";
@@ -513,8 +514,10 @@ export class SessionTracker {
         intent: result.intent,
         domain: result.domain ?? DEFAULT_MIGRATED_DOMAIN,
         confidence: result.confidence,
-        complexity: result.complexity,
       };
+      if (isIntentComplexity(result.complexity)) {
+        record.complexity = result.complexity;
+      }
       if (result.keywords?.length) record.keywords = [...result.keywords];
       if (result.topic) record.topic = result.topic;
       if (result.topicChangeReason) {

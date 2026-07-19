@@ -151,6 +151,31 @@ describe("StatsAggregator", () => {
     ]);
   });
 
+  it("records the turn without a complexity bucket when complexity is unavailable", () => {
+    const state = createState();
+    delete state.intent!.result.complexity;
+
+    expect(aggregator.record("missing-complexity", state, intent)).toBe(true);
+
+    const intentStats = readStats().intents["version-control"];
+    expect(intentStats.turns).toBe(1);
+    expect(intentStats.complexity).toEqual({ low: 0, medium: 0, high: 0 });
+    expect(intentStats.complexity).not.toHaveProperty("undefined");
+  });
+
+  it("ignores an unknown persisted complexity value", () => {
+    const state = createState();
+    (state.intent!.result as unknown as { complexity: unknown }).complexity =
+      "unknown";
+
+    expect(aggregator.record("unknown-complexity", state, intent)).toBe(true);
+
+    const intentStats = readStats().intents["version-control"];
+    expect(intentStats.turns).toBe(1);
+    expect(intentStats.complexity).toEqual({ low: 0, medium: 0, high: 0 });
+    expect(intentStats.complexity).not.toHaveProperty("unknown");
+  });
+
   it("aggregates summary, intent, skill routing, tools, and daily metrics", () => {
     aggregator.record(
       "session-1",

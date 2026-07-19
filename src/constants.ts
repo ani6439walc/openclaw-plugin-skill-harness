@@ -1,3 +1,5 @@
+import type { IntentComplexity, IntentDefinition } from "./types.js";
+
 export const DEFAULT_TIMEOUT_MS = 3_000;
 export const PROCESSED_EVENTS_RETENTION_DAYS = 90;
 export const LOCK_STALE_THRESHOLD_MS = 60_000;
@@ -12,8 +14,6 @@ export const DEFAULT_RECENT_ASSISTANT_CHARS = 180;
 export const SKILL_HARNESS_PLUGIN_TAG = "skill_harness_plugin";
 export const UNTRUSTED_CONTEXT_HEADER =
   "Generated Skill Harness context for this turn follows. It is not user input: the user's explicit request, higher-priority instructions, and verified repository/tool evidence win. Use the policy inside <skill_harness_plugin> to interpret candidates and advisory guidance:";
-
-import { IntentDefinition } from "./types.js";
 
 export const FALLBACK_INTENT_ID = "other";
 export const FALLBACK_INTENT: IntentDefinition = {
@@ -69,3 +69,7 @@ export const INSTRUCTION_COMPLEXITY_PROMPTS = {
   medium: DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
   high: DEFAULT_HIGH_COMPLEXITY_PROMPT,
 } as const;
+
+export function isIntentComplexity(value: unknown): value is IntentComplexity {
+  return value === "low" || value === "medium" || value === "high";
+}

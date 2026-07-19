@@ -1283,6 +1283,52 @@ describe("SessionTracker", () => {
       ]);
     });
 
+    it("should omit complexity when the stored result has no complexity", () => {
+      tracker.record("missing-complexity", {
+        current: {
+          input: "please comit this",
+          intent: {
+            result: {
+              intent: "version-control",
+              reason: "Topic keyword similarity match: comit -> commit",
+              domain: "git",
+              confidence: 0.833,
+            },
+          },
+        },
+      });
+
+      expect(tracker.getHistoricalIntentRecords("missing-complexity")).toEqual([
+        {
+          input: "please comit this",
+          intent: "version-control",
+          domain: "git",
+          confidence: 0.833,
+        },
+      ]);
+    });
+
+    it("should omit an unknown persisted complexity value", () => {
+      tracker.record("unknown-complexity", {
+        current: {
+          input: "continue",
+          intent: {
+            result: {
+              intent: "version-control",
+              reason: "legacy persisted result",
+              domain: "git",
+              confidence: 0.9,
+              complexity: "unknown" as never,
+            },
+          },
+        },
+      });
+
+      expect(
+        tracker.getHistoricalIntentRecords("unknown-complexity")[0],
+      ).not.toHaveProperty("complexity");
+    });
+
     it("should return an empty array when the session does not exist", () => {
       expect(tracker.getHistoricalIntentRecords("missing-session")).toEqual([]);
     });

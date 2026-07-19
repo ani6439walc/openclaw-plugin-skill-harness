@@ -1509,6 +1509,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         }),
       }),
     );
+    expect(
+      record.mock.calls[0]?.[1].current?.intent?.result,
+    ).not.toHaveProperty("complexity");
   });
 
   it("skips exact keyword hints when instruction config is disabled", async () => {
@@ -2044,13 +2047,26 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               topic: "User wants a git commit.",
               domain: "git",
               confidence: expect.closeTo(0.833, 0.01),
-              complexity: "medium",
               topicChangeReason: undefined,
             }),
           }),
         }),
       }),
     );
+    expect(
+      record.mock.calls[0]?.[1].current?.intent?.result,
+    ).not.toHaveProperty("complexity");
+    const completedIntentClassifyEvents = emittedPipelineEvents(
+      emitAgentEvent,
+    ).filter(
+      (entry) =>
+        entry.data.phase === "intent-classify" &&
+        entry.data.state === "completed",
+    );
+    expect(completedIntentClassifyEvents.length).toBeGreaterThan(0);
+    for (const entry of completedIntentClassifyEvents) {
+      expect(entry.data).not.toHaveProperty("complexity");
+    }
   });
 
   it("requires high overall topic confidence for the keyword-similarity bypass", async () => {
@@ -2195,6 +2211,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
           topicChangeReason: "start",
         }),
       }),
+    );
+    expect(instructionWriter.mock.calls[0]?.[0].result).not.toHaveProperty(
+      "complexity",
     );
   });
 
@@ -2341,7 +2360,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(classifier).toHaveBeenCalledOnce();
   });
 
-  it("keeps same-topic inheritance ahead of topic keyword similarity", async () => {
+  it("keeps same-topic inheritance ahead of topic keyword similarity without inheriting complexity", async () => {
     const { handlers, classifier, instructionWriter, record, emitAgentEvent } =
       createTopicFlowHarness({
         historicalIntents: [
@@ -2393,12 +2412,14 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               topic: "User is still discussing a git commit.",
               domain: "git",
               confidence: 0.9,
-              complexity: "medium",
             }),
           }),
         }),
       }),
     );
+    expect(
+      record.mock.calls[0]?.[1].current?.intent?.result,
+    ).not.toHaveProperty("complexity");
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -2459,7 +2480,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
-  it("defaults inherited complexity to medium when historical complexity is missing", async () => {
+  it("leaves inherited complexity absent when historical complexity is missing", async () => {
     const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [
         {
@@ -2497,11 +2518,51 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         current: expect.objectContaining({
           intent: expect.objectContaining({
             trigger: "same-topic",
-            result: expect.objectContaining({ complexity: "medium" }),
           }),
         }),
       }),
     );
+    expect(
+      record.mock.calls[0]?.[1].current?.intent?.result,
+    ).not.toHaveProperty("complexity");
+  });
+
+  it("does not inherit an unknown persisted complexity value", async () => {
+    const { handlers, record } = createTopicFlowHarness({
+      historicalIntents: [
+        {
+          input: "commit the change",
+          intent: "version-control",
+          keywords: ["commit"],
+          topic: "User wants a git commit.",
+          domain: "git",
+          confidence: 0.9,
+          complexity: "unknown" as never,
+        },
+      ],
+      intents: [versionControlIntent],
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "direct-continuation",
+        changed: false,
+        reason: "same-topic",
+        confidence: 0.9,
+        keywords: ["commit", "follow-up"],
+        topic: "User is still discussing a git commit.",
+        domain: "git",
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "continue",
+        messages: [{ role: "user", content: "continue" }],
+      } as never,
+      ctx,
+    );
+
+    expect(
+      record.mock.calls[0]?.[1].current?.intent?.result,
+    ).not.toHaveProperty("complexity");
   });
 
   it("does not emit instruction hint events when confidence is undefined (treated as 0)", async () => {

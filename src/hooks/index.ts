@@ -64,7 +64,7 @@ import {
   resolveAvailableSkillsWithRelated,
   resolveDomainSkills,
 } from "../intents/index.js";
-import { FALLBACK_INTENT } from "../constants.js";
+import { FALLBACK_INTENT, isIntentComplexity } from "../constants.js";
 import { intentsPath } from "../file-utils.js";
 import type {
   HistoricalIntentRecord,
@@ -248,7 +248,6 @@ function buildInheritedIntentResult(
     domain,
     topic: topicContext.topic,
     confidence: latest.confidence ?? 0.8,
-    complexity: latest.complexity ?? "medium",
   };
 }
 
@@ -697,7 +696,6 @@ export function createHookHandlers(deps: HookDeps) {
             ? latestHistoricalIntent?.topic
             : undefined,
           confidence: topicKeywordSimilarityMatch.score,
-          complexity: "medium",
         };
         emitPipelineEvent(
           params.ctx,
@@ -722,7 +720,9 @@ export function createHookHandlers(deps: HookDeps) {
           {
             intent: result.intent,
             reason: result.reason,
-            complexity: result.complexity,
+            ...(isIntentComplexity(result.complexity)
+              ? { complexity: result.complexity }
+              : {}),
             confidence: result.confidence,
           },
         );
@@ -805,7 +805,9 @@ export function createHookHandlers(deps: HookDeps) {
           ? {
               intent: result.intent,
               reason: result.reason,
-              complexity: result.complexity,
+              ...(isIntentComplexity(result.complexity)
+                ? { complexity: result.complexity }
+                : {}),
               confidence: result.confidence,
             }
           : { error: "classifier returned no result" },
@@ -939,7 +941,6 @@ export function createHookHandlers(deps: HookDeps) {
           ? undefined
           : "match",
       confidence: 1,
-      complexity: "low",
     };
   }
 

@@ -448,6 +448,47 @@ describe("runIntentInstructionSubagent", () => {
     );
   });
 
+  it("runs the instruction writer without a complexity-derived execution mode", async () => {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [
+        {
+          text: JSON.stringify({
+            instruction_hint: "Follow the version-control workflow.",
+            additional_candinate_skills: [],
+          }),
+        },
+      ],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    const result = await runIntentInstructionSubagent({
+      api,
+      config: resolveConfig({}),
+      agentId: "main",
+      latest: "please comit this",
+      result: {
+        intent: "version-control",
+        reason: "Topic keyword similarity match: comit -> commit",
+        domain: "git",
+        confidence: 0.833,
+        topicChangeReason: "start",
+      },
+      intentBody: "Follow the version-control workflow.",
+      modelRef: { provider: "openai", model: "gpt-5.6-sol" },
+    });
+
+    expect(result).toEqual({
+      instructionHint: "Follow the version-control workflow.",
+      additionalCandidateSkills: [],
+    });
+    const prompt = runEmbeddedAgent.mock.calls[0][0].prompt;
+    expect(prompt).not.toMatch(/^complexity:/m);
+    expect(prompt).not.toContain("<execution_mode>");
+  });
+
   it("rejects an additional skill without search and view evidence", async () => {
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [

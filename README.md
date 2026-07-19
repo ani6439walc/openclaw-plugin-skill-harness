@@ -25,7 +25,7 @@ When enabled, Skill Harness provides four main capabilities:
 
 1. **Intent classification**
    - Reads the latest user message and recent conversation context.
-   - Classifies the current intent, domain, topic, confidence, and complexity.
+   - Classifies the current intent, domain, topic, and confidence. Model-classified turns provide required complexity, while every deterministic route leaves it absent.
    - Handles same-topic continuations, explicit topic switches, short messages, correction fragments, bare names, and similar edge cases.
 
 2. **Skill and hint injection**
@@ -35,7 +35,7 @@ When enabled, Skill Harness provides four main capabilities:
    - Tells the main agent which skills may need to be read and which workflows or pitfalls should be preserved.
 
 3. **Runtime statistics**
-   - Records the intent, skills, tools, confidence, complexity, and conservative classifier-projection measurements used for each tracked turn.
+   - Records the intent, skills, tools, confidence, known complexity when present, and conservative classifier-projection measurements used for each tracked turn.
    - Aggregates data into `stats.json` so you can see which skills were recommended, adopted, stale, or in need of review.
 
 4. **Intent Review (optional)**
@@ -104,10 +104,10 @@ Each intent describes:
 
 The plugin prefers cheap deterministic checks before calling helper models:
 
-- exact `fastpath.keywords` match can inject a short hint immediately
-- topic checker can inherit the previous intent only for same-topic results with joint confidence at or above `0.8` and available history; inherited results keep the prior intent, confidence, and complexity (defaulting missing legacy complexity to `medium`) while refreshing topic, domain, and keywords from the latest topic check
+- exact `fastpath.keywords` match can inject a short hint immediately and leaves complexity absent
+- topic checker can inherit the previous intent only for same-topic results with joint confidence at or above `0.8` and available history; inherited results keep the prior intent and confidence while refreshing topic, domain, and keywords from the latest topic check, but always leave complexity absent regardless of the historical value
 - uncertain same-topic results and same-topic results without history bypass keyword similarity and reach the classifier path
-- domain keyword similarity can route clear changed-topic cases only when the same joint-confidence threshold passes; these deterministic results use `medium` complexity
+- domain keyword similarity can route clear changed-topic cases only when the same joint-confidence threshold passes; these deterministic results leave complexity absent rather than synthesizing a default
 - turns that reach the classifier use a deterministic conservative candidate projection when the current domain plus high confidence, authorized same-topic history, or exact candidate evidence provides enough support; missing or weak evidence uses the post-deny full catalog without a second classifier call
 - projected candidates preserve canonical catalog order and include the predicted domain, `candidate.scope: cross-flow` intents, authorized low-confidence history, and exact matches against manual `candidate.keywords` or normalized intent IDs; denied and removed intents cannot be reintroduced
 - exact projection phrases use NFKC, locale-independent lowercasing, and collapsed whitespace with boundary-safe matching; punctuation remains literal, so hyphens and underscores are not interchangeable aliases
@@ -122,7 +122,7 @@ When deterministic routing is not enough, Skill Harness runs bounded helper suba
 
 - **topic checker**: returns required `basis`, `reason`, joint `confidence`, keywords, topic, and domain; confidence measures the combined correctness of reason, domain, and keywords, while host code derives the internal `changed` flag from `reason`
 - **intent classifier**: returns structured JSON for intent, domain, topic, confidence, keywords, and the final complexity for model-classified turns
-- **instruction writer**: runs only when classifier confidence is at least `0.8` and treats the resolved intent as the task boundary. It returns raw JSON with an optional `instruction_hint` plus `additional_candinate_skills`, the sole machine-readable channel for new skill candidates. When existing evidence is insufficient, it chooses one bounded branch: either read one existing candidate, or run one focused `skill_search` (limited to three results) followed by one `skill_view` of the strongest new result. Only a newly searched and viewed skill may appear in the array, with at most one entry. The host validates the tool order, results, viewed name, and returned candidate against the embedded-run trace; missing, mismatched, failed, or over-budget evidence invalidates the generated result while preserving classifier/domain fail-open guidance. Existing intent/domain candidates are not repeated there. If no incremental guidance is justified, the writer returns `instruction_hint: null` with an empty array; this is a successful no-op, so domain candidates remain available without injecting an instruction hint. Resolved additional skill names are deduplicated into `domain_skill_candidates`; unknown or invisible names are ignored.
+- **instruction writer**: runs only when resolved intent confidence is at least `0.8` and treats the resolved intent as the task boundary. When complexity is known, it receives the matching execution-depth calibration; when complexity is absent, it still runs without complexity metadata or an `execution_mode` block. It returns raw JSON with an optional `instruction_hint` plus `additional_candinate_skills`, the sole machine-readable channel for new skill candidates. When existing evidence is insufficient, it chooses one bounded branch: either read one existing candidate, or run one focused `skill_search` (limited to three results) followed by one `skill_view` of the strongest new result. Only a newly searched and viewed skill may appear in the array, with at most one entry. The host validates the tool order, results, viewed name, and returned candidate against the embedded-run trace; missing, mismatched, failed, or over-budget evidence invalidates the generated result while preserving classifier/domain fail-open guidance. Existing intent/domain candidates are not repeated there. If no incremental guidance is justified, the writer returns `instruction_hint: null` with an empty array; this is a successful no-op, so domain candidates remain available without injecting an instruction hint. Resolved additional skill names are deduplicated into `domain_skill_candidates`; unknown or invisible names are ignored.
 - **Intent Review reviewer**: optional post-turn reviewer that improves runtime intents when configured triggers fire
 
 All helper outputs are treated as guidance, not user-visible final answers.
@@ -162,7 +162,7 @@ The policy tells the main agent:
 - each domain skill candidate includes its resolved `path` plus direct visible `related_skills` metadata; related skills remain optional rather than automatically required
 - irrelevant skill hints should be ignored if classification is wrong
 - generated instruction hints are advisory and must still be checked against the latest user request and verified context
-- instruction-writer depth and suggested verification use fixed built-in calibration for each complexity level; they do not define main-agent execution, planning, delegation, or scheduling policy
+- when complexity is known, instruction-writer depth and suggested verification use fixed built-in calibration for that level; missing complexity does not fall back to `medium`. These calibrations do not define main-agent execution, planning, delegation, or scheduling policy
 
 Fixed mandatory guidance is not repeated inside this dynamic block. If an injected candidate or hint does not fit the current task, the static workflow directs the main agent to use focused `skill_search` and then read selected results with `skill_view`.
 
@@ -336,7 +336,7 @@ Skill Harness keeps package files and runtime state separate. The runtime data r
 
 Session cleanup preserves the ended session and only removes expired `sessions/*.json` files. It does not delete root-level `stats.json`, root-level `review.json`, intent files, skills, transcripts, or package files.
 
-`stats.json` schema v2 adds bounded classifier-projection aggregates: eligible/projected/full-fallback counts and rates, average original/candidate intent counts and rendered catalog code points, average projection duration, reason counts, and daily projection counters. Classifier-bound attempts remain eligible when result parsing or classifier execution fails, but those attempts do not increment intent-turn summaries. Valid v1 files migrate on the next recorded turn without losing existing intent, skill, tool, routing, daily, or processed-event data. Invalid files remain untouched and fail open. Skill usage readers remain version-agnostic and accept both schemas.
+`stats.json` schema v2 adds bounded classifier-projection aggregates: eligible/projected/full-fallback counts and rates, average original/candidate intent counts and rendered catalog code points, average projection duration, reason counts, and daily projection counters. Complexity buckets count only turns with known complexity, so `low + medium + high` may be lower than the intent's total turn count. Classifier-bound attempts remain eligible when result parsing or classifier execution fails, but those attempts do not increment intent-turn summaries. Valid v1 files migrate on the next recorded turn without losing existing intent, skill, tool, routing, daily, or processed-event data. Invalid files remain untouched and fail open. Skill usage readers remain version-agnostic and accept both schemas.
 
 ## Intent Review
 

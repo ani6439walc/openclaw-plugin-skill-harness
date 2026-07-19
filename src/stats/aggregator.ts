@@ -9,7 +9,7 @@ import {
   readJsonFile,
   safeWriteJson,
 } from "../file-utils.js";
-import { FALLBACK_INTENT_ID } from "../constants.js";
+import { FALLBACK_INTENT_ID, isIntentComplexity } from "../constants.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_RETENTION_MS = 90 * DAY_MS;
@@ -649,7 +649,9 @@ function recordIntentStats(params: {
   intent.turns += 1;
   intent.lastSeenAt = eventTime;
   intent.lowConfidenceTurns += result.confidence < 0.8 ? 1 : 0;
-  intent.complexity[result.complexity] += 1;
+  if (isIntentComplexity(result.complexity)) {
+    intent.complexity[result.complexity] += 1;
+  }
   intent.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
   intent.toolAssistedTurns += toolCallCount > 0 ? 1 : 0;
   intent.erroredTurns += errored ? 1 : 0;

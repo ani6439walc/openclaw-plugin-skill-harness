@@ -1320,6 +1320,43 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).not.toContain("<candidate_skills>");
   });
 
+  it("omits complexity metadata and execution mode when complexity is unavailable", () => {
+    const prompt = buildIntentInstructionPrompt({
+      latest: "please comit this",
+      result: {
+        intent: "version-control",
+        reason: "Topic keyword similarity match: comit -> commit",
+        domain: "git",
+        confidence: 0.833,
+        topicChangeReason: "start",
+      },
+      intentBody: "## Guidelines\n\nFollow the version-control workflow.",
+      complexityContext: "Depth: medium. Verify relevant behavior.",
+    });
+
+    expect(prompt).toContain("<intent_metadata>");
+    expect(prompt).not.toMatch(/^complexity:/m);
+    expect(prompt).not.toContain("<execution_mode>");
+  });
+
+  it("treats an unknown complexity value as unavailable", () => {
+    const prompt = buildIntentInstructionPrompt({
+      latest: "continue",
+      result: {
+        intent: "version-control",
+        reason: "legacy persisted result",
+        domain: "git",
+        confidence: 0.9,
+        complexity: "unknown" as never,
+      },
+      intentBody: "Follow the version-control workflow.",
+      complexityContext: "Depth: medium. Verify relevant behavior.",
+    });
+
+    expect(prompt).not.toMatch(/^complexity:/m);
+    expect(prompt).not.toContain("<execution_mode>");
+  });
+
   it("includes the matched intent body, latest message, and instruction requirements", () => {
     const prompt = buildIntentInstructionPrompt({
       latest: "繼續實作同題續聊",
@@ -1437,7 +1474,9 @@ describe("buildIntentInstructionPrompt", () => {
     expect(prompt).toContain(
       "minimal inspection commands and a concise reporting shape",
     );
-    expect(prompt).toContain("execution_mode only to tune");
+    expect(prompt).toContain(
+      "When execution_mode is present, use it only to tune",
+    );
     expect(prompt).toContain("conversation context only to resolve references");
     expect(prompt).toContain(
       "Use topicChangeReason only as a carry-over guard",
