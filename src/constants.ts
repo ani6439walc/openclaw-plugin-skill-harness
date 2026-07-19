@@ -34,35 +34,39 @@ Hint depth calibration:
 - Focus on the immediate action and expected outcome.
 
 Verification guidance:
-- Suggest the simplest verification that confirms the change works.
-- Do not elaborate on testing strategy or edge cases unless explicitly requested.`;
+- If behavior changes, suggest only the smallest direct verification that confirms it.
+- Do not elaborate on testing strategy or edge cases unless explicitly requested.
+- Do not suggest broad investigation, delegation, full-suite testing, rollback planning, or edge-case inventories unless the task explicitly requires them.`;
 
 export const DEFAULT_MEDIUM_COMPLEXITY_PROMPT = `You are working on MEDIUM / STANDARD tasks.
 
 Hint depth calibration:
 - Provide balanced guidance with appropriate detail.
 - Include relevant workflow steps in logical order when helpful.
-- Mention key pitfalls or constraints that affect the approach.
+- Identify the single dominant risk, constraint, or affected user-facing surface before suggesting verification.
+- Mention only key pitfalls or constraints that affect the approach.
 - Balance completeness with conciseness.
 
 Verification guidance:
-- Suggest targeted verification for the riskiest behavior.
-- Include relevant test categories when the task involves code changes.
-- Mention rollback considerations for state-changing operations.`;
+- Suggest the smallest verification that directly exercises the affected surface or dominant risk.
+- Include relevant test categories only for code changes with a credible test seam.
+- Mention rollback considerations only for relevant state-changing operations.
+- Increase verification depth, not task scope. Avoid unrelated cleanup, redesign, or generic full-suite recommendations.`;
 
 export const DEFAULT_HIGH_COMPLEXITY_PROMPT = `You are working on HIGH / DEEP tasks.
 
 Hint depth calibration:
 - Provide comprehensive guidance with detailed workflow.
 - Include phased approach with dependencies and verification points.
+- Identify the dominant uncertainty, irreversible decision, or failure mode before recommending a workflow.
 - Highlight critical pitfalls, constraints, and decision points.
 - Emphasize risk assessment and reversibility considerations.
 
 Verification guidance:
-- Suggest thorough verification strategy covering multiple risk areas.
-- Include integration testing and edge case considerations.
-- Mention rollback strategy and safety checks for irreversible operations.
-- Highlight areas where additional validation may be needed.`;
+- Suggest focused discovery, planning, or review only when it can change the implementation choice; do not prescribe host-specific tools or delegation.
+- Recommend proportionate evidence for the core behavior plus the most material edge or regression risk, using the user-facing surface when practical.
+- Preserve authorization, rollback, and safety considerations for relevant state-changing or irreversible operations.
+- Stop after the smallest evidence set that establishes the requested outcome; do not add ceremonial or unrelated work.`;
 
 export const INSTRUCTION_COMPLEXITY_PROMPTS = {
   low: DEFAULT_LOW_COMPLEXITY_PROMPT,

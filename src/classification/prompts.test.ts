@@ -11,7 +11,9 @@ import {
   formatDomainSkills,
 } from "./prompts.js";
 import {
+  DEFAULT_HIGH_COMPLEXITY_PROMPT,
   DEFAULT_LOW_COMPLEXITY_PROMPT,
+  DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
   UNTRUSTED_CONTEXT_HEADER,
 } from "../constants.js";
 import type {
@@ -1651,6 +1653,39 @@ describe("buildIntentInstructionPrompt", () => {
       `<execution_mode>\n${indentXmlLines(DEFAULT_LOW_COMPLEXITY_PROMPT)}\n</execution_mode>`,
     );
     expect(prompt).not.toContain("<complexity_context>");
+  });
+
+  it("calibrates verification to task depth without prescribing host workflows", () => {
+    expect(DEFAULT_LOW_COMPLEXITY_PROMPT).toContain(
+      "smallest direct verification",
+    );
+    expect(DEFAULT_LOW_COMPLEXITY_PROMPT).toContain(
+      "Do not suggest broad investigation, delegation, full-suite testing",
+    );
+
+    expect(DEFAULT_MEDIUM_COMPLEXITY_PROMPT).toContain(
+      "single dominant risk, constraint, or affected user-facing surface",
+    );
+    expect(DEFAULT_MEDIUM_COMPLEXITY_PROMPT).toContain(
+      "Increase verification depth, not task scope",
+    );
+
+    expect(DEFAULT_HIGH_COMPLEXITY_PROMPT).toContain(
+      "dominant uncertainty, irreversible decision, or failure mode",
+    );
+    expect(DEFAULT_HIGH_COMPLEXITY_PROMPT).toContain(
+      "smallest evidence set that establishes the requested outcome",
+    );
+
+    for (const prompt of [
+      DEFAULT_LOW_COMPLEXITY_PROMPT,
+      DEFAULT_MEDIUM_COMPLEXITY_PROMPT,
+      DEFAULT_HIGH_COMPLEXITY_PROMPT,
+    ]) {
+      expect(prompt).not.toContain("TDD (MANDATORY");
+      expect(prompt).not.toContain("codegraph_explore");
+      expect(prompt).not.toContain("subagent_type");
+    }
   });
 
   it("tells instruction writer to output ultra-concise guidance without losing semantics", () => {
