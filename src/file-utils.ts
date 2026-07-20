@@ -1,7 +1,29 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveStateDir as resolveStateDirFallback } from "openclaw/plugin-sdk/state-paths";
+import type { OpenClawPluginApi } from "../api.js";
 import { logger } from "../api.js";
+
+/**
+ * Safely resolves the OpenClaw state directory from a plugin API instance.
+ * Falls back to OpenClaw state path resolution when `api.runtime.state` is unavailable
+ * (e.g. during CLI metadata discovery or CLI registration).
+ */
+export function resolveStateDirFromApi(
+  api?: Partial<OpenClawPluginApi>,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (api?.runtime?.state?.resolveStateDir) {
+    try {
+      const dir = api.runtime.state.resolveStateDir(env);
+      if (dir) return dir;
+    } catch {
+      // Ignore error and fall back below
+    }
+  }
+  return resolveStateDirFallback(env);
+}
 
 /**
  * Package root directory. Source tests run from src/, compiled code from

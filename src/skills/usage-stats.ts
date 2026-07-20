@@ -3,6 +3,7 @@ import {
   fileExists,
   readJsonFile,
   resolvePluginDataRoot,
+  resolveStateDirFromApi,
   statsPath,
 } from "../file-utils.js";
 import type { SkillResolutionParams, SkillUsageStats } from "./types.js";
@@ -65,7 +66,7 @@ function normalizeStats(raw: RawSkillStats | undefined): SkillUsageStats {
 }
 
 function statsFilePath(params: SkillResolutionParams): string {
-  const stateDir = params.api.runtime.state.resolveStateDir(process.env);
+  const stateDir = resolveStateDirFromApi(params.api, process.env);
   return statsPath(resolvePluginDataRoot(stateDir, PLUGIN_ID));
 }
 

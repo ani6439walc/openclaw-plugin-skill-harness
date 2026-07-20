@@ -3,6 +3,7 @@ import path from "node:path";
 import matter from "gray-matter";
 import { findAvailableSkill, clearSkillIndexCache } from "./indexer.js";
 import { resolveSkillRoots } from "./roots.js";
+import { resolveStateDirFromApi } from "../file-utils.js";
 import type { AvailableSkill, SkillResolutionParams } from "./types.js";
 
 const MAX_NAME_LENGTH = 64;
@@ -114,10 +115,7 @@ function parseDescription(content: string): string {
 }
 
 function managedSkillsRoot(params: SkillResolutionParams): string {
-  return path.join(
-    params.api.runtime.state.resolveStateDir(process.env),
-    "skills",
-  );
+  return path.join(resolveStateDirFromApi(params.api, process.env), "skills");
 }
 
 function resolveNewSkillDir(params: SkillManageParams): string {

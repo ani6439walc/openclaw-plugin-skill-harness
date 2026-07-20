@@ -3,6 +3,7 @@ import type { Dirent, Stats } from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 import { logger, type OpenClawPluginApi } from "../../api.js";
+import { resolveStateDirFromApi } from "../file-utils.js";
 import type { IntentCatalogEntry } from "../types.js";
 import { buildSkillDomainMap, domainsForSkill } from "./domains.js";
 import {
@@ -289,7 +290,7 @@ async function getCachedSkillIndex(
 async function listSkillIndexes(
   params: SkillResolutionParams,
 ): Promise<Array<Map<string, AvailableSkill>>> {
-  const stateDir = params.api.runtime.state.resolveStateDir(process.env);
+  const stateDir = resolveStateDirFromApi(params.api, process.env);
   const cacheTtlMs =
     params.cacheTtlMs ?? resolveSkillIndexCacheTtlMs(params.api.config);
   let disabledBundledSkillNames: Set<string> | undefined;

@@ -5,6 +5,7 @@ import {
   reviewLogPath,
   intentsPath,
   resolvePluginDataRoot,
+  resolveStateDirFromApi,
   sessionsDirPath,
   sessionsPath,
   statsPath,
@@ -32,5 +33,23 @@ describe("plugin data paths", () => {
     expect(legacyReviewLogPath(dataRoot)).toBe(
       path.join(dataRoot, "evolution.json"),
     );
+  });
+
+  it("safely resolves stateDir from api.runtime.state when available", () => {
+    const api = {
+      runtime: {
+        state: {
+          resolveStateDir: () => "/custom/state/dir",
+        },
+      },
+    } as any;
+    expect(resolveStateDirFromApi(api)).toBe("/custom/state/dir");
+  });
+
+  it("falls back gracefully when api.runtime or api.runtime.state is undefined", () => {
+    const emptyApi = {} as any;
+    const env = { OPENCLAW_STATE_DIR: "/fallback/state/dir" };
+    expect(resolveStateDirFromApi(emptyApi, env)).toBe("/fallback/state/dir");
+    expect(resolveStateDirFromApi(undefined, env)).toBe("/fallback/state/dir");
   });
 });

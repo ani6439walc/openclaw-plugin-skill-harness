@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import type { OpenClawPluginApi } from "../../api.js";
+import { resolveStateDirFromApi } from "../file-utils.js";
 import type { SkillRoot, SkillSource } from "./types.js";
 
 const require = createRequire(import.meta.url);
@@ -78,7 +79,7 @@ export function resolveSkillRoots(params: {
   homeDir?: string;
 }): SkillRoot[] {
   const homeDir = params.homeDir ?? os.homedir();
-  const stateDir = params.api.runtime.state.resolveStateDir(process.env);
+  const stateDir = resolveStateDirFromApi(params.api, process.env);
   const workspaceDir = params.api.runtime.agent.resolveAgentWorkspaceDir(
     params.api.config,
     params.agentId,

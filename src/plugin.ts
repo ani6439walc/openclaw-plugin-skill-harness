@@ -31,6 +31,7 @@ import {
   reviewLogPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
+  resolveStateDirFromApi,
   sessionsDirPath,
 } from "./file-utils.js";
 
@@ -175,7 +176,7 @@ export function createPlugin(
     description:
       "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
     register() {
-      const stateDir = api.runtime.state.resolveStateDir(process.env);
+      const stateDir = resolveStateDirFromApi(api, process.env);
       const dataRoot = resolvePluginDataRoot(stateDir, PLUGIN_ID);
       initializePluginDataRoot({ dataRoot });
 
