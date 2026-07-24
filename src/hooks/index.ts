@@ -622,6 +622,7 @@ export function createHookHandlers(deps: HookDeps) {
       history: params.historicalIntents,
       messageProvider: params.ctx.messageProvider,
       modelRef: params.modelRef,
+      dataRoot: deps.dataRoot,
     });
     emitPipelineEvent(
       params.ctx,
@@ -782,6 +783,7 @@ export function createHookHandlers(deps: HookDeps) {
           modelRef: params.modelRef,
           intents: projection.effectiveIntents,
           topicContext: topicContext ?? undefined,
+          dataRoot: deps.dataRoot,
         });
       } catch (error) {
         recordPromptBuildSession({
@@ -1123,6 +1125,7 @@ export function createHookHandlers(deps: HookDeps) {
       }),
       messageProvider: params.ctx.messageProvider,
       modelRef: instructionModelRef,
+      dataRoot: deps.dataRoot,
     });
     const instructionText = instructionResult.instructionHint ?? undefined;
     if (instructionText) {
@@ -1578,6 +1581,7 @@ export function createHookHandlers(deps: HookDeps) {
         modelRef: params.modelRef,
         snapshot: params.snapshot,
         triggers: params.triggers,
+        dataRoot: deps.dataRoot,
       });
       if (!reviewResult) return;
       await reviewLogWriter.record(

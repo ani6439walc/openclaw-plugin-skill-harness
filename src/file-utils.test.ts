@@ -9,6 +9,8 @@ import {
   sessionsDirPath,
   sessionsPath,
   statsPath,
+  agentWorkspacePath,
+  agentSessionsPath,
 } from "./file-utils.js";
 
 describe("plugin data paths", () => {
@@ -32,6 +34,13 @@ describe("plugin data paths", () => {
     expect(reviewLogPath(dataRoot)).toBe(path.join(dataRoot, "review.json"));
     expect(legacyReviewLogPath(dataRoot)).toBe(
       path.join(dataRoot, "evolution.json"),
+    );
+    expect(agentWorkspacePath(dataRoot)).toBe(path.join(dataRoot, "workspace"));
+    expect(agentSessionsPath(dataRoot, "intention")).toBe(
+      path.join(dataRoot, "agents", "intention", "sessions"),
+    );
+    expect(agentSessionsPath(dataRoot, "review")).toBe(
+      path.join(dataRoot, "agents", "review", "sessions"),
     );
   });
 

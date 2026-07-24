@@ -73,6 +73,14 @@ export function legacyReviewLogPath(dataRoot: string): string {
   return path.join(dataRoot, "evolution.json");
 }
 
+export function agentWorkspacePath(dataRoot: string): string {
+  return path.join(dataRoot, "workspace");
+}
+
+export function agentSessionsPath(dataRoot: string, agentName: string): string {
+  return path.join(dataRoot, "agents", agentName, "sessions");
+}
+
 /**
  * Resolve a path under the sessions directory.
  */

@@ -26,6 +26,7 @@ import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
 } from "../subagent-runtime.js";
+import { agentSessionsPath } from "../file-utils.js";
 import { extractPayloadText } from "../classification/index.js";
 
 export interface ReviewSubagentResult {
@@ -1029,6 +1030,7 @@ export async function runReviewSubagent(params: {
   modelRef: { provider: string; model: string };
   snapshot: ReviewSnapshot;
   triggers: readonly ReviewTrigger[];
+  dataRoot?: string;
 }): Promise<ReviewSubagentResult> {
   const runId = `skill-harness-review-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const suffix = crypto
@@ -1063,7 +1065,7 @@ export async function runReviewSubagent(params: {
       runId,
       workspaceDir,
       agentDir: workspaceDir,
-      sessionFile: `/tmp/${runId}.session.jsonl`,
+      sessionFile: `${params.dataRoot ? agentSessionsPath(params.dataRoot, "review") : "/tmp"}/${runId}.session.jsonl`,
       ...buildEmbeddedSubagentRunDefaults(),
       modelRun: false,
       promptMode: "minimal",

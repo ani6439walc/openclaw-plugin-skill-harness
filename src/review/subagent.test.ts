@@ -1594,6 +1594,40 @@ describe("runReviewSubagent", () => {
     expect(fs.existsSync(options.workspaceDir)).toBe(false);
   });
 
+  it("places session file under dataRoot when provided", async () => {
+    const intentDirectory = createIntentDirectory();
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [
+        {
+          text: '{"findings":[{"trigger":"weak-intent","hasFinding":false}]}',
+        },
+      ],
+    });
+    const api = {
+      config: { tools: { fs: { workspaceOnly: false } } },
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await runReviewSubagent({
+      api,
+      config: resolveConfig({ review: { enabled: true } }),
+      agentId: "main",
+      intentDirectory,
+      modelRef: { provider: "google", model: "review" },
+      snapshot,
+      triggers: ["weak-intent"],
+      dataRoot: "/tmp/test-data-root",
+    });
+
+    expect(runEmbeddedAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionFile: expect.stringMatching(
+          /^\/tmp\/test-data-root\/agents\/review\/sessions\/skill-harness-review-.+\.session\.jsonl$/,
+        ),
+      }),
+    );
+  });
+
   it("allows skill_view only for skill-candidate reviews", async () => {
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [{ text: '{"findings":[]}' }],

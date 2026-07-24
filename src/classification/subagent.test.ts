@@ -154,6 +154,70 @@ describe("buildIntentionEmbeddedRunParams", () => {
       "/tmp/skill-harness-test-run.session.jsonl",
     );
   });
+
+  it("uses dataRoot paths when provided", () => {
+    const dataRoot = "/tmp/test-data-root";
+    const result = buildIntentionEmbeddedRunParams({
+      params: {
+        api: { config: {} } as OpenClawPluginApi,
+        config: resolveConfig({}),
+        agentId: "main",
+        modelRef: { provider: "google", model: "intent" },
+        dataRoot,
+      },
+      subagentSessionId: "skill-harness-test-run",
+      subagentSessionKey: "agent:main:skill-harness:test",
+      prompt: "classify",
+    });
+
+    expect(result.workspaceDir).toBe(`${dataRoot}/workspace`);
+    expect(result.agentDir).toBe(`${dataRoot}/workspace`);
+    expect(result.sessionFile).toBe(
+      `${dataRoot}/agents/intention/sessions/skill-harness-test-run.session.jsonl`,
+    );
+  });
+
+  it("uses topic-switch agent name in session path", () => {
+    const dataRoot = "/tmp/test-data-root";
+    const result = buildIntentionEmbeddedRunParams({
+      params: {
+        api: { config: {} } as OpenClawPluginApi,
+        config: resolveConfig({}),
+        agentId: "main",
+        modelRef: { provider: "google", model: "intent" },
+        dataRoot,
+      },
+      subagentSessionId: "skill-harness-test-run",
+      subagentSessionKey: "agent:main:skill-harness:test",
+      prompt: "topic switch",
+      agentName: "topic-switch",
+    });
+
+    expect(result.sessionFile).toBe(
+      `${dataRoot}/agents/topic-switch/sessions/skill-harness-test-run.session.jsonl`,
+    );
+  });
+
+  it("uses intent-instruction agent name in session path", () => {
+    const dataRoot = "/tmp/test-data-root";
+    const result = buildIntentionEmbeddedRunParams({
+      params: {
+        api: { config: {} } as OpenClawPluginApi,
+        config: resolveConfig({}),
+        agentId: "main",
+        modelRef: { provider: "google", model: "intent" },
+        dataRoot,
+      },
+      subagentSessionId: "skill-harness-test-run",
+      subagentSessionKey: "agent:main:skill-harness:test",
+      prompt: "instruction",
+      agentName: "intent-instruction",
+    });
+
+    expect(result.sessionFile).toBe(
+      `${dataRoot}/agents/intent-instruction/sessions/skill-harness-test-run.session.jsonl`,
+    );
+  });
 });
 
 describe("runIntentionSubagent", () => {

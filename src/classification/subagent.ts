@@ -27,6 +27,7 @@ import {
   extractEmbeddedRunError,
   formatEmbeddedError,
 } from "../subagent-runtime.js";
+import { agentWorkspacePath, agentSessionsPath } from "../file-utils.js";
 import { validateInstructionSkillEvidence } from "./instruction-skill-evidence.js";
 import type {
   ClassifiedIntentionResult,
@@ -46,6 +47,7 @@ export type EmbeddedSubagentBaseParams = {
   sessionId?: string;
   messageProvider?: string;
   modelRef: { provider: string; model: string };
+  dataRoot?: string;
 };
 
 function createSubagentSessionIdentity(
@@ -186,6 +188,7 @@ export async function runIntentionSubagent(params: {
   modelRef: { provider: string; model: string };
   intents: readonly IntentCatalogEntry[];
   topicContext?: TopicSwitchResult;
+  dataRoot?: string;
 }): Promise<ClassifiedIntentionResult | undefined> {
   const { subagentSessionId, subagentSessionKey } =
     createSubagentSessionIdentity(params, {
@@ -206,6 +209,7 @@ export async function runIntentionSubagent(params: {
     subagentSessionId,
     subagentSessionKey,
     prompt,
+    agentName: "intention",
   });
 
   try {
@@ -246,6 +250,7 @@ export async function runTopicSwitchSubagent(params: {
   history: readonly HistoricalIntentRecord[];
   messageProvider?: string;
   modelRef: { provider: string; model: string };
+  dataRoot?: string;
 }): Promise<TopicSwitchResult | undefined> {
   const { subagentSessionId, subagentSessionKey } =
     createSubagentSessionIdentity(params, {
@@ -269,6 +274,7 @@ export async function runTopicSwitchSubagent(params: {
         subagentSessionId,
         subagentSessionKey,
         prompt,
+        agentName: "topic-switch",
       }),
     );
     const rawReply = extractPayloadText(result);
@@ -298,6 +304,7 @@ export async function runIntentInstructionSubagent(params: {
   availableSkills?: AvailableSkill[];
   messageProvider?: string;
   modelRef: { provider: string; model: string };
+  dataRoot?: string;
 }): Promise<IntentInstructionSubagentResult> {
   const { subagentSessionId, subagentSessionKey } =
     createSubagentSessionIdentity(params, {
@@ -328,6 +335,7 @@ export async function runIntentInstructionSubagent(params: {
         subagentSessionId,
         subagentSessionKey,
         prompt,
+        agentName: "intent-instruction",
       }),
       timeoutMs: params.config.instruction.timeoutMs,
       thinkLevel: params.config.instruction.thinking,
@@ -398,7 +406,12 @@ export function buildIntentionEmbeddedRunParams(params: {
   subagentSessionId: string;
   subagentSessionKey: string;
   prompt: string;
+  agentName?: "topic-switch" | "intention" | "intent-instruction";
 }) {
+  const dataRoot = params.params.dataRoot;
+  const agentName = params.agentName ?? "intention";
+  const workspaceDir = dataRoot ? agentWorkspacePath(dataRoot) : "/tmp";
+  const sessionDir = dataRoot ? agentSessionsPath(dataRoot, agentName) : "/tmp";
   return {
     sessionId: params.subagentSessionId,
     sessionKey: params.subagentSessionKey,
@@ -410,9 +423,9 @@ export function buildIntentionEmbeddedRunParams(params: {
     model: params.params.modelRef.model,
     timeoutMs: params.params.config.timeoutMs,
     runId: params.subagentSessionId,
-    workspaceDir: "/tmp",
-    agentDir: "/tmp",
-    sessionFile: `/tmp/${params.subagentSessionId}.session.jsonl`,
+    workspaceDir,
+    agentDir: workspaceDir,
+    sessionFile: `${sessionDir}/${params.subagentSessionId}.session.jsonl`,
     ...buildEmbeddedSubagentRunDefaults(),
     modelRun: true,
     promptMode: "none" as const,
