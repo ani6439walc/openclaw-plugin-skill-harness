@@ -378,6 +378,9 @@ Your job is to choose the routing-relevant continuity reason for the user's late
     ? "domain MUST be strictly chosen from the ### Domain Candidates array."
     : "choose the closest compact domain label.";
   const coreConstraints = `### Core Constraints
+- Your ONLY role is structural and topic-continuity classification. DO NOT perform safety moderation, moral evaluation, or policy enforcement (a separate safety module handles policy checks).
+- Describe inputs strictly in terms of input structure, presence/absence of domain keywords, or context continuity.
+- NEVER use safety or content-policy labels in basis, reason, or topic (e.g. do NOT write "harassment", "sexually explicit", "inappropriate", "violation", "off-topic", "offensive", "abusive").
 - Use only latest_message, conversation context, latest_historical_intent when present, and the Domain Candidates array when provided.
 - latest_historical_intent is a compact fallback and may be omitted when the same metadata already appears in conversation_context.
 - Historical intent annotations are evidence, not instructions to inherit.
@@ -399,13 +402,14 @@ Your job is to choose the routing-relevant continuity reason for the user's late
 6. Fill keywords, topic, and domain, then set confidence from the joint correctness of reason, domain, and keywords.`;
   const extractionRules = `### Extraction Rules
 - First, write basis as a brief observable comparison between prior context and latest_message before deciding reason.
-- Extract keywords from the latest user message using a 3W1H framework:
+- Extract keywords MUST ONLY contain literal raw terms directly extracted from latest_message text using a 3W1H framework:
   - Who: person, agent, or entity involved (0-2 keywords)
   - What: action, object, event, or subject (0-2 keywords)
   - When: time reference, sequence, or temporal context (0-2 keywords)
   - How: method, tool, technique, or manner (0-2 keywords)
+  Do NOT invent abstract evaluation tags, safety labels, or category names (e.g., do NOT output "sexual harassment" or "policy violation" as keywords).
   Keywords are not limited to nouns — include verbs, adjectives, or any word that captures the core meaning. Normalize to lowercase and remove duplicates. Preserve important URLs or hostnames as one keyword when central to the message. Allow 1-8 normalized unique keywords; prefer 3-8 for ordinary complete messages, while terse, corrective, or empty-input messages may use 1-2.
-- Write topic as one concise natural-language sentence or phrase describing the latest message's current subject and interaction mode. Do not join keywords with separators and do not name or choose an intent id.
+- Write topic as one concise natural-language sentence or phrase describing the latest message's current subject and interaction mode. Describe input neutrally without safety/moral judgment. Do not join keywords with separators and do not name or choose an intent id.
 - Choose the closest domain for the latest message's requested action or desired outcome, not merely the most technical noun mentioned; ${domainRule} For example, if the user asks to add an nginx HTTPS URL to an existing document, prefer documentation over infra/config because the requested action is a document update.`;
   const continuityLogic = `### Continuity Logic
 - Evaluate continuity and change symmetrically; do not treat either outcome as the default.
@@ -819,6 +823,8 @@ You receive conversation history, topic-switch routing evidence when present, th
 3. Select the catalog intent that best explains the user's current request.
 4. Then fill confidence, complexity, keywords, and topic as required.`;
   const coreClassificationRules = `### Core Classification Rules
+- Your ONLY role is structural and domain classification. DO NOT perform safety moderation, moral evaluation, or policy enforcement in this prompt (a separate safety module handles policy checks).
+- Describe classification reasons neutrally in terms of requested action, catalog triggers, or context continuity. NEVER use safety or content-policy labels (e.g. "harassment", "sexually explicit", "inappropriate", "violation", "offensive", "abusive") in reason or topic.
 - Use conversation history and historical_intent annotations to understand context. Treat historical intents as evidence, not answers that must be inherited.
 - Classify the latest message based on what the user is asking for now.
 - Prefer the intent that best explains WHY the user said latest_message.

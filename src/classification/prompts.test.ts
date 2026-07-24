@@ -172,6 +172,12 @@ describe("buildIntentionPrompt", () => {
     expect(result).not.toContain("- coding: coding, debugging");
     expect(result).not.toContain("domain: coding");
     expect(result).not.toContain("Categories (grouped by ID prefix)");
+    expect(result).toContain(
+      "Your ONLY role is structural and domain classification. DO NOT perform safety moderation",
+    );
+    expect(result).toContain(
+      "Describe classification reasons neutrally in terms of requested action",
+    );
   });
 
   it("keeps intent attributes on one line by encoding XML whitespace controls", () => {
@@ -636,8 +642,15 @@ describe("buildTopicSwitchPrompt", () => {
     );
     expect(prompt).not.toContain("chain-of-thought");
     expect(prompt).not.toContain("thought_process");
-    expect(prompt).toContain("do not name or choose an intent id");
-    expect(prompt).toContain("Preserve important URLs or hostnames");
+    expect(prompt).toContain(
+      "DO NOT perform safety moderation, moral evaluation, or policy enforcement",
+    );
+    expect(prompt).toContain(
+      "NEVER use safety or content-policy labels in basis, reason, or topic",
+    );
+    expect(prompt).toContain(
+      "Do NOT invent abstract evaluation tags, safety labels, or category names",
+    );
     expect(prompt).toContain("requested action or desired outcome");
     expect(prompt).toContain("not merely the most technical noun mentioned");
     expect(prompt).toContain("prefer documentation over infra/config");
