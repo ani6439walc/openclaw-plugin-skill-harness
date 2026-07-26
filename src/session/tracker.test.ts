@@ -868,10 +868,22 @@ describe("SessionTracker", () => {
       },
     );
 
-    it("should delete expired session JSON and memory only", () => {
+    it("should delete expired main and embedded-agent session files only", () => {
       const nowMs = Date.UTC(2026, 5, 11);
       const dayMs = 24 * 60 * 60 * 1000;
       const sessionsDir = path.join(tempDir, "sessions");
+      const agentSessionsDir = path.join(
+        tempDir,
+        "agents",
+        "review",
+        "sessions",
+      );
+      const otherAgentSessionsDir = path.join(
+        tempDir,
+        "agents",
+        "intention",
+        "sessions",
+      );
 
       for (const sessionId of ["expired", "boundary", "fresh"]) {
         tracker.record(sessionId, {
@@ -895,9 +907,48 @@ describe("SessionTracker", () => {
       const ignoredFile = path.join(sessionsDir, "ignored.txt");
       const nestedDir = path.join(sessionsDir, "nested");
       const nestedFile = path.join(nestedDir, "expired.json");
+      const expiredAgentSession = path.join(
+        agentSessionsDir,
+        "expired.session.jsonl",
+      );
+      const boundaryAgentSession = path.join(
+        agentSessionsDir,
+        "boundary.session.jsonl",
+      );
+      const freshAgentSession = path.join(
+        agentSessionsDir,
+        "fresh.session.jsonl",
+      );
+      const expiredAgentTrajectory = path.join(
+        agentSessionsDir,
+        "expired.session.trajectory.jsonl",
+      );
+      const expiredAgentTrajectoryPath = path.join(
+        agentSessionsDir,
+        "expired.session.trajectory-path.json",
+      );
+      const freshAgentTrajectory = path.join(
+        agentSessionsDir,
+        "fresh.session.trajectory.jsonl",
+      );
+      const ignoredAgentFile = path.join(agentSessionsDir, "ignored.jsonl");
+      const expiredOtherAgentSession = path.join(
+        otherAgentSessionsDir,
+        "expired.session.jsonl",
+      );
       fs.writeFileSync(ignoredFile, "{}");
       fs.mkdirSync(nestedDir);
       fs.writeFileSync(nestedFile, "{}");
+      fs.mkdirSync(agentSessionsDir, { recursive: true });
+      fs.writeFileSync(expiredAgentSession, "{}");
+      fs.writeFileSync(boundaryAgentSession, "{}");
+      fs.writeFileSync(freshAgentSession, "{}");
+      fs.writeFileSync(expiredAgentTrajectory, "{}");
+      fs.writeFileSync(expiredAgentTrajectoryPath, "{}");
+      fs.writeFileSync(freshAgentTrajectory, "{}");
+      fs.writeFileSync(ignoredAgentFile, "{}");
+      fs.mkdirSync(otherAgentSessionsDir, { recursive: true });
+      fs.writeFileSync(expiredOtherAgentSession, "{}");
 
       fs.utimesSync(expiredFile, new Date(nowMs), new Date(nowMs - 15 * dayMs));
       fs.utimesSync(
@@ -908,8 +959,48 @@ describe("SessionTracker", () => {
       fs.utimesSync(freshFile, new Date(nowMs), new Date(nowMs - dayMs));
       fs.utimesSync(ignoredFile, new Date(nowMs), new Date(nowMs - 15 * dayMs));
       fs.utimesSync(nestedFile, new Date(nowMs), new Date(nowMs - 15 * dayMs));
+      fs.utimesSync(
+        expiredAgentSession,
+        new Date(nowMs),
+        new Date(nowMs - 15 * dayMs),
+      );
+      fs.utimesSync(
+        boundaryAgentSession,
+        new Date(nowMs),
+        new Date(nowMs - 14 * dayMs),
+      );
+      fs.utimesSync(
+        freshAgentSession,
+        new Date(nowMs),
+        new Date(nowMs - dayMs),
+      );
+      fs.utimesSync(
+        expiredAgentTrajectory,
+        new Date(nowMs),
+        new Date(nowMs - 15 * dayMs),
+      );
+      fs.utimesSync(
+        expiredAgentTrajectoryPath,
+        new Date(nowMs),
+        new Date(nowMs - 15 * dayMs),
+      );
+      fs.utimesSync(
+        freshAgentTrajectory,
+        new Date(nowMs),
+        new Date(nowMs - dayMs),
+      );
+      fs.utimesSync(
+        ignoredAgentFile,
+        new Date(nowMs),
+        new Date(nowMs - 15 * dayMs),
+      );
+      fs.utimesSync(
+        expiredOtherAgentSession,
+        new Date(nowMs),
+        new Date(nowMs - 15 * dayMs),
+      );
 
-      expect(tracker.cleanupExpired(nowMs)).toBe(1);
+      expect(tracker.cleanupExpired(nowMs)).toBe(5);
 
       expect(fs.existsSync(expiredFile)).toBe(false);
       expect(tracker.hasIntentData("expired")).toBe(false);
@@ -917,6 +1008,14 @@ describe("SessionTracker", () => {
       expect(fs.existsSync(freshFile)).toBe(true);
       expect(fs.existsSync(ignoredFile)).toBe(true);
       expect(fs.existsSync(nestedFile)).toBe(true);
+      expect(fs.existsSync(expiredAgentSession)).toBe(false);
+      expect(fs.existsSync(boundaryAgentSession)).toBe(true);
+      expect(fs.existsSync(freshAgentSession)).toBe(true);
+      expect(fs.existsSync(expiredAgentTrajectory)).toBe(false);
+      expect(fs.existsSync(expiredAgentTrajectoryPath)).toBe(false);
+      expect(fs.existsSync(freshAgentTrajectory)).toBe(true);
+      expect(fs.existsSync(ignoredAgentFile)).toBe(true);
+      expect(fs.existsSync(expiredOtherAgentSession)).toBe(false);
     });
 
     it("should safely sweep when the sessions directory is missing", () => {

@@ -11,6 +11,7 @@ import type { ReviewSnapshot, ReviewState } from "../review/types.js";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
 import {
+  agentSessionsPath,
   pluginRoot,
   sessionsDirPath,
   sessionsPath,
@@ -21,6 +22,11 @@ import {
 import { isIntentComplexity } from "../constants.js";
 
 const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+const EMBEDDED_AGENT_SESSION_SUFFIXES = [
+  ".session.jsonl",
+  ".session.trajectory.jsonl",
+  ".session.trajectory-path.json",
+];
 const DEFAULT_MIGRATED_DOMAIN = "other";
 const trackerCache = new Map<string, SessionTracker>();
 const TOPIC_CHANGE_REASONS = new Set([
@@ -655,38 +661,96 @@ export class SessionTracker {
 
   cleanupExpired(nowMs = Date.now()): number {
     const sessionsDir = sessionsDirPath(this.pluginRoot);
-    if (!fileExists(sessionsDir)) return 0;
-
     const cutoffMs = nowMs - SESSION_RETENTION_MS;
     let deletedCount = 0;
 
-    try {
-      for (const entry of fs.readdirSync(sessionsDir, {
-        withFileTypes: true,
-      })) {
-        if (!entry.isFile() || !entry.name.endsWith(".json")) {
-          continue;
+    if (fileExists(sessionsDir)) {
+      try {
+        for (const entry of fs.readdirSync(sessionsDir, {
+          withFileTypes: true,
+        })) {
+          if (!entry.isFile() || !entry.name.endsWith(".json")) {
+            continue;
+          }
+
+          const filePath = path.join(sessionsDir, entry.name);
+          try {
+            if (fs.statSync(filePath).mtimeMs >= cutoffMs) continue;
+
+            const sessionId = entry.name.slice(0, -".json".length);
+            this.sessionData.delete(sessionId);
+            fs.rmSync(filePath, { force: true });
+            deletedCount += 1;
+          } catch (err) {
+            logger.warn("failed to delete expired session file", {
+              error: err,
+              path: filePath,
+            });
+          }
         }
+      } catch (err) {
+        logger.warn("failed to scan expired session files", {
+          error: err,
+          path: sessionsDir,
+        });
+      }
+    }
 
-        const filePath = path.join(sessionsDir, entry.name);
+    return deletedCount + this.cleanupExpiredEmbeddedAgentSessions(cutoffMs);
+  }
+
+  private cleanupExpiredEmbeddedAgentSessions(cutoffMs: number): number {
+    const agentsDir = path.join(this.pluginRoot, "agents");
+    if (!fileExists(agentsDir)) return 0;
+
+    let deletedCount = 0;
+    try {
+      for (const agent of fs.readdirSync(agentsDir, { withFileTypes: true })) {
+        if (!agent.isDirectory()) continue;
+
+        const sessionsDir = agentSessionsPath(this.pluginRoot, agent.name);
+        if (!fileExists(sessionsDir)) continue;
+
         try {
-          if (fs.statSync(filePath).mtimeMs >= cutoffMs) continue;
+          for (const entry of fs.readdirSync(sessionsDir, {
+            withFileTypes: true,
+          })) {
+            if (
+              !entry.isFile() ||
+              !EMBEDDED_AGENT_SESSION_SUFFIXES.some((suffix) =>
+                entry.name.endsWith(suffix),
+              )
+            ) {
+              continue;
+            }
 
-          const sessionId = entry.name.slice(0, -".json".length);
-          this.sessionData.delete(sessionId);
-          fs.rmSync(filePath, { force: true });
-          deletedCount += 1;
+            const filePath = path.join(sessionsDir, entry.name);
+            try {
+              if (fs.statSync(filePath).mtimeMs >= cutoffMs) continue;
+
+              fs.rmSync(filePath, { force: true });
+              deletedCount += 1;
+            } catch (err) {
+              logger.warn(
+                "failed to delete expired embedded agent session file",
+                {
+                  error: err,
+                  path: filePath,
+                },
+              );
+            }
+          }
         } catch (err) {
-          logger.warn("failed to delete expired session file", {
+          logger.warn("failed to scan embedded agent session files", {
             error: err,
-            path: filePath,
+            path: sessionsDir,
           });
         }
       }
     } catch (err) {
-      logger.warn("failed to scan expired session files", {
+      logger.warn("failed to scan embedded agent directories", {
         error: err,
-        path: sessionsDir,
+        path: agentsDir,
       });
     }
 
