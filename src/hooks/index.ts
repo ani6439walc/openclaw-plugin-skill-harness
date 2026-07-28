@@ -27,12 +27,13 @@ import {
   type ReviewTriggerKeywords,
 } from "../review/trigger-keywords.js";
 import {
+  extractLatestUserMessage,
   limitConversationTurns,
   extractRecentTurns,
   extractToolText,
   isInternalUserTurn,
   attachHistoricalIntents,
-  sanitizeConversationText,
+  sanitizeHistoricalIntentInput,
   projectIntentCandidates,
   measureIntentCatalogCodePoints,
   type IntentProjection,
@@ -86,10 +87,10 @@ export type { HookDeps } from "./types.js";
 function sanitizeHistoricalIntentRecords(
   records: HistoricalIntentRecord[],
 ): HistoricalIntentRecord[] {
-  return records.map((record) => ({
-    ...record,
-    input: sanitizeConversationText(record.input),
-  }));
+  return records.flatMap((record) => {
+    const input = sanitizeHistoricalIntentInput(record.input);
+    return input ? [{ ...record, input }] : [];
+  });
 }
 
 const LOW_THINKING_EFFORTS = new Set(["off", "minimal", "low"]);
@@ -549,7 +550,10 @@ export function createHookHandlers(deps: HookDeps) {
     historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
   } {
-    const latestUserMessage = sanitizeConversationText(event.prompt ?? "");
+    const latestUserMessage = extractLatestUserMessage(
+      event.messages,
+      event.prompt,
+    );
     const historicalIntents = sanitizeHistoricalIntentRecords(
       ctx.sessionId ? tracker.getHistoricalIntentRecords(ctx.sessionId) : [],
     );

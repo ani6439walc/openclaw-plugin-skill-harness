@@ -20,6 +20,7 @@ import {
   safeWriteJson,
 } from "../file-utils.js";
 import { isIntentComplexity } from "../constants.js";
+import { sanitizeHistoricalIntentInput } from "../classification/conversation.js";
 
 const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const EMBEDDED_AGENT_SESSION_SUFFIXES = [
@@ -104,6 +105,11 @@ function truncate(value: string | undefined, maxChars: number) {
   return value?.slice(0, maxChars);
 }
 
+function sanitizeReviewInput(value: string | undefined): string | undefined {
+  if (!value) return;
+  return truncate(sanitizeHistoricalIntentInput(value), 1000) || undefined;
+}
+
 const REVIEW_PARAM_MAX_CHARS = 500;
 
 const SAFE_REVIEW_PARAM_KEYS = new Set([
@@ -178,7 +184,7 @@ function createReviewState(
   options?: { preserveFullResult?: boolean },
 ): ReviewState {
   return {
-    input: truncate(state.input, 1000),
+    input: sanitizeReviewInput(state.input),
     intent: state.intent?.result ? { ...state.intent.result } : undefined,
     skillsUsed: state.skillsUsed?.map((skill) => ({ ...skill })),
     toolCalls: state.toolCalls?.map((call) => ({

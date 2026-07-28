@@ -21,6 +21,11 @@ const INTERNAL_RUNTIME_CONTEXT_HEADER = "OpenClaw runtime context (internal):";
 const INTERNAL_RUNTIME_CONTEXT_NOTICE =
   "This context is runtime-generated, not user-authored. Keep internal details private.";
 const INTERNAL_TASK_COMPLETION_MARKER = "[Internal task completion event]";
+const OPENCLAW_ASSEMBLED_CONTEXT_HEADER =
+  "OpenClaw assembled context for this turn:";
+const CONTEXT_WARNINGS_HEADER = "--- Context Warnings ---";
+const ATTACHED_CONTEXT_HEADER = "--- Attached Context ---";
+const CONVERSATION_CONTEXT_END_TAG = "</conversation_context>";
 const INPUT_PROVENANCE_KINDS = new Set([
   "external_user",
   "inter_session",
@@ -328,6 +333,39 @@ export function sanitizeConversationText(text: string): string {
     .trim();
 }
 
+/**
+ * Keep legacy tracked inputs from replaying OpenClaw's assembled prompt into
+ * routing subagents. New records are sourced from message content directly;
+ * this only salvages the user request from records written by older versions.
+ */
+export function sanitizeHistoricalIntentInput(text: string): string {
+  const prompt = text.trimStart();
+  if (!prompt.startsWith(OPENCLAW_ASSEMBLED_CONTEXT_HEADER)) {
+    return sanitizeConversationText(text);
+  }
+
+  const conversationEndIndex = prompt.lastIndexOf(CONVERSATION_CONTEXT_END_TAG);
+  if (conversationEndIndex === -1) return "";
+
+  const requestMatch = /(?:^|\r?\n)Current user request:\s*/.exec(
+    prompt.slice(conversationEndIndex + CONVERSATION_CONTEXT_END_TAG.length),
+  );
+  if (!requestMatch) return "";
+
+  const requestStart =
+    conversationEndIndex +
+    CONVERSATION_CONTEXT_END_TAG.length +
+    requestMatch.index +
+    requestMatch[0].length;
+  const contextEnd = [
+    prompt.indexOf(CONTEXT_WARNINGS_HEADER, requestStart),
+    prompt.indexOf(ATTACHED_CONTEXT_HEADER, requestStart),
+  ]
+    .filter((index) => index !== -1)
+    .sort((left, right) => left - right)[0];
+  return sanitizeConversationText(prompt.slice(requestStart, contextEnd));
+}
+
 function isHeartbeatMessage(role: string, text: string): boolean {
   const trimmed = text.trim();
   if (role === "assistant" && trimmed === "HEARTBEAT_OK") return true;
@@ -385,4 +423,40 @@ export function extractRecentTurns(
   }
 
   return turns;
+}
+
+/**
+ * Extract the newest user-authored message. When the message list is stale,
+ * recover only the current request from an assembled prompt.
+ */
+export function extractLatestUserMessage(
+  messages: unknown[] | undefined,
+  prompt?: string,
+): string {
+  let latestUserMessage = "";
+
+  if (Array.isArray(messages)) {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (!message || typeof message !== "object") continue;
+
+      const typed = message as PromptMessageLike;
+      if (typed.role !== "user" || isInterSessionUserMessage(typed)) continue;
+
+      const text = sanitizeConversationText(extractTextContent(typed.content));
+      if (text && !isHeartbeatMessage("user", text)) {
+        latestUserMessage = text;
+        break;
+      }
+    }
+  }
+
+  if (
+    latestUserMessage &&
+    (!prompt || promptRepresentsMessage(prompt, latestUserMessage))
+  ) {
+    return latestUserMessage;
+  }
+
+  return prompt ? sanitizeHistoricalIntentInput(prompt) : latestUserMessage;
 }

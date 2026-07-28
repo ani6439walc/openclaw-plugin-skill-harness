@@ -1,10 +1,12 @@
 export {
   attachHistoricalIntents,
+  extractLatestUserMessage,
   extractRecentTurns,
   extractToolText,
   isInternalUserTurn,
   limitConversationTurns,
   sanitizeConversationText,
+  sanitizeHistoricalIntentInput,
 } from "./conversation.js";
 export {
   buildDomainSkillsPromptPrefix,
