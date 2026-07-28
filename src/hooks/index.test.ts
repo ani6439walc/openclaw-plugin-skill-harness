@@ -3066,13 +3066,16 @@ Current user request: previous clean request
       ],
       topicChecker,
     });
-    const eventWithAssembledPrompt = {
-      prompt: `OpenClaw assembled context for this turn:
+    const assembledPrompt = `OpenClaw assembled context for this turn:
 <conversation_context>
 [assistant] tool call: web_search
 [toolResult] ${toolOutput}
 </conversation_context>
-Current user request: fresh clean request`,
+Current user request: fresh clean request
+--- Context Warnings ---
+<memory-context>recalled context</memory-context>`.replace(/\s+/g, " ");
+    const eventWithAssembledPrompt = {
+      prompt: assembledPrompt,
       messages: [
         { role: "user", content: "previous clean request" },
         {
@@ -3084,7 +3087,7 @@ Current user request: fresh clean request`,
         },
         {
           role: "user",
-          content: "fresh clean request",
+          content: assembledPrompt,
           provenance: { kind: "external_user" },
         },
       ],

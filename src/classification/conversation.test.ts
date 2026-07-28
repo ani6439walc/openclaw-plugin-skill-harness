@@ -115,6 +115,27 @@ Current user request: current clean request`,
       ),
     ).toBe("current clean request");
   });
+
+  it("sanitizes an assembled context delivered as the latest user message", () => {
+    const assembledPrompt = `OpenClaw assembled context for this turn:
+<conversation_context>
+[assistant] tool call: memory_search
+[toolResult] MESSAGE_TOOL_OUTPUT_MUST_NOT_APPEAR
+</conversation_context>
+Current user request: current clean request
+--- Context Warnings ---
+<memory-context>recalled context</memory-context>`;
+    const flattenedAssembledPrompt = assembledPrompt
+      .replace(/\s+/g, " ")
+      .trim();
+
+    expect(
+      extractLatestUserMessage(
+        [{ role: "user", content: flattenedAssembledPrompt }],
+        flattenedAssembledPrompt,
+      ),
+    ).toBe("current clean request");
+  });
 });
 
 describe("attachHistoricalIntents", () => {

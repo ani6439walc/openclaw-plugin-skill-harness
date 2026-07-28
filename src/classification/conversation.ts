@@ -347,7 +347,7 @@ export function sanitizeHistoricalIntentInput(text: string): string {
   const conversationEndIndex = prompt.lastIndexOf(CONVERSATION_CONTEXT_END_TAG);
   if (conversationEndIndex === -1) return "";
 
-  const requestMatch = /(?:^|\r?\n)Current user request:\s*/.exec(
+  const requestMatch = /^\s*Current user request:\s*/.exec(
     prompt.slice(conversationEndIndex + CONVERSATION_CONTEXT_END_TAG.length),
   );
   if (!requestMatch) return "";
@@ -394,7 +394,11 @@ export function extractRecentTurns(
     const role = typed.role;
     if (role !== "user" && role !== "assistant") continue;
 
-    const text = sanitizeConversationText(extractTextContent(typed.content));
+    const rawText = extractTextContent(typed.content);
+    const text =
+      role === "user"
+        ? sanitizeHistoricalIntentInput(rawText)
+        : sanitizeConversationText(rawText);
     if (!text || isHeartbeatMessage(role, text)) continue;
 
     if (role === "user") {
@@ -443,7 +447,9 @@ export function extractLatestUserMessage(
       const typed = message as PromptMessageLike;
       if (typed.role !== "user" || isInterSessionUserMessage(typed)) continue;
 
-      const text = sanitizeConversationText(extractTextContent(typed.content));
+      const text = sanitizeHistoricalIntentInput(
+        extractTextContent(typed.content),
+      );
       if (text && !isHeartbeatMessage("user", text)) {
         latestUserMessage = text;
         break;
