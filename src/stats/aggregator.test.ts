@@ -2,10 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  extractRecommendedSkillsFromInstruction,
-  StatsAggregator,
-} from "./aggregator.js";
+import { StatsAggregator } from "./aggregator.js";
 import type { IntentCatalogEntry } from "../types.js";
 import type { SessionState } from "../session/index.js";
 
@@ -33,10 +30,8 @@ describe("StatsAggregator", () => {
           confidence: 0.75,
           complexity: "medium",
         },
-        instructionText: [
-          "MUST view skill: git-master",
-          "REQUIRED skill: dev-lifecycle",
-        ].join("\n"),
+        instructionText: "Consider the injected skill candidates when useful.",
+        recommendedSkills: ["git-master", "dev-lifecycle"],
       },
       skillsUsed: [{ name: "git-master", path: "/skills/git-master/SKILL.md" }],
       toolCalls: [
@@ -97,38 +92,6 @@ describe("StatsAggregator", () => {
       fs.readFileSync(path.join(tempDir, "stats.json"), "utf-8"),
     );
   }
-
-  it("extracts only explicit instruction skill recommendations", () => {
-    expect(
-      extractRecommendedSkillsFromInstruction(
-        [
-          "MUST view skill: prompt-engineering-expert",
-          "REQUIRED skill: test-driven-development",
-          "強烈建議 read skill: treemd",
-          "強烈建議 view skill: skill-viewer",
-          "  skill: obsidian",
-          "- skill: raw-candidate",
-          "MUST read skill: prompt-engineering-expert at /duplicate/SKILL.md",
-          "MUST view skill: prompt-engineering-expert",
-          "MUST read skill: `github-pr-workflow`",
-          "REQUIRED skill: test-driven-development.",
-          "MUST read skill: code-review-and-quality at /skills/code-review-and-quality/SKILL.md - needed to assess bot feedback",
-          "MUST view skill: code-review-and-quality - needed to assess bot feedback",
-          "1. MUST read skill: numbered-skill at /skills/numbered-skill/SKILL.md",
-          "2. MUST view skill: numbered-view-skill",
-        ].join("\n"),
-      ),
-    ).toEqual([
-      "prompt-engineering-expert",
-      "test-driven-development",
-      "treemd",
-      "skill-viewer",
-      "github-pr-workflow",
-      "code-review-and-quality",
-      "numbered-skill",
-      "numbered-view-skill",
-    ]);
-  });
 
   it("creates stats.json without scanning existing session files", () => {
     const sessionsDir = path.join(tempDir, "sessions");
@@ -566,7 +529,7 @@ describe("StatsAggregator", () => {
     expect(fs.readFileSync(statsPath, "utf-8")).toBe(serialized);
   });
 
-  it("counts actual instruction recommendations instead of catalog candidates", () => {
+  it("counts recorded injected candidates instead of parsing intent prose", () => {
     const noisyIntent: IntentCatalogEntry = {
       id: "prompt-engineering",
       definition: {
@@ -593,7 +556,8 @@ describe("StatsAggregator", () => {
             complexity: "medium",
           },
           instructionText:
-            "MUST read skill: prompt-engineering-expert at /skills/prompt-engineering-expert/SKILL.md",
+            "Consider the injected prompt-engineering skill candidates.",
+          recommendedSkills: ["prompt-engineering-expert"],
         },
         skillsUsed: [
           {

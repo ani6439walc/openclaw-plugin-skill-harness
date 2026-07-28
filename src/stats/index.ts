@@ -1,5 +1,1 @@
-export {
-  defaultStatsAggregator,
-  extractRecommendedSkillsFromInstruction,
-  StatsAggregator,
-} from "./aggregator.js";
+export { defaultStatsAggregator, StatsAggregator } from "./aggregator.js";

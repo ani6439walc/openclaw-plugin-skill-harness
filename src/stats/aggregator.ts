@@ -213,30 +213,6 @@ function resolveIntentId(
   return resultIntent.match(/^([A-Za-z0-9_-]+)/)?.[1] ?? resultIntent;
 }
 
-const SKILL_RECOMMENDATION_PATTERN =
-  /^\s*(?:(?:[-*]|\d+\.)\s*)?(?:(?:MUST|REQUIRED)\s+(?:(?:read|view)\s+)?skill|強烈建議\s+(?:(?:read|view)\s+)?skill)\s*:\s*([^\s,;]+)/iu;
-
-function normalizeRecommendedSkillName(skill: string): string | undefined {
-  const normalized = skill.replace(/^[`"']+|[`"'.!?]+$/g, "");
-  return normalized || undefined;
-}
-
-export function extractRecommendedSkillsFromInstruction(
-  instructionText: string | undefined,
-): string[] {
-  if (!instructionText) return [];
-  return [
-    ...new Set(
-      instructionText
-        .split(/\r?\n/)
-        .map((line) => line.match(SKILL_RECOMMENDATION_PATTERN)?.[1])
-        .filter((skill): skill is string => !!skill)
-        .map(normalizeRecommendedSkillName)
-        .filter((skill): skill is string => !!skill),
-    ),
-  ];
-}
-
 function createDailyBucket(): DailyBucket {
   return {
     turns: 0,
@@ -915,9 +891,9 @@ export class StatsAggregator {
         const skillsUsed = [
           ...new Set((state.skillsUsed ?? []).map((skill) => skill.name)),
         ];
-        const recommendedSkills = extractRecommendedSkillsFromInstruction(
-          state.intent?.instructionText,
-        );
+        const recommendedSkills = [
+          ...new Set(state.intent?.recommendedSkills ?? []),
+        ];
         const adoptedSkills = recommendedSkills.filter((skill) =>
           skillsUsed.includes(skill),
         );

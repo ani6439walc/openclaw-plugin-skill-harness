@@ -1665,6 +1665,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               topicChangeReason: "start",
             }),
             instructionText: "Reply warmly.",
+            recommendedSkills: [],
           }),
           timestamps: expect.objectContaining({ start: expect.any(String) }),
         }),
@@ -2749,7 +2750,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       instructionHint: null,
       additionalCandidateSkills: [],
     });
-    const { handlers } = createTopicFlowHarness({
+    const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [codingIntent],
       classifier,
@@ -2767,6 +2768,16 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(result?.prependContext).toContain("<domain_skill_candidates>");
     expect(result?.prependContext).toContain("<name>domain-test-skill</name>");
     expect(result?.prependContext).not.toContain("\n## Instruction Hint\n");
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            recommendedSkills: ["domain-test-skill"],
+          }),
+        }),
+      }),
+    );
   });
 
   it.each([undefined, "", "   "])(
@@ -3336,7 +3347,7 @@ Current user request: fresh clean request
       instructionHint: "Consider the directly applicable discovered workflow.",
       additionalCandidateSkills: ["search-discovered-skill"],
     });
-    const { handlers } = createTopicFlowHarness({
+    const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [skillIntent, testingIntent, researchIntent, codegraphIntent],
       classifier,
@@ -3426,6 +3437,21 @@ Current user request: fresh clean request
       result?.prependContext.match(/<name>architecture-diagram<\/name>/g),
     ).toHaveLength(1);
     expect(result?.prependContext).not.toContain("blogwatcher");
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            recommendedSkills: [
+              "architecture-diagram",
+              "test-driven-development",
+              "codegraph-analysis",
+              "search-discovered-skill",
+            ],
+          }),
+        }),
+      }),
+    );
   });
 
   it("falls back to classifier-only when topic checker returns no result", async () => {

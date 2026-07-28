@@ -854,6 +854,7 @@ export function createHookHandlers(deps: HookDeps) {
     trigger: IntentTrigger;
     result?: IntentionResult;
     instructionText?: string;
+    recommendedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): void {
@@ -875,6 +876,7 @@ export function createHookHandlers(deps: HookDeps) {
           trigger: params.trigger,
           ...(params.result ? { result: params.result } : {}),
           instructionText: params.instructionText,
+          recommendedSkills: params.recommendedSkills,
           ...(params.intentProjection
             ? { intentProjection: params.intentProjection }
             : {}),
@@ -892,6 +894,7 @@ export function createHookHandlers(deps: HookDeps) {
     trigger: IntentTrigger;
     result: IntentionResult;
     instructionText?: string;
+    recommendedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): void {
@@ -904,6 +907,7 @@ export function createHookHandlers(deps: HookDeps) {
       trigger: params.trigger,
       result: params.result,
       instructionText: params.instructionText,
+      recommendedSkills: params.recommendedSkills,
       intentProjection: params.intentProjection,
       conversation: params.conversation,
     });
@@ -981,26 +985,30 @@ export function createHookHandlers(deps: HookDeps) {
       },
     );
     if (!params.refreshedConfig.instruction.enabled) {
+      const domainSkills = await resolvePromptDomainSkills({
+        agentId: params.routing.effectiveAgentId,
+        domain: result.domain,
+        availableIntents: params.availableIntents,
+      });
       recordPromptBuildResult({
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
         trigger: "exact-keyword",
         result,
+        recommendedSkills: domainSkills.map((skill) => skill.name),
         conversation: params.conversation,
       });
       return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(
-          result,
-          await resolvePromptDomainSkills({
-            agentId: params.routing.effectiveAgentId,
-            domain: result.domain,
-            availableIntents: params.availableIntents,
-          }),
-        ),
+        buildDomainSkillsPromptPrefix(result, domainSkills),
       );
     }
 
+    const domainSkills = await resolvePromptDomainSkills({
+      agentId: params.routing.effectiveAgentId,
+      domain: result.domain,
+      availableIntents: params.availableIntents,
+    });
     recordPromptBuildResult({
       ctx: params.ctx,
       routing: params.routing,
@@ -1008,6 +1016,7 @@ export function createHookHandlers(deps: HookDeps) {
       trigger: "exact-keyword",
       result,
       instructionText: params.exactKeywordMatch.hint,
+      recommendedSkills: domainSkills.map((skill) => skill.name),
       conversation: params.conversation,
     });
     const promptPrefix = buildPromptPrefix(
@@ -1015,11 +1024,7 @@ export function createHookHandlers(deps: HookDeps) {
       params.availableIntents,
       params.refreshedConfig,
       params.exactKeywordMatch.hint,
-      await resolvePromptDomainSkills({
-        agentId: params.routing.effectiveAgentId,
-        domain: result.domain,
-        availableIntents: params.availableIntents,
-      }),
+      domainSkills,
     );
     return toPromptBuildResult(promptPrefix);
   }
@@ -1038,24 +1043,23 @@ export function createHookHandlers(deps: HookDeps) {
     logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
 
     const recordAndReturnDomainSkillsPrefix = async () => {
+      const domainSkills = await resolvePromptDomainSkills({
+        agentId: params.routing.effectiveAgentId,
+        domain: result.domain,
+        availableIntents: params.availableIntents,
+      });
       recordPromptBuildResult({
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
         trigger: params.classification.trigger,
         result,
+        recommendedSkills: domainSkills.map((skill) => skill.name),
         intentProjection: params.classification.intentProjection,
         conversation: params.conversation,
       });
       return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(
-          result,
-          await resolvePromptDomainSkills({
-            agentId: params.routing.effectiveAgentId,
-            domain: result.domain,
-            availableIntents: params.availableIntents,
-          }),
-        ),
+        buildDomainSkillsPromptPrefix(result, domainSkills),
       );
     };
 
@@ -1164,17 +1168,6 @@ export function createHookHandlers(deps: HookDeps) {
       );
     }
 
-    recordPromptBuildResult({
-      ctx: params.ctx,
-      routing: params.routing,
-      latestUserMessage: params.latestUserMessage,
-      trigger: params.classification.trigger,
-      result,
-      instructionText,
-      intentProjection: params.classification.intentProjection,
-      conversation: params.conversation,
-    });
-
     const domainSkills = await resolvePromptDomainSkills({
       agentId: params.routing.effectiveAgentId,
       domain: result.domain,
@@ -1197,6 +1190,18 @@ export function createHookHandlers(deps: HookDeps) {
       seenSkillNames.add(normalizedName);
       domainSkills.push(skill);
     }
+
+    recordPromptBuildResult({
+      ctx: params.ctx,
+      routing: params.routing,
+      latestUserMessage: params.latestUserMessage,
+      trigger: params.classification.trigger,
+      result,
+      instructionText,
+      recommendedSkills: domainSkills.map((skill) => skill.name),
+      intentProjection: params.classification.intentProjection,
+      conversation: params.conversation,
+    });
 
     const promptPrefix = buildPromptPrefix(
       result,

@@ -377,6 +377,7 @@ describe("SessionTracker", () => {
               complexity: "low",
             },
             instructionText: "Use the requested skill.",
+            recommendedSkills: ["skill-viewer", "tool-reference"],
           },
         },
       });
@@ -392,6 +393,7 @@ describe("SessionTracker", () => {
       expect(saved.current.intent).toMatchObject({
         trigger: "classifier",
         instructionText: "Use the requested skill.",
+        recommendedSkills: ["skill-viewer", "tool-reference"],
         result: { intent: "tool-reference" },
       });
     });

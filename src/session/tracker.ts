@@ -70,6 +70,7 @@ export interface IntentState {
   trigger?: IntentTrigger;
   result?: IntentionResult;
   instructionText?: string;
+  recommendedSkills?: string[];
   intentProjection?: IntentProjectionTelemetry;
 }
 
@@ -596,6 +597,11 @@ export class SessionTracker {
         }
         if (data.current.intent.instructionText !== undefined) {
           current.intent.instructionText = data.current.intent.instructionText;
+        }
+        if (data.current.intent.recommendedSkills !== undefined) {
+          current.intent.recommendedSkills = [
+            ...data.current.intent.recommendedSkills,
+          ];
         }
         if (data.current.intent.intentProjection !== undefined) {
           current.intent.intentProjection =
