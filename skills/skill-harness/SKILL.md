@@ -1,11 +1,11 @@
 ---
 name: skill-harness
-description: "Design, inventory, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), or analyzing intent complexity and extracting oversized intents into skills (extract)."
+description: "Use when designing or auditing Skill Harness intents, analyzing intent complexity, extracting intents into skills, or evaluating and updating Intent Review trigger keywords from runtime evidence."
 ---
 
 # Skill Harness
 
-Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), and complexity analysis or skill extraction (extract). Background subagents handle automated self-improvement; do not process review findings manually through this skill.
+Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), complexity analysis or skill extraction (extract), and evidence-backed Intent Review keyword maintenance (keyword-audit). Background subagents handle automated self-improvement; use keyword-audit only for deliberate human-requested analysis and maintenance.
 
 ## Quick routing
 
@@ -13,10 +13,11 @@ Manage the human-facing lifecycle of intent definitions: single-intent CRUD (des
 What does the user want?
 ├─ Bootstrap or re-audit the ENTIRE catalog → inventory
 ├─ Create/rename/split/merge/refine ONE intent → design
-└─ Check intent complexity / upgrade intents to skills → extract
+├─ Check intent complexity / upgrade intents to skills → extract
+└─ Analyze Review keyword hits/misses/collisions or update them → keyword-audit
 ```
 
-If ambiguous, ask one routing question: "Are you working on a single intent, auditing the whole system, or analyzing intent complexity?"
+If ambiguous, ask one routing question: "Are you working on one intent, auditing the whole catalog, analyzing intent complexity, or evaluating Intent Review keywords?"
 
 ## Shared operating rules
 
@@ -27,6 +28,7 @@ If ambiguous, ask one routing question: "Are you working on a single intent, aud
   - Runtime editable intents live in the active OpenClaw-resolved runtime intent catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`.
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
+- Treat runtime session text as private. Keyword-audit reports stay local and omit snippets by default; never send raw retained conversations to external tools or artifacts.
 - Check changed intent files for canonical format: valid frontmatter shape, required sections in order, concrete triggers/examples, conservative optional `candidate` metadata, frontmatter `skills[]` when skill loading is needed, durable `## Experience` guidance when operational lessons are needed, no legacy `## Skills & Tools`, and no body cross-references to other intent ids.
 - When preserving concrete shell commands or stable CLI equivalents for MCP documentation calls, write the bare command in `## Experience` instead of tool-wrapper syntax such as `exec({ command: ... })` or vague "runtime capability" language. For Bifrost-backed Context7, DeepWiki, or GoogleDeveloperKnowledge calls, add `mcporter` to frontmatter `skills[]` and document the matching `mcporter call ...` command.
 - When reviewing, creating, splitting, merging, or extracting intents, validate domain-intent consistency using `references/clustering.md`.
@@ -149,6 +151,47 @@ Read and follow `references/extract.md`. Keep these checkpoints visible:
 
 ---
 
+## Mode: keyword-audit
+
+### When to use
+
+User wants to measure, analyze, propose, or apply changes to Intent Review trigger keywords using actual runtime observations.
+
+Keywords: "Review keywords", "trigger keywords", "keyword hit rate", "keyword misses", "keyword collisions", "分析關鍵字", "統計關鍵字", "更新關鍵字", "successful-pattern", "behavior-fix", "entity-context"
+
+Do not use this mode for intent `fastpath.keywords` or `candidate.keywords`; route those through design or inventory with the labeled-fixture rules in `references/format.md`.
+
+### Workflow
+
+Read and follow `references/keyword-audit.md`. Keep these checkpoints visible:
+
+1. **Pin evidence** — resolve the active data root, require current schema-v5 `review.json`, record retained sessions and the configured successful-pattern tool-call threshold.
+2. **Generate a read-only report** — run `scripts/review-keyword-audit.py`; keep snippets disabled unless local content inspection is explicitly necessary.
+3. **Label evidence** — inspect positive refs and collisions locally; frequency alone is not approval.
+4. **Proposal checkpoint** — present before/after coverage and at most three exact additions/removals per target; wait for explicit confirmation.
+5. **Host-owned update** — prefer Intent Review's validated, locked, atomic keyword-change path; do not hand-edit `review.json` during normal work.
+6. **Behavior verification** — rerun the report and focused Review tests, then report the exact persisted delta and residual collision risk.
+
+### Failure modes
+
+| Trigger                                   | First fix                                           | Fallback                                         |
+| ----------------------------------------- | --------------------------------------------------- | ------------------------------------------------ |
+| **Missing or incompatible `review.json`** | Stop and report the schema/state mismatch           | Do not invent defaults or migrate runtime data   |
+| **Too little retained evidence**          | Keep phrases as candidates and gather more sessions | Make no keyword change                           |
+| **Candidate has collisions**              | Narrow the exact phrase and rerun labeling          | Retain the current keyword set                   |
+| **Host locking/atomic path unavailable**  | Do not write runtime state                          | Deliver the approved delta for later application |
+
+### Anti-patterns
+
+| #   | Anti-pattern                                       | Why not                                         | Do instead                                              |
+| --- | -------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
+| 1   | **Promote the most frequent phrase automatically** | Co-occurrence is not target semantics           | Require distinct-session positives and collision review |
+| 2   | **Print raw snippets by default**                  | Sessions can contain private user data          | Keep reports snippet-free and inspect refs locally      |
+| 3   | **Remove keywords with zero retained hits**        | Retention can erase prior evidence              | Require repeated labeled false positives                |
+| 4   | **Mix evidence across keyword targets**            | Host findings may update only their own trigger | Evaluate each target independently                      |
+
+---
+
 ## Shared resources
 
 ### First-time setup assets
@@ -167,6 +210,7 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 - Body sections appear in the canonical order from `references/format.md`.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
 - `candidate.scope: cross-flow` is used only for durable domain-independent coverage; manual `candidate.keywords` have labeled positive and collision evidence and are never inferred from one session.
+- Review trigger keywords are a separate runtime surface. Analyze them with `references/keyword-audit.md` and `scripts/review-keyword-audit.py`; never infer a write from phrase frequency alone.
 - Skill dependencies use frontmatter `skills[]`, and `## Experience` uses the expected skill/tool guidance shape.
 - Concrete shell commands and mcporter-backed documentation lookups are preserved as bare commands in `## Experience`, with `mcporter` listed in `skills[]` when needed.
 - Legacy `## Skills & Tools` sections are absent from new or updated intents.
@@ -181,8 +225,9 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 
 ### Test prompts (dry_run)
 
-| #   | Prompt                                           | Expected behavior                                                                                                 | Mode      |
-| --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------- |
-| 1   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory |
-| 2   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview → ground → draft → format check                                 | design    |
-| 3   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract   |
+| #   | Prompt                                           | Expected behavior                                                                                                 | Mode          |
+| --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------- |
+| 1   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory     |
+| 2   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview → ground → draft → format check                                 | design        |
+| 3   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract       |
+| 4   | "Analyze which Review keywords should change"    | Route to **keyword-audit** → pin evidence → report → label → 🔴 CHECKPOINT → host update → verify                 | keyword-audit |
