@@ -69,10 +69,6 @@ export function reviewLogPath(dataRoot: string): string {
   return path.join(dataRoot, "review.json");
 }
 
-export function legacyReviewLogPath(dataRoot: string): string {
-  return path.join(dataRoot, "evolution.json");
-}
-
 export function agentWorkspacePath(dataRoot: string): string {
   return path.join(dataRoot, "workspace");
 }

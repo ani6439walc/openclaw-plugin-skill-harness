@@ -283,6 +283,40 @@ const expectedFullSnapshot = `<review_snapshot>
 </review_snapshot>`;
 
 describe("formatReviewSnapshot", () => {
+  it("serializes bounded skill placement evidence and intent skill references", () => {
+    const output = formatReviewSnapshot(
+      {
+        ...fullSnapshot,
+        skillPlacementCandidate: {
+          epochKey: "a".repeat(64),
+          agentId: "private-agent-id",
+          name: "unused-skill",
+          source: "workspace",
+          reason: "zero-recommendation-usage",
+          observedTurns: 20,
+          usageTurns: 0,
+          recommendedTurns: 0,
+          currentlyReferencedIntentIds: ["intent-review"],
+        },
+        intentCatalog: [
+          {
+            ...fullSnapshot.intentCatalog[0]!,
+            skills: ["unused-skill"],
+          },
+        ],
+      },
+      { requestedTriggers: ["skill-placement"] },
+    );
+
+    expect(output).toContain("<skill_placement_candidate>");
+    expect(output).toContain(
+      '{"name":"unused-skill","source":"workspace","reason":"zero-recommendation-usage","observedTurns":20,"usageTurns":0,"recommendedTurns":0,"currentlyReferencedIntentIds":["intent-review"]}',
+    );
+    expect(output).toContain('"skills":["unused-skill"]');
+    expect(output).not.toContain("private-agent-id");
+    expect(output).not.toContain("a".repeat(64));
+  });
+
   it("indents each nested review snapshot level by two spaces", () => {
     const output = formatReviewSnapshot(fullSnapshot, {
       includeIntentCatalog: true,

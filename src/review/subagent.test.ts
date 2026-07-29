@@ -261,6 +261,11 @@ describe("buildReviewPrompt", () => {
       "frontmatter skills, Concrete Workflow, or Experience",
     ],
     [
+      "skill-placement",
+      "one host-selected resolved skill",
+      "exactly one best-fit runtime intent",
+    ],
+    [
       "process-gap",
       "failed execution and recovery path",
       "Guidelines, frontmatter skills, Concrete Workflow, or Experience",
@@ -331,6 +336,33 @@ describe("buildReviewPrompt", () => {
     expect(prompt).not.toContain("Entity-context reviews are limited");
     expect(prompt).not.toContain("trigger keyword update");
     expect(prompt).not.toContain("triggerKeywords.*");
+  });
+
+  it("bounds skill placement to the host-selected skill and one intent", () => {
+    const prompt = buildReviewPrompt(
+      {
+        ...snapshot,
+        skillPlacementCandidate: {
+          epochKey: "a".repeat(64),
+          agentId: "main",
+          name: "source-driven-development",
+          source: "workspace",
+          reason: "zero-recommendation-usage",
+          observedTurns: 20,
+          usageTurns: 0,
+          recommendedTurns: 0,
+          currentlyReferencedIntentIds: [],
+        },
+      },
+      ["skill-placement"],
+    );
+
+    expect(prompt).toContain("skill_placement_candidate");
+    expect(prompt).toContain("Inspect only the selected skill with skill_view");
+    expect(prompt).toContain("exactly one targetIntentId");
+    expect(prompt).toContain("runtime intent Markdown");
+    expect(prompt).not.toContain("skill_search");
+    expect(prompt).not.toContain("skill_manage");
   });
 
   it("keeps trigger evidence semantically isolated", () => {
@@ -1628,36 +1660,287 @@ describe("runReviewSubagent", () => {
     );
   });
 
-  it("allows skill_view only for skill-candidate reviews", async () => {
-    const runEmbeddedAgent = vi.fn().mockResolvedValue({
-      payloads: [{ text: '{"findings":[]}' }],
-    });
-    const api = {
-      config: {},
-      runtime: { agent: { runEmbeddedAgent } },
-    } as unknown as OpenClawPluginApi;
+  it.each(["skill-candidate", "skill-placement"] as const)(
+    "allows skill_view for %s reviews without broader skill tools",
+    async (trigger) => {
+      const runEmbeddedAgent = vi.fn().mockResolvedValue({
+        payloads: [{ text: '{"findings":[]}' }],
+      });
+      const api = {
+        config: {},
+        runtime: { agent: { runEmbeddedAgent } },
+      } as unknown as OpenClawPluginApi;
 
-    await runReviewSubagent({
-      api,
+      await runReviewSubagent({
+        api,
+        config: resolveConfig({ review: { enabled: true } }),
+        agentId: "main",
+        intentDirectory: createIntentDirectory(),
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: [trigger],
+      });
+
+      expect(runEmbeddedAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolsAllow: ["read", "write", "apply_patch", "skill_view"],
+        }),
+      );
+      expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
+        "skill_list",
+      );
+      expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
+        "skill_search",
+      );
+      expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
+        "skill_manage",
+      );
+    },
+  );
+
+  it.each([
+    {
+      name: "rejects multiple placement targets",
+      findingTargetIntentIds: [["social-casual", "other"]],
+      addSkill: true,
+      expectedError:
+        "skill-placement positive finding must declare exactly one target intent",
+    },
+    {
+      name: "rejects multiple placement findings with different targets",
+      findingTargetIntentIds: [["social-casual"], ["other"]],
+      addSkill: true,
+      expectedError: "skill-placement must return exactly one positive finding",
+    },
+    {
+      name: "rejects a target without the selected skill reference",
+      findingTargetIntentIds: [["social-casual"]],
+      addSkill: false,
+      expectedError:
+        "skill-placement target social-casual does not reference selected skill source-driven-development",
+    },
+  ])("$name", async ({ findingTargetIntentIds, addSkill, expectedError }) => {
+    const targetIntentIds = [...new Set(findingTargetIntentIds.flat())];
+    const intentDirectory = createIntentDirectory();
+    const originals = new Map(
+      targetIntentIds.map((id) => [
+        id,
+        fs.readFileSync(path.join(intentDirectory, `${id}.md`), "utf-8"),
+      ]),
+    );
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      for (const id of targetIntentIds) {
+        const original = originals.get(id)!;
+        const withGuidance = original.replace(
+          id === "social-casual" ? "- Chat casually." : "- Ask for context.",
+          "- Use source-driven-development for source-grounded tasks.",
+        );
+        fs.writeFileSync(
+          path.join(options.workspaceDir, `${id}.md`),
+          addSkill
+            ? withGuidance.replace(
+                `domain: ${id === "social-casual" ? "social" : "other"}`,
+                `domain: ${id === "social-casual" ? "social" : "other"}\nskills:\n  - source-driven-development`,
+              )
+            : withGuidance,
+        );
+      }
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: findingTargetIntentIds.map((findingTargets, index) => ({
+                trigger: "skill-placement",
+                hasFinding: true,
+                targetKind: "intent-markdown",
+                operation: "refine",
+                targetIntentIds: findingTargets,
+                dedupeKey: `place-source-driven-development-${index}`,
+                summary: "Place the selected skill",
+                evidence: ["Host selected the skill after 20 turns"],
+                correctionGoal: "Reference the selected skill",
+                suggestedChange: "Refine one runtime intent.",
+              })),
+            }),
+          },
+        ],
+      };
+    });
+
+    await expect(
+      runReviewSubagent({
+        api: {
+          config: {},
+          runtime: { agent: { runEmbeddedAgent } },
+        } as unknown as OpenClawPluginApi,
+        config: resolveConfig({ review: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot: {
+          ...snapshot,
+          skillPlacementCandidate: {
+            epochKey: "a".repeat(64),
+            agentId: "main",
+            name: "source-driven-development",
+            source: "workspace",
+            reason: "zero-recommendation-usage",
+            observedTurns: 20,
+            usageTurns: 0,
+            recommendedTurns: 0,
+            currentlyReferencedIntentIds: [],
+          },
+        },
+        triggers: ["skill-placement"],
+      }),
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "validation-failed",
+      validationErrors: [expectedError],
+    });
+    for (const [id, original] of originals) {
+      expect(
+        fs.readFileSync(path.join(intentDirectory, `${id}.md`), "utf-8"),
+      ).toBe(original);
+    }
+  });
+
+  it("rejects a skill-placement finding that targets trigger keywords", async () => {
+    const intentDirectory = createIntentDirectory();
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [
+        {
+          text: JSON.stringify({
+            findings: [
+              {
+                trigger: "skill-placement",
+                hasFinding: true,
+                targetKind: "trigger-keywords",
+                operation: "adjust-trigger-keywords",
+                targetIntentIds: [],
+                targetTrigger: "successful-pattern",
+                keywordChange: { add: ["placed skill"], remove: [] },
+                dedupeKey: "misdirected-skill-placement",
+                summary: "Change a trigger instead of placing the skill",
+                evidence: ["Host selected a skill"],
+                correctionGoal: "Place the selected skill",
+                suggestedChange: "Adjust trigger keywords.",
+              },
+            ],
+          }),
+        },
+      ],
+    });
+
+    await expect(
+      runReviewSubagent({
+        api: {
+          config: {},
+          runtime: { agent: { runEmbeddedAgent } },
+        } as unknown as OpenClawPluginApi,
+        config: resolveConfig({ review: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot: {
+          ...snapshot,
+          skillPlacementCandidate: {
+            epochKey: "a".repeat(64),
+            agentId: "main",
+            name: "source-driven-development",
+            source: "workspace",
+            reason: "zero-recommendation-usage",
+            observedTurns: 20,
+            usageTurns: 0,
+            recommendedTurns: 0,
+            currentlyReferencedIntentIds: [],
+          },
+        },
+        triggers: ["skill-placement"],
+      }),
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "schema-rejected",
+      schemaRejectionReasonCounts: {
+        "invalid-trigger-keyword-target": 1,
+        "missing-trigger-decision": 1,
+      },
+    });
+  });
+
+  it("applies guidance-only placement with canonical mixed-case skill identity", async () => {
+    const intentDirectory = createIntentDirectory();
+    const targetPath = path.join(intentDirectory, "social-casual.md");
+    const original = fs.readFileSync(targetPath, "utf-8");
+    const preplaced = original.replace(
+      "domain: social",
+      "domain: social\nskills:\n  - source-driven-development",
+    );
+    fs.writeFileSync(targetPath, preplaced);
+    const updated = preplaced.replace(
+      "- Chat casually.",
+      "- Use source-driven-development for source-grounded tasks.",
+    );
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.writeFileSync(
+        path.join(options.workspaceDir, "social-casual.md"),
+        updated,
+      );
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "skill-placement",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["social-casual"],
+                  dedupeKey: "place-source-driven-development",
+                  summary: "Place the selected skill",
+                  evidence: ["Host selected the skill after 20 turns"],
+                  correctionGoal: "Reference the selected skill",
+                  suggestedChange: "Refine social-casual.md.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+
+    const result = await runReviewSubagent({
+      api: {
+        config: {},
+        runtime: { agent: { runEmbeddedAgent } },
+      } as unknown as OpenClawPluginApi,
       config: resolveConfig({ review: { enabled: true } }),
       agentId: "main",
-      intentDirectory: createIntentDirectory(),
+      intentDirectory,
       modelRef: { provider: "google", model: "review" },
-      snapshot,
-      triggers: ["skill-candidate"],
+      snapshot: {
+        ...snapshot,
+        skillPlacementCandidate: {
+          epochKey: "a".repeat(64),
+          agentId: "main",
+          name: "Source-Driven-Development",
+          source: "workspace",
+          reason: "zero-recommendation-usage",
+          observedTurns: 20,
+          usageTurns: 0,
+          recommendedTurns: 0,
+          currentlyReferencedIntentIds: ["social-casual"],
+        },
+      },
+      triggers: ["skill-placement"],
     });
 
-    expect(runEmbeddedAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toolsAllow: ["read", "write", "apply_patch", "skill_view"],
-      }),
-    );
-    expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
-      "skill_list",
-    );
-    expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
-      "skill_manage",
-    );
+    expect(result).toMatchObject({
+      outcome: "applied",
+      changedIntentIds: ["social-casual"],
+    });
+    expect(fs.readFileSync(targetPath, "utf-8")).toBe(updated);
   });
 
   it("reports embedded agent error payloads as subagent errors", async () => {

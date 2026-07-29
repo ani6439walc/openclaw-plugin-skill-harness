@@ -119,19 +119,20 @@ Configure Skill Harness in `openclaw.json`:
 
 ### Important options
 
-| Option                             | Default           | Purpose                                                          |
-| ---------------------------------- | ----------------- | ---------------------------------------------------------------- |
-| `agents`                           | `["main"]`        | OpenClaw agent IDs eligible for scanning.                        |
-| `allowedChatTypes`                 | `["direct"]`      | Chat types that may run the scanner.                             |
-| `allowedChatIds` / `deniedChatIds` | `[]`              | Optional chat allow-list and deny-list.                          |
-| `intentDeny`                       | `{}`              | Per-agent intent deny-list with wildcard-style keys.             |
-| `model` / `modelFallback`          | unset             | Scanner model and last-resort resolution fallback.               |
-| `thinking`                         | `"medium"`        | Intent-classifier thinking level.                                |
-| `lowThinkingMode`                  | `"fastpath-only"` | Behavior when the main agent uses off, minimal, or low thinking. |
-| `queryMode` / `contextWindow`      | `"recent"`        | Scanner context and its limits.                                  |
-| `timeoutMs`                        | `10000`           | Topic-checker and intent-classifier time budget.                 |
-| `instruction.enabled`              | `true`            | Enables post-classification instruction hints.                   |
-| `review.enabled`                   | `false`           | Enables post-turn Intent Review.                                 |
+| Option                                   | Default           | Purpose                                                                                       |
+| ---------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| `agents`                                 | `["main"]`        | OpenClaw agent IDs eligible for scanning.                                                     |
+| `allowedChatTypes`                       | `["direct"]`      | Chat types that may run the scanner.                                                          |
+| `allowedChatIds` / `deniedChatIds`       | `[]`              | Optional chat allow-list and deny-list.                                                       |
+| `intentDeny`                             | `{}`              | Per-agent intent deny-list with wildcard-style keys.                                          |
+| `model` / `modelFallback`                | unset             | Scanner model and last-resort resolution fallback.                                            |
+| `thinking`                               | `"medium"`        | Intent-classifier thinking level.                                                             |
+| `lowThinkingMode`                        | `"fastpath-only"` | Behavior when the main agent uses off, minimal, or low thinking.                              |
+| `queryMode` / `contextWindow`            | `"recent"`        | Scanner context and its limits.                                                               |
+| `timeoutMs`                              | `10000`           | Topic-checker and intent-classifier time budget.                                              |
+| `instruction.enabled`                    | `true`            | Enables post-classification instruction hints.                                                |
+| `review.enabled`                         | `false`           | Enables post-turn Intent Review.                                                              |
+| `review.triggers.skillPlacement.enabled` | `true`            | Reviews one eligible resolved skill for placement in a runtime intent when Review is enabled. |
 
 Topic Checker, Intent Classifier, Hint Writer, and Intent Review resolve models in this order: explicit configured model, current session model, agent primary model, then configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
@@ -188,6 +189,8 @@ Enable it with:
 ```
 
 Review investigates a trigger; it does not treat the trigger as proof. Validated findings can create, refine, split, or merge runtime intents. The reviewer never writes source files, bundled skills, OpenClaw config, memory files, or arbitrary paths.
+
+The `skill-placement` trigger consumes current per-agent resolved-inventory observations. It selects at most one skill per accepted turn, prioritizes an existing low-adoption `needsReview` signal, and otherwise requires 20 continuous observations with zero recommendations and zero usage. The placement reviewer receives the selected skill through `skill_view` plus the complete intent catalog, and may refine exactly one existing runtime intent. It cannot create or modify skills. `applied` and `nofinding` complete that inventory epoch; technical, validation, queue, and log-write failures remain retryable.
 
 See [Intent Review](docs/intent-review.md) for safeguards and decision rules.
 

@@ -88,7 +88,7 @@ Rules:
 
 The indexer uses `skills.load.watchDebounceMs` as its cache TTL only when `skills.load.watch` is `true`; otherwise it retains the 60-second default. This is polling, not a filesystem watcher. Keep the TTL in the cache key so live configuration changes cannot reuse indexes created under a different refresh interval.
 
-Stats schema v3 observes the resolved inventory per tracked agent on existing accepted stats events. Resolve the agent ID from persisted tracker state, never from a finalize-context fallback. Inventory identity consists of normalized skill name, source, a SHA-256 of the resolved winning `SKILL.md` path, and a SHA-256 of the raw file bytes. Keep both fingerprints internal to stats; public skill list/search/view results must not expose them. A source, winner, content, or visibility-continuity change starts a new per-skill epoch. If the disabled bundled-skill policy or inventory cannot be resolved trustworthily, preserve the existing stats event but skip the observation update. Do not synthesize historical zero observations during v1/v2 migration.
+Stats schema v3 observes the resolved inventory per tracked agent on existing accepted stats events. Resolve the agent ID from persisted tracker state, never from a finalize-context fallback. Inventory identity consists of normalized skill name, source, a SHA-256 of the resolved winning `SKILL.md` path, and a SHA-256 of the raw file bytes. Canonicalize top-level recommendation and usage aggregate keys with trimmed locale-independent lowercase identity so `needsReview` joins the inventory's normalized key even when display casing differs. At the load boundary, merge valid existing mixed-case aggregate and daily-count collisions into the canonical key and recompute derived fields. Dynamic aggregate and count-map keys must use own-property-safe reads and writes so accepted reserved names such as `__proto__` cannot mutate `Object.prototype`. Keep both fingerprints internal to stats; public skill list/search/view results must not expose them. A source, winner, content, or visibility-continuity change starts a new per-skill epoch. If the disabled bundled-skill policy or inventory cannot be resolved trustworthily, preserve the existing stats event but skip the observation update. Do not synthesize historical zero observations during v1/v2 migration.
 
 ## Source Map
 
@@ -103,7 +103,7 @@ Use the existing module boundaries:
 - `src/session/tracker.ts`: session JSON state under `dataRoot/sessions`.
 - `src/stats/aggregator.ts`: usage, candidate-projection, and agent-scoped resolved-skill inventory aggregation into schema-v3 `dataRoot/stats.json`, including explicit valid-v1/v2 migration without historical observation backfill.
 - `src/review/log-writer.ts`: direct Intent Review outcomes and trigger keyword updates into `dataRoot/review.json`.
-- `src/review/log.ts`: review log schema validation/migration and root trigger keyword state. Legacy `items` are dropped during migration; there is no tool/command action surface.
+- `src/review/log.ts`: strict current-only review log schema-v5 validation, root trigger keyword state, processed outcomes, and completed skill-placement epochs. There is no legacy migration or tool/command action surface.
 - `src/subagent-runtime.ts`: shared embedded subagent run defaults and error-payload extraction helpers used by classification and review subagents.
 - `src/classification/prompts.ts`, `src/classification/subagent.ts`, `src/classification/conversation.ts`, `src/classification/candidates.ts`, `src/review/subagent.ts`, `src/review/triggers.ts`: classification, conservative candidate projection, and review logic.
 - `src/review/snapshot-formatter.ts`: task-oriented Review snapshot serialization, host-owned manifest metadata, semantic evidence wrappers, and final-boundary escaping.
@@ -178,7 +178,7 @@ Typical mapping:
 - Stats behavior: `src/stats/aggregator.test.ts`.
 - Intent skill-reference resolution: `src/intents/skill-references.test.ts`.
 - Review trigger keyword normalization: `src/review/trigger-keywords.test.ts`.
-- Intent Review writes and log migration: `src/review/log-writer.test.ts` and `src/review/log.test.ts`.
+- Intent Review writes and strict current-log validation: `src/review/log-writer.test.ts` and `src/review/log.test.ts`.
 - Review tool/command removal behavior: `src/plugin.test.ts` and `manifest.test.ts`.
 
 When changing runtime paths, include tests for both the desired new location and non-overwrite startup behavior.
@@ -201,7 +201,9 @@ Keep Review prompts task-first: requested trigger workflows precede the shared i
 
 Keep Review context projection conservative and deterministic. Group only runs of at least three consecutive, explicitly successful, parameter-identical calls to `read`, `skill_list`, `skill_search`, or `skill_view`; failures, mutations, unknown tools, and intervening calls remain expanded. Project only Recent assistant results longer than 1,000 Unicode code points, preserving the first and final 500 code points with an exact host-owned omission count; Current results keep their established tracker boundary. `missing-intent` and `weak-intent` always receive the full Intent Catalog, while `skill-candidate`, `behavior-fix`, and `satisfaction-check` may use the deterministic matched/observed/domain/exact-keyword candidate union only when all conservative fallback gates pass. Keep Available Skills complete and record only count and rendered-code-point measurements; do not add a skill selector without a separate measured decision.
 
-Do not edit `reviewLogPath(dataRoot)` manually for normal work. It stores schema v4 `triggerKeywords` plus `processedEvents`; legacy `items` are discarded during migration.
+Skill-placement Review is host-selected and agent-scoped. Select at most one candidate after an accepted stats event, using only the persisted tracker agent ID and current resolved inventory. Reserve the epoch immediately after selection and before any asynchronous snapshot or skill-resolution work. Snapshot skill resolution, model lookup, and the reviewer invocation must use that same tracked agent. If snapshot resolution no longer returns the selected skill, do not enqueue the placement run, release the reservation for retry, and preserve any ordinary triggers by rebuilding their model and snapshot path without placement data. Add `skill-placement` to any ordinary triggers for the same run, include the full catalog with `skills[]`, and expose only `read`, `write`, `apply_patch`, and `skill_view`. Host validation must require exactly one positive placement finding, one existing target intent, `operation: refine`, and a canonical trimmed-lowercase candidate reference in valid frontmatter. Always release the pending reservation after queue, reviewer, validation, or log completion; only atomically persisted `applied` or `nofinding` outcomes suppress a later run.
+
+Do not edit `reviewLogPath(dataRoot)` manually for normal work. It stores strict current-only schema v5 `triggerKeywords`, `processedEvents`, and `reviewedSkillEpochs`. V1-v4 files and malformed current records are rejected without rewrite or migration.
 
 For manual runtime intent edits, read current runtime intent Markdown, make the smallest grounded change, then run at least:
 

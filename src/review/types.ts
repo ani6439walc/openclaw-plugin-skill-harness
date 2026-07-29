@@ -1,6 +1,7 @@
 import type { ReviewTrigger } from "./triggers.js";
 import type { ReviewOperation } from "./log.js";
 import type { TriggerKeywordTarget } from "./trigger-keywords.js";
+import type { SkillPlacementCandidate } from "../stats/aggregator.js";
 import type {
   AvailableSkill,
   IntentCatalogEntry,
@@ -28,6 +29,10 @@ export type ReviewState = {
   timestamps?: { start?: string; end?: string };
 };
 
+export type SkillPlacementReviewCandidate = SkillPlacementCandidate & {
+  currentlyReferencedIntentIds: string[];
+};
+
 export type ReviewSnapshot = {
   sessionId: string;
   sessionKey?: string;
@@ -38,9 +43,12 @@ export type ReviewSnapshot = {
   recent: ReviewState[];
   matchedIntent?: IntentCatalogEntry;
   availableSkills?: AvailableSkill[];
+  skillPlacementCandidate?: SkillPlacementReviewCandidate;
   intentCatalog: Array<
     { id: string } & Pick<IntentDefinition, "triggers" | "examples"> &
-      Partial<Pick<IntentDefinition, "domain" | "fastpath" | "candidate">>
+      Partial<
+        Pick<IntentDefinition, "domain" | "fastpath" | "candidate" | "skills">
+      >
   >;
 };
 

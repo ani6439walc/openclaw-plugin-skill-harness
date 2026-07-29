@@ -17,6 +17,7 @@ function escapeSnapshotText(value: unknown): string {
 type ReviewSnapshotBlockName =
   | "review_snapshot"
   | "snapshot_manifest"
+  | "skill_placement_candidate"
   | "current_turn"
   | "recent_turn"
   | "recent_turns"
@@ -366,6 +367,9 @@ function formatIntentEntryMetadata(
   };
   metadata.triggers = [...definition.triggers];
   metadata.examples = [...definition.examples];
+  if (definition.skills !== undefined) {
+    metadata.skills = [...definition.skills];
+  }
   const fastpath = definition.fastpath;
   if (fastpath) {
     metadata.fastpath = {
@@ -429,7 +433,7 @@ function formatSnapshotManifest(
   if ("fallbackReason" in catalogProjection) {
     intentCatalog.fallbackReason = catalogProjection.fallbackReason;
   }
-  const manifest = {
+  const manifest: Record<string, unknown> = {
     requestedTriggers: [...(options.requestedTriggers ?? [])],
     currentIntent: snapshot.current.intent?.intent ?? null,
     intentConfidence: snapshot.current.intent?.confidence ?? null,
@@ -441,9 +445,33 @@ function formatSnapshotManifest(
     matchedIntentPresent: snapshot.matchedIntent !== undefined,
     intentCatalog,
   };
+  if (snapshot.skillPlacementCandidate) {
+    manifest.skillPlacementCandidatePresent = true;
+  }
   return wrapRequiredReviewSnapshotBlock(
     "snapshot_manifest",
     stringifySnapshotJson(manifest),
+  );
+}
+
+function formatSkillPlacementCandidate(
+  candidate: ReviewSnapshot["skillPlacementCandidate"],
+): string | undefined {
+  if (!candidate) return undefined;
+  return wrapRequiredReviewSnapshotBlock(
+    "skill_placement_candidate",
+    stringifySnapshotJson({
+      name: candidate.name,
+      source: candidate.source,
+      reason: candidate.reason,
+      observedTurns: candidate.observedTurns,
+      usageTurns: candidate.usageTurns,
+      recommendedTurns: candidate.recommendedTurns,
+      ...(candidate.adoptionRate !== undefined
+        ? { adoptionRate: candidate.adoptionRate }
+        : {}),
+      currentlyReferencedIntentIds: [...candidate.currentlyReferencedIntentIds],
+    }),
   );
 }
 
@@ -478,6 +506,7 @@ export function formatReviewSnapshot(
       availableSkills ? Array.from(indentXmlLines(availableSkills)).length : 0,
       catalogManifest,
     ),
+    formatSkillPlacementCandidate(snapshot.skillPlacementCandidate),
     formatReviewState("current_turn", snapshot.current, {
       turnNumber: snapshot.turnNumber,
     }),

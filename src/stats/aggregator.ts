@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { logger } from "../../api.js";
 import type { SessionState } from "../session/index.js";
@@ -18,6 +19,7 @@ const DAILY_RETENTION_MS = 90 * DAY_MS;
 const RECENT_WINDOW_MS = 7 * DAY_MS;
 const REVIEW_MIN_RECOMMENDATIONS = 5;
 const REVIEW_ADOPTION_THRESHOLD = 0.7;
+const SKILL_PLACEMENT_MIN_OBSERVED_TURNS = 20;
 const MAX_PROJECTION_REASON_KEYS = 32;
 const MAX_PROJECTION_REASON_CODE_POINTS = 80;
 const OTHER_PROJECTION_REASON = "other";
@@ -91,6 +93,20 @@ interface AgentSkillInventoryObservation {
 interface SkillInventoryStats {
   startedAt: string;
   agents: Record<string, AgentSkillInventoryObservation>;
+}
+
+export type SkillPlacementReason = "low-adoption" | "zero-recommendation-usage";
+
+export interface SkillPlacementCandidate {
+  epochKey: string;
+  agentId: string;
+  name: string;
+  source: SkillSource;
+  reason: SkillPlacementReason;
+  observedTurns: number;
+  usageTurns: number;
+  recommendedTurns: number;
+  adoptionRate?: number;
 }
 
 type Stats = {
@@ -229,7 +245,7 @@ function createStats(nowIso: string): Stats {
 }
 
 function increment(counts: CountMap, key: string, amount = 1): void {
-  counts[key] = (counts[key] ?? 0) + amount;
+  setOwnRecordValue(counts, key, (ownRecordValue(counts, key) ?? 0) + amount);
 }
 
 function rate(numerator: number, denominator: number): number {
@@ -292,7 +308,8 @@ function recomputeDerivedStats(stats: Stats, nowMs: number): void {
   for (const [intentId, intent] of Object.entries(stats.intents)) {
     intent.share = rate(intent.turns, stats.summary.turns);
     intent.last7Days = recentBuckets.reduce(
-      (total, [, bucket]) => total + (bucket.intents[intentId] ?? 0),
+      (total, [, bucket]) =>
+        total + (ownRecordValue(bucket.intents, intentId) ?? 0),
       0,
     );
   }
@@ -300,7 +317,8 @@ function recomputeDerivedStats(stats: Stats, nowMs: number): void {
   for (const [skillName, skill] of Object.entries(stats.skills)) {
     skill.adoptionRate = rate(skill.adoptedTurns, skill.recommendedTurns);
     skill.last7DaysUsage = recentBuckets.reduce(
-      (total, [, bucket]) => total + (bucket.skills[skillName] ?? 0),
+      (total, [, bucket]) =>
+        total + (ownRecordValue(bucket.skills, skillName) ?? 0),
       0,
     );
     if (!skill.lastUsedAt) {
@@ -321,7 +339,8 @@ function recomputeDerivedStats(stats: Stats, nowMs: number): void {
 
   for (const [toolName, tool] of Object.entries(stats.tools)) {
     tool.last7DaysCalls = recentBuckets.reduce(
-      (total, [, bucket]) => total + (bucket.tools[toolName] ?? 0),
+      (total, [, bucket]) =>
+        total + (ownRecordValue(bucket.tools, toolName) ?? 0),
       0,
     );
   }
@@ -666,11 +685,14 @@ function loadStats(statsFilePath: string, eventTime: string): Stats {
     }
     const migrated = migrateStatsV1(stats);
     assertStatsV2(migrated);
-    return migrateStatsV2(migrated, eventTime);
+    return canonicalizeSkillStats(
+      migrateStatsV2(migrated, eventTime),
+      eventTime,
+    );
   }
   if (stats.schemaVersion === 2) {
     assertStatsV2(stats);
-    return migrateStatsV2(stats, eventTime);
+    return canonicalizeSkillStats(migrateStatsV2(stats, eventTime), eventTime);
   }
   if (
     stats.schemaVersion !== 3 ||
@@ -687,7 +709,7 @@ function loadStats(statsFilePath: string, eventTime: string): Stats {
       throw new Error("unsupported or invalid stats schema");
     }
   }
-  return stats;
+  return canonicalizeSkillStats(stats, eventTime);
 }
 
 function recordSummaryStats(params: {
@@ -735,7 +757,7 @@ function recordIntentStats(params: {
     errored,
   } = params;
 
-  const intent = (stats.intents[intentId] ??= {
+  const intent = getOrCreateOwnRecordValue(stats.intents, intentId, () => ({
     turns: 0,
     share: 0,
     lastSeenAt: eventTime,
@@ -746,7 +768,7 @@ function recordIntentStats(params: {
     skillAssistedTurns: 0,
     toolAssistedTurns: 0,
     erroredTurns: 0,
-  });
+  }));
   intent.averageConfidence = rate(
     intent.averageConfidence * intent.turns + result.confidence,
     intent.turns + 1,
@@ -762,6 +784,57 @@ function recordIntentStats(params: {
   intent.erroredTurns += errored ? 1 : 0;
 }
 
+function canonicalSkillName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function canonicalizeCountMap(counts: CountMap): CountMap {
+  const canonical: CountMap = {};
+  for (const [name, count] of Object.entries(counts)) {
+    const key = canonicalSkillName(name);
+    setOwnRecordValue(
+      canonical,
+      key,
+      (ownRecordValue(canonical, key) ?? 0) + count,
+    );
+  }
+  return canonical;
+}
+
+function canonicalizeSkillStats(stats: Stats, eventTime: string): Stats {
+  const canonical: Stats["skills"] = {};
+  for (const [name, skill] of Object.entries(stats.skills)) {
+    const key = canonicalSkillName(name);
+    const existing = ownRecordValue(canonical, key);
+    const lastUsedAt =
+      !existing?.lastUsedAt ||
+      (skill.lastUsedAt !== undefined &&
+        Date.parse(skill.lastUsedAt) > Date.parse(existing.lastUsedAt))
+        ? skill.lastUsedAt
+        : existing.lastUsedAt;
+    setOwnRecordValue(canonical, key, {
+      ...skill,
+      usageTurns: (existing?.usageTurns ?? 0) + skill.usageTurns,
+      recommendedTurns:
+        (existing?.recommendedTurns ?? 0) + skill.recommendedTurns,
+      adoptedTurns: (existing?.adoptedTurns ?? 0) + skill.adoptedTurns,
+      ...(lastUsedAt ? { lastUsedAt } : {}),
+    });
+  }
+  stats.skills = canonical;
+  for (const bucket of Object.values(stats.daily)) {
+    bucket.skills = canonicalizeCountMap(bucket.skills);
+  }
+  recomputeDerivedStats(stats, Date.parse(eventTime));
+  return stats;
+}
+
+function compareCanonicalSkillNames(left: string, right: string): number {
+  const leftKey = canonicalSkillName(left);
+  const rightKey = canonicalSkillName(right);
+  return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+}
+
 function recordSkillStats(params: {
   stats: Stats;
   skillsUsed: string[];
@@ -772,15 +845,19 @@ function recordSkillStats(params: {
   const { stats, skillsUsed, recommendedSkills, adoptedSkills, eventTime } =
     params;
   for (const skillName of new Set([...skillsUsed, ...recommendedSkills])) {
-    const skill = (stats.skills[skillName] ??= {
-      usageTurns: 0,
-      recommendedTurns: 0,
-      adoptedTurns: 0,
-      adoptionRate: 0,
-      last7DaysUsage: 0,
-      lifecycle: "never-used",
-      needsReview: false,
-    });
+    const skill = getOrCreateOwnRecordValue<Stats["skills"][string]>(
+      stats.skills,
+      skillName,
+      () => ({
+        usageTurns: 0,
+        recommendedTurns: 0,
+        adoptedTurns: 0,
+        adoptionRate: 0,
+        last7DaysUsage: 0,
+        lifecycle: "never-used",
+        needsReview: false,
+      }),
+    );
     if (skillsUsed.includes(skillName)) {
       skill.usageTurns += 1;
       skill.lastUsedAt = eventTime;
@@ -818,14 +895,14 @@ function recordToolStats(params: {
   const { stats, toolCalls, toolNames, eventTime } = params;
   for (const toolName of toolNames) {
     const calls = toolCalls.filter((tool) => tool.name === toolName);
-    const tool = (stats.tools[toolName] ??= {
+    const tool = getOrCreateOwnRecordValue(stats.tools, toolName, () => ({
       calls: 0,
       turns: 0,
       errorCalls: 0,
       averageDurationMs: 0,
       lastUsedAt: eventTime,
       last7DaysCalls: 0,
-    });
+    }));
     tool.averageDurationMs = rate(
       tool.averageDurationMs * tool.calls +
         calls.reduce((total, call) => total + (call.durationMs ?? 0), 0),
@@ -843,10 +920,10 @@ function incrementBoundedReason(counts: CountMap, reason: string): void {
     .slice(0, MAX_PROJECTION_REASON_CODE_POINTS)
     .join("");
   if (!normalized) return;
-  if (counts[normalized] === undefined) {
+  if (ownRecordValue(counts, normalized) === undefined) {
     const keyCount = Object.keys(counts).length;
     if (keyCount >= MAX_PROJECTION_REASON_KEYS) {
-      if (counts[OTHER_PROJECTION_REASON] !== undefined) {
+      if (ownRecordValue(counts, OTHER_PROJECTION_REASON) !== undefined) {
         increment(counts, OTHER_PROJECTION_REASON);
       }
       return;
@@ -964,7 +1041,7 @@ function recordDailyStats(params: {
     errored,
     projection,
   } = params;
-  const daily = (stats.daily[date] ??= createDailyBucket());
+  const daily = getOrCreateOwnRecordValue(stats.daily, date, createDailyBucket);
   daily.turns += 1;
   daily.erroredTurns += errored ? 1 : 0;
   increment(daily.intents, intentId);
@@ -1016,6 +1093,38 @@ function setOwnRecordValue<T>(
     value,
     writable: true,
   });
+}
+
+function getOrCreateOwnRecordValue<T>(
+  record: Record<string, T>,
+  key: string,
+  create: () => T,
+): T {
+  const existing = ownRecordValue(record, key);
+  if (existing !== undefined) return existing;
+  const value = create();
+  setOwnRecordValue(record, key, value);
+  return value;
+}
+
+function skillPlacementEpochKey(params: {
+  inventoryStartedAt: string;
+  agentId: string;
+  skill: SkillInventoryObservation;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        params.inventoryStartedAt,
+        params.agentId,
+        canonicalSkillName(params.skill.name),
+        params.skill.source,
+        params.skill.winnerFingerprint,
+        params.skill.fingerprint,
+        params.skill.firstSeenTurn,
+      ]),
+    )
+    .digest("hex");
 }
 
 function recordSkillInventoryObservation(params: {
@@ -1104,6 +1213,71 @@ export class StatsAggregator {
     return aggregator;
   }
 
+  selectSkillPlacementCandidate(
+    agentId: string,
+    excludedEpochKeys: ReadonlySet<string> = new Set(),
+  ): SkillPlacementCandidate | undefined {
+    const statsFilePath = statsPath(this.pluginRoot);
+    try {
+      const stats = loadStats(statsFilePath, new Date().toISOString());
+      const agent = ownRecordValue(stats.skillInventory.agents, agentId);
+      if (!agent) return undefined;
+
+      const candidates = Object.values(agent.skills)
+        .filter((skill) => skill.lastSeenTurn === agent.observedTurns)
+        .flatMap((skill): SkillPlacementCandidate[] => {
+          const globalSkill = ownRecordValue(
+            stats.skills,
+            canonicalSkillName(skill.name),
+          );
+          const reason: SkillPlacementReason | undefined =
+            globalSkill?.needsReview
+              ? "low-adoption"
+              : skill.observedTurns >= SKILL_PLACEMENT_MIN_OBSERVED_TURNS &&
+                  skill.recommendedTurns === 0 &&
+                  skill.usageTurns === 0
+                ? "zero-recommendation-usage"
+                : undefined;
+          if (!reason) return [];
+
+          return [
+            {
+              epochKey: skillPlacementEpochKey({
+                inventoryStartedAt: stats.skillInventory.startedAt,
+                agentId,
+                skill,
+              }),
+              agentId,
+              name: skill.name,
+              source: skill.source,
+              reason,
+              observedTurns: skill.observedTurns,
+              usageTurns: skill.usageTurns,
+              recommendedTurns: skill.recommendedTurns,
+              ...(reason === "low-adoption"
+                ? { adoptionRate: globalSkill?.adoptionRate }
+                : {}),
+            },
+          ];
+        })
+        .filter((candidate) => !excludedEpochKeys.has(candidate.epochKey))
+        .sort(
+          (left, right) =>
+            Number(right.reason === "low-adoption") -
+              Number(left.reason === "low-adoption") ||
+            compareCanonicalSkillNames(left.name, right.name),
+        );
+
+      return candidates[0];
+    } catch (error) {
+      logger.warn("failed to select skill placement candidate", {
+        error,
+        path: statsFilePath,
+      });
+      return undefined;
+    }
+  }
+
   isRecordable(
     sessionId: string | undefined,
     state: SessionState,
@@ -1154,10 +1328,20 @@ export class StatsAggregator {
       stats.updatedAt = eventTime;
       stats.processedEvents[eventId] = eventTime;
       const skillsUsed = result
-        ? [...new Set((state.skillsUsed ?? []).map((skill) => skill.name))]
+        ? [
+            ...new Set(
+              (state.skillsUsed ?? []).map((skill) =>
+                canonicalSkillName(skill.name),
+              ),
+            ),
+          ]
         : [];
       const recommendedSkills = result
-        ? [...new Set(state.intent?.recommendedSkills ?? [])]
+        ? [
+            ...new Set(
+              (state.intent?.recommendedSkills ?? []).map(canonicalSkillName),
+            ),
+          ]
         : [];
 
       if (result) {
@@ -1200,7 +1384,11 @@ export class StatsAggregator {
             adoptedSkills.length,
           );
           incrementRoutingAdoption(
-            (stats.routing.byIntent[intentId] ??= emptyRoutingCounts()),
+            getOrCreateOwnRecordValue(
+              stats.routing.byIntent,
+              intentId,
+              emptyRoutingCounts,
+            ),
             recommendedSkills.length,
             adoptedSkills.length,
           );
@@ -1220,7 +1408,11 @@ export class StatsAggregator {
         });
       } else if (projection) {
         recordProjectionStats(stats, projection);
-        const daily = (stats.daily[date] ??= createDailyBucket());
+        const daily = getOrCreateOwnRecordValue(
+          stats.daily,
+          date,
+          createDailyBucket,
+        );
         recordDailyProjectionStats(daily, projection);
       }
 

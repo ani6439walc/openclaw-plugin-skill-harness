@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import matter from "gray-matter";
 import { z } from "zod";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
@@ -66,6 +67,13 @@ const REVIEW_INSTRUCTIONS: Record<
     workflow:
       "skill-candidate: first look for the smallest reusable Experience or Concrete Workflow refinement: concrete skill/tool evidence, stable parameters, recovery, pitfalls, required ordering, or tool-call compression. When the trigger came from many tool calls, explicitly check whether future turns could use batched reads, one-purpose scripts, safe pipelines, reusable command templates, or a more specific skill to reduce repeated calls. Prefer refining the matched intent; if it is the wrong boundary, use the Intent Catalog to choose an existing umbrella intent to refine before returning outside-intent-scope. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
   },
+  "skill-placement": {
+    focus:
+      "Review one host-selected resolved skill from skill_placement_candidate and decide whether one existing class-level runtime intent should reference it. Use the complete Intent Catalog skills metadata to avoid duplicate or weak placement.",
+    goal: "Place the selected skill in exactly one best-fit runtime intent, or return no_finding when its existing placement is already adequate or no durable intent boundary fits.",
+    workflow:
+      "skill-placement: treat skill_placement_candidate as the only target skill. Inspect only the selected skill with skill_view; do not inspect unrelated skills. Choose exactly one existing best-fit class-level intent from the full Intent Catalog. A positive finding must use operation=refine, exactly one targetIntentId, and a direct edit to that runtime intent Markdown. Add or preserve the exact selected skill name in frontmatter skills and add only the minimum durable workflow or Experience guidance needed to explain when it applies. Do not create, split, merge, rename, or delete intents; do not edit the skill itself, source code, config, or state JSON. Return no_finding when the selected skill is already adequately placed, is transient or too narrow, or has no suitable durable intent boundary.",
+  },
   "process-gap": {
     focus:
       "Trace the failed execution and recovery path, then identify which missing intent guideline, tool call example, workflow step, or Experience pitfall would have prevented the gap.",
@@ -119,6 +127,7 @@ const REVIEW_INSTRUCTIONS: Record<
 
 const CATALOG_CONTEXT_TRIGGERS = new Set<ReviewTrigger>([
   "skill-candidate",
+  "skill-placement",
   "missing-intent",
   "weak-intent",
   "behavior-fix",
@@ -669,7 +678,12 @@ Important reminders for tool use:
 
 function buildReviewToolsAllow(triggers: readonly ReviewTrigger[]): string[] {
   const tools = ["read", "write", "apply_patch"];
-  if (triggers.includes("skill-candidate")) tools.push("skill_view");
+  if (
+    triggers.includes("skill-candidate") ||
+    triggers.includes("skill-placement")
+  ) {
+    tools.push("skill_view");
+  }
   return tools;
 }
 
@@ -917,6 +931,61 @@ function concurrentIntentConflicts(
       return before.get(file) !== current.get(file);
     })
     .sort((a, b) => a.localeCompare(b));
+}
+
+function validateSkillPlacementChanges(params: {
+  snapshot: ReviewSnapshot;
+  findings: readonly ReviewFinding[];
+  after: ReadonlyMap<string, string>;
+}): string[] {
+  const placementFindings = params.findings.filter(
+    (
+      finding,
+    ): finding is Extract<ReviewFinding, { targetKind: "intent-markdown" }> =>
+      finding.trigger === "skill-placement" &&
+      finding.targetKind === "intent-markdown",
+  );
+  if (placementFindings.length === 0) return [];
+  if (placementFindings.length !== 1) {
+    return ["skill-placement must return exactly one positive finding"];
+  }
+
+  const candidate = params.snapshot.skillPlacementCandidate;
+  if (!candidate) {
+    return ["skill-placement positive finding is missing its host candidate"];
+  }
+  const finding = placementFindings[0]!;
+  if (finding.operation !== "refine") {
+    return ["skill-placement positive finding must use operation refine"];
+  }
+  if (finding.targetIntentIds.length !== 1) {
+    return [
+      "skill-placement positive finding must declare exactly one target intent",
+    ];
+  }
+
+  const targetIntentId = finding.targetIntentIds[0]!;
+  const content = params.after.get(`${targetIntentId}.md`);
+  if (content === undefined) {
+    return [
+      `skill-placement target ${targetIntentId} must remain an intent file`,
+    ];
+  }
+  const skills = matter(content).data.skills;
+  const candidateName = candidate.name.trim().toLowerCase();
+  if (
+    !Array.isArray(skills) ||
+    !skills.some(
+      (skill) =>
+        typeof skill === "string" &&
+        skill.trim().toLowerCase() === candidateName,
+    )
+  ) {
+    return [
+      `skill-placement target ${targetIntentId} does not reference selected skill ${candidate.name}`,
+    ];
+  }
+  return [];
 }
 
 interface StagedIntentWrite {
@@ -1210,6 +1279,18 @@ export async function runReviewSubagent(params: {
         };
         return failure;
       }
+    }
+    const skillPlacementErrors = validateSkillPlacementChanges({
+      snapshot: params.snapshot,
+      findings: parsed.findings,
+      after: afterIntentFiles,
+    });
+    if (skillPlacementErrors.length > 0) {
+      return {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: skillPlacementErrors,
+      };
     }
     const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
     const conflictIds = concurrentIntentConflicts(

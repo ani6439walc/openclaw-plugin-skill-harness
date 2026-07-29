@@ -34,6 +34,7 @@ describe("resolveConfig", () => {
         timeoutMs: 30000,
         triggers: {
           skillCandidate: { enabled: true, toolCalls: 5 },
+          skillPlacement: { enabled: true },
           processGap: { enabled: true, toolFailures: 2 },
           successfulPattern: {
             enabled: true,
@@ -87,6 +88,7 @@ describe("resolveConfig", () => {
           timeoutMs: 600000,
           triggers: {
             skillCandidate: { enabled: false, toolCalls: 0 },
+            skillPlacement: { enabled: false },
             processGap: { toolFailures: 500 },
             successfulPattern: {
               toolCalls: 0,
@@ -109,6 +111,7 @@ describe("resolveConfig", () => {
         timeoutMs: 600000,
         triggers: {
           skillCandidate: { enabled: false, toolCalls: 1 },
+          skillPlacement: { enabled: false },
           processGap: { enabled: true, toolFailures: 100 },
           successfulPattern: {
             enabled: true,

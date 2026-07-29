@@ -49,6 +49,7 @@ const DEFAULT_REVIEW = {
   timeoutMs: 30_000,
   triggers: {
     skillCandidate: { enabled: true, toolCalls: 5 },
+    skillPlacement: { enabled: true },
     processGap: { enabled: true, toolFailures: 2 },
     successfulPattern: {
       enabled: true,
@@ -157,6 +158,9 @@ const ReviewSchema = z
             toolCalls: boundedInt(5, 1, 100),
           })
           .catch(DEFAULT_REVIEW.triggers.skillCandidate),
+        skillPlacement: z
+          .object({ enabled: enabledSchema })
+          .catch(DEFAULT_REVIEW.triggers.skillPlacement),
         processGap: z
           .object({
             enabled: enabledSchema,

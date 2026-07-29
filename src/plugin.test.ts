@@ -120,7 +120,7 @@ describe("createPlugin", () => {
     fs.writeFileSync(path.join(dataRoot, "stats.json"), '{"stats":true}');
     fs.writeFileSync(
       path.join(dataRoot, "review.json"),
-      '{"schemaVersion":4,"createdAt":"2026-07-01T00:00:00.000Z","updatedAt":"2026-07-01T00:00:00.000Z","processedEvents":{},"triggerKeywords":{}}',
+      '{"schemaVersion":5,"createdAt":"2026-07-01T00:00:00.000Z","updatedAt":"2026-07-01T00:00:00.000Z","processedEvents":{},"reviewedSkillEpochs":{},"triggerKeywords":{"successfulPattern":[],"behaviorFix":[],"entityContext":[]}}',
     );
 
     createPlugin(api).register(api);
@@ -136,40 +136,18 @@ describe("createPlugin", () => {
     );
   });
 
-  it("migrates legacy review logs into review.json without deleting the source", () => {
+  it("ignores legacy evolution.json without creating review.json", () => {
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(dataRoot, { recursive: true });
-    const legacyLog =
-      '{"schemaVersion":4,"createdAt":"2026-07-01T00:00:00.000Z","updatedAt":"2026-07-01T00:00:00.000Z","processedEvents":{},"triggerKeywords":{"successfulPattern":["done"]}}';
+    const legacyLog = '{"schemaVersion":4}';
     fs.writeFileSync(path.join(dataRoot, "evolution.json"), legacyLog);
 
     initializePluginDataRoot({ dataRoot });
 
-    expect(fs.existsSync(path.join(dataRoot, "evolution.json"))).toBe(true);
     expect(
-      JSON.parse(fs.readFileSync(path.join(dataRoot, "review.json"), "utf-8")),
-    ).toMatchObject({
-      schemaVersion: 4,
-      triggerKeywords: { successfulPattern: ["done"] },
-    });
-  });
-
-  it("does not overwrite an existing review.json during legacy review log migration", () => {
-    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-    fs.mkdirSync(dataRoot, { recursive: true });
-    const currentLog =
-      '{"schemaVersion":4,"createdAt":"2026-07-02T00:00:00.000Z","updatedAt":"2026-07-02T00:00:00.000Z","processedEvents":{},"triggerKeywords":{"successfulPattern":["current"]}}';
-    fs.writeFileSync(path.join(dataRoot, "review.json"), currentLog);
-    fs.writeFileSync(
-      path.join(dataRoot, "evolution.json"),
-      '{"schemaVersion":4,"createdAt":"2026-07-01T00:00:00.000Z","updatedAt":"2026-07-01T00:00:00.000Z","processedEvents":{},"triggerKeywords":{"successfulPattern":["legacy"]}}',
-    );
-
-    initializePluginDataRoot({ dataRoot });
-
-    expect(fs.readFileSync(path.join(dataRoot, "review.json"), "utf-8")).toBe(
-      currentLog,
-    );
+      fs.readFileSync(path.join(dataRoot, "evolution.json"), "utf-8"),
+    ).toBe(legacyLog);
+    expect(fs.existsSync(path.join(dataRoot, "review.json"))).toBe(false);
   });
 
   it("loads runtime intents from the fixed data-root intents directory", () => {

@@ -7,6 +7,7 @@ import {
 
 export const REVIEW_TRIGGER_TYPES = [
   "skill-candidate",
+  "skill-placement",
   "process-gap",
   "successful-pattern",
   "satisfaction-check",

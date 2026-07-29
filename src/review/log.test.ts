@@ -30,56 +30,36 @@ describe("review log", () => {
     }
   });
 
-  it("creates a v4 review log without pending items", () => {
+  it("creates a v5 review log with an empty skill epoch ledger", () => {
     expect(createReviewLog("2026-06-11T00:00:00.000Z")).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
       triggerKeywords: DEFAULT_REVIEW_TRIGGER_KEYWORDS,
       processedEvents: {},
+      reviewedSkillEpochs: {},
     });
   });
 
-  it("migrates legacy v1-v3 files by keeping processedEvents and dropping items", () => {
-    const migrated = parseReviewLog({
-      schemaVersion: 3,
-      createdAt: "2026-06-11T00:00:00.000Z",
-      updatedAt: "2026-06-11T00:00:00.000Z",
-      triggerKeywords: { successfulPattern: ["done"] },
-      processedEvents: {
-        event: {
-          processedAt: "2026-06-11T00:01:00.000Z",
-          triggers: ["behavior_fix"],
-          findingCount: 1,
-          outcome: "wrote-items",
-        },
-      },
-      items: [{ id: "legacy" }],
-    });
-
-    expect(migrated).toMatchObject({
-      schemaVersion: 4,
-      createdAt: "2026-06-11T00:00:00.000Z",
-      updatedAt: "2026-06-11T00:00:00.000Z",
-      triggerKeywords: { successfulPattern: ["done"] },
-      processedEvents: {
-        event: {
-          processedAt: "2026-06-11T00:01:00.000Z",
-          triggers: ["behavior-fix"],
-          changeCount: 1,
-          outcome: "applied",
-        },
-      },
-    });
-    expect(migrated).not.toHaveProperty("items");
+  it.each([1, 2, 3, 4])("rejects legacy v%s review logs", (schemaVersion) => {
+    expect(() =>
+      parseReviewLog({
+        schemaVersion,
+        createdAt: "2026-06-11T00:00:00.000Z",
+        updatedAt: "2026-06-11T00:00:00.000Z",
+        triggerKeywords: DEFAULT_REVIEW_TRIGGER_KEYWORDS,
+        processedEvents: {},
+      }),
+    ).toThrow();
   });
 
   it("parses structured processed event records", () => {
     const parsed = parseReviewLog({
-      schemaVersion: 4,
+      schemaVersion: 5,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
       triggerKeywords: DEFAULT_REVIEW_TRIGGER_KEYWORDS,
+      reviewedSkillEpochs: {},
       processedEvents: {
         "session-1:turn-1": {
           processedAt: "2026-06-11T00:01:00.000Z",
@@ -118,12 +98,13 @@ describe("review log", () => {
     });
   });
 
-  it("parses sanitized reason counts on processed events", () => {
+  it("parses allowlisted reason counts on processed events", () => {
     const parsed = parseReviewLog({
-      schemaVersion: 4,
+      schemaVersion: 5,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
       triggerKeywords: DEFAULT_REVIEW_TRIGGER_KEYWORDS,
+      reviewedSkillEpochs: {},
       processedEvents: {
         "session-1:turn-1": {
           processedAt: "2026-06-11T00:01:00.000Z",
@@ -133,13 +114,10 @@ describe("review log", () => {
           noFindingReasonCounts: {
             "routine-tool-use": 2,
             "wrong-trigger": 1,
-            "raw user text should not survive": 99,
-            "privacy-sensitive": 0,
           },
           schemaRejectionReasonCounts: {
             "missing-target": 2,
             "missing-trigger-decision": 1,
-            "raw zod message should not survive": 99,
           },
         },
       },
@@ -157,32 +135,69 @@ describe("review log", () => {
     });
   });
 
-  it("seeds legacy config keywords while migrating legacy logs", () => {
-    const parsed = parseReviewLog(
-      {
-        schemaVersion: 2,
-        createdAt: "2026-06-11T00:00:00.000Z",
-        updatedAt: "2026-06-11T00:00:00.000Z",
-        processedEvents: {},
+  it("rejects unknown legacy fields in v5 logs", () => {
+    expect(() =>
+      parseReviewLog({
+        ...createReviewLog("2026-06-11T00:00:00.000Z"),
         items: [],
-      },
-      {
-        behaviorFix: ["my correction"],
-        successfulPattern: [],
-        entityContext: ["看看"],
-      },
-    );
+      }),
+    ).toThrow();
+  });
 
-    expect(parsed.triggerKeywords).toEqual({
-      behaviorFix: ["my correction"],
-      successfulPattern: [],
-      entityContext: ["看看"],
-    });
+  it.each([
+    {
+      name: "wrong trigger keyword field type",
+      mutate: (log: Record<string, unknown>) => {
+        log.triggerKeywords = {
+          ...DEFAULT_REVIEW_TRIGGER_KEYWORDS,
+          successfulPattern: "ship it",
+        };
+      },
+    },
+    {
+      name: "unknown processed record field",
+      mutate: (log: Record<string, unknown>) => {
+        log.processedEvents = {
+          event: {
+            processedAt: "2026-06-11T00:01:00.000Z",
+            triggers: [],
+            changeCount: 0,
+            outcome: "nofinding",
+            legacy: true,
+          },
+        };
+      },
+    },
+    {
+      name: "legacy string processed event",
+      mutate: (log: Record<string, unknown>) => {
+        log.processedEvents = { event: "2026-06-11T00:01:00.000Z" };
+      },
+    },
+    ...["wrote-items", "unknown"].map((outcome) => ({
+      name: `${outcome} outcome`,
+      mutate: (log: Record<string, unknown>) => {
+        log.processedEvents = {
+          event: {
+            processedAt: "2026-06-11T00:01:00.000Z",
+            triggers: [],
+            changeCount: 0,
+            outcome,
+          },
+        };
+      },
+    })),
+  ])("rejects $name in current v5 logs", ({ mutate }) => {
+    const log = createReviewLog(
+      "2026-06-11T00:00:00.000Z",
+    ) as unknown as Record<string, unknown>;
+    mutate(log);
+    expect(() => parseReviewLog(log)).toThrow();
   });
 
   it("parses and normalizes root trigger keyword fields", () => {
     const parsed = parseReviewLog({
-      schemaVersion: 4,
+      schemaVersion: 5,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
       triggerKeywords: {
@@ -191,6 +206,7 @@ describe("review log", () => {
         entityContext: [" 看一下 "],
       },
       processedEvents: {},
+      reviewedSkillEpochs: {},
     });
 
     expect(parsed.triggerKeywords).toEqual({
@@ -211,11 +227,15 @@ describe("review log", () => {
   it("reads trigger keywords from an existing review log", () => {
     const logPath = createTempLogPath();
     writeLogFixture(logPath, {
-      schemaVersion: 4,
+      schemaVersion: 5,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
-      triggerKeywords: { behaviorFix: ["fix it"] },
+      triggerKeywords: {
+        ...DEFAULT_REVIEW_TRIGGER_KEYWORDS,
+        behaviorFix: ["fix it"],
+      },
       processedEvents: {},
+      reviewedSkillEpochs: {},
     });
 
     expect(readReviewTriggerKeywords(logPath)).toMatchObject({
@@ -227,7 +247,7 @@ describe("review log", () => {
     const logPath = createTempLogPath();
     writeLogFixture(logPath, createReviewLog("2026-06-11T00:00:00.000Z"));
 
-    expect(readReviewLog(logPath)).toMatchObject({ schemaVersion: 4 });
+    expect(readReviewLog(logPath)).toMatchObject({ schemaVersion: 5 });
   });
 
   it("prunes old or corrupt processed event records", () => {

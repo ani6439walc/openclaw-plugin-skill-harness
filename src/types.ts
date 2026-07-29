@@ -10,6 +10,7 @@ export type LowThinkingMode = "fastpath-only" | "full" | "off";
 
 export type ReviewTriggersConfig = {
   skillCandidate?: { enabled?: boolean; toolCalls?: number };
+  skillPlacement?: { enabled?: boolean };
   processGap?: { enabled?: boolean; toolFailures?: number };
   successfulPattern?: {
     enabled?: boolean;
@@ -40,6 +41,7 @@ export type ResolvedReviewConfig = {
   timeoutMs: number;
   triggers: {
     skillCandidate: { enabled: boolean; toolCalls: number };
+    skillPlacement: { enabled: boolean };
     processGap: { enabled: boolean; toolFailures: number };
     successfulPattern: {
       enabled: boolean;

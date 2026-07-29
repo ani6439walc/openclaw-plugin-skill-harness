@@ -38,7 +38,8 @@ export type HookDeps = {
   classifier?: typeof runIntentionSubagent;
   topicChecker?: typeof runTopicSwitchSubagent;
   instructionWriter?: typeof runIntentInstructionSubagent;
-  reviewLogWriter?: Pick<ReviewLogWriter, "record">;
+  reviewLogWriter?: Pick<ReviewLogWriter, "record"> &
+    Partial<Pick<ReviewLogWriter, "completedSkillEpochKeys">>;
   triggerKeywords?: () => ReviewTriggerKeywords;
   bundledSkillsDir?: string;
   dataRoot?: string;

@@ -698,13 +698,41 @@ description: Navigate Tokyo.
     vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
     vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
+    vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue({
+      sessionId: "tracked-session",
+      agentId: "agent-a",
+      eventId: "tracked-session:2026-07-06T15:47:27.004Z",
+      turnNumber: 1,
+      current: {
+        timestamps: {
+          start: "2026-07-06T15:47:27.004Z",
+          end: "2026-07-06T15:48:27.004Z",
+        },
+      },
+      recent: [],
+      intentCatalog: [],
+    });
     vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
     vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
     const recordStats = vi
       .spyOn(defaultStatsAggregator, "record")
       .mockReturnValue(true);
+    const selectPlacement = vi.spyOn(
+      defaultStatsAggregator,
+      "selectSkillPlacementCandidate",
+    );
 
-    await createHandlers({}, { skillInventoryResolver: resolver }).onAgentEnd(
+    await createHandlers(
+      {},
+      {
+        config: () => resolveConfig({ review: { enabled: true } }),
+        skillInventoryResolver: resolver,
+        reviewLogWriter: {
+          completedSkillEpochKeys: () => new Set<string>(),
+          record: vi.fn(),
+        },
+      },
+    ).onAgentEnd(
       { messages: [{ role: "assistant", content: "done" }] } as never,
       { sessionId: "event-session", agentId: "agent-a" } as never,
     );
@@ -714,6 +742,7 @@ description: Navigate Tokyo.
       state,
       undefined,
     );
+    expect(selectPlacement).not.toHaveBeenCalled();
   });
 
   it("does not resolve inventory for an unrecordable stats event", async () => {
@@ -935,7 +964,14 @@ description: Navigate Tokyo.
       outcome: "nofinding" as const,
       noFindingReasonCounts: { "wrong-trigger": 1 },
     });
-    const reviewLogWriter = { record: vi.fn() };
+    const selectPlacement = vi.spyOn(
+      defaultStatsAggregator,
+      "selectSkillPlacementCandidate",
+    );
+    const reviewLogWriter = {
+      completedSkillEpochKeys: vi.fn().mockReturnValue(undefined),
+      record: vi.fn(),
+    };
     const handlers = createHookHandlers({
       api: {
         config: {},
@@ -966,6 +1002,7 @@ description: Navigate Tokyo.
     });
 
     expect(enqueue).toHaveBeenCalledOnce();
+    expect(selectPlacement).not.toHaveBeenCalled();
     expect(reviewer).not.toHaveBeenCalled();
     await enqueue.mock.calls[0][0]();
     expect(reviewer).toHaveBeenCalledWith(
@@ -985,6 +1022,7 @@ description: Navigate Tokyo.
               triggers: ["Unmatched requests"],
               examples: ["help"],
               domain: "other",
+              skills: ["analysis"],
               fastpath: { keywords: [], hint: undefined },
             },
           ],
@@ -1014,6 +1052,338 @@ description: Navigate Tokyo.
         noFindingReasonCounts: { "wrong-trigger": 1 },
       },
     );
+  });
+
+  it("preserves ordinary review when placement skill re-resolution fails", async () => {
+    const snapshot = {
+      sessionId: "session-placement-fallback",
+      agentId: "persisted-agent",
+      eventId: "session-placement-fallback:2026-07-29T00:00:00.000Z",
+      turnNumber: 21,
+      current: {
+        input: "wrong",
+        intent: {
+          intent: "other",
+          reason: "same topic",
+          domain: "other",
+          confidence: 0.95,
+          complexity: "low" as const,
+        },
+        timestamps: { start: "2026-07-29T00:00:00.000Z" },
+      },
+      recent: [],
+      intentCatalog: [],
+    };
+    const candidate = {
+      epochKey: "b".repeat(64),
+      agentId: "persisted-agent",
+      name: "source-driven-development",
+      source: "workspace" as const,
+      reason: "zero-recommendation-usage" as const,
+      observedTurns: 20,
+      usageTurns: 0,
+      recommendedTurns: 0,
+    };
+    vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
+    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue({
+      input: snapshot.current.input,
+      intent: { result: snapshot.current.intent },
+      timestamps: snapshot.current.timestamps,
+    });
+    vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue(snapshot);
+    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("persisted-agent");
+    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+    const selectCandidate = vi
+      .spyOn(defaultStatsAggregator, "selectSkillPlacementCandidate")
+      .mockReturnValue(candidate);
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
+    const enqueue = vi.fn();
+    const reviewer = vi.fn().mockResolvedValue({
+      findings: [],
+      outcome: "nofinding" as const,
+    });
+    const handlers = createHookHandlers({
+      api: {
+        config: {},
+        runtime: {
+          state: { resolveStateDir: () => "/missing-state" },
+          agent: {
+            resolveAgentWorkspaceDir: vi.fn(() => "/missing-workspace"),
+          },
+        },
+      } as unknown as OpenClawPluginApi,
+      config: () =>
+        resolveConfig({
+          review: {
+            enabled: true,
+            model: "google/test-review",
+            triggers: {
+              skillCandidate: { enabled: false },
+              processGap: { enabled: false },
+              successfulPattern: { enabled: false },
+              satisfactionCheck: { enabled: false },
+              missingIntent: { enabled: false },
+              weakIntent: { enabled: false },
+              behaviorFix: { enabled: true },
+              entityContext: { enabled: false },
+              skillPlacement: { enabled: true },
+            },
+          },
+        }),
+      refreshLiveConfigFromRuntime: vi.fn(),
+      refreshIntents: vi.fn(),
+      reviewQueue: { enqueue },
+      reviewer,
+      reviewLogWriter: {
+        completedSkillEpochKeys: vi.fn(() => new Set<string>()),
+        record: vi.fn(async () => true),
+      },
+      skillInventoryResolver: vi.fn().mockResolvedValue([]),
+    });
+
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "event-session-fallback-a",
+      agentId: "ctx-agent",
+    });
+
+    expect(enqueue).toHaveBeenCalledOnce();
+    await enqueue.mock.calls[0][0]();
+    expect(reviewer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "ctx-agent",
+        triggers: ["behavior-fix"],
+      }),
+    );
+    expect(reviewer.mock.calls[0][0].snapshot).not.toHaveProperty(
+      "skillPlacementCandidate",
+    );
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "event-session-fallback-b",
+      agentId: "ctx-agent",
+    });
+    expect(selectCandidate).toHaveBeenCalledTimes(2);
+    expect(enqueue).toHaveBeenCalledTimes(2);
+  });
+
+  it("enqueues one skill-placement review from the persisted agent inventory", async () => {
+    const snapshot = {
+      sessionId: "session-placement",
+      agentId: "persisted-agent",
+      eventId: "session-placement:2026-07-29T00:00:00.000Z",
+      turnNumber: 21,
+      current: {
+        input: "continue",
+        intent: {
+          intent: "other",
+          reason: "same topic",
+          domain: "other",
+          confidence: 0.95,
+          complexity: "low" as const,
+        },
+        timestamps: { start: "2026-07-29T00:00:00.000Z" },
+      },
+      recent: [],
+      intentCatalog: [],
+    };
+    const candidate = {
+      epochKey: "a".repeat(64),
+      agentId: "persisted-agent",
+      name: "source-driven-development",
+      source: "workspace" as const,
+      reason: "zero-recommendation-usage" as const,
+      observedTurns: 20,
+      usageTurns: 0,
+      recommendedTurns: 0,
+    };
+    const definition = {
+      id: "other",
+      definition: {
+        triggers: ["Unmatched requests"],
+        examples: ["help"],
+        domain: "other",
+        skills: ["source-driven-development"],
+        fastpath: { keywords: [] },
+        prompt: "## Guidelines\n\n- Ask for context.",
+      },
+    };
+    vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
+    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue({
+      input: snapshot.current.input,
+      intent: { result: snapshot.current.intent },
+      timestamps: snapshot.current.timestamps,
+    });
+    vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue(snapshot);
+    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("persisted-agent");
+    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+    const selectCandidate = vi
+      .spyOn(defaultStatsAggregator, "selectSkillPlacementCandidate")
+      .mockImplementation((_agentId, excludedEpochKeys) =>
+        (excludedEpochKeys ?? new Set()).has(candidate.epochKey)
+          ? undefined
+          : candidate,
+      );
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-placement-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const missingWorkspaceDir = path.join(tmp, "missing-workspace");
+    const skillDir = path.join(
+      workspaceDir,
+      "skills",
+      "source-driven-development",
+    );
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: source-driven-development\ndescription: Ground work in primary sources.\n---\n",
+    );
+    const enqueue = vi.fn();
+    const reviewer = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("reviewer failed"))
+      .mockResolvedValue({
+        findings: [],
+        outcome: "nofinding" as const,
+      });
+    const completedEpochKeys = new Set<string>();
+    let failLogWrite = true;
+    const reviewLogWriter = {
+      completedSkillEpochKeys: vi.fn(() => new Set(completedEpochKeys)),
+      record: vi.fn(async (_eventId, _source, _findings, options) => {
+        if (failLogWrite) {
+          failLogWrite = false;
+          return false;
+        }
+        if (
+          options.skillPlacementCandidate &&
+          options.outcome === "nofinding"
+        ) {
+          completedEpochKeys.add(options.skillPlacementCandidate.epochKey);
+        }
+        return true;
+      }),
+    };
+    const handlers = createHookHandlers({
+      api: {
+        config: {},
+        runtime: {
+          state: { resolveStateDir: () => "/missing-state" },
+          agent: {
+            resolveAgentWorkspaceDir: vi
+              .fn()
+              .mockReturnValueOnce(missingWorkspaceDir)
+              .mockReturnValue(workspaceDir),
+          },
+        },
+      } as unknown as OpenClawPluginApi,
+      config: () =>
+        resolveConfig({
+          review: {
+            enabled: true,
+            model: "google/test-review",
+            triggers: {
+              skillCandidate: { enabled: false },
+              processGap: { enabled: false },
+              successfulPattern: { enabled: false },
+              satisfactionCheck: { enabled: false },
+              missingIntent: { enabled: false },
+              weakIntent: { enabled: false },
+              behaviorFix: { enabled: false },
+              entityContext: { enabled: false },
+              skillPlacement: { enabled: true },
+            },
+          },
+        }),
+      refreshLiveConfigFromRuntime: vi.fn(),
+      refreshIntents: vi.fn(),
+      reviewQueue: { enqueue },
+      reviewer,
+      reviewLogWriter,
+      skillInventoryResolver: vi.fn().mockResolvedValue([]),
+    });
+
+    await Promise.all([
+      handlers.onAgentEnd({ messages: [] } as never, {
+        sessionId: "event-session-a",
+        agentId: "ctx-agent",
+      }),
+      handlers.onAgentEnd({ messages: [] } as never, {
+        sessionId: "event-session-b",
+        agentId: "ctx-agent",
+      }),
+    ]);
+
+    expect(selectCandidate).toHaveBeenCalledWith(
+      "persisted-agent",
+      new Set<string>(),
+    );
+    expect(enqueue).not.toHaveBeenCalled();
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "event-session-c",
+      agentId: "ctx-agent",
+    });
+    expect(enqueue).toHaveBeenCalledOnce();
+    await expect(enqueue.mock.calls[0][0]()).rejects.toThrow("reviewer failed");
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "event-session-d",
+      agentId: "ctx-agent",
+    });
+    expect(enqueue).toHaveBeenCalledTimes(2);
+    await enqueue.mock.calls[1][0]();
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "event-session-e",
+      agentId: "ctx-agent",
+    });
+    expect(enqueue).toHaveBeenCalledTimes(3);
+    await enqueue.mock.calls[2][0]();
+    expect(reviewer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "persisted-agent",
+        triggers: ["skill-placement"],
+        snapshot: expect.objectContaining({
+          skillPlacementCandidate: {
+            ...candidate,
+            currentlyReferencedIntentIds: ["other"],
+          },
+          availableSkills: [
+            {
+              name: "source-driven-development",
+              location: path.join(skillDir, "SKILL.md"),
+              description: "Ground work in primary sources.",
+            },
+          ],
+          intentCatalog: [
+            expect.objectContaining({
+              id: "other",
+              skills: ["source-driven-development"],
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(reviewLogWriter.record).toHaveBeenCalledWith(
+      snapshot.eventId,
+      expect.objectContaining({ agentId: "persisted-agent" }),
+      [],
+      expect.objectContaining({
+        triggers: ["skill-placement"],
+        outcome: "nofinding",
+        skillPlacementCandidate: expect.objectContaining({
+          epochKey: candidate.epochKey,
+        }),
+      }),
+    );
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "event-session-f",
+      agentId: "ctx-agent",
+    });
+    expect(enqueue).toHaveBeenCalledTimes(3);
   });
 });
 

@@ -33,6 +33,7 @@ export interface CatalogProjection {
 const FULL_CATALOG_TRIGGERS = new Set<ReviewTrigger>([
   "missing-intent",
   "weak-intent",
+  "skill-placement",
 ]);
 
 const PROJECTED_CATALOG_TRIGGERS = new Set<ReviewTrigger>([

@@ -11,11 +11,7 @@ import { IntentCatalog } from "./intents/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { ReviewLogWriter } from "./review/log-writer.js";
-import {
-  readReviewLog,
-  readReviewTriggerKeywords,
-  writeReviewLogAtomic,
-} from "./review/log.js";
+import { readReviewTriggerKeywords } from "./review/log.js";
 import {
   normalizeReviewTriggerKeywords,
   type ReviewTriggerKeywords,
@@ -27,7 +23,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   intentsPath,
-  legacyReviewLogPath,
   reviewLogPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
@@ -104,24 +99,6 @@ function seedExampleIntents(dataRoot: string, packageRoot: string): void {
   }
 }
 
-function migrateLegacyReviewLog(dataRoot: string): void {
-  const targetPath = reviewLogPath(dataRoot);
-  if (fs.existsSync(targetPath)) return;
-
-  const sourcePath = legacyReviewLogPath(dataRoot);
-  if (!fs.existsSync(sourcePath)) return;
-
-  try {
-    writeReviewLogAtomic(targetPath, readReviewLog(sourcePath));
-  } catch (err) {
-    logger.warn("failed to migrate legacy review log", {
-      error: err,
-      sourcePath,
-      targetPath,
-    });
-  }
-}
-
 export function initializePluginDataRoot({
   dataRoot,
   packageRoot = defaultPackageRoot,
@@ -148,8 +125,6 @@ export function initializePluginDataRoot({
       path: intentsPath(dataRoot),
     });
   }
-
-  migrateLegacyReviewLog(dataRoot);
 }
 
 export function createPlugin(

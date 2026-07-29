@@ -7,6 +7,7 @@ import {
   withFileLock,
 } from "../file-utils.js";
 import type { ReviewFinding, ReviewSource } from "./types.js";
+import type { SkillPlacementCandidate } from "../stats/aggregator.js";
 import type { ReviewTriggerKeywords } from "./trigger-keywords.js";
 import { normalizeKeywordList } from "./trigger-keywords.js";
 import {
@@ -88,6 +89,20 @@ export class ReviewLogWriter {
     return new ReviewLogWriter(pluginRoot, options);
   }
 
+  completedSkillEpochKeys(): ReadonlySet<string> | undefined {
+    const logPath = reviewLogPath(this.pluginRoot);
+    if (!fileExists(logPath)) return new Set();
+    try {
+      return new Set(Object.keys(readReviewLog(logPath).reviewedSkillEpochs));
+    } catch (error) {
+      logger.warn("failed to read completed skill epochs", {
+        error,
+        path: logPath,
+      });
+      return undefined;
+    }
+  }
+
   async record(
     eventId: string,
     source: ReviewSource,
@@ -100,6 +115,7 @@ export class ReviewLogWriter {
       validationErrors?: readonly string[];
       noFindingReasonCounts?: NoFindingReasonCounts;
       schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
+      skillPlacementCandidate?: SkillPlacementCandidate;
     } = {},
   ): Promise<boolean> {
     if (!eventId) return false;
@@ -110,7 +126,7 @@ export class ReviewLogWriter {
         const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
         const triggerKeywordSeed = this.options.triggerKeywordSeed?.();
         const log = fileExists(logPath)
-          ? readReviewLog(logPath, triggerKeywordSeed)
+          ? readReviewLog(logPath)
           : createReviewLog(nowIso, triggerKeywordSeed);
 
         pruneProcessedEvents(log, options.nowMs ?? Date.now());
@@ -173,6 +189,28 @@ export class ReviewLogWriter {
           );
         const outcome =
           options.outcome ?? (changes.length > 0 ? "applied" : "nofinding");
+
+        const candidate = options.skillPlacementCandidate;
+        if (
+          candidate &&
+          (outcome === "applied" || outcome === "nofinding") &&
+          !Object.hasOwn(log.reviewedSkillEpochs, candidate.epochKey)
+        ) {
+          Object.defineProperty(log.reviewedSkillEpochs, candidate.epochKey, {
+            configurable: true,
+            enumerable: true,
+            value: {
+              agentId: candidate.agentId,
+              skillName: candidate.name,
+              source: candidate.source,
+              reason: candidate.reason,
+              completedAt: nowIso,
+              outcome,
+              eventId,
+            },
+            writable: true,
+          });
+        }
 
         log.updatedAt = nowIso;
         log.processedEvents[eventId] = {

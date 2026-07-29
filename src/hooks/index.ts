@@ -20,8 +20,9 @@ import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { defaultReviewLogWriter } from "../review/log-writer.js";
 import { enqueueReview } from "../review/queue.js";
-import { checkReviewTriggers } from "../review/triggers.js";
+import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { runReviewSubagent } from "../review/subagent.js";
+import type { SkillPlacementReviewCandidate } from "../review/types.js";
 import {
   DEFAULT_REVIEW_TRIGGER_KEYWORDS,
   type ReviewTriggerKeywords,
@@ -485,6 +486,7 @@ export function createHookHandlers(deps: HookDeps) {
   const bundledSkillsDir = deps.bundledSkillsDir;
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const recordedToolCalls = new Set<string>();
+  const pendingSkillEpochKeys = new Set<string>();
 
   function resolvePromptBuildScope(
     ctx: PluginHookAgentContext,
@@ -1550,16 +1552,26 @@ export function createHookHandlers(deps: HookDeps) {
         })
       : statsAggregator.record(sessionId, state, intentDefinition);
     if (!recorded) return;
-    return { intentDefinition };
+    return {
+      intentDefinition,
+      agentId,
+      skillInventoryObserved: skillInventory !== undefined,
+    };
   }
 
   async function buildReviewSnapshot(
     baseSnapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>,
     intentDefinition: ReturnType<typeof findIntentDefinition>,
     agentId: string,
+    skillPlacementCandidate?: SkillPlacementReviewCandidate,
   ) {
+    const availableSkillNames = [
+      ...(intentDefinition?.definition.skills ?? []),
+      ...(skillPlacementCandidate ? [skillPlacementCandidate.name] : []),
+    ];
     return {
       ...baseSnapshot,
+      ...(skillPlacementCandidate ? { agentId } : {}),
       matchedIntent: intentDefinition
         ? {
             id: intentDefinition.id,
@@ -1570,19 +1582,22 @@ export function createHookHandlers(deps: HookDeps) {
             },
           }
         : undefined,
-      availableSkills: intentDefinition
-        ? await resolveAvailableSkills({
-            api,
-            agentId,
-            bundledSkillsDir,
-            skillNames: intentDefinition.definition.skills,
-          })
-        : [],
+      availableSkills:
+        availableSkillNames.length > 0
+          ? await resolveAvailableSkills({
+              api,
+              agentId,
+              bundledSkillsDir,
+              skillNames: [...new Set(availableSkillNames)],
+            })
+          : [],
+      ...(skillPlacementCandidate ? { skillPlacementCandidate } : {}),
       intentCatalog: catalog.get().map((entry) => ({
         id: entry.id,
         triggers: [...entry.definition.triggers],
         examples: [...entry.definition.examples],
         domain: entry.definition.domain,
+        skills: [...(entry.definition.skills ?? [])],
         fastpath: {
           keywords: [...(entry.definition.fastpath?.keywords ?? [])],
           hint: entry.definition.fastpath?.hint,
@@ -1607,44 +1622,61 @@ export function createHookHandlers(deps: HookDeps) {
     agentId: string;
     modelRef: NonNullable<ReturnType<typeof getReviewModelRef>>;
     snapshot: Awaited<ReturnType<typeof buildReviewSnapshot>>;
-    triggers: ReturnType<typeof checkReviewTriggers>;
-  }): void {
-    enqueueReviewTask(async () => {
-      const reviewResult = await reviewer({
-        api,
-        config: params.resolvedConfig,
-        agentId: params.agentId,
-        intentDirectory: intentsPath(deps.dataRoot ?? "."),
-        sessionKey: params.ctx.sessionKey ?? params.snapshot.sessionKey,
-        messageProvider: params.ctx.messageProvider,
-        modelRef: params.modelRef,
-        snapshot: params.snapshot,
-        triggers: params.triggers,
-        dataRoot: deps.dataRoot,
+    triggers: readonly ReviewTrigger[];
+    skillPlacementCandidate?: SkillPlacementReviewCandidate;
+  }): boolean {
+    try {
+      enqueueReviewTask(async () => {
+        try {
+          const reviewResult = await reviewer({
+            api,
+            config: params.resolvedConfig,
+            agentId: params.agentId,
+            intentDirectory: intentsPath(deps.dataRoot ?? "."),
+            sessionKey: params.ctx.sessionKey ?? params.snapshot.sessionKey,
+            messageProvider: params.ctx.messageProvider,
+            modelRef: params.modelRef,
+            snapshot: params.snapshot,
+            triggers: params.triggers,
+            dataRoot: deps.dataRoot,
+          });
+          if (!reviewResult) return;
+          await reviewLogWriter.record(
+            params.snapshot.eventId,
+            {
+              sessionId: params.snapshot.sessionId,
+              sessionKey: params.snapshot.sessionKey,
+              agentId: params.snapshot.agentId,
+              turnStart: params.snapshot.current.timestamps!.start!,
+            },
+            reviewResult.findings,
+            {
+              triggers: params.triggers,
+              outcome: reviewResult.outcome,
+              changedIntentIds: reviewResult.changedIntentIds,
+              validationErrors: reviewResult.validationErrors,
+              noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+              schemaRejectionReasonCounts:
+                reviewResult.schemaRejectionReasonCounts,
+              skillPlacementCandidate: params.skillPlacementCandidate,
+            },
+          );
+          if (reviewResult.changedIntentIds?.length) {
+            deps.refreshIntents();
+          }
+        } finally {
+          if (params.skillPlacementCandidate) {
+            pendingSkillEpochKeys.delete(
+              params.skillPlacementCandidate.epochKey,
+            );
+          }
+        }
       });
-      if (!reviewResult) return;
-      await reviewLogWriter.record(
-        params.snapshot.eventId,
-        {
-          sessionId: params.snapshot.sessionId,
-          sessionKey: params.snapshot.sessionKey,
-          agentId: params.snapshot.agentId,
-          turnStart: params.snapshot.current.timestamps!.start!,
-        },
-        reviewResult.findings,
-        {
-          triggers: params.triggers,
-          outcome: reviewResult.outcome,
-          changedIntentIds: reviewResult.changedIntentIds,
-          validationErrors: reviewResult.validationErrors,
-          noFindingReasonCounts: reviewResult.noFindingReasonCounts,
-          schemaRejectionReasonCounts: reviewResult.schemaRejectionReasonCounts,
-        },
-      );
-      if (reviewResult.changedIntentIds?.length) {
-        deps.refreshIntents();
-      }
-    });
+      return true;
+    } catch (error) {
+      logger.warn("failed to enqueue Intent Review", { error });
+      return false;
+    }
   }
 
   async function finalizeTrackedTurn(
@@ -1660,34 +1692,113 @@ export function createHookHandlers(deps: HookDeps) {
     if (!reviewConfig.enabled) return;
     const baseSnapshot = tracker.getReviewSnapshot(trackedSessionId);
     if (!baseSnapshot) return;
-    const agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
-    const snapshot = await buildReviewSnapshot(
-      baseSnapshot,
-      agentEndStats.intentDefinition,
-      agentId,
-    );
-    const triggers = checkReviewTriggers(
-      snapshot.current,
-      snapshot.turnNumber,
+    const triggers: ReviewTrigger[] = checkReviewTriggers(
+      baseSnapshot.current,
+      baseSnapshot.turnNumber,
       reviewConfig.triggers,
       readTriggerKeywordsFailOpen(deps.triggerKeywords),
     );
-    if (triggers.length === 0) return;
+    let skillPlacementCandidate: SkillPlacementReviewCandidate | undefined;
+    let ownsReservation = false;
+    try {
+      if (
+        reviewConfig.triggers.skillPlacement.enabled &&
+        agentEndStats.agentId &&
+        agentEndStats.skillInventoryObserved
+      ) {
+        const completedEpochKeys = reviewLogWriter.completedSkillEpochKeys?.();
+        if (completedEpochKeys) {
+          const excludedEpochKeys = new Set([
+            ...completedEpochKeys,
+            ...pendingSkillEpochKeys,
+          ]);
+          const selected = statsAggregator.selectSkillPlacementCandidate(
+            agentEndStats.agentId,
+            excludedEpochKeys,
+          );
+          if (selected) {
+            pendingSkillEpochKeys.add(selected.epochKey);
+            ownsReservation = true;
+            const canonicalName = selected.name.trim().toLowerCase();
+            skillPlacementCandidate = {
+              ...selected,
+              currentlyReferencedIntentIds: catalog
+                .get()
+                .filter((entry) =>
+                  (entry.definition.skills ?? []).some(
+                    (name) => name.trim().toLowerCase() === canonicalName,
+                  ),
+                )
+                .map((entry) => entry.id),
+            };
+            triggers.push("skill-placement");
+          }
+        }
+      }
+      if (triggers.length === 0) return;
 
-    const modelRef = getReviewModelRef(api, agentId, resolvedConfig, {
-      modelProviderId: ctx.modelProviderId,
-      modelId: ctx.modelId,
-    });
-    if (!modelRef) return;
+      let agentId = skillPlacementCandidate
+        ? agentEndStats.agentId!
+        : (ctx.agentId ?? baseSnapshot.agentId ?? "main");
+      let modelRef = getReviewModelRef(api, agentId, resolvedConfig, {
+        modelProviderId: ctx.modelProviderId,
+        modelId: ctx.modelId,
+      });
+      if (!modelRef) return;
+      let snapshot = await buildReviewSnapshot(
+        baseSnapshot,
+        agentEndStats.intentDefinition,
+        agentId,
+        skillPlacementCandidate,
+      );
+      const placementSkillName = skillPlacementCandidate?.name
+        .trim()
+        .toLowerCase();
+      if (
+        placementSkillName &&
+        !snapshot.availableSkills.some(
+          (skill) => skill.name.trim().toLowerCase() === placementSkillName,
+        )
+      ) {
+        pendingSkillEpochKeys.delete(skillPlacementCandidate!.epochKey);
+        ownsReservation = false;
+        skillPlacementCandidate = undefined;
+        const placementTriggerIndex = triggers.indexOf("skill-placement");
+        if (placementTriggerIndex >= 0)
+          triggers.splice(placementTriggerIndex, 1);
+        if (triggers.length === 0) return;
 
-    enqueueReviewRun({
-      ctx,
-      resolvedConfig,
-      agentId,
-      modelRef,
-      snapshot,
-      triggers,
-    });
+        agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
+        modelRef = getReviewModelRef(api, agentId, resolvedConfig, {
+          modelProviderId: ctx.modelProviderId,
+          modelId: ctx.modelId,
+        });
+        if (!modelRef) return;
+        snapshot = await buildReviewSnapshot(
+          baseSnapshot,
+          agentEndStats.intentDefinition,
+          agentId,
+          undefined,
+        );
+      }
+
+      const enqueued = enqueueReviewRun({
+        ctx,
+        resolvedConfig,
+        agentId,
+        modelRef,
+        snapshot,
+        triggers,
+        skillPlacementCandidate,
+      });
+      if (enqueued) ownsReservation = false;
+    } catch (error) {
+      logger.warn("failed to prepare Intent Review", { error });
+    } finally {
+      if (ownsReservation && skillPlacementCandidate) {
+        pendingSkillEpochKeys.delete(skillPlacementCandidate.epochKey);
+      }
+    }
   }
 
   async function onAgentEnd(

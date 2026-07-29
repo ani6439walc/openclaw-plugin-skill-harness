@@ -73,7 +73,7 @@ function snapshot(
 }
 
 describe("projectIntentCatalog", () => {
-  it.each(["missing-intent", "weak-intent"] as const)(
+  it.each(["missing-intent", "weak-intent", "skill-placement"] as const)(
     "forces the complete catalog when a multi-trigger run contains %s",
     (trigger) => {
       const input = snapshot();

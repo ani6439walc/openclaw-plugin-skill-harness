@@ -23,6 +23,16 @@ describe("ReviewLogWriter", () => {
     correctionGoal: "Preserve deployment workflow",
     suggestedChange: "Updated productivity.md Experience with deployment flow",
   };
+  const skillPlacementCandidate = {
+    epochKey: "a".repeat(64),
+    agentId: "main",
+    name: "unused-skill",
+    source: "workspace" as const,
+    reason: "zero-recommendation-usage" as const,
+    observedTurns: 20,
+    usageTurns: 0,
+    recommendedTurns: 0,
+  };
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "review-writer-"));
@@ -46,7 +56,7 @@ describe("ReviewLogWriter", () => {
     ).toBe(true);
 
     expect(readLog()).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       updatedAt: "2026-06-11T00:01:00.000Z",
       processedEvents: {
         "session-1:turn-1": {
@@ -126,7 +136,7 @@ describe("ReviewLogWriter", () => {
     ).toBe(true);
 
     expect(readLog()).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       triggerKeywords: expect.objectContaining({
         successfulPattern: expect.arrayContaining(["verified", "ship it"]),
       }),
@@ -170,41 +180,21 @@ describe("ReviewLogWriter", () => {
     );
   });
 
-  it("migrates legacy v3 review files by dropping legacy items", async () => {
+  it("preserves legacy review files without migration", async () => {
     const logPath = path.join(root, "review.json");
-    fs.writeFileSync(
-      logPath,
-      JSON.stringify({
-        schemaVersion: 3,
-        createdAt: "2026-06-10T00:00:00.000Z",
-        updatedAt: "2026-06-10T00:00:00.000Z",
-        triggerKeywords: { successfulPattern: ["done"] },
-        processedEvents: {},
-        items: [
-          {
-            id: "IMP-20260610-001",
-            type: finding.trigger,
-            dedupeKey: finding.dedupeKey,
-            summary: "old",
-            correctionGoal: "old",
-            details: { evidence: [], suggestedChange: "old" },
-            frequency: 1,
-            sources: [source],
-            createdAt: "2026-06-10T00:00:00.000Z",
-            updatedAt: "2026-06-10T00:00:00.000Z",
-            status: "pending",
-          },
-        ],
-      }),
-    );
-
-    expect(await writer.record("event-2", source, [finding])).toBe(true);
-    expect(readLog()).toMatchObject({
-      schemaVersion: 4,
+    const original = JSON.stringify({
+      schemaVersion: 3,
+      createdAt: "2026-06-10T00:00:00.000Z",
+      updatedAt: "2026-06-10T00:00:00.000Z",
       triggerKeywords: { successfulPattern: ["done"] },
-      processedEvents: { "event-2": { outcome: "applied" } },
+      processedEvents: {},
+      items: [],
     });
-    expect(readLog()).not.toHaveProperty("items");
+    fs.writeFileSync(logPath, original);
+
+    expect(await writer.record("event-2", source, [finding])).toBe(false);
+    expect(writer.completedSkillEpochKeys()).toBeUndefined();
+    expect(fs.readFileSync(logPath, "utf-8")).toBe(original);
   });
 
   it("preserves corrupt existing review.json", async () => {
@@ -234,6 +224,83 @@ describe("ReviewLogWriter", () => {
       },
     });
     expect(readLog()).not.toHaveProperty("items");
+  });
+
+  it("completes skill epochs only for applied or no-finding outcomes", async () => {
+    expect(writer.completedSkillEpochKeys()).toEqual(new Set());
+    expect(
+      await writer.record("event-1", source, [finding], {
+        outcome: "applied",
+        skillPlacementCandidate,
+        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+      }),
+    ).toBe(true);
+    expect(writer.completedSkillEpochKeys()).toEqual(
+      new Set([skillPlacementCandidate.epochKey]),
+    );
+    expect(
+      readLog().reviewedSkillEpochs[skillPlacementCandidate.epochKey],
+    ).toMatchObject({
+      agentId: "main",
+      skillName: "unused-skill",
+      source: "workspace",
+      reason: "zero-recommendation-usage",
+      completedAt: "2026-06-11T00:01:00.000Z",
+      outcome: "applied",
+      eventId: "event-1",
+    });
+
+    const failedCandidate = {
+      ...skillPlacementCandidate,
+      epochKey: "b".repeat(64),
+    };
+    expect(
+      await writer.record("event-2", source, [], {
+        outcome: "validation-failed",
+        skillPlacementCandidate: failedCandidate,
+      }),
+    ).toBe(true);
+    expect(writer.completedSkillEpochKeys()).toEqual(
+      new Set([skillPlacementCandidate.epochKey]),
+    );
+  });
+
+  it("writes the processed event and completed skill epoch atomically", async () => {
+    expect(
+      await writer.record("seed-event", source, [], {
+        outcome: "validation-failed",
+      }),
+    ).toBe(true);
+    const before = readLog();
+
+    fs.chmodSync(root, 0o500);
+    try {
+      expect(
+        await writer.record("placement-event", source, [], {
+          outcome: "nofinding",
+          skillPlacementCandidate,
+        }),
+      ).toBe(false);
+    } finally {
+      fs.chmodSync(root, 0o700);
+    }
+
+    expect(readLog()).toEqual(before);
+    expect(readLog().processedEvents).not.toHaveProperty("placement-event");
+    expect(readLog().reviewedSkillEpochs).not.toHaveProperty(
+      skillPlacementCandidate.epochKey,
+    );
+
+    expect(
+      await writer.record("placement-event", source, [], {
+        outcome: "nofinding",
+        skillPlacementCandidate,
+      }),
+    ).toBe(true);
+    expect(readLog().processedEvents).toHaveProperty("placement-event");
+    expect(readLog().reviewedSkillEpochs).toHaveProperty(
+      skillPlacementCandidate.epochKey,
+    );
   });
 
   it("records sanitized review metadata on processed events", async () => {

@@ -249,6 +249,14 @@
                   }
                 }
               },
+              "skillPlacement": {
+                "type": "object",
+                "description": "Review one visible resolved skill when it has a low-adoption signal, or after 20 continuous turns with zero recommendations and usage.",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": { "type": "boolean", "default": true }
+                }
+              },
               "processGap": {
                 "type": "object",
                 "additionalProperties": false,

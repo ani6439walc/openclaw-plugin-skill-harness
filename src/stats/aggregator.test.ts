@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
+import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import { StatsAggregator } from "./aggregator.js";
@@ -115,6 +116,71 @@ describe("StatsAggregator", () => {
     } as never;
   }
 
+  function recordZeroActivityInventoryTurn(turn: number): void {
+    recordInventoryTurn({
+      turn,
+      skills: [
+        {
+          name: "unused-skill",
+          source: "workspace",
+          winnerFingerprint: WINNER_A,
+          fingerprint: CONTENT_A,
+        },
+      ],
+    });
+  }
+
+  function recordInventoryTurn(params: {
+    turn: number;
+    agentId?: string;
+    skills: Array<{
+      name: string;
+      source: "workspace" | "extra";
+      winnerFingerprint: string;
+      fingerprint: string;
+    }>;
+    recommendedSkills?: string[];
+    usedSkills?: string[];
+  }): void {
+    const {
+      turn,
+      agentId = "main",
+      skills,
+      recommendedSkills = [],
+      usedSkills = [],
+    } = params;
+    const startMs = Date.parse("2026-06-11T00:00:00.000Z") + turn * 120_000;
+    const endMs = startMs + 60_000;
+    const state = createState({
+      intent: {
+        result: {
+          intent: "version-control",
+          reason: "test",
+          domain: "git",
+          confidence: 0.75,
+          complexity: "medium",
+        },
+        recommendedSkills,
+      },
+      skillsUsed: usedSkills.map((name) => ({
+        name,
+        path: `/skills/${name}/SKILL.md`,
+      })),
+      timestamps: {
+        start: new Date(startMs).toISOString(),
+        end: new Date(endMs).toISOString(),
+      },
+    });
+    expect(
+      aggregator.record(
+        `${agentId}-${turn}`,
+        state,
+        intent,
+        inventoryOptions(agentId, skills),
+      ),
+    ).toBe(true);
+  }
+
   it("creates stats.json without scanning existing session files", () => {
     const sessionsDir = path.join(tempDir, "sessions");
     fs.mkdirSync(sessionsDir);
@@ -227,6 +293,235 @@ describe("StatsAggregator", () => {
     });
   });
 
+  it("selects zero-use skill only after 20 continuous observations", () => {
+    for (let turn = 1; turn < 20; turn += 1) {
+      recordZeroActivityInventoryTurn(turn);
+    }
+    expect(aggregator.selectSkillPlacementCandidate("main")).toBeUndefined();
+
+    recordZeroActivityInventoryTurn(20);
+
+    expect(aggregator.selectSkillPlacementCandidate("main")).toMatchObject({
+      agentId: "main",
+      name: "unused-skill",
+      reason: "zero-recommendation-usage",
+      observedTurns: 20,
+      usageTurns: 0,
+      recommendedTurns: 0,
+    });
+  });
+
+  it("prioritizes low-adoption and honors excluded epoch keys", () => {
+    const skills = [
+      {
+        name: "zero-skill",
+        source: "workspace" as const,
+        winnerFingerprint: WINNER_A,
+        fingerprint: CONTENT_A,
+      },
+      {
+        name: "low-skill",
+        source: "extra" as const,
+        winnerFingerprint: WINNER_B,
+        fingerprint: SAME_CONTENT,
+      },
+    ];
+    for (let turn = 1; turn <= 20; turn += 1) {
+      recordInventoryTurn({
+        turn,
+        skills,
+        recommendedSkills: ["low-skill"],
+      });
+    }
+
+    const first = aggregator.selectSkillPlacementCandidate("main");
+    expect(first).toMatchObject({
+      name: "low-skill",
+      reason: "low-adoption",
+      adoptionRate: 0,
+    });
+    expect(
+      aggregator.selectSkillPlacementCandidate(
+        "main",
+        new Set([first?.epochKey ?? ""]),
+      ),
+    ).toMatchObject({
+      name: "zero-skill",
+      reason: "zero-recommendation-usage",
+    });
+  });
+
+  it("joins low-adoption stats to resolved inventory by canonical skill name", () => {
+    const skills = [
+      {
+        name: "Mixed-Skill",
+        source: "workspace" as const,
+        winnerFingerprint: WINNER_A,
+        fingerprint: CONTENT_A,
+      },
+    ];
+    for (let turn = 1; turn <= 5; turn += 1) {
+      recordInventoryTurn({
+        turn,
+        skills,
+        recommendedSkills: ["mixed-skill"],
+      });
+    }
+
+    const candidate = aggregator.selectSkillPlacementCandidate("main");
+    expect(candidate).toMatchObject({
+      name: "Mixed-Skill",
+      reason: "low-adoption",
+      adoptionRate: 0,
+    });
+    const stats = readStats();
+    expect(candidate?.epochKey).toBe(
+      createHash("sha256")
+        .update(
+          JSON.stringify([
+            stats.skillInventory.startedAt,
+            "main",
+            "mixed-skill",
+            "workspace",
+            WINNER_A,
+            CONTENT_A,
+            1,
+          ]),
+        )
+        .digest("hex"),
+    );
+  });
+
+  it("merges existing mixed-case v3 skill aggregates into the canonical key", () => {
+    const skills = [
+      {
+        name: "Mixed-Skill",
+        source: "workspace" as const,
+        winnerFingerprint: WINNER_A,
+        fingerprint: CONTENT_A,
+      },
+    ];
+    for (let turn = 1; turn <= 5; turn += 1) {
+      recordInventoryTurn({
+        turn,
+        skills,
+        recommendedSkills: ["mixed-skill"],
+      });
+    }
+    const existing = readStats();
+    existing.skills["Mixed-Skill"] = { ...existing.skills["mixed-skill"] };
+    existing.skills["mixed-skill"] = {
+      ...existing.skills["mixed-skill"],
+      recommendedTurns: 1,
+      needsReview: false,
+    };
+    const existingDay = existing.daily["2026-06-11"];
+    existingDay.skills["Mixed-Skill"] = 2;
+    existingDay.skills["mixed-skill"] = 1;
+    fs.writeFileSync(
+      path.join(tempDir, "stats.json"),
+      JSON.stringify(existing),
+    );
+
+    recordInventoryTurn({
+      turn: 6,
+      skills,
+      recommendedSkills: ["MIXED-SKILL"],
+    });
+
+    expect(aggregator.selectSkillPlacementCandidate("main")).toMatchObject({
+      name: "Mixed-Skill",
+      reason: "low-adoption",
+      recommendedTurns: 6,
+    });
+    const stats = readStats();
+    expect(Object.keys(stats.skills)).toEqual(["mixed-skill"]);
+    expect(stats.skills["mixed-skill"].recommendedTurns).toBe(7);
+    expect(stats.skills["mixed-skill"].last7DaysUsage).toBe(3);
+    expect(stats.daily["2026-06-11"].skills).toEqual({ "mixed-skill": 3 });
+  });
+
+  it("breaks placement ties by locale-independent canonical skill name", () => {
+    const skills = [
+      {
+        name: "ä-skill",
+        source: "workspace" as const,
+        winnerFingerprint: WINNER_A,
+        fingerprint: CONTENT_A,
+      },
+      {
+        name: "z-skill",
+        source: "extra" as const,
+        winnerFingerprint: WINNER_B,
+        fingerprint: SAME_CONTENT,
+      },
+    ];
+    for (let turn = 1; turn <= 20; turn += 1) {
+      recordInventoryTurn({ turn, skills });
+    }
+
+    expect(aggregator.selectSkillPlacementCandidate("main")?.name).toBe(
+      "z-skill",
+    );
+  });
+
+  it("requires current agent visibility and starts a new epoch after reset", () => {
+    for (let turn = 1; turn <= 20; turn += 1) {
+      recordZeroActivityInventoryTurn(turn);
+    }
+    const original = aggregator.selectSkillPlacementCandidate("main");
+    expect(original).toBeDefined();
+    expect(aggregator.selectSkillPlacementCandidate("other")).toBeUndefined();
+
+    recordInventoryTurn({ turn: 21, skills: [] });
+    expect(aggregator.selectSkillPlacementCandidate("main")).toBeUndefined();
+
+    for (let turn = 22; turn <= 41; turn += 1) {
+      recordInventoryTurn({
+        turn,
+        skills: [
+          {
+            name: "unused-skill",
+            source: "workspace",
+            winnerFingerprint: WINNER_A,
+            fingerprint: SAME_CONTENT,
+          },
+        ],
+      });
+    }
+    const restarted = aggregator.selectSkillPlacementCandidate("main");
+    expect(restarted).toBeDefined();
+    expect(restarted?.epochKey).not.toBe(original?.epochKey);
+  });
+
+  it("namespaces epoch keys by inventory start time", () => {
+    for (let turn = 1; turn <= 20; turn += 1) {
+      recordZeroActivityInventoryTurn(turn);
+    }
+    const before = aggregator.selectSkillPlacementCandidate("main");
+    const statsPath = path.join(tempDir, "stats.json");
+    const stats = readStats();
+    stats.skillInventory.startedAt = "2026-06-12T00:00:00.000Z";
+    fs.writeFileSync(statsPath, JSON.stringify(stats));
+
+    const after = aggregator.selectSkillPlacementCandidate("main");
+    expect(after?.epochKey).not.toBe(before?.epochKey);
+  });
+
+  it("fails open without rewriting corrupt v3 stats during selection", () => {
+    for (let turn = 1; turn <= 20; turn += 1) {
+      recordZeroActivityInventoryTurn(turn);
+    }
+    const statsPath = path.join(tempDir, "stats.json");
+    const stats = readStats();
+    stats.skillInventory.agents.main.skills["unused-skill"].observedTurns = 21;
+    const original = JSON.stringify(stats);
+    fs.writeFileSync(statsPath, original);
+
+    expect(aggregator.selectSkillPlacementCandidate("main")).toBeUndefined();
+    expect(fs.readFileSync(statsPath, "utf-8")).toBe(original);
+  });
+
   it("stores reserved inventory keys as own properties", () => {
     expect(
       aggregator.record("session-1", createState(), intent, {
@@ -252,6 +547,124 @@ describe("StatsAggregator", () => {
         "__proto__",
       ),
     ).toBe(true);
+  });
+
+  it("stores reserved skill aggregate keys without polluting Object.prototype", () => {
+    const prototypeKeys = [
+      "usageTurns",
+      "recommendedTurns",
+      "adoptedTurns",
+      "adoptionRate",
+      "last7DaysUsage",
+      "lifecycle",
+      "needsReview",
+      "lastUsedAt",
+    ];
+    const originalDescriptors = new Map(
+      prototypeKeys.map((key) => [
+        key,
+        Object.getOwnPropertyDescriptor(Object.prototype, key),
+      ]),
+    );
+    const state = createState();
+    const reservedNames = ["__proto__", "constructor"];
+    state.intent!.result!.intent = "__proto__";
+    state.intent!.recommendedSkills = reservedNames;
+    state.skillsUsed = reservedNames.map((name) => ({
+      name,
+      path: `/skills/${name}/SKILL.md`,
+    }));
+    state.toolCalls = reservedNames.map((name) => ({
+      name,
+      params: {},
+      durationMs: 100,
+    }));
+
+    try {
+      expect(
+        aggregator.record("reserved-skill", state, undefined, {
+          nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+        }),
+      ).toBe(true);
+      const constructorIntent = createState({
+        timestamps: {
+          start: "2026-06-11T00:02:00.000Z",
+          end: "2026-06-11T00:03:00.000Z",
+        },
+      });
+      constructorIntent.intent!.result!.intent = "constructor";
+      constructorIntent.intent!.recommendedSkills = [];
+      constructorIntent.skillsUsed = [];
+      constructorIntent.toolCalls = [];
+      expect(
+        aggregator.record(
+          "reserved-constructor-intent",
+          constructorIntent,
+          undefined,
+          { nowMs: Date.parse("2026-06-11T00:03:00.000Z") },
+        ),
+      ).toBe(true);
+      const nextDay = createState({
+        timestamps: {
+          start: "2026-06-12T00:00:00.000Z",
+          end: "2026-06-12T00:01:00.000Z",
+        },
+      });
+      nextDay.intent!.recommendedSkills = ["ordinary-skill"];
+      nextDay.skillsUsed = [
+        {
+          name: "ordinary-skill",
+          path: "/skills/ordinary-skill/SKILL.md",
+        },
+      ];
+      expect(
+        aggregator.record("ordinary-skill", nextDay, intent, {
+          nowMs: Date.parse("2026-06-12T00:01:00.000Z"),
+        }),
+      ).toBe(true);
+
+      const stats = readStats();
+      for (const name of reservedNames) {
+        expect(stats.intents[name].last7Days).toBe(1);
+        expect(Number.isFinite(stats.intents[name].last7Days)).toBe(true);
+        expect(Object.hasOwn(stats.daily["2026-06-12"].intents, name)).toBe(
+          false,
+        );
+      }
+      for (const name of reservedNames) {
+        expect(Object.hasOwn(stats.skills, name)).toBe(true);
+        expect(stats.skills[name]).toMatchObject({
+          usageTurns: 1,
+          recommendedTurns: 1,
+          adoptedTurns: 1,
+          last7DaysUsage: 1,
+        });
+        expect(Number.isFinite(stats.skills[name].last7DaysUsage)).toBe(true);
+        expect(Object.hasOwn(stats.daily["2026-06-11"].skills, name)).toBe(
+          true,
+        );
+        expect(stats.daily["2026-06-11"].skills[name]).toBe(1);
+        expect(Object.hasOwn(stats.daily["2026-06-12"].skills, name)).toBe(
+          false,
+        );
+        expect(stats.tools[name].last7DaysCalls).toBe(1);
+        expect(Number.isFinite(stats.tools[name].last7DaysCalls)).toBe(true);
+        expect(Object.hasOwn(stats.daily["2026-06-12"].tools, name)).toBe(
+          false,
+        );
+      }
+      for (const key of prototypeKeys) {
+        expect(Object.getOwnPropertyDescriptor(Object.prototype, key)).toEqual(
+          originalDescriptors.get(key),
+        );
+      }
+    } finally {
+      for (const [key, descriptor] of originalDescriptors) {
+        if (descriptor)
+          Object.defineProperty(Object.prototype, key, descriptor);
+        else delete (Object.prototype as Record<string, unknown>)[key];
+      }
+    }
   });
 
   it.each([

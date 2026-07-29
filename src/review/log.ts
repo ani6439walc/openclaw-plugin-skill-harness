@@ -3,6 +3,8 @@ import { fileExists, readJsonFile, writeJsonAtomic } from "../file-utils.js";
 import type { ReviewFinding, ReviewSource } from "./types.js";
 import { REVIEW_TRIGGER_TYPES, type ReviewTrigger } from "./triggers.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
+import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
+import type { SkillPlacementReason } from "../stats/aggregator.js";
 import {
   normalizeReviewTriggerKeywords,
   normalizeKeywordList,
@@ -26,7 +28,6 @@ export const PROCESSED_EVENT_OUTCOMES = [
   "parse-failed",
   "subagent-error",
   "validation-failed",
-  "unknown",
 ] as const;
 
 export type ProcessedEventOutcome = (typeof PROCESSED_EVENT_OUTCOMES)[number];
@@ -90,39 +91,33 @@ export type ProcessedEventRecord = {
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
 };
 
+export type ReviewedSkillEpoch = {
+  agentId: string;
+  skillName: string;
+  source: SkillSource;
+  reason: SkillPlacementReason;
+  completedAt: string;
+  outcome: "applied" | "nofinding";
+  eventId: string;
+};
+
 export type ReviewLog = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   createdAt: string;
   updatedAt: string;
   triggerKeywords: ReviewTriggerKeywords;
   processedEvents: Record<string, ProcessedEventRecord>;
+  reviewedSkillEpochs: Record<string, ReviewedSkillEpoch>;
 };
 
-const LEGACY_TRIGGER_TYPE_MAP: Record<string, ReviewTrigger> = {
-  skill_candidate: "skill-candidate",
-  process_gap: "process-gap",
-  successful_pattern: "successful-pattern",
-  satisfaction_check: "satisfaction-check",
-  missing_intent: "missing-intent",
-  weak_intent: "weak-intent",
-  behavior_fix: "behavior-fix",
-  entity_context: "entity-context",
-};
-
-function normalizeTrigger(value: unknown): ReviewTrigger | undefined {
-  if (typeof value !== "string") return;
-  const normalized = LEGACY_TRIGGER_TYPE_MAP[value] ?? value;
-  return (REVIEW_TRIGGER_TYPES as readonly string[]).includes(normalized)
-    ? (normalized as ReviewTrigger)
-    : undefined;
-}
-
-const ReviewSourceSchema = z.object({
-  sessionId: z.string(),
-  sessionKey: z.string().optional(),
-  agentId: z.string().optional(),
-  turnStart: z.string(),
-});
+const ReviewSourceSchema = z
+  .object({
+    sessionId: z.string(),
+    sessionKey: z.string().optional(),
+    agentId: z.string().optional(),
+    turnStart: z.string(),
+  })
+  .strict();
 
 const TriggerKeywordTargetSchema = z.enum([
   "successful-pattern",
@@ -130,9 +125,17 @@ const TriggerKeywordTargetSchema = z.enum([
   "entity-context",
 ]);
 
+const KeywordListSchema = z
+  .array(z.string())
+  .transform((values) => normalizeKeywordList(values, []));
+
 const TriggerKeywordsSchema = z
-  .unknown()
-  .transform((value) => normalizeReviewTriggerKeywords(value));
+  .object({
+    successfulPattern: KeywordListSchema,
+    behaviorFix: KeywordListSchema,
+    entityContext: KeywordListSchema,
+  })
+  .strict();
 
 const ProcessedEventOutcomeSchema = z.enum(PROCESSED_EVENT_OUTCOMES);
 
@@ -164,165 +167,112 @@ export function normalizeSchemaRejectionReasonCounts(
   return normalizeAllowlistedCounts(value, SCHEMA_REJECTION_REASON_CODES);
 }
 
-const KeywordChangeSchema = z.object({
-  add: z
-    .array(z.string())
-    .catch([])
-    .transform((values) => normalizeKeywordList(values, [])),
-  remove: z
-    .array(z.string())
-    .catch([])
-    .transform((values) => normalizeKeywordList(values, [])),
-});
+const KeywordChangeSchema = z
+  .object({
+    add: KeywordListSchema,
+    remove: KeywordListSchema,
+  })
+  .strict();
 
 const AppliedReviewChangeSchema = z
   .object({
-    trigger: z.unknown().transform((value, ctx): ReviewTrigger => {
-      const trigger = normalizeTrigger(value);
-      if (!trigger) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "invalid trigger",
-        });
-        return z.NEVER;
-      }
-      return trigger;
-    }),
+    trigger: z.enum(REVIEW_TRIGGER_TYPES),
     targetKind: z.enum(["intent-markdown", "trigger-keywords"]),
     operation: z.enum([...REVIEW_OPERATIONS, "adjust-trigger-keywords"]),
-    targetIntentIds: z.array(z.string().trim().min(1)).catch([]),
+    targetIntentIds: z.array(z.string().trim().min(1)),
     targetTrigger: TriggerKeywordTargetSchema.optional(),
     keywordChange: KeywordChangeSchema.optional(),
     dedupeKey: z.string().trim().min(1),
     summary: z.string().trim().min(1),
-    evidence: z.array(z.string()).catch([]),
+    evidence: z.array(z.string()),
     correctionGoal: z.string().trim().min(1),
     suggestedChange: z.string().trim().min(1),
   })
+  .strict()
   .transform((change): AppliedReviewChange => change);
 
-const ProcessedEventRecordSchema = z.union([
-  z.string().transform((processedAt): ProcessedEventRecord => ({
-    processedAt,
-    triggers: [],
-    changeCount: 0,
-    outcome: "unknown",
-  })),
-  z
-    .object({
-      processedAt: z.string(),
-      source: ReviewSourceSchema.optional(),
-      triggers: z
-        .array(z.unknown())
-        .catch([])
-        .transform((values) =>
-          values.flatMap((value) => normalizeTrigger(value) ?? []),
-        ),
-      findingCount: z.number().int().nonnegative().optional(),
-      changeCount: z.number().int().nonnegative().optional(),
-      outcome: z
-        .union([ProcessedEventOutcomeSchema, z.literal("wrote-items")])
-        .catch("unknown"),
-      changes: z.array(AppliedReviewChangeSchema).optional(),
-      changedIntentIds: z.array(z.string()).optional(),
-      validationErrors: z.array(z.string()).optional(),
-      noFindingReasonCounts: z.unknown().optional(),
-      schemaRejectionReasonCounts: z.unknown().optional(),
-    })
-    .transform(
-      ({
-        findingCount,
-        changeCount,
-        outcome,
-        noFindingReasonCounts,
-        schemaRejectionReasonCounts,
-        ...record
-      }): ProcessedEventRecord => {
-        const normalizedReasonCounts = normalizeNoFindingReasonCounts(
-          noFindingReasonCounts,
-        );
-        const normalizedSchemaRejectionCounts =
-          normalizeSchemaRejectionReasonCounts(schemaRejectionReasonCounts);
-        return {
-          ...record,
-          changeCount:
-            changeCount ?? findingCount ?? record.changes?.length ?? 0,
-          outcome: outcome === "wrote-items" ? "applied" : outcome,
-          ...(normalizedReasonCounts
-            ? { noFindingReasonCounts: normalizedReasonCounts }
-            : {}),
-          ...(normalizedSchemaRejectionCounts
-            ? { schemaRejectionReasonCounts: normalizedSchemaRejectionCounts }
-            : {}),
-        };
-      },
-    ),
-]);
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  const allowed = new Set(keys);
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+const PositiveCountsSchema = z.record(z.string(), z.number().int().positive());
+const NoFindingReasonCountsSchema = PositiveCountsSchema.refine((value) =>
+  hasOnlyKeys(value, NO_FINDING_REASON_CODES),
+).transform((value): NoFindingReasonCounts => value);
+const SchemaRejectionReasonCountsSchema = PositiveCountsSchema.refine((value) =>
+  hasOnlyKeys(value, SCHEMA_REJECTION_REASON_CODES),
+).transform((value): SchemaRejectionReasonCounts => value);
+
+const ProcessedEventRecordSchema = z
+  .object({
+    processedAt: z.string(),
+    source: ReviewSourceSchema.optional(),
+    triggers: z.array(z.enum(REVIEW_TRIGGER_TYPES)),
+    changeCount: z.number().int().nonnegative(),
+    outcome: ProcessedEventOutcomeSchema,
+    changes: z.array(AppliedReviewChangeSchema).optional(),
+    changedIntentIds: z.array(z.string()).optional(),
+    validationErrors: z.array(z.string()).optional(),
+    noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
+    schemaRejectionReasonCounts: SchemaRejectionReasonCountsSchema.optional(),
+  })
+  .strict()
+  .transform((record): ProcessedEventRecord => record);
 
 const ProcessedEventsSchema = z.record(z.string(), ProcessedEventRecordSchema);
 
-export const ReviewLogSchema = z.object({
-  schemaVersion: z.literal(4),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  triggerKeywords: TriggerKeywordsSchema,
-  processedEvents: ProcessedEventsSchema,
-});
+const ReviewedSkillEpochSchema = z
+  .object({
+    agentId: z.string().trim().min(1),
+    skillName: z.string().trim().min(1),
+    source: z.enum(SKILL_SOURCE_ORDER),
+    reason: z.enum(["low-adoption", "zero-recommendation-usage"]),
+    completedAt: z.string(),
+    outcome: z.enum(["applied", "nofinding"]),
+    eventId: z.string().trim().min(1),
+  })
+  .strict();
+
+const ReviewedSkillEpochsSchema = z.record(
+  z.string().regex(/^[a-f0-9]{64}$/),
+  ReviewedSkillEpochSchema,
+);
+
+export const ReviewLogSchema = z
+  .object({
+    schemaVersion: z.literal(5),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    triggerKeywords: TriggerKeywordsSchema,
+    processedEvents: ProcessedEventsSchema,
+    reviewedSkillEpochs: ReviewedSkillEpochsSchema,
+  })
+  .strict();
 
 export function createReviewLog(
   nowIso: string,
   triggerKeywordSeed?: Partial<ReviewTriggerKeywords>,
 ): ReviewLog {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     createdAt: nowIso,
     updatedAt: nowIso,
     triggerKeywords: normalizeReviewTriggerKeywords(triggerKeywordSeed),
     processedEvents: {},
+    reviewedSkillEpochs: {},
   };
 }
 
-export function parseReviewLog(
-  raw: unknown,
-  triggerKeywordSeed?: Partial<ReviewTriggerKeywords>,
-): ReviewLog {
-  const version = z.object({ schemaVersion: z.number() }).parse(raw);
-  if (version.schemaVersion === 4) return ReviewLogSchema.parse(raw);
-
-  if (
-    version.schemaVersion === 1 ||
-    version.schemaVersion === 2 ||
-    version.schemaVersion === 3
-  ) {
-    const legacy = z
-      .object({
-        createdAt: z.string(),
-        updatedAt: z.string(),
-        triggerKeywords: TriggerKeywordsSchema.optional(),
-        processedEvents: ProcessedEventsSchema.catch({}),
-      })
-      .parse(raw);
-    return ReviewLogSchema.parse({
-      schemaVersion: 4,
-      createdAt: legacy.createdAt,
-      updatedAt: legacy.updatedAt,
-      triggerKeywords: normalizeReviewTriggerKeywords(
-        legacy.triggerKeywords ?? triggerKeywordSeed,
-      ),
-      processedEvents: legacy.processedEvents,
-    });
-  }
-
-  throw new Error(
-    `unsupported review schema version: ${version.schemaVersion}`,
-  );
+export function parseReviewLog(raw: unknown): ReviewLog {
+  return ReviewLogSchema.parse(raw);
 }
 
-export function readReviewLog(
-  logPath: string,
-  triggerKeywordSeed?: Partial<ReviewTriggerKeywords>,
-): ReviewLog {
-  return parseReviewLog(readJsonFile<unknown>(logPath), triggerKeywordSeed);
+export function readReviewLog(logPath: string): ReviewLog {
+  return parseReviewLog(readJsonFile<unknown>(logPath));
 }
 
 export function readReviewTriggerKeywords(
@@ -332,7 +282,7 @@ export function readReviewTriggerKeywords(
   if (!fileExists(logPath)) {
     return normalizeReviewTriggerKeywords(triggerKeywordSeed);
   }
-  return readReviewLog(logPath, triggerKeywordSeed).triggerKeywords;
+  return readReviewLog(logPath).triggerKeywords;
 }
 
 export function writeReviewLogAtomic(logPath: string, log: ReviewLog): void {

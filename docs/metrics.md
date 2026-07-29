@@ -10,7 +10,7 @@ Skill Harness keeps package files and runtime state separate. The paths below us
 | `~/.openclaw/plugins/skill-harness/sessions/`          | Per-session JSON snapshots for audit and review context.                                               |
 | `~/.openclaw/plugins/skill-harness/agents/*/sessions/` | Embedded-agent session transcripts.                                                                    |
 | `~/.openclaw/plugins/skill-harness/stats.json`         | Schema-v3 intent, skill, tool, routing, projection, inventory-observation, and daily usage statistics. |
-| `~/.openclaw/plugins/skill-harness/review.json`        | Intent Review trigger keywords and processed event outcomes.                                           |
+| `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v5 Intent Review trigger keywords, processed outcomes, and completed skill-placement epochs.    |
 
 Session cleanup preserves the ended main session and removes only expired `sessions/*.json` and embedded-agent session artifacts: `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json`. It does not delete root-level statistics, review data, intents, skills, transcripts outside the embedded-agent session directories, or package files.
 
@@ -43,6 +43,8 @@ It also records agent-scoped resolved skill inventory observations on accepted s
 - inventory resolution uses the invoking tracked agent's current roots, source precedence, and disabled bundled-skill policy; unresolved policy or inventory errors skip only the observation update
 - fingerprints are internal statistics fields and are not exposed through skill tool results
 
-These observations collect evidence only. They do not trigger Intent Review, create candidates, set thresholds, or modify skill files. Valid v1 and v2 files migrate on the next recorded turn by adding an empty observation section; historical zero recommendation or usage values are not synthesized. Existing intent, skill, tool, routing, projection, daily, and processed-event data are preserved. Invalid files remain untouched and fail open.
+These observations feed the optional `skill-placement` Review trigger after an accepted stats event. Selection uses only the persisted tracked agent's currently visible resolved inventory. Existing top-level `needsReview` skill aggregates have priority; otherwise a continuous epoch becomes eligible after 20 observed turns only when recommendation and usage counts are both zero. At most one candidate is selected per turn, and completed or in-memory pending epoch keys are excluded. The selector does not modify skill files and does not synthesize historical zero observations.
+
+Valid stats v1 and v2 files migrate on the next recorded turn by adding an empty observation section; existing intent, skill, tool, routing, projection, daily, and processed-event data are preserved. Invalid files remain untouched and fail open. Skill recommendation and usage names are canonicalized with trimmed lowercase identity for aggregate joins, while inventory observations retain the resolved display name. When valid existing stats contain mixed-case keys for the same skill, the load boundary merges their raw counters and daily counts into one canonical key before recomputing derived fields.
 
 Complexity buckets count only turns with known complexity, so `low + medium + high` can be lower than an intent's total turns. Skill-usage readers continue to read the existing top-level skill aggregates independently of inventory observations.
