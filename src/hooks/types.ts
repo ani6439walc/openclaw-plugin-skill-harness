@@ -14,6 +14,7 @@ import type {
   runTopicSwitchSubagent,
 } from "../classification/index.js";
 import type { ReviewTriggerKeywords } from "../review/trigger-keywords.js";
+import type { resolveSkillInventory } from "../skills/indexer.js";
 
 export interface PendingToolCall {
   name: string;
@@ -29,6 +30,7 @@ export type HookDeps = {
   catalog?: typeof defaultCatalog;
   tracker?: typeof defaultTracker;
   statsAggregator?: typeof defaultStatsAggregator;
+  skillInventoryResolver?: typeof resolveSkillInventory;
   reviewQueue?: { enqueue(task: () => Promise<void>): void };
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],

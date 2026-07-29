@@ -457,6 +457,10 @@ export class SessionTracker {
     return this.sessionData.get(sessionId)?.current;
   }
 
+  getAgentId(sessionId: string): string | undefined {
+    return this.sessionData.get(sessionId)?.agentId;
+  }
+
   resolveCurrentSessionId(params: {
     sessionId?: string;
     sessionKey?: string;

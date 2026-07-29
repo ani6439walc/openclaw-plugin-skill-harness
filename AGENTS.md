@@ -88,6 +88,8 @@ Rules:
 
 The indexer uses `skills.load.watchDebounceMs` as its cache TTL only when `skills.load.watch` is `true`; otherwise it retains the 60-second default. This is polling, not a filesystem watcher. Keep the TTL in the cache key so live configuration changes cannot reuse indexes created under a different refresh interval.
 
+Stats schema v3 observes the resolved inventory per tracked agent on existing accepted stats events. Resolve the agent ID from persisted tracker state, never from a finalize-context fallback. Inventory identity consists of normalized skill name, source, a SHA-256 of the resolved winning `SKILL.md` path, and a SHA-256 of the raw file bytes. Keep both fingerprints internal to stats; public skill list/search/view results must not expose them. A source, winner, content, or visibility-continuity change starts a new per-skill epoch. If the disabled bundled-skill policy or inventory cannot be resolved trustworthily, preserve the existing stats event but skip the observation update. Do not synthesize historical zero observations during v1/v2 migration.
+
 ## Source Map
 
 Use the existing module boundaries:
@@ -99,7 +101,7 @@ Use the existing module boundaries:
 - `src/file-utils.ts`: shared path helpers and atomic filesystem primitives.
 - `src/intents/catalog.ts`: runtime intent catalog loading.
 - `src/session/tracker.ts`: session JSON state under `dataRoot/sessions`.
-- `src/stats/aggregator.ts`: usage and candidate-projection aggregation into schema-v2 `dataRoot/stats.json`, including explicit valid-v1 migration.
+- `src/stats/aggregator.ts`: usage, candidate-projection, and agent-scoped resolved-skill inventory aggregation into schema-v3 `dataRoot/stats.json`, including explicit valid-v1/v2 migration without historical observation backfill.
 - `src/review/log-writer.ts`: direct Intent Review outcomes and trigger keyword updates into `dataRoot/review.json`.
 - `src/review/log.ts`: review log schema validation/migration and root trigger keyword state. Legacy `items` are dropped during migration; there is no tool/command action surface.
 - `src/subagent-runtime.ts`: shared embedded subagent run defaults and error-payload extraction helpers used by classification and review subagents.

@@ -9,4 +9,5 @@ export {
   resolveAvailableSkills,
   resolveAvailableSkillsWithRelated,
   resolveDomainSkills,
+  resolveSkillInventory,
 } from "../skills/indexer.js";

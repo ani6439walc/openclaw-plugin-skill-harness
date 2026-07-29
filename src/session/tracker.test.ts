@@ -21,6 +21,16 @@ describe("SessionTracker", () => {
   });
 
   describe("create", () => {
+    it("returns the persisted agent id for a tracked session", () => {
+      tracker.record("agent-session", {
+        agentId: "agent-a",
+        current: { input: "tracked" },
+      });
+
+      expect(tracker.getAgentId("agent-session")).toBe("agent-a");
+      expect(tracker.getAgentId("missing-session")).toBeUndefined();
+    });
+
     it("should return a shared instance for the same plugin root", () => {
       const tracker1 = SessionTracker.create(tempDir);
       const tracker2 = SessionTracker.create(tempDir);

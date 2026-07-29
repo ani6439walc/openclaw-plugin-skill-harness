@@ -10,6 +10,8 @@ import {
   safeWriteJson,
 } from "../file-utils.js";
 import { FALLBACK_INTENT_ID, isIntentComplexity } from "../constants.js";
+import type { SkillInventoryItem, SkillSource } from "../skills/types.js";
+import { SKILL_SOURCE_ORDER } from "../skills/types.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_RETENTION_MS = 90 * DAY_MS;
@@ -68,8 +70,31 @@ type ProjectionStats = DailyProjectionCounts & {
   selectionReasons: CountMap;
 };
 
+interface SkillInventoryObservation extends SkillInventoryItem {
+  winnerFingerprint: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  firstSeenTurn: number;
+  lastSeenTurn: number;
+  observedTurns: number;
+  usageTurns: number;
+  recommendedTurns: number;
+}
+
+interface AgentSkillInventoryObservation {
+  firstObservedAt: string;
+  lastObservedAt: string;
+  observedTurns: number;
+  skills: Record<string, SkillInventoryObservation>;
+}
+
+interface SkillInventoryStats {
+  startedAt: string;
+  agents: Record<string, AgentSkillInventoryObservation>;
+}
+
 type Stats = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   createdAt: string;
   updatedAt: string;
   summary: {
@@ -125,11 +150,16 @@ type Stats = {
     }
   >;
   projection: ProjectionStats;
+  skillInventory: SkillInventoryStats;
   daily: Record<string, DailyBucket>;
   processedEvents: Record<string, string>;
 };
 
-type StatsV1 = Omit<Stats, "schemaVersion" | "projection" | "daily"> & {
+type StatsV2 = Omit<Stats, "schemaVersion" | "skillInventory"> & {
+  schemaVersion: 2;
+};
+
+type StatsV1 = Omit<StatsV2, "schemaVersion" | "projection" | "daily"> & {
   schemaVersion: 1;
   daily: Record<string, DailyBucketV1>;
 };
@@ -172,7 +202,7 @@ function emptyProjectionStats(): ProjectionStats {
 
 function createStats(nowIso: string): Stats {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     createdAt: nowIso,
     updatedAt: nowIso,
     summary: {
@@ -192,6 +222,7 @@ function createStats(nowIso: string): Stats {
     routing: { ...emptyRoutingCounts(), byIntent: {} },
     tools: {},
     projection: emptyProjectionStats(),
+    skillInventory: { startedAt: nowIso, agents: {} },
     daily: {},
     processedEvents: {},
   };
@@ -359,6 +390,70 @@ function isIsoTimestamp(value: unknown): value is string {
   );
 }
 
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0;
+}
+
+function isSkillSource(value: unknown): value is SkillSource {
+  return (
+    typeof value === "string" &&
+    (SKILL_SOURCE_ORDER as readonly string[]).includes(value)
+  );
+}
+
+function isSha256Fingerprint(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function isSkillInventoryStats(value: unknown): value is SkillInventoryStats {
+  if (
+    !isRecord(value) ||
+    !isIsoTimestamp(value.startedAt) ||
+    !isRecord(value.agents)
+  ) {
+    return false;
+  }
+  return Object.entries(value.agents).every(([agentId, agent]) => {
+    if (
+      !agentId ||
+      agentId.trim() !== agentId ||
+      !isRecord(agent) ||
+      !isIsoTimestamp(agent.firstObservedAt) ||
+      !isIsoTimestamp(agent.lastObservedAt) ||
+      !isNonNegativeInteger(agent.observedTurns) ||
+      agent.observedTurns === 0 ||
+      !isRecord(agent.skills)
+    ) {
+      return false;
+    }
+    const observedTurns = agent.observedTurns;
+    return Object.entries(agent.skills).every(
+      ([skillKey, skill]) =>
+        isRecord(skill) &&
+        typeof skill.name === "string" &&
+        skill.name.trim().length > 0 &&
+        skill.name === skill.name.trim() &&
+        skillKey === skill.name.toLowerCase() &&
+        isSkillSource(skill.source) &&
+        isSha256Fingerprint(skill.winnerFingerprint) &&
+        isSha256Fingerprint(skill.fingerprint) &&
+        isIsoTimestamp(skill.firstSeenAt) &&
+        isIsoTimestamp(skill.lastSeenAt) &&
+        isNonNegativeInteger(skill.firstSeenTurn) &&
+        isNonNegativeInteger(skill.lastSeenTurn) &&
+        isNonNegativeInteger(skill.observedTurns) &&
+        isNonNegativeInteger(skill.usageTurns) &&
+        isNonNegativeInteger(skill.recommendedTurns) &&
+        skill.firstSeenTurn > 0 &&
+        skill.firstSeenTurn <= skill.lastSeenTurn &&
+        skill.lastSeenTurn <= observedTurns &&
+        skill.observedTurns === skill.lastSeenTurn - skill.firstSeenTurn + 1 &&
+        skill.usageTurns <= skill.observedTurns &&
+        skill.recommendedTurns <= skill.observedTurns,
+    );
+  });
+}
+
 function isUtcDateKey(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const timestamp = Date.parse(`${value}T00:00:00.000Z`);
@@ -425,7 +520,9 @@ function isProjectionStats(value: unknown): value is ProjectionStats {
   );
 }
 
-function assertStatsBase(stats: unknown): asserts stats is Stats | StatsV1 {
+function assertStatsBase(
+  stats: unknown,
+): asserts stats is Stats | StatsV2 | StatsV1 {
   if (!isRecord(stats)) throw new Error("unsupported or invalid stats schema");
   if (
     !isIsoTimestamp(stats.createdAt) ||
@@ -520,7 +617,7 @@ function assertStatsBase(stats: unknown): asserts stats is Stats | StatsV1 {
   }
 }
 
-function migrateStatsV1(stats: StatsV1): Stats {
+function migrateStatsV1(stats: StatsV1): StatsV2 {
   return {
     ...stats,
     schemaVersion: 2,
@@ -534,6 +631,28 @@ function migrateStatsV1(stats: StatsV1): Stats {
   };
 }
 
+function migrateStatsV2(stats: StatsV2, eventTime: string): Stats {
+  return {
+    ...stats,
+    schemaVersion: 3,
+    skillInventory: { startedAt: eventTime, agents: {} },
+  };
+}
+
+function assertStatsV2(stats: StatsV2): void {
+  if (!isProjectionStats(stats.projection)) {
+    throw new Error("unsupported or invalid stats schema");
+  }
+  for (const bucket of Object.values(stats.daily)) {
+    if (
+      !isDailyBucketV1(bucket) ||
+      !isDailyProjectionCounts(bucket.projection)
+    ) {
+      throw new Error("unsupported or invalid stats schema");
+    }
+  }
+}
+
 function loadStats(statsFilePath: string, eventTime: string): Stats {
   if (!fileExists(statsFilePath)) return createStats(eventTime);
 
@@ -545,9 +664,19 @@ function loadStats(statsFilePath: string, eventTime: string): Stats {
         throw new Error("unsupported or invalid stats schema");
       }
     }
-    return migrateStatsV1(stats);
+    const migrated = migrateStatsV1(stats);
+    assertStatsV2(migrated);
+    return migrateStatsV2(migrated, eventTime);
   }
-  if (stats.schemaVersion !== 2 || !isProjectionStats(stats.projection)) {
+  if (stats.schemaVersion === 2) {
+    assertStatsV2(stats);
+    return migrateStatsV2(stats, eventTime);
+  }
+  if (
+    stats.schemaVersion !== 3 ||
+    !isProjectionStats(stats.projection) ||
+    !isSkillInventoryStats(stats.skillInventory)
+  ) {
     throw new Error("unsupported or invalid stats schema");
   }
   for (const bucket of Object.values(stats.daily)) {
@@ -849,6 +978,119 @@ function recordDailyStats(params: {
   if (projection) recordDailyProjectionStats(daily, projection);
 }
 
+function createSkillInventoryObservation(params: {
+  skill: SkillInventoryItem & { winnerFingerprint: string };
+  eventTime: string;
+  agentTurn: number;
+  used: boolean;
+  recommended: boolean;
+}): SkillInventoryObservation {
+  const { skill, eventTime, agentTurn, used, recommended } = params;
+  return {
+    ...skill,
+    firstSeenAt: eventTime,
+    lastSeenAt: eventTime,
+    firstSeenTurn: agentTurn,
+    lastSeenTurn: agentTurn,
+    observedTurns: 1,
+    usageTurns: used ? 1 : 0,
+    recommendedTurns: recommended ? 1 : 0,
+  };
+}
+
+function ownRecordValue<T>(
+  record: Record<string, T>,
+  key: string,
+): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+function setOwnRecordValue<T>(
+  record: Record<string, T>,
+  key: string,
+  value: T,
+): void {
+  Object.defineProperty(record, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  });
+}
+
+function recordSkillInventoryObservation(params: {
+  stats: Stats;
+  agentId: string;
+  skills: readonly (SkillInventoryItem & { winnerFingerprint: string })[];
+  skillsUsed: readonly string[];
+  recommendedSkills: readonly string[];
+  eventTime: string;
+}): void {
+  const agentId = params.agentId.trim();
+  if (!agentId) return;
+  let agent = ownRecordValue(params.stats.skillInventory.agents, agentId);
+  if (!agent) {
+    agent = {
+      firstObservedAt: params.eventTime,
+      lastObservedAt: params.eventTime,
+      observedTurns: 0,
+      skills: {},
+    };
+    setOwnRecordValue(params.stats.skillInventory.agents, agentId, agent);
+  }
+  const agentTurn = agent.observedTurns + 1;
+  const used = new Set(params.skillsUsed.map((name) => name.toLowerCase()));
+  const recommended = new Set(
+    params.recommendedSkills.map((name) => name.toLowerCase()),
+  );
+  const seen = new Set<string>();
+
+  for (const rawSkill of params.skills) {
+    const name = rawSkill.name.trim();
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    const skill = { ...rawSkill, name };
+    const previous = ownRecordValue(agent.skills, key);
+    const reset =
+      !previous ||
+      previous.source !== skill.source ||
+      previous.winnerFingerprint !== skill.winnerFingerprint ||
+      previous.fingerprint !== skill.fingerprint ||
+      previous.lastSeenTurn !== agentTurn - 1;
+    if (reset) {
+      setOwnRecordValue(
+        agent.skills,
+        key,
+        createSkillInventoryObservation({
+          skill,
+          eventTime: params.eventTime,
+          agentTurn,
+          used: used.has(key),
+          recommended: recommended.has(key),
+        }),
+      );
+      continue;
+    }
+    previous.lastSeenAt = params.eventTime;
+    previous.lastSeenTurn = agentTurn;
+    previous.observedTurns += 1;
+    previous.usageTurns += used.has(key) ? 1 : 0;
+    previous.recommendedTurns += recommended.has(key) ? 1 : 0;
+  }
+
+  agent.lastObservedAt = params.eventTime;
+  agent.observedTurns = agentTurn;
+}
+
+export interface StatsRecordOptions {
+  nowMs?: number;
+  skillInventory?: {
+    agentId: string;
+    skills: readonly (SkillInventoryItem & { winnerFingerprint: string })[];
+  };
+}
+
 export class StatsAggregator {
   private constructor(private readonly pluginRoot: string) {}
 
@@ -862,11 +1104,37 @@ export class StatsAggregator {
     return aggregator;
   }
 
+  isRecordable(
+    sessionId: string | undefined,
+    state: SessionState,
+    options: { nowMs?: number } = {},
+  ): boolean {
+    const result = state.intent?.result;
+    const projection = state.intent?.intentProjection;
+    const start = state.timestamps?.start;
+    if (!sessionId || (!result && !projection) || !start) return false;
+
+    const statsFilePath = statsPath(this.pluginRoot);
+    try {
+      const eventTime = new Date(
+        state.timestamps?.end ?? options.nowMs ?? Date.now(),
+      ).toISOString();
+      const stats = loadStats(statsFilePath, eventTime);
+      return !stats.processedEvents[`${sessionId}:${start}`];
+    } catch (error) {
+      logger.warn("failed to preflight stats event", {
+        error,
+        path: statsFilePath,
+      });
+      return false;
+    }
+  }
+
   record(
     sessionId: string | undefined,
     state: SessionState,
     intentDefinition?: IntentCatalogEntry,
-    options: { nowMs?: number } = {},
+    options: StatsRecordOptions = {},
   ): boolean {
     const result = state.intent?.result;
     const projection = state.intent?.intentProjection;
@@ -885,15 +1153,15 @@ export class StatsAggregator {
       const date = eventTime.slice(0, 10);
       stats.updatedAt = eventTime;
       stats.processedEvents[eventId] = eventTime;
+      const skillsUsed = result
+        ? [...new Set((state.skillsUsed ?? []).map((skill) => skill.name))]
+        : [];
+      const recommendedSkills = result
+        ? [...new Set(state.intent?.recommendedSkills ?? [])]
+        : [];
 
       if (result) {
         const intentId = resolveIntentId(result.intent, intentDefinition);
-        const skillsUsed = [
-          ...new Set((state.skillsUsed ?? []).map((skill) => skill.name)),
-        ];
-        const recommendedSkills = [
-          ...new Set(state.intent?.recommendedSkills ?? []),
-        ];
         const adoptedSkills = recommendedSkills.filter((skill) =>
           skillsUsed.includes(skill),
         );
@@ -954,6 +1222,17 @@ export class StatsAggregator {
         recordProjectionStats(stats, projection);
         const daily = (stats.daily[date] ??= createDailyBucket());
         recordDailyProjectionStats(daily, projection);
+      }
+
+      if (options.skillInventory) {
+        recordSkillInventoryObservation({
+          stats,
+          agentId: options.skillInventory.agentId,
+          skills: options.skillInventory.skills,
+          skillsUsed,
+          recommendedSkills,
+          eventTime,
+        });
       }
 
       pruneRollingData(stats, nowMs);

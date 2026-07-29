@@ -6,6 +6,13 @@ import { StatsAggregator } from "./aggregator.js";
 import type { IntentCatalogEntry } from "../types.js";
 import type { SessionState } from "../session/index.js";
 
+const WINNER_A = "a".repeat(64);
+const WINNER_B = "b".repeat(64);
+const CONTENT_A = "c".repeat(64);
+const SAME_CONTENT = "d".repeat(64);
+const STABLE_WINNER = "e".repeat(64);
+const STABLE_CONTENT = "f".repeat(64);
+
 describe("StatsAggregator", () => {
   let tempDir: string;
   let aggregator: StatsAggregator;
@@ -93,6 +100,21 @@ describe("StatsAggregator", () => {
     );
   }
 
+  function inventoryOptions(
+    agentId: string,
+    skills: Array<{
+      name: string;
+      source: "workspace" | "extra";
+      winnerFingerprint: string;
+      fingerprint: string;
+    }>,
+  ) {
+    return {
+      skillInventory: { agentId, skills },
+      nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+    } as never;
+  }
+
   it("creates stats.json without scanning existing session files", () => {
     const sessionsDir = path.join(tempDir, "sessions");
     fs.mkdirSync(sessionsDir);
@@ -112,6 +134,367 @@ describe("StatsAggregator", () => {
     expect(Object.keys(stats.processedEvents)).toEqual([
       "new-session:2026-06-11T00:00:00.000Z",
     ]);
+  });
+
+  it("preflights incomplete and duplicate stats events", () => {
+    expect(
+      aggregator.isRecordable("missing-start", createState({ timestamps: {} })),
+    ).toBe(false);
+    expect(
+      aggregator.isRecordable(
+        "missing-result",
+        createState({ intent: undefined }),
+      ),
+    ).toBe(false);
+
+    const state = createState();
+    expect(aggregator.isRecordable("session-1", state)).toBe(true);
+    expect(aggregator.record("session-1", state, intent)).toBe(true);
+    expect(aggregator.isRecordable("session-1", state)).toBe(false);
+  });
+
+  it("records resolved skill inventory observations independently per agent", () => {
+    const skill = {
+      name: "git-master",
+      source: "workspace" as const,
+      winnerFingerprint: WINNER_A,
+      fingerprint: CONTENT_A,
+    };
+
+    expect(
+      aggregator.record(
+        "agent-a-session",
+        createState(),
+        intent,
+        inventoryOptions("agent-a", [skill]),
+      ),
+    ).toBe(true);
+    expect(
+      aggregator.record(
+        "agent-b-session",
+        createState({
+          intent: {
+            result: {
+              intent: "version-control",
+              reason: "test",
+              domain: "git",
+              confidence: 0.75,
+              complexity: "medium",
+            },
+            recommendedSkills: [],
+          },
+          skillsUsed: [],
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+        inventoryOptions("agent-b", [skill]),
+      ),
+    ).toBe(true);
+
+    const stats = readStats();
+    expect(stats.schemaVersion).toBe(3);
+    expect(stats.skillInventory.startedAt).toBe("2026-06-11T00:01:00.000Z");
+    expect(stats.skillInventory.agents["agent-a"]).toMatchObject({
+      observedTurns: 1,
+      skills: {
+        "git-master": {
+          name: "git-master",
+          source: "workspace",
+          winnerFingerprint: WINNER_A,
+          fingerprint: CONTENT_A,
+          firstSeenTurn: 1,
+          lastSeenTurn: 1,
+          observedTurns: 1,
+          usageTurns: 1,
+          recommendedTurns: 1,
+        },
+      },
+    });
+    expect(stats.skillInventory.agents["agent-b"]).toMatchObject({
+      observedTurns: 1,
+      skills: {
+        "git-master": {
+          firstSeenTurn: 1,
+          lastSeenTurn: 1,
+          observedTurns: 1,
+          usageTurns: 0,
+          recommendedTurns: 0,
+        },
+      },
+    });
+  });
+
+  it("stores reserved inventory keys as own properties", () => {
+    expect(
+      aggregator.record("session-1", createState(), intent, {
+        skillInventory: {
+          agentId: "__proto__",
+          skills: [
+            {
+              name: "__proto__",
+              source: "workspace",
+              winnerFingerprint: WINNER_A,
+              fingerprint: CONTENT_A,
+            },
+          ],
+        },
+      }),
+    ).toBe(true);
+
+    const stats = readStats();
+    expect(Object.hasOwn(stats.skillInventory.agents, "__proto__")).toBe(true);
+    expect(
+      Object.hasOwn(
+        stats.skillInventory.agents["__proto__"].skills,
+        "__proto__",
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      "invalid winner fingerprint",
+      (skill: Record<string, unknown>) => {
+        skill.winnerFingerprint = "x";
+      },
+    ],
+    [
+      "invalid content fingerprint",
+      (skill: Record<string, unknown>) => {
+        skill.fingerprint = "x";
+      },
+    ],
+    [
+      "usage beyond observed turns",
+      (skill: Record<string, unknown>) => {
+        skill.usageTurns = 2;
+      },
+    ],
+    [
+      "recommendations beyond observed turns",
+      (skill: Record<string, unknown>) => {
+        skill.recommendedTurns = 2;
+      },
+    ],
+    [
+      "inconsistent epoch turn count",
+      (skill: Record<string, unknown>) => {
+        skill.observedTurns = 2;
+      },
+    ],
+  ])("preserves v3 stats with %s", (_, corrupt) => {
+    const statsPath = path.join(tempDir, "stats.json");
+    expect(
+      aggregator.record(
+        "seed",
+        createState(),
+        intent,
+        inventoryOptions("main", [
+          {
+            name: "git-master",
+            source: "workspace",
+            winnerFingerprint: WINNER_A,
+            fingerprint: CONTENT_A,
+          },
+        ]),
+      ),
+    ).toBe(true);
+    const stats = readStats();
+    corrupt(stats.skillInventory.agents.main.skills["git-master"]);
+    const original = JSON.stringify(stats);
+    fs.writeFileSync(statsPath, original);
+
+    expect(
+      aggregator.record(
+        "next",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(false);
+    expect(fs.readFileSync(statsPath, "utf-8")).toBe(original);
+  });
+
+  it.each([
+    [
+      "a non-canonical agent key",
+      (stats: ReturnType<typeof readStats>) => {
+        stats.skillInventory.agents[" main "] =
+          stats.skillInventory.agents.main;
+        delete stats.skillInventory.agents.main;
+      },
+    ],
+    [
+      "a skill key that does not match its name",
+      (stats: ReturnType<typeof readStats>) => {
+        const skills = stats.skillInventory.agents.main.skills;
+        skills.other = skills["git-master"];
+        delete skills["git-master"];
+      },
+    ],
+    [
+      "a non-canonical skill name",
+      (stats: ReturnType<typeof readStats>) => {
+        stats.skillInventory.agents.main.skills["git-master"].name =
+          " git-master ";
+      },
+    ],
+  ])("preserves v3 stats with %s", (_, corrupt) => {
+    const statsPath = path.join(tempDir, "stats.json");
+    expect(
+      aggregator.record(
+        "seed",
+        createState(),
+        intent,
+        inventoryOptions("main", [
+          {
+            name: "git-master",
+            source: "workspace",
+            winnerFingerprint: WINNER_A,
+            fingerprint: CONTENT_A,
+          },
+        ]),
+      ),
+    ).toBe(true);
+    const stats = readStats();
+    corrupt(stats);
+    const original = JSON.stringify(stats);
+    fs.writeFileSync(statsPath, original);
+
+    expect(
+      aggregator.record(
+        "next",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(false);
+    expect(fs.readFileSync(statsPath, "utf-8")).toBe(original);
+  });
+
+  it("restarts a skill observation epoch after interrupted visibility", () => {
+    const skill = {
+      name: "git-master",
+      source: "workspace" as const,
+      winnerFingerprint: WINNER_A,
+      fingerprint: CONTENT_A,
+    };
+    aggregator.record(
+      "visible-1",
+      createState(),
+      intent,
+      inventoryOptions("main", [skill]),
+    );
+    aggregator.record(
+      "missing",
+      createState({
+        timestamps: {
+          start: "2026-06-11T00:02:00.000Z",
+          end: "2026-06-11T00:03:00.000Z",
+        },
+      }),
+      intent,
+      inventoryOptions("main", []),
+    );
+    aggregator.record(
+      "visible-2",
+      createState({
+        timestamps: {
+          start: "2026-06-11T00:04:00.000Z",
+          end: "2026-06-11T00:05:00.000Z",
+        },
+      }),
+      intent,
+      inventoryOptions("main", [skill]),
+    );
+
+    expect(readStats().skillInventory.agents.main).toMatchObject({
+      observedTurns: 3,
+      skills: {
+        "git-master": {
+          firstSeenAt: "2026-06-11T00:05:00.000Z",
+          lastSeenAt: "2026-06-11T00:05:00.000Z",
+          firstSeenTurn: 3,
+          lastSeenTurn: 3,
+          observedTurns: 1,
+          usageTurns: 1,
+          recommendedTurns: 1,
+        },
+      },
+    });
+  });
+
+  it("restarts only the changed skill identity and deduplicates the event", () => {
+    const firstInventory = [
+      {
+        name: "git-master",
+        source: "extra" as const,
+        winnerFingerprint: WINNER_A,
+        fingerprint: SAME_CONTENT,
+      },
+      {
+        name: "dev-lifecycle",
+        source: "workspace" as const,
+        winnerFingerprint: STABLE_WINNER,
+        fingerprint: STABLE_CONTENT,
+      },
+    ];
+    aggregator.record(
+      "identity-1",
+      createState(),
+      intent,
+      inventoryOptions("main", firstInventory),
+    );
+    const changedState = createState({
+      timestamps: {
+        start: "2026-06-11T00:02:00.000Z",
+        end: "2026-06-11T00:03:00.000Z",
+      },
+    });
+    const changedInventory = [
+      { ...firstInventory[0], winnerFingerprint: WINNER_B },
+      firstInventory[1],
+    ];
+
+    expect(
+      aggregator.record(
+        "identity-2",
+        changedState,
+        intent,
+        inventoryOptions("main", changedInventory),
+      ),
+    ).toBe(true);
+    expect(
+      aggregator.record(
+        "identity-2",
+        changedState,
+        intent,
+        inventoryOptions("main", changedInventory),
+      ),
+    ).toBe(false);
+
+    const skills = readStats().skillInventory.agents.main.skills;
+    expect(skills["git-master"]).toMatchObject({
+      winnerFingerprint: WINNER_B,
+      firstSeenTurn: 2,
+      observedTurns: 1,
+    });
+    expect(skills["dev-lifecycle"]).toMatchObject({
+      firstSeenTurn: 1,
+      lastSeenTurn: 2,
+      observedTurns: 2,
+    });
   });
 
   it("records the turn without a complexity bucket when complexity is unavailable", () => {
@@ -306,7 +689,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(2);
+    expect(stats.schemaVersion).toBe(3);
     expect(stats.projection).toMatchObject({
       eligibleTurns: 2,
       projectedTurns: 1,
@@ -424,6 +807,7 @@ describe("StatsAggregator", () => {
     const legacy = readStats();
     legacy.schemaVersion = 1;
     delete legacy.projection;
+    delete legacy.skillInventory;
     for (const bucket of Object.values(legacy.daily) as Array<
       Record<string, unknown>
     >) {
@@ -445,13 +829,50 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.schemaVersion).toBe(3);
     expect(migrated.createdAt).toBe(legacy.createdAt);
     expect(migrated.summary.turns).toBe(2);
     expect(migrated.intents["version-control"].turns).toBe(2);
     expect(migrated.processedEvents).toMatchObject(legacy.processedEvents);
     expect(migrated.projection.eligibleTurns).toBe(0);
     expect(migrated.daily["2026-06-11"].projection.eligibleTurns).toBe(0);
+    expect(migrated.skillInventory).toEqual({
+      startedAt: "2026-06-11T00:03:00.000Z",
+      agents: {},
+    });
+  });
+
+  it("migrates a valid v2 file without synthesizing inventory history", () => {
+    aggregator.record("existing-session", createState(), intent);
+    const statsPath = path.join(tempDir, "stats.json");
+    const legacy = readStats();
+    legacy.schemaVersion = 2;
+    delete legacy.skillInventory;
+    fs.writeFileSync(statsPath, JSON.stringify(legacy));
+
+    expect(
+      aggregator.record(
+        "new-session",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(true);
+
+    const migrated = readStats();
+    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.createdAt).toBe(legacy.createdAt);
+    expect(migrated.summary.turns).toBe(2);
+    expect(migrated.intents["version-control"].turns).toBe(2);
+    expect(migrated.processedEvents).toMatchObject(legacy.processedEvents);
+    expect(migrated.skillInventory).toEqual({
+      startedAt: "2026-06-11T00:03:00.000Z",
+      agents: {},
+    });
   });
 
   it.each([
@@ -505,6 +926,7 @@ describe("StatsAggregator", () => {
     const legacy = readStats() as Record<string, unknown>;
     legacy.schemaVersion = 1;
     delete legacy.projection;
+    delete legacy.skillInventory;
     for (const bucket of Object.values(
       legacy.daily as Record<string, Record<string, unknown>>,
     )) {

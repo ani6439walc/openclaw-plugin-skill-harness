@@ -64,6 +64,7 @@ import {
   resolveAvailableSkills,
   resolveAvailableSkillsWithRelated,
   resolveDomainSkills,
+  resolveSkillInventory,
 } from "../intents/index.js";
 import { FALLBACK_INTENT, isIntentComplexity } from "../constants.js";
 import { intentsPath } from "../file-utils.js";
@@ -472,6 +473,8 @@ export function createHookHandlers(deps: HookDeps) {
   const catalog = deps.catalog ?? defaultCatalog;
   const tracker = deps.tracker ?? defaultTracker;
   const statsAggregator = deps.statsAggregator ?? defaultStatsAggregator;
+  const skillInventoryResolver =
+    deps.skillInventoryResolver ?? resolveSkillInventory;
   const enqueueReviewTask = deps.reviewQueue?.enqueue ?? enqueueReview;
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier ?? runIntentionSubagent;
@@ -1511,7 +1514,7 @@ export function createHookHandlers(deps: HookDeps) {
     });
   }
 
-  function recordAgentEndStats(sessionId: string) {
+  async function recordAgentEndStats(sessionId: string) {
     const state = tracker.getCurrentState(sessionId);
     if (!state) return;
 
@@ -1519,7 +1522,34 @@ export function createHookHandlers(deps: HookDeps) {
       catalog,
       state.intent?.result?.intent,
     );
-    if (!statsAggregator.record(sessionId, state, intentDefinition)) return;
+    const agentId = tracker.getAgentId(sessionId)?.trim();
+    if (agentId && !statsAggregator.isRecordable(sessionId, state)) return;
+    let skillInventory:
+      | {
+          agentId: string;
+          skills: NonNullable<
+            Awaited<ReturnType<typeof resolveSkillInventory>>
+          >;
+        }
+      | undefined;
+    if (agentId) {
+      try {
+        const skills = await skillInventoryResolver({
+          api,
+          agentId,
+          bundledSkillsDir,
+        });
+        if (skills) skillInventory = { agentId, skills };
+      } catch (error) {
+        logger.warn("failed to resolve skill inventory for stats", { error });
+      }
+    }
+    const recorded = skillInventory
+      ? statsAggregator.record(sessionId, state, intentDefinition, {
+          skillInventory,
+        })
+      : statsAggregator.record(sessionId, state, intentDefinition);
+    if (!recorded) return;
     return { intentDefinition };
   }
 
@@ -1622,7 +1652,7 @@ export function createHookHandlers(deps: HookDeps) {
     ctx: PluginHookAgentContext,
   ): Promise<void> {
     if (!trackedSessionId) return;
-    const agentEndStats = recordAgentEndStats(trackedSessionId);
+    const agentEndStats = await recordAgentEndStats(trackedSessionId);
     if (!agentEndStats) return;
 
     const resolvedConfig = config();

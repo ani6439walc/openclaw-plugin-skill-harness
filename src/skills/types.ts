@@ -60,6 +60,13 @@ export interface AvailableSkill {
   resolvedRelatedSkills?: RelatedSkillResult[];
 }
 
+export interface SkillInventoryItem {
+  name: string;
+  source: SkillSource;
+  winnerFingerprint: string;
+  fingerprint: string;
+}
+
 export interface SkillResolutionParams {
   api: import("../../api.js").OpenClawPluginApi;
   agentId: string;

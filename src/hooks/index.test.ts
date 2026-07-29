@@ -18,13 +18,17 @@ vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
 
 const emitHostAgentEvent = vi.mocked(emitAgentEvent);
 
-function createHandlers(api: Partial<OpenClawPluginApi> = {}) {
+function createHandlers(
+  api: Partial<OpenClawPluginApi> = {},
+  overrides: Record<string, unknown> = {},
+) {
   return createHookHandlers({
     api: api as OpenClawPluginApi,
     config: () => resolveConfig({}),
     refreshLiveConfigFromRuntime: () => undefined,
     refreshIntents: () => undefined,
-  });
+    ...overrides,
+  } as never);
 }
 
 describe("createHookHandlers tracking guards", () => {
@@ -605,6 +609,190 @@ description: Navigate Tokyo.
       definition,
     );
   });
+
+  it("attributes inventory observation to the tracked agent", async () => {
+    const state = {
+      intent: {
+        result: {
+          intent: "skill-lifecycle",
+          reason: "test",
+          domain: "agent-ops",
+          confidence: 0.9,
+          complexity: "low" as const,
+        },
+      },
+      timestamps: { start: "2026-07-06T15:47:27.004Z" },
+    };
+    const definition = {
+      id: "skill-lifecycle",
+      definition: {
+        triggers: ["skill"],
+        examples: [],
+        domain: "agent-ops",
+        skills: ["skill-harness"],
+        fastpath: { keywords: [] },
+        prompt: "Follow the skill workflow.",
+      },
+    };
+    const inventory = [
+      {
+        name: "skill-harness",
+        source: "workspace" as const,
+        winnerFingerprint: "winner-a",
+        fingerprint: "content-a",
+      },
+    ];
+    const resolveInventory = vi.fn().mockResolvedValue(inventory);
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "tracked-session",
+    );
+    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
+    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
+    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
+    const recordStats = vi
+      .spyOn(defaultStatsAggregator, "record")
+      .mockReturnValue(true);
+
+    await createHandlers(
+      {},
+      { skillInventoryResolver: resolveInventory },
+    ).onAgentEnd(
+      { messages: [{ role: "assistant", content: "done" }] } as never,
+      { sessionId: "event-session", agentId: "agent-b" } as never,
+    );
+
+    expect(resolveInventory).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "agent-a" }),
+    );
+    expect(recordStats).toHaveBeenCalledWith(
+      "tracked-session",
+      state,
+      definition,
+      { skillInventory: { agentId: "agent-a", skills: inventory } },
+    );
+  });
+
+  it.each([
+    ["returns undefined", vi.fn().mockResolvedValue(undefined)],
+    ["rejects", vi.fn().mockRejectedValue(new Error("inventory failed"))],
+  ])("preserves stats when inventory resolution %s", async (_, resolver) => {
+    const state = {
+      intent: {
+        result: {
+          intent: "other",
+          reason: "test",
+          domain: "other",
+          confidence: 0.5,
+          complexity: "low" as const,
+        },
+      },
+      timestamps: { start: "2026-07-06T15:47:27.004Z" },
+    };
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "tracked-session",
+    );
+    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
+    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
+    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
+    const recordStats = vi
+      .spyOn(defaultStatsAggregator, "record")
+      .mockReturnValue(true);
+
+    await createHandlers({}, { skillInventoryResolver: resolver }).onAgentEnd(
+      { messages: [{ role: "assistant", content: "done" }] } as never,
+      { sessionId: "event-session", agentId: "agent-a" } as never,
+    );
+
+    expect(recordStats).toHaveBeenCalledWith(
+      "tracked-session",
+      state,
+      undefined,
+    );
+  });
+
+  it("does not resolve inventory for an unrecordable stats event", async () => {
+    const state = {
+      intent: {
+        result: {
+          intent: "other",
+          reason: "test",
+          domain: "other",
+          confidence: 0.5,
+          complexity: "low" as const,
+        },
+      },
+      timestamps: { start: "2026-07-06T15:47:27.004Z" },
+    };
+    const resolver = vi.fn().mockResolvedValue([]);
+    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+      "tracked-session",
+    );
+    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
+    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
+    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(false);
+    const recordStats = vi.spyOn(defaultStatsAggregator, "record");
+
+    await createHandlers({}, { skillInventoryResolver: resolver }).onAgentEnd(
+      { messages: [{ role: "assistant", content: "done" }] } as never,
+      { sessionId: "event-session", agentId: "agent-a" } as never,
+    );
+
+    expect(resolver).not.toHaveBeenCalled();
+    expect(recordStats).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "missing start",
+      {
+        intent: {
+          result: {
+            intent: "other",
+            reason: "test",
+            domain: "other",
+            confidence: 0.5,
+            complexity: "low" as const,
+          },
+        },
+        timestamps: {},
+      },
+    ],
+    [
+      "missing result and projection",
+      { intent: undefined, timestamps: { start: "2026-07-06T15:47:27.004Z" } },
+    ],
+  ])(
+    "does not resolve inventory when a stats event is %s",
+    async (_, state) => {
+      const resolver = vi.fn().mockResolvedValue([]);
+      vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+        "tracked-session",
+      );
+      vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
+      vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+      vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
+      vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
+      vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
+      const recordStats = vi.spyOn(defaultStatsAggregator, "record");
+
+      await createHandlers({}, { skillInventoryResolver: resolver }).onAgentEnd(
+        { messages: [{ role: "assistant", content: "done" }] } as never,
+        { sessionId: "event-session", agentId: "agent-a" } as never,
+      );
+
+      expect(resolver).not.toHaveBeenCalled();
+      expect(recordStats).not.toHaveBeenCalled();
+    },
+  );
 
   it("aggregates agent_end using canonical session key when hook context omits it", async () => {
     const sessionKey = "agent:main:discord:direct:529296776637972480";

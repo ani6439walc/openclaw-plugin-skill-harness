@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import type { Dirent, Stats } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import matter from "gray-matter";
 import { logger, type OpenClawPluginApi } from "../../api.js";
@@ -16,6 +17,7 @@ import { skillSourcePriority } from "./types.js";
 import type {
   AvailableSkill,
   DeclaredRelatedSkill,
+  SkillInventoryItem,
   SkillResolutionParams,
   SkillUsageStats,
 } from "./types.js";
@@ -25,11 +27,17 @@ const SKILL_INDEX_MAX_DEPTH = 32;
 
 interface CachedSkillIndex {
   expiresAtMs: number;
-  index: Map<string, AvailableSkill>;
+  index: Map<string, IndexedSkill>;
+}
+
+interface IndexedSkill extends AvailableSkill {
+  winnerFingerprint: string;
+  fingerprint: string;
 }
 
 interface SkillIndexOptions {
   disabledSkillNames?: ReadonlySet<string>;
+  requireComplete?: boolean;
   source?: AvailableSkill["source"];
 }
 
@@ -95,10 +103,12 @@ function parseDeclaredRelatedSkills(data: unknown): DeclaredRelatedSkill[] {
 async function readSkillFile(
   filePath: string,
   source?: AvailableSkill["source"],
-): Promise<AvailableSkill | undefined> {
+  requireComplete = false,
+): Promise<IndexedSkill | undefined> {
   try {
-    const raw = await fs.readFile(filePath, "utf-8");
-    const parsed = matter(raw);
+    const raw = await fs.readFile(filePath);
+    const resolvedFilePath = await fs.realpath(filePath);
+    const parsed = matter(raw.toString("utf-8"));
     const name =
       typeof parsed.data.name === "string"
         ? parsed.data.name.trim()
@@ -113,10 +123,15 @@ async function readSkillFile(
       name,
       location: filePath,
       description,
+      winnerFingerprint: createHash("sha256")
+        .update(resolvedFilePath)
+        .digest("hex"),
+      fingerprint: createHash("sha256").update(raw).digest("hex"),
       source,
       ...(relatedSkills.length ? { relatedSkills } : {}),
     };
   } catch (err) {
+    if (requireComplete) throw err;
     if (!isMissingPathError(err)) {
       logger.warn("failed to read referenced skill metadata", {
         error: err,
@@ -127,73 +142,109 @@ async function readSkillFile(
   }
 }
 
-async function readEntryStat(entryPath: string): Promise<Stats | undefined> {
+async function readEntryStat(
+  entryPath: string,
+  requireComplete = false,
+): Promise<Stats | undefined> {
   try {
     return await fs.stat(entryPath);
-  } catch {
+  } catch (error) {
+    if (requireComplete) throw error;
     return;
   }
 }
 
-async function isSkillFileEntry(dir: string, entry: Dirent): Promise<boolean> {
+async function isSkillFileEntry(
+  dir: string,
+  entry: Dirent,
+  requireComplete = false,
+): Promise<boolean> {
   if (entry.name !== "SKILL.md") return false;
   if (entry.isFile()) return true;
   if (!entry.isSymbolicLink()) return false;
-  return (await readEntryStat(path.join(dir, entry.name)))?.isFile() ?? false;
+  return (
+    (
+      await readEntryStat(path.join(dir, entry.name), requireComplete)
+    )?.isFile() ?? false
+  );
 }
 
 async function resolveChildDirectory(
   dir: string,
   entry: Dirent,
+  requireComplete = false,
 ): Promise<string | undefined> {
   const entryPath = path.join(dir, entry.name);
   if (entry.isDirectory()) return entryPath;
   if (!entry.isSymbolicLink()) return;
-  return (await readEntryStat(entryPath))?.isDirectory()
+  return (await readEntryStat(entryPath, requireComplete))?.isDirectory()
     ? entryPath
     : undefined;
 }
 
-export async function readDisabledBundledSkillNames(
+type DisabledBundledSkillPolicy =
+  { resolved: true; names: Set<string> } | { resolved: false };
+
+async function resolveDisabledBundledSkillPolicy(
   stateDir: string,
-): Promise<Set<string>> {
+): Promise<DisabledBundledSkillPolicy> {
   const configPath = path.join(stateDir, "openclaw.json");
   try {
     const parsed = JSON.parse(
       await fs.readFile(configPath, "utf-8"),
     ) as unknown;
-    if (!parsed || typeof parsed !== "object") return new Set();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { resolved: false };
+    }
     const skills = (parsed as { skills?: unknown }).skills;
-    if (!skills || typeof skills !== "object") return new Set();
+    if (skills === undefined) return { resolved: true, names: new Set() };
+    if (!skills || typeof skills !== "object" || Array.isArray(skills)) {
+      return { resolved: false };
+    }
     const entries = (skills as { entries?: unknown }).entries;
+    if (entries === undefined) return { resolved: true, names: new Set() };
     if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
-      return new Set();
+      return { resolved: false };
     }
 
     const disabled = new Set<string>();
     for (const [name, entry] of Object.entries(entries)) {
-      if (!entry || typeof entry !== "object") continue;
-      if ((entry as { enabled?: unknown }).enabled === false) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return { resolved: false };
+      }
+      const enabled = (entry as { enabled?: unknown }).enabled;
+      if (enabled !== undefined && typeof enabled !== "boolean") {
+        return { resolved: false };
+      }
+      if (enabled === false) {
         disabled.add(name.toLowerCase());
       }
     }
-    return disabled;
+    return { resolved: true, names: disabled };
   } catch (err) {
-    if (!isMissingPathError(err)) {
-      logger.warn("failed to read OpenClaw skill entry configuration", {
-        error: err,
-        path: configPath,
-      });
+    if (isMissingPathError(err)) {
+      return { resolved: true, names: new Set() };
     }
-    return new Set();
+    logger.warn("failed to read OpenClaw skill entry configuration", {
+      error: err,
+      path: configPath,
+    });
+    return { resolved: false };
   }
+}
+
+export async function readDisabledBundledSkillNames(
+  stateDir: string,
+): Promise<Set<string>> {
+  const policy = await resolveDisabledBundledSkillPolicy(stateDir);
+  return policy.resolved ? policy.names : new Set();
 }
 
 async function buildSkillIndex(
   root: string,
   options: SkillIndexOptions = {},
-): Promise<Map<string, AvailableSkill>> {
-  const index = new Map<string, AvailableSkill>();
+): Promise<Map<string, IndexedSkill>> {
+  const index = new Map<string, IndexedSkill>();
   const visitedDirs = new Set<string>();
   const disabledSkillNames = options.disabledSkillNames ?? new Set<string>();
 
@@ -203,7 +254,13 @@ async function buildSkillIndex(
     let realDir: string;
     try {
       realDir = await fs.realpath(dir);
-    } catch {
+    } catch (error) {
+      if (
+        options.requireComplete &&
+        !(depth === 0 && isMissingPathError(error))
+      ) {
+        throw error;
+      }
       return;
     }
     if (visitedDirs.has(realDir)) return;
@@ -212,15 +269,20 @@ async function buildSkillIndex(
     let entries: Dirent[];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (options.requireComplete) throw error;
       return;
     }
 
     const skillFileEntry = entries.find((entry) => entry.name === "SKILL.md");
-    if (skillFileEntry && (await isSkillFileEntry(dir, skillFileEntry))) {
+    if (
+      skillFileEntry &&
+      (await isSkillFileEntry(dir, skillFileEntry, options.requireComplete))
+    ) {
       const skill = await readSkillFile(
         path.join(dir, "SKILL.md"),
         options.source,
+        options.requireComplete,
       );
       const key = skill?.name.toLowerCase();
       if (skill && key && !disabledSkillNames.has(key)) {
@@ -239,7 +301,11 @@ async function buildSkillIndex(
     const childDirs: string[] = [];
     for (const entry of entries) {
       if (disabledSkillNames.has(entry.name.toLowerCase())) continue;
-      const childDir = await resolveChildDirectory(dir, entry);
+      const childDir = await resolveChildDirectory(
+        dir,
+        entry,
+        options.requireComplete,
+      );
       if (childDir) childDirs.push(childDir);
     }
     childDirs.sort((left, right) => left.localeCompare(right));
@@ -256,13 +322,13 @@ async function buildSkillIndex(
 async function getCachedSkillIndex(
   root: string,
   options: { cacheTtlMs?: number; nowMs?: number } & SkillIndexOptions = {},
-): Promise<Map<string, AvailableSkill>> {
+): Promise<Map<string, IndexedSkill>> {
   const nowMs = options.nowMs ?? Date.now();
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_SKILL_INDEX_CACHE_TTL_MS;
   const disabledCacheKey = options.disabledSkillNames
     ? [...options.disabledSkillNames].sort().join(",")
     : "";
-  const cacheKey = `${root}\0${options.source ?? ""}\0${disabledCacheKey}\0${cacheTtlMs}`;
+  const cacheKey = `${root}\0${options.source ?? ""}\0${disabledCacheKey}\0${cacheTtlMs}\0${options.requireComplete === true}`;
   sweepExpiredSkillIndexes(nowMs);
 
   const cached = skillIndexCache.get(cacheKey);
@@ -274,6 +340,7 @@ async function getCachedSkillIndex(
 
   const index = await buildSkillIndex(root, {
     disabledSkillNames: options.disabledSkillNames,
+    requireComplete: options.requireComplete,
     source: options.source,
   });
   if (cacheTtlMs > 0) {
@@ -289,17 +356,19 @@ async function getCachedSkillIndex(
 
 async function listSkillIndexes(
   params: SkillResolutionParams,
-): Promise<Array<Map<string, AvailableSkill>>> {
+  resolvedDisabledBundledSkillNames?: ReadonlySet<string>,
+  requireComplete = false,
+): Promise<Array<Map<string, IndexedSkill>>> {
   const stateDir = resolveStateDirFromApi(params.api, process.env);
   const cacheTtlMs =
     params.cacheTtlMs ?? resolveSkillIndexCacheTtlMs(params.api.config);
-  let disabledBundledSkillNames: Set<string> | undefined;
+  let disabledBundledSkillNames = resolvedDisabledBundledSkillNames;
   const getDisabledBundledSkillNames = async () => {
     disabledBundledSkillNames ??= await readDisabledBundledSkillNames(stateDir);
     return disabledBundledSkillNames;
   };
 
-  const indexes: Array<Map<string, AvailableSkill>> = [];
+  const indexes: Array<Map<string, IndexedSkill>> = [];
   for (const root of resolveSkillRoots(params)) {
     indexes.push(
       await getCachedSkillIndex(root.path, {
@@ -309,11 +378,53 @@ async function listSkillIndexes(
             ? await getDisabledBundledSkillNames()
             : undefined,
         nowMs: params.nowMs,
+        requireComplete,
         source: root.source,
       }),
     );
   }
   return indexes;
+}
+
+export async function resolveSkillInventory(
+  params: SkillResolutionParams,
+): Promise<SkillInventoryItem[] | undefined> {
+  const policy = await resolveDisabledBundledSkillPolicy(
+    resolveStateDirFromApi(params.api, process.env),
+  );
+  if (!policy.resolved) return;
+  const inventory: SkillInventoryItem[] = [];
+  const seen = new Set<string>();
+  let indexes: Array<Map<string, IndexedSkill>>;
+  try {
+    indexes = await listSkillIndexes(params, policy.names, true);
+  } catch (error) {
+    logger.warn("failed to resolve complete skill inventory", { error });
+    return;
+  }
+  for (const index of indexes) {
+    for (const skill of index.values()) {
+      const key = skill.name.toLowerCase();
+      if (seen.has(key) || !skill.source) continue;
+      seen.add(key);
+      inventory.push({
+        name: skill.name,
+        source: skill.source,
+        winnerFingerprint: skill.winnerFingerprint,
+        fingerprint: skill.fingerprint,
+      });
+    }
+  }
+  return inventory;
+}
+
+function stripIndexOnlyFields(skill: IndexedSkill): AvailableSkill {
+  const {
+    fingerprint: _fingerprint,
+    winnerFingerprint: _winnerFingerprint,
+    ...available
+  } = skill;
+  return available;
 }
 
 function stripToolOnlyFields(skill: AvailableSkill): AvailableSkill {
@@ -364,7 +475,7 @@ export async function listAvailableSkills(
       }
       seen.add(key);
       skills.push({
-        ...skill,
+        ...stripIndexOnlyFields(skill),
         ...(domainsBySkill
           ? { domains: domainsForSkill(domainsBySkill, skill.name) }
           : {}),
@@ -395,7 +506,7 @@ export async function findAvailableSkill(
     const skill = index.get(normalizedName);
     if (skill) {
       return {
-        ...skill,
+        ...stripIndexOnlyFields(skill),
         ...(domainsBySkill
           ? { domains: domainsForSkill(domainsBySkill, skill.name) }
           : {}),

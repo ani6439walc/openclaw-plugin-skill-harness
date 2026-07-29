@@ -6,6 +6,7 @@ import {
   findAvailableSkill,
   listAvailableSkills,
   resolveAvailableSkills,
+  resolveSkillInventory,
 } from "./indexer.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import type { IntentCatalogEntry } from "../types.js";
@@ -47,6 +48,147 @@ function createApi(
 }
 
 describe("skill indexer", () => {
+  it("fingerprints raw skill bytes before UTF-8 decoding", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const api = createApi(stateDir, workspaceDir);
+    const skillDir = path.join(workspaceDir, "skills", "raw-bytes");
+    const skillPath = path.join(skillDir, "SKILL.md");
+    const prefix = Buffer.from(
+      "---\nname: raw-bytes\ndescription: Raw bytes.\n---\n\n# Raw bytes\n",
+    );
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(skillPath, Buffer.concat([prefix, Buffer.from([0x80])]));
+
+    const first = await resolveSkillInventory({
+      api,
+      agentId: "main",
+      cacheTtlMs: 0,
+    });
+    fs.writeFileSync(skillPath, Buffer.concat([prefix, Buffer.from([0x81])]));
+    const second = await resolveSkillInventory({
+      api,
+      agentId: "main",
+      cacheTtlMs: 0,
+    });
+
+    expect(
+      first?.find((skill) => skill.name === "raw-bytes")?.fingerprint,
+    ).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      second?.find((skill) => skill.name === "raw-bytes")?.fingerprint,
+    ).not.toBe(first?.find((skill) => skill.name === "raw-bytes")?.fingerprint);
+  });
+
+  it("fingerprints the resolved precedence winner independently of content", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const firstRoot = path.join(tmp, "first");
+    const secondRoot = path.join(tmp, "second");
+    writeSkillAt(path.join(firstRoot, "shared"), "shared", "Same content.");
+    writeSkillAt(path.join(secondRoot, "shared"), "shared", "Same content.");
+
+    const first = await resolveSkillInventory({
+      api: createApi(stateDir, workspaceDir, {
+        skills: { load: { extraDirs: [firstRoot, secondRoot] } },
+      }),
+      agentId: "main",
+      bundledSkillsDir: "",
+      cacheTtlMs: 0,
+      homeDir: path.join(tmp, "home"),
+    });
+    const second = await resolveSkillInventory({
+      api: createApi(stateDir, workspaceDir, {
+        skills: { load: { extraDirs: [secondRoot, firstRoot] } },
+      }),
+      agentId: "main",
+      bundledSkillsDir: "",
+      cacheTtlMs: 0,
+      homeDir: path.join(tmp, "home"),
+    });
+
+    const firstShared = first?.find((skill) => skill.name === "shared");
+    const secondShared = second?.find((skill) => skill.name === "shared");
+    expect(firstShared?.source).toBe("extra");
+    expect(firstShared?.fingerprint).toBe(secondShared?.fingerprint);
+    expect(firstShared?.winnerFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(secondShared?.winnerFingerprint).not.toBe(
+      firstShared?.winnerFingerprint,
+    );
+  });
+
+  it("does not resolve an inventory when bundled skill policy is unreadable", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    writeSkillAt(
+      path.join(workspaceDir, "skills", "visible"),
+      "visible",
+      "Visible skill.",
+    );
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, "openclaw.json"), "{ invalid json");
+
+    await expect(
+      resolveSkillInventory({
+        api: createApi(stateDir, workspaceDir),
+        agentId: "main",
+        bundledSkillsDir: "",
+        cacheTtlMs: 0,
+        homeDir: path.join(tmp, "home"),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not resolve an inventory when a bundled skill policy entry is malformed", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    writeSkillAt(
+      path.join(workspaceDir, "skills", "visible"),
+      "visible",
+      "Visible skill.",
+    );
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, "openclaw.json"),
+      JSON.stringify({
+        skills: { entries: { visible: { enabled: "false" } } },
+      }),
+    );
+
+    await expect(
+      resolveSkillInventory({
+        api: createApi(stateDir, workspaceDir),
+        agentId: "main",
+        bundledSkillsDir: "",
+        cacheTtlMs: 0,
+        homeDir: path.join(tmp, "home"),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not resolve an inventory when skill traversal is incomplete", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const skillsDir = path.join(workspaceDir, "skills");
+    writeSkillAt(path.join(skillsDir, "visible"), "visible", "Visible skill.");
+    fs.symlinkSync("loop", path.join(skillsDir, "loop"));
+
+    await expect(
+      resolveSkillInventory({
+        api: createApi(stateDir, workspaceDir),
+        agentId: "main",
+        bundledSkillsDir: "",
+        cacheTtlMs: 0,
+        homeDir: path.join(tmp, "home"),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("refreshes the index using the configured skill watcher debounce", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
     const workspaceDir = path.join(tmp, "workspace");
