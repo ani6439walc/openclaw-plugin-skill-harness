@@ -155,7 +155,16 @@ Keep each intent narrow and concrete:
 - `skills[]` only when the skill genuinely helps
 - experience notes for durable pitfalls, commands, and verification steps
 
-The bundled `skill-harness` skill helps agents design, inventory, and extract runtime intent definitions.
+### Human maintenance skill
+
+The bundled `skill-harness` skill is the explicit human-maintenance surface for runtime intents and Review keyword evidence. It has four modes:
+
+- `inventory` — audit the complete resolved skill/tool/intent catalog, cluster capabilities by user goal, and identify coverage gaps after a calibration checkpoint;
+- `design` — create, refine, rename, split, or merge one intent through a staged preview and confirmation workflow;
+- `extract` — score intent complexity, identify independent responsibilities, and draft skill blueprints plus a slimmed intent after approval;
+- `keyword-audit` — generate a private, report-only cross-session analysis of Review keyword matches, misses, and collisions, then propose a bounded delta without writing runtime state.
+
+This skill does not manually repeat production-owned work: per-turn classification and hint generation, startup seeding, trigger-driven intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, or session cleanup. Broad routing changes and skill extraction remain human-owned because they require semantic calibration and explicit write approval.
 
 ## Skill tools
 
@@ -189,6 +198,10 @@ Enable it with:
 ```
 
 Review investigates a trigger; it does not treat the trigger as proof. Validated findings can create, refine, split, or merge runtime intents. The reviewer never writes source files, bundled skills, OpenClaw config, memory files, or arbitrary paths.
+
+The `successful-pattern`, `behavior-fix`, and `entity-context` triggers may also return a JSON-only trigger-keyword finding. Each finding is limited to its own requested trigger and at most three additions and three removals. The host validates and deduplicates the delta, records it under the schema-v5 `review.json` lock, writes atomically, and refreshes the live keyword cache; the reviewer never edits `review.json` itself.
+
+This automatic keyword learning is event-driven, not a corpus audit. Each keyword-capable trigger must first pass its structural gates **and match an existing keyword** before it can request a keyword finding. A semantically relevant turn that matches no current keyword does not enter that trigger's Review through another path. Production currently has no periodic cross-session keyword-coverage epoch, unmatched-turn aggregation, or labeled TP/FP/FN analysis. The bundled `keyword-audit` mode covers that evidence gap as a private report-and-proposal workflow, but it does not persist approved changes manually.
 
 The `skill-placement` trigger consumes current per-agent resolved-inventory observations. It selects at most one skill per accepted turn, prioritizes an existing low-adoption `needsReview` signal, and otherwise requires 20 continuous observations with zero recommendations and zero usage. The placement reviewer receives the selected skill through `skill_view` plus the complete intent catalog, and may refine exactly one existing runtime intent. It cannot create or modify skills. `applied` and `nofinding` complete that inventory epoch; technical, validation, queue, and log-write failures remain retryable.
 
