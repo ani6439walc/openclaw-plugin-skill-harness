@@ -113,7 +113,7 @@ memory_search({
 
 - Synthesize the read content into a natural language reply, with source citations (e.g., `Source: memory/2026-04-08.md#L42`).
 - If information spans multiple files, merge and label each segment with its source date.
-- **Never fabricate details** not present in memory. If a gap exists, explicitly say "Ani has no record of this part."
+- **Never fabricate details** not present in memory. If a gap exists, explicitly say that no relevant record covers that part.
 
 ## Experience
 

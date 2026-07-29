@@ -4,17 +4,11 @@ Use this workflow when bootstrapping or re-auditing the full intent catalog.
 
 ## Step 1 — Discovery scan
 
-Build an inventory from the active sources instead of assuming a single skill directory.
+Build an inventory from the runtime-resolved catalogs instead of walking source directories yourself.
 
 ### Skills
 
-Include every available skill source the current environment exposes:
-
-- Bundled extension skills, including this package's `skills/` tree.
-- User/runtime skill directories configured for OpenClaw.
-- The active OpenClaw skill catalog if the runtime exposes one.
-
-For each skill, read only the frontmatter and short description first. Deep-read the body only when needed to distinguish capability boundaries.
+Call `skill_list` once to obtain the invoking agent's resolved inventory across bundled, workspace, configured extra, and managed skill roots. Do not reconstruct root precedence manually. Use `skill_search` only to narrow an uncertain capability and `skill_view` only when a description cannot establish the boundary.
 
 ### Tools
 

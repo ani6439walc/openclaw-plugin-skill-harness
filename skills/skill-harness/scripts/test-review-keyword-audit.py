@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -39,6 +40,10 @@ class ReviewKeywordAuditTest(unittest.TestCase):
                 "input": "ship release",
                 "result": "verified workflow shipped cleanly",
                 "toolCalls": [{"name": "exec", "params": {}}] * 5,
+                "timestamps": {
+                    "start": "2026-07-01T01:00:00.000Z",
+                    "end": "2026-07-01T01:01:00.000Z",
+                },
             },
             {
                 "input": "ship patch",
@@ -52,6 +57,10 @@ class ReviewKeywordAuditTest(unittest.TestCase):
                 "toolCalls": [
                     {"name": "read_file", "params": {"path": "memory/project.md"}}
                 ],
+                "timestamps": {
+                    "start": "2026-07-02T03:00:00.000Z",
+                    "end": "2026-07-02T03:02:00.000Z",
+                },
             },
         ]
         (self.root / "sessions" / "fixture.json").write_text(
@@ -95,6 +104,21 @@ class ReviewKeywordAuditTest(unittest.TestCase):
         self.assertTrue(report["reportOnly"])
         self.assertFalse(report["privacy"]["snippetsIncluded"])
         self.assertEqual(
+            report["provenance"]["reviewSha256"],
+            hashlib.sha256((self.root / "review.json").read_bytes()).hexdigest(),
+        )
+        self.assertEqual(report["provenance"]["scriptSha256"], hashlib.sha256(SCRIPT.read_bytes()).hexdigest())
+        self.assertIn("sourceCommit", report["provenance"])
+        self.assertEqual(
+            report["analysisWindow"],
+            {
+                "earliestStart": "2026-07-01T01:00:00.000Z",
+                "latestEnd": "2026-07-02T03:02:00.000Z",
+                "statesWithTimestamps": 2,
+                "statesAnalyzed": 5,
+            },
+        )
+        self.assertEqual(
             report["targets"]["successful-pattern"]["summary"],
             {
                 "eligibleDocs": 2,
@@ -130,6 +154,91 @@ class ReviewKeywordAuditTest(unittest.TestCase):
                 for item in report["targets"]["successful-pattern"]["candidatePhrases"]
             )
         )
+
+    def test_labeled_observations_produce_confusion_metrics(self) -> None:
+        labels_path = self.root / "labels.json"
+        labels_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "observations": [
+                        {
+                            "ref": "fixture.json#history:0",
+                            "expectedTriggers": ["successful-pattern"],
+                        },
+                        {
+                            "ref": "fixture.json#history:1",
+                            "expectedTriggers": [
+                                "successful-pattern",
+                                "entity-context",
+                            ],
+                        },
+                        {
+                            "ref": "fixture.json#history:2",
+                            "expectedTriggers": [],
+                        },
+                        {
+                            "ref": "fixture.json#history:3",
+                            "expectedTriggers": ["behavior-fix"],
+                        },
+                        {
+                            "ref": "fixture.json#current:0",
+                            "expectedTriggers": ["entity-context"],
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = self.run_audit("--labels", str(labels_path))
+        metrics = report["labeledMetrics"]
+        self.assertEqual(metrics["labeledObservations"], 5)
+        self.assertEqual(metrics["unknownRefs"], [])
+        self.assertEqual(
+            metrics["targets"]["behavior-fix"],
+            {
+                "truePositive": 0,
+                "falsePositive": 1,
+                "falseNegative": 1,
+                "trueNegative": 3,
+                "structurallyBlockedPositive": 0,
+                "precision": 0.0,
+                "recall": 0.0,
+            },
+        )
+        self.assertEqual(metrics["targets"]["successful-pattern"]["falseNegative"], 2)
+        self.assertEqual(
+            metrics["targets"]["entity-context"]["structurallyBlockedPositive"], 1
+        )
+
+    def test_reads_successful_pattern_threshold_from_openclaw_config(self) -> None:
+        config_path = self.root / "openclaw.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "plugins": {
+                        "entries": {
+                            "skill-harness": {
+                                "config": {
+                                    "review": {
+                                        "triggers": {
+                                            "successfulPattern": {"toolCalls": 6}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = self.run_audit("--config", str(config_path))
+        self.assertEqual(report["configuration"]["successfulToolCalls"], 6)
+        self.assertEqual(report["configuration"]["thresholdSource"], "openclaw-config")
+        self.assertEqual(report["targets"]["successful-pattern"]["summary"]["eligibleDocs"], 1)
 
     def test_rejects_non_current_review_log(self) -> None:
         (self.root / "review.json").write_text(

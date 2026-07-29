@@ -1,6 +1,6 @@
 # Review Keyword Audit Workflow
 
-Use this workflow to analyze and refine **Intent Review trigger keywords** from retained Skill Harness runtime evidence.
+Use this workflow to analyze **Intent Review trigger keywords** and produce a bounded proposal from retained Skill Harness runtime evidence.
 
 This mode covers only these schema-v5 `review.json` fields:
 
@@ -14,24 +14,44 @@ It does **not** analyze intent `fastpath.keywords` or `candidate.keywords`. For 
 
 Runtime sessions can contain private user and assistant text. Keep reports local, do not paste raw snippets into chat or external artifacts, and never read credential files. The bundled audit script is report-only and omits snippets unless `--include-snippets` is explicitly supplied. It requires either `--output` or an explicit `--stdout`; `--output` is the safe default and atomically creates a mode-`0600` local report. Snippets are refused on stdout.
 
-Do not edit `review.json` while analysis is still exploratory. Keyword changes alter future Review routing and require an evidence summary plus explicit user confirmation before any write.
+This workflow is report and proposal only. Keyword persistence belongs to production Intent Review; do not invoke, emulate, or bypass its host-owned writer, and never hand-edit `review.json`.
 
-## Step 1 — Pin the evidence window
+## Step 1 — Identify the retained evidence window
 
-Resolve the active Skill Harness data root. The default is:
+Resolve the active paths with the same OpenClaw environment convention used by the installed runtime:
 
-```text
-~/.openclaw/plugins/skill-harness/
+```bash
+STATE_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
+CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$STATE_DIR/openclaw.json}"
+DATA_ROOT="$STATE_DIR/plugins/skill-harness"
 ```
+
+The audit script performs this resolution automatically. `--data-root` and `--config` are explicit overrides for nonstandard layouts.
 
 Record these inputs before analysis:
 
 - `review.json` — current schema-v5 keyword source and processed Review outcomes
 - `sessions/*.json` — retained current/history turn snapshots
 - `stats.json` — aggregate accepted-turn count used only as a retention/coverage cross-check
-- configured `review.triggers.successfulPattern.toolCalls` threshold; pass it to the script when it differs from `5`
+- effective `plugins.entries["skill-harness"].config.review.triggers.successfulPattern.toolCalls` threshold
+- current `review.json` SHA-256, exact script SHA-256, source commit when available, and retained-state analysis window
 
-Completion criterion: the source paths, schema version, retained session count, and configured successful-pattern threshold are known. If `review.json` is absent or not schema v5, stop instead of inventing defaults or migrating it.
+The script does not snapshot or hash session files. It reads each retained state once and reports the timestamps it observed, so an active runtime can change the session set during analysis. Use a quiescent copied data root when an immutable cross-file snapshot is required, and do not describe `analysisWindow` as a pinned session snapshot.
+
+Schema v5 processed events do **not** preserve the keyword that matched or the keyword-set version. Historical events can support outcome counts, but they cannot be replayed against the current keyword list for keyword attribution.
+
+The script reads the threshold from `CONFIG_PATH`; `--successful-tool-calls` is an explicit override. The report's `configuration.thresholdSource` must say `openclaw-config`, `cli-override`, `default`, or `default-invalid-config`. The effective range is `1`–`100`, with source default `5`.
+
+The report records bounded provenance:
+
+- `provenance.reviewSha256` — SHA-256 of the exact `review.json` read; the script stops if that file changes during loading
+- `provenance.scriptSha256` — SHA-256 of the exact audit script bytes
+- `provenance.sourceCommit` — repository `HEAD` when Git metadata is available; `null` in packaged/non-Git installs
+- `analysisWindow` — earliest retained state start, latest retained state end, timestamped-state count, and total analyzed-state count
+
+Treat `scriptSha256` as the portable source identity when `sourceCommit` is `null`. A partial timestamp window is allowed, but disclose `statesWithTimestamps < statesAnalyzed`; do not infer missing timestamps.
+
+Completion criterion: the source paths, schema version, available hashes, observed retained analysis window, threshold value, threshold source, and session-snapshot limitation are disclosed. If `review.json` is absent or not schema v5, stop instead of inventing defaults or migrating it.
 
 ## Step 2 — Generate the read-only report
 
@@ -53,7 +73,7 @@ python3 skills/skill-harness/scripts/review-keyword-audit.py \
   --output /tmp/behavior-fix-keyword-audit.json
 ```
 
-If the runtime successful-pattern threshold is not `5`:
+For an intentional one-run threshold override:
 
 ```bash
 python3 skills/skill-harness/scripts/review-keyword-audit.py \
@@ -61,27 +81,69 @@ python3 skills/skill-harness/scripts/review-keyword-audit.py \
   --output /tmp/skill-harness-keyword-audit.json
 ```
 
-The script mirrors the deterministic trigger gates that matter to keyword matching:
+The script provides an **approximate structural replay** of the deterministic trigger gates that matter to keyword matching:
 
 - `successful-pattern` — no agent error and either enough tool calls or at least one used skill; searches user input plus assistant result
 - `behavior-fix` — searches user input only and excludes known quoted/ingest prompt markers
 - `entity-context` — requires a memory/tools source signal in text or a matching read/search tool parameter; searches user input plus assistant result
 
-The report includes:
+It intentionally normalizes text with NFKC, lowercase, and collapsed whitespace for audit grouping, while production matching lowercases and performs substring checks without the same compatibility/whitespace normalization. Treat edge cases involving compatibility characters or repeated whitespace as candidates for focused production tests, not as exact replay proof.
 
-- eligible, matched, and unmatched retained documents
-- hit counts for every current keyword
+The unlabeled report includes:
+
+- structurally eligible, current-keyword-matched, and current-keyword-unmatched retained documents
+- current substring-match counts for every keyword
 - ranked CJK substrings and Latin token n-grams found in unmatched eligible documents
 - local session/turn references for manual labeling
 - overlap with other structurally eligible trigger targets
 - processed Review outcome and prior keyword-change counts
 - aggregate `stats.json` turns versus retained session states
 
-Candidate phrases are discovery leads, not recommendations. Phrase frequency does not prove semantic correctness.
+These are **structural match proxies**, not semantic hits or misses. An unmatched eligible document is not a false negative until a human label says that target should have triggered. Candidate phrases are discovery leads, not recommendations; phrase frequency does not prove semantic correctness.
 
 Completion criterion: the report parses as JSON, its mode is `0600`, `reportOnly` is `true`, `snippetsIncluded` is `false`, and every requested target has a summary.
 
-## Step 3 — Label positives and collisions
+## Step 3 — Build a labeled fixture
+
+Copy `templates/review-keyword-labels.json` to a private local path and add report refs without copying conversation text:
+
+```json
+{
+  "schemaVersion": 1,
+  "observations": [
+    {
+      "ref": "session-file.json#history:0",
+      "expectedTriggers": ["behavior-fix"]
+    },
+    {
+      "ref": "session-file.json#current:0",
+      "expectedTriggers": []
+    }
+  ]
+}
+```
+
+Allowed expected triggers are `successful-pattern`, `behavior-fix`, and `entity-context`. An empty list is an explicit negative observation. Keep one observation per unique ref.
+
+Run the semantic replay:
+
+```bash
+python3 skills/skill-harness/scripts/review-keyword-audit.py \
+  --labels /tmp/review-keyword-labels.json \
+  --output /tmp/skill-harness-keyword-audit-labeled.json
+```
+
+`labeledMetrics` reports TP, FP, FN, TN, precision, recall, multi-trigger predictions, unknown refs, and positives blocked by structural gates. Treat any unknown ref as stale fixture evidence and resolve it before proposing a change.
+
+Definitions:
+
+- **TP:** label expects the trigger; its structural gate passes; a current keyword matches.
+- **FP:** label does not expect the trigger; its structural gate passes; a current keyword matches.
+- **FN:** label expects the trigger, but the full structural-gate-plus-keyword prediction does not fire.
+- **Structural blocked positive:** an FN where the keyword surface was never reached because the trigger's structural gate failed.
+- **Collision:** an FP caused by broad substring matching, the same phrase serving multiple trigger targets, or one labeled observation predicting multiple targets unexpectedly.
+
+## Step 4 — Label proposed phrases and collisions
 
 For each proposed addition, inspect the referenced retained turns locally with structured file reads. Build a compact evidence record:
 
@@ -90,7 +152,7 @@ target: behavior-fix
 phrase: "不要再"
 positive refs: <two or more distinct session files>
 collision refs: <checked non-target uses>
-why existing keywords miss: <observable exact-match gap>
+why existing keywords do not match: <observable exact-match gap>
 expected effect: <which eligible turns become matched>
 ```
 
@@ -104,58 +166,48 @@ Apply these gates:
 
 For removals, require repeated false-positive evidence from at least two distinct sessions and verify the keyword has no retained true-positive role. **Zero retained hits is not removal evidence** because session retention may have discarded the turns that justified the keyword.
 
-Completion criterion: every addition/removal has labeled positive and collision evidence. Otherwise recommend no change.
+Completion criterion: every addition/removal has labeled positive and collision evidence, `unknownRefs` is empty, and the labeled metrics distinguish keyword misses from structural-gate misses. Otherwise recommend no change.
 
-## Step 4 — Present a bounded proposal
+## Step 5 — Present a bounded proposal
 
 Present per target:
 
-- current retained coverage: eligible / matched / unmatched
+- structural proxy: eligible / current-keyword-matched / current-keyword-unmatched
+- labeled TP / FP / FN / precision / recall
 - proposed additions, maximum 3
 - proposed removals, maximum 3
 - positive refs and collision result for each phrase
 - expected newly matched retained documents
 - uncertainty caused by session retention or incomplete data
-- recommendation: apply / retain current set / gather more evidence
+- recommendation: propose exact delta / retain current set / gather more evidence
 
 Do not combine `successful-pattern`, `behavior-fix`, and `entity-context` evidence. A trigger-keyword finding may update only its own target.
 
-Wait for explicit confirmation naming the target and exact add/remove phrases before changing runtime state.
+Wait for explicit confirmation naming the target and exact add/remove phrases before marking a proposal approved. Approval does not authorize a manual runtime write.
 
-## Step 5 — Apply through the host-owned path
+Do not claim a false-negative rate, precision, or recall when `labeledMetrics` is absent. Do not attribute historical processed events to current keywords.
 
-Preferred path: let enabled Intent Review emit a trigger-specific `targetKind="trigger-keywords"` finding. The host validates a maximum of three additions/removals, normalizes/deduplicates the lists, acquires the Review log lock, and atomically writes `review.json` with the processed event.
+## Step 6 — Close with an approved or rejected proposal
 
-Do not hand-edit `review.json` during normal work. If a manual maintenance write is explicitly requested, treat it as an exceptional runtime-state mutation: pin the current file hash, preserve strict schema v5, stage the complete proposed JSON outside the data root, show the exact target/add/remove delta, confirm again, then replace atomically under the same Review-log locking discipline. If that host locking path is unavailable, stop rather than risk racing Intent Review.
-
-Completion criterion: the persisted target list contains exactly the approved normalized change, unrelated targets and processed records are unchanged, and the runtime file still passes current schema-v5 parsing.
-
-## Step 6 — Verify behavior, not just JSON
-
-After a confirmed host-owned update:
-
-1. Re-run the audit and confirm the intended retained references move from unmatched to matched.
-2. Add or update focused trigger tests for each accepted phrase and at least one collision/non-trigger fixture.
-3. Run:
+Record the exact target, additions, removals, evidence refs, collision result, and approval status. Do not claim the delta was persisted. Run the audit script's focused regression tests:
 
 ```bash
 python3 skills/skill-harness/scripts/test-review-keyword-audit.py
-pnpm test src/review/triggers.test.ts src/review/trigger-keywords.test.ts src/review/log-writer.test.ts
-pnpm run typecheck
-pnpm run build
 ```
 
-4. Report the before/after counts, exact keyword delta, tests, and any remaining collision risk.
+If production trigger matching or persistence code is changed in a separate implementation task, that code change owns its focused TypeScript tests and full repository gates; do not perform it as part of this audit workflow.
 
-Completion criterion: evidence, persisted state, production trigger behavior, and regression tests agree.
+Completion criterion: the report is reproducible, the bounded proposal is explicitly approved or rejected, script tests pass, no runtime file changed, and residual collision risk is disclosed.
 
 ## Common mistakes
 
-| Mistake                                      | Why it fails                                      | Correct action                                             |
-| -------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------- |
-| Add the top phrase automatically             | Frequency is not semantic evidence                | Label positives and collisions first                       |
-| Include snippets by default                  | Runtime sessions may contain private content      | Keep snippets off; inspect locally only as needed          |
-| Remove a zero-hit keyword                    | Retention creates false absence                   | Require repeated labeled false positives                   |
-| Treat all session turns as eligible          | Production uses trigger-specific structural gates | Use the bundled audit script and matching config threshold |
-| Update `candidate.keywords` from this report | It is a different routing surface                 | Use design/inventory labeled fixtures                      |
-| Hand-edit `review.json` during normal work   | Can race host writes or violate schema            | Use the host-owned locked atomic path                      |
+| Mistake                                      | Why it fails                                           | Correct action                                             |
+| -------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
+| Add the top phrase automatically             | Frequency is not semantic evidence                     | Label positives and collisions first                       |
+| Call unmatched eligible turns "misses"       | Structural eligibility is not an expected label        | Use `--labels` before reporting TP/FP/FN                   |
+| Replay old events against current keywords   | Events lack matched-keyword and keyword-set provenance | Use them only for outcome/history counts                   |
+| Include snippets by default                  | Runtime sessions may contain private content           | Keep snippets off; inspect locally only as needed          |
+| Remove a zero-hit keyword                    | Retention creates false absence                        | Require repeated labeled false positives                   |
+| Treat all session turns as eligible          | Production uses trigger-specific structural gates      | Use the bundled audit script and matching config threshold |
+| Update `candidate.keywords` from this report | It is a different routing surface                      | Use design/inventory labeled fixtures                      |
+| Hand-edit `review.json` after approval       | Approval does not provide the missing host lock        | Stop with an approved delta when no host writer is exposed |

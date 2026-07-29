@@ -105,7 +105,7 @@ memory_search({
 - Present comparison results in bullet-point format, one bullet per dimension.
 - If one side has significantly less data, clearly state "B has fewer records, comparison may be incomplete."
 - **Do not fabricate missing details** to "fill in" comparison tables. Leave blanks rather than invent.
-- Avoid table format (Discord style guide) — use bullet points instead.
+- Prefer concise bullet points; use a table only when it materially improves comparison clarity.
 
 ## Experience
 

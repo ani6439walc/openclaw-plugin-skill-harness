@@ -8,9 +8,11 @@ snapshots, stats.json, or intent Markdown.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unicodedata
@@ -19,6 +21,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 TARGETS = ("successful-pattern", "behavior-fix", "entity-context")
+DEFAULT_SUCCESSFUL_TOOL_CALLS = 5
+SCRIPT_PATH = Path(__file__).resolve()
 KEYWORD_FIELDS = {
     "successful-pattern": "successfulPattern",
     "behavior-fix": "behaviorFix",
@@ -157,6 +161,29 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(64 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_commit() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(SCRIPT_PATH.parents[3]), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
+
+
 def load_review_log(path: Path) -> dict[str, Any]:
     value = load_json(path)
     if not isinstance(value, dict) or value.get("schemaVersion") != 5:
@@ -184,20 +211,105 @@ def load_states(sessions_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
         if not isinstance(value, dict):
             errors.append(f"{path.name}: root is not an object")
             continue
-        ordered_states = value.get("history") if isinstance(value.get("history"), list) else []
-        ordered_states = [*ordered_states, value.get("current")]
-        turn = 0
-        for state in ordered_states:
+        history = value.get("history") if isinstance(value.get("history"), list) else []
+        for index, state in enumerate(history):
             if not isinstance(state, dict):
                 continue
-            turn += 1
             states.append(
                 {
-                    "ref": f"{path.name}#{turn}",
+                    "ref": f"{path.name}#history:{index}",
                     "state": state,
                 }
             )
+        current = value.get("current")
+        if isinstance(current, dict):
+            states.append(
+                {
+                    "ref": f"{path.name}#current:0",
+                    "state": current,
+                }
+            )
     return states, errors
+
+
+def analysis_window(records: list[dict[str, Any]]) -> dict[str, Any]:
+    starts: list[str] = []
+    ends: list[str] = []
+    timestamped = 0
+    for record in records:
+        state = record.get("state")
+        timestamps = state.get("timestamps") if isinstance(state, dict) else None
+        if not isinstance(timestamps, dict):
+            continue
+        start = timestamps.get("start")
+        end = timestamps.get("end")
+        if not isinstance(start, str) and not isinstance(end, str):
+            continue
+        timestamped += 1
+        if isinstance(start, str) and start:
+            starts.append(start)
+        if isinstance(end, str) and end:
+            ends.append(end)
+    return {
+        "earliestStart": min(starts) if starts else None,
+        "latestEnd": max(ends) if ends else None,
+        "statesWithTimestamps": timestamped,
+        "statesAnalyzed": len(records),
+    }
+
+
+def load_labels(path: Path) -> list[dict[str, Any]]:
+    value = load_json(path)
+    if not isinstance(value, dict) or value.get("schemaVersion") != 1:
+        raise ValueError(f"{path} must be a schema-v1 label fixture")
+    observations = value.get("observations")
+    if not isinstance(observations, list):
+        raise ValueError(f"{path} is missing observations")
+    labels: list[dict[str, Any]] = []
+    seen_refs: set[str] = set()
+    for index, observation in enumerate(observations):
+        if not isinstance(observation, dict):
+            raise ValueError(f"{path} observations[{index}] must be an object")
+        ref = observation.get("ref")
+        expected = observation.get("expectedTriggers")
+        if not isinstance(ref, str) or not ref or ref in seen_refs:
+            raise ValueError(f"{path} observations[{index}] has an invalid or duplicate ref")
+        if not isinstance(expected, list) or not all(
+            isinstance(target, str) and target in TARGETS for target in expected
+        ):
+            raise ValueError(f"{path} observations[{index}] has invalid expectedTriggers")
+        if len(set(expected)) != len(expected):
+            raise ValueError(f"{path} observations[{index}] repeats an expected trigger")
+        seen_refs.add(ref)
+        labels.append({"ref": ref, "expectedTriggers": set(expected)})
+    return labels
+
+
+def default_state_dir() -> Path:
+    configured = os.environ.get("OPENCLAW_STATE_DIR")
+    return Path(configured).expanduser() if configured else Path.home() / ".openclaw"
+
+
+def resolve_successful_tool_calls(
+    config_path: Path, override: int | None
+) -> tuple[int, str]:
+    if override is not None:
+        return override, "cli-override"
+    if not config_path.is_file():
+        return DEFAULT_SUCCESSFUL_TOOL_CALLS, "default"
+    try:
+        value = load_json(config_path)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"{config_path} is unreadable: {error.__class__.__name__}") from error
+    try:
+        configured = value["plugins"]["entries"]["skill-harness"]["config"]["review"][
+            "triggers"
+        ]["successfulPattern"]["toolCalls"]
+    except (KeyError, TypeError):
+        return DEFAULT_SUCCESSFUL_TOOL_CALLS, "default"
+    if isinstance(configured, bool) or not isinstance(configured, int) or not 1 <= configured <= 100:
+        return DEFAULT_SUCCESSFUL_TOOL_CALLS, "default-invalid-config"
+    return configured, "openclaw-config"
 
 
 def stats_summary(path: Path, analyzed_states: int) -> dict[str, Any] | None:
@@ -223,7 +335,7 @@ def review_change_summary(log: dict[str, Any]) -> dict[str, Any]:
     removals: Counter[str] = Counter()
     events = log.get("processedEvents")
     if not isinstance(events, dict):
-        return {"events": 0, "outcomes": {}, "keywordAdditions": {}, "keywordRemovals": {}}
+        events = {}
     for event in events.values():
         if not isinstance(event, dict):
             continue
@@ -251,6 +363,91 @@ def review_change_summary(log: dict[str, Any]) -> dict[str, Any]:
         "outcomes": dict(sorted(counts.items())),
         "keywordAdditions": dict(sorted(additions.items())),
         "keywordRemovals": dict(sorted(removals.items())),
+        "keywordAttributionAvailable": False,
+        "note": (
+            "Processed events do not preserve the matched keyword or keyword-set version; "
+            "do not replay historical triggers against the current list."
+        ),
+    }
+
+
+def labeled_metrics(
+    records: list[dict[str, Any]],
+    labels: list[dict[str, Any]],
+    keyword_root: dict[str, Any],
+    targets: tuple[str, ...],
+    successful_tool_calls: int,
+) -> dict[str, Any]:
+    records_by_ref = {record["ref"]: record for record in records}
+    counts = {
+        target: Counter(
+            {
+                "truePositive": 0,
+                "falsePositive": 0,
+                "falseNegative": 0,
+                "trueNegative": 0,
+                "structurallyBlockedPositive": 0,
+            }
+        )
+        for target in targets
+    }
+    unknown_refs: list[str] = []
+    multi_trigger_predictions = 0
+    for label in labels:
+        record = records_by_ref.get(label["ref"])
+        if record is None:
+            unknown_refs.append(label["ref"])
+            continue
+        state = record["state"]
+        predicted: set[str] = set()
+        eligibility: dict[str, bool] = {}
+        for target in targets:
+            eligible = is_eligible(state, target, successful_tool_calls)
+            eligibility[target] = eligible
+            keywords = keyword_root[KEYWORD_FIELDS[target]]
+            if eligible and includes_any(state_text(state, target), keywords):
+                predicted.add(target)
+        if len(predicted) > 1:
+            multi_trigger_predictions += 1
+        expected = label["expectedTriggers"]
+        for target in targets:
+            expected_target = target in expected
+            predicted_target = target in predicted
+            if expected_target and predicted_target:
+                counts[target]["truePositive"] += 1
+            elif expected_target:
+                counts[target]["falseNegative"] += 1
+                if not eligibility[target]:
+                    counts[target]["structurallyBlockedPositive"] += 1
+            elif predicted_target:
+                counts[target]["falsePositive"] += 1
+            else:
+                counts[target]["trueNegative"] += 1
+
+    target_metrics: dict[str, Any] = {}
+    for target, target_counts in counts.items():
+        true_positive = target_counts["truePositive"]
+        false_positive = target_counts["falsePositive"]
+        false_negative = target_counts["falseNegative"]
+        precision_denominator = true_positive + false_positive
+        recall_denominator = true_positive + false_negative
+        target_metrics[target] = {
+            **dict(target_counts),
+            "precision": (
+                round(true_positive / precision_denominator, 4)
+                if precision_denominator
+                else None
+            ),
+            "recall": (
+                round(true_positive / recall_denominator, 4) if recall_denominator else None
+            ),
+        }
+    return {
+        "labeledObservations": len(labels),
+        "evaluatedObservations": len(labels) - len(unknown_refs),
+        "unknownRefs": sorted(unknown_refs),
+        "multiTriggerPredictions": multi_trigger_predictions,
+        "targets": target_metrics,
     }
 
 
@@ -324,6 +521,10 @@ def analyze_target(
     matched_count = sum(1 for record in eligible if record["matched"])
     return {
         "existingKeywords": existing_stats,
+        "measurement": (
+            "Structural eligibility plus current-keyword substring matching only; "
+            "these counts are not semantic TP/FP/FN without --labels."
+        ),
         "summary": {
             "eligibleDocs": len(eligible),
             "matchedDocs": matched_count,
@@ -341,8 +542,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-root",
         type=Path,
-        default=Path.home() / ".openclaw/plugins/skill-harness",
+        default=default_state_dir() / "plugins/skill-harness",
         help="Skill Harness runtime data root",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="OpenClaw config path; defaults to OPENCLAW_CONFIG_PATH or <state-dir>/openclaw.json",
     )
     destination = parser.add_mutually_exclusive_group(required=True)
     destination.add_argument(
@@ -361,21 +568,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--successful-tool-calls",
         type=int,
-        default=5,
-        help="Configured successful-pattern tool-call threshold",
+        default=None,
+        help="Override successful-pattern tool-call threshold instead of reading OpenClaw config",
     )
     parser.add_argument(
         "--include-snippets",
         action="store_true",
         help="Include private text snippets in the local report; off by default",
     )
+    parser.add_argument(
+        "--labels",
+        type=Path,
+        help="Optional schema-v1 ref/expectedTriggers fixture for semantic TP/FP/FN metrics",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    if args.min_docs < 1 or args.top < 1 or args.successful_tool_calls < 1:
-        raise SystemExit("--min-docs, --top, and --successful-tool-calls must be positive")
+    if args.min_docs < 1 or args.top < 1:
+        raise SystemExit("--min-docs and --top must be positive")
+    if args.successful_tool_calls is not None and not 1 <= args.successful_tool_calls <= 100:
+        raise SystemExit("--successful-tool-calls must be between 1 and 100")
     if args.include_snippets and args.stdout:
         raise SystemExit("--include-snippets requires --output; refusing private snippets on stdout")
     review_path = args.data_root / "review.json"
@@ -385,20 +599,43 @@ def main() -> int:
     if not sessions_dir.is_dir():
         raise SystemExit(f"missing session directory: {sessions_dir}")
 
+    inferred_state_dir = args.data_root.parent.parent
+    config_path = args.config or Path(
+        os.environ.get("OPENCLAW_CONFIG_PATH", inferred_state_dir / "openclaw.json")
+    ).expanduser()
+    successful_tool_calls, threshold_source = resolve_successful_tool_calls(
+        config_path, args.successful_tool_calls
+    )
+    review_sha256 = sha256_file(review_path)
     review_log = load_review_log(review_path)
+    if sha256_file(review_path) != review_sha256:
+        raise SystemExit(f"review log changed while being read: {review_path}")
     records, session_errors = load_states(sessions_dir)
     targets = TARGETS if args.target == "all" else (args.target,)
+    labels = load_labels(args.labels) if args.labels else None
     report: dict[str, Any] = {
         "schemaVersion": 1,
         "reportOnly": True,
         "dataRoot": str(args.data_root),
+        "provenance": {
+            "reviewSha256": review_sha256,
+            "scriptSha256": sha256_file(SCRIPT_PATH),
+            "sourceCommit": source_commit(),
+        },
+        "analysisWindow": analysis_window(records),
         "privacy": {
             "snippetsIncluded": args.include_snippets,
             "warning": "Keep reports local; session content may be private.",
         },
+        "configuration": {
+            "configPath": str(config_path),
+            "successfulToolCalls": successful_tool_calls,
+            "thresholdSource": threshold_source,
+        },
         "inputs": {
             "reviewLog": str(review_path),
             "sessionsDirectory": str(sessions_dir),
+            "labels": str(args.labels) if args.labels else None,
             "sessionErrors": session_errors,
         },
         "runtimeStats": stats_summary(args.data_root / "stats.json", len(records)),
@@ -411,11 +648,22 @@ def main() -> int:
             records,
             target,
             keyword_root[KEYWORD_FIELDS[target]],
-            args.successful_tool_calls,
+            successful_tool_calls,
             args.min_docs,
             args.top,
             args.include_snippets,
         )
+    report["labeledMetrics"] = (
+        labeled_metrics(
+            records,
+            labels,
+            keyword_root,
+            targets,
+            successful_tool_calls,
+        )
+        if labels is not None
+        else None
+    )
 
     rendered = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.stdout:

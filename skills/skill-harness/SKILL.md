@@ -1,11 +1,13 @@
 ---
 name: skill-harness
-description: "Use when designing or auditing Skill Harness intents, analyzing intent complexity, extracting intents into skills, or evaluating and updating Intent Review trigger keywords from runtime evidence."
+description: "Use when designing or auditing Skill Harness intents, analyzing intent complexity, extracting intents into skills, or auditing Intent Review trigger keywords from runtime evidence."
 ---
 
 # Skill Harness
 
-Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), complexity analysis or skill extraction (extract), and evidence-backed Intent Review keyword maintenance (keyword-audit). Background subagents handle automated self-improvement; use keyword-audit only for deliberate human-requested analysis and maintenance.
+Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), complexity analysis or skill extraction (extract), and evidence-backed Intent Review keyword auditing (keyword-audit). Background subagents handle automated self-improvement; use keyword-audit only for deliberate human-requested analysis.
+
+Do not manually repeat production-owned work: per-turn classification and hint generation, startup intent seeding, trigger-driven runtime intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, and session cleanup. This skill is for explicit human maintenance requests and the judgment or confirmation those automated paths do not own.
 
 ## Quick routing
 
@@ -14,7 +16,7 @@ What does the user want?
 ├─ Bootstrap or re-audit the ENTIRE catalog → inventory
 ├─ Create/rename/split/merge/refine ONE intent → design
 ├─ Check intent complexity / upgrade intents to skills → extract
-└─ Analyze Review keyword hits/misses/collisions or update them → keyword-audit
+└─ Analyze Review keyword hits/misses/collisions and propose a bounded delta → keyword-audit
 ```
 
 If ambiguous, ask one routing question: "Are you working on one intent, auditing the whole catalog, analyzing intent complexity, or evaluating Intent Review keywords?"
@@ -47,7 +49,7 @@ Keywords: "audit intents", "bootstrap intents", "re-audit", "check intent covera
 
 Read and follow `references/inventory.md`. Keep these checkpoints visible:
 
-1. **Discovery scan** — use `references/discovery.md` to inventory bundled skills, configured/user skills, active tools, and existing runtime intents.
+1. **Discovery scan** — use the resolved `skill_list` inventory, active tool catalog, and runtime intent catalog; do not scan skill directories manually.
 2. **Clustering** — use `references/clustering.md`; group by user goal, not directory name.
 3. **Calibration checkpoint** — present the cluster map before generating or changing intents.
 4. **Interview gaps** — fill uncovered clusters using the design-mode interview rules.
@@ -63,11 +65,11 @@ Read and follow `references/inventory.md`. Keep these checkpoints visible:
 
 ### Anti-patterns
 
-| #   | Anti-pattern                                   | Why not                                      | Do instead                                         |
-| --- | ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------- |
-| 1   | **Run inventory without discovery/clustering** | Misses capabilities, produces orphan intents | Follow order: discovery → clustering → calibration |
-| 2   | **Assume one hardcoded skill directory**       | OpenClaw may load bundled and runtime skills | Scan the active catalog and configured skill roots |
-| 3   | **Skip cluster map checkpoint**                | User cannot calibrate, may miss gaps         | Present cluster map before interview/generation    |
+| #   | Anti-pattern                                   | Why not                                      | Do instead                                               |
+| --- | ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------------- |
+| 1   | **Run inventory without discovery/clustering** | Misses capabilities, produces orphan intents | Follow order: discovery → clustering → calibration       |
+| 2   | **Scan skill directories manually**            | Reimplements source precedence incorrectly   | Use the invoking agent's resolved `skill_list` inventory |
+| 3   | **Skip cluster map checkpoint**                | User cannot calibrate, may miss gaps         | Present cluster map before interview/generation          |
 
 ---
 
@@ -155,7 +157,7 @@ Read and follow `references/extract.md`. Keep these checkpoints visible:
 
 ### When to use
 
-User wants to measure, analyze, propose, or apply changes to Intent Review trigger keywords using actual runtime observations.
+User wants to measure, analyze, or propose changes to Intent Review trigger keywords using actual runtime observations.
 
 Keywords: "Review keywords", "trigger keywords", "keyword hit rate", "keyword misses", "keyword collisions", "分析關鍵字", "統計關鍵字", "更新關鍵字", "successful-pattern", "behavior-fix", "entity-context"
 
@@ -166,20 +168,19 @@ Do not use this mode for intent `fastpath.keywords` or `candidate.keywords`; rou
 Read and follow `references/keyword-audit.md`. Keep these checkpoints visible:
 
 1. **Pin evidence** — resolve the active data root, require current schema-v5 `review.json`, record retained sessions and the configured successful-pattern tool-call threshold.
-2. **Generate a read-only report** — run `scripts/review-keyword-audit.py`; keep snippets disabled unless local content inspection is explicitly necessary.
-3. **Label evidence** — inspect positive refs and collisions locally; frequency alone is not approval.
+2. **Generate a read-only report** — run `scripts/review-keyword-audit.py`; treat unmatched documents as structural proxies, not semantic misses, and keep snippets disabled unless local content inspection is explicitly necessary.
+3. **Label evidence** — build a private ref-only fixture from `templates/review-keyword-labels.json`, rerun with `--labels`, and inspect TP/FP/FN plus collisions locally; frequency alone is not approval.
 4. **Proposal checkpoint** — present before/after coverage and at most three exact additions/removals per target; wait for explicit confirmation.
-5. **Host-owned update** — prefer Intent Review's validated, locked, atomic keyword-change path; do not hand-edit `review.json` during normal work.
-6. **Behavior verification** — rerun the report and focused Review tests, then report the exact persisted delta and residual collision risk.
+5. **Report and proposal only** — deliver the evidence-backed delta after confirmation, but do not invoke or emulate Intent Review's production-owned writer and do not hand-edit `review.json`.
 
 ### Failure modes
 
-| Trigger                                   | First fix                                           | Fallback                                         |
-| ----------------------------------------- | --------------------------------------------------- | ------------------------------------------------ |
-| **Missing or incompatible `review.json`** | Stop and report the schema/state mismatch           | Do not invent defaults or migrate runtime data   |
-| **Too little retained evidence**          | Keep phrases as candidates and gather more sessions | Make no keyword change                           |
-| **Candidate has collisions**              | Narrow the exact phrase and rerun labeling          | Retain the current keyword set                   |
-| **Host locking/atomic path unavailable**  | Do not write runtime state                          | Deliver the approved delta for later application |
+| Trigger                                   | First fix                                           | Fallback                                       |
+| ----------------------------------------- | --------------------------------------------------- | ---------------------------------------------- |
+| **Missing or incompatible `review.json`** | Stop and report the schema/state mismatch           | Do not invent defaults or migrate runtime data |
+| **Too little retained evidence**          | Keep phrases as candidates and gather more sessions | Make no keyword change                         |
+| **Candidate has collisions**              | Narrow the exact phrase and rerun labeling          | Retain the current keyword set                 |
+| **User requests direct runtime mutation** | Explain that production Review owns keyword writes  | Deliver an approved but unapplied delta        |
 
 ### Anti-patterns
 
@@ -193,14 +194,6 @@ Read and follow `references/keyword-audit.md`. Keep these checkpoints visible:
 ---
 
 ## Shared resources
-
-### First-time setup assets
-
-When bootstrapping from scratch, copy example intent templates from `assets/`:
-
-- `assets/chat.md` / `assets/typo.md` — minimal behavior-only intents (no tools)
-- `assets/approve.md` / `assets/reject.md` — approval-flow intents
-- `assets/memory-lookup.md` / `assets/memory-compare.md` — memory retrieval SOPs
 
 ### Format check principles
 
@@ -230,4 +223,4 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 | 1   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory     |
 | 2   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview → ground → draft → format check                                 | design        |
 | 3   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract       |
-| 4   | "Analyze which Review keywords should change"    | Route to **keyword-audit** → pin evidence → report → label → 🔴 CHECKPOINT → host update → verify                 | keyword-audit |
+| 4   | "Analyze which Review keywords should change"    | Route to **keyword-audit** → pin evidence → report → label → 🔴 CHECKPOINT → bounded proposal                     | keyword-audit |
