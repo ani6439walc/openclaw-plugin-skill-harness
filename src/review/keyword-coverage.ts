@@ -34,8 +34,6 @@ export interface CoverageReplayInput {
   phrase: string;
   target: TriggerKeywordTarget;
   documents: CoverageCandidateDocument[];
-  config: ResolvedReviewConfig["triggers"];
-  triggerKeywords: ReviewTriggerKeywords;
 }
 
 export interface CoverageReplayResult {

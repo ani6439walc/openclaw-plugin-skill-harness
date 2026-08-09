@@ -437,8 +437,6 @@ export function parseKeywordCoverageModelResponse(
         phrase: decision.removal.phrase,
         target: decision.target,
         documents: documents.filter((doc) => doc.target === decision.target),
-        config: {} as never,
-        triggerKeywords: options.triggerKeywords,
       })
         .matches.map((document) => document.ref)
         .sort();
@@ -498,12 +496,6 @@ function buildReplayEvidence(
         phrase: decision.addition.phrase,
         target: decision.target,
         documents: targetDocs,
-        config: {} as never,
-        triggerKeywords: {
-          successfulPattern: [],
-          behaviorFix: [],
-          entityContext: [],
-        },
       });
       const matchedRefs = replay.matches.map((match) => match.ref);
       const supportOk = decision.addition.supportRefs.every((ref) =>
@@ -525,12 +517,6 @@ function buildReplayEvidence(
         phrase: decision.removal.phrase,
         target: decision.target,
         documents: targetDocs,
-        config: {} as never,
-        triggerKeywords: {
-          successfulPattern: [],
-          behaviorFix: [],
-          entityContext: [],
-        },
       });
       const matchedRefs = replay.matches.map((match) => match.ref);
       const supportOk = decision.removal.falsePositiveRefs.every((ref) =>

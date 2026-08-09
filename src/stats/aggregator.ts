@@ -1201,6 +1201,8 @@ export interface StatsRecordOptions {
 }
 
 export class StatsAggregator {
+  private acceptedTurnCount: number | undefined;
+
   private constructor(private readonly pluginRoot: string) {}
 
   static create(pluginRoot: string): StatsAggregator {
@@ -1429,7 +1431,13 @@ export class StatsAggregator {
 
       pruneRollingData(stats, nowMs);
       recomputeDerivedStats(stats, nowMs);
-      return safeWriteJson(statsFilePath, stats, "failed to write stats file");
+      const written = safeWriteJson(
+        statsFilePath,
+        stats,
+        "failed to write stats file",
+      );
+      if (written) this.acceptedTurnCount = stats.summary.turns;
+      return written;
     } catch (err) {
       logger.warn("failed to update stats file", {
         error: err,
@@ -1440,11 +1448,14 @@ export class StatsAggregator {
   }
 
   getAcceptedTurnCount(): number | undefined {
+    if (this.acceptedTurnCount !== undefined) return this.acceptedTurnCount;
+
     const statsFilePath = statsPath(this.pluginRoot);
     try {
       if (!fileExists(statsFilePath)) return undefined;
       const stats = loadStats(statsFilePath, new Date().toISOString());
-      return stats.summary.turns;
+      this.acceptedTurnCount = stats.summary.turns;
+      return this.acceptedTurnCount;
     } catch (err) {
       logger.warn("failed to read accepted turn count", { error: err });
       return undefined;
