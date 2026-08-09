@@ -30,6 +30,7 @@ export type ReviewConfig = {
   modelFallback?: string;
   thinking?: ThinkLevel;
   timeoutMs?: number;
+  keywordCoverage?: { everyAcceptedTurns?: number };
   triggers?: ReviewTriggersConfig;
 };
 
@@ -39,6 +40,7 @@ export type ResolvedReviewConfig = {
   modelFallback: string | undefined;
   thinking: ThinkLevel;
   timeoutMs: number;
+  keywordCoverage: { everyAcceptedTurns: number };
   triggers: {
     skillCandidate: { enabled: boolean; toolCalls: number };
     skillPlacement: { enabled: boolean };

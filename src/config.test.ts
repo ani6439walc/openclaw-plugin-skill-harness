@@ -46,6 +46,7 @@ describe("resolveConfig", () => {
           behaviorFix: { enabled: true },
           entityContext: { enabled: true },
         },
+        keywordCoverage: { everyAcceptedTurns: 50 },
       });
       expect(result.instruction).toMatchObject({
         enabled: true,
@@ -124,6 +125,22 @@ describe("resolveConfig", () => {
           behaviorFix: { enabled: false, keywords: [] },
           entityContext: { enabled: false, keywords: ["看一下"] },
         },
+      });
+    });
+
+    it("clamps keyword coverage cadence without adding a coverage enable flag", () => {
+      expect(
+        resolveConfig({
+          review: { keywordCoverage: { everyAcceptedTurns: 0 } },
+        }).review.keywordCoverage.everyAcceptedTurns,
+      ).toBe(10);
+      expect(
+        resolveConfig({
+          review: { keywordCoverage: { everyAcceptedTurns: 5_000 } },
+        }).review.keywordCoverage.everyAcceptedTurns,
+      ).toBe(1_000);
+      expect(resolveConfig({ review: {} }).review.keywordCoverage).toEqual({
+        everyAcceptedTurns: 50,
       });
     });
 

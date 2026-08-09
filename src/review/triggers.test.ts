@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../config.js";
-import { checkReviewTriggers } from "./triggers.js";
+import { checkReviewTriggers, evaluateKeywordTrigger } from "./triggers.js";
 import type { ReviewTriggerKeywords } from "./trigger-keywords.js";
 import type { SessionState } from "../session/index.js";
 
@@ -326,5 +326,193 @@ describe("checkReviewTriggers", () => {
         triggers,
       ),
     ).not.toContain("entity-context");
+  });
+});
+
+describe("evaluateKeywordTrigger", () => {
+  const triggers = resolveConfig({}).review.triggers;
+  const customKeywords: ReviewTriggerKeywords = {
+    successfulPattern: ["verified"],
+    behaviorFix: ["redo"],
+    entityContext: ["means"],
+  };
+
+  describe("successful-pattern", () => {
+    it("returns eligible when threshold met and keywords match", () => {
+      const result = evaluateKeywordTrigger(
+        "successful-pattern",
+        state({
+          toolCalls: Array.from({ length: 5 }, (_, index) => ({
+            name: `tool-${index}`,
+            params: {},
+          })),
+          result: "verified",
+        }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(true);
+      expect(result.matchedKeywords).toEqual(["verified"]);
+      expect(result.blockedReason).toBeUndefined();
+    });
+
+    it("returns eligible when skillsUsed is present", () => {
+      const result = evaluateKeywordTrigger(
+        "successful-pattern",
+        state({
+          skillsUsed: [{ name: "test-driven-development", path: "skills/tdd" }],
+          result: "verified",
+        }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(true);
+      expect(result.matchedKeywords).toEqual(["verified"]);
+    });
+
+    it("returns blocked with threshold when no toolCalls or skills", () => {
+      const result = evaluateKeywordTrigger(
+        "successful-pattern",
+        state({ result: "verified" }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(false);
+      expect(result.matchedKeywords).toEqual([]);
+      expect(result.blockedReason).toBe("threshold");
+    });
+
+    it("returns blocked with agent-error when state.error", () => {
+      const result = evaluateKeywordTrigger(
+        "successful-pattern",
+        state({
+          error: "failed",
+          toolCalls: Array.from({ length: 5 }, (_, index) => ({
+            name: `tool-${index}`,
+            params: {},
+          })),
+          result: "verified",
+        }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(false);
+      expect(result.matchedKeywords).toEqual([]);
+      expect(result.blockedReason).toBe("agent-error");
+    });
+
+    it("returns not eligible when no keywords match", () => {
+      const result = evaluateKeywordTrigger(
+        "successful-pattern",
+        state({
+          toolCalls: Array.from({ length: 5 }, (_, index) => ({
+            name: `tool-${index}`,
+            params: {},
+          })),
+          result: "done",
+        }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(false);
+      expect(result.matchedKeywords).toEqual([]);
+      expect(result.blockedReason).toBeUndefined();
+    });
+  });
+
+  describe("behavior-fix", () => {
+    it("returns eligible when keywords match and not quoted content", () => {
+      const result = evaluateKeywordTrigger(
+        "behavior-fix",
+        state({ input: "redo this" }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(true);
+      expect(result.matchedKeywords).toEqual(["redo"]);
+      expect(result.blockedReason).toBeUndefined();
+    });
+
+    it("returns blocked with quoted-content for dream diary", () => {
+      const result = evaluateKeywordTrigger(
+        "behavior-fix",
+        state({
+          input:
+            "Write a dream diary entry from these memory fragments:\n- redo this",
+        }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(false);
+      expect(result.matchedKeywords).toEqual([]);
+      expect(result.blockedReason).toBe("quoted-content");
+    });
+
+    it("returns not eligible when no keywords match", () => {
+      const result = evaluateKeywordTrigger(
+        "behavior-fix",
+        state({ input: "do this" }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(false);
+      expect(result.matchedKeywords).toEqual([]);
+      expect(result.blockedReason).toBeUndefined();
+    });
+  });
+
+  describe("entity-context", () => {
+    it("returns eligible when keywords and source signal present", () => {
+      const result = evaluateKeywordTrigger(
+        "entity-context",
+        state({ input: "Yumi means Hermes, check TOOLS.md" }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(true);
+      expect(result.matchedKeywords).toEqual(["means"]);
+      expect(result.blockedReason).toBeUndefined();
+    });
+
+    it("returns eligible with read tool params as source signal", () => {
+      const result = evaluateKeywordTrigger(
+        "entity-context",
+        state({
+          input: "Yumi means Hermes",
+          toolCalls: [{ name: "read", params: { path: "TOOLS.md" } }],
+        }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(true);
+      expect(result.matchedKeywords).toEqual(["means"]);
+    });
+
+    it("returns blocked with missing-context-source when no signal", () => {
+      const result = evaluateKeywordTrigger(
+        "entity-context",
+        state({ input: "Yumi means Hermes" }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(false);
+      expect(result.matchedKeywords).toEqual([]);
+      expect(result.blockedReason).toBe("missing-context-source");
+    });
+
+    it("returns not eligible when no keywords match", () => {
+      const result = evaluateKeywordTrigger(
+        "entity-context",
+        state({
+          input: "check TOOLS.md",
+          toolCalls: [{ name: "read", params: { path: "TOOLS.md" } }],
+        }),
+        triggers,
+        customKeywords,
+      );
+      expect(result.structurallyEligible).toBe(false);
+      expect(result.matchedKeywords).toEqual([]);
+      expect(result.blockedReason).toBeUndefined();
+    });
   });
 });

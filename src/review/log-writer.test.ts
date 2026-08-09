@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ReviewLogWriter } from "./log-writer.js";
+import { IntentReviewLogWriter, ReviewLogWriter } from "./log-writer.js";
 
 describe("ReviewLogWriter", () => {
   let root: string;
@@ -330,5 +330,106 @@ describe("ReviewLogWriter", () => {
         "missing-trigger-decision": 1,
       },
     });
+  });
+});
+
+describe("IntentReviewLogWriter", () => {
+  let root: string;
+  let writer: IntentReviewLogWriter;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "intent-review-writer-"));
+    writer = IntentReviewLogWriter.create(root);
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("writes v6 intent audit records without active keyword state", async () => {
+    const finding = {
+      trigger: "skill-candidate" as const,
+      targetKind: "intent-markdown" as const,
+      operation: "refine" as const,
+      targetIntentIds: ["productivity"],
+      dedupeKey: "deploy-flow",
+      summary: "Reusable deployment flow",
+      evidence: ["Five related tool calls"],
+      correctionGoal: "Preserve deployment workflow",
+      suggestedChange: "Updated productivity.md",
+    };
+    const source = {
+      sessionId: "session-1",
+      agentId: "main",
+      turnStart: "2026-06-11T00:00:00.000Z",
+    };
+
+    expect(
+      await writer.record("session-1:turn-1", source, [finding], {
+        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+      }),
+    ).toBe(true);
+    expect(await writer.record("session-1:turn-1", source, [finding])).toBe(
+      false,
+    );
+
+    const log = JSON.parse(
+      fs.readFileSync(path.join(root, "review.json"), "utf8"),
+    );
+    expect(log).toMatchObject({
+      schemaVersion: 6,
+      historicalKeywordAudits: {},
+      processedEvents: {
+        "session-1:turn-1": {
+          changeCount: 1,
+          outcome: "applied",
+          changes: [{ targetKind: "intent-markdown" }],
+        },
+      },
+    });
+    expect(log).not.toHaveProperty("triggerKeywords");
+  });
+
+  it("preserves v6 skill-placement epoch idempotency", async () => {
+    const candidate = {
+      epochKey: "a".repeat(64),
+      agentId: "main",
+      name: "unused-skill",
+      source: "workspace" as const,
+      reason: "zero-recommendation-usage" as const,
+      observedTurns: 20,
+      usageTurns: 0,
+      recommendedTurns: 0,
+    };
+    const source = {
+      sessionId: "session-1",
+      agentId: "main",
+      turnStart: "2026-06-11T00:00:00.000Z",
+    };
+
+    expect(
+      await writer.record("placement-event", source, [], {
+        outcome: "nofinding",
+        skillPlacementCandidate: candidate,
+        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+      }),
+    ).toBe(true);
+    expect(writer.completedSkillEpochKeys()).toEqual(
+      new Set([candidate.epochKey]),
+    );
+    expect(
+      await writer.record("placement-event-retry", source, [], {
+        outcome: "nofinding",
+        skillPlacementCandidate: candidate,
+        nowMs: Date.parse("2026-06-11T00:02:00.000Z"),
+      }),
+    ).toBe(false);
+
+    const log = JSON.parse(
+      fs.readFileSync(path.join(root, "review.json"), "utf8"),
+    );
+    expect(log.reviewedSkillEpochs[candidate.epochKey].eventId).toBe(
+      "placement-event",
+    );
   });
 });

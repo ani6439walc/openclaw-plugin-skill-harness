@@ -91,6 +91,21 @@ export type ProcessedEventRecord = {
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
 };
 
+export type AppliedIntentReviewChange = Omit<
+  AppliedReviewChange,
+  "targetKind" | "operation" | "targetTrigger" | "keywordChange"
+> & {
+  targetKind: "intent-markdown";
+  operation: ReviewOperation;
+};
+
+export type IntentProcessedEventRecord = Omit<
+  ProcessedEventRecord,
+  "changes"
+> & {
+  changes?: AppliedIntentReviewChange[];
+};
+
 export type ReviewedSkillEpoch = {
   agentId: string;
   skillName: string;
@@ -108,6 +123,15 @@ export type ReviewLog = {
   triggerKeywords: ReviewTriggerKeywords;
   processedEvents: Record<string, ProcessedEventRecord>;
   reviewedSkillEpochs: Record<string, ReviewedSkillEpoch>;
+};
+
+export type ReviewLogV6 = {
+  schemaVersion: 6;
+  createdAt: string;
+  updatedAt: string;
+  processedEvents: Record<string, IntentProcessedEventRecord>;
+  reviewedSkillEpochs: Record<string, ReviewedSkillEpoch>;
+  historicalKeywordAudits: Record<string, ProcessedEventRecord>;
 };
 
 const ReviewSourceSchema = z
@@ -253,6 +277,71 @@ export const ReviewLogSchema = z
   })
   .strict();
 
+const IntentAppliedReviewChangeSchema = z
+  .object({
+    trigger: z.enum(REVIEW_TRIGGER_TYPES),
+    targetKind: z.literal("intent-markdown"),
+    operation: z.enum(REVIEW_OPERATIONS),
+    targetIntentIds: z.array(z.string().trim().min(1)),
+    dedupeKey: z.string().trim().min(1),
+    summary: z.string().trim().min(1),
+    evidence: z.array(z.string()),
+    correctionGoal: z.string().trim().min(1),
+    suggestedChange: z.string().trim().min(1),
+  })
+  .strict();
+
+const IntentProcessedEventRecordSchema = z
+  .object({
+    processedAt: z.string(),
+    source: ReviewSourceSchema.optional(),
+    triggers: z.array(z.enum(REVIEW_TRIGGER_TYPES)),
+    changeCount: z.number().int().nonnegative(),
+    outcome: ProcessedEventOutcomeSchema,
+    changes: z.array(IntentAppliedReviewChangeSchema).optional(),
+    changedIntentIds: z.array(z.string()).optional(),
+    validationErrors: z.array(z.string()).optional(),
+    noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
+    schemaRejectionReasonCounts: SchemaRejectionReasonCountsSchema.optional(),
+  })
+  .strict()
+  .refine((record) =>
+    record.triggers.every(
+      (trigger) =>
+        trigger !== "successful-pattern" &&
+        trigger !== "behavior-fix" &&
+        trigger !== "entity-context",
+    ),
+  );
+
+const HistoricalKeywordAuditRecordSchema = ProcessedEventRecordSchema.refine(
+  (record) =>
+    record.triggers.some(
+      (trigger) =>
+        trigger === "successful-pattern" ||
+        trigger === "behavior-fix" ||
+        trigger === "entity-context",
+    ) ||
+    (record.changes ?? []).some(
+      (change) => change.targetKind === "trigger-keywords",
+    ),
+);
+
+export const ReviewLogV6Schema = z
+  .object({
+    schemaVersion: z.literal(6),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    processedEvents: z.record(z.string(), IntentProcessedEventRecordSchema),
+    reviewedSkillEpochs: ReviewedSkillEpochsSchema,
+    historicalKeywordAudits: z.record(
+      z.string(),
+      HistoricalKeywordAuditRecordSchema,
+    ),
+  })
+  .strict()
+  .transform((log): ReviewLogV6 => log);
+
 export function createReviewLog(
   nowIso: string,
   triggerKeywordSeed?: Partial<ReviewTriggerKeywords>,
@@ -267,8 +356,27 @@ export function createReviewLog(
   };
 }
 
+export function createReviewLogV6(nowIso: string): ReviewLogV6 {
+  return {
+    schemaVersion: 6,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    processedEvents: {},
+    reviewedSkillEpochs: {},
+    historicalKeywordAudits: {},
+  };
+}
+
 export function parseReviewLog(raw: unknown): ReviewLog {
   return ReviewLogSchema.parse(raw);
+}
+
+export function parseReviewLogV5ForMigration(raw: unknown): ReviewLog {
+  return ReviewLogSchema.parse(raw);
+}
+
+export function parseReviewLogV6(raw: unknown): ReviewLogV6 {
+  return ReviewLogV6Schema.parse(raw);
 }
 
 export function readReviewLog(logPath: string): ReviewLog {

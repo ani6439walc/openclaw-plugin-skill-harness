@@ -1672,4 +1672,30 @@ describe("StatsAggregator", () => {
       malformedV2Stats,
     );
   });
+
+  describe("getAcceptedTurnCount", () => {
+    it("returns undefined when stats file is missing", () => {
+      expect(aggregator.getAcceptedTurnCount()).toBeUndefined();
+    });
+
+    it("returns the persisted summary.turns count after recording events", () => {
+      aggregator.record("session-1", createState(), intent);
+      expect(aggregator.getAcceptedTurnCount()).toBe(1);
+
+      aggregator.record("session-2", createState(), intent);
+      expect(aggregator.getAcceptedTurnCount()).toBe(2);
+    });
+
+    it("returns undefined for malformed stats files", () => {
+      const statsPath = path.join(tempDir, "stats.json");
+      fs.writeFileSync(statsPath, "{ broken json");
+      expect(aggregator.getAcceptedTurnCount()).toBeUndefined();
+    });
+
+    it("returns undefined for stats with invalid schema", () => {
+      const statsPath = path.join(tempDir, "stats.json");
+      fs.writeFileSync(statsPath, JSON.stringify({ schemaVersion: 999 }));
+      expect(aggregator.getAcceptedTurnCount()).toBeUndefined();
+    });
+  });
 });

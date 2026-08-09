@@ -159,19 +159,20 @@ describe("createPlugin", () => {
     expect(load).toHaveBeenCalledWith("intents");
   });
 
-  it("registers hooks when review trigger keyword cache is corrupt", () => {
+  it("registers hooks when keyword coverage keyword cache is corrupt", () => {
     const api = createApi();
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(dataRoot, { recursive: true });
-    fs.writeFileSync(path.join(dataRoot, "review.json"), "{ broken");
+    fs.writeFileSync(path.join(dataRoot, "keyword-coverage.json"), "{ broken");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 
     expect(() => createPlugin(api).register(api)).not.toThrow();
 
     expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
-    expect(warn).toHaveBeenCalledWith(
+    // Fail-open: corrupt coverage file should not block registration.
+    expect(warn).not.toHaveBeenCalledWith(
       "failed to read review trigger keywords",
-      expect.objectContaining({ path: path.join(dataRoot, "review.json") }),
+      expect.anything(),
     );
   });
 

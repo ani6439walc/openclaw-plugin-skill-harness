@@ -22,11 +22,21 @@ import { defaultReviewLogWriter } from "../review/log-writer.js";
 import { enqueueReview } from "../review/queue.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { runReviewSubagent } from "../review/subagent.js";
+import type {
+  IntentMarkdownReviewFinding,
+  TriggerKeywordsReviewFinding,
+} from "../review/types.js";
 import type { SkillPlacementReviewCandidate } from "../review/types.js";
 import {
   DEFAULT_REVIEW_TRIGGER_KEYWORDS,
   type ReviewTriggerKeywords,
+  type TriggerKeywordTarget,
 } from "../review/trigger-keywords.js";
+import {
+  discoverKeywordCoverageCandidates,
+  runKeywordCoverageReview,
+} from "../review/index.js";
+import { createHash } from "node:crypto";
 import {
   extractLatestUserMessage,
   limitConversationTurns,
@@ -483,10 +493,18 @@ export function createHookHandlers(deps: HookDeps) {
   const instructionWriter =
     deps.instructionWriter ?? runIntentInstructionSubagent;
   const reviewLogWriter = deps.reviewLogWriter ?? defaultReviewLogWriter;
+  const coverageReviewer = deps.coverageReviewer ?? runKeywordCoverageReview;
+  const keywordCoverageWriter = deps.keywordCoverageWriter;
   const bundledSkillsDir = deps.bundledSkillsDir;
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const recordedToolCalls = new Set<string>();
   const pendingSkillEpochKeys = new Set<string>();
+  const pendingCoverageEpochKeys = new Set<string>();
+  const COVERAGE_TARGETS: readonly TriggerKeywordTarget[] = [
+    "successful-pattern",
+    "behavior-fix",
+    "entity-context",
+  ];
 
   function resolvePromptBuildScope(
     ctx: PluginHookAgentContext,
@@ -1641,26 +1659,86 @@ export function createHookHandlers(deps: HookDeps) {
             dataRoot: deps.dataRoot,
           });
           if (!reviewResult) return;
-          await reviewLogWriter.record(
-            params.snapshot.eventId,
-            {
-              sessionId: params.snapshot.sessionId,
-              sessionKey: params.snapshot.sessionKey,
-              agentId: params.snapshot.agentId,
-              turnStart: params.snapshot.current.timestamps!.start!,
-            },
-            reviewResult.findings,
-            {
-              triggers: params.triggers,
-              outcome: reviewResult.outcome,
-              changedIntentIds: reviewResult.changedIntentIds,
-              validationErrors: reviewResult.validationErrors,
-              noFindingReasonCounts: reviewResult.noFindingReasonCounts,
-              schemaRejectionReasonCounts:
-                reviewResult.schemaRejectionReasonCounts,
-              skillPlacementCandidate: params.skillPlacementCandidate,
-            },
-          );
+          const keywordWriter = deps.keywordCoverageWriter;
+          if (!keywordWriter) {
+            // Backward compatibility: v5 path unchanged
+            await reviewLogWriter.record(
+              params.snapshot.eventId,
+              {
+                sessionId: params.snapshot.sessionId,
+                sessionKey: params.snapshot.sessionKey,
+                agentId: params.snapshot.agentId,
+                turnStart: params.snapshot.current.timestamps!.start!,
+              },
+              reviewResult.findings,
+              {
+                triggers: params.triggers,
+                outcome: reviewResult.outcome,
+                changedIntentIds: reviewResult.changedIntentIds,
+                validationErrors: reviewResult.validationErrors,
+                noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+                schemaRejectionReasonCounts:
+                  reviewResult.schemaRejectionReasonCounts,
+                skillPlacementCandidate: params.skillPlacementCandidate,
+              },
+            );
+          } else {
+            // Split findings by targetKind
+            const keywordFindings = reviewResult.findings.filter(
+              (f): f is TriggerKeywordsReviewFinding =>
+                f.targetKind === "trigger-keywords",
+            );
+            const intentFindings = reviewResult.findings.filter(
+              (f): f is IntentMarkdownReviewFinding =>
+                f.targetKind === "intent-markdown",
+            );
+
+            if (keywordFindings.length > 0) {
+              // Only record keyword events for successful outcomes
+              if (
+                reviewResult.outcome === "applied" ||
+                reviewResult.outcome === "nofinding"
+              ) {
+                await keywordWriter.recordKeywordEvent({
+                  eventId: params.snapshot.eventId,
+                  policy: "ordinary",
+                  targets: [
+                    ...new Set(keywordFindings.map((f) => f.targetTrigger)),
+                  ],
+                  mutations: keywordFindings.map((f) => ({
+                    target: f.targetTrigger,
+                    add: f.addKeywords,
+                    remove: f.removeKeywords,
+                  })),
+                  outcome: reviewResult.outcome,
+                });
+                deps.refreshTriggerKeywords?.();
+              }
+            }
+
+            if (intentFindings.length > 0 || params.skillPlacementCandidate) {
+              await reviewLogWriter.record(
+                params.snapshot.eventId,
+                {
+                  sessionId: params.snapshot.sessionId,
+                  sessionKey: params.snapshot.sessionKey,
+                  agentId: params.snapshot.agentId,
+                  turnStart: params.snapshot.current.timestamps!.start!,
+                },
+                intentFindings,
+                {
+                  triggers: params.triggers,
+                  outcome: reviewResult.outcome,
+                  changedIntentIds: reviewResult.changedIntentIds,
+                  validationErrors: reviewResult.validationErrors,
+                  noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+                  schemaRejectionReasonCounts:
+                    reviewResult.schemaRejectionReasonCounts,
+                  skillPlacementCandidate: params.skillPlacementCandidate,
+                },
+              );
+            }
+          }
           if (reviewResult.changedIntentIds?.length) {
             deps.refreshIntents();
           }
@@ -1679,6 +1757,274 @@ export function createHookHandlers(deps: HookDeps) {
     }
   }
 
+  function buildCoverageEpochKey(params: {
+    acceptedTurn: number;
+    cadence: number;
+    keywordFingerprint: string;
+  }): string {
+    return createHash("sha256")
+      .update(
+        `coverage:${params.cadence}:${params.acceptedTurn}:${params.keywordFingerprint}`,
+      )
+      .digest("hex");
+  }
+
+  function fingerprintKeywords(keywords: ReviewTriggerKeywords): string {
+    return createHash("sha256")
+      .update(
+        JSON.stringify({
+          successfulPattern: keywords.successfulPattern,
+          behaviorFix: keywords.behaviorFix,
+          entityContext: keywords.entityContext,
+        }),
+      )
+      .digest("hex");
+  }
+
+  function readCoverageCursors(
+    runtimeTargets:
+      | Partial<
+          Record<
+            TriggerKeywordTarget,
+            { cursor: number; lastCompletedAcceptedTurn: number }
+          >
+        >
+      | undefined,
+  ): Record<TriggerKeywordTarget, number> {
+    return {
+      "successful-pattern": runtimeTargets?.["successful-pattern"]?.cursor ?? 0,
+      "behavior-fix": runtimeTargets?.["behavior-fix"]?.cursor ?? 0,
+      "entity-context": runtimeTargets?.["entity-context"]?.cursor ?? 0,
+    };
+  }
+
+  function coverageWatermarkEligible(params: {
+    acceptedTurn: number;
+    cadence: number;
+    runtimeTargets:
+      | Partial<
+          Record<
+            TriggerKeywordTarget,
+            { cursor: number; lastCompletedAcceptedTurn: number }
+          >
+        >
+      | undefined;
+  }): boolean {
+    if (params.acceptedTurn < params.cadence) return false;
+    if (params.acceptedTurn % params.cadence !== 0) return false;
+    const lastCompleted = Math.max(
+      0,
+      ...COVERAGE_TARGETS.map(
+        (target) =>
+          params.runtimeTargets?.[target]?.lastCompletedAcceptedTurn ?? 0,
+      ),
+    );
+    // Require full cadence progress after the last completed epoch.
+    return params.acceptedTurn >= lastCompleted + params.cadence;
+  }
+
+  function enqueueKeywordCoverageRun(params: {
+    ctx: PluginHookAgentContext;
+    resolvedConfig: ResolvedSkillHarnessPluginConfig;
+    agentId: string;
+    modelRef: NonNullable<ReturnType<typeof getReviewModelRef>>;
+    acceptedTurn: number;
+    epochKey: string;
+  }): boolean {
+    if (!keywordCoverageWriter || !deps.dataRoot) return false;
+    try {
+      enqueueReviewTask(async () => {
+        try {
+          const runtimeState = keywordCoverageWriter.readRuntimeState();
+          if (!runtimeState) {
+            await keywordCoverageWriter.releaseCoverageEpoch({
+              epochKey: params.epochKey,
+            });
+            return;
+          }
+
+          const triggerKeywords =
+            runtimeState.triggerKeywords ??
+            readTriggerKeywordsFailOpen(deps.triggerKeywords);
+          const cursor = readCoverageCursors(runtimeState.targets);
+          const sessions =
+            typeof tracker.listRetainedSessions === "function"
+              ? tracker.listRetainedSessions()
+              : [];
+          const discovery = discoverKeywordCoverageCandidates({
+            sessions,
+            config: params.resolvedConfig.review.triggers,
+            triggerKeywords,
+            cursor,
+          });
+
+          const documents = COVERAGE_TARGETS.flatMap(
+            (target) => discovery.additions[target] ?? [],
+          );
+          if (documents.length === 0) {
+            await keywordCoverageWriter.completeCoverageEpoch({
+              epochKey: params.epochKey,
+              outcome: "nofinding",
+              nextCursors: discovery.nextCursor,
+            });
+            return;
+          }
+
+          const reviewResult = await coverageReviewer({
+            api,
+            dataRoot: deps.dataRoot!,
+            agentId: params.agentId,
+            sessionId: params.ctx.sessionId,
+            sessionKey: params.ctx.sessionKey,
+            messageProvider: params.ctx.messageProvider,
+            triggerKeywords,
+            documents,
+            cursor,
+            config: {
+              model: params.modelRef.model,
+              modelFallback:
+                params.resolvedConfig.review.modelFallback ??
+                params.resolvedConfig.modelFallback,
+              thinking: params.resolvedConfig.review.thinking,
+              timeoutMs: params.resolvedConfig.review.timeoutMs,
+            },
+            modelRef: params.modelRef,
+            pluginConfig: params.resolvedConfig,
+          });
+
+          if (!reviewResult) {
+            await keywordCoverageWriter.releaseCoverageEpoch({
+              epochKey: params.epochKey,
+            });
+            return;
+          }
+
+          const mutations = reviewResult.decisions
+            .filter((decision) => decision.outcome === "finding")
+            .map((decision) => ({
+              target: decision.target,
+              add: decision.addition ? [decision.addition.phrase] : [],
+              remove: decision.removal ? [decision.removal.phrase] : [],
+            }))
+            .filter(
+              (mutation) => mutation.add.length > 0 || mutation.remove.length > 0,
+            );
+
+          const outcome = mutations.length > 0 ? "applied" : "nofinding";
+          if (mutations.length > 0) {
+            const writeResult = await keywordCoverageWriter.recordKeywordEvent({
+              eventId: `coverage:${params.epochKey}`,
+              policy: "coverage",
+              targets: mutations.map((mutation) => mutation.target),
+              mutations,
+              outcome: "applied",
+            });
+            if (writeResult === "retryable-failure") {
+              await keywordCoverageWriter.releaseCoverageEpoch({
+                epochKey: params.epochKey,
+              });
+              return;
+            }
+            deps.refreshTriggerKeywords?.();
+          }
+
+          const completeResult = await keywordCoverageWriter.completeCoverageEpoch({
+            epochKey: params.epochKey,
+            outcome,
+            nextCursors: discovery.nextCursor,
+          });
+          if (completeResult === "retryable-failure") {
+            await keywordCoverageWriter.releaseCoverageEpoch({
+              epochKey: params.epochKey,
+            });
+          }
+        } catch (error) {
+          logger.warn("keyword coverage epoch failed", { error });
+          try {
+            await keywordCoverageWriter.releaseCoverageEpoch({
+              epochKey: params.epochKey,
+            });
+          } catch (releaseError) {
+            logger.warn("failed to release keyword coverage epoch", {
+              error: releaseError,
+            });
+          }
+        } finally {
+          pendingCoverageEpochKeys.delete(params.epochKey);
+        }
+      });
+      return true;
+    } catch (error) {
+      logger.warn("failed to enqueue keyword coverage", { error });
+      return false;
+    }
+  }
+
+  async function maybeEnqueueKeywordCoverage(params: {
+    ctx: PluginHookAgentContext;
+    resolvedConfig: ResolvedSkillHarnessPluginConfig;
+    acceptedTurn: number;
+  }): Promise<void> {
+    if (!keywordCoverageWriter || !deps.dataRoot) return;
+    if (!params.resolvedConfig.review.enabled) return;
+
+    try {
+      const cadence =
+        params.resolvedConfig.review.keywordCoverage.everyAcceptedTurns;
+      const runtimeState = keywordCoverageWriter.readRuntimeState();
+      if (!runtimeState) return;
+      if (
+        !coverageWatermarkEligible({
+          acceptedTurn: params.acceptedTurn,
+          cadence,
+          runtimeTargets: runtimeState.targets,
+        })
+      ) {
+        return;
+      }
+
+      const keywordFingerprint = fingerprintKeywords(
+        runtimeState.triggerKeywords,
+      );
+      const epochKey = buildCoverageEpochKey({
+        acceptedTurn: params.acceptedTurn,
+        cadence,
+        keywordFingerprint,
+      });
+      if (pendingCoverageEpochKeys.has(epochKey)) return;
+
+      const agentId = params.ctx.agentId ?? "main";
+      const modelRef = getReviewModelRef(api, agentId, params.resolvedConfig, {
+        modelProviderId: params.ctx.modelProviderId,
+        modelId: params.ctx.modelId,
+      });
+      if (!modelRef) return;
+
+      const reserved = await keywordCoverageWriter.reserveCoverageEpoch({
+        epochKey,
+        targets: COVERAGE_TARGETS,
+        acceptedTurn: params.acceptedTurn,
+      });
+      if (reserved !== "applied") return;
+
+      pendingCoverageEpochKeys.add(epochKey);
+      const enqueued = enqueueKeywordCoverageRun({
+        ctx: params.ctx,
+        resolvedConfig: params.resolvedConfig,
+        agentId,
+        modelRef,
+        acceptedTurn: params.acceptedTurn,
+        epochKey,
+      });
+      if (!enqueued) {
+        pendingCoverageEpochKeys.delete(epochKey);
+        await keywordCoverageWriter.releaseCoverageEpoch({ epochKey });
+      }
+    } catch (error) {
+      logger.warn("failed to schedule keyword coverage", { error });
+    }
+  }
+
   async function finalizeTrackedTurn(
     trackedSessionId: string | undefined,
     ctx: PluginHookAgentContext,
@@ -1690,6 +2036,20 @@ export function createHookHandlers(deps: HookDeps) {
     const resolvedConfig = config();
     const reviewConfig = resolvedConfig.review;
     if (!reviewConfig.enabled) return;
+
+    try {
+      const acceptedTurn = statsAggregator.getAcceptedTurnCount?.();
+      if (typeof acceptedTurn === "number") {
+        await maybeEnqueueKeywordCoverage({
+          ctx,
+          resolvedConfig,
+          acceptedTurn,
+        });
+      }
+    } catch (error) {
+      logger.warn("failed to evaluate keyword coverage schedule", { error });
+    }
+
     const baseSnapshot = tracker.getReviewSnapshot(trackedSessionId);
     if (!baseSnapshot) return;
     const triggers: ReviewTrigger[] = checkReviewTriggers(

@@ -1438,6 +1438,18 @@ export class StatsAggregator {
       return false;
     }
   }
+
+  getAcceptedTurnCount(): number | undefined {
+    const statsFilePath = statsPath(this.pluginRoot);
+    try {
+      if (!fileExists(statsFilePath)) return undefined;
+      const stats = loadStats(statsFilePath, new Date().toISOString());
+      return stats.summary.turns;
+    } catch (err) {
+      logger.warn("failed to read accepted turn count", { error: err });
+      return undefined;
+    }
+  }
 }
 
 export const defaultStatsAggregator = StatsAggregator.create(pluginRoot);

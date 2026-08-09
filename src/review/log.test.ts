@@ -1,13 +1,20 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
   createReviewLog,
   parseReviewLog,
+  parseReviewLogV5ForMigration,
+  parseReviewLogV6,
   pruneProcessedEvents,
   readReviewLog,
   readReviewTriggerKeywords,
+} from "./log.js";
+import type {
+  AppliedIntentReviewChange,
+  IntentProcessedEventRecord,
+  ReviewLogV6,
 } from "./log.js";
 import { DEFAULT_REVIEW_TRIGGER_KEYWORDS } from "./trigger-keywords.js";
 
@@ -39,6 +46,180 @@ describe("review log", () => {
       processedEvents: {},
       reviewedSkillEpochs: {},
     });
+  });
+
+  it("keeps a frozen v5 parser beside a strict v6 audit contract", () => {
+    const v5 = createReviewLog("2026-06-11T00:00:00.000Z");
+    expect(parseReviewLogV5ForMigration(v5)).toEqual(v5);
+
+    expect(
+      parseReviewLogV6({
+        schemaVersion: 6,
+        createdAt: "2026-06-11T00:00:00.000Z",
+        updatedAt: "2026-06-11T00:00:00.000Z",
+        processedEvents: {},
+        reviewedSkillEpochs: {},
+        historicalKeywordAudits: {},
+      }),
+    ).toMatchObject({ schemaVersion: 6, historicalKeywordAudits: {} });
+    expect(() =>
+      parseReviewLogV6({
+        schemaVersion: 6,
+        createdAt: "2026-06-11T00:00:00.000Z",
+        updatedAt: "2026-06-11T00:00:00.000Z",
+        processedEvents: {},
+        reviewedSkillEpochs: {},
+        historicalKeywordAudits: {},
+        triggerKeywords: DEFAULT_REVIEW_TRIGGER_KEYWORDS,
+      }),
+    ).toThrow();
+    expectTypeOf<ReviewLogV6["processedEvents"]>().toEqualTypeOf<
+      Record<string, IntentProcessedEventRecord>
+    >();
+    expectTypeOf<IntentProcessedEventRecord["changes"]>().toEqualTypeOf<
+      AppliedIntentReviewChange[] | undefined
+    >();
+  });
+
+  it("rejects keyword changes from mutable v6 processed events", () => {
+    expect(() =>
+      parseReviewLogV6({
+        schemaVersion: 6,
+        createdAt: "2026-06-11T00:00:00.000Z",
+        updatedAt: "2026-06-11T00:00:00.000Z",
+        reviewedSkillEpochs: {},
+        historicalKeywordAudits: {},
+        processedEvents: {
+          event: {
+            processedAt: "2026-06-11T00:01:00.000Z",
+            triggers: ["successful-pattern"],
+            changeCount: 1,
+            outcome: "applied",
+            changes: [
+              {
+                trigger: "successful-pattern",
+                targetKind: "trigger-keywords",
+                operation: "adjust-trigger-keywords",
+                targetIntentIds: [],
+                targetTrigger: "successful-pattern",
+                keywordChange: { add: ["ship it"], remove: [] },
+                dedupeKey: "keyword-change",
+                summary: "keyword change",
+                evidence: ["evidence"],
+                correctionGoal: "goal",
+                suggestedChange: "change keyword",
+              },
+            ],
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects keyword operations disguised as intent changes in mutable v6 events", () => {
+    expect(() =>
+      parseReviewLogV6({
+        schemaVersion: 6,
+        createdAt: "2026-06-11T00:00:00.000Z",
+        updatedAt: "2026-06-11T00:00:00.000Z",
+        reviewedSkillEpochs: {},
+        historicalKeywordAudits: {},
+        processedEvents: {
+          event: {
+            processedAt: "2026-06-11T00:01:00.000Z",
+            triggers: ["skill-candidate"],
+            changeCount: 1,
+            outcome: "applied",
+            changes: [
+              {
+                trigger: "skill-candidate",
+                targetKind: "intent-markdown",
+                operation: "adjust-trigger-keywords",
+                targetIntentIds: ["intent-a"],
+                dedupeKey: "disguised-keyword-change",
+                summary: "invalid operation",
+                evidence: ["evidence"],
+                correctionGoal: "goal",
+                suggestedChange: "invalid keyword operation",
+              },
+            ],
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("preserves migrated keyword audit records outside mutable v6 events", () => {
+    const parsed = parseReviewLogV6({
+      schemaVersion: 6,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      processedEvents: {},
+      reviewedSkillEpochs: {},
+      historicalKeywordAudits: {
+        "v5:event": {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["successful-pattern"],
+          changeCount: 1,
+          outcome: "applied",
+          changes: [
+            {
+              trigger: "successful-pattern",
+              targetKind: "trigger-keywords",
+              operation: "adjust-trigger-keywords",
+              targetIntentIds: [],
+              targetTrigger: "successful-pattern",
+              keywordChange: { add: ["ship it"], remove: [] },
+              dedupeKey: "keyword-change",
+              summary: "keyword change",
+              evidence: ["evidence"],
+              correctionGoal: "goal",
+              suggestedChange: "change keyword",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.historicalKeywordAudits["v5:event"]).toMatchObject({
+      changes: [{ targetKind: "trigger-keywords" }],
+    });
+  });
+
+  it("keeps keyword-only evidence out of mutable v6 events and in history", () => {
+    const base = {
+      schemaVersion: 6,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      reviewedSkillEpochs: {},
+    };
+    const noFindingKeywordEvent = {
+      processedAt: "2026-06-11T00:01:00.000Z",
+      triggers: ["successful-pattern"],
+      changeCount: 0,
+      outcome: "nofinding",
+    };
+    const intentEvent = {
+      processedAt: "2026-06-11T00:01:00.000Z",
+      triggers: ["skill-candidate"],
+      changeCount: 0,
+      outcome: "nofinding",
+    };
+
+    expect(() =>
+      parseReviewLogV6({
+        ...base,
+        processedEvents: { event: noFindingKeywordEvent },
+        historicalKeywordAudits: {},
+      }),
+    ).toThrow();
+    expect(() =>
+      parseReviewLogV6({
+        ...base,
+        processedEvents: {},
+        historicalKeywordAudits: { event: intentEvent },
+      }),
+    ).toThrow();
   });
 
   it.each([1, 2, 3, 4])("rejects legacy v%s review logs", (schemaVersion) => {

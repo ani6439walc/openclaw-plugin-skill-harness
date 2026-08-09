@@ -109,6 +109,21 @@ describe("skill-harness manifest", () => {
       maximum: 1800000,
       default: 180000,
     });
+    expect(review.properties.keywordCoverage).toEqual({
+      type: "object",
+      description:
+        "Automatic cross-session keyword coverage review cadence for accepted routed turns.",
+      additionalProperties: false,
+      properties: {
+        everyAcceptedTurns: {
+          type: "integer",
+          minimum: 10,
+          maximum: 1000,
+          default: 50,
+        },
+      },
+      default: {},
+    });
     expect(
       review.properties.triggers.properties.skillCandidate.properties.toolCalls
         .default,

@@ -232,6 +232,20 @@
             "maximum": 1800000,
             "default": 180000
           },
+          "keywordCoverage": {
+            "type": "object",
+            "description": "Automatic cross-session keyword coverage review cadence for accepted routed turns.",
+            "additionalProperties": false,
+            "properties": {
+              "everyAcceptedTurns": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 1000,
+                "default": 50
+              }
+            },
+            "default": {}
+          },
           "triggers": {
             "type": "object",
             "additionalProperties": false,

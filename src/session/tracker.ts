@@ -457,6 +457,15 @@ export class SessionTracker {
     return this.sessionData.get(sessionId)?.current;
   }
 
+  /** Snapshot of retained sessions currently loaded in memory (14-day retention). */
+  listRetainedSessions(): SessionData[] {
+    return [...this.sessionData.values()].map((session) => ({
+      ...session,
+      history: session.history ? [...session.history] : undefined,
+      current: { ...session.current },
+    }));
+  }
+
   getAgentId(sessionId: string): string | undefined {
     return this.sessionData.get(sessionId)?.agentId;
   }
