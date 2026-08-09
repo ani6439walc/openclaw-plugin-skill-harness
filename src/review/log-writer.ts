@@ -299,6 +299,77 @@ export class IntentReviewLogWriter {
     }
   }
 
+  async recordHistoricalKeywordAudit(
+    eventId: string,
+    source: ReviewSource,
+    findings: readonly ReviewFinding[],
+    options: {
+      nowMs?: number;
+      triggers?: readonly ReviewTrigger[];
+      outcome?: ProcessedEventOutcome;
+      changedIntentIds?: readonly string[];
+      validationErrors?: readonly string[];
+      noFindingReasonCounts?: NoFindingReasonCounts;
+      schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
+    } = {},
+  ): Promise<boolean> {
+    if (!eventId) return false;
+    const logPath = reviewLogPath(this.dataRoot);
+    const result = await withFileLock(logPath, async () => {
+      try {
+        const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
+        const log = fileExists(logPath)
+          ? parseReviewLogV6(readJsonFile<unknown>(logPath))
+          : createReviewLogV6(nowIso);
+        if (Object.hasOwn(log.historicalKeywordAudits, eventId)) return false;
+
+        const changes = findings.map(appliedChangeFromFinding);
+        const outcome =
+          options.outcome ?? (changes.length > 0 ? "applied" : "nofinding");
+        log.historicalKeywordAudits[eventId] = {
+          processedAt: nowIso,
+          source,
+          triggers: [
+            ...new Set(
+              options.triggers ?? findings.map((finding) => finding.trigger),
+            ),
+          ],
+          changeCount: changes.length,
+          outcome,
+          ...(changes.length > 0 ? { changes } : {}),
+          ...(options.changedIntentIds?.length
+            ? { changedIntentIds: [...options.changedIntentIds] }
+            : {}),
+          ...(options.validationErrors?.length
+            ? { validationErrors: [...options.validationErrors] }
+            : {}),
+          ...(options.noFindingReasonCounts
+            ? { noFindingReasonCounts: options.noFindingReasonCounts }
+            : {}),
+          ...(options.schemaRejectionReasonCounts
+            ? {
+                schemaRejectionReasonCounts:
+                  options.schemaRejectionReasonCounts,
+              }
+            : {}),
+        };
+        log.updatedAt = nowIso;
+        return safeWriteJson(
+          logPath,
+          ReviewLogV6Schema.parse(log),
+          "failed to write v6 historical keyword audit",
+        );
+      } catch (error) {
+        logger.warn("failed to update v6 historical keyword audit", {
+          error,
+          path: logPath,
+        });
+        return false;
+      }
+    });
+    return result ?? false;
+  }
+
   async record(
     eventId: string,
     source: ReviewSource,

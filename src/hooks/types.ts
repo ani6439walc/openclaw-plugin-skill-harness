@@ -3,7 +3,10 @@ import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import type { defaultCatalog } from "../intents/index.js";
 import type { defaultTracker } from "../session/index.js";
 import type { defaultStatsAggregator } from "../stats/index.js";
-import type { ReviewLogWriter } from "../review/log-writer.js";
+import type {
+  IntentReviewLogWriter,
+  ReviewLogWriter,
+} from "../review/log-writer.js";
 import type { KeywordCoverageWriter } from "../review/keyword-coverage-writer.js";
 import type {
   ReviewSubagentResult,
@@ -47,7 +50,10 @@ export type HookDeps = {
   topicChecker?: typeof runTopicSwitchSubagent;
   instructionWriter?: typeof runIntentInstructionSubagent;
   reviewLogWriter?: Pick<ReviewLogWriter, "record"> &
-    Partial<Pick<ReviewLogWriter, "completedSkillEpochKeys">>;
+    Partial<
+      Pick<ReviewLogWriter, "completedSkillEpochKeys"> &
+        Pick<IntentReviewLogWriter, "recordHistoricalKeywordAudit">
+    >;
   keywordCoverageWriter?: Pick<
     KeywordCoverageWriter,
     | "recordKeywordEvent"

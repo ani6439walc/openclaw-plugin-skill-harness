@@ -492,7 +492,8 @@ export function createHookHandlers(deps: HookDeps) {
   const topicChecker = deps.topicChecker ?? runTopicSwitchSubagent;
   const instructionWriter =
     deps.instructionWriter ?? runIntentInstructionSubagent;
-  const reviewLogWriter = deps.reviewLogWriter ?? defaultReviewLogWriter;
+  const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
+    deps.reviewLogWriter ?? defaultReviewLogWriter;
   const coverageReviewer = deps.coverageReviewer ?? runKeywordCoverageReview;
   const keywordCoverageWriter = deps.keywordCoverageWriter;
   const bundledSkillsDir = deps.bundledSkillsDir;
@@ -1692,6 +1693,38 @@ export function createHookHandlers(deps: HookDeps) {
               (f): f is IntentMarkdownReviewFinding =>
                 f.targetKind === "intent-markdown",
             );
+            const keywordTriggered = params.triggers.some(
+              (trigger) =>
+                trigger === "successful-pattern" ||
+                trigger === "behavior-fix" ||
+                trigger === "entity-context",
+            );
+            const intentTriggers = params.triggers.filter(
+              (trigger) =>
+                trigger !== "successful-pattern" &&
+                trigger !== "behavior-fix" &&
+                trigger !== "entity-context",
+            );
+
+            if (keywordTriggered) {
+              await reviewLogWriter.recordHistoricalKeywordAudit?.(
+                params.snapshot.eventId,
+                {
+                  sessionId: params.snapshot.sessionId,
+                  sessionKey: params.snapshot.sessionKey,
+                  agentId: params.snapshot.agentId,
+                  turnStart: params.snapshot.current.timestamps!.start!,
+                },
+                keywordFindings,
+                {
+                  triggers: params.triggers,
+                  outcome: reviewResult.outcome,
+                  noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+                  schemaRejectionReasonCounts:
+                    reviewResult.schemaRejectionReasonCounts,
+                },
+              );
+            }
 
             if (keywordFindings.length > 0) {
               // Only record keyword events for successful outcomes
@@ -1716,26 +1749,32 @@ export function createHookHandlers(deps: HookDeps) {
               }
             }
 
-            await reviewLogWriter.record(
-              params.snapshot.eventId,
-              {
-                sessionId: params.snapshot.sessionId,
-                sessionKey: params.snapshot.sessionKey,
-                agentId: params.snapshot.agentId,
-                turnStart: params.snapshot.current.timestamps!.start!,
-              },
-              intentFindings,
-              {
-                triggers: params.triggers,
-                outcome: reviewResult.outcome,
-                changedIntentIds: reviewResult.changedIntentIds,
-                validationErrors: reviewResult.validationErrors,
-                noFindingReasonCounts: reviewResult.noFindingReasonCounts,
-                schemaRejectionReasonCounts:
-                  reviewResult.schemaRejectionReasonCounts,
-                skillPlacementCandidate: params.skillPlacementCandidate,
-              },
-            );
+            if (
+              intentTriggers.length > 0 ||
+              intentFindings.length > 0 ||
+              params.skillPlacementCandidate
+            ) {
+              await reviewLogWriter.record(
+                params.snapshot.eventId,
+                {
+                  sessionId: params.snapshot.sessionId,
+                  sessionKey: params.snapshot.sessionKey,
+                  agentId: params.snapshot.agentId,
+                  turnStart: params.snapshot.current.timestamps!.start!,
+                },
+                intentFindings,
+                {
+                  triggers: intentTriggers,
+                  outcome: reviewResult.outcome,
+                  changedIntentIds: reviewResult.changedIntentIds,
+                  validationErrors: reviewResult.validationErrors,
+                  noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+                  schemaRejectionReasonCounts:
+                    reviewResult.schemaRejectionReasonCounts,
+                  skillPlacementCandidate: params.skillPlacementCandidate,
+                },
+              );
+            }
           }
           if (reviewResult.changedIntentIds?.length) {
             deps.refreshIntents();

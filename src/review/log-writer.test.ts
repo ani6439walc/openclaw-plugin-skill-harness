@@ -390,6 +390,33 @@ describe("IntentReviewLogWriter", () => {
     expect(log).not.toHaveProperty("triggerKeywords");
   });
 
+  it("records keyword-triggered nofinding audits outside intent processed events", async () => {
+    const source = {
+      sessionId: "session-1",
+      agentId: "main",
+      turnStart: "2026-06-11T00:00:00.000Z",
+    };
+
+    await expect(
+      writer.recordHistoricalKeywordAudit("keyword-nofinding", source, [], {
+        triggers: ["successful-pattern"],
+        outcome: "nofinding",
+      }),
+    ).resolves.toBe(true);
+
+    const log = JSON.parse(
+      fs.readFileSync(path.join(root, "review.json"), "utf8"),
+    );
+    expect(log.processedEvents).toEqual({});
+    expect(log.historicalKeywordAudits).toMatchObject({
+      "keyword-nofinding": {
+        triggers: ["successful-pattern"],
+        outcome: "nofinding",
+        changeCount: 0,
+      },
+    });
+  });
+
   it("preserves v6 skill-placement epoch idempotency", async () => {
     const candidate = {
       epochKey: "a".repeat(64),
