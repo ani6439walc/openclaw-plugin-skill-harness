@@ -168,4 +168,21 @@ describe("skill-harness manifest", () => {
     });
     expect(instruction.properties).not.toHaveProperty("triggers");
   });
+
+  it("accepts deprecated keyword seeds for strict-schema upgrades", () => {
+    const triggers =
+      manifest.configSchema.properties.review.properties.triggers.properties;
+
+    for (const trigger of [
+      triggers.successfulPattern,
+      triggers.behaviorFix,
+      triggers.entityContext,
+    ]) {
+      expect(trigger.properties.keywords).toMatchObject({
+        type: "array",
+        items: { type: "string" },
+      });
+      expect(trigger.properties.keywords.description).toContain("Deprecated");
+    }
+  });
 });

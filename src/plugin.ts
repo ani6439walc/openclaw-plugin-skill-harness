@@ -152,8 +152,8 @@ export function createPlugin(
         );
       };
 
-      // Best-effort one-time cutover; refresh the live cache after a successful write.
-      void migrateKeywordStateOnce({
+      // Fail-open one-time cutover. Finalization waits for this before it writes runtime review state.
+      const migrationPromise: Promise<void> = migrateKeywordStateOnce({
         reviewPath,
         keywordCoveragePath,
       })
@@ -181,6 +181,7 @@ export function createPlugin(
         keywordCoverageWriter,
         triggerKeywords: () => triggerKeywordCache,
         refreshTriggerKeywords: refreshTriggerKeywordCache,
+        migrationPromise,
         dataRoot,
       };
 

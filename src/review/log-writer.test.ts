@@ -417,6 +417,40 @@ describe("IntentReviewLogWriter", () => {
     });
   });
 
+  it("prunes expired intent and historical keyword audits before v6 writes", async () => {
+    const source = {
+      sessionId: "session-1",
+      agentId: "main",
+      turnStart: "2026-01-01T00:00:00.000Z",
+    };
+    const oldNowMs = Date.parse("2026-01-01T00:00:00.000Z");
+    const currentNowMs = Date.parse("2026-04-02T00:00:00.000Z");
+
+    await writer.record("expired-intent", source, [], {
+      triggers: ["skill-candidate"],
+      outcome: "nofinding",
+      nowMs: oldNowMs,
+    });
+    await writer.recordHistoricalKeywordAudit("expired-keyword", source, [], {
+      triggers: ["successful-pattern"],
+      outcome: "nofinding",
+      nowMs: oldNowMs,
+    });
+    await writer.record("current-intent", source, [], {
+      triggers: ["skill-candidate"],
+      outcome: "nofinding",
+      nowMs: currentNowMs,
+    });
+
+    const log = JSON.parse(
+      fs.readFileSync(path.join(root, "review.json"), "utf8"),
+    );
+    expect(log.processedEvents).toEqual({
+      "current-intent": expect.any(Object),
+    });
+    expect(log.historicalKeywordAudits).toEqual({});
+  });
+
   it("preserves v6 skill-placement epoch idempotency", async () => {
     const candidate = {
       epochKey: "a".repeat(64),

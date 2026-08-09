@@ -402,13 +402,24 @@ export function pruneProcessedEvents(
   log: ReviewLog,
   nowMs: number = Date.now(),
 ): void {
+  pruneEventRecords(log.processedEvents, nowMs);
+}
+
+export function pruneReviewLogV6Events(
+  log: ReviewLogV6,
+  nowMs: number = Date.now(),
+): void {
+  pruneEventRecords(log.processedEvents, nowMs);
+  pruneEventRecords(log.historicalKeywordAudits, nowMs);
+}
+
+function pruneEventRecords(
+  records: Record<string, { processedAt: string }>,
+  nowMs: number,
+): void {
   const cutoff = nowMs - PROCESSED_EVENTS_RETENTION_DAYS * 86_400_000;
-  for (const eventId in log.processedEvents) {
-    const eventTime = new Date(
-      log.processedEvents[eventId].processedAt,
-    ).getTime();
-    if (Number.isNaN(eventTime) || eventTime < cutoff) {
-      delete log.processedEvents[eventId];
-    }
+  for (const eventId in records) {
+    const eventTime = new Date(records[eventId].processedAt).getTime();
+    if (Number.isNaN(eventTime) || eventTime < cutoff) delete records[eventId];
   }
 }

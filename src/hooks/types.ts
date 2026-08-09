@@ -65,6 +65,7 @@ export type HookDeps = {
   >;
   triggerKeywords?: () => ReviewTriggerKeywords;
   refreshTriggerKeywords?: () => void;
+  migrationPromise?: Promise<void>;
   bundledSkillsDir?: string;
   dataRoot?: string;
 };

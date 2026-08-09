@@ -23,6 +23,7 @@ import {
   ReviewLogSchema,
   ReviewLogV6Schema,
   parseReviewLogV6,
+  pruneReviewLogV6Events,
   normalizeNoFindingReasonCounts,
   normalizeSchemaRejectionReasonCounts,
   type AppliedIntentReviewChange,
@@ -321,6 +322,7 @@ export class IntentReviewLogWriter {
         const log = fileExists(logPath)
           ? parseReviewLogV6(readJsonFile<unknown>(logPath))
           : createReviewLogV6(nowIso);
+        pruneReviewLogV6Events(log, options.nowMs ?? Date.now());
         if (Object.hasOwn(log.historicalKeywordAudits, eventId)) return false;
 
         const changes = findings.map(appliedChangeFromFinding);
@@ -393,6 +395,7 @@ export class IntentReviewLogWriter {
         const log = fileExists(logPath)
           ? parseReviewLogV6(readJsonFile<unknown>(logPath))
           : createReviewLogV6(nowIso);
+        pruneReviewLogV6Events(log, options.nowMs ?? Date.now());
         if (Object.hasOwn(log.processedEvents, eventId)) return false;
 
         const changes = findings.map(appliedIntentChangeFromFinding);
