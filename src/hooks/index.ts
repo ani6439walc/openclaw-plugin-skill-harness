@@ -1716,28 +1716,26 @@ export function createHookHandlers(deps: HookDeps) {
               }
             }
 
-            if (intentFindings.length > 0 || params.skillPlacementCandidate) {
-              await reviewLogWriter.record(
-                params.snapshot.eventId,
-                {
-                  sessionId: params.snapshot.sessionId,
-                  sessionKey: params.snapshot.sessionKey,
-                  agentId: params.snapshot.agentId,
-                  turnStart: params.snapshot.current.timestamps!.start!,
-                },
-                intentFindings,
-                {
-                  triggers: params.triggers,
-                  outcome: reviewResult.outcome,
-                  changedIntentIds: reviewResult.changedIntentIds,
-                  validationErrors: reviewResult.validationErrors,
-                  noFindingReasonCounts: reviewResult.noFindingReasonCounts,
-                  schemaRejectionReasonCounts:
-                    reviewResult.schemaRejectionReasonCounts,
-                  skillPlacementCandidate: params.skillPlacementCandidate,
-                },
-              );
-            }
+            await reviewLogWriter.record(
+              params.snapshot.eventId,
+              {
+                sessionId: params.snapshot.sessionId,
+                sessionKey: params.snapshot.sessionKey,
+                agentId: params.snapshot.agentId,
+                turnStart: params.snapshot.current.timestamps!.start!,
+              },
+              intentFindings,
+              {
+                triggers: params.triggers,
+                outcome: reviewResult.outcome,
+                changedIntentIds: reviewResult.changedIntentIds,
+                validationErrors: reviewResult.validationErrors,
+                noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+                schemaRejectionReasonCounts:
+                  reviewResult.schemaRejectionReasonCounts,
+                skillPlacementCandidate: params.skillPlacementCandidate,
+              },
+            );
           }
           if (reviewResult.changedIntentIds?.length) {
             deps.refreshIntents();

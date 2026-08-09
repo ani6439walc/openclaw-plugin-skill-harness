@@ -6,6 +6,7 @@ import { logger, type OpenClawPluginApi } from "../api.js";
 import { createPlugin, initializePluginDataRoot } from "./plugin.js";
 import { IntentCatalog } from "./intents/index.js";
 import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
+import { IntentReviewLogWriter } from "./review/log-writer.js";
 
 describe("createPlugin", () => {
   let stateDir: string;
@@ -204,6 +205,28 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
 
     await vi.waitFor(() => expect(readKeywords).toHaveBeenCalledTimes(3));
+
+    const writer = IntentReviewLogWriter.create(dataRoot);
+    await expect(
+      writer.record(
+        "ordinary-review-after-migration",
+        {
+          sessionId: "session-1",
+          agentId: "main",
+          turnStart: "2026-08-09T00:00:00.000Z",
+        },
+        [],
+        { triggers: ["skill-candidate"], outcome: "nofinding" },
+      ),
+    ).resolves.toBe(true);
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dataRoot, "review.json"), "utf8")),
+    ).toMatchObject({
+      schemaVersion: 6,
+      processedEvents: {
+        "ordinary-review-after-migration": { outcome: "nofinding" },
+      },
+    });
   });
 
   function createPackageRootWithAssets(files: Record<string, string>): string {

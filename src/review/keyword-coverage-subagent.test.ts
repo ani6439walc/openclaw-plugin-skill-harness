@@ -528,6 +528,22 @@ describe("runKeywordCoverageReview", () => {
       expect(result?.decisions).toHaveLength(1);
       expect(result?.decisions[0].outcome).toBe("nofinding");
     });
+
+    it("rejects nofinding with a keyword mutation", async () => {
+      const modelResponse = JSON.stringify({
+        decisions: [
+          {
+            target: "successful-pattern",
+            addition: { phrase: "durable phrase", supportRefs: ["abc123"] },
+            outcome: "nofinding",
+          },
+        ],
+      });
+
+      await expect(
+        runKeywordCoverageReview({ ...baseParams, modelResponse }),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe("two-pass discovery and adjudication", () => {

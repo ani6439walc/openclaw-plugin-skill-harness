@@ -307,6 +307,10 @@ export class IntentReviewLogWriter {
       nowMs?: number;
       triggers?: readonly ReviewTrigger[];
       outcome?: ProcessedEventOutcome;
+      changedIntentIds?: readonly string[];
+      validationErrors?: readonly string[];
+      noFindingReasonCounts?: NoFindingReasonCounts;
+      schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
       skillPlacementCandidate?: SkillPlacementCandidate;
     } = {},
   ): Promise<boolean> {
@@ -358,6 +362,21 @@ export class IntentReviewLogWriter {
           changeCount: changes.length,
           outcome,
           ...(changes.length > 0 ? { changes } : {}),
+          ...(options.changedIntentIds?.length
+            ? { changedIntentIds: [...options.changedIntentIds] }
+            : {}),
+          ...(options.validationErrors?.length
+            ? { validationErrors: [...options.validationErrors] }
+            : {}),
+          ...(options.noFindingReasonCounts
+            ? { noFindingReasonCounts: options.noFindingReasonCounts }
+            : {}),
+          ...(options.schemaRejectionReasonCounts
+            ? {
+                schemaRejectionReasonCounts:
+                  options.schemaRejectionReasonCounts,
+              }
+            : {}),
         };
         log.updatedAt = nowIso;
         return safeWriteJson(

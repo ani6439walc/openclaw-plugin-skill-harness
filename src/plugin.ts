@@ -10,7 +10,7 @@ import { resolveConfig } from "./config.js";
 import { IntentCatalog } from "./intents/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
-import { ReviewLogWriter } from "./review/log-writer.js";
+import { IntentReviewLogWriter } from "./review/log-writer.js";
 import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
 import { migrateKeywordStateOnce } from "./review/keyword-state-migration.js";
 import {
@@ -163,7 +163,7 @@ export function createPlugin(
         .catch((error) => {
           logger.warn("keyword state migration failed", { error });
         });
-      const reviewLogWriter = ReviewLogWriter.create(dataRoot);
+      const reviewLogWriter = IntentReviewLogWriter.create(dataRoot);
 
       const refreshRuntimeIntents = () => {
         catalog.load("intents");

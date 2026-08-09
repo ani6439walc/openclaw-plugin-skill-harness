@@ -262,22 +262,28 @@ function deduplicatePhrases(
   const result: KeywordCoverageDecision[] = [];
 
   for (const decision of decisions) {
-    if (!seen.has(decision.target)) {
-      seen.set(decision.target, new Set());
-    }
-    const targetPhrases = seen.get(decision.target)!;
+    const targetPhrases = seen.get(decision.target) ?? new Set<string>();
+    seen.set(decision.target, targetPhrases);
+    let addition = decision.addition;
+    let removal = decision.removal;
 
-    if (decision.addition) {
-      if (targetPhrases.has(decision.addition.phrase)) continue;
-      targetPhrases.add(decision.addition.phrase);
+    if (addition) {
+      if (targetPhrases.has(addition.phrase)) addition = undefined;
+      else targetPhrases.add(addition.phrase);
+    }
+    if (removal) {
+      if (targetPhrases.has(removal.phrase)) removal = undefined;
+      else targetPhrases.add(removal.phrase);
     }
 
-    if (decision.removal) {
-      if (targetPhrases.has(decision.removal.phrase)) continue;
-      targetPhrases.add(decision.removal.phrase);
+    if (addition || removal || decision.outcome === "nofinding") {
+      result.push({
+        target: decision.target,
+        ...(addition ? { addition } : {}),
+        ...(removal ? { removal } : {}),
+        outcome: decision.outcome,
+      });
     }
-
-    result.push(decision);
   }
 
   return result;
@@ -293,22 +299,32 @@ function enforceQuotas(
   const result: KeywordCoverageDecision[] = [];
 
   for (const decision of decisions) {
-    if (!counts.has(decision.target)) {
-      counts.set(decision.target, { additions: 0, removals: 0 });
-    }
-    const targetCounts = counts.get(decision.target)!;
+    const targetCounts = counts.get(decision.target) ?? {
+      additions: 0,
+      removals: 0,
+    };
+    counts.set(decision.target, targetCounts);
+    let addition = decision.addition;
+    let removal = decision.removal;
 
-    if (decision.addition) {
-      if (targetCounts.additions >= MAX_ADDITIONS_PER_TARGET) continue;
-      targetCounts.additions += 1;
+    if (addition) {
+      if (targetCounts.additions >= MAX_ADDITIONS_PER_TARGET)
+        addition = undefined;
+      else targetCounts.additions += 1;
+    }
+    if (removal) {
+      if (targetCounts.removals >= MAX_REMOVALS_PER_TARGET) removal = undefined;
+      else targetCounts.removals += 1;
     }
 
-    if (decision.removal) {
-      if (targetCounts.removals >= MAX_REMOVALS_PER_TARGET) continue;
-      targetCounts.removals += 1;
+    if (addition || removal || decision.outcome === "nofinding") {
+      result.push({
+        target: decision.target,
+        ...(addition ? { addition } : {}),
+        ...(removal ? { removal } : {}),
+        outcome: decision.outcome,
+      });
     }
-
-    result.push(decision);
   }
 
   return result;
@@ -372,6 +388,15 @@ export function parseKeywordCoverageModelResponse(
         "keyword coverage review failed: finding without addition/removal",
         { target: decision.target },
       );
+      return undefined;
+    }
+    if (
+      decision.outcome === "nofinding" &&
+      (decision.addition || decision.removal)
+    ) {
+      logger.warn("keyword coverage review failed: nofinding with mutation", {
+        target: decision.target,
+      });
       return undefined;
     }
 
