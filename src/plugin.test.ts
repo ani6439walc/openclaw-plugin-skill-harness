@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { logger, type OpenClawPluginApi } from "../api.js";
 import { createPlugin, initializePluginDataRoot } from "./plugin.js";
 import { IntentCatalog } from "./intents/index.js";
+import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
 
 describe("createPlugin", () => {
   let stateDir: string;
@@ -174,6 +175,32 @@ describe("createPlugin", () => {
       "failed to read review trigger keywords",
       expect.anything(),
     );
+  });
+
+  it("refreshes cached keywords after migrating v5 review state", async () => {
+    const api = createApi();
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+    fs.mkdirSync(dataRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(dataRoot, "review.json"),
+      JSON.stringify({
+        schemaVersion: 5,
+        createdAt: "2026-07-01T00:00:00.000Z",
+        updatedAt: "2026-07-01T00:00:00.000Z",
+        processedEvents: {},
+        reviewedSkillEpochs: {},
+        triggerKeywords: {
+          successfulPattern: ["ship it"],
+          behaviorFix: ["wrong"],
+          entityContext: ["look up"],
+        },
+      }),
+    );
+    const readKeywords = vi.spyOn(KeywordCoverageWriter.prototype, "readKeywords");
+
+    createPlugin(api).register(api);
+
+    await vi.waitFor(() => expect(readKeywords).toHaveBeenCalledTimes(3));
   });
 
   function createPackageRootWithAssets(files: Record<string, string>): string {

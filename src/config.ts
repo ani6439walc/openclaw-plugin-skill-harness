@@ -175,7 +175,6 @@ const ReviewSchema = z
           .object({
             enabled: enabledSchema,
             toolCalls: boundedInt(5, 1, 100),
-            keywords: StringListSchema.optional().catch(undefined),
           })
           .catch(DEFAULT_REVIEW.triggers.successfulPattern),
         satisfactionCheck: z
@@ -197,16 +196,10 @@ const ReviewSchema = z
           })
           .catch(DEFAULT_REVIEW.triggers.weakIntent),
         behaviorFix: z
-          .object({
-            enabled: enabledSchema,
-            keywords: StringListSchema.optional().catch(undefined),
-          })
+          .object({ enabled: enabledSchema })
           .catch(DEFAULT_REVIEW.triggers.behaviorFix),
         entityContext: z
-          .object({
-            enabled: enabledSchema,
-            keywords: StringListSchema.optional().catch(undefined),
-          })
+          .object({ enabled: enabledSchema })
           .catch(DEFAULT_REVIEW.triggers.entityContext),
       })
       .catch(DEFAULT_REVIEW.triggers),

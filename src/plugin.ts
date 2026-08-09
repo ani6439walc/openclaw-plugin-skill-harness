@@ -142,14 +142,6 @@ export function createPlugin(
       const reviewPath = reviewLogPath(dataRoot);
       const keywordCoveragePath = keywordCoverageLogPath(dataRoot);
 
-      // Best-effort one-time cutover; fail-open on migration errors.
-      void migrateKeywordStateOnce({
-        reviewPath,
-        keywordCoveragePath,
-      }).catch((error) => {
-        logger.warn("keyword state migration failed", { error });
-      });
-
       const keywordCoverageWriter = KeywordCoverageWriter.create(dataRoot);
       let triggerKeywordCache =
         readKeywordCoverageKeywordsFailOpen(keywordCoverageWriter);
@@ -157,6 +149,18 @@ export function createPlugin(
         triggerKeywordCache =
           readKeywordCoverageKeywordsFailOpen(keywordCoverageWriter);
       };
+
+      // Best-effort one-time cutover; refresh the live cache after a successful write.
+      void migrateKeywordStateOnce({
+        reviewPath,
+        keywordCoveragePath,
+      })
+        .then(() => {
+          refreshTriggerKeywordCache();
+        })
+        .catch((error) => {
+          logger.warn("keyword state migration failed", { error });
+        });
       const reviewLogWriter = ReviewLogWriter.create(dataRoot);
 
       const refreshRuntimeIntents = () => {
