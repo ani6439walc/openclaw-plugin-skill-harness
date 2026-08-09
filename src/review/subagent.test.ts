@@ -2851,11 +2851,74 @@ describe("runReviewSubagent", () => {
     expect(fs.readFileSync(otherPath, "utf-8")).toBe(originalOther);
   });
 
+  it("does not reclassify an ambiguous created-and-deleted lifecycle", async () => {
+    const intentDirectory = createIntentDirectory();
+    const otherPath = path.join(intentDirectory, "other.md");
+    const originalOther = fs.readFileSync(otherPath, "utf-8");
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.rmSync(path.join(options.workspaceDir, "other.md"));
+      fs.copyFileSync(
+        path.join(options.workspaceDir, "social-casual.md"),
+        path.join(options.workspaceDir, "new-casual-chat.md"),
+      );
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "satisfaction-check",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["other", "new-casual-chat"],
+                  dedupeKey: "replace-casual-boundary",
+                  summary: "Replace one casual boundary with another",
+                  evidence: ["Catalog collision needs a boundary change"],
+                  correctionGoal: "Keep the catalog boundary unambiguous",
+                  suggestedChange: "Replace other.md with new-casual-chat.md.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ review: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["satisfaction-check"],
+      }),
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "validation-failed",
+      validationErrors: [
+        "review refine targets must remain intent files: other, new-casual-chat",
+      ],
+    });
+    expect(fs.readFileSync(otherPath, "utf-8")).toBe(originalOther);
+    expect(
+      fs.existsSync(path.join(intentDirectory, "new-casual-chat.md")),
+    ).toBe(false);
+  });
+
   it.each([
     {
-      name: "create findings that modify an existing intent",
+      name: "create findings that modify an existing intent as refine",
       operation: "create",
       targetIntentIds: ["social-casual"],
+      canonicalOperation: "refine",
+      changedIntentIds: ["social-casual"],
       mutate: (workspaceDir: string) => {
         const targetPath = path.join(workspaceDir, "social-casual.md");
         fs.writeFileSync(
@@ -2865,14 +2928,13 @@ describe("runReviewSubagent", () => {
             .replace("- Chat casually.", "- Route tool support away."),
         );
       },
-      validationErrors: [
-        "review create targets must be new intent files: social-casual",
-      ],
     },
     {
-      name: "split findings that create no target intent",
+      name: "split findings with only existing edits as refine",
       operation: "split",
       targetIntentIds: ["social-casual"],
+      canonicalOperation: "refine",
+      changedIntentIds: ["social-casual"],
       mutate: (workspaceDir: string) => {
         const targetPath = path.join(workspaceDir, "social-casual.md");
         fs.writeFileSync(
@@ -2882,15 +2944,13 @@ describe("runReviewSubagent", () => {
             .replace("- Chat casually.", "- Route tool support away."),
         );
       },
-      validationErrors: [
-        "review split must declare at least two target intents",
-        "review split must create at least one target intent",
-      ],
     },
     {
-      name: "merge findings that remove no target intent",
+      name: "merge findings with only existing edits as refine",
       operation: "merge",
       targetIntentIds: ["other", "social-casual"],
+      canonicalOperation: "refine",
+      changedIntentIds: ["other", "social-casual"],
       mutate: (workspaceDir: string) => {
         const socialPath = path.join(workspaceDir, "social-casual.md");
         const otherPath = path.join(workspaceDir, "other.md");
@@ -2907,11 +2967,39 @@ describe("runReviewSubagent", () => {
             .replace("- Ask for context.", "- Ask for specific context."),
         );
       },
-      validationErrors: ["review merge must remove at least one target intent"],
+    },
+    {
+      name: "merge findings that create and modify intents as split",
+      operation: "merge",
+      targetIntentIds: ["social-casual", "new-casual-chat"],
+      canonicalOperation: "split",
+      changedIntentIds: ["new-casual-chat", "social-casual"],
+      mutate: (workspaceDir: string) => {
+        const sourcePath = path.join(workspaceDir, "social-casual.md");
+        fs.copyFileSync(
+          sourcePath,
+          path.join(workspaceDir, "new-casual-chat.md"),
+        );
+        fs.writeFileSync(
+          sourcePath,
+          fs
+            .readFileSync(sourcePath, "utf-8")
+            .replace(
+              "- Chat casually.",
+              "- Keep the remaining casual scope narrow.",
+            ),
+        );
+      },
     },
   ])(
-    "rejects $name",
-    async ({ operation, targetIntentIds, mutate, validationErrors }) => {
+    "reclassifies $name",
+    async ({
+      operation,
+      targetIntentIds,
+      canonicalOperation,
+      changedIntentIds,
+      mutate,
+    }) => {
       const intentDirectory = createIntentDirectory();
       const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
         mutate(options.workspaceDir);
@@ -2953,11 +3041,18 @@ describe("runReviewSubagent", () => {
           snapshot,
           triggers: ["behavior-fix"],
         }),
-      ).resolves.toEqual({
-        findings: [],
-        outcome: "validation-failed",
-        validationErrors,
-      });
+      ).resolves.toEqual(
+        expect.objectContaining({
+          findings: [
+            expect.objectContaining({
+              operation: canonicalOperation,
+              targetIntentIds,
+            }),
+          ],
+          changedIntentIds,
+          outcome: "applied",
+        }),
+      );
     },
   );
 

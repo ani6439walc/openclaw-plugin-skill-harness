@@ -22,6 +22,7 @@ import {
   type NoFindingReasonCode,
   type NoFindingReasonCounts,
   type ProcessedEventOutcome,
+  type ReviewOperation,
   type SchemaRejectionReasonCode,
   type SchemaRejectionReasonCounts,
 } from "./log.js";
@@ -1001,6 +1002,61 @@ function validateIntentOperationChanges(params: {
   return errors;
 }
 
+function inferCanonicalIntentOperation(params: {
+  before: ReadonlyMap<string, string>;
+  after: ReadonlyMap<string, string>;
+  targetIntentIds: readonly string[];
+}): ReviewOperation | undefined {
+  const targetIds = [...new Set(params.targetIntentIds)];
+  const createdIds = targetIds.filter(
+    (id) => !params.before.has(`${id}.md`) && params.after.has(`${id}.md`),
+  );
+  const deletedIds = targetIds.filter(
+    (id) => params.before.has(`${id}.md`) && !params.after.has(`${id}.md`),
+  );
+  const modifiedIds = targetIds.filter((id) => {
+    const file = `${id}.md`;
+    return (
+      params.before.has(file) &&
+      params.after.has(file) &&
+      params.before.get(file) !== params.after.get(file)
+    );
+  });
+
+  if (createdIds.length > 0 && deletedIds.length > 0) return undefined;
+  if (createdIds.length > 0) {
+    return modifiedIds.length > 0 ? "split" : "create";
+  }
+  if (deletedIds.length > 0) {
+    return modifiedIds.length > 0 ? "merge" : undefined;
+  }
+  return modifiedIds.length > 0 ? "refine" : undefined;
+}
+
+function reconcileIntentOperationChanges(params: {
+  before: ReadonlyMap<string, string>;
+  after: ReadonlyMap<string, string>;
+  findings: readonly ReviewFinding[];
+}): ReviewFinding[] {
+  return params.findings.map((finding) => {
+    if (finding.targetKind !== "intent-markdown") return finding;
+    const operation = inferCanonicalIntentOperation({
+      before: params.before,
+      after: params.after,
+      targetIntentIds: finding.targetIntentIds,
+    });
+    if (!operation || operation === finding.operation) return finding;
+
+    logger.warn("review operation reclassified from workspace lifecycle", {
+      dedupeKey: finding.dedupeKey,
+      declaredOperation: finding.operation,
+      canonicalOperation: operation,
+      targetIntentIds: finding.targetIntentIds,
+    });
+    return { ...finding, operation };
+  });
+}
+
 function concurrentIntentConflicts(
   before: Map<string, string>,
   current: Map<string, string>,
@@ -1287,8 +1343,13 @@ export async function runReviewSubagent(params: {
     }
     const afterIntentFiles = snapshotIntentFiles(workspaceDir);
     const changedIds = changedIntentIds(beforeIntentFiles, afterIntentFiles);
+    const findings = reconcileIntentOperationChanges({
+      before: beforeIntentFiles,
+      after: afterIntentFiles,
+      findings: parsed.findings,
+    });
     const intentFindingTargets = new Set(
-      parsed.findings
+      findings
         .filter((finding) => finding.targetKind === "intent-markdown")
         .flatMap((finding) => finding.targetIntentIds),
     );
@@ -1343,7 +1404,7 @@ export async function runReviewSubagent(params: {
     const operationErrors = validateIntentOperationChanges({
       before: beforeIntentFiles,
       after: afterIntentFiles,
-      findings: parsed.findings,
+      findings,
     });
     if (operationErrors.length > 0) {
       return {
@@ -1375,7 +1436,7 @@ export async function runReviewSubagent(params: {
     }
     const skillPlacementErrors = validateSkillPlacementChanges({
       snapshot: params.snapshot,
-      findings: parsed.findings,
+      findings,
       after: afterIntentFiles,
     });
     if (skillPlacementErrors.length > 0) {
@@ -1410,12 +1471,10 @@ export async function runReviewSubagent(params: {
       changedIds,
     });
     return {
-      findings: parsed.findings,
+      findings,
       ...(changedIds.length > 0 ? { changedIntentIds: changedIds } : {}),
       outcome:
-        parsed.findings.length > 0 || changedIds.length > 0
-          ? "applied"
-          : "nofinding",
+        findings.length > 0 || changedIds.length > 0 ? "applied" : "nofinding",
       ...(parsed.noFindingReasonCounts
         ? { noFindingReasonCounts: parsed.noFindingReasonCounts }
         : {}),
