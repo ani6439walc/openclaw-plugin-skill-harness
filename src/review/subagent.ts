@@ -6,7 +6,11 @@ import matter from "gray-matter";
 import { z } from "zod";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
-import type { ReviewFinding, ReviewSnapshot } from "./types.js";
+import type {
+  IntentMarkdownReviewFinding,
+  ReviewFinding,
+  ReviewSnapshot,
+} from "./types.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { formatReviewSnapshot } from "./snapshot-formatter.js";
@@ -920,6 +924,83 @@ function existingIntentValidationTargets(
     .sort((a, b) => a.localeCompare(b));
 }
 
+function validateIntentOperationChanges(params: {
+  before: ReadonlyMap<string, string>;
+  after: ReadonlyMap<string, string>;
+  findings: readonly ReviewFinding[];
+}): string[] {
+  const findings = params.findings.filter(
+    (finding): finding is IntentMarkdownReviewFinding =>
+      finding.targetKind === "intent-markdown",
+  );
+  const errors: string[] = [];
+
+  for (const finding of findings) {
+    const targetIds = [...new Set(finding.targetIntentIds)];
+    const existsBefore = (id: string): boolean => params.before.has(`${id}.md`);
+    const existsAfter = (id: string): boolean => params.after.has(`${id}.md`);
+    const createdIds = targetIds.filter(
+      (id) => !existsBefore(id) && existsAfter(id),
+    );
+    const deletedIds = targetIds.filter(
+      (id) => existsBefore(id) && !existsAfter(id),
+    );
+
+    switch (finding.operation) {
+      case "refine": {
+        const missingTargets = targetIds.filter(
+          (id) => !existsBefore(id) || !existsAfter(id),
+        );
+        if (missingTargets.length > 0) {
+          errors.push(
+            `review refine targets must remain intent files: ${missingTargets.join(", ")}`,
+          );
+        }
+        break;
+      }
+      case "create": {
+        const nonCreatedTargets = targetIds.filter(
+          (id) => existsBefore(id) || !existsAfter(id),
+        );
+        if (nonCreatedTargets.length > 0) {
+          errors.push(
+            `review create targets must be new intent files: ${nonCreatedTargets.join(", ")}`,
+          );
+        }
+        break;
+      }
+      case "split":
+        if (targetIds.length < 2) {
+          errors.push("review split must declare at least two target intents");
+        }
+        if (createdIds.length === 0) {
+          errors.push("review split must create at least one target intent");
+        }
+        if (!targetIds.some(existsBefore)) {
+          errors.push(
+            "review split must include at least one existing source intent",
+          );
+        }
+        break;
+      case "merge":
+        if (targetIds.length < 2) {
+          errors.push("review merge must declare at least two target intents");
+        }
+        if (deletedIds.length === 0) {
+          errors.push("review merge must remove at least one target intent");
+        }
+        if (!targetIds.some(existsAfter)) {
+          errors.push(
+            "review merge must retain or create at least one target intent",
+          );
+        }
+        break;
+    }
+  }
+
+  return errors;
+}
+
 function concurrentIntentConflicts(
   before: Map<string, string>,
   current: Map<string, string>,
@@ -1258,6 +1339,18 @@ export async function runReviewSubagent(params: {
         ],
       };
       return failure;
+    }
+    const operationErrors = validateIntentOperationChanges({
+      before: beforeIntentFiles,
+      after: afterIntentFiles,
+      findings: parsed.findings,
+    });
+    if (operationErrors.length > 0) {
+      return {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: operationErrors,
+      };
     }
     if (changedIds.length > 0) {
       const validation = validateIntentDirectory(

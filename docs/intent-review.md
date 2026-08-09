@@ -18,7 +18,7 @@ When enabled, Review can investigate completed turns with signals such as:
 
 A trigger starts an investigation; it is not evidence by itself. The reviewer evaluates trigger-specific evidence, durability, scope, and existing intent coverage. It prefers the smallest valid change or a recorded no-finding result.
 
-Validated changes may create, refine, split, or merge runtime `intents/*.md`. Before applying a targeted change, the reviewer validates the staged catalog. It records the outcome in `review.json`.
+Validated changes may create, refine, split, or merge runtime `intents/*.md`; autonomous standalone deletion is not an operation. Before applying a targeted change, the host validates the staged catalog and operation/file lifecycle together: refine targets remain existing files, create targets are new files, split creates at least one target from an existing source, and merge removes at least one target while retaining or creating another. It records the outcome in `review.json`.
 
 `skill-placement` is narrower than the general workflow. The host selects at most one candidate from the persisted tracked agent's current resolved inventory, reserves its epoch before any asynchronous snapshot work, and supplies the complete intent catalog including each intent's `skills[]`. The reviewer may only refine one existing intent so that its valid YAML frontmatter references the selected skill. Multiple positive placement findings, multiple targets, intent creation, and skill mutation are rejected by the host.
 
@@ -36,6 +36,6 @@ Every requested trigger requires a valid positive or no-finding decision. Omitte
 
 ## Placement completion and retry
 
-Only `applied` and `nofinding` complete a skill inventory epoch. The processed event and completed epoch are written atomically to schema-v5 `review.json`. Reviewer errors, parse or schema rejection, validation failure, queue failure, and review-log write failure clear the in-memory reservation without completing the epoch, so a later accepted turn can retry. An unreadable or incompatible review log disables placement selection while preserving ordinary Review triggers.
+Only `applied` and `nofinding` complete a skill inventory epoch. The intent-only processed event and completed epoch are written atomically to schema-v6 `review.json`; keyword-triggered audits are retained separately in `historicalKeywordAudits`. Reviewer errors, parse or schema rejection, validation failure, queue failure, and review-log write failure clear the in-memory reservation without completing the epoch, so a later accepted turn can retry. An unreadable or incompatible review log disables placement selection while preserving ordinary Review triggers.
 
-Schema v5 is current-only: v1-v4 logs, legacy string events, legacy outcomes, aliases, and unknown fields are rejected rather than migrated. Delete or archive an incompatible runtime `review.json` before enabling this version.
+Schema v6 is current-only: schema-v5 and older logs, legacy string events, legacy outcomes, aliases, and unknown fields are rejected rather than migrated. Delete or archive an incompatible runtime `review.json` before enabling this version.

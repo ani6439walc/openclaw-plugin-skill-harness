@@ -4,13 +4,14 @@
 
 Skill Harness keeps package files and runtime state separate. The paths below use the default local state directory.
 
-| Path                                                   | Purpose                                                                                                |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `~/.openclaw/plugins/skill-harness/intents/`           | Editable runtime intent catalog.                                                                       |
-| `~/.openclaw/plugins/skill-harness/sessions/`          | Per-session JSON snapshots for audit and review context.                                               |
-| `~/.openclaw/plugins/skill-harness/agents/*/sessions/` | Embedded-agent session transcripts.                                                                    |
-| `~/.openclaw/plugins/skill-harness/stats.json`         | Schema-v3 intent, skill, tool, routing, projection, inventory-observation, and daily usage statistics. |
-| `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v5 Intent Review trigger keywords, processed outcomes, and completed skill-placement epochs.    |
+| Path                                                      | Purpose                                                                                         |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `~/.openclaw/plugins/skill-harness/intents/`              | Editable runtime intent catalog.                                                                |
+| `~/.openclaw/plugins/skill-harness/sessions/`             | Per-session JSON snapshots for audit and review context.                                        |
+| `~/.openclaw/plugins/skill-harness/agents/*/sessions/`    | Embedded-agent session transcripts.                                                             |
+| `~/.openclaw/plugins/skill-harness/stats.json`            | Schema-v4 intent, skill, tool, routing, projection, inventory-observation, and daily telemetry. |
+| `~/.openclaw/plugins/skill-harness/review.json`           | Schema-v6 current-only Intent Review outcomes and completed skill-placement epochs.             |
+| `~/.openclaw/plugins/skill-harness/keyword-coverage.json` | Schema-v1 trigger-keyword coverage state and epochs.                                            |
 
 Session cleanup preserves the ended main session and removes only expired `sessions/*.json` and embedded-agent session artifacts: `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json`. It does not delete root-level statistics, review data, intents, skills, transcripts outside the embedded-agent session directories, or package files.
 
@@ -24,27 +25,38 @@ The README reports one deployment's observed routed turns, confidence, recommend
 - Rendered catalog size is measured in Unicode code points, not provider-billed tokens.
 - Provider tokenization and context injected by OpenClaw or other plugins are outside Skill Harness's measurement scope.
 - A projection can be eligible even when classifier execution or parsing later fails; those attempts do not increment successful intent-turn summaries.
+- `review.json` is the sole owner of ordinary Review outcomes and mutations. `stats.json` never synthesizes or mirrors those outcomes.
 
-## Schema v3 statistics
+## Schema v4 statistics
 
-`stats.json` schema v3 retains the bounded classifier-projection aggregates introduced in v2:
+`stats.json` schema v4 retains the schema-v3 aggregate usage, routing, projection, and agent-scoped inventory observations, and adds attribution that can only be measured from newly accepted turns:
 
-- eligible, projected, and full-fallback counts and rates
-- average original and candidate intent counts
-- average rendered catalog code points and projection duration
-- selection-reason counts and daily projection counters
+- root `attribution.startedAt` records the exact UTC instant at which v4 attribution began;
+- `daily.intentOutcomes` records completed/errored, skill-assisted, and tool-assisted turns per resolved intent;
+- `daily.intentRouting` records injected recommendation and adoption counts per resolved intent;
+- `daily.skillRouting` records same-turn recommendation and adoption counts per injected skill;
+- `daily.toolErrors` records error calls per tool;
+- every top-level `tools[toolName].latencyHistogram` uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Missing, invalid, or negative durations count as `unknown`; they are never represented as zero milliseconds.
+
+The four v4 daily attribution maps are bounded to 64 keys per UTC date. Named keys use the deterministic `value:<trimmed-name>` encoding, reserving the host-owned `__other__` entry before the cap; later distinct keys aggregate into that entry. This limits unbounded per-day cardinality without changing all-time aggregate identity. Existing v3 daily `intents`, `skills`, and `tools` maps retain their previous behavior and are not retroactively compacted.
+
+### Migration and attribution boundary
+
+Valid v1, v2, and v3 files migrate atomically on the next recorded turn. Existing aggregate, routing, projection, inventory, daily, and processed-event data are preserved. The migration adds empty v4 daily attribution maps and zeroed tool histograms, then records only the triggering and later turns into the new fields. It does **not** backfill historical intent routing, skill routing, tool errors, or latency data.
+
+Consequently, a report over any window beginning before `attribution.startedAt` has insufficient historical attribution. The start date itself can contain pre-v4 turns before the exact start instant, so compare only post-boundary observations. Invalid files remain untouched and fail open.
 
 It also records agent-scoped resolved skill inventory observations on accepted stats events:
 
-- each agent has an independent observation-turn counter and visible-skill map
-- each visible skill records source, hashed precedence-winner identity, raw-content SHA-256, first/last observation time and turn, observed turns, same-turn usage, and same-turn recommendation counts
-- a source, winner, content, or visibility-continuity change starts a new observation epoch for that skill
-- missing skills retain their last epoch as historical state but do not gain observation turns
-- inventory resolution uses the invoking tracked agent's current roots, source precedence, and disabled bundled-skill policy; unresolved policy or inventory errors skip only the observation update
-- fingerprints are internal statistics fields and are not exposed through skill tool results
+- each agent has an independent observation-turn counter and visible-skill map;
+- each visible skill records source, hashed precedence-winner identity, raw-content SHA-256, first/last observation time and turn, observed turns, same-turn usage, and same-turn recommendation counts;
+- a source, winner, content, or visibility-continuity change starts a new observation epoch for that skill;
+- missing skills retain their last epoch as historical state but do not gain observation turns;
+- inventory resolution uses the invoking tracked agent's current roots, source precedence, and disabled bundled-skill policy; unresolved policy or inventory errors skip only the observation update;
+- fingerprints are internal statistics fields and are not exposed through skill tool results.
 
 These observations feed the optional `skill-placement` Review trigger after an accepted stats event. Selection uses only the persisted tracked agent's currently visible resolved inventory. Existing top-level `needsReview` skill aggregates have priority; otherwise a continuous epoch becomes eligible after 20 observed turns only when recommendation and usage counts are both zero. At most one candidate is selected per turn, and completed or in-memory pending epoch keys are excluded. The selector does not modify skill files and does not synthesize historical zero observations.
 
-Valid stats v1 and v2 files migrate on the next recorded turn by adding an empty observation section; existing intent, skill, tool, routing, projection, daily, and processed-event data are preserved. Invalid files remain untouched and fail open. Skill recommendation and usage names are canonicalized with trimmed lowercase identity for aggregate joins, while inventory observations retain the resolved display name. When valid existing stats contain mixed-case keys for the same skill, the load boundary merges their raw counters and daily counts into one canonical key before recomputing derived fields.
+Skill recommendation and usage names are canonicalized with trimmed lowercase identity for aggregate joins, while inventory observations retain the resolved display name. When valid existing stats contain mixed-case keys for the same skill, the load boundary merges their raw counters and daily counts into one canonical key before recomputing derived fields.
 
 Complexity buckets count only turns with known complexity, so `low + medium + high` can be lower than an intent's total turns. Skill-usage readers continue to read the existing top-level skill aggregates independently of inventory observations.

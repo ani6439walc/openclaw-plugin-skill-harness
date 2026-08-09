@@ -168,12 +168,13 @@ Keep each intent narrow and concrete:
 
 ### Human maintenance skill
 
-The bundled `skill-harness` skill is the explicit human-maintenance surface for runtime intents and Review keyword evidence. It has four modes:
+The bundled `skill-harness` skill is the explicit human-maintenance surface for runtime intents, Review keyword evidence, and privacy-safe runtime health analysis. It has five modes:
 
 - `inventory` — audit the complete resolved skill/tool/intent catalog, cluster capabilities by user goal, and identify coverage gaps after a calibration checkpoint;
 - `design` — create, refine, rename, split, or merge one intent through a staged preview and confirmation workflow;
 - `extract` — score intent complexity, identify independent responsibilities, and draft skill blueprints plus a slimmed intent after approval;
 - `keyword-audit` — generate a private, report-only cross-session analysis of Review keyword matches, misses, and collisions, then propose a bounded delta without writing runtime state.
+- `runtime-health` — generate a private, report-only aggregate snapshot of Review outcomes, coverage state, v3/v4 stats, session retention, and agent-artifact growth without exposing retained text or modifying runtime state.
 
 This skill does not manually repeat production-owned work: per-turn classification and hint generation, startup seeding, trigger-driven intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, or session cleanup. Broad routing changes and skill extraction remain human-owned because they require semantic calibration and explicit write approval.
 
@@ -208,7 +209,7 @@ Enable it with:
 }
 ```
 
-Review investigates a trigger; it does not treat the trigger as proof. Validated findings can create, refine, split, or merge runtime intents. The reviewer never writes source files, bundled skills, OpenClaw config, memory files, or arbitrary paths.
+Review investigates a trigger; it does not treat the trigger as proof. Validated findings can create, refine, split, or merge runtime intents; autonomous standalone deletion is not supported. The host checks that each declared operation matches the staged intent file lifecycle before applying it. The reviewer never writes source files, bundled skills, OpenClaw config, memory files, or arbitrary paths.
 
 The `successful-pattern`, `behavior-fix`, and `entity-context` triggers may also return a JSON-only trigger-keyword finding. Each finding is limited to its own requested trigger and at most three additions and three removals. The host validates and deduplicates the delta, records it under the independently locked `keyword-coverage.json`, writes atomically, and refreshes the live keyword cache; the reviewer never edits runtime state itself.
 

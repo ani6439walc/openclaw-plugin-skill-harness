@@ -261,7 +261,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(3);
+    expect(stats.schemaVersion).toBe(4);
     expect(stats.skillInventory.startedAt).toBe("2026-06-11T00:01:00.000Z");
     expect(stats.skillInventory.agents["agent-a"]).toMatchObject({
       observedTurns: 1,
@@ -946,6 +946,10 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
+    expect(stats.schemaVersion).toBe(4);
+    expect(stats.attribution).toEqual({
+      startedAt: "2026-06-11T00:01:00.000Z",
+    });
     expect(stats.summary).toMatchObject({
       turns: 1,
       completedTurns: 0,
@@ -1008,6 +1012,14 @@ describe("StatsAggregator", () => {
       errorCalls: 1,
       averageDurationMs: 200,
       last7DaysCalls: 2,
+      latencyHistogram: {
+        unknown: 0,
+        "0-99": 0,
+        "100-499": 2,
+        "500-999": 0,
+        "1000-4999": 0,
+        "5000+": 0,
+      },
     });
     expect(stats.tools.exec).not.toHaveProperty("durationTotalMs");
     expect(stats.tools.exec).not.toHaveProperty("durationSamples");
@@ -1023,6 +1035,28 @@ describe("StatsAggregator", () => {
         recommendedSkillOpportunities: 2,
         adoptedSkillOpportunities: 1,
       },
+      intentOutcomes: {
+        "value:version-control": {
+          turns: 1,
+          completedTurns: 0,
+          erroredTurns: 1,
+          skillAssistedTurns: 1,
+          toolAssistedTurns: 1,
+        },
+      },
+      intentRouting: {
+        "value:version-control": {
+          recommendationTurns: 1,
+          adoptedTurns: 1,
+          recommendedSkillOpportunities: 2,
+          adoptedSkillOpportunities: 1,
+        },
+      },
+      skillRouting: {
+        "value:git-master": { recommendedTurns: 1, adoptedTurns: 1 },
+        "value:dev-lifecycle": { recommendedTurns: 1, adoptedTurns: 0 },
+      },
+      toolErrors: { "value:exec": 1 },
     });
   });
 
@@ -1102,7 +1136,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(3);
+    expect(stats.schemaVersion).toBe(4);
     expect(stats.projection).toMatchObject({
       eligibleTurns: 2,
       projectedTurns: 1,
@@ -1242,7 +1276,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.createdAt).toBe(legacy.createdAt);
     expect(migrated.summary.turns).toBe(2);
     expect(migrated.intents["version-control"].turns).toBe(2);
@@ -1277,7 +1311,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.createdAt).toBe(legacy.createdAt);
     expect(migrated.summary.turns).toBe(2);
     expect(migrated.intents["version-control"].turns).toBe(2);
@@ -1286,6 +1320,163 @@ describe("StatsAggregator", () => {
       startedAt: "2026-06-11T00:03:00.000Z",
       agents: {},
     });
+  });
+
+  it("migrates v3 without synthesizing historical daily attribution", () => {
+    const statsPath = path.join(tempDir, "stats.json");
+    expect(
+      aggregator.record(
+        "v3-session",
+        createState({
+          timestamps: {
+            start: "2026-06-10T00:00:00.000Z",
+            end: "2026-06-10T00:01:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(true);
+    const legacy = readStats();
+    legacy.schemaVersion = 3;
+    delete legacy.attribution;
+    for (const tool of Object.values(legacy.tools)) {
+      delete tool.latencyHistogram;
+    }
+    for (const bucket of Object.values(legacy.daily)) {
+      delete bucket.intentOutcomes;
+      delete bucket.intentRouting;
+      delete bucket.skillRouting;
+      delete bucket.toolErrors;
+    }
+    fs.writeFileSync(statsPath, JSON.stringify(legacy));
+
+    expect(
+      aggregator.record(
+        "v4-session",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:00:00.000Z",
+            end: "2026-06-11T00:01:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(true);
+
+    const migrated = readStats();
+    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.attribution).toEqual({
+      startedAt: "2026-06-11T00:01:00.000Z",
+    });
+    expect(migrated.daily["2026-06-10"]).toMatchObject({
+      intentOutcomes: {},
+      intentRouting: {},
+      skillRouting: {},
+      toolErrors: {},
+    });
+    expect(migrated.daily["2026-06-11"].intentOutcomes).toEqual({
+      "value:version-control": {
+        turns: 1,
+        completedTurns: 1,
+        erroredTurns: 0,
+        skillAssistedTurns: 1,
+        toolAssistedTurns: 1,
+      },
+    });
+    expect(migrated.tools.exec.latencyHistogram).toMatchObject({
+      unknown: 0,
+      "100-499": 2,
+    });
+  });
+
+  it("bounds each v4 daily attribution map with a host-owned other key", () => {
+    const startMs = Date.parse("2026-06-11T00:00:00.000Z");
+    for (let index = 0; index < 65; index += 1) {
+      const start = new Date(startMs + index * 1000).toISOString();
+      const end = new Date(startMs + index * 1000 + 500).toISOString();
+      expect(
+        aggregator.record(
+          `cardinality-${index}`,
+          createState({
+            intent: {
+              result: {
+                intent: `intent-${index}`,
+                reason: "test",
+                confidence: 0.9,
+                complexity: "low",
+              },
+              recommendedSkills: [`skill-${index}`],
+            },
+            skillsUsed: [],
+            toolCalls: [
+              {
+                name: `tool-${index}`,
+                params: {},
+                error: "failed",
+                durationMs: 100,
+              },
+            ],
+            timestamps: { start, end },
+          }),
+          undefined,
+        ),
+      ).toBe(true);
+    }
+
+    const daily = readStats().daily["2026-06-11"];
+    for (const map of [
+      daily.intentOutcomes,
+      daily.intentRouting,
+      daily.skillRouting,
+      daily.toolErrors,
+    ]) {
+      expect(Object.keys(map)).toHaveLength(64);
+    }
+    expect(daily.intentOutcomes.__other__.turns).toBe(2);
+    expect(daily.intentRouting.__other__.recommendationTurns).toBe(2);
+    expect(daily.skillRouting.__other__.recommendedTurns).toBe(2);
+    expect(daily.toolErrors.__other__).toBe(2);
+  });
+
+  it("keeps a raw other name distinct from host-owned daily overflow", () => {
+    expect(
+      aggregator.record(
+        "reserved-other",
+        createState({
+          intent: {
+            result: {
+              intent: "__other__",
+              reason: "test",
+              domain: "test",
+              confidence: 0.9,
+              complexity: "low",
+            },
+            recommendedSkills: ["__other__"],
+          },
+          skillsUsed: [
+            { name: "__other__", path: "/skills/__other__/SKILL.md" },
+          ],
+          toolCalls: [
+            {
+              name: "__other__",
+              params: {},
+              error: "failed",
+              durationMs: 100,
+            },
+          ],
+        }),
+      ),
+    ).toBe(true);
+
+    const daily = readStats().daily["2026-06-11"];
+    expect(daily.intentOutcomes["value:__other__"].turns).toBe(1);
+    expect(daily.intentRouting["value:__other__"].recommendationTurns).toBe(1);
+    expect(daily.skillRouting["value:__other__"].recommendedTurns).toBe(1);
+    expect(daily.toolErrors["value:__other__"]).toBe(1);
+    expect(daily.intentOutcomes.__other__).toBeUndefined();
+    expect(daily.intentRouting.__other__).toBeUndefined();
+    expect(daily.skillRouting.__other__).toBeUndefined();
+    expect(daily.toolErrors.__other__).toBeUndefined();
   });
 
   it.each([

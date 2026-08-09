@@ -2797,6 +2797,258 @@ describe("runReviewSubagent", () => {
     );
   });
 
+  it("rejects refine findings that delete their declared runtime intent", async () => {
+    const intentDirectory = createIntentDirectory();
+    const otherPath = path.join(intentDirectory, "other.md");
+    const originalOther = fs.readFileSync(otherPath, "utf-8");
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.rmSync(path.join(options.workspaceDir, "other.md"));
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "behavior-fix",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["other"],
+                  dedupeKey: "remove-other-as-refinement",
+                  summary: "Remove obsolete fallback intent",
+                  evidence: ["Fallback intent appears redundant"],
+                  correctionGoal: "Keep the fallback boundary current",
+                  suggestedChange: "Deleted other.md.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ review: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      }),
+    ).resolves.toEqual({
+      findings: [],
+      outcome: "validation-failed",
+      validationErrors: [
+        "review refine targets must remain intent files: other",
+      ],
+    });
+    expect(fs.readFileSync(otherPath, "utf-8")).toBe(originalOther);
+  });
+
+  it.each([
+    {
+      name: "create findings that modify an existing intent",
+      operation: "create",
+      targetIntentIds: ["social-casual"],
+      mutate: (workspaceDir: string) => {
+        const targetPath = path.join(workspaceDir, "social-casual.md");
+        fs.writeFileSync(
+          targetPath,
+          fs
+            .readFileSync(targetPath, "utf-8")
+            .replace("- Chat casually.", "- Route tool support away."),
+        );
+      },
+      validationErrors: [
+        "review create targets must be new intent files: social-casual",
+      ],
+    },
+    {
+      name: "split findings that create no target intent",
+      operation: "split",
+      targetIntentIds: ["social-casual"],
+      mutate: (workspaceDir: string) => {
+        const targetPath = path.join(workspaceDir, "social-casual.md");
+        fs.writeFileSync(
+          targetPath,
+          fs
+            .readFileSync(targetPath, "utf-8")
+            .replace("- Chat casually.", "- Route tool support away."),
+        );
+      },
+      validationErrors: [
+        "review split must declare at least two target intents",
+        "review split must create at least one target intent",
+      ],
+    },
+    {
+      name: "merge findings that remove no target intent",
+      operation: "merge",
+      targetIntentIds: ["other", "social-casual"],
+      mutate: (workspaceDir: string) => {
+        const socialPath = path.join(workspaceDir, "social-casual.md");
+        const otherPath = path.join(workspaceDir, "other.md");
+        fs.writeFileSync(
+          socialPath,
+          fs
+            .readFileSync(socialPath, "utf-8")
+            .replace("- Chat casually.", "- Route tool support away."),
+        );
+        fs.writeFileSync(
+          otherPath,
+          fs
+            .readFileSync(otherPath, "utf-8")
+            .replace("- Ask for context.", "- Ask for specific context."),
+        );
+      },
+      validationErrors: ["review merge must remove at least one target intent"],
+    },
+  ])(
+    "rejects $name",
+    async ({ operation, targetIntentIds, mutate, validationErrors }) => {
+      const intentDirectory = createIntentDirectory();
+      const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+        mutate(options.workspaceDir);
+        return {
+          payloads: [
+            {
+              text: JSON.stringify({
+                findings: [
+                  {
+                    trigger: "behavior-fix",
+                    hasFinding: true,
+                    targetKind: "intent-markdown",
+                    operation,
+                    targetIntentIds,
+                    dedupeKey: `invalid-${operation}-lifecycle`,
+                    summary: "Intent lifecycle change",
+                    evidence: ["Concrete intent boundary evidence"],
+                    correctionGoal: "Keep intent boundaries valid",
+                    suggestedChange: "Update runtime intent files.",
+                  },
+                ],
+              }),
+            },
+          ],
+        };
+      });
+      const api = {
+        config: {},
+        runtime: { agent: { runEmbeddedAgent } },
+      } as unknown as OpenClawPluginApi;
+
+      await expect(
+        runReviewSubagent({
+          api,
+          config: resolveConfig({ review: { enabled: true } }),
+          agentId: "main",
+          intentDirectory,
+          modelRef: { provider: "google", model: "review" },
+          snapshot,
+          triggers: ["behavior-fix"],
+        }),
+      ).resolves.toEqual({
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors,
+      });
+    },
+  );
+
+  it.each([
+    {
+      name: "create",
+      operation: "create",
+      targetIntentIds: ["new-casual-chat"],
+      changedIntentIds: ["new-casual-chat"],
+      mutate: (workspaceDir: string) => {
+        fs.copyFileSync(
+          path.join(workspaceDir, "social-casual.md"),
+          path.join(workspaceDir, "new-casual-chat.md"),
+        );
+      },
+    },
+    {
+      name: "split",
+      operation: "split",
+      targetIntentIds: ["social-casual", "new-casual-chat"],
+      changedIntentIds: ["new-casual-chat", "social-casual"],
+      mutate: (workspaceDir: string) => {
+        const sourcePath = path.join(workspaceDir, "social-casual.md");
+        fs.copyFileSync(
+          sourcePath,
+          path.join(workspaceDir, "new-casual-chat.md"),
+        );
+        fs.writeFileSync(
+          sourcePath,
+          fs
+            .readFileSync(sourcePath, "utf-8")
+            .replace(
+              "- Chat casually.",
+              "- Keep the remaining casual scope narrow.",
+            ),
+        );
+      },
+    },
+  ])(
+    "allows valid $name file lifecycle",
+    async ({ operation, targetIntentIds, changedIntentIds, mutate }) => {
+      const intentDirectory = createIntentDirectory();
+      const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+        mutate(options.workspaceDir);
+        return {
+          payloads: [
+            {
+              text: JSON.stringify({
+                findings: [
+                  {
+                    trigger: "missing-intent",
+                    hasFinding: true,
+                    targetKind: "intent-markdown",
+                    operation,
+                    targetIntentIds,
+                    dedupeKey: `${operation}-casual-boundary`,
+                    summary: "Clarify the casual intent boundary",
+                    evidence: ["Concrete durable boundary evidence"],
+                    correctionGoal: "Keep runtime intent boundaries clear",
+                    suggestedChange: "Update runtime intent files.",
+                  },
+                ],
+              }),
+            },
+          ],
+        };
+      });
+      const api = {
+        config: {},
+        runtime: { agent: { runEmbeddedAgent } },
+      } as unknown as OpenClawPluginApi;
+
+      await expect(
+        runReviewSubagent({
+          api,
+          config: resolveConfig({ review: { enabled: true } }),
+          agentId: "main",
+          intentDirectory,
+          modelRef: { provider: "google", model: "review" },
+          snapshot,
+          triggers: ["missing-intent"],
+        }),
+      ).resolves.toEqual(
+        expect.objectContaining({
+          changedIntentIds,
+          outcome: "applied",
+        }),
+      );
+    },
+  );
+
   it("does not require valid runtime intent Markdown for trigger-keyword-only findings", async () => {
     const intentDirectory = createIntentDirectory();
     fs.writeFileSync(

@@ -23,6 +23,18 @@ const SKILL_PLACEMENT_MIN_OBSERVED_TURNS = 20;
 const MAX_PROJECTION_REASON_KEYS = 32;
 const MAX_PROJECTION_REASON_CODE_POINTS = 80;
 const OTHER_PROJECTION_REASON = "other";
+const MAX_DAILY_ATTRIBUTION_KEYS = 64;
+const MAX_DAILY_ATTRIBUTION_KEY_CODE_POINTS = 128;
+const OTHER_DAILY_ATTRIBUTION_KEY = "__other__";
+const DAILY_ATTRIBUTION_VALUE_PREFIX = "value:";
+const LATENCY_BUCKETS = [
+  "unknown",
+  "0-99",
+  "100-499",
+  "500-999",
+  "1000-4999",
+  "5000+",
+] as const;
 const statsAggregatorCache = new Map<string, StatsAggregator>();
 
 type CountMap = Record<string, number>;
@@ -38,6 +50,23 @@ type RoutingCounts = {
   adoptedSkillOpportunities: number;
   skillAdoptionRate: number;
 };
+type DailyRoutingCounts = Omit<
+  RoutingCounts,
+  "turnAdoptionRate" | "skillAdoptionRate"
+>;
+type DailyIntentOutcomes = {
+  turns: number;
+  completedTurns: number;
+  erroredTurns: number;
+  skillAssistedTurns: number;
+  toolAssistedTurns: number;
+};
+type DailySkillRouting = {
+  recommendedTurns: number;
+  adoptedTurns: number;
+};
+type LatencyBucket = (typeof LATENCY_BUCKETS)[number];
+type LatencyHistogram = Record<LatencyBucket, number>;
 
 type DailyProjectionCounts = {
   eligibleTurns: number;
@@ -52,11 +81,18 @@ type DailyBucketV1 = {
   intents: CountMap;
   skills: CountMap;
   tools: CountMap;
-  routing: Omit<RoutingCounts, "turnAdoptionRate" | "skillAdoptionRate">;
+  routing: DailyRoutingCounts;
 };
 
-type DailyBucket = DailyBucketV1 & {
+type DailyBucketV3 = DailyBucketV1 & {
   projection: DailyProjectionCounts;
+};
+
+type DailyBucket = DailyBucketV3 & {
+  intentOutcomes: Record<string, DailyIntentOutcomes>;
+  intentRouting: Record<string, DailyRoutingCounts>;
+  skillRouting: Record<string, DailySkillRouting>;
+  toolErrors: CountMap;
 };
 
 type ProjectionStats = DailyProjectionCounts & {
@@ -110,9 +146,10 @@ export interface SkillPlacementCandidate {
 }
 
 type Stats = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   createdAt: string;
   updatedAt: string;
+  attribution: { startedAt: string };
   summary: {
     turns: number;
     completedTurns: number;
@@ -161,6 +198,7 @@ type Stats = {
       turns: number;
       errorCalls: number;
       averageDurationMs: number;
+      latencyHistogram: LatencyHistogram;
       lastUsedAt: string;
       last7DaysCalls: number;
     }
@@ -171,7 +209,18 @@ type Stats = {
   processedEvents: Record<string, string>;
 };
 
-type StatsV2 = Omit<Stats, "schemaVersion" | "skillInventory"> & {
+type ToolStatsV3 = Omit<Stats["tools"][string], "latencyHistogram">;
+
+type StatsV3 = Omit<
+  Stats,
+  "schemaVersion" | "attribution" | "daily" | "tools"
+> & {
+  schemaVersion: 3;
+  tools: Record<string, ToolStatsV3>;
+  daily: Record<string, DailyBucketV3>;
+};
+
+type StatsV2 = Omit<StatsV3, "schemaVersion" | "skillInventory"> & {
   schemaVersion: 2;
 };
 
@@ -200,6 +249,31 @@ function emptyDailyProjectionCounts(): DailyProjectionCounts {
   };
 }
 
+function emptyDailyIntentOutcomes(): DailyIntentOutcomes {
+  return {
+    turns: 0,
+    completedTurns: 0,
+    erroredTurns: 0,
+    skillAssistedTurns: 0,
+    toolAssistedTurns: 0,
+  };
+}
+
+function emptyDailySkillRouting(): DailySkillRouting {
+  return { recommendedTurns: 0, adoptedTurns: 0 };
+}
+
+function emptyLatencyHistogram(): LatencyHistogram {
+  return {
+    unknown: 0,
+    "0-99": 0,
+    "100-499": 0,
+    "500-999": 0,
+    "1000-4999": 0,
+    "5000+": 0,
+  };
+}
+
 function emptyProjectionStats(): ProjectionStats {
   return {
     ...emptyDailyProjectionCounts(),
@@ -218,9 +292,10 @@ function emptyProjectionStats(): ProjectionStats {
 
 function createStats(nowIso: string): Stats {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     createdAt: nowIso,
     updatedAt: nowIso,
+    attribution: { startedAt: nowIso },
     summary: {
       turns: 0,
       completedTurns: 0,
@@ -274,6 +349,10 @@ function createDailyBucket(): DailyBucket {
       adoptedSkillOpportunities: 0,
     },
     projection: emptyDailyProjectionCounts(),
+    intentOutcomes: {},
+    intentRouting: {},
+    skillRouting: {},
+    toolErrors: {},
   };
 }
 
@@ -413,6 +492,15 @@ function isNonNegativeInteger(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) >= 0;
 }
 
+function hasNonNegativeIntegers(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, number> {
+  return (
+    isRecord(value) && keys.every((key) => isNonNegativeInteger(value[key]))
+  );
+}
+
 function isSkillSource(value: unknown): value is SkillSource {
   return (
     typeof value === "string" &&
@@ -501,6 +589,17 @@ const DAILY_PROJECTION_FIELDS = [
   "projectedTurns",
   "fullFallbackTurns",
 ] as const;
+const DAILY_INTENT_OUTCOME_FIELDS = [
+  "turns",
+  "completedTurns",
+  "erroredTurns",
+  "skillAssistedTurns",
+  "toolAssistedTurns",
+] as const;
+const DAILY_SKILL_ROUTING_FIELDS = [
+  "recommendedTurns",
+  "adoptedTurns",
+] as const;
 
 function isDailyProjectionCounts(
   value: unknown,
@@ -518,6 +617,73 @@ function isDailyBucketV1(value: unknown): value is DailyBucketV1 {
     isCountMap(value.skills) &&
     isCountMap(value.tools) &&
     hasNumbers(value.routing, DAILY_ROUTING_FIELDS)
+  );
+}
+
+function isDailyBucketV3(value: unknown): value is DailyBucketV3 {
+  return (
+    isDailyBucketV1(value) &&
+    isRecord(value) &&
+    isDailyProjectionCounts((value as Record<string, unknown>).projection)
+  );
+}
+
+function isBoundedDailyAttributionMap<T>(
+  value: unknown,
+  isEntry: (entry: unknown) => entry is T,
+): value is Record<string, T> {
+  if (!isRecord(value)) return false;
+  const entries = Object.entries(value);
+  return (
+    entries.length <= MAX_DAILY_ATTRIBUTION_KEYS &&
+    (entries.length < MAX_DAILY_ATTRIBUTION_KEYS ||
+      Object.hasOwn(value, OTHER_DAILY_ATTRIBUTION_KEY)) &&
+    entries.every(([key, entry]) => {
+      if (key === OTHER_DAILY_ATTRIBUTION_KEY) return isEntry(entry);
+      if (!key.startsWith(DAILY_ATTRIBUTION_VALUE_PREFIX)) return false;
+      const rawKey = key.slice(DAILY_ATTRIBUTION_VALUE_PREFIX.length);
+      const length = Array.from(rawKey).length;
+      return (
+        length > 0 &&
+        length <= MAX_DAILY_ATTRIBUTION_KEY_CODE_POINTS &&
+        isEntry(entry)
+      );
+    })
+  );
+}
+
+function isDailyIntentOutcomes(value: unknown): value is DailyIntentOutcomes {
+  return hasNonNegativeIntegers(value, DAILY_INTENT_OUTCOME_FIELDS);
+}
+
+function isDailySkillRouting(value: unknown): value is DailySkillRouting {
+  return hasNonNegativeIntegers(value, DAILY_SKILL_ROUTING_FIELDS);
+}
+
+function isLatencyHistogram(value: unknown): value is LatencyHistogram {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === LATENCY_BUCKETS.length &&
+    LATENCY_BUCKETS.every(
+      (bucket) =>
+        Object.hasOwn(value, bucket) && isNonNegativeInteger(value[bucket]),
+    )
+  );
+}
+
+function isDailyBucket(value: unknown): value is DailyBucket {
+  if (!isDailyBucketV3(value) || !isRecord(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    isBoundedDailyAttributionMap(
+      record.intentOutcomes,
+      isDailyIntentOutcomes,
+    ) &&
+    isBoundedDailyAttributionMap(record.intentRouting, (entry) =>
+      hasNonNegativeIntegers(entry, DAILY_ROUTING_FIELDS),
+    ) &&
+    isBoundedDailyAttributionMap(record.skillRouting, isDailySkillRouting) &&
+    isBoundedDailyAttributionMap(record.toolErrors, isNonNegativeInteger)
   );
 }
 
@@ -541,7 +707,7 @@ function isProjectionStats(value: unknown): value is ProjectionStats {
 
 function assertStatsBase(
   stats: unknown,
-): asserts stats is Stats | StatsV2 | StatsV1 {
+): asserts stats is Stats | StatsV3 | StatsV2 | StatsV1 {
   if (!isRecord(stats)) throw new Error("unsupported or invalid stats schema");
   if (
     !isIsoTimestamp(stats.createdAt) ||
@@ -650,7 +816,7 @@ function migrateStatsV1(stats: StatsV1): StatsV2 {
   };
 }
 
-function migrateStatsV2(stats: StatsV2, eventTime: string): Stats {
+function migrateStatsV2(stats: StatsV2, eventTime: string): StatsV3 {
   return {
     ...stats,
     schemaVersion: 3,
@@ -672,6 +838,66 @@ function assertStatsV2(stats: StatsV2): void {
   }
 }
 
+function assertStatsV3(
+  stats: Pick<Stats, "projection" | "skillInventory"> & {
+    daily: Record<string, DailyBucketV3>;
+  },
+): void {
+  if (
+    !isProjectionStats(stats.projection) ||
+    !isSkillInventoryStats(stats.skillInventory)
+  ) {
+    throw new Error("unsupported or invalid stats schema");
+  }
+  for (const bucket of Object.values(stats.daily)) {
+    if (!isDailyBucketV3(bucket)) {
+      throw new Error("unsupported or invalid stats schema");
+    }
+  }
+}
+
+function migrateStatsV3(stats: StatsV3, eventTime: string): Stats {
+  return {
+    ...stats,
+    schemaVersion: 4,
+    attribution: { startedAt: eventTime },
+    tools: Object.fromEntries(
+      Object.entries(stats.tools).map(([name, tool]) => [
+        name,
+        { ...tool, latencyHistogram: emptyLatencyHistogram() },
+      ]),
+    ),
+    daily: Object.fromEntries(
+      Object.entries(stats.daily).map(([date, bucket]) => [
+        date,
+        {
+          ...bucket,
+          intentOutcomes: {},
+          intentRouting: {},
+          skillRouting: {},
+          toolErrors: {},
+        },
+      ]),
+    ),
+  };
+}
+
+function assertStatsV4(stats: Stats): void {
+  if (!isIsoTimestamp(stats.attribution.startedAt)) {
+    throw new Error("unsupported or invalid stats schema");
+  }
+  for (const tool of Object.values(stats.tools)) {
+    if (!isLatencyHistogram(tool.latencyHistogram)) {
+      throw new Error("unsupported or invalid stats schema");
+    }
+  }
+  for (const bucket of Object.values(stats.daily)) {
+    if (!isDailyBucket(bucket)) {
+      throw new Error("unsupported or invalid stats schema");
+    }
+  }
+}
+
 function loadStats(statsFilePath: string, eventTime: string): Stats {
   if (!fileExists(statsFilePath)) return createStats(eventTime);
 
@@ -686,29 +912,26 @@ function loadStats(statsFilePath: string, eventTime: string): Stats {
     const migrated = migrateStatsV1(stats);
     assertStatsV2(migrated);
     return canonicalizeSkillStats(
-      migrateStatsV2(migrated, eventTime),
+      migrateStatsV3(migrateStatsV2(migrated, eventTime), eventTime),
       eventTime,
     );
   }
   if (stats.schemaVersion === 2) {
     assertStatsV2(stats);
-    return canonicalizeSkillStats(migrateStatsV2(stats, eventTime), eventTime);
+    return canonicalizeSkillStats(
+      migrateStatsV3(migrateStatsV2(stats, eventTime), eventTime),
+      eventTime,
+    );
   }
-  if (
-    stats.schemaVersion !== 3 ||
-    !isProjectionStats(stats.projection) ||
-    !isSkillInventoryStats(stats.skillInventory)
-  ) {
+  if (stats.schemaVersion === 3) {
+    assertStatsV3(stats);
+    return canonicalizeSkillStats(migrateStatsV3(stats, eventTime), eventTime);
+  }
+  if (stats.schemaVersion !== 4) {
     throw new Error("unsupported or invalid stats schema");
   }
-  for (const bucket of Object.values(stats.daily)) {
-    if (
-      !isDailyBucketV1(bucket) ||
-      !isDailyProjectionCounts(bucket.projection)
-    ) {
-      throw new Error("unsupported or invalid stats schema");
-    }
-  }
+  assertStatsV3(stats);
+  assertStatsV4(stats);
   return canonicalizeSkillStats(stats, eventTime);
 }
 
@@ -886,6 +1109,21 @@ function incrementRoutingAdoption(
   routing.adoptedSkillOpportunities += adoptedSkills;
 }
 
+function latencyBucket(durationMs: unknown): LatencyBucket {
+  if (
+    typeof durationMs !== "number" ||
+    !Number.isFinite(durationMs) ||
+    durationMs < 0
+  ) {
+    return "unknown";
+  }
+  if (durationMs < 100) return "0-99";
+  if (durationMs < 500) return "100-499";
+  if (durationMs < 1000) return "500-999";
+  if (durationMs < 5000) return "1000-4999";
+  return "5000+";
+}
+
 function recordToolStats(params: {
   stats: Stats;
   toolCalls: NonNullable<SessionState["toolCalls"]>;
@@ -900,6 +1138,7 @@ function recordToolStats(params: {
       turns: 0,
       errorCalls: 0,
       averageDurationMs: 0,
+      latencyHistogram: emptyLatencyHistogram(),
       lastUsedAt: eventTime,
       last7DaysCalls: 0,
     }));
@@ -911,6 +1150,9 @@ function recordToolStats(params: {
     tool.calls += calls.length;
     tool.turns += 1;
     tool.errorCalls += calls.filter((call) => call.error !== undefined).length;
+    for (const call of calls) {
+      increment(tool.latencyHistogram, latencyBucket(call.durationMs));
+    }
     tool.lastUsedAt = eventTime;
   }
 }
@@ -1017,6 +1259,47 @@ function recordDailyProjectionStats(
   }
 }
 
+function boundedDailyAttributionKey<T>(
+  entries: Record<string, T>,
+  rawKey: string,
+): string {
+  const normalized = rawKey.trim();
+  if (
+    !normalized ||
+    Array.from(normalized).length > MAX_DAILY_ATTRIBUTION_KEY_CODE_POINTS
+  ) {
+    return OTHER_DAILY_ATTRIBUTION_KEY;
+  }
+  const key = `${DAILY_ATTRIBUTION_VALUE_PREFIX}${normalized}`;
+  if (ownRecordValue(entries, key) !== undefined) return key;
+  const keyCount = Object.keys(entries).length;
+  if (keyCount >= MAX_DAILY_ATTRIBUTION_KEYS) {
+    return OTHER_DAILY_ATTRIBUTION_KEY;
+  }
+  return keyCount === MAX_DAILY_ATTRIBUTION_KEYS - 1
+    ? OTHER_DAILY_ATTRIBUTION_KEY
+    : key;
+}
+
+function getOrCreateBoundedDailyAttributionEntry<T>(
+  entries: Record<string, T>,
+  rawKey: string,
+  create: () => T,
+): T {
+  return getOrCreateOwnRecordValue(
+    entries,
+    boundedDailyAttributionKey(entries, rawKey),
+    create,
+  );
+}
+
+function incrementBoundedDailyAttribution(
+  counts: CountMap,
+  rawKey: string,
+): void {
+  increment(counts, boundedDailyAttributionKey(counts, rawKey));
+}
+
 function recordDailyStats(params: {
   stats: Stats;
   date: string;
@@ -1047,11 +1330,51 @@ function recordDailyStats(params: {
   increment(daily.intents, intentId);
   for (const skillName of skillsUsed) increment(daily.skills, skillName);
   for (const call of toolCalls) increment(daily.tools, call.name);
+  const outcomes = getOrCreateBoundedDailyAttributionEntry(
+    daily.intentOutcomes,
+    intentId,
+    emptyDailyIntentOutcomes,
+  );
+  outcomes.turns += 1;
+  outcomes.completedTurns += errored ? 0 : 1;
+  outcomes.erroredTurns += errored ? 1 : 0;
+  outcomes.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
+  outcomes.toolAssistedTurns += toolCalls.length > 0 ? 1 : 0;
   incrementRoutingAdoption(
     daily.routing,
     recommendedSkills.length,
     adoptedSkills.length,
   );
+  if (recommendedSkills.length > 0) {
+    incrementRoutingAdoption(
+      getOrCreateBoundedDailyAttributionEntry(
+        daily.intentRouting,
+        intentId,
+        () => ({
+          recommendationTurns: 0,
+          adoptedTurns: 0,
+          recommendedSkillOpportunities: 0,
+          adoptedSkillOpportunities: 0,
+        }),
+      ),
+      recommendedSkills.length,
+      adoptedSkills.length,
+    );
+  }
+  for (const skillName of recommendedSkills) {
+    const skillRouting = getOrCreateBoundedDailyAttributionEntry(
+      daily.skillRouting,
+      skillName,
+      emptyDailySkillRouting,
+    );
+    skillRouting.recommendedTurns += 1;
+    skillRouting.adoptedTurns += adoptedSkills.includes(skillName) ? 1 : 0;
+  }
+  for (const call of toolCalls) {
+    if (call.error !== undefined) {
+      incrementBoundedDailyAttribution(daily.toolErrors, call.name);
+    }
+  }
   if (projection) recordDailyProjectionStats(daily, projection);
 }
 

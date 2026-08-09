@@ -14,6 +14,12 @@ const keywordAuditScriptPath = path.resolve(
 const keywordAuditLabelsTemplatePath = path.resolve(
   "skills/skill-harness/templates/review-keyword-labels.json",
 );
+const runtimeHealthReferencePath = path.resolve(
+  "skills/skill-harness/references/runtime-health-audit.md",
+);
+const runtimeHealthScriptPath = path.resolve(
+  "skills/skill-harness/scripts/runtime-health-audit.py",
+);
 const memoryLookupAssetPath = path.resolve(
   "skills/skill-harness/assets/memory-lookup.md",
 );
@@ -25,14 +31,13 @@ describe("skill-harness review mode", () => {
   it("keeps automated runtime work out of the human maintenance skill", () => {
     const parsed = matter(fs.readFileSync(skillPath, "utf-8"));
     const keywordAudit = fs.readFileSync(keywordAuditReferencePath, "utf-8");
+    const runtimeHealth = fs.readFileSync(runtimeHealthReferencePath, "utf-8");
     const memoryLookup = fs.readFileSync(memoryLookupAssetPath, "utf-8");
     const memoryCompare = fs.readFileSync(memoryCompareAssetPath, "utf-8");
 
     expect(parsed.data).toMatchObject({
       name: "skill-harness",
-      description: expect.stringContaining(
-        "auditing Intent Review trigger keywords from runtime evidence",
-      ),
+      description: expect.stringContaining("runtime health"),
     });
     expect(parsed.data).not.toHaveProperty("disable-model-invocation");
     expect(parsed.content).toContain(
@@ -59,6 +64,15 @@ describe("skill-harness review mode", () => {
     expect(keywordAudit).toContain("approximate structural replay");
     expect(keywordAudit).toContain("does not snapshot or hash session files");
     expect(keywordAudit).not.toContain("## Step 6 — Apply");
+    expect(parsed.content).toContain("## Mode: runtime-health");
+    expect(parsed.content).toContain("references/runtime-health-audit.md");
+    expect(parsed.content).toContain("scripts/runtime-health-audit.py");
+    expect(fs.existsSync(runtimeHealthReferencePath)).toBe(true);
+    expect(fs.existsSync(runtimeHealthScriptPath)).toBe(true);
+    expect(runtimeHealth).toContain("report-only");
+    expect(runtimeHealth).toContain("never writes runtime state");
+    expect(runtimeHealth).toContain("Do not hand-edit");
+    expect(runtimeHealth).toContain("ordinary Intent Review only");
     expect(memoryLookup).not.toContain("Ani");
     expect(memoryCompare).not.toContain("Discord style guide");
   });
