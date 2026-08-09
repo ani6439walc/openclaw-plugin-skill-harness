@@ -111,6 +111,47 @@ const TOPIC_PROJECTION_CONFIDENCE = 0.8;
 const MAX_PROJECTION_CANDIDATE_IDS = 128;
 const MAX_PROJECTION_MATCHED_KEYWORDS = 32;
 const MAX_PROJECTION_KEYWORD_CHARS = 200;
+const KEYWORD_COVERAGE_TARGETS: readonly TriggerKeywordTarget[] = [
+  "successful-pattern",
+  "behavior-fix",
+  "entity-context",
+];
+const KEYWORD_COVERAGE_RETRY_INTERVAL = 5;
+
+type CoverageRuntimeTargets = Partial<
+  Record<
+    TriggerKeywordTarget,
+    { cursor: number; lastCompletedAcceptedTurn: number }
+  >
+>;
+
+export function coverageEpochMilestone(params: {
+  cadence: number;
+  runtimeTargets: CoverageRuntimeTargets | undefined;
+}): number {
+  return (
+    Math.max(
+      0,
+      ...KEYWORD_COVERAGE_TARGETS.map(
+        (target) =>
+          params.runtimeTargets?.[target]?.lastCompletedAcceptedTurn ?? 0,
+      ),
+    ) + params.cadence
+  );
+}
+
+export function coverageWatermarkEligible(params: {
+  acceptedTurn: number;
+  cadence: number;
+  runtimeTargets: CoverageRuntimeTargets | undefined;
+}): boolean {
+  const milestone = coverageEpochMilestone(params);
+  if (params.acceptedTurn < milestone) return false;
+  return (
+    params.acceptedTurn === milestone ||
+    (params.acceptedTurn - milestone) % KEYWORD_COVERAGE_RETRY_INTERVAL === 0
+  );
+}
 
 function measureProjectionCatalogs(
   originalIntents: readonly IntentCatalogEntry[],
@@ -501,11 +542,6 @@ export function createHookHandlers(deps: HookDeps) {
   const recordedToolCalls = new Set<string>();
   const pendingSkillEpochKeys = new Set<string>();
   const pendingCoverageEpochKeys = new Set<string>();
-  const COVERAGE_TARGETS: readonly TriggerKeywordTarget[] = [
-    "successful-pattern",
-    "behavior-fix",
-    "entity-context",
-  ];
 
   function resolvePromptBuildScope(
     ctx: PluginHookAgentContext,
@@ -1835,35 +1871,6 @@ export function createHookHandlers(deps: HookDeps) {
     };
   }
 
-  function coverageWatermarkEligible(params: {
-    acceptedTurn: number;
-    cadence: number;
-    runtimeTargets:
-      | Partial<
-          Record<
-            TriggerKeywordTarget,
-            { cursor: number; lastCompletedAcceptedTurn: number }
-          >
-        >
-      | undefined;
-  }): boolean {
-    if (params.acceptedTurn < params.cadence) return false;
-    const lastCompleted = Math.max(
-      0,
-      ...COVERAGE_TARGETS.map(
-        (target) =>
-          params.runtimeTargets?.[target]?.lastCompletedAcceptedTurn ?? 0,
-      ),
-    );
-    if (params.acceptedTurn % params.cadence === 0) {
-      return params.acceptedTurn >= lastCompleted + params.cadence;
-    }
-    // A released/failed first epoch is retried every five accepted turns.
-    if (lastCompleted === 0 && params.acceptedTurn % 5 === 0) return true;
-    // Require full cadence progress after the last completed epoch.
-    return params.acceptedTurn >= lastCompleted + params.cadence;
-  }
-
   function enqueueKeywordCoverageRun(params: {
     ctx: PluginHookAgentContext;
     resolvedConfig: ResolvedSkillHarnessPluginConfig;
@@ -1899,13 +1906,13 @@ export function createHookHandlers(deps: HookDeps) {
             cursor,
           });
 
-          const removalDocuments = COVERAGE_TARGETS.flatMap(
+          const removalDocuments = KEYWORD_COVERAGE_TARGETS.flatMap(
             (target) => discovery.removals[target] ?? [],
           );
           const documents =
             removalDocuments.length > 0
               ? removalDocuments
-              : COVERAGE_TARGETS.flatMap(
+              : KEYWORD_COVERAGE_TARGETS.flatMap(
                   (target) => discovery.additions[target] ?? [],
                 );
           if (documents.length === 0) {
@@ -2032,11 +2039,15 @@ export function createHookHandlers(deps: HookDeps) {
         return;
       }
 
+      const milestone = coverageEpochMilestone({
+        cadence,
+        runtimeTargets: runtimeState.targets,
+      });
       const keywordFingerprint = fingerprintKeywords(
         runtimeState.triggerKeywords,
       );
       const epochKey = buildCoverageEpochKey({
-        acceptedTurn: params.acceptedTurn,
+        acceptedTurn: milestone,
         cadence,
         keywordFingerprint,
       });
@@ -2051,7 +2062,7 @@ export function createHookHandlers(deps: HookDeps) {
 
       const reserved = await keywordCoverageWriter.reserveCoverageEpoch({
         epochKey,
-        targets: COVERAGE_TARGETS,
+        targets: KEYWORD_COVERAGE_TARGETS,
         acceptedTurn: params.acceptedTurn,
       });
       if (reserved !== "applied") return;
