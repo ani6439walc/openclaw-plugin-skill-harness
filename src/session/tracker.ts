@@ -420,6 +420,7 @@ export class SessionTracker {
     if (!fileExists(sessionsDir)) {
       return;
     }
+    const cutoffMs = Date.now() - SESSION_RETENTION_MS;
 
     const files = fs.readdirSync(sessionsDir);
     for (const file of files) {
@@ -429,6 +430,7 @@ export class SessionTracker {
 
       const filePath = path.join(sessionsDir, file);
       try {
+        if (fs.statSync(filePath).mtimeMs < cutoffMs) continue;
         const sessionData: SessionData = readJsonFile<SessionData>(filePath);
         const migrated = migrateSessionData(sessionData);
         this.sessionData.set(sessionData.sessionId, sessionData);

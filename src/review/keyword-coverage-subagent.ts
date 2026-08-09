@@ -323,6 +323,7 @@ export function parseKeywordCoverageModelResponse(
   options: {
     toolCalls?: Array<{ name: string; params: Record<string, unknown> }>;
     error?: Error;
+    triggerKeywords?: ReviewTriggerKeywords;
   } = {},
 ): KeywordCoverageReviewerResult | undefined {
   const { toolCalls, error } = options;
@@ -401,6 +402,38 @@ export function parseKeywordCoverageModelResponse(
         refs: decision.removal.falsePositiveRefs,
       });
       return undefined;
+    }
+
+    if (decision.removal && options.triggerKeywords) {
+      const targetKeywords =
+        decision.target === "successful-pattern"
+          ? options.triggerKeywords.successfulPattern
+          : decision.target === "behavior-fix"
+            ? options.triggerKeywords.behaviorFix
+            : options.triggerKeywords.entityContext;
+      const completeRefs = replayKeywordPhrase({
+        phrase: decision.removal.phrase,
+        target: decision.target,
+        documents: documents.filter((doc) => doc.target === decision.target),
+        config: {} as never,
+        triggerKeywords: options.triggerKeywords,
+      }).matches.map((document) => document.ref).sort();
+      const proposedRefs = [...new Set(decision.removal.falsePositiveRefs)].sort();
+      if (
+        !targetKeywords.some(
+          (keyword) =>
+            keyword.toLocaleLowerCase() ===
+            decision.removal!.phrase.toLocaleLowerCase(),
+        ) ||
+        proposedRefs.length !== completeRefs.length ||
+        proposedRefs.some((ref, index) => ref !== completeRefs[index])
+      ) {
+        logger.warn("keyword coverage review failed: incomplete removal evidence", {
+          target: decision.target,
+          phrase: decision.removal.phrase,
+        });
+        return undefined;
+      }
     }
 
     validDecisions.push(decision);
@@ -685,6 +718,7 @@ export async function runKeywordCoverageReview(
     return parseKeywordCoverageModelResponse(params.modelResponse, documents, {
       toolCalls: params.toolCalls,
       error: params.error,
+      triggerKeywords,
     });
   }
 
@@ -717,7 +751,9 @@ export async function runKeywordCoverageReview(
     return undefined;
   }
 
-  const discovery = parseKeywordCoverageModelResponse(discoveryRaw, documents);
+  const discovery = parseKeywordCoverageModelResponse(discoveryRaw, documents, {
+    triggerKeywords,
+  });
   if (!discovery) return undefined;
 
   const replayEvidence = buildReplayEvidence(discovery.decisions, documents);
@@ -765,6 +801,7 @@ export async function runKeywordCoverageReview(
   const adjudicated = parseKeywordCoverageModelResponse(
     adjudicationRaw,
     documents,
+    { triggerKeywords },
   );
   if (!adjudicated) return undefined;
 

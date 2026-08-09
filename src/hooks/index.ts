@@ -1858,9 +1858,15 @@ export function createHookHandlers(deps: HookDeps) {
             cursor,
           });
 
-          const documents = COVERAGE_TARGETS.flatMap(
-            (target) => discovery.additions[target] ?? [],
+          const removalDocuments = COVERAGE_TARGETS.flatMap(
+            (target) => discovery.removals[target] ?? [],
           );
+          const documents =
+            removalDocuments.length > 0
+              ? removalDocuments
+              : COVERAGE_TARGETS.flatMap(
+                  (target) => discovery.additions[target] ?? [],
+                );
           if (documents.length === 0) {
             await keywordCoverageWriter.completeCoverageEpoch({
               epochKey: params.epochKey,

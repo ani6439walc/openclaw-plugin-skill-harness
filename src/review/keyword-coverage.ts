@@ -4,7 +4,6 @@ import type { SessionData, SessionState } from "../session/tracker.js";
 import type { TriggerKeywordTarget } from "./trigger-keywords.js";
 import type { ReviewTriggerKeywords } from "./trigger-keywords.js";
 import {
-  evaluateKeywordTrigger,
   checkStructuralEligibility,
   findMatchedKeywords,
   type TriggerState,
@@ -44,8 +43,23 @@ export interface CoverageReplayResult {
 }
 
 const MAX_CANDIDATES_PER_TARGET = 8;
+const MAX_CANDIDATE_INPUT_CHARS = 1_000;
+const MAX_CANDIDATE_RESULT_CHARS = 1_500;
 
-function generateRef(sessionId: string, stateIndex: number, target: TriggerKeywordTarget): string {
+type CandidateWithSession = {
+  candidate: CoverageCandidateDocument;
+  sessionId: string;
+};
+
+function truncateCandidateText(value: string | undefined, maxChars: number): string | undefined {
+  return value?.slice(0, maxChars);
+}
+
+function generateRef(
+  sessionId: string,
+  stateIndex: number,
+  target: TriggerKeywordTarget,
+): string {
   const content = `${sessionId}:${stateIndex}:${target}`;
   return createHash("sha256").update(content).digest("hex");
 }
@@ -61,7 +75,9 @@ function sessionStateToTriggerState(state: SessionState): TriggerState {
   };
 }
 
-function extractToolSummary(state: SessionState): CoverageCandidateDocument["toolSummary"] {
+function extractToolSummary(
+  state: SessionState,
+): CoverageCandidateDocument["toolSummary"] {
   return (state.toolCalls ?? []).map((call) => ({
     name: call.name,
     success: call.success,
@@ -72,7 +88,11 @@ function extractToolSummary(state: SessionState): CoverageCandidateDocument["too
 function collectStatesFromSessions(
   sessions: SessionData[],
 ): Array<{ sessionId: string; state: SessionState; stateIndex: number }> {
-  const collected: Array<{ sessionId: string; state: SessionState; stateIndex: number }> = [];
+  const collected: Array<{
+    sessionId: string;
+    state: SessionState;
+    stateIndex: number;
+  }> = [];
 
   for (const session of sessions) {
     const states: SessionState[] = [...(session.history ?? []), session.current];
@@ -86,106 +106,131 @@ function collectStatesFromSessions(
   return collected;
 }
 
-function keywordProperty(target: TriggerKeywordTarget): keyof ReviewTriggerKeywords {
+function keywordProperty(
+  target: TriggerKeywordTarget,
+): keyof ReviewTriggerKeywords {
   switch (target) {
-    case "successful-pattern": return "successfulPattern";
-    case "behavior-fix": return "behaviorFix";
-    case "entity-context": return "entityContext";
+    case "successful-pattern":
+      return "successfulPattern";
+    case "behavior-fix":
+      return "behaviorFix";
+    case "entity-context":
+      return "entityContext";
   }
+}
+
+function roundRobinCandidates(
+  candidates: CandidateWithSession[],
+): CoverageCandidateDocument[] {
+  const bySession = new Map<string, CoverageCandidateDocument[]>();
+  for (const { candidate, sessionId } of candidates) {
+    const sessionCandidates = bySession.get(sessionId) ?? [];
+    sessionCandidates.push(candidate);
+    bySession.set(sessionId, sessionCandidates);
+  }
+
+  const ordered: CoverageCandidateDocument[] = [];
+  for (let stateIndex = 0; bySession.size > 0; stateIndex += 1) {
+    for (const [sessionId, sessionCandidates] of bySession) {
+      const candidate = sessionCandidates[stateIndex];
+      if (candidate) ordered.push(candidate);
+      if (stateIndex + 1 >= sessionCandidates.length) bySession.delete(sessionId);
+    }
+  }
+  return ordered;
 }
 
 export function discoverKeywordCoverageCandidates(
   input: CoverageDiscoveryInput,
 ): CoverageDiscoveryResult {
   const { sessions, config, triggerKeywords, cursor } = input;
-
   const additions: Record<TriggerKeywordTarget, CoverageCandidateDocument[]> = {
     "successful-pattern": [],
     "behavior-fix": [],
     "entity-context": [],
   };
-
   const removals: Record<TriggerKeywordTarget, CoverageCandidateDocument[]> = {
     "successful-pattern": [],
     "behavior-fix": [],
     "entity-context": [],
   };
-
   const nextCursor: Record<TriggerKeywordTarget, number> = { ...cursor };
-
   const allStates = collectStatesFromSessions(sessions);
-  if (allStates.length === 0) {
-    return { additions, removals, nextCursor };
-  }
+  if (allStates.length === 0) return { additions, removals, nextCursor };
 
-  const targets: TriggerKeywordTarget[] = ["successful-pattern", "behavior-fix", "entity-context"];
-
+  const targets: TriggerKeywordTarget[] = [
+    "successful-pattern",
+    "behavior-fix",
+    "entity-context",
+  ];
   for (const target of targets) {
-    // Phase 1: Collect all eligible candidates with sessionId
-    const candidatesWithSession: Array<{ candidate: CoverageCandidateDocument; sessionId: string }> = [];
-    for (const { sessionId, state, stateIndex } of allStates) {
-      const triggerState = sessionStateToTriggerState(state);
-      
-      // Check structural eligibility first
-      const structural = checkStructuralEligibility(target, triggerState, config);
-      if (!structural.eligible) continue;
+    const additionCandidates: CandidateWithSession[] = [];
+    const removalCandidates = new Map<string, CandidateWithSession[]>();
+    const existingKeywords = triggerKeywords[keywordProperty(target)];
 
-      // Coverage candidate = structurally eligible AND NOT matching existing keywords
+    for (const { sessionId, state, stateIndex } of allStates) {
+      if (!checkStructuralEligibility(target, sessionStateToTriggerState(state), config).eligible) {
+        continue;
+      }
       const text = `${state.input ?? ""}\n${state.result ?? ""}`;
-      const existingKeywords = triggerKeywords[keywordProperty(target)];
       const matchedKeywords = findMatchedKeywords(text, existingKeywords);
+      const candidate: CoverageCandidateDocument = {
+        ref: generateRef(sessionId, stateIndex, target),
+        target,
+        input:
+          truncateCandidateText(state.input, MAX_CANDIDATE_INPUT_CHARS) ?? "",
+        result: truncateCandidateText(state.result, MAX_CANDIDATE_RESULT_CHARS),
+        toolSummary: extractToolSummary(state),
+      };
 
       if (matchedKeywords.length === 0) {
-        const ref = generateRef(sessionId, stateIndex, target);
-        candidatesWithSession.push({
-          candidate: {
-            ref,
-            target,
-            input: state.input ?? "",
-            result: state.result,
-            toolSummary: extractToolSummary(state),
-          },
-          sessionId,
-        });
+        additionCandidates.push({ candidate, sessionId });
+        continue;
+      }
+      for (const phrase of matchedKeywords) {
+        const candidates = removalCandidates.get(phrase) ?? [];
+        candidates.push({ candidate, sessionId });
+        removalCandidates.set(phrase, candidates);
       }
     }
 
-    // Phase 2: Sort by session uniqueness (distinct sessions first)
-    const sessionOrder = new Map<string, number>();
-    for (const { sessionId } of candidatesWithSession) {
-      if (!sessionOrder.has(sessionId)) {
-        sessionOrder.set(sessionId, sessionOrder.size);
-      }
-    }
-
-    candidatesWithSession.sort((a, b) =>
-      (sessionOrder.get(a.sessionId) ?? 0) - (sessionOrder.get(b.sessionId) ?? 0)
-    );
-
-    // Phase 3: Apply cursor offset and truncate
-    const allCandidates = candidatesWithSession.map(c => c.candidate);
+    const allCandidates = roundRobinCandidates(additionCandidates);
     const cursorStart = cursor[target];
     const rotatedCandidates = [
       ...allCandidates.slice(cursorStart),
       ...allCandidates.slice(0, cursorStart),
     ];
-
     additions[target] = rotatedCandidates.slice(0, MAX_CANDIDATES_PER_TARGET);
-    nextCursor[target] = (cursorStart + additions[target].length) % Math.max(1, allCandidates.length);
+    nextCursor[target] =
+      (cursorStart + additions[target].length) % Math.max(1, allCandidates.length);
+
+    if (existingKeywords.length === 0) continue;
+    const phrase = existingKeywords[cursorStart % existingKeywords.length]!;
+    const hitSet = removalCandidates.get(phrase) ?? [];
+    if (
+      hitSet.length >= 2 &&
+      hitSet.length <= MAX_CANDIDATES_PER_TARGET &&
+      new Set(hitSet.map((entry) => entry.sessionId)).size >= 2
+    ) {
+      removals[target] = hitSet.map((entry) => entry.candidate);
+    }
   }
 
   return { additions, removals, nextCursor };
 }
 
-export function replayKeywordPhrase(input: CoverageReplayInput): CoverageReplayResult {
+export function replayKeywordPhrase(
+  input: CoverageReplayInput,
+): CoverageReplayResult {
   const { phrase, documents } = input;
   const normalizedPhrase = phrase.toLocaleLowerCase();
-
   const matches = documents.filter((doc) => {
     const normalizedInput = (doc.input ?? "").toLocaleLowerCase();
     const normalizedResult = (doc.result ?? "").toLocaleLowerCase();
-    return normalizedInput.includes(normalizedPhrase) || normalizedResult.includes(normalizedPhrase);
+    return (
+      normalizedInput.includes(normalizedPhrase) ||
+      normalizedResult.includes(normalizedPhrase)
+    );
   });
-
   return { matches };
 }

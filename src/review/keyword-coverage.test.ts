@@ -351,6 +351,106 @@ describe("discoverKeywordCoverageCandidates", () => {
     const uniqueRefs = new Set(refs);
     expect(uniqueRefs.size).toBe(refs.length);
   });
+
+  it("round-robins eligible candidates across sessions before repeating one session", () => {
+    const sessionA = createSession("session-a", {
+      history: Array.from({ length: 8 }, (_, index) => ({
+        input: `a-${index}`,
+        result: "done",
+        toolCalls: Array.from({ length: 5 }, () => ({
+          name: "read",
+          params: {},
+        })),
+        timestamps: { start: new Date().toISOString() },
+      })),
+      current: {
+        input: "a-current",
+        result: "done",
+        toolCalls: Array.from({ length: 5 }, () => ({
+          name: "read",
+          params: {},
+        })),
+        timestamps: { start: new Date().toISOString() },
+      },
+    });
+    const sessionB = createSession("session-b", {
+      current: {
+        input: "b-0",
+        result: "done",
+        toolCalls: Array.from({ length: 5 }, () => ({
+          name: "read",
+          params: {},
+        })),
+        timestamps: { start: new Date().toISOString() },
+      },
+    });
+
+    const result = discoverKeywordCoverageCandidates({
+      sessions: [sessionA, sessionB],
+      config,
+      triggerKeywords: keywords,
+      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+    });
+
+    expect(result.additions["successful-pattern"].slice(0, 3).map((doc) => doc.input)).toEqual([
+      "a-0",
+      "b-0",
+      "a-1",
+    ]);
+  });
+
+  it("includes the complete cross-session hit set for one removable current keyword", () => {
+    const sessions = ["a", "b"].map((sessionId) =>
+      createSession(`session-${sessionId}`, {
+        current: {
+          input: `task ${sessionId}`,
+          result: "verified",
+          toolCalls: Array.from({ length: 5 }, () => ({ name: "read", params: {} })),
+          timestamps: { start: new Date().toISOString() },
+        },
+      }),
+    );
+
+    const result = discoverKeywordCoverageCandidates({
+      sessions,
+      config,
+      triggerKeywords: keywords,
+      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+    });
+
+    expect(result.removals["successful-pattern"].map((doc) => doc.input)).toEqual([
+      "task a",
+      "task b",
+    ]);
+  });
+
+  it("rejects removable keyword evidence from fewer than two sessions", () => {
+    const session = createSession("session-a", {
+      history: [
+        {
+          input: "first",
+          result: "verified",
+          toolCalls: Array.from({ length: 5 }, () => ({ name: "read", params: {} })),
+          timestamps: { start: new Date().toISOString() },
+        },
+      ],
+      current: {
+        input: "second",
+        result: "verified",
+        toolCalls: Array.from({ length: 5 }, () => ({ name: "read", params: {} })),
+        timestamps: { start: new Date().toISOString() },
+      },
+    });
+
+    const result = discoverKeywordCoverageCandidates({
+      sessions: [session],
+      config,
+      triggerKeywords: keywords,
+      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+    });
+
+    expect(result.removals["successful-pattern"]).toEqual([]);
+  });
 });
 
 describe("replayKeywordPhrase", () => {
