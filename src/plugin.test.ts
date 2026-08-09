@@ -5,6 +5,8 @@ import * as path from "node:path";
 import { logger, type OpenClawPluginApi } from "../api.js";
 import { createPlugin, initializePluginDataRoot } from "./plugin.js";
 import { IntentCatalog } from "./intents/index.js";
+import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
+import { IntentReviewLogWriter } from "./review/log-writer.js";
 
 describe("createPlugin", () => {
   let stateDir: string;
@@ -159,20 +161,72 @@ describe("createPlugin", () => {
     expect(load).toHaveBeenCalledWith("intents");
   });
 
-  it("registers hooks when review trigger keyword cache is corrupt", () => {
+  it("registers hooks when keyword coverage keyword cache is corrupt", () => {
     const api = createApi();
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     fs.mkdirSync(dataRoot, { recursive: true });
-    fs.writeFileSync(path.join(dataRoot, "review.json"), "{ broken");
+    fs.writeFileSync(path.join(dataRoot, "keyword-coverage.json"), "{ broken");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 
     expect(() => createPlugin(api).register(api)).not.toThrow();
 
     expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
-    expect(warn).toHaveBeenCalledWith(
+    // Fail-open: corrupt coverage file should not block registration.
+    expect(warn).not.toHaveBeenCalledWith(
       "failed to read review trigger keywords",
-      expect.objectContaining({ path: path.join(dataRoot, "review.json") }),
+      expect.anything(),
     );
+  });
+
+  it("refreshes cached keywords after migrating v5 review state", async () => {
+    const api = createApi();
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+    fs.mkdirSync(dataRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(dataRoot, "review.json"),
+      JSON.stringify({
+        schemaVersion: 5,
+        createdAt: "2026-07-01T00:00:00.000Z",
+        updatedAt: "2026-07-01T00:00:00.000Z",
+        processedEvents: {},
+        reviewedSkillEpochs: {},
+        triggerKeywords: {
+          successfulPattern: ["ship it"],
+          behaviorFix: ["wrong"],
+          entityContext: ["look up"],
+        },
+      }),
+    );
+    const readKeywords = vi.spyOn(
+      KeywordCoverageWriter.prototype,
+      "readKeywords",
+    );
+
+    createPlugin(api).register(api);
+
+    await vi.waitFor(() => expect(readKeywords).toHaveBeenCalledTimes(3));
+
+    const writer = IntentReviewLogWriter.create(dataRoot);
+    await expect(
+      writer.record(
+        "ordinary-review-after-migration",
+        {
+          sessionId: "session-1",
+          agentId: "main",
+          turnStart: "2026-08-09T00:00:00.000Z",
+        },
+        [],
+        { triggers: ["skill-candidate"], outcome: "nofinding" },
+      ),
+    ).resolves.toBe(true);
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dataRoot, "review.json"), "utf8")),
+    ).toMatchObject({
+      schemaVersion: 6,
+      processedEvents: {
+        "ordinary-review-after-migration": { outcome: "nofinding" },
+      },
+    });
   });
 
   function createPackageRootWithAssets(files: Record<string, string>): string {

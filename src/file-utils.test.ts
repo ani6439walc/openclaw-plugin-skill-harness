@@ -10,6 +10,7 @@ import {
   statsPath,
   agentWorkspacePath,
   agentSessionsPath,
+  keywordCoverageLogPath,
 } from "./file-utils.js";
 
 describe("plugin data paths", () => {
@@ -31,6 +32,9 @@ describe("plugin data paths", () => {
     );
     expect(statsPath(dataRoot)).toBe(path.join(dataRoot, "stats.json"));
     expect(reviewLogPath(dataRoot)).toBe(path.join(dataRoot, "review.json"));
+    expect(keywordCoverageLogPath(dataRoot)).toBe(
+      path.join(dataRoot, "keyword-coverage.json"),
+    );
     expect(agentWorkspacePath(dataRoot)).toBe(path.join(dataRoot, "workspace"));
     expect(agentSessionsPath(dataRoot, "intention")).toBe(
       path.join(dataRoot, "agents", "intention", "sessions"),

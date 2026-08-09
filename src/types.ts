@@ -15,13 +15,12 @@ export type ReviewTriggersConfig = {
   successfulPattern?: {
     enabled?: boolean;
     toolCalls?: number;
-    keywords?: string[];
   };
   satisfactionCheck?: { enabled?: boolean; everyTurns?: number };
   missingIntent?: { enabled?: boolean };
   weakIntent?: { enabled?: boolean; confidenceBelow?: number };
-  behaviorFix?: { enabled?: boolean; keywords?: string[] };
-  entityContext?: { enabled?: boolean; keywords?: string[] };
+  behaviorFix?: { enabled?: boolean };
+  entityContext?: { enabled?: boolean };
 };
 
 export type ReviewConfig = {
@@ -30,6 +29,7 @@ export type ReviewConfig = {
   modelFallback?: string;
   thinking?: ThinkLevel;
   timeoutMs?: number;
+  keywordCoverage?: { everyAcceptedTurns?: number };
   triggers?: ReviewTriggersConfig;
 };
 
@@ -39,6 +39,7 @@ export type ResolvedReviewConfig = {
   modelFallback: string | undefined;
   thinking: ThinkLevel;
   timeoutMs: number;
+  keywordCoverage: { everyAcceptedTurns: number };
   triggers: {
     skillCandidate: { enabled: boolean; toolCalls: number };
     skillPlacement: { enabled: boolean };
@@ -46,13 +47,12 @@ export type ResolvedReviewConfig = {
     successfulPattern: {
       enabled: boolean;
       toolCalls: number;
-      keywords?: string[];
     };
     satisfactionCheck: { enabled: boolean; everyTurns: number };
     missingIntent: { enabled: boolean };
     weakIntent: { enabled: boolean; confidenceBelow: number };
-    behaviorFix: { enabled: boolean; keywords?: string[] };
-    entityContext: { enabled: boolean; keywords?: string[] };
+    behaviorFix: { enabled: boolean };
+    entityContext: { enabled: boolean };
   };
 };
 

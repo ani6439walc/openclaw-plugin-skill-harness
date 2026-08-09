@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
-import { createHookHandlers } from "./index.js";
+import {
+  coverageEpochMilestone,
+  coverageWatermarkEligible,
+  createHookHandlers,
+} from "./index.js";
 import { SKILL_HARNESS_SYSTEM_CONTEXT } from "./system-context.js";
 import { defaultTracker } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
@@ -30,6 +34,59 @@ function createHandlers(
     ...overrides,
   } as never);
 }
+
+describe("keyword coverage scheduling", () => {
+  const noCompletedEpoch = {
+    "successful-pattern": { cursor: 0, lastCompletedAcceptedTurn: 0 },
+    "behavior-fix": { cursor: 0, lastCompletedAcceptedTurn: 0 },
+    "entity-context": { cursor: 0, lastCompletedAcceptedTurn: 0 },
+  };
+
+  it("triggers at a cadence milestone and every five turns after a failed epoch", () => {
+    const eligible = (acceptedTurn: number) =>
+      coverageWatermarkEligible({
+        acceptedTurn,
+        cadence: 50,
+        runtimeTargets: noCompletedEpoch,
+      });
+
+    expect(eligible(49)).toBe(false);
+    expect(eligible(50)).toBe(true);
+    expect(eligible(51)).toBe(false);
+    expect(eligible(54)).toBe(false);
+    expect(eligible(55)).toBe(true);
+    expect(eligible(56)).toBe(false);
+    expect(eligible(60)).toBe(true);
+  });
+
+  it("uses the same milestone for retries and advances after completion", () => {
+    expect(
+      coverageEpochMilestone({
+        cadence: 50,
+        runtimeTargets: noCompletedEpoch,
+      }),
+    ).toBe(50);
+
+    const completedAt50 = {
+      "successful-pattern": { cursor: 0, lastCompletedAcceptedTurn: 50 },
+      "behavior-fix": { cursor: 0, lastCompletedAcceptedTurn: 50 },
+      "entity-context": { cursor: 0, lastCompletedAcceptedTurn: 50 },
+    };
+    expect(
+      coverageEpochMilestone({
+        cadence: 50,
+        runtimeTargets: completedAt50,
+      }),
+    ).toBe(100);
+    expect(
+      coverageWatermarkEligible({
+        acceptedTurn: 55,
+        cadence: 50,
+        runtimeTargets: completedAt50,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("createHookHandlers tracking guards", () => {
   afterEach(() => {

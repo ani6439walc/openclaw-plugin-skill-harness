@@ -109,6 +109,21 @@ describe("skill-harness manifest", () => {
       maximum: 1800000,
       default: 180000,
     });
+    expect(review.properties.keywordCoverage).toEqual({
+      type: "object",
+      description:
+        "Automatic cross-session keyword coverage review cadence for accepted routed turns.",
+      additionalProperties: false,
+      properties: {
+        everyAcceptedTurns: {
+          type: "integer",
+          minimum: 10,
+          maximum: 1000,
+          default: 50,
+        },
+      },
+      default: {},
+    });
     expect(
       review.properties.triggers.properties.skillCandidate.properties.toolCalls
         .default,
@@ -152,5 +167,22 @@ describe("skill-harness manifest", () => {
       default: 20000,
     });
     expect(instruction.properties).not.toHaveProperty("triggers");
+  });
+
+  it("accepts deprecated keyword seeds for strict-schema upgrades", () => {
+    const triggers =
+      manifest.configSchema.properties.review.properties.triggers.properties;
+
+    for (const trigger of [
+      triggers.successfulPattern,
+      triggers.behaviorFix,
+      triggers.entityContext,
+    ]) {
+      expect(trigger.properties.keywords).toMatchObject({
+        type: "array",
+        items: { type: "string" },
+      });
+      expect(trigger.properties.keywords.description).toContain("Deprecated");
+    }
   });
 });

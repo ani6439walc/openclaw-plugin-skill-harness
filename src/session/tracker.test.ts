@@ -113,6 +113,29 @@ describe("SessionTracker", () => {
       expect(loadedTracker.hasIntentData("existing-session-123")).toBe(true);
     });
 
+    it("excludes expired on-disk sessions from retained snapshots after restart", () => {
+      const sessionsDir = path.join(tempDir, "sessions");
+      fs.mkdirSync(sessionsDir, { recursive: true });
+      const filePath = path.join(sessionsDir, "expired.json");
+      fs.writeFileSync(
+        filePath,
+        JSON.stringify({
+          sessionId: "expired",
+          current: { input: "do not review", result: "old" },
+        }),
+      );
+      const expired = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+      fs.utimesSync(filePath, expired, expired);
+
+      const loadedTracker = SessionTracker.create(tempDir);
+
+      expect(
+        loadedTracker
+          .listRetainedSessions()
+          .map((session) => session.sessionId),
+      ).not.toContain("expired");
+    });
+
     it("migrates legacy topic metadata and missing domain on load", () => {
       const sessionsDir = path.join(tempDir, "sessions");
       fs.mkdirSync(sessionsDir, { recursive: true });

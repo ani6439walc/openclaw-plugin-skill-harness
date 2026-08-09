@@ -10,19 +10,20 @@ import { resolveConfig } from "./config.js";
 import { IntentCatalog } from "./intents/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
-import { ReviewLogWriter } from "./review/log-writer.js";
-import { readReviewTriggerKeywords } from "./review/log.js";
+import { IntentReviewLogWriter } from "./review/log-writer.js";
+import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
+import { migrateKeywordStateOnce } from "./review/keyword-state-migration.js";
 import {
   normalizeReviewTriggerKeywords,
   type ReviewTriggerKeywords,
 } from "./review/trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { registerSkillTools } from "./skills/index.js";
-import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   intentsPath,
+  keywordCoverageLogPath,
   reviewLogPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
@@ -37,34 +38,14 @@ const EXAMPLE_INTENT_ASSETS_DIR = path.join(
   "assets",
 );
 
-function reviewKeywordSeedFromConfig(
-  config: ResolvedSkillHarnessPluginConfig,
-): Partial<ReviewTriggerKeywords> | undefined {
-  const seed: Partial<ReviewTriggerKeywords> = {};
-  if (config.review.triggers.successfulPattern.keywords !== undefined) {
-    seed.successfulPattern = config.review.triggers.successfulPattern.keywords;
-  }
-  if (config.review.triggers.behaviorFix.keywords !== undefined) {
-    seed.behaviorFix = config.review.triggers.behaviorFix.keywords;
-  }
-  if (config.review.triggers.entityContext.keywords !== undefined) {
-    seed.entityContext = config.review.triggers.entityContext.keywords;
-  }
-  return Object.keys(seed).length > 0 ? seed : undefined;
-}
-
-function readReviewTriggerKeywordsFailOpen(
-  logPath: string,
-  triggerKeywordSeed?: Partial<ReviewTriggerKeywords>,
+function readKeywordCoverageKeywordsFailOpen(
+  writer: KeywordCoverageWriter,
 ): ReviewTriggerKeywords {
   try {
-    return readReviewTriggerKeywords(logPath, triggerKeywordSeed);
+    return writer.readKeywords() ?? normalizeReviewTriggerKeywords({});
   } catch (err) {
-    logger.warn("failed to read review trigger keywords", {
-      error: err,
-      path: logPath,
-    });
-    return normalizeReviewTriggerKeywords(triggerKeywordSeed);
+    logger.warn("failed to read keyword coverage keywords", { error: err });
+    return normalizeReviewTriggerKeywords({});
   }
 }
 
@@ -158,21 +139,31 @@ export function createPlugin(
       const catalog = IntentCatalog.create(dataRoot);
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
-      const logPath = reviewLogPath(dataRoot);
-      let triggerKeywordCache = readReviewTriggerKeywordsFailOpen(
-        logPath,
-        reviewKeywordSeedFromConfig(config),
+      const reviewPath = reviewLogPath(dataRoot);
+      const keywordCoveragePath = keywordCoverageLogPath(dataRoot);
+
+      const keywordCoverageWriter = KeywordCoverageWriter.create(dataRoot);
+      let triggerKeywordCache = readKeywordCoverageKeywordsFailOpen(
+        keywordCoverageWriter,
       );
       const refreshTriggerKeywordCache = () => {
-        triggerKeywordCache = readReviewTriggerKeywordsFailOpen(
-          logPath,
-          reviewKeywordSeedFromConfig(config),
+        triggerKeywordCache = readKeywordCoverageKeywordsFailOpen(
+          keywordCoverageWriter,
         );
       };
-      const reviewLogWriter = ReviewLogWriter.create(dataRoot, {
-        triggerKeywordSeed: () => reviewKeywordSeedFromConfig(config),
-        onAfterWrite: refreshTriggerKeywordCache,
-      });
+
+      // Fail-open one-time cutover. Finalization waits for this before it writes runtime review state.
+      const migrationPromise: Promise<void> = migrateKeywordStateOnce({
+        reviewPath,
+        keywordCoveragePath,
+      })
+        .then(() => {
+          refreshTriggerKeywordCache();
+        })
+        .catch((error) => {
+          logger.warn("keyword state migration failed", { error });
+        });
+      const reviewLogWriter = IntentReviewLogWriter.create(dataRoot);
 
       const refreshRuntimeIntents = () => {
         catalog.load("intents");
@@ -187,7 +178,10 @@ export function createPlugin(
         tracker,
         statsAggregator,
         reviewLogWriter,
+        keywordCoverageWriter,
         triggerKeywords: () => triggerKeywordCache,
+        refreshTriggerKeywords: refreshTriggerKeywordCache,
+        migrationPromise,
         dataRoot,
       };
 

@@ -102,28 +102,3 @@ export function normalizeReviewTriggerKeywords(
     ),
   };
 }
-
-export function mergeReviewTriggerKeywordSeeds(
-  base: ReviewTriggerKeywords,
-  seed: unknown,
-): ReviewTriggerKeywords {
-  const seedRecord =
-    seed && typeof seed === "object" ? (seed as Record<string, unknown>) : {};
-  return normalizeReviewTriggerKeywords(
-    {
-      behaviorFix:
-        seedRecord.behaviorFix === undefined
-          ? base.behaviorFix
-          : seedRecord.behaviorFix,
-      successfulPattern:
-        seedRecord.successfulPattern === undefined
-          ? base.successfulPattern
-          : seedRecord.successfulPattern,
-      entityContext:
-        seedRecord.entityContext === undefined
-          ? base.entityContext
-          : seedRecord.entityContext,
-    },
-    base,
-  );
-}

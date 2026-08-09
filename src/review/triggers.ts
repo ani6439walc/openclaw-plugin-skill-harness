@@ -3,6 +3,7 @@ import { FALLBACK_INTENT_ID } from "../constants.js";
 import {
   DEFAULT_REVIEW_TRIGGER_KEYWORDS,
   type ReviewTriggerKeywords,
+  type TriggerKeywordTarget,
 } from "./trigger-keywords.js";
 
 export const REVIEW_TRIGGER_TYPES = [
@@ -19,13 +20,22 @@ export const REVIEW_TRIGGER_TYPES = [
 
 export type ReviewTrigger = (typeof REVIEW_TRIGGER_TYPES)[number];
 
+export type KeywordTriggerBlockedReason =
+  "agent-error" | "quoted-content" | "missing-context-source" | "threshold";
+
+export interface KeywordTriggerEvaluation {
+  structurallyEligible: boolean;
+  matchedKeywords: string[];
+  blockedReason?: KeywordTriggerBlockedReason;
+}
+
 type TriggerToolCall = {
   name?: string;
   params?: Record<string, unknown>;
   error?: string;
 };
 
-type TriggerState = {
+export type TriggerState = {
   input?: string;
   intent?: { result?: IntentionResult } | IntentionResult;
   skillsUsed?: unknown[];
@@ -122,6 +132,93 @@ function hasEntityContextSourceSignal(
   );
 }
 
+export function findMatchedKeywords(
+  text: string | undefined,
+  keywords: readonly string[],
+): string[] {
+  if (!text) return [];
+  const normalizedText = text.toLocaleLowerCase();
+  return keywords.filter((keyword) =>
+    normalizedText.includes(keyword.toLocaleLowerCase()),
+  );
+}
+
+function keywordProperty(
+  target: TriggerKeywordTarget,
+): keyof ReviewTriggerKeywords {
+  switch (target) {
+    case "successful-pattern":
+      return "successfulPattern";
+    case "behavior-fix":
+      return "behaviorFix";
+    case "entity-context":
+      return "entityContext";
+  }
+}
+
+export function checkStructuralEligibility(
+  target: TriggerKeywordTarget,
+  state: TriggerState,
+  config: ResolvedReviewConfig["triggers"],
+): { eligible: boolean; reason?: KeywordTriggerBlockedReason } {
+  const toolCalls = state.toolCalls ?? [];
+  const text = `${state.input ?? ""}\n${state.result ?? ""}`;
+
+  switch (target) {
+    case "successful-pattern": {
+      if (state.error) {
+        return { eligible: false, reason: "agent-error" };
+      }
+      const meetsToolCallThreshold =
+        toolCalls.length >= config.successfulPattern.toolCalls;
+      const hasSkillsUsed = (state.skillsUsed?.length ?? 0) > 0;
+      if (!meetsToolCallThreshold && !hasSkillsUsed) {
+        return { eligible: false, reason: "threshold" };
+      }
+      return { eligible: true };
+    }
+    case "behavior-fix": {
+      if (isQuotedContentPrompt(state.input)) {
+        return { eligible: false, reason: "quoted-content" };
+      }
+      return { eligible: true };
+    }
+    case "entity-context": {
+      if (!hasEntityContextSourceSignal(text, toolCalls)) {
+        return { eligible: false, reason: "missing-context-source" };
+      }
+      return { eligible: true };
+    }
+  }
+}
+
+export function evaluateKeywordTrigger(
+  target: TriggerKeywordTarget,
+  state: TriggerState,
+  config: ResolvedReviewConfig["triggers"],
+  triggerKeywords: ReviewTriggerKeywords = DEFAULT_REVIEW_TRIGGER_KEYWORDS,
+): KeywordTriggerEvaluation {
+  const structural = checkStructuralEligibility(target, state, config);
+  if (!structural.eligible) {
+    return {
+      structurallyEligible: false,
+      matchedKeywords: [],
+      blockedReason: structural.reason,
+    };
+  }
+
+  const text = `${state.input ?? ""}\n${state.result ?? ""}`;
+  const matchedKeywords = findMatchedKeywords(
+    text,
+    triggerKeywords[keywordProperty(target)],
+  );
+
+  return {
+    structurallyEligible: matchedKeywords.length > 0,
+    matchedKeywords,
+  };
+}
+
 export function checkReviewTriggers(
   state: TriggerState,
   turnNumber: number,
@@ -149,14 +246,16 @@ export function checkReviewTriggers(
   ) {
     matches.push("process-gap");
   }
-  if (
-    config.successfulPattern.enabled &&
-    !state.error &&
-    (toolCalls.length >= config.successfulPattern.toolCalls ||
-      (state.skillsUsed?.length ?? 0) > 0) &&
-    includesAnyKeyword(text, triggerKeywords.successfulPattern)
-  ) {
-    matches.push("successful-pattern");
+  if (config.successfulPattern.enabled) {
+    const evaluation = evaluateKeywordTrigger(
+      "successful-pattern",
+      state,
+      config,
+      triggerKeywords,
+    );
+    if (evaluation.structurallyEligible) {
+      matches.push("successful-pattern");
+    }
   }
   if (
     config.satisfactionCheck.enabled &&
@@ -179,19 +278,27 @@ export function checkReviewTriggers(
   ) {
     matches.push("weak-intent");
   }
-  if (
-    config.behaviorFix.enabled &&
-    !isQuotedContentPrompt(state.input) &&
-    includesAnyKeyword(state.input, triggerKeywords.behaviorFix)
-  ) {
-    matches.push("behavior-fix");
+  if (config.behaviorFix.enabled) {
+    const evaluation = evaluateKeywordTrigger(
+      "behavior-fix",
+      state,
+      config,
+      triggerKeywords,
+    );
+    if (evaluation.structurallyEligible) {
+      matches.push("behavior-fix");
+    }
   }
-  if (
-    config.entityContext.enabled &&
-    includesAnyKeyword(text, triggerKeywords.entityContext) &&
-    hasEntityContextSourceSignal(text, toolCalls)
-  ) {
-    matches.push("entity-context");
+  if (config.entityContext.enabled) {
+    const evaluation = evaluateKeywordTrigger(
+      "entity-context",
+      state,
+      config,
+      triggerKeywords,
+    );
+    if (evaluation.structurallyEligible) {
+      matches.push("entity-context");
+    }
   }
 
   return matches;

@@ -47,6 +47,7 @@ const DEFAULT_REVIEW = {
   modelFallback: undefined,
   thinking: "medium",
   timeoutMs: 30_000,
+  keywordCoverage: { everyAcceptedTurns: 50 },
   triggers: {
     skillCandidate: { enabled: true, toolCalls: 5 },
     skillPlacement: { enabled: true },
@@ -150,6 +151,9 @@ const ReviewSchema = z
     modelFallback: z.string().optional().catch(undefined),
     thinking: ThinkLevelSchema,
     timeoutMs: boundedInt(30_000, 250, 600_000),
+    keywordCoverage: z
+      .object({ everyAcceptedTurns: boundedInt(50, 10, 1_000) })
+      .catch(DEFAULT_REVIEW.keywordCoverage),
     triggers: z
       .object({
         skillCandidate: z
@@ -171,7 +175,6 @@ const ReviewSchema = z
           .object({
             enabled: enabledSchema,
             toolCalls: boundedInt(5, 1, 100),
-            keywords: StringListSchema.optional().catch(undefined),
           })
           .catch(DEFAULT_REVIEW.triggers.successfulPattern),
         satisfactionCheck: z
@@ -193,16 +196,10 @@ const ReviewSchema = z
           })
           .catch(DEFAULT_REVIEW.triggers.weakIntent),
         behaviorFix: z
-          .object({
-            enabled: enabledSchema,
-            keywords: StringListSchema.optional().catch(undefined),
-          })
+          .object({ enabled: enabledSchema })
           .catch(DEFAULT_REVIEW.triggers.behaviorFix),
         entityContext: z
-          .object({
-            enabled: enabledSchema,
-            keywords: StringListSchema.optional().catch(undefined),
-          })
+          .object({ enabled: enabledSchema })
           .catch(DEFAULT_REVIEW.triggers.entityContext),
       })
       .catch(DEFAULT_REVIEW.triggers),

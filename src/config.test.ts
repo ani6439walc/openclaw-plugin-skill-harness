@@ -46,6 +46,7 @@ describe("resolveConfig", () => {
           behaviorFix: { enabled: true },
           entityContext: { enabled: true },
         },
+        keywordCoverage: { everyAcceptedTurns: 50 },
       });
       expect(result.instruction).toMatchObject({
         enabled: true,
@@ -92,13 +93,12 @@ describe("resolveConfig", () => {
             processGap: { toolFailures: 500 },
             successfulPattern: {
               toolCalls: 0,
-              keywords: ["ship it", "ship it"],
             },
             satisfactionCheck: { everyTurns: 3 },
             missingIntent: { enabled: false },
             weakIntent: { confidenceBelow: 2 },
-            behaviorFix: { enabled: false, keywords: [] },
-            entityContext: { enabled: false, keywords: ["看一下"] },
+            behaviorFix: { enabled: false },
+            entityContext: { enabled: false },
           },
         },
       });
@@ -116,14 +116,49 @@ describe("resolveConfig", () => {
           successfulPattern: {
             enabled: true,
             toolCalls: 1,
-            keywords: ["ship it", "ship it"],
           },
           satisfactionCheck: { enabled: true, everyTurns: 3 },
           missingIntent: { enabled: false },
           weakIntent: { enabled: true, confidenceBelow: 1 },
-          behaviorFix: { enabled: false, keywords: [] },
-          entityContext: { enabled: false, keywords: ["看一下"] },
+          behaviorFix: { enabled: false },
+          entityContext: { enabled: false },
         },
+      });
+    });
+
+    it("ignores removed legacy review trigger keyword seeds", () => {
+      const result = resolveConfig({
+        review: {
+          triggers: {
+            successfulPattern: { keywords: ["ship it"] },
+            behaviorFix: { keywords: ["wrong"] },
+            entityContext: { keywords: ["看一下"] },
+          },
+        },
+      });
+
+      expect(result.review.triggers.successfulPattern).not.toHaveProperty(
+        "keywords",
+      );
+      expect(result.review.triggers.behaviorFix).not.toHaveProperty("keywords");
+      expect(result.review.triggers.entityContext).not.toHaveProperty(
+        "keywords",
+      );
+    });
+
+    it("clamps keyword coverage cadence without adding a coverage enable flag", () => {
+      expect(
+        resolveConfig({
+          review: { keywordCoverage: { everyAcceptedTurns: 0 } },
+        }).review.keywordCoverage.everyAcceptedTurns,
+      ).toBe(10);
+      expect(
+        resolveConfig({
+          review: { keywordCoverage: { everyAcceptedTurns: 5_000 } },
+        }).review.keywordCoverage.everyAcceptedTurns,
+      ).toBe(1_000);
+      expect(resolveConfig({ review: {} }).review.keywordCoverage).toEqual({
+        everyAcceptedTurns: 50,
       });
     });
 

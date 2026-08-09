@@ -232,6 +232,20 @@
             "maximum": 1800000,
             "default": 180000
           },
+          "keywordCoverage": {
+            "type": "object",
+            "description": "Automatic cross-session keyword coverage review cadence for accepted routed turns.",
+            "additionalProperties": false,
+            "properties": {
+              "everyAcceptedTurns": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 1000,
+                "default": 50
+              }
+            },
+            "default": {}
+          },
           "triggers": {
             "type": "object",
             "additionalProperties": false,
@@ -284,7 +298,7 @@
                   "keywords": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Deprecated seed for triggerKeywords.successfulPattern in runtime review.json. Prefer host-managed trigger keyword updates."
+                    "description": "Deprecated legacy seed. Accepted for configuration compatibility but ignored at runtime."
                   }
                 }
               },
@@ -329,7 +343,7 @@
                   "keywords": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Deprecated seed for triggerKeywords.behaviorFix in runtime review.json. Prefer host-managed trigger keyword updates."
+                    "description": "Deprecated legacy seed. Accepted for configuration compatibility but ignored at runtime."
                   }
                 }
               },
@@ -341,7 +355,7 @@
                   "keywords": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Deprecated seed for triggerKeywords.entityContext in runtime review.json. Prefer host-managed trigger keyword updates."
+                    "description": "Deprecated legacy seed. Accepted for configuration compatibility but ignored at runtime."
                   }
                 }
               }

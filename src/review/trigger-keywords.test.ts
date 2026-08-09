@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_REVIEW_TRIGGER_KEYWORDS,
-  mergeReviewTriggerKeywordSeeds,
   normalizeReviewTriggerKeywords,
   normalizeKeywordList,
 } from "./trigger-keywords.js";
@@ -75,22 +74,5 @@ describe("review trigger keyword normalization", () => {
     expect(normalizeReviewTriggerKeywords("not an object")).toEqual(
       DEFAULT_REVIEW_TRIGGER_KEYWORDS,
     );
-  });
-
-  it("merges keyword seeds without replacing omitted fields", () => {
-    expect(
-      mergeReviewTriggerKeywordSeeds(
-        {
-          behaviorFix: ["wrong"],
-          successfulPattern: ["done"],
-          entityContext: ["先看"],
-        },
-        { successfulPattern: "ship it", entityContext: ["看看"] },
-      ),
-    ).toEqual({
-      behaviorFix: ["wrong"],
-      successfulPattern: ["ship it"],
-      entityContext: ["看看"],
-    });
   });
 });
