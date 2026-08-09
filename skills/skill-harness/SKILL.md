@@ -167,20 +167,19 @@ Do not use this mode for intent `fastpath.keywords` or `candidate.keywords`; rou
 
 Read and follow `references/keyword-audit.md`. Keep these checkpoints visible:
 
-1. **Pin evidence** — resolve the active data root, require current schema-v5 `review.json`, record retained sessions and the configured successful-pattern tool-call threshold.
-2. **Generate a read-only report** — run `scripts/review-keyword-audit.py`; treat unmatched documents as structural proxies, not semantic misses, and keep snippets disabled unless local content inspection is explicitly necessary.
-3. **Label evidence** — build a private ref-only fixture from `templates/review-keyword-labels.json`, rerun with `--labels`, and inspect TP/FP/FN plus collisions locally; frequency alone is not approval.
-4. **Proposal checkpoint** — present before/after coverage and at most three exact additions/removals per target; wait for explicit confirmation.
-5. **Report and proposal only** — deliver the evidence-backed delta after confirmation, but do not invoke or emulate Intent Review's production-owned writer and do not hand-edit `review.json`.
+1. **Generate a read-only report** — run `scripts/review-keyword-audit.py`; it resolves the default data root, validates current schema-v6 `review.json` plus schema-v1 `keyword-coverage.json`, and records provenance. Treat unmatched documents as structural proxies, not semantic misses, and keep snippets disabled unless local content inspection is explicitly necessary.
+2. **Label evidence** — build a private ref-only fixture from `templates/review-keyword-labels.json`, rerun with `--labels`, and inspect TP/FP/FN plus collisions locally; frequency alone is not approval.
+3. **Proposal checkpoint** — present before/after coverage and at most three exact additions/removals per target; wait for explicit confirmation.
+4. **Report and proposal only** — deliver the evidence-backed delta after confirmation, but do not invoke or emulate Intent Review's production-owned writer and do not hand-edit `review.json` or `keyword-coverage.json`.
 
 ### Failure modes
 
-| Trigger                                   | First fix                                           | Fallback                                       |
-| ----------------------------------------- | --------------------------------------------------- | ---------------------------------------------- |
-| **Missing or incompatible `review.json`** | Stop and report the schema/state mismatch           | Do not invent defaults or migrate runtime data |
-| **Too little retained evidence**          | Keep phrases as candidates and gather more sessions | Make no keyword change                         |
-| **Candidate has collisions**              | Narrow the exact phrase and rerun labeling          | Retain the current keyword set                 |
-| **User requests direct runtime mutation** | Explain that production Review owns keyword writes  | Deliver an approved but unapplied delta        |
+| Trigger                                   | First fix                                                                          | Fallback                                       |
+| ----------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **Missing or incompatible runtime state** | Stop and report the `review.json` or `keyword-coverage.json` schema/state mismatch | Do not invent defaults or migrate runtime data |
+| **Too little retained evidence**          | Keep phrases as candidates and gather more sessions                                | Make no keyword change                         |
+| **Candidate has collisions**              | Narrow the exact phrase and rerun labeling                                         | Retain the current keyword set                 |
+| **User requests direct runtime mutation** | Explain that production Review owns keyword writes                                 | Deliver an approved but unapplied delta        |
 
 ### Anti-patterns
 

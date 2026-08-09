@@ -186,8 +186,18 @@ def source_commit() -> str | None:
 
 def load_review_log(path: Path) -> dict[str, Any]:
     value = load_json(path)
-    if not isinstance(value, dict) or value.get("schemaVersion") != 5:
-        raise ValueError(f"{path} must be a current schema-v5 review log")
+    if not isinstance(value, dict) or value.get("schemaVersion") != 6:
+        raise ValueError(f"{path} must be a current schema-v6 review log")
+    for field in ("processedEvents", "historicalKeywordAudits"):
+        if not isinstance(value.get(field), dict):
+            raise ValueError(f"{path} has an invalid {field}")
+    return value
+
+
+def load_keyword_coverage_log(path: Path) -> dict[str, Any]:
+    value = load_json(path)
+    if not isinstance(value, dict) or value.get("schemaVersion") != 1:
+        raise ValueError(f"{path} must be a current schema-v1 keyword coverage log")
     keywords = value.get("triggerKeywords")
     if not isinstance(keywords, dict):
         raise ValueError(f"{path} is missing triggerKeywords")
@@ -196,6 +206,9 @@ def load_review_log(path: Path) -> dict[str, Any]:
             isinstance(item, str) for item in keywords[field]
         ):
             raise ValueError(f"{path} has an invalid triggerKeywords.{field}")
+    for field in ("processedKeywordEvents", "coverageEpochs"):
+        if not isinstance(value.get(field), dict):
+            raise ValueError(f"{path} has an invalid {field}")
     return value
 
 
@@ -329,33 +342,50 @@ def stats_summary(path: Path, analyzed_states: int) -> dict[str, Any] | None:
     }
 
 
-def review_change_summary(log: dict[str, Any]) -> dict[str, Any]:
+def review_history_summary(log: dict[str, Any]) -> dict[str, Any]:
+    counts: Counter[str] = Counter()
+    ordinary_events = log["processedEvents"]
+    historical_keyword_audits = log["historicalKeywordAudits"]
+    for event in historical_keyword_audits.values():
+        if not isinstance(event, dict):
+            continue
+        outcome = event.get("outcome")
+        if isinstance(outcome, str):
+            counts[outcome] += 1
+    return {
+        "ordinaryEvents": len(ordinary_events),
+        "historicalKeywordAudits": len(historical_keyword_audits),
+        "historicalKeywordAuditOutcomes": dict(sorted(counts.items())),
+        "keywordAttributionAvailable": False,
+        "note": (
+            "Historical keyword audits do not preserve the matched keyword or keyword-set version; "
+            "do not replay them against the current list."
+        ),
+    }
+
+
+def keyword_change_summary(log: dict[str, Any]) -> dict[str, Any]:
     counts: Counter[str] = Counter()
     additions: Counter[str] = Counter()
     removals: Counter[str] = Counter()
-    events = log.get("processedEvents")
-    if not isinstance(events, dict):
-        events = {}
+    events = log["processedKeywordEvents"]
     for event in events.values():
         if not isinstance(event, dict):
             continue
         outcome = event.get("outcome")
         if isinstance(outcome, str):
             counts[outcome] += 1
-        changes = event.get("changes")
-        if not isinstance(changes, list):
+        mutations = event.get("mutations")
+        if not isinstance(mutations, list):
             continue
-        for change in changes:
-            if not isinstance(change, dict) or change.get("targetKind") != "trigger-keywords":
+        for mutation in mutations:
+            if not isinstance(mutation, dict) or not isinstance(mutation.get("target"), str):
                 continue
-            target = change.get("targetTrigger")
-            keyword_change = change.get("keywordChange")
-            if not isinstance(target, str) or not isinstance(keyword_change, dict):
-                continue
-            for keyword in keyword_change.get("add", []):
+            target = mutation["target"]
+            for keyword in mutation.get("add", []):
                 if isinstance(keyword, str):
                     additions[f"{target}:{keyword}"] += 1
-            for keyword in keyword_change.get("remove", []):
+            for keyword in mutation.get("remove", []):
                 if isinstance(keyword, str):
                     removals[f"{target}:{keyword}"] += 1
     return {
@@ -363,11 +393,7 @@ def review_change_summary(log: dict[str, Any]) -> dict[str, Any]:
         "outcomes": dict(sorted(counts.items())),
         "keywordAdditions": dict(sorted(additions.items())),
         "keywordRemovals": dict(sorted(removals.items())),
-        "keywordAttributionAvailable": False,
-        "note": (
-            "Processed events do not preserve the matched keyword or keyword-set version; "
-            "do not replay historical triggers against the current list."
-        ),
+        "coverageEpochs": len(log["coverageEpochs"]),
     }
 
 
@@ -593,9 +619,12 @@ def main() -> int:
     if args.include_snippets and args.stdout:
         raise SystemExit("--include-snippets requires --output; refusing private snippets on stdout")
     review_path = args.data_root / "review.json"
+    keyword_coverage_path = args.data_root / "keyword-coverage.json"
     sessions_dir = args.data_root / "sessions"
     if not review_path.is_file():
-        raise SystemExit(f"missing current keyword source: {review_path}")
+        raise SystemExit(f"missing current review log: {review_path}")
+    if not keyword_coverage_path.is_file():
+        raise SystemExit(f"missing current keyword coverage log: {keyword_coverage_path}")
     if not sessions_dir.is_dir():
         raise SystemExit(f"missing session directory: {sessions_dir}")
 
@@ -607,9 +636,15 @@ def main() -> int:
         config_path, args.successful_tool_calls
     )
     review_sha256 = sha256_file(review_path)
+    keyword_coverage_sha256 = sha256_file(keyword_coverage_path)
     review_log = load_review_log(review_path)
+    keyword_coverage_log = load_keyword_coverage_log(keyword_coverage_path)
     if sha256_file(review_path) != review_sha256:
         raise SystemExit(f"review log changed while being read: {review_path}")
+    if sha256_file(keyword_coverage_path) != keyword_coverage_sha256:
+        raise SystemExit(
+            f"keyword coverage log changed while being read: {keyword_coverage_path}"
+        )
     records, session_errors = load_states(sessions_dir)
     targets = TARGETS if args.target == "all" else (args.target,)
     labels = load_labels(args.labels) if args.labels else None
@@ -619,6 +654,7 @@ def main() -> int:
         "dataRoot": str(args.data_root),
         "provenance": {
             "reviewSha256": review_sha256,
+            "keywordCoverageSha256": keyword_coverage_sha256,
             "scriptSha256": sha256_file(SCRIPT_PATH),
             "sourceCommit": source_commit(),
         },
@@ -634,15 +670,17 @@ def main() -> int:
         },
         "inputs": {
             "reviewLog": str(review_path),
+            "keywordCoverageLog": str(keyword_coverage_path),
             "sessionsDirectory": str(sessions_dir),
             "labels": str(args.labels) if args.labels else None,
             "sessionErrors": session_errors,
         },
         "runtimeStats": stats_summary(args.data_root / "stats.json", len(records)),
-        "reviewHistory": review_change_summary(review_log),
+        "reviewHistory": review_history_summary(review_log),
+        "keywordHistory": keyword_change_summary(keyword_coverage_log),
         "targets": {},
     }
-    keyword_root = review_log["triggerKeywords"]
+    keyword_root = keyword_coverage_log["triggerKeywords"]
     for target in targets:
         report["targets"][target] = analyze_target(
             records,

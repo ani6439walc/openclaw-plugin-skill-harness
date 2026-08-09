@@ -2,11 +2,13 @@
 
 Use this workflow to analyze **Intent Review trigger keywords** and produce a bounded proposal from retained Skill Harness runtime evidence.
 
-This mode covers only these schema-v5 `review.json` fields:
+This mode reads current trigger keywords from schema-v1 `keyword-coverage.json`:
 
 - `triggerKeywords.successfulPattern`
 - `triggerKeywords.behaviorFix`
 - `triggerKeywords.entityContext`
+
+It reads ordinary Review outcome counts from schema-v6 `review.json.processedEvents`, historical keyword-triggered audit counts from `review.json.historicalKeywordAudits`, and keyword mutation / coverage epoch history from `keyword-coverage.json`.
 
 It does **not** analyze intent `fastpath.keywords` or `candidate.keywords`. For those, use design or inventory mode and require labeled positive and collision fixtures under `references/format.md`.
 
@@ -14,44 +16,36 @@ It does **not** analyze intent `fastpath.keywords` or `candidate.keywords`. For 
 
 Runtime sessions can contain private user and assistant text. Keep reports local, do not paste raw snippets into chat or external artifacts, and never read credential files. The bundled audit script is report-only and omits snippets unless `--include-snippets` is explicitly supplied. It requires either `--output` or an explicit `--stdout`; `--output` is the safe default and atomically creates a mode-`0600` local report. Snippets are refused on stdout.
 
-This workflow is report and proposal only. Keyword persistence belongs to production Intent Review; do not invoke, emulate, or bypass its host-owned writer, and never hand-edit `review.json`.
+This workflow is report and proposal only. Keyword persistence belongs to production Intent Review; do not invoke, emulate, or bypass its host-owned writer, and never hand-edit `review.json` or `keyword-coverage.json`.
 
-## Step 1 — Identify the retained evidence window
+## Step 1 — Generate and inspect the retained evidence window
 
-Resolve the active paths with the same OpenClaw environment convention used by the installed runtime:
+The audit script automatically resolves the default OpenClaw state/config paths, loads current schema-v6 `review.json` and schema-v1 `keyword-coverage.json`, reads retained sessions, and records the effective successful-pattern threshold and input provenance. Do not reconstruct those defaults in a shell wrapper.
 
-```bash
-STATE_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
-CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$STATE_DIR/openclaw.json}"
-DATA_ROOT="$STATE_DIR/plugins/skill-harness"
-```
+Use `--data-root` or `--config` only for an intentionally nonstandard layout. The generated report records these inputs:
 
-The audit script performs this resolution automatically. `--data-root` and `--config` are explicit overrides for nonstandard layouts.
-
-Record these inputs before analysis:
-
-- `review.json` — current schema-v5 keyword source and processed Review outcomes
-- `sessions/*.json` — retained current/history turn snapshots
-- `stats.json` — aggregate accepted-turn count used only as a retention/coverage cross-check
+- schema-v6 `review.json` ordinary and historical Review audit outcomes
+- schema-v1 `keyword-coverage.json` trigger keywords, mutation events, target cursors/watermarks, and coverage epochs
+- retained `sessions/*.json` snapshots and `stats.json` as a retention/coverage cross-check
 - effective `plugins.entries["skill-harness"].config.review.triggers.successfulPattern.toolCalls` threshold
-- current `review.json` SHA-256, exact script SHA-256, source commit when available, and retained-state analysis window
+- both runtime JSON hashes, script hash, source commit when available, and observed retained-state analysis window
 
 The script does not snapshot or hash session files. It reads each retained state once and reports the timestamps it observed, so an active runtime can change the session set during analysis. Use a quiescent copied data root when an immutable cross-file snapshot is required, and do not describe `analysisWindow` as a pinned session snapshot.
 
-Schema v5 processed events do **not** preserve the keyword that matched or the keyword-set version. Historical events can support outcome counts, but they cannot be replayed against the current keyword list for keyword attribution.
+Historical keyword audits do **not** preserve the keyword that matched or the keyword-set version. They can support outcome counts, but cannot be replayed against the current keyword list for keyword attribution. `processedKeywordEvents` records bounded mutation outcomes, not matched-turn attribution.
 
 The script reads the threshold from `CONFIG_PATH`; `--successful-tool-calls` is an explicit override. The report's `configuration.thresholdSource` must say `openclaw-config`, `cli-override`, `default`, or `default-invalid-config`. The effective range is `1`–`100`, with source default `5`.
 
 The report records bounded provenance:
 
-- `provenance.reviewSha256` — SHA-256 of the exact `review.json` read; the script stops if that file changes during loading
+- `provenance.reviewSha256` and `provenance.keywordCoverageSha256` — SHA-256 values of both exact runtime JSON inputs; the script stops if either changes during loading
 - `provenance.scriptSha256` — SHA-256 of the exact audit script bytes
 - `provenance.sourceCommit` — repository `HEAD` when Git metadata is available; `null` in packaged/non-Git installs
 - `analysisWindow` — earliest retained state start, latest retained state end, timestamped-state count, and total analyzed-state count
 
 Treat `scriptSha256` as the portable source identity when `sourceCommit` is `null`. A partial timestamp window is allowed, but disclose `statesWithTimestamps < statesAnalyzed`; do not infer missing timestamps.
 
-Completion criterion: the source paths, schema version, available hashes, observed retained analysis window, threshold value, threshold source, and session-snapshot limitation are disclosed. If `review.json` is absent or not schema v5, stop instead of inventing defaults or migrating it.
+Completion criterion: the source paths, schema versions, available hashes, observed retained analysis window, threshold value, threshold source, and session-snapshot limitation are disclosed. If either runtime JSON input is absent or not its current schema, stop instead of inventing defaults or migrating it.
 
 ## Step 2 — Generate the read-only report
 
@@ -59,7 +53,6 @@ From the repository root:
 
 ```bash
 python3 skills/skill-harness/scripts/review-keyword-audit.py \
-  --data-root ~/.openclaw/plugins/skill-harness \
   --output /tmp/skill-harness-keyword-audit.json
 ```
 
@@ -96,7 +89,7 @@ The unlabeled report includes:
 - ranked CJK substrings and Latin token n-grams found in unmatched eligible documents
 - local session/turn references for manual labeling
 - overlap with other structurally eligible trigger targets
-- processed Review outcome and prior keyword-change counts
+- ordinary/historical Review outcome counts plus prior keyword mutation and coverage-epoch counts
 - aggregate `stats.json` turns versus retained session states
 
 These are **structural match proxies**, not semantic hits or misses. An unmatched eligible document is not a false negative until a human label says that target should have triggered. Candidate phrases are discovery leads, not recommendations; phrase frequency does not prove semantic correctness.

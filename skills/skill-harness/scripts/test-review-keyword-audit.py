@@ -21,7 +21,20 @@ class ReviewKeywordAuditTest(unittest.TestCase):
         (self.root / "review.json").write_text(
             json.dumps(
                 {
-                    "schemaVersion": 5,
+                    "schemaVersion": 6,
+                    "createdAt": "2026-07-01T00:00:00.000Z",
+                    "updatedAt": "2026-07-01T00:00:00.000Z",
+                    "processedEvents": {},
+                    "reviewedSkillEpochs": {},
+                    "historicalKeywordAudits": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (self.root / "keyword-coverage.json").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
                     "createdAt": "2026-07-01T00:00:00.000Z",
                     "updatedAt": "2026-07-01T00:00:00.000Z",
                     "triggerKeywords": {
@@ -29,8 +42,9 @@ class ReviewKeywordAuditTest(unittest.TestCase):
                         "behaviorFix": ["wrong"],
                         "entityContext": ["memory alias"],
                     },
-                    "processedEvents": {},
-                    "reviewedSkillEpochs": {},
+                    "processedKeywordEvents": {},
+                    "targets": {},
+                    "coverageEpochs": {},
                 }
             ),
             encoding="utf-8",
@@ -107,8 +121,22 @@ class ReviewKeywordAuditTest(unittest.TestCase):
             report["provenance"]["reviewSha256"],
             hashlib.sha256((self.root / "review.json").read_bytes()).hexdigest(),
         )
+        self.assertEqual(
+            report["provenance"]["keywordCoverageSha256"],
+            hashlib.sha256((self.root / "keyword-coverage.json").read_bytes()).hexdigest(),
+        )
         self.assertEqual(report["provenance"]["scriptSha256"], hashlib.sha256(SCRIPT.read_bytes()).hexdigest())
         self.assertIn("sourceCommit", report["provenance"])
+        self.assertEqual(
+            report["keywordHistory"],
+            {
+                "events": 0,
+                "outcomes": {},
+                "keywordAdditions": {},
+                "keywordRemovals": {},
+                "coverageEpochs": 0,
+            },
+        )
         self.assertEqual(
             report["analysisWindow"],
             {
@@ -240,9 +268,9 @@ class ReviewKeywordAuditTest(unittest.TestCase):
         self.assertEqual(report["configuration"]["thresholdSource"], "openclaw-config")
         self.assertEqual(report["targets"]["successful-pattern"]["summary"]["eligibleDocs"], 1)
 
-    def test_rejects_non_current_review_log(self) -> None:
+    def test_rejects_schema_v5_review_log(self) -> None:
         (self.root / "review.json").write_text(
-            json.dumps({"schemaVersion": 4}), encoding="utf-8"
+            json.dumps({"schemaVersion": 5}), encoding="utf-8"
         )
         result = subprocess.run(
             [
@@ -256,7 +284,7 @@ class ReviewKeywordAuditTest(unittest.TestCase):
             text=True,
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("schema-v5", result.stderr)
+        self.assertIn("schema-v6", result.stderr)
 
 
 if __name__ == "__main__":
