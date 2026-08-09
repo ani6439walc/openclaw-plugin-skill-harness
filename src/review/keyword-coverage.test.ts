@@ -40,7 +40,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
@@ -62,7 +66,10 @@ describe("discoverKeywordCoverageCandidates", () => {
       current: {
         input: "implement feature",
         result: "done, success", // Does NOT match existing keywords
-        toolCalls: Array.from({ length: 5 }, (_, i) => ({ name: `tool-${i}`, params: {} })),
+        toolCalls: Array.from({ length: 5 }, (_, i) => ({
+          name: `tool-${i}`,
+          params: {},
+        })),
         timestamps: { start: new Date().toISOString() },
       },
     });
@@ -71,16 +78,28 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
 
     expect(result.additions["successful-pattern"]).toHaveLength(1);
-    expect(result.additions["successful-pattern"][0].ref).toMatch(/^[a-f0-9]{64}$/);
-    expect(result.additions["successful-pattern"][0].input).toBe("implement feature");
-    expect(result.additions["successful-pattern"][0].result).toBe("done, success");
-    expect(result.additions["successful-pattern"][0].toolSummary).toHaveLength(5);
+    expect(result.additions["successful-pattern"][0].ref).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+    expect(result.additions["successful-pattern"][0].input).toBe(
+      "implement feature",
+    );
+    expect(result.additions["successful-pattern"][0].result).toBe(
+      "done, success",
+    );
+    expect(result.additions["successful-pattern"][0].toolSummary).toHaveLength(
+      5,
+    );
   });
 
   it("selects successful-pattern candidates with skillsUsed (coverage gap)", () => {
@@ -97,7 +116,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
@@ -120,7 +143,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
@@ -141,7 +168,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
@@ -154,7 +185,10 @@ describe("discoverKeywordCoverageCandidates", () => {
       current: {
         input: "implement feature",
         result: "完成，verified", // MATCHES existing keywords
-        toolCalls: Array.from({ length: 5 }, (_, i) => ({ name: `tool-${i}`, params: {} })),
+        toolCalls: Array.from({ length: 5 }, (_, i) => ({
+          name: `tool-${i}`,
+          params: {},
+        })),
         timestamps: { start: new Date().toISOString() },
       },
     });
@@ -163,7 +197,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
@@ -184,19 +222,26 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
 
     expect(result.additions["behavior-fix"]).toHaveLength(1);
-    expect(result.additions["behavior-fix"][0].input).toBe("adjust approach, try different method");
+    expect(result.additions["behavior-fix"][0].input).toBe(
+      "adjust approach, try different method",
+    );
   });
 
   it("excludes behavior-fix when input contains quoted content markers", () => {
     const session = createSession("session-6", {
       current: {
-        input: "Write a dream diary entry from these memory fragments: adjust approach",
+        input:
+          "Write a dream diary entry from these memory fragments: adjust approach",
         result: "done",
         timestamps: { start: new Date().toISOString() },
       },
@@ -206,7 +251,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
@@ -228,7 +277,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
@@ -249,7 +302,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
@@ -273,12 +330,18 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions,
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
 
-    expect(result.additions["successful-pattern"].length).toBeLessThanOrEqual(8);
+    expect(result.additions["successful-pattern"].length).toBeLessThanOrEqual(
+      8,
+    );
   });
 
   it("rotates cursor across sessions deterministically", () => {
@@ -288,7 +351,10 @@ describe("discoverKeywordCoverageCandidates", () => {
         current: {
           input: `input ${i}`,
           result: `done ${i}`, // Does NOT match existing keywords
-          toolCalls: Array.from({ length: 5 }, (_, j) => ({ name: `tool-${j}`, params: {} })),
+          toolCalls: Array.from({ length: 5 }, (_, j) => ({
+            name: `tool-${j}`,
+            params: {},
+          })),
           timestamps: { start: new Date().toISOString() },
         },
       }),
@@ -298,7 +364,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions,
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result1 = discoverKeywordCoverageCandidates(input1);
@@ -308,7 +378,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions,
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 3, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 3,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result2 = discoverKeywordCoverageCandidates(input2);
@@ -342,12 +416,18 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session1, session2],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     };
 
     const result = discoverKeywordCoverageCandidates(input);
 
-    const refs = result.additions["successful-pattern"].map((c: CoverageCandidateDocument) => c.ref);
+    const refs = result.additions["successful-pattern"].map(
+      (c: CoverageCandidateDocument) => c.ref,
+    );
     const uniqueRefs = new Set(refs);
     expect(uniqueRefs.size).toBe(refs.length);
   });
@@ -389,14 +469,18 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [sessionA, sessionB],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     });
 
-    expect(result.additions["successful-pattern"].slice(0, 3).map((doc) => doc.input)).toEqual([
-      "a-0",
-      "b-0",
-      "a-1",
-    ]);
+    expect(
+      result.additions["successful-pattern"]
+        .slice(0, 3)
+        .map((doc) => doc.input),
+    ).toEqual(["a-0", "b-0", "a-1"]);
   });
 
   it("includes the complete cross-session hit set for one removable current keyword", () => {
@@ -405,7 +489,10 @@ describe("discoverKeywordCoverageCandidates", () => {
         current: {
           input: `task ${sessionId}`,
           result: "verified",
-          toolCalls: Array.from({ length: 5 }, () => ({ name: "read", params: {} })),
+          toolCalls: Array.from({ length: 5 }, () => ({
+            name: "read",
+            params: {},
+          })),
           timestamps: { start: new Date().toISOString() },
         },
       }),
@@ -415,13 +502,16 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions,
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     });
 
-    expect(result.removals["successful-pattern"].map((doc) => doc.input)).toEqual([
-      "task a",
-      "task b",
-    ]);
+    expect(
+      result.removals["successful-pattern"].map((doc) => doc.input),
+    ).toEqual(["task a", "task b"]);
   });
 
   it("rejects removable keyword evidence from fewer than two sessions", () => {
@@ -430,14 +520,20 @@ describe("discoverKeywordCoverageCandidates", () => {
         {
           input: "first",
           result: "verified",
-          toolCalls: Array.from({ length: 5 }, () => ({ name: "read", params: {} })),
+          toolCalls: Array.from({ length: 5 }, () => ({
+            name: "read",
+            params: {},
+          })),
           timestamps: { start: new Date().toISOString() },
         },
       ],
       current: {
         input: "second",
         result: "verified",
-        toolCalls: Array.from({ length: 5 }, () => ({ name: "read", params: {} })),
+        toolCalls: Array.from({ length: 5 }, () => ({
+          name: "read",
+          params: {},
+        })),
         timestamps: { start: new Date().toISOString() },
       },
     });
@@ -446,7 +542,11 @@ describe("discoverKeywordCoverageCandidates", () => {
       sessions: [session],
       config,
       triggerKeywords: keywords,
-      cursor: { "successful-pattern": 0, "behavior-fix": 0, "entity-context": 0 },
+      cursor: {
+        "successful-pattern": 0,
+        "behavior-fix": 0,
+        "entity-context": 0,
+      },
     });
 
     expect(result.removals["successful-pattern"]).toEqual([]);

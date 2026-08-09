@@ -143,11 +143,13 @@ export function createPlugin(
       const keywordCoveragePath = keywordCoverageLogPath(dataRoot);
 
       const keywordCoverageWriter = KeywordCoverageWriter.create(dataRoot);
-      let triggerKeywordCache =
-        readKeywordCoverageKeywordsFailOpen(keywordCoverageWriter);
+      let triggerKeywordCache = readKeywordCoverageKeywordsFailOpen(
+        keywordCoverageWriter,
+      );
       const refreshTriggerKeywordCache = () => {
-        triggerKeywordCache =
-          readKeywordCoverageKeywordsFailOpen(keywordCoverageWriter);
+        triggerKeywordCache = readKeywordCoverageKeywordsFailOpen(
+          keywordCoverageWriter,
+        );
       };
 
       // Best-effort one-time cutover; refresh the live cache after a successful write.

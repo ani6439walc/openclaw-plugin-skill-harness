@@ -75,11 +75,12 @@ Runtime data root:
   - `sessions/<sessionId>.json`
   - `stats.json`
   - `review.json`
+  - `keyword-coverage.json`
 
 Rules:
 
 - The active intent catalog always loads from `intentsPath(dataRoot)`; with the default local state directory this is `~/.openclaw/plugins/skill-harness/intents`.
-- `stats.json` and `review.json` are root-level runtime files. They must not be placed under `sessions/`.
+- `stats.json`, `review.json`, and `keyword-coverage.json` are root-level runtime files. They must not be placed under `sessions/`.
 - Startup initialization may copy example intent files from `skills/skill-harness/assets/*.md` when the runtime `intents/` directory is absent or contains no Markdown files.
 - Startup initialization must not overwrite existing runtime intent files.
 
@@ -103,8 +104,9 @@ Use the existing module boundaries:
 - `src/intents/catalog.ts`: runtime intent catalog loading.
 - `src/session/tracker.ts`: session JSON state under `dataRoot/sessions`.
 - `src/stats/aggregator.ts`: usage, candidate-projection, and agent-scoped resolved-skill inventory aggregation into schema-v3 `dataRoot/stats.json`, including explicit valid-v1/v2 migration without historical observation backfill.
-- `src/review/log-writer.ts`: direct Intent Review outcomes and trigger keyword updates into `dataRoot/review.json`.
-- `src/review/log.ts`: strict current-only review log schema-v5 validation, root trigger keyword state, processed outcomes, and completed skill-placement epochs. There is no legacy migration or tool/command action surface.
+- `src/review/log-writer.ts`: direct Intent Review outcomes into `dataRoot/review.json`.
+- `src/review/keyword-coverage-writer.ts`: independent trigger-keyword state, coverage epochs, and keyword mutations in `dataRoot/keyword-coverage.json`.
+- `src/review/log.ts`: strict current-only review log schema-v6 validation for ordinary Review outcomes and completed skill-placement epochs. There is no legacy migration or tool/command action surface.
 - `src/subagent-runtime.ts`: shared embedded subagent run defaults and error-payload extraction helpers used by classification and review subagents.
 - `src/classification/prompts.ts`, `src/classification/subagent.ts`, `src/classification/conversation.ts`, `src/classification/candidates.ts`, `src/review/subagent.ts`, `src/review/triggers.ts`: classification, conservative candidate projection, and review logic.
 - `src/review/snapshot-formatter.ts`: task-oriented Review snapshot serialization, host-owned manifest metadata, semantic evidence wrappers, and final-boundary escaping.

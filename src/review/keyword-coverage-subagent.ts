@@ -8,10 +8,7 @@ import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
 } from "../subagent-runtime.js";
-import type {
-  ResolvedSkillHarnessPluginConfig,
-  ThinkLevel,
-} from "../types.js";
+import type { ResolvedSkillHarnessPluginConfig, ThinkLevel } from "../types.js";
 import {
   replayKeywordPhrase,
   type CoverageCandidateDocument,
@@ -417,8 +414,12 @@ export function parseKeywordCoverageModelResponse(
         documents: documents.filter((doc) => doc.target === decision.target),
         config: {} as never,
         triggerKeywords: options.triggerKeywords,
-      }).matches.map((document) => document.ref).sort();
-      const proposedRefs = [...new Set(decision.removal.falsePositiveRefs)].sort();
+      })
+        .matches.map((document) => document.ref)
+        .sort();
+      const proposedRefs = [
+        ...new Set(decision.removal.falsePositiveRefs),
+      ].sort();
       if (
         !targetKeywords.some(
           (keyword) =>
@@ -428,10 +429,13 @@ export function parseKeywordCoverageModelResponse(
         proposedRefs.length !== completeRefs.length ||
         proposedRefs.some((ref, index) => ref !== completeRefs[index])
       ) {
-        logger.warn("keyword coverage review failed: incomplete removal evidence", {
-          target: decision.target,
-          phrase: decision.removal.phrase,
-        });
+        logger.warn(
+          "keyword coverage review failed: incomplete removal evidence",
+          {
+            target: decision.target,
+            phrase: decision.removal.phrase,
+          },
+        );
         return undefined;
       }
     }
@@ -577,9 +581,7 @@ function filterDecisionsByReplay(
         (item) => item.target === decision.target && item.outcome === "finding",
       );
       if (firstFinding !== -1) return index === firstFinding;
-      return (
-        all.findIndex((item) => item.target === decision.target) === index
-      );
+      return all.findIndex((item) => item.target === decision.target) === index;
     });
 }
 
@@ -590,8 +592,7 @@ function createCoverageSessionIdentity(params: {
   hashInput: string;
 }): { sessionId: string; sessionKey: string } {
   const runId = `skill-harness-keyword-coverage-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-  const scope =
-    params.sessionKey ?? params.sessionId ?? crypto.randomUUID();
+  const scope = params.sessionKey ?? params.sessionId ?? crypto.randomUUID();
   const suffix = crypto
     .createHash("sha1")
     .update(`${scope}:${params.hashInput}`)
@@ -745,9 +746,7 @@ export async function runKeywordCoverageReview(
       pluginConfig: params.pluginConfig,
     });
   } else {
-    logger.warn(
-      "keyword coverage review failed: missing model execution path",
-    );
+    logger.warn("keyword coverage review failed: missing model execution path");
     return undefined;
   }
 

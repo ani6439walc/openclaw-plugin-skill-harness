@@ -21,10 +21,7 @@ export const REVIEW_TRIGGER_TYPES = [
 export type ReviewTrigger = (typeof REVIEW_TRIGGER_TYPES)[number];
 
 export type KeywordTriggerBlockedReason =
-  | "agent-error"
-  | "quoted-content"
-  | "missing-context-source"
-  | "threshold";
+  "agent-error" | "quoted-content" | "missing-context-source" | "threshold";
 
 export interface KeywordTriggerEvaluation {
   structurallyEligible: boolean;
@@ -146,11 +143,16 @@ export function findMatchedKeywords(
   );
 }
 
-function keywordProperty(target: TriggerKeywordTarget): keyof ReviewTriggerKeywords {
+function keywordProperty(
+  target: TriggerKeywordTarget,
+): keyof ReviewTriggerKeywords {
   switch (target) {
-    case "successful-pattern": return "successfulPattern";
-    case "behavior-fix": return "behaviorFix";
-    case "entity-context": return "entityContext";
+    case "successful-pattern":
+      return "successfulPattern";
+    case "behavior-fix":
+      return "behaviorFix";
+    case "entity-context":
+      return "entityContext";
   }
 }
 
@@ -167,7 +169,8 @@ export function checkStructuralEligibility(
       if (state.error) {
         return { eligible: false, reason: "agent-error" };
       }
-      const meetsToolCallThreshold = toolCalls.length >= config.successfulPattern.toolCalls;
+      const meetsToolCallThreshold =
+        toolCalls.length >= config.successfulPattern.toolCalls;
       const hasSkillsUsed = (state.skillsUsed?.length ?? 0) > 0;
       if (!meetsToolCallThreshold && !hasSkillsUsed) {
         return { eligible: false, reason: "threshold" };
@@ -197,11 +200,18 @@ export function evaluateKeywordTrigger(
 ): KeywordTriggerEvaluation {
   const structural = checkStructuralEligibility(target, state, config);
   if (!structural.eligible) {
-    return { structurallyEligible: false, matchedKeywords: [], blockedReason: structural.reason };
+    return {
+      structurallyEligible: false,
+      matchedKeywords: [],
+      blockedReason: structural.reason,
+    };
   }
 
   const text = `${state.input ?? ""}\n${state.result ?? ""}`;
-  const matchedKeywords = findMatchedKeywords(text, triggerKeywords[keywordProperty(target)]);
+  const matchedKeywords = findMatchedKeywords(
+    text,
+    triggerKeywords[keywordProperty(target)],
+  );
 
   return {
     structurallyEligible: matchedKeywords.length > 0,

@@ -130,7 +130,9 @@ describe("SessionTracker", () => {
       const loadedTracker = SessionTracker.create(tempDir);
 
       expect(
-        loadedTracker.listRetainedSessions().map((session) => session.sessionId),
+        loadedTracker
+          .listRetainedSessions()
+          .map((session) => session.sessionId),
       ).not.toContain("expired");
     });
 

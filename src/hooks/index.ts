@@ -1811,7 +1811,6 @@ export function createHookHandlers(deps: HookDeps) {
       | undefined;
   }): boolean {
     if (params.acceptedTurn < params.cadence) return false;
-    if (params.acceptedTurn % params.cadence !== 0) return false;
     const lastCompleted = Math.max(
       0,
       ...COVERAGE_TARGETS.map(
@@ -1819,6 +1818,11 @@ export function createHookHandlers(deps: HookDeps) {
           params.runtimeTargets?.[target]?.lastCompletedAcceptedTurn ?? 0,
       ),
     );
+    if (params.acceptedTurn % params.cadence === 0) {
+      return params.acceptedTurn >= lastCompleted + params.cadence;
+    }
+    // A released/failed first epoch is retried every five accepted turns.
+    if (lastCompleted === 0 && params.acceptedTurn % 5 === 0) return true;
     // Require full cadence progress after the last completed epoch.
     return params.acceptedTurn >= lastCompleted + params.cadence;
   }
@@ -1913,7 +1917,8 @@ export function createHookHandlers(deps: HookDeps) {
               remove: decision.removal ? [decision.removal.phrase] : [],
             }))
             .filter(
-              (mutation) => mutation.add.length > 0 || mutation.remove.length > 0,
+              (mutation) =>
+                mutation.add.length > 0 || mutation.remove.length > 0,
             );
 
           const outcome = mutations.length > 0 ? "applied" : "nofinding";
@@ -1934,11 +1939,12 @@ export function createHookHandlers(deps: HookDeps) {
             deps.refreshTriggerKeywords?.();
           }
 
-          const completeResult = await keywordCoverageWriter.completeCoverageEpoch({
-            epochKey: params.epochKey,
-            outcome,
-            nextCursors: discovery.nextCursor,
-          });
+          const completeResult =
+            await keywordCoverageWriter.completeCoverageEpoch({
+              epochKey: params.epochKey,
+              outcome,
+              nextCursors: discovery.nextCursor,
+            });
           if (completeResult === "retryable-failure") {
             await keywordCoverageWriter.releaseCoverageEpoch({
               epochKey: params.epochKey,

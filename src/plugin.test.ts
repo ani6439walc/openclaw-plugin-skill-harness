@@ -196,7 +196,10 @@ describe("createPlugin", () => {
         },
       }),
     );
-    const readKeywords = vi.spyOn(KeywordCoverageWriter.prototype, "readKeywords");
+    const readKeywords = vi.spyOn(
+      KeywordCoverageWriter.prototype,
+      "readKeywords",
+    );
 
     createPlugin(api).register(api);
 

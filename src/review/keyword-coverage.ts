@@ -51,7 +51,10 @@ type CandidateWithSession = {
   sessionId: string;
 };
 
-function truncateCandidateText(value: string | undefined, maxChars: number): string | undefined {
+function truncateCandidateText(
+  value: string | undefined,
+  maxChars: number,
+): string | undefined {
   return value?.slice(0, maxChars);
 }
 
@@ -95,10 +98,17 @@ function collectStatesFromSessions(
   }> = [];
 
   for (const session of sessions) {
-    const states: SessionState[] = [...(session.history ?? []), session.current];
+    const states: SessionState[] = [
+      ...(session.history ?? []),
+      session.current,
+    ];
     states.forEach((state, index) => {
       if (state.input || state.result) {
-        collected.push({ sessionId: session.sessionId, state, stateIndex: index });
+        collected.push({
+          sessionId: session.sessionId,
+          state,
+          stateIndex: index,
+        });
       }
     });
   }
@@ -134,7 +144,8 @@ function roundRobinCandidates(
     for (const [sessionId, sessionCandidates] of bySession) {
       const candidate = sessionCandidates[stateIndex];
       if (candidate) ordered.push(candidate);
-      if (stateIndex + 1 >= sessionCandidates.length) bySession.delete(sessionId);
+      if (stateIndex + 1 >= sessionCandidates.length)
+        bySession.delete(sessionId);
     }
   }
   return ordered;
@@ -169,7 +180,13 @@ export function discoverKeywordCoverageCandidates(
     const existingKeywords = triggerKeywords[keywordProperty(target)];
 
     for (const { sessionId, state, stateIndex } of allStates) {
-      if (!checkStructuralEligibility(target, sessionStateToTriggerState(state), config).eligible) {
+      if (
+        !checkStructuralEligibility(
+          target,
+          sessionStateToTriggerState(state),
+          config,
+        ).eligible
+      ) {
         continue;
       }
       const text = `${state.input ?? ""}\n${state.result ?? ""}`;
@@ -202,7 +219,8 @@ export function discoverKeywordCoverageCandidates(
     ];
     additions[target] = rotatedCandidates.slice(0, MAX_CANDIDATES_PER_TARGET);
     nextCursor[target] =
-      (cursorStart + additions[target].length) % Math.max(1, allCandidates.length);
+      (cursorStart + additions[target].length) %
+      Math.max(1, allCandidates.length);
 
     if (existingKeywords.length === 0) continue;
     const phrase = existingKeywords[cursorStart % existingKeywords.length]!;
