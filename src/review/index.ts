@@ -5,7 +5,7 @@ export * from "./keyword-coverage-log.js";
 export * from "./keyword-coverage-writer.js";
 export * from "./keyword-coverage.js";
 export * from "./keyword-coverage-subagent.js";
-export * from "./keyword-state-migration.js";
+
 export * from "./trigger-keywords.js";
 export * from "./triggers.js";
 export * from "./subagent.js";

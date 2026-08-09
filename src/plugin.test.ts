@@ -122,7 +122,7 @@ describe("createPlugin", () => {
     fs.writeFileSync(path.join(dataRoot, "stats.json"), '{"stats":true}');
     fs.writeFileSync(
       path.join(dataRoot, "review.json"),
-      '{"schemaVersion":5,"createdAt":"2026-07-01T00:00:00.000Z","updatedAt":"2026-07-01T00:00:00.000Z","processedEvents":{},"reviewedSkillEpochs":{},"triggerKeywords":{"successfulPattern":[],"behaviorFix":[],"entityContext":[]}}',
+      '{"schemaVersion":6,"createdAt":"2026-07-01T00:00:00.000Z","updatedAt":"2026-07-01T00:00:00.000Z","processedEvents":{},"reviewedSkillEpochs":{},"historicalKeywordAudits":{}}',
     );
 
     createPlugin(api).register(api);
@@ -176,57 +176,6 @@ describe("createPlugin", () => {
       "failed to read review trigger keywords",
       expect.anything(),
     );
-  });
-
-  it("refreshes cached keywords after migrating v5 review state", async () => {
-    const api = createApi();
-    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-    fs.mkdirSync(dataRoot, { recursive: true });
-    fs.writeFileSync(
-      path.join(dataRoot, "review.json"),
-      JSON.stringify({
-        schemaVersion: 5,
-        createdAt: "2026-07-01T00:00:00.000Z",
-        updatedAt: "2026-07-01T00:00:00.000Z",
-        processedEvents: {},
-        reviewedSkillEpochs: {},
-        triggerKeywords: {
-          successfulPattern: ["ship it"],
-          behaviorFix: ["wrong"],
-          entityContext: ["look up"],
-        },
-      }),
-    );
-    const readKeywords = vi.spyOn(
-      KeywordCoverageWriter.prototype,
-      "readKeywords",
-    );
-
-    createPlugin(api).register(api);
-
-    await vi.waitFor(() => expect(readKeywords).toHaveBeenCalledTimes(3));
-
-    const writer = IntentReviewLogWriter.create(dataRoot);
-    await expect(
-      writer.record(
-        "ordinary-review-after-migration",
-        {
-          sessionId: "session-1",
-          agentId: "main",
-          turnStart: "2026-08-09T00:00:00.000Z",
-        },
-        [],
-        { triggers: ["skill-candidate"], outcome: "nofinding" },
-      ),
-    ).resolves.toBe(true);
-    expect(
-      JSON.parse(fs.readFileSync(path.join(dataRoot, "review.json"), "utf8")),
-    ).toMatchObject({
-      schemaVersion: 6,
-      processedEvents: {
-        "ordinary-review-after-migration": { outcome: "nofinding" },
-      },
-    });
   });
 
   function createPackageRootWithAssets(files: Record<string, string>): string {

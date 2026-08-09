@@ -12,7 +12,7 @@ import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
 import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
-import { migrateKeywordStateOnce } from "./review/keyword-state-migration.js";
+
 import {
   normalizeReviewTriggerKeywords,
   type ReviewTriggerKeywords,
@@ -152,17 +152,6 @@ export function createPlugin(
         );
       };
 
-      // Fail-open one-time cutover. Finalization waits for this before it writes runtime review state.
-      const migrationPromise: Promise<void> = migrateKeywordStateOnce({
-        reviewPath,
-        keywordCoveragePath,
-      })
-        .then(() => {
-          refreshTriggerKeywordCache();
-        })
-        .catch((error) => {
-          logger.warn("keyword state migration failed", { error });
-        });
       const reviewLogWriter = IntentReviewLogWriter.create(dataRoot);
 
       const refreshRuntimeIntents = () => {
@@ -181,7 +170,7 @@ export function createPlugin(
         keywordCoverageWriter,
         triggerKeywords: () => triggerKeywordCache,
         refreshTriggerKeywords: refreshTriggerKeywordCache,
-        migrationPromise,
+
         dataRoot,
       };
 

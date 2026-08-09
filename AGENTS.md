@@ -106,7 +106,7 @@ Use the existing module boundaries:
 - `src/stats/aggregator.ts`: usage, candidate-projection, and agent-scoped resolved-skill inventory aggregation into schema-v3 `dataRoot/stats.json`, including explicit valid-v1/v2 migration without historical observation backfill.
 - `src/review/log-writer.ts`: direct Intent Review outcomes into `dataRoot/review.json`.
 - `src/review/keyword-coverage-writer.ts`: independent trigger-keyword state, coverage epochs, and keyword mutations in `dataRoot/keyword-coverage.json`.
-- `src/review/log.ts`: strict current-only review log schema-v6 validation for ordinary Review outcomes and completed skill-placement epochs. There is no legacy migration or tool/command action surface.
+- `src/review/log.ts`: strict current-only review log schema-v6 validation for ordinary Review outcomes and completed skill-placement epochs. There is no legacy migration, recovery, or tool/command action surface; schema-v5 review state is unsupported.
 - `src/subagent-runtime.ts`: shared embedded subagent run defaults and error-payload extraction helpers used by classification and review subagents.
 - `src/classification/prompts.ts`, `src/classification/subagent.ts`, `src/classification/conversation.ts`, `src/classification/candidates.ts`, `src/review/subagent.ts`, `src/review/triggers.ts`: classification, conservative candidate projection, and review logic.
 - `src/review/snapshot-formatter.ts`: task-oriented Review snapshot serialization, host-owned manifest metadata, semantic evidence wrappers, and final-boundary escaping.
@@ -214,7 +214,7 @@ Trigger-keyword Review is event-driven and limited to requested `successful-patt
 
 The bundled `keyword-audit` mode is the deliberate human evidence path for that coverage gap. It may inspect retained sessions locally, produce ref-only labels and TP/FP/FN/collision metrics, and propose an exact bounded delta. It must remain report-only: never hand-edit `review.json`, invoke or emulate the internal writer, or claim that approval persisted a change. The audit script normalizes more aggressively than production substring matching and does not hash or snapshot every session file, so document it as an approximate replay over an observed evidence window.
 
-Do not edit `reviewLogPath(dataRoot)` manually for normal work. It stores strict current-only schema v5 `triggerKeywords`, `processedEvents`, and `reviewedSkillEpochs`. V1-v4 files and malformed current records are rejected without rewrite or migration.
+Do not edit `reviewLogPath(dataRoot)` manually for normal work. It stores strict current-only schema v6 `processedEvents`, `reviewedSkillEpochs`, and `historicalKeywordAudits`; trigger keywords live only in `keywordCoverageLogPath(dataRoot)`. Schema-v5 and malformed current records are rejected without rewrite, migration, or recovery.
 
 For manual runtime intent edits, read current runtime intent Markdown, make the smallest grounded change, then run at least:
 

@@ -2090,16 +2090,6 @@ export function createHookHandlers(deps: HookDeps) {
     ctx: PluginHookAgentContext,
   ): Promise<void> {
     if (!trackedSessionId) return;
-    try {
-      await deps.migrationPromise;
-    } catch (error) {
-      logger.warn(
-        "keyword state migration did not complete before finalization",
-        {
-          error,
-        },
-      );
-    }
     const agentEndStats = await recordAgentEndStats(trackedSessionId);
     if (!agentEndStats) return;
 
