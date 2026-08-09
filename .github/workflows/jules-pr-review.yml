@@ -15,8 +15,10 @@ concurrency:
 
 jobs:
   review:
-    # Only trigger for repo owner PRs (personal repo)
-    if: github.event.pull_request.user.login == github.repository_owner
+    # Restrict secrets-backed reviews to the owner and trusted collaborators.
+    if: >-
+      github.event.pull_request.user.login == github.repository_owner ||
+      github.event.pull_request.author_association == 'COLLABORATOR'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
