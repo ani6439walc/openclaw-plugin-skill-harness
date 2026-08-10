@@ -48,7 +48,9 @@ When complexity is known, the instruction writer receives its matching execution
 
 ## Prompt context
 
-The fixed `appendSystemContext` requires active skill discovery and documents the four Skill Harness tools. It contains no runtime skill inventory, skill paths, intent result, or generated hint.
+Every non-excluded agent turn within the configured chat scope receives the fixed `appendSystemContext`, including agents outside the plugin's configured intent-scanning `agents` list. Its universal section requires active skill discovery and documents the four Skill Harness tools. Agents enabled by the `agents` option additionally receive the `### Using Skill Harness context` section, which explains how to apply per-turn candidates and hints. Neither static section contains a runtime skill inventory, skill paths, intent result, or generated hint.
+
+Configured skills, when resolvable for that agent, are appended as a separate `<configured_skills>` block. The `agents` option controls both the intent-routing static section and dynamic intent analysis; it does not suppress universal skill-discovery or configured-skill context for other normal agents.
 
 Eligible external-user turns may receive dynamic `prependContext` with `<domain_skill_candidates>` and an optional `## Instruction Hint`. Candidate entries include their resolved path and directly visible related skills. Related skills are optional, not automatically required.
 

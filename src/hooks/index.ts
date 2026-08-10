@@ -70,6 +70,7 @@ import {
 import {
   buildDomainSkillsPromptPrefix,
   buildPromptPrefix,
+  formatConfiguredSkills,
 } from "../classification/index.js";
 import {
   resolveAvailableSkills,
@@ -93,7 +94,10 @@ import {
   resolveToolCallKey,
   resolveToolResultText,
 } from "./tool-tracking.js";
-import { SKILL_HARNESS_SYSTEM_CONTEXT } from "./system-context.js";
+import {
+  SKILL_HARNESS_INTENT_CONTEXT,
+  SKILL_HARNESS_SYSTEM_CONTEXT,
+} from "./system-context.js";
 export type { HookDeps } from "./types.js";
 
 function sanitizeHistoricalIntentRecords(
@@ -262,10 +266,18 @@ function recordTrackedSession(
 
 function toPromptBuildResult(
   prependContext?: string,
+  configuredSkillsXml?: string,
+  includeIntentContext = true,
 ): PluginHookBeforePromptBuildResult {
+  const systemContext = includeIntentContext
+    ? `${SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_INTENT_CONTEXT}`
+    : SKILL_HARNESS_SYSTEM_CONTEXT;
+  const appendSystemContext = configuredSkillsXml
+    ? `${systemContext}\n\n${configuredSkillsXml}`
+    : systemContext;
   return {
     ...(prependContext ? { prependContext } : {}),
-    appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    appendSystemContext,
   };
 }
 
@@ -557,10 +569,8 @@ export function createHookHandlers(deps: HookDeps) {
           })
         : undefined);
 
-    // Use current config for early checks. These must run before refreshing live config.
+    // Use current config for static-context chat scope before refreshing live config.
     const currentConfig = config();
-    if (!isEnabledForAgent(currentConfig, resolvedAgentId)) return;
-
     const resolvedSessionKeyForChecks = resolvedSessionKey ?? ctx.sessionKey;
     if (
       !isAllowedChatType(currentConfig, {
@@ -1014,6 +1024,46 @@ export function createHookHandlers(deps: HookDeps) {
     };
   }
 
+  async function resolveConfiguredSkillsXml(
+    agentId: string,
+  ): Promise<string | undefined> {
+    if (!deps.getConfiguredAgentSkills) return undefined;
+    const configuredSkillNames = await deps.getConfiguredAgentSkills(agentId);
+    if (!configuredSkillNames.length) {
+      logger.info("no configured agent skills found in memory map", {
+        agentId,
+      });
+      return undefined;
+    }
+    try {
+      const skills = await resolveAvailableSkills({
+        api,
+        agentId,
+        bundledSkillsDir,
+        skillNames: configuredSkillNames,
+      });
+      if (!skills.length) {
+        logger.info(
+          "configured agent skills could not be resolved from available skill roots",
+          { agentId, configuredSkillNames },
+        );
+      } else {
+        logger.info("resolved configured agent skills for prompt build", {
+          agentId,
+          configuredSkillNames,
+          resolvedSkills: skills.map((s) => s.name),
+        });
+      }
+      return formatConfiguredSkills(skills);
+    } catch (error) {
+      logger.warn(
+        "failed to resolve configured agent skills for prompt build",
+        { error },
+      );
+      return undefined;
+    }
+  }
+
   async function handleExactKeywordPromptBuild(params: {
     ctx: PluginHookAgentContext;
     routing: NonNullable<ReturnType<typeof resolvePromptBuildScope>>;
@@ -1023,6 +1073,7 @@ export function createHookHandlers(deps: HookDeps) {
     conversation: ReturnType<typeof limitConversationTurns>;
     availableIntents: ReturnType<typeof catalog.filterForAgent>;
     exactKeywordMatch: NonNullable<ReturnType<typeof findExactKeywordIntent>>;
+    configuredSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
     const latestHistoricalIntent =
       params.historicalIntents[params.historicalIntents.length - 1];
@@ -1061,6 +1112,7 @@ export function createHookHandlers(deps: HookDeps) {
       });
       return toPromptBuildResult(
         buildDomainSkillsPromptPrefix(result, domainSkills),
+        params.configuredSkillsXml,
       );
     }
 
@@ -1086,7 +1138,7 @@ export function createHookHandlers(deps: HookDeps) {
       params.exactKeywordMatch.hint,
       domainSkills,
     );
-    return toPromptBuildResult(promptPrefix);
+    return toPromptBuildResult(promptPrefix, params.configuredSkillsXml);
   }
 
   async function handleClassifiedPromptBuild(params: {
@@ -1098,6 +1150,7 @@ export function createHookHandlers(deps: HookDeps) {
     availableIntents: ReturnType<typeof catalog.filterForAgent>;
     classification: PromptBuildClassification;
     modelRef: NonNullable<ReturnType<typeof getModelRef>>;
+    configuredSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
     const result = params.classification.result;
     logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
@@ -1120,6 +1173,7 @@ export function createHookHandlers(deps: HookDeps) {
       });
       return toPromptBuildResult(
         buildDomainSkillsPromptPrefix(result, domainSkills),
+        params.configuredSkillsXml,
       );
     };
 
@@ -1270,7 +1324,7 @@ export function createHookHandlers(deps: HookDeps) {
       instructionResult.instructionHint,
       domainSkills,
     );
-    return toPromptBuildResult(promptPrefix);
+    return toPromptBuildResult(promptPrefix, params.configuredSkillsXml);
   }
 
   async function runPromptBuildPipeline<T>(
@@ -1301,6 +1355,8 @@ export function createHookHandlers(deps: HookDeps) {
   ): Promise<PluginHookBeforePromptBuildResult | undefined> {
     let resolvedSessionKey = ctx.sessionKey;
     let staticContextEligible = false;
+    let configuredSkillsXml: string | undefined;
+    let intentContextEnabled = false;
     try {
       const routing = resolvePromptBuildScope(ctx);
       if (!routing) return;
@@ -1313,12 +1369,25 @@ export function createHookHandlers(deps: HookDeps) {
       if (shouldSkipSkillSystemContext(resolvedContext)) return;
 
       staticContextEligible = true;
-      if (shouldSkipIntentAnalysis(resolvedContext)) {
-        return toPromptBuildResult();
+      intentContextEnabled = isEnabledForAgent(
+        config(),
+        routing.effectiveAgentId,
+      );
+      configuredSkillsXml = await resolveConfiguredSkillsXml(
+        routing.effectiveAgentId,
+      );
+
+      if (!intentContextEnabled) {
+        return toPromptBuildResult(undefined, configuredSkillsXml, false);
       }
-      if (isInternalUserTurn(event)) return toPromptBuildResult();
+      if (shouldSkipIntentAnalysis(resolvedContext)) {
+        return toPromptBuildResult(undefined, configuredSkillsXml);
+      }
+      if (isInternalUserTurn(event)) {
+        return toPromptBuildResult(undefined, configuredSkillsXml);
+      }
       if (!isEligibleInteractiveSession(resolvedContext)) {
-        return toPromptBuildResult();
+        return toPromptBuildResult(undefined, configuredSkillsXml);
       }
 
       // THEN refresh config and intents
@@ -1328,7 +1397,7 @@ export function createHookHandlers(deps: HookDeps) {
         logger.debug(
           "low thinking mode is off; skipping intention scan for low reasoning effort.",
         );
-        return toPromptBuildResult();
+        return toPromptBuildResult(undefined, configuredSkillsXml);
       }
       const { latestUserMessage, historicalIntents, conversation } =
         buildConversationContext(event, ctx, refreshedConfig);
@@ -1336,7 +1405,7 @@ export function createHookHandlers(deps: HookDeps) {
       refreshIntents();
       if (catalog.count === 0) {
         logger.debug("no intents loaded; skipping intention scan.");
-        return toPromptBuildResult();
+        return toPromptBuildResult(undefined, configuredSkillsXml);
       }
 
       logger.debug(
@@ -1365,6 +1434,7 @@ export function createHookHandlers(deps: HookDeps) {
               conversation,
               availableIntents,
               exactKeywordMatch,
+              configuredSkillsXml,
             }),
         );
       }
@@ -1373,7 +1443,7 @@ export function createHookHandlers(deps: HookDeps) {
         logger.debug(
           "low thinking fastpath-only mode found no exact keyword match; skipping LLM-based intent analysis.",
         );
-        return toPromptBuildResult();
+        return toPromptBuildResult(undefined, configuredSkillsXml);
       }
 
       const modelRef = getModelRef(
@@ -1385,7 +1455,7 @@ export function createHookHandlers(deps: HookDeps) {
           modelId: ctx.modelId,
         },
       );
-      if (!modelRef) return toPromptBuildResult();
+      if (!modelRef) return toPromptBuildResult(undefined, configuredSkillsXml);
 
       return await runPromptBuildPipeline(
         ctx,
@@ -1405,7 +1475,7 @@ export function createHookHandlers(deps: HookDeps) {
 
           if (!classification) {
             logger.debug("intention subagent failed; skipping hint injection.");
-            return toPromptBuildResult();
+            return toPromptBuildResult(undefined, configuredSkillsXml);
           }
 
           return await handleClassifiedPromptBuild({
@@ -1417,12 +1487,19 @@ export function createHookHandlers(deps: HookDeps) {
             availableIntents,
             classification,
             modelRef,
+            configuredSkillsXml,
           });
         },
       );
     } catch (err) {
       logger.warn("before_prompt_build hook error", { error: err });
-      return staticContextEligible ? toPromptBuildResult() : undefined;
+      return staticContextEligible
+        ? toPromptBuildResult(
+            undefined,
+            configuredSkillsXml,
+            intentContextEnabled,
+          )
+        : undefined;
     }
   }
 

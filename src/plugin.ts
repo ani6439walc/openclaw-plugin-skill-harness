@@ -108,6 +108,110 @@ export function initializePluginDataRoot({
   }
 }
 
+export function extractConfiguredAgentSkillsMap(
+  config?: OpenClawConfig,
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  if (!config?.agents) return map;
+
+  const defaults = Array.isArray(config.agents.defaults?.skills)
+    ? config.agents.defaults.skills
+    : undefined;
+
+  if (defaults) {
+    map.set("defaults", [...defaults]);
+  }
+
+  if (Array.isArray(config.agents.list)) {
+    for (const agent of config.agents.list) {
+      if (!agent?.id) continue;
+      if (Array.isArray(agent.skills)) {
+        map.set(agent.id.trim().toLowerCase(), [...agent.skills]);
+      } else if (defaults) {
+        map.set(agent.id.trim().toLowerCase(), [...defaults]);
+      }
+    }
+  }
+
+  return map;
+}
+
+function wipeAgentSkillsConfig(config?: OpenClawConfig): void {
+  if (!config?.agents) return;
+  if (config.agents.defaults) {
+    config.agents.defaults.skills = [];
+  }
+  if (Array.isArray(config.agents.list)) {
+    for (const agent of config.agents.list) {
+      if (agent) {
+        agent.skills = [];
+      }
+    }
+  }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
+async function readRawOpenClawConfig(
+  api: OpenClawPluginApi,
+): Promise<OpenClawConfig | undefined> {
+  let stateDir = "";
+  if (api.runtime?.state?.resolveStateDir) {
+    stateDir = api.runtime.state.resolveStateDir(process.env) || "";
+  }
+  if (!stateDir && process.env.HOME) {
+    stateDir = path.join(process.env.HOME, ".openclaw");
+  }
+  if (!stateDir) return undefined;
+
+  const configPath = path.join(stateDir, "openclaw.json");
+  try {
+    return JSON.parse(
+      await fs.promises.readFile(configPath, "utf8"),
+    ) as OpenClawConfig;
+  } catch (err) {
+    if (isMissingFileError(err)) return undefined;
+    logger.warn("failed to read raw openclaw.json for skills fallback", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+}
+
+export function createConfiguredAgentSkillsResolver(
+  api: OpenClawPluginApi,
+  configuredSkillsMap: Map<string, string[]>,
+): (agentId: string) => Promise<string[]> {
+  return async (agentId: string): Promise<string[]> => {
+    const rawConfig = await readRawOpenClawConfig(api);
+    if (rawConfig) {
+      configuredSkillsMap.clear();
+      for (const [key, val] of extractConfiguredAgentSkillsMap(rawConfig)) {
+        configuredSkillsMap.set(key, val);
+      }
+    }
+
+    wipeAgentSkillsConfig(api.config);
+    if (api.runtime?.config?.current) {
+      wipeAgentSkillsConfig(api.runtime.config.current() as OpenClawConfig);
+    }
+
+    const normalized = agentId.trim().toLowerCase();
+    return (
+      configuredSkillsMap.get(normalized) ??
+      configuredSkillsMap.get("defaults") ??
+      []
+    );
+  };
+}
+
 export function createPlugin(
   api: OpenClawPluginApi,
 ): OpenClawPluginDefinition & {
@@ -132,6 +236,27 @@ export function createPlugin(
     description:
       "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
     register() {
+      const runtimeConfig = api.runtime?.config?.current
+        ? (api.runtime.config.current() as OpenClawConfig)
+        : undefined;
+
+      const configuredSkillsMap = extractConfiguredAgentSkillsMap(api.config);
+      const runtimeSkillsMap = extractConfiguredAgentSkillsMap(runtimeConfig);
+      for (const [key, val] of runtimeSkillsMap.entries()) {
+        const existing = configuredSkillsMap.get(key);
+        if (!existing || existing.length === 0) {
+          configuredSkillsMap.set(key, val);
+        }
+      }
+
+      wipeAgentSkillsConfig(api.config);
+      wipeAgentSkillsConfig(runtimeConfig);
+
+      const getConfiguredAgentSkills = createConfiguredAgentSkillsResolver(
+        api,
+        configuredSkillsMap,
+      );
+
       const stateDir = resolveStateDirFromApi(api, process.env);
       const dataRoot = resolvePluginDataRoot(stateDir, PLUGIN_ID);
       initializePluginDataRoot({ dataRoot });
@@ -170,7 +295,9 @@ export function createPlugin(
         keywordCoverageWriter,
         triggerKeywords: () => triggerKeywordCache,
         refreshTriggerKeywords: refreshTriggerKeywordCache,
+        getConfiguredAgentSkills,
 
+        bundledSkillsDir: path.join(defaultPackageRoot, "skills"),
         dataRoot,
       };
 

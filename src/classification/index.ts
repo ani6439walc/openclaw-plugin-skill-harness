@@ -11,6 +11,7 @@ export {
 export {
   buildDomainSkillsPromptPrefix,
   buildPromptPrefix,
+  formatConfiguredSkills,
   measureIntentCatalogCodePoints,
 } from "./prompts.js";
 export { projectIntentCandidates } from "./candidates.js";
