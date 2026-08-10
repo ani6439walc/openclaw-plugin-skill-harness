@@ -1099,3 +1099,11 @@ export function buildDomainSkillsPromptPrefix(
     formatDomainSkills(domainSkills),
   ]);
 }
+
+export function formatConfiguredSkills(
+  skills: AvailableSkill[] | undefined,
+): string {
+  if (!skills?.length) return "";
+  const xml = formatSkillXmlBlock("configured_skills", skills, "", true);
+  return `### Agent-configured skills\n\nActively review and apply these pre-configured skills when relevant to the task and environment:\n\n${xml}`;
+}

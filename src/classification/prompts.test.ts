@@ -2750,6 +2750,10 @@ describe("buildPromptPrefix", () => {
     expect(prefix).toContain(
       "`## Instruction Hint`: advisory; follow only when it matches the user's request and verified context",
     );
+    expect(prefix).not.toContain(
+      "Treat injected candidates as discovery leads, not proof that every listed skill applies.",
+    );
+    expect(prefix).not.toContain("search with 1-3 concise task concepts");
     expect(prefix).toContain(
       "Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.",
     );

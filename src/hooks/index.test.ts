@@ -9,11 +9,15 @@ import {
   coverageWatermarkEligible,
   createHookHandlers,
 } from "./index.js";
-import { SKILL_HARNESS_SYSTEM_CONTEXT } from "./system-context.js";
+import {
+  SKILL_HARNESS_INTENT_CONTEXT,
+  SKILL_HARNESS_SYSTEM_CONTEXT as BASE_SKILL_HARNESS_SYSTEM_CONTEXT,
+} from "./system-context.js";
 import { defaultTracker } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { defaultCatalog, filterIntentsForAgent } from "../intents/index.js";
 import type { IntentCatalogEntry } from "../types.js";
+import { resolvePackageRoot } from "../file-utils.js";
 import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness";
 
 vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
@@ -21,6 +25,7 @@ vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
 }));
 
 const emitHostAgentEvent = vi.mocked(emitAgentEvent);
+const SKILL_HARNESS_SYSTEM_CONTEXT = `${BASE_SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_INTENT_CONTEXT}`;
 
 function createHandlers(
   api: Partial<OpenClawPluginApi> = {},
@@ -1685,38 +1690,47 @@ describe("createHookHandlers internal turn guards", () => {
     {
       label: "disabled agent",
       config: { agents: ["other"] },
+      expected: BASE_SKILL_HARNESS_SYSTEM_CONTEXT,
     },
     {
       label: "disallowed chat type",
       config: { allowedChatTypes: ["group"] },
+      expected: undefined,
     },
     {
       label: "chat id absent from allowlist",
       config: { allowedChatIds: ["direct:999"] },
+      expected: undefined,
     },
     {
       label: "denied chat id",
       config: { deniedChatIds: ["direct:123"] },
+      expected: undefined,
     },
-  ])("does not inject for $label", async ({ config }) => {
-    const handlers = createHookHandlers({
-      api: { config: {} } as OpenClawPluginApi,
-      config: () => resolveConfig(config as never),
-      refreshLiveConfigFromRuntime: vi.fn(),
-      refreshIntents: vi.fn(),
-    });
+  ])(
+    "injects only the permitted static context for $label",
+    async ({ config, expected }) => {
+      const handlers = createHookHandlers({
+        api: { config: {} } as OpenClawPluginApi,
+        config: () => resolveConfig(config as never),
+        refreshLiveConfigFromRuntime: vi.fn(),
+        refreshIntents: vi.fn(),
+      });
 
-    const result = await handlers.onBeforePromptBuild(
-      { prompt: "background task", messages: [] },
-      {
-        trigger: "heartbeat",
-        agentId: "main",
-        sessionKey: "agent:main:direct:123",
-      },
-    );
+      const result = await handlers.onBeforePromptBuild(
+        { prompt: "background task", messages: [] },
+        {
+          trigger: "heartbeat",
+          agentId: "main",
+          sessionKey: "agent:main:direct:123",
+        },
+      );
 
-    expect(result).toBeUndefined();
-  });
+      expect(result).toEqual(
+        expected ? { appendSystemContext: expected } : undefined,
+      );
+    },
+  );
 
   it("fails closed when chat type cannot be resolved", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
@@ -1836,6 +1850,7 @@ describe("createHookHandlers topic switch flow", () => {
     instructionWriter?: ReturnType<typeof vi.fn>;
     api?: Partial<OpenClawPluginApi>;
     bundledSkillsDir?: string;
+    getConfiguredAgentSkills?: (agentId: string) => string[];
   }) {
     emitHostAgentEvent.mockReset();
     const intents = params.intents ?? [intent];
@@ -1893,6 +1908,10 @@ describe("createHookHandlers topic switch flow", () => {
     const handlers = createHookHandlers({
       api: {
         config: {},
+        runtime: {
+          agent: { resolveAgentWorkspaceDir: () => "/nonexistent-workspace" },
+          state: { resolveStateDir: () => "/nonexistent-state" },
+        },
         ...params.api,
       } as unknown as OpenClawPluginApi,
       config: () => resolveConfig(rawConfig),
@@ -1904,6 +1923,7 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker,
       instructionWriter,
       bundledSkillsDir: params.bundledSkillsDir,
+      getConfiguredAgentSkills: params.getConfiguredAgentSkills,
     });
 
     return {
@@ -4279,5 +4299,70 @@ Current user request: fresh clean request
         stream: "plugin:skill-harness",
       }),
     );
+  });
+
+  it("appends full XML details of configured skills into appendSystemContext on prompt build turns", async () => {
+    const getConfiguredAgentSkills = vi.fn().mockReturnValue(["skill-harness"]);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
+      getConfiguredAgentSkills,
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "unrelated message",
+        messages: [{ role: "user", content: "unrelated message" }],
+      } as never,
+      ctx,
+    );
+
+    expect(getConfiguredAgentSkills).toHaveBeenCalledWith("main");
+    expect(result?.appendSystemContext).toContain(SKILL_HARNESS_SYSTEM_CONTEXT);
+    expect(result?.appendSystemContext).toContain(
+      "### Using Skill Harness context",
+    );
+    expect(result?.appendSystemContext).toContain(
+      "### Agent-configured skills",
+    );
+    expect(result?.appendSystemContext).toContain(
+      "Actively review and apply these pre-configured skills when relevant to the task and environment:",
+    );
+    expect(result?.appendSystemContext).toContain("<configured_skills>");
+    expect(result?.appendSystemContext).toContain("<name>skill-harness</name>");
+  });
+
+  it("injects static configured skill context for agents excluded from intent analysis", async () => {
+    const getConfiguredAgentSkills = vi.fn().mockReturnValue(["skill-harness"]);
+    const classifier = vi.fn();
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: { agents: ["main"] },
+      classifier,
+      bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
+      getConfiguredAgentSkills,
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "find the relevant skill",
+        messages: [{ role: "user", content: "find the relevant skill" }],
+      } as never,
+      {
+        ...ctx,
+        agentId: "librarian",
+        sessionKey: "agent:librarian:direct:123",
+      },
+    );
+
+    expect(getConfiguredAgentSkills).toHaveBeenCalledWith("librarian");
+    expect(result?.appendSystemContext).toContain(
+      BASE_SKILL_HARNESS_SYSTEM_CONTEXT,
+    );
+    expect(result?.appendSystemContext).not.toContain(
+      "### Using Skill Harness context",
+    );
+    expect(result?.appendSystemContext).toContain("<configured_skills>");
+    expect(classifier).not.toHaveBeenCalled();
   });
 });

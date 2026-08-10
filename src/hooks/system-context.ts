@@ -11,9 +11,9 @@ Use only the Skill Harness tools exposed in the current turn. Do not call or dep
 - \`skill_search\`: When available, search visible skills using concise task concepts, domains, or keywords. Search results are discovery candidates, not substitutes for reading a skill.
 - \`skill_view\`: When available, load a selected skill's complete \`SKILL.md\` or an allowed linked support file before following its workflow.
 - \`skill_list\`: When available, browse the visible skill inventory only when the task is broad, terminology is uncertain, or focused search is insufficient. Avoid enumerating the full inventory unnecessarily.
-- \`skill_manage\`: When available and authorized, create, patch, edit, delete, or manage support files for skills. Prefer targeted patches for small corrections and verify write results.
+- \`skill_manage\`: When available and authorized, create, patch, edit, delete, or manage support files for skills. Prefer targeted patches for small corrections and verify write results.`;
 
-### Using Skill Harness context
+export const SKILL_HARNESS_INTENT_CONTEXT = `### Using Skill Harness context
 
 Skill Harness may inject \`domain_skill_candidates\` and an \`Instruction Hint\` for the current turn.
 

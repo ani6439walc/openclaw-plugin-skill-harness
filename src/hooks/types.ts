@@ -65,6 +65,7 @@ export type HookDeps = {
   >;
   triggerKeywords?: () => ReviewTriggerKeywords;
   refreshTriggerKeywords?: () => void;
+  getConfiguredAgentSkills?: (agentId: string) => string[];
 
   bundledSkillsDir?: string;
   dataRoot?: string;

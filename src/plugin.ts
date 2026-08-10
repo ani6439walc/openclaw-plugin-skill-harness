@@ -108,6 +108,48 @@ export function initializePluginDataRoot({
   }
 }
 
+export function extractConfiguredAgentSkillsMap(
+  config?: OpenClawConfig,
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  if (!config?.agents) return map;
+
+  const defaults = Array.isArray(config.agents.defaults?.skills)
+    ? config.agents.defaults.skills
+    : undefined;
+
+  if (defaults) {
+    map.set("defaults", [...defaults]);
+  }
+
+  if (Array.isArray(config.agents.list)) {
+    for (const agent of config.agents.list) {
+      if (!agent?.id) continue;
+      if (Array.isArray(agent.skills)) {
+        map.set(agent.id.trim().toLowerCase(), [...agent.skills]);
+      } else if (defaults) {
+        map.set(agent.id.trim().toLowerCase(), [...defaults]);
+      }
+    }
+  }
+
+  return map;
+}
+
+function wipeAgentSkillsConfig(config?: OpenClawConfig): void {
+  if (!config?.agents) return;
+  if (config.agents.defaults) {
+    config.agents.defaults.skills = [];
+  }
+  if (Array.isArray(config.agents.list)) {
+    for (const agent of config.agents.list) {
+      if (agent) {
+        agent.skills = [];
+      }
+    }
+  }
+}
+
 export function createPlugin(
   api: OpenClawPluginApi,
 ): OpenClawPluginDefinition & {
@@ -132,6 +174,70 @@ export function createPlugin(
     description:
       "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
     register() {
+      const runtimeConfig = api.runtime?.config?.current
+        ? (api.runtime.config.current() as OpenClawConfig)
+        : undefined;
+
+      const configuredSkillsMap = extractConfiguredAgentSkillsMap(api.config);
+      const runtimeSkillsMap = extractConfiguredAgentSkillsMap(runtimeConfig);
+      for (const [key, val] of runtimeSkillsMap.entries()) {
+        const existing = configuredSkillsMap.get(key);
+        if (!existing || existing.length === 0) {
+          configuredSkillsMap.set(key, val);
+        }
+      }
+
+      wipeAgentSkillsConfig(api.config);
+      wipeAgentSkillsConfig(runtimeConfig);
+
+      const getConfiguredAgentSkills = (agentId: string): string[] => {
+        let rawConfig: OpenClawConfig | undefined;
+        try {
+          let stateDir = "";
+          if (api.runtime?.state?.resolveStateDir) {
+            stateDir = api.runtime.state.resolveStateDir(process.env) || "";
+          }
+          if (!stateDir && process.env.HOME) {
+            stateDir = path.join(process.env.HOME, ".openclaw");
+          }
+          if (stateDir) {
+            const configPath = path.join(stateDir, "openclaw.json");
+            if (fs.existsSync(configPath)) {
+              rawConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+            }
+          }
+        } catch (err) {
+          logger.warn("failed to read raw openclaw.json for skills fallback", {
+            error: err,
+          });
+        }
+
+        const currentConfig =
+          rawConfig ??
+          (api.runtime?.config?.current
+            ? (api.runtime.config.current() as OpenClawConfig)
+            : api.config);
+
+        const latestSkillsMap = extractConfiguredAgentSkillsMap(currentConfig);
+        for (const [key, val] of latestSkillsMap.entries()) {
+          if (val && val.length > 0) {
+            configuredSkillsMap.set(key, val);
+          }
+        }
+
+        wipeAgentSkillsConfig(api.config);
+        if (api.runtime?.config?.current) {
+          wipeAgentSkillsConfig(api.runtime.config.current() as OpenClawConfig);
+        }
+
+        const normalized = agentId.trim().toLowerCase();
+        return (
+          configuredSkillsMap.get(normalized) ??
+          configuredSkillsMap.get("defaults") ??
+          []
+        );
+      };
+
       const stateDir = resolveStateDirFromApi(api, process.env);
       const dataRoot = resolvePluginDataRoot(stateDir, PLUGIN_ID);
       initializePluginDataRoot({ dataRoot });
@@ -170,7 +276,9 @@ export function createPlugin(
         keywordCoverageWriter,
         triggerKeywords: () => triggerKeywordCache,
         refreshTriggerKeywords: refreshTriggerKeywordCache,
+        getConfiguredAgentSkills,
 
+        bundledSkillsDir: path.join(defaultPackageRoot, "skills"),
         dataRoot,
       };
 

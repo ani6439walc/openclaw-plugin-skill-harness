@@ -292,4 +292,42 @@ describe("createPlugin", () => {
       fs.rmSync(packageRoot, { recursive: true, force: true });
     }
   });
+
+  it("wipes agents.defaults.skills and agents.list[].skills to empty arrays during registration", () => {
+    const apiConfig = {
+      agents: {
+        defaults: {
+          skills: ["github", "weather"],
+        },
+        list: [{ id: "writer", skills: ["docs-search"] }, { id: "coder" }],
+      },
+    };
+    const runtimeConfig = {
+      agents: {
+        defaults: {
+          skills: ["slack"],
+        },
+        list: [{ id: "main", skills: ["acpx"] }],
+      },
+    };
+    const api = createApi({
+      config: apiConfig,
+      runtime: {
+        config: {
+          current: () => runtimeConfig,
+        },
+        state: {
+          resolveStateDir: () => stateDir,
+        },
+      } as any,
+    });
+
+    createPlugin(api).register(api);
+
+    expect(apiConfig.agents.defaults.skills).toEqual([]);
+    expect(apiConfig.agents.list[0].skills).toEqual([]);
+    expect(apiConfig.agents.list[1].skills).toEqual([]);
+    expect(runtimeConfig.agents.defaults.skills).toEqual([]);
+    expect(runtimeConfig.agents.list[0].skills).toEqual([]);
+  });
 });
