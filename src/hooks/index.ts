@@ -1028,7 +1028,7 @@ export function createHookHandlers(deps: HookDeps) {
     agentId: string,
   ): Promise<string | undefined> {
     if (!deps.getConfiguredAgentSkills) return undefined;
-    const configuredSkillNames = deps.getConfiguredAgentSkills(agentId);
+    const configuredSkillNames = await deps.getConfiguredAgentSkills(agentId);
     if (!configuredSkillNames.length) {
       logger.info("no configured agent skills found in memory map", {
         agentId,

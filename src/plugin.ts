@@ -150,6 +150,68 @@ function wipeAgentSkillsConfig(config?: OpenClawConfig): void {
   }
 }
 
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
+async function readRawOpenClawConfig(
+  api: OpenClawPluginApi,
+): Promise<OpenClawConfig | undefined> {
+  let stateDir = "";
+  if (api.runtime?.state?.resolveStateDir) {
+    stateDir = api.runtime.state.resolveStateDir(process.env) || "";
+  }
+  if (!stateDir && process.env.HOME) {
+    stateDir = path.join(process.env.HOME, ".openclaw");
+  }
+  if (!stateDir) return undefined;
+
+  const configPath = path.join(stateDir, "openclaw.json");
+  try {
+    return JSON.parse(
+      await fs.promises.readFile(configPath, "utf8"),
+    ) as OpenClawConfig;
+  } catch (err) {
+    if (isMissingFileError(err)) return undefined;
+    logger.warn("failed to read raw openclaw.json for skills fallback", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+}
+
+export function createConfiguredAgentSkillsResolver(
+  api: OpenClawPluginApi,
+  configuredSkillsMap: Map<string, string[]>,
+): (agentId: string) => Promise<string[]> {
+  return async (agentId: string): Promise<string[]> => {
+    const rawConfig = await readRawOpenClawConfig(api);
+    if (rawConfig) {
+      configuredSkillsMap.clear();
+      for (const [key, val] of extractConfiguredAgentSkillsMap(rawConfig)) {
+        configuredSkillsMap.set(key, val);
+      }
+    }
+
+    wipeAgentSkillsConfig(api.config);
+    if (api.runtime?.config?.current) {
+      wipeAgentSkillsConfig(api.runtime.config.current() as OpenClawConfig);
+    }
+
+    const normalized = agentId.trim().toLowerCase();
+    return (
+      configuredSkillsMap.get(normalized) ??
+      configuredSkillsMap.get("defaults") ??
+      []
+    );
+  };
+}
+
 export function createPlugin(
   api: OpenClawPluginApi,
 ): OpenClawPluginDefinition & {
@@ -190,53 +252,10 @@ export function createPlugin(
       wipeAgentSkillsConfig(api.config);
       wipeAgentSkillsConfig(runtimeConfig);
 
-      const getConfiguredAgentSkills = (agentId: string): string[] => {
-        let rawConfig: OpenClawConfig | undefined;
-        try {
-          let stateDir = "";
-          if (api.runtime?.state?.resolveStateDir) {
-            stateDir = api.runtime.state.resolveStateDir(process.env) || "";
-          }
-          if (!stateDir && process.env.HOME) {
-            stateDir = path.join(process.env.HOME, ".openclaw");
-          }
-          if (stateDir) {
-            const configPath = path.join(stateDir, "openclaw.json");
-            if (fs.existsSync(configPath)) {
-              rawConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-            }
-          }
-        } catch (err) {
-          logger.warn("failed to read raw openclaw.json for skills fallback", {
-            error: err,
-          });
-        }
-
-        const currentConfig =
-          rawConfig ??
-          (api.runtime?.config?.current
-            ? (api.runtime.config.current() as OpenClawConfig)
-            : api.config);
-
-        const latestSkillsMap = extractConfiguredAgentSkillsMap(currentConfig);
-        for (const [key, val] of latestSkillsMap.entries()) {
-          if (val && val.length > 0) {
-            configuredSkillsMap.set(key, val);
-          }
-        }
-
-        wipeAgentSkillsConfig(api.config);
-        if (api.runtime?.config?.current) {
-          wipeAgentSkillsConfig(api.runtime.config.current() as OpenClawConfig);
-        }
-
-        const normalized = agentId.trim().toLowerCase();
-        return (
-          configuredSkillsMap.get(normalized) ??
-          configuredSkillsMap.get("defaults") ??
-          []
-        );
-      };
+      const getConfiguredAgentSkills = createConfiguredAgentSkillsResolver(
+        api,
+        configuredSkillsMap,
+      );
 
       const stateDir = resolveStateDirFromApi(api, process.env);
       const dataRoot = resolvePluginDataRoot(stateDir, PLUGIN_ID);

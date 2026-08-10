@@ -3,7 +3,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { logger, type OpenClawPluginApi } from "../api.js";
-import { createPlugin, initializePluginDataRoot } from "./plugin.js";
+import {
+  createConfiguredAgentSkillsResolver,
+  createPlugin,
+  initializePluginDataRoot,
+} from "./plugin.js";
 import { IntentCatalog } from "./intents/index.js";
 import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
@@ -329,5 +333,43 @@ describe("createPlugin", () => {
     expect(apiConfig.agents.list[1].skills).toEqual([]);
     expect(runtimeConfig.agents.defaults.skills).toEqual([]);
     expect(runtimeConfig.agents.list[0].skills).toEqual([]);
+  });
+
+  it("asynchronously refreshes configured skills from raw config and clears removed skills", async () => {
+    const configPath = path.join(stateDir, "openclaw.json");
+    const writeOpenClawConfig = (skills: string[]) => {
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({
+          agents: { list: [{ id: "main", skills }] },
+        }),
+      );
+    };
+    writeOpenClawConfig(["skill-harness"]);
+
+    const apiConfig = {
+      agents: { list: [{ id: "main", skills: ["skill-harness"] }] },
+    };
+    const api = createApi({
+      config: apiConfig,
+      runtime: {
+        config: { current: () => apiConfig },
+        state: { resolveStateDir: () => stateDir },
+      } as never,
+    });
+    const readFile = vi.spyOn(fs.promises, "readFile");
+    const resolver = createConfiguredAgentSkillsResolver(
+      api,
+      new Map([["main", ["skill-harness"]]]),
+    );
+    const initial = await resolver("main");
+
+    expect(readFile).toHaveBeenCalledWith(configPath, "utf8");
+    expect(initial).toEqual(["skill-harness"]);
+
+    writeOpenClawConfig([]);
+    const removed = await resolver("main");
+
+    expect(removed).toEqual([]);
   });
 });

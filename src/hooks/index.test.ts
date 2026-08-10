@@ -1850,7 +1850,9 @@ describe("createHookHandlers topic switch flow", () => {
     instructionWriter?: ReturnType<typeof vi.fn>;
     api?: Partial<OpenClawPluginApi>;
     bundledSkillsDir?: string;
-    getConfiguredAgentSkills?: (agentId: string) => string[];
+    getConfiguredAgentSkills?: (
+      agentId: string,
+    ) => string[] | Promise<string[]>;
   }) {
     emitHostAgentEvent.mockReset();
     const intents = params.intents ?? [intent];
@@ -4302,7 +4304,9 @@ Current user request: fresh clean request
   });
 
   it("appends full XML details of configured skills into appendSystemContext on prompt build turns", async () => {
-    const getConfiguredAgentSkills = vi.fn().mockReturnValue(["skill-harness"]);
+    const getConfiguredAgentSkills = vi
+      .fn()
+      .mockResolvedValue(["skill-harness"]);
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
