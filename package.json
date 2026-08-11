@@ -2,7 +2,7 @@
   "name": "skill-harness",
   "displayName": "Skill Harness",
   "description": "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
-  "version": "2026.7.1-beta.5",
+  "version": "2026.7.1-2",
   "type": "module",
   "license": "MIT",
   "author": "Ani <ani6439walc@gmail.com>",
@@ -35,12 +35,12 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.6.11",
-      "minGatewayVersion": "2026.6.11"
+      "pluginApi": ">=2026.7.1-2",
+      "minGatewayVersion": "2026.7.1-2"
     },
     "build": {
-      "openclawVersion": "2026.6.11",
-      "pluginSdkVersion": "2026.6.11"
+      "openclawVersion": "2026.7.1-2",
+      "pluginSdkVersion": "2026.7.1-2"
     }
   },
   "scripts": {
@@ -51,15 +51,15 @@
   },
   "dependencies": {
     "gray-matter": "4.0.3",
-    "typebox": "1.1.39",
+    "typebox": "1.3.3",
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "openclaw": "2026.6.11"
+    "openclaw": "2026.7.1-2"
   },
   "devDependencies": {
-    "prettier": "3.9.4",
     "typescript": "6.0.3",
-    "vitest": "4.1.9"
+    "vitest": "4.1.9",
+    "prettier": "3.9.6"
   }
 }

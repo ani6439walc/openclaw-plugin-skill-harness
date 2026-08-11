@@ -272,3 +272,7 @@ If the directory exists but is empty, check file permissions and plugin startup 
 ## License
 
 MIT.
+
+---
+
+_🌸 Powered by Ani, Wan Jiun Wei © 2026_
