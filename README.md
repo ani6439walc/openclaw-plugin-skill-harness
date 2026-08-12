@@ -53,10 +53,10 @@ Skill Harness addresses both:
 ```mermaid
 graph TD
   A[Agent turn] --> B[before_prompt_build]
-  B --> C{Chat allowed and session not excluded?}
-  C -->|No| Z[Continue without Skill Harness context]
-  C -->|Yes| D[Append fixed skill-discovery guidance]
-  D --> E{Configured for scanning and eligible external-user turn?}
+  B --> C{Internal helper session?}
+  C -->|Yes| Z[Continue without Skill Harness context]
+  C -->|No| D[Append fixed guidance and enriched configured skills]
+  D --> E{Chat and agent eligible external-user turn?}
   E -->|No| M[Continue with static context]
   E -->|Yes| F[Load config and runtime intents]
   F --> G{Deterministic route available?}
@@ -67,7 +67,7 @@ graph TD
   M --> N[Record stats and optionally review the completed turn]
 ```
 
-All non-excluded agents in the permitted chat scope receive the static skill-discovery context. The plugin `agents` option limits only dynamic intent scanning: agents outside that list still receive static guidance and, when configured skills resolve for them, the `<configured_skills>` block. The routing pipeline uses cheap deterministic evidence before helper-model calls. Exact fast paths, high-confidence same-topic continuations, and clear changed-topic matches can avoid classification. Uncertain cases use a conservative candidate projection when evidence supports it; otherwise they fail open to the full eligible catalog.
+Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. The plugin `agents` option and chat scope limit dynamic intent routing only. The routing pipeline uses cheap deterministic evidence before helper-model calls. Exact fast paths, high-confidence same-topic continuations, and clear changed-topic matches can avoid classification. Uncertain cases use a conservative candidate projection when evidence supports it; otherwise they fail open to the full eligible catalog.
 
 For lifecycle contracts, projection rules, helper subagents, dynamic prompt shape, and fail-open behavior, read [Architecture](docs/architecture.md).
 

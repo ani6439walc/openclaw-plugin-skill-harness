@@ -6,6 +6,7 @@ export {
 export type { IntentValidationResult } from "./validation.js";
 export { validateIntentDirectory } from "./validation.js";
 export {
+  listAvailableSkills,
   resolveAvailableSkills,
   resolveAvailableSkillsWithRelated,
   resolveDomainSkills,

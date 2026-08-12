@@ -1686,58 +1686,11 @@ describe("createHookHandlers internal turn guards", () => {
     expect(result).toBeUndefined();
   });
 
-  it.each([
-    {
-      label: "disabled agent",
-      config: { agents: ["other"] },
-      expected: BASE_SKILL_HARNESS_SYSTEM_CONTEXT,
-    },
-    {
-      label: "disallowed chat type",
-      config: { allowedChatTypes: ["group"] },
-      expected: undefined,
-    },
-    {
-      label: "chat id absent from allowlist",
-      config: { allowedChatIds: ["direct:999"] },
-      expected: undefined,
-    },
-    {
-      label: "denied chat id",
-      config: { deniedChatIds: ["direct:123"] },
-      expected: undefined,
-    },
-  ])(
-    "injects only the permitted static context for $label",
-    async ({ config, expected }) => {
-      const handlers = createHookHandlers({
-        api: { config: {} } as OpenClawPluginApi,
-        config: () => resolveConfig(config as never),
-        refreshLiveConfigFromRuntime: vi.fn(),
-        refreshIntents: vi.fn(),
-      });
-
-      const result = await handlers.onBeforePromptBuild(
-        { prompt: "background task", messages: [] },
-        {
-          trigger: "heartbeat",
-          agentId: "main",
-          sessionKey: "agent:main:direct:123",
-        },
-      );
-
-      expect(result).toEqual(
-        expected ? { appendSystemContext: expected } : undefined,
-      );
-    },
-  );
-
-  it("fails closed when chat type cannot be resolved", async () => {
-    const refreshLiveConfigFromRuntime = vi.fn();
+  it("injects only base static context for an agent excluded from intent analysis", async () => {
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
-      config: () => resolveConfig({}),
-      refreshLiveConfigFromRuntime,
+      config: () => resolveConfig({ agents: ["other"] }),
+      refreshLiveConfigFromRuntime: vi.fn(),
       refreshIntents: vi.fn(),
     });
 
@@ -1746,13 +1699,111 @@ describe("createHookHandlers internal turn guards", () => {
       {
         trigger: "heartbeat",
         agentId: "main",
-        sessionKey: "agent:main:main",
+        sessionKey: "agent:main:direct:123",
       },
     );
 
-    expect(result).toBeUndefined();
-    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      appendSystemContext: BASE_SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
   });
+
+  it.each([
+    {
+      label: "disallowed chat type",
+      config: { allowedChatTypes: ["group"] },
+      sessionKey: "agent:main:direct:123",
+    },
+    {
+      label: "chat id absent from allowlist",
+      config: { allowedChatIds: ["direct:999"] },
+      sessionKey: "agent:main:direct:123",
+    },
+    {
+      label: "denied chat id",
+      config: { deniedChatIds: ["direct:123"] },
+      sessionKey: "agent:main:direct:123",
+    },
+    {
+      label: "unresolved chat type",
+      config: {},
+      sessionKey: "agent:main:main",
+    },
+  ])(
+    "injects static configured skills without dynamic routing for $label",
+    async ({ config, sessionKey }) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "static-scope-"));
+      const stateDir = path.join(tmp, "state");
+      const workspaceDir = path.join(tmp, "workspace");
+      const skillDir = path.join(workspaceDir, "skills", "static-scope");
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, "SKILL.md"),
+        "---\nname: static-scope\ndescription: Static scope workspace skill.\n---\n",
+        "utf8",
+      );
+      const refreshLiveConfigFromRuntime = vi.fn();
+      const refreshIntents = vi.fn();
+      const topicChecker = vi.fn();
+      const classifier = vi.fn();
+      const instructionWriter = vi.fn();
+      const handlers = createHookHandlers({
+        api: {
+          config: {},
+          runtime: {
+            state: { resolveStateDir: () => stateDir },
+            agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+          },
+        } as never,
+        config: () => resolveConfig(config as never),
+        refreshLiveConfigFromRuntime,
+        refreshIntents,
+        topicChecker,
+        classifier,
+        instructionWriter,
+      });
+
+      try {
+        const result = await handlers.onBeforePromptBuild(
+          {
+            prompt: "normal external question",
+            messages: [
+              {
+                role: "user",
+                content: "normal external question",
+                provenance: { kind: "external_user" },
+              },
+            ],
+          },
+          {
+            trigger: "user",
+            agentId: "main",
+            sessionId: "static-scope-session",
+            sessionKey,
+          },
+        );
+        const systemContext = result?.appendSystemContext ?? "";
+
+        expect(result?.prependContext).toBeUndefined();
+        expect(systemContext).toContain(SKILL_HARNESS_SYSTEM_CONTEXT);
+        expect(systemContext).toContain("<configured_skills>");
+        expect(systemContext).toContain("<name>static-scope</name>");
+        expect(systemContext).toContain(
+          "<description>Static scope workspace skill.</description>",
+        );
+        expect(systemContext).toContain(
+          `<path>${path.join(workspaceDir, "skills", "static-scope", "SKILL.md")}</path>`,
+        );
+        expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+        expect(refreshIntents).not.toHaveBeenCalled();
+        expect(topicChecker).not.toHaveBeenCalled();
+        expect(classifier).not.toHaveBeenCalled();
+        expect(instructionWriter).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("does not skip a normal external-user turn", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
@@ -4334,6 +4385,342 @@ Current user request: fresh clean request
     );
     expect(result?.appendSystemContext).toContain("<configured_skills>");
     expect(result?.appendSystemContext).toContain("<name>skill-harness</name>");
+  });
+
+  it("automatically appends direct and nested workspace skills when no skills are explicitly configured", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-workspace-skills-"),
+    );
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(workspaceDir, "skills"),
+      "direct",
+      "Direct workspace skill.",
+    );
+    writeSkill(
+      path.join(workspaceDir, "skills", "groups", "deep"),
+      "nested",
+      "Nested workspace skill.",
+    );
+    const getConfiguredAgentSkills = vi.fn().mockResolvedValue([]);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getConfiguredAgentSkills,
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "unrelated message",
+        messages: [{ role: "user", content: "unrelated message" }],
+      } as never,
+      ctx,
+    );
+    const systemContext = result?.appendSystemContext ?? "";
+
+    expect(getConfiguredAgentSkills).toHaveBeenCalledWith("main");
+    expect(systemContext).toContain("<configured_skills>");
+    expect(systemContext).toContain("<name>direct</name>");
+    expect(systemContext).toContain(
+      "<description>Direct workspace skill.</description>",
+    );
+    expect(systemContext).toContain(
+      `<path>${path.join(workspaceDir, "skills", "direct", "SKILL.md")}</path>`,
+    );
+    expect(systemContext).toContain("<name>nested</name>");
+    expect(systemContext).toContain(
+      "<description>Nested workspace skill.</description>",
+    );
+    expect(systemContext).toContain(
+      `<path>${path.join(workspaceDir, "skills", "groups", "deep", "nested", "SKILL.md")}</path>`,
+    );
+  });
+
+  it("unions explicit configured skills with workspace skills using workspace winners and explicit-first order", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-skill-union-"));
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(stateDir, "skills"),
+      "explicit-only",
+      "Explicit-only managed skill.",
+    );
+    writeSkill(
+      path.join(stateDir, "skills"),
+      "shared",
+      "Lower-precedence explicit copy.",
+    );
+    writeSkill(
+      path.join(workspaceDir, "skills"),
+      "shared",
+      "Workspace shared winner.",
+    );
+    writeSkill(
+      path.join(workspaceDir, "skills"),
+      "workspace-only",
+      "Workspace-only skill.",
+    );
+    const getConfiguredAgentSkills = vi
+      .fn()
+      .mockResolvedValue(["explicit-only", "shared"]);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getConfiguredAgentSkills,
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "unrelated message",
+        messages: [{ role: "user", content: "unrelated message" }],
+      } as never,
+      ctx,
+    );
+    const systemContext = result?.appendSystemContext ?? "";
+    const renderedNames = Array.from(
+      systemContext.matchAll(/<name>([^<]+)<\/name>/g),
+      (match) => match[1],
+    );
+
+    expect(systemContext).toContain("<name>explicit-only</name>");
+    expect(systemContext).toContain("<name>workspace-only</name>");
+    expect(systemContext.match(/<name>shared<\/name>/g)).toHaveLength(1);
+    expect(systemContext).toContain(
+      "<description>Workspace shared winner.</description>",
+    );
+    expect(systemContext).toContain(
+      `<path>${path.join(workspaceDir, "skills", "shared", "SKILL.md")}</path>`,
+    );
+    expect(systemContext).not.toContain("Lower-precedence explicit copy.");
+    expect(renderedNames).toEqual([
+      "explicit-only",
+      "shared",
+      "workspace-only",
+    ]);
+  });
+
+  it("keeps workspace skills when explicit configured-skill retrieval fails", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-skill-explicit-fail-"),
+    );
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(workspaceDir, "skills"),
+      "workspace-only",
+      "Workspace fallback skill.",
+    );
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getConfiguredAgentSkills: vi
+        .fn()
+        .mockRejectedValue(new Error("configured lookup failed")),
+    });
+
+    try {
+      const result = await handlers.onBeforePromptBuild(event, ctx);
+
+      expect(result?.appendSystemContext).toContain(
+        "<name>workspace-only</name>",
+      );
+      expect(result?.appendSystemContext).toContain(
+        "<description>Workspace fallback skill.</description>",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps workspace skills when explicit configured-skill resolution fails", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-skill-resolve-fail-"),
+    );
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(workspaceDir, "skills"),
+      "workspace-only",
+      "Workspace resolver fallback skill.",
+    );
+    const resolveAgentWorkspaceDir = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("explicit resolution failed");
+      })
+      .mockReturnValue(workspaceDir);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getConfiguredAgentSkills: vi.fn().mockResolvedValue(["missing-explicit"]),
+    });
+
+    try {
+      const result = await handlers.onBeforePromptBuild(event, ctx);
+
+      expect(result?.appendSystemContext).toContain(
+        "<name>workspace-only</name>",
+      );
+      expect(result?.appendSystemContext).toContain(
+        "<description>Workspace resolver fallback skill.</description>",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps explicit configured skills when workspace inventory resolution fails", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-skill-workspace-fail-"),
+    );
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(stateDir, "skills"),
+      "explicit-only",
+      "Explicit fallback skill.",
+    );
+    const resolveAgentWorkspaceDir = vi
+      .fn()
+      .mockReturnValueOnce(workspaceDir)
+      .mockImplementation(() => {
+        throw new Error("workspace lookup failed");
+      });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getConfiguredAgentSkills: vi.fn().mockResolvedValue(["explicit-only"]),
+    });
+
+    try {
+      const result = await handlers.onBeforePromptBuild(event, ctx);
+
+      expect(result?.appendSystemContext).toContain(
+        "<name>explicit-only</name>",
+      );
+      expect(result?.appendSystemContext).toContain(
+        "<description>Explicit fallback skill.</description>",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("injects only the workspace skills resolved for each agent", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-agent-skills-"));
+    const stateDir = path.join(tmp, "state");
+    const mainWorkspace = path.join(tmp, "main-workspace");
+    const librarianWorkspace = path.join(tmp, "librarian-workspace");
+    writeSkill(
+      path.join(mainWorkspace, "skills"),
+      "main-only",
+      "Main workspace skill.",
+    );
+    writeSkill(
+      path.join(librarianWorkspace, "skills"),
+      "librarian-only",
+      "Librarian workspace skill.",
+    );
+    const getConfiguredAgentSkills = vi.fn().mockResolvedValue([]);
+    const resolveAgentWorkspaceDir = vi.fn(
+      (_config: unknown, agentId: string) =>
+        agentId === "librarian" ? librarianWorkspace : mainWorkspace,
+    );
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getConfiguredAgentSkills,
+    });
+
+    const mainResult = await handlers.onBeforePromptBuild(
+      {
+        prompt: "main request",
+        messages: [{ role: "user", content: "main request" }],
+      } as never,
+      ctx,
+    );
+    const librarianResult = await handlers.onBeforePromptBuild(
+      {
+        prompt: "librarian request",
+        messages: [{ role: "user", content: "librarian request" }],
+      } as never,
+      {
+        ...ctx,
+        agentId: "librarian",
+        sessionId: "librarian-session",
+        sessionKey: "agent:librarian:direct:123",
+      },
+    );
+    const mainContext = mainResult?.appendSystemContext ?? "";
+    const librarianContext = librarianResult?.appendSystemContext ?? "";
+    const mainSkillPath = path.join(
+      mainWorkspace,
+      "skills",
+      "main-only",
+      "SKILL.md",
+    );
+    const librarianSkillPath = path.join(
+      librarianWorkspace,
+      "skills",
+      "librarian-only",
+      "SKILL.md",
+    );
+
+    expect(mainContext).toContain("<name>main-only</name>");
+    expect(mainContext).toContain(`<path>${mainSkillPath}</path>`);
+    expect(mainContext).not.toContain("<name>librarian-only</name>");
+    expect(mainContext).not.toContain(librarianSkillPath);
+    expect(librarianContext).toContain("<name>librarian-only</name>");
+    expect(librarianContext).toContain(`<path>${librarianSkillPath}</path>`);
+    expect(librarianContext).not.toContain("<name>main-only</name>");
+    expect(librarianContext).not.toContain(mainSkillPath);
+    expect(resolveAgentWorkspaceDir).toHaveBeenCalledWith(
+      expect.anything(),
+      "main",
+      expect.anything(),
+    );
+    expect(resolveAgentWorkspaceDir).toHaveBeenCalledWith(
+      expect.anything(),
+      "librarian",
+      expect.anything(),
+    );
   });
 
   it("injects static configured skill context for agents excluded from intent analysis", async () => {
