@@ -12,13 +12,14 @@ Consumers should use the parent lifecycle for pipeline status and timing rather 
 
 ## Routing stages
 
-1. Check agent and chat authorization.
-2. Append fixed skill-discovery guidance for authorized main-agent turns.
-3. Skip dynamic classification for internal, inter-session, generic subagent, Intent Review, dreaming, active-memory, or non-user-trigger turns.
-4. Load live config and runtime intents for eligible external-user turns.
-5. Try deterministic evidence before helper models.
-6. Inject focused candidate skills and an optional instruction hint.
-7. Record stats after the turn and run Intent Review only when configured triggers match.
+1. Resolve the canonical agent and session identity.
+2. Exclude Skill Harness helper, generic subagent, Intent Review, dreaming, and active-memory sessions from all prompt injection.
+3. Append fixed skill-discovery guidance and the enriched configured-skills union for every remaining agent turn.
+4. Apply the configured agent list, chat scope, user-turn, and interactive-session gates only to dynamic intent routing.
+5. Load live config and runtime intents for eligible external-user turns.
+6. Try deterministic evidence before helper models.
+7. Inject focused candidate skills and an optional instruction hint.
+8. Record stats after the turn and run Intent Review only when configured triggers match.
 
 ## Deterministic routing and candidate projection
 
@@ -48,9 +49,9 @@ When complexity is known, the instruction writer receives its matching execution
 
 ## Prompt context
 
-Every non-excluded agent turn within the configured chat scope receives the fixed `appendSystemContext`, including agents outside the plugin's configured intent-scanning `agents` list. Its universal section requires active skill discovery and documents the four Skill Harness tools. Agents enabled by the `agents` option additionally receive the `### Using Skill Harness context` section, which explains how to apply per-turn candidates and hints. Neither static section contains a runtime skill inventory, skill paths, intent result, or generated hint.
+Every non-excluded normal agent turn receives fixed `appendSystemContext`, regardless of the configured chat scope and including agents outside the plugin's intent-scanning `agents` list. Its universal section requires active skill discovery and documents the four Skill Harness tools. Agents enabled by the `agents` option additionally receive the `### Using Skill Harness context` section, which explains how to apply per-turn candidates and hints. Neither fixed section contains a runtime skill inventory, skill paths, intent result, or generated hint.
 
-Configured skills, when resolvable for that agent, are appended as a separate `<configured_skills>` block. The `agents` option controls both the intent-routing static section and dynamic intent analysis; it does not suppress universal skill-discovery or configured-skill context for other normal agents.
+The separate `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills from the invoking agent's workspace `skills/` tree. Explicit order is preserved, workspace-only entries are appended in index order, duplicate names use the workspace winner, and each rendered entry includes its resolved description and path. The `agents` option controls the intent-routing static section and dynamic analysis; chat scope controls dynamic analysis only. Neither suppresses universal skill discovery or configured-skill context for normal agents.
 
 Eligible external-user turns may receive dynamic `prependContext` with `<domain_skill_candidates>` and an optional `## Instruction Hint`. Candidate entries include their resolved path and directly visible related skills. Related skills are optional, not automatically required.
 
@@ -58,4 +59,4 @@ The static prompt requires agents to use only tools exposed for that turn. `befo
 
 ## Fail-open behavior
 
-Skill Harness should improve routing without blocking OpenClaw. Config-loading, classification, statistics, and review failures are logged while the main agent continues. After static authorization succeeds, a dynamic-routing failure preserves fixed guidance and omits only the failed dynamic hint. Review failures never block the user reply.
+Skill Harness should improve routing without blocking OpenClaw. Config-loading, classification, statistics, and review failures are logged while the main agent continues. After internal-helper exclusion, static skill-resolution or dynamic-routing failures preserve fixed guidance and omit only unavailable enriched or dynamic context. Review failures never block the user reply.

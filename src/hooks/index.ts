@@ -73,6 +73,7 @@ import {
   formatConfiguredSkills,
 } from "../classification/index.js";
 import {
+  listAvailableSkills,
   resolveAvailableSkills,
   resolveAvailableSkillsWithRelated,
   resolveDomainSkills,
@@ -555,9 +556,14 @@ export function createHookHandlers(deps: HookDeps) {
   const pendingSkillEpochKeys = new Set<string>();
   const pendingCoverageEpochKeys = new Set<string>();
 
-  function resolvePromptBuildScope(
+  interface PromptBuildIdentity {
+    effectiveAgentId: string;
+    resolvedSessionKey?: string;
+  }
+
+  function resolvePromptBuildIdentity(
     ctx: PluginHookAgentContext,
-  ): { effectiveAgentId: string; resolvedSessionKey?: string } | undefined {
+  ): PromptBuildIdentity {
     const resolvedAgentId = resolveStatusUpdateAgentId(ctx);
     const resolvedSessionKey =
       ctx.sessionKey?.trim() ||
@@ -569,7 +575,13 @@ export function createHookHandlers(deps: HookDeps) {
           })
         : undefined);
 
-    // Use current config for static-context chat scope before refreshing live config.
+    return { effectiveAgentId: resolvedAgentId, resolvedSessionKey };
+  }
+
+  function isPromptBuildChatAllowed(
+    ctx: PluginHookAgentContext,
+    resolvedSessionKey?: string,
+  ): boolean {
     const currentConfig = config();
     const resolvedSessionKeyForChecks = resolvedSessionKey ?? ctx.sessionKey;
     if (
@@ -579,7 +591,7 @@ export function createHookHandlers(deps: HookDeps) {
         mainKey: api.config.session?.mainKey,
       })
     ) {
-      return;
+      return false;
     }
     if (
       !isAllowedChatId(currentConfig, {
@@ -587,10 +599,9 @@ export function createHookHandlers(deps: HookDeps) {
         messageProvider: ctx.messageProvider,
       })
     ) {
-      return;
+      return false;
     }
-
-    return { effectiveAgentId: resolvedAgentId, resolvedSessionKey };
+    return true;
   }
 
   function resolveTrackingContext(ctx: {
@@ -959,7 +970,7 @@ export function createHookHandlers(deps: HookDeps) {
 
   function recordPromptBuildResult(params: {
     ctx: PluginHookAgentContext;
-    routing: NonNullable<ReturnType<typeof resolvePromptBuildScope>>;
+    routing: PromptBuildIdentity;
     latestUserMessage: string;
     trigger: IntentTrigger;
     result: IntentionResult;
@@ -1027,33 +1038,78 @@ export function createHookHandlers(deps: HookDeps) {
   async function resolveConfiguredSkillsXml(
     agentId: string,
   ): Promise<string | undefined> {
-    if (!deps.getConfiguredAgentSkills) return undefined;
-    const configuredSkillNames = await deps.getConfiguredAgentSkills(agentId);
-    if (!configuredSkillNames.length) {
-      logger.info("no configured agent skills found in memory map", {
-        agentId,
-      });
-      return undefined;
-    }
     try {
-      const skills = await resolveAvailableSkills({
-        api,
-        agentId,
-        bundledSkillsDir,
-        skillNames: configuredSkillNames,
-      });
-      if (!skills.length) {
-        logger.info(
-          "configured agent skills could not be resolved from available skill roots",
-          { agentId, configuredSkillNames },
-        );
-      } else {
-        logger.info("resolved configured agent skills for prompt build", {
+      let configuredSkillNames: string[] = [];
+      if (deps.getConfiguredAgentSkills) {
+        try {
+          configuredSkillNames = await deps.getConfiguredAgentSkills(agentId);
+        } catch (error) {
+          logger.warn("failed to retrieve configured agent skill names", {
+            agentId,
+            error,
+          });
+        }
+      }
+
+      let explicitSkills: Awaited<ReturnType<typeof resolveAvailableSkills>> =
+        [];
+      try {
+        explicitSkills = await resolveAvailableSkills({
+          api,
+          agentId,
+          bundledSkillsDir,
+          skillNames: configuredSkillNames,
+        });
+      } catch (error) {
+        logger.warn("failed to resolve explicitly configured agent skills", {
           agentId,
           configuredSkillNames,
-          resolvedSkills: skills.map((s) => s.name),
+          error,
         });
       }
+
+      let workspaceSkills: Awaited<ReturnType<typeof listAvailableSkills>> = [];
+      try {
+        workspaceSkills = await listAvailableSkills({
+          api,
+          agentId,
+          bundledSkillsDir,
+          source: "workspace",
+          usageStats: {},
+        });
+      } catch (error) {
+        logger.warn("failed to resolve workspace agent skills", {
+          agentId,
+          error,
+        });
+      }
+
+      const skills = [...explicitSkills];
+      const seen = new Set(
+        explicitSkills.map((skill) => skill.name.trim().toLowerCase()),
+      );
+      for (const skill of workspaceSkills) {
+        const normalizedName = skill.name.trim().toLowerCase();
+        if (seen.has(normalizedName)) continue;
+        skills.push(skill);
+        seen.add(normalizedName);
+      }
+      if (!skills.length) {
+        logger.info(
+          "no configured or workspace agent skills could be resolved",
+          { agentId, configuredSkillNames },
+        );
+        return undefined;
+      }
+      logger.info(
+        "resolved configured and workspace agent skills for prompt build",
+        {
+          agentId,
+          configuredSkillNames,
+          workspaceSkills: workspaceSkills.map((skill) => skill.name),
+          resolvedSkills: skills.map((s) => s.name),
+        },
+      );
       return formatConfiguredSkills(skills);
     } catch (error) {
       logger.warn(
@@ -1066,7 +1122,7 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function handleExactKeywordPromptBuild(params: {
     ctx: PluginHookAgentContext;
-    routing: NonNullable<ReturnType<typeof resolvePromptBuildScope>>;
+    routing: PromptBuildIdentity;
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
     latestUserMessage: string;
     historicalIntents: HistoricalIntentRecord[];
@@ -1143,7 +1199,7 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function handleClassifiedPromptBuild(params: {
     ctx: PluginHookAgentContext;
-    routing: NonNullable<ReturnType<typeof resolvePromptBuildScope>>;
+    routing: PromptBuildIdentity;
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
     latestUserMessage: string;
     conversation: ReturnType<typeof limitConversationTurns>;
@@ -1358,8 +1414,7 @@ export function createHookHandlers(deps: HookDeps) {
     let configuredSkillsXml: string | undefined;
     let intentContextEnabled = false;
     try {
-      const routing = resolvePromptBuildScope(ctx);
-      if (!routing) return;
+      const routing = resolvePromptBuildIdentity(ctx);
       resolvedSessionKey = routing.resolvedSessionKey ?? resolvedSessionKey;
 
       const resolvedContext = {
@@ -1379,6 +1434,9 @@ export function createHookHandlers(deps: HookDeps) {
 
       if (!intentContextEnabled) {
         return toPromptBuildResult(undefined, configuredSkillsXml, false);
+      }
+      if (!isPromptBuildChatAllowed(resolvedContext, resolvedSessionKey)) {
+        return toPromptBuildResult(undefined, configuredSkillsXml);
       }
       if (shouldSkipIntentAnalysis(resolvedContext)) {
         return toPromptBuildResult(undefined, configuredSkillsXml);
