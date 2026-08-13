@@ -87,7 +87,13 @@ describe("createPlugin", () => {
       api.registerTool.mock.calls.map(([tool, options]) =>
         typeof tool === "function" ? options?.name : tool.name,
       ),
-    ).toEqual(["skill_list", "skill_search", "skill_view", "skill_manage"]);
+    ).toEqual([
+      "skill_list",
+      "skill_search",
+      "skill_view",
+      "skill_manage",
+      "skill_experience",
+    ]);
     expect(api.registerCommand).not.toHaveBeenCalled();
   });
 
@@ -201,6 +207,7 @@ describe("createPlugin", () => {
     try {
       initializePluginDataRoot({ dataRoot, packageRoot });
 
+      expect(fs.readdirSync(path.join(dataRoot, "experiences"))).toEqual([]);
       expect(fs.readdirSync(path.join(dataRoot, "intents"))).toEqual([
         "example.md",
       ]);

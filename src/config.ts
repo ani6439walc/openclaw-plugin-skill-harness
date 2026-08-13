@@ -41,6 +41,14 @@ const DEFAULT_INSTRUCTION = {
   timeoutMs: 30_000,
 } as const;
 
+const DEFAULT_CURATION = {
+  enabled: true,
+  model: undefined,
+  modelFallback: undefined,
+  thinking: "medium",
+  timeoutMs: 30_000,
+} as const;
+
 const DEFAULT_REVIEW = {
   enabled: false,
   model: undefined,
@@ -78,6 +86,7 @@ const DEFAULT_CONFIG = {
   contextWindow: DEFAULT_CONTEXT_WINDOW,
   timeoutMs: DEFAULT_TIMEOUT_MS,
   instruction: DEFAULT_INSTRUCTION,
+  curation: DEFAULT_CURATION,
   review: DEFAULT_REVIEW,
 } satisfies ResolvedSkillHarnessPluginConfig;
 
@@ -144,6 +153,15 @@ const InstructionSchema = z
     timeoutMs: boundedInt(30_000, 250, 600_000),
   })
   .catch(DEFAULT_INSTRUCTION);
+const CurationSchema = z
+  .object({
+    enabled: z.boolean().catch(true),
+    model: z.string().optional().catch(undefined),
+    modelFallback: z.string().optional().catch(undefined),
+    thinking: ThinkLevelSchema,
+    timeoutMs: boundedInt(30_000, 250, 600_000),
+  })
+  .catch(DEFAULT_CURATION);
 const ReviewSchema = z
   .object({
     enabled: z.boolean().catch(false),
@@ -237,6 +255,7 @@ const SkillHarnessConfigSchema = z
     contextWindow: ContextWindowSchema,
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 250, 120_000),
     instruction: InstructionSchema,
+    curation: CurationSchema,
     review: ReviewSchema,
   })
   .catch(DEFAULT_CONFIG);

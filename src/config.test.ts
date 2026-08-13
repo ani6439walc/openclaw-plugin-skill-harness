@@ -230,6 +230,44 @@ describe("resolveConfig", () => {
     });
   });
 
+  describe("curation", () => {
+    it("defaults to an enabled independent curator configuration", () => {
+      expect(resolveConfig({}).curation).toEqual({
+        enabled: true,
+        model: undefined,
+        modelFallback: undefined,
+        thinking: "medium",
+        timeoutMs: 30_000,
+      });
+      expect(
+        resolveConfig({ review: { enabled: false } }).curation.enabled,
+      ).toBe(true);
+    });
+
+    it("parses curator model settings and clamps its timeout", () => {
+      expect(
+        resolveConfig({
+          curation: {
+            enabled: false,
+            model: "google/curator",
+            modelFallback: "openai/fallback",
+            thinking: "high",
+            timeoutMs: 0,
+          },
+        }).curation,
+      ).toEqual({
+        enabled: false,
+        model: "google/curator",
+        modelFallback: "openai/fallback",
+        thinking: "high",
+        timeoutMs: 250,
+      });
+      expect(
+        resolveConfig({ curation: { timeoutMs: 700_000 } }).curation.timeoutMs,
+      ).toBe(600_000);
+    });
+  });
+
   describe("enum validation", () => {
     it("should accept valid queryMode values", () => {
       const messageResult = resolveConfig({ queryMode: "message" });

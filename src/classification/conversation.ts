@@ -7,6 +7,7 @@ import type {
   PromptMessageLike,
   RecentTurn,
 } from "../types.js";
+import type { SessionData } from "../session/tracker.js";
 
 const LEGACY_UNTRUSTED_CONTEXT_HEADERS = [
   "Use it as a helpful reference to naturally guide the conversation or tasks, but prioritize the user's explicit intent. (the following information is retrieved background context):",
@@ -135,6 +136,18 @@ export function limitConversationTurns(
 
   const filtered = allTurns.filter((turn) => turn.text.trim().length > 0);
 
+  const truncateTurn = (text: string, limit: number): string => {
+    const cleaned = text.trim().replace(/\s+/g, " ");
+    const codePoints = Array.from(cleaned);
+    if (codePoints.length <= limit) return cleaned;
+    const suffix = Array.from(" (truncated...)");
+    if (limit <= suffix.length) return codePoints.slice(0, limit).join("");
+    return [
+      ...codePoints.slice(0, Math.max(0, limit - suffix.length)),
+      ...suffix,
+    ].join("");
+  };
+
   // Walk backwards, picking up to maxUserTurns user + maxAssistantTurns assistant
   let remainingUser = maxUserTurns;
   let remainingAssistant = maxAssistantTurns;
@@ -143,31 +156,41 @@ export function limitConversationTurns(
     const turn = filtered[i];
     if (turn.role === "user" && remainingUser > 0) {
       remainingUser--;
-      const cleaned = turn.text.trim().replace(/\s+/g, " ");
       picked.unshift({
         ...turn,
         role: turn.role,
-        text:
-          cleaned.length > userCharLimit
-            ? cleaned.slice(0, userCharLimit) + " (truncated...)"
-            : cleaned,
+        text: truncateTurn(turn.text, userCharLimit),
       });
     } else if (turn.role === "assistant" && remainingAssistant > 0) {
       remainingAssistant--;
-      const cleaned = turn.text.trim().replace(/\s+/g, " ");
       picked.unshift({
         ...turn,
         role: turn.role,
-        text:
-          cleaned.length > assistantCharLimit
-            ? cleaned.slice(0, assistantCharLimit) + " (truncated...)"
-            : cleaned,
+        text: truncateTurn(turn.text, assistantCharLimit),
       });
     }
     if (remainingUser === 0 && remainingAssistant === 0) break;
   }
 
   return picked;
+}
+
+export function projectCurationConversation(
+  session: SessionData,
+  topicEpoch: number,
+): RecentTurn[] {
+  const turns: RecentTurn[] = [];
+  for (const state of session.history ?? []) {
+    if (!state.timestamps?.end || state.error !== undefined) continue;
+    if (state.intent?.recommendationState?.topicEpoch !== topicEpoch) continue;
+    if (state.input?.trim()) {
+      turns.push({ role: "user", text: state.input });
+    }
+    if (state.result?.trim()) {
+      turns.push({ role: "assistant", text: state.result });
+    }
+  }
+  return limitConversationTurns(turns, "recent");
 }
 
 function stripThinkingTags(text: string): string {

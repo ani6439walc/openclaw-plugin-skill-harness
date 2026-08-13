@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildRoutingContext,
   buildIntentInstructionPrompt,
   buildIntentionPrompt,
   buildTopicSwitchPrompt,
@@ -24,6 +25,7 @@ import type {
 } from "../types.js";
 import { FALLBACK_INTENT, FALLBACK_INTENT_ID } from "../constants.js";
 import { indentXmlLines } from "../xml-format.js";
+import type { SkillExperienceEntry } from "../experiences/types.js";
 
 function conversationContextFrom(prompt: string): string {
   const openingTag = "<conversation_context>";
@@ -108,6 +110,113 @@ describe("conversation context prompt serialization", () => {
       conversationContextFrom(intentClassifierPrompt),
       conversationContextFrom(hintWriterPrompt),
     ]).toEqual([topicCheckerContext, topicCheckerContext]);
+  });
+});
+
+describe("buildRoutingContext", () => {
+  it("serializes routing guidance, candidates, and experiences at the XML trust boundary", () => {
+    const experience: SkillExperienceEntry = {
+      identity: "architecture-diagram/layout",
+      skill: "architecture-diagram",
+      entryId: "layout",
+      summary: "Prefer clear diagrams.",
+      keywords: ["diagram"],
+      body: "Keep <boundaries> explicit & reviewable.",
+      path: "/private/experience.md",
+    };
+
+    const result = buildRoutingContext({
+      result: {
+        intent: "architecture",
+        reason: "User requested a diagram.",
+        domain: "design",
+        confidence: 0.95,
+      },
+      guidance: "Render the selected skills with stable evidence.",
+      candidates: [
+        {
+          name: "architecture-diagram",
+          location: "/private/SKILL.md",
+          description: "Draw <clear> diagrams & validate them.",
+        },
+      ],
+      experiences: [experience],
+    });
+
+    expect(result).toContain("<skill_harness_plugin>");
+    expect(result).toContain("<selected_intent>architecture</selected_intent>");
+    expect(result).toContain(
+      "<intent_guidance>Render the selected skills with stable evidence.</intent_guidance>",
+    );
+    expect(result).toContain("<skill_candidates>");
+    expect(result).toContain("<name>architecture-diagram</name>");
+    expect(result).toContain(
+      "<description>Draw &lt;clear&gt; diagrams &amp; validate them.</description>",
+    );
+    expect(result).toContain("<skill_experiences>");
+    expect(result).toContain(
+      "<identity>architecture-diagram/layout</identity>",
+    );
+    expect(result).toContain(
+      "Keep &lt;boundaries&gt; explicit &amp; reviewable.",
+    );
+    expect(result).not.toContain("/private/SKILL.md");
+    expect(result).not.toContain("/private/experience.md");
+  });
+
+  it("omits empty optional blocks and bounds experience bodies by Unicode code points", () => {
+    const experience = (
+      entryId: string,
+      body: string,
+    ): SkillExperienceEntry => ({
+      identity: `skill/${entryId}`,
+      skill: "skill",
+      entryId,
+      summary: "Summary.",
+      keywords: [],
+      body,
+      path: `/private/${entryId}.md`,
+    });
+
+    const empty = buildRoutingContext({
+      result: {
+        intent: "other",
+        reason: "No exact match.",
+        domain: "other",
+        confidence: 0.5,
+      },
+      guidance: "Use only verified context.",
+      candidates: [],
+      experiences: [],
+    });
+    expect(empty).not.toContain("<skill_candidates>");
+    expect(empty).not.toContain("<skill_experiences>");
+
+    const bounded = buildRoutingContext({
+      result: {
+        intent: "other",
+        reason: "No exact match.",
+        domain: "other",
+        confidence: 0.5,
+      },
+      guidance: "Use only verified context.",
+      candidates: [],
+      experiences: [
+        experience("one", "😀".repeat(1_201)),
+        experience("two", "😀".repeat(1_201)),
+        experience("three", "😀".repeat(1_201)),
+        experience("four", "must not render"),
+      ],
+    });
+
+    expect(bounded).toContain("<identity>skill/one</identity>");
+    expect(bounded).toContain("<identity>skill/two</identity>");
+    expect(bounded).toContain("<identity>skill/three</identity>");
+    expect(bounded).not.toContain("<identity>skill/four</identity>");
+    expect(Array.from(bounded.match(/😀/gu)?.join("") ?? "")).toHaveLength(
+      3_000,
+    );
+    expect(bounded).not.toContain("�");
   });
 });
 

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { registerSkillTools } from "./tools.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import type { IntentCatalogEntry } from "../types.js";
+import { SkillExperienceCatalog } from "../experiences/index.js";
 
 function createApi(
   stateDir: string,
@@ -48,6 +49,20 @@ function writeSkill(
   fs.writeFileSync(
     path.join(skillDir, "SKILL.md"),
     `---\nname: ${name}\ndescription: ${description}\n${relatedSkillsFrontmatter}---\n\n# ${heading}\n`,
+  );
+}
+
+function writeExperience(
+  dataRoot: string,
+  skill: string,
+  entryId: string,
+  body: string,
+): void {
+  const directory = path.join(dataRoot, "experiences", skill);
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(
+    path.join(directory, `${entryId}.md`),
+    `---\nskill: ${skill}\nsummary: ${entryId} summary\nkeywords: [${entryId}]\n---\n${body}\n`,
   );
 }
 
@@ -125,23 +140,30 @@ function toolsForAgent(
 }
 
 describe("registerSkillTools", () => {
-  it("registers skill_list, skill_search, skill_view, and skill_manage tools", () => {
+  it("registers the four skill tools followed by agent-scoped skill_experience", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
-    const api = createApi(path.join(tmp, "state"), path.join(tmp, "workspace"));
+    const stateDir = path.join(tmp, "state");
+    const api = createApi(stateDir, path.join(tmp, "workspace"));
 
-    registerSkillTools(api);
+    registerSkillTools(api, {
+      experienceCatalog: SkillExperienceCatalog.create(
+        path.join(stateDir, "plugins", "skill-harness"),
+      ),
+    });
 
-    expect(api.registerTool).toHaveBeenCalledTimes(4);
+    expect(api.registerTool).toHaveBeenCalledTimes(5);
     expect([...toolsForAgent(api).keys()]).toEqual([
       "skill_list",
       "skill_search",
       "skill_view",
       "skill_manage",
+      "skill_experience",
     ]);
     const toolsWithoutAgent = toolsForAgent(api, "");
     expect(toolsWithoutAgent.has("skill_list")).toBe(false);
     expect(toolsWithoutAgent.has("skill_search")).toBe(false);
     expect(toolsWithoutAgent.has("skill_view")).toBe(false);
+    expect(toolsWithoutAgent.has("skill_experience")).toBe(false);
   });
 
   it("describes focused discovery, required reading, and authorized mutation", () => {
@@ -167,6 +189,153 @@ describe("registerSkillTools", () => {
     expect(description("skill_manage")).toContain(
       "Use only when available and authorized",
     );
+  });
+
+  it("returns only bounded experience for requested skills visible to the invoking agent", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const stateDir = path.join(tmp, "state");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+    const mainWorkspace = path.join(tmp, "main-workspace");
+    const analystWorkspace = path.join(tmp, "analyst-workspace");
+    const api = createApi(stateDir, {
+      main: mainWorkspace,
+      analyst: analystWorkspace,
+    });
+    writeSkill(mainWorkspace, "react");
+    writeSkill(analystWorkspace, "vue");
+    writeExperience(dataRoot, "react", "alpha", "😀".repeat(2_500));
+    writeExperience(dataRoot, "react", "beta", "b".repeat(2_500));
+    writeExperience(dataRoot, "react", "gamma", "c".repeat(2_500));
+    writeExperience(dataRoot, "react", "ignored", "d".repeat(100));
+    writeExperience(dataRoot, "vue", "private", "private analyst guidance");
+    const experienceFile = path.join(
+      dataRoot,
+      "experiences",
+      "react",
+      "alpha.md",
+    );
+    const readBefore = fs.readFileSync(experienceFile, "utf8");
+
+    registerSkillTools(api, {
+      experienceCatalog: SkillExperienceCatalog.create(dataRoot),
+    });
+    const tool = toolsForAgent(api, "main").get("skill_experience");
+    const result = await runTool(tool, {
+      skills: [" REACT ", "react", "vue", "missing"],
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      unavailable_skills: ["vue", "missing"],
+    });
+    expect(
+      result.entries.map((entry: { identity: string }) => entry.identity),
+    ).toEqual(["react/alpha", "react/beta", "react/gamma"]);
+    expect(
+      result.entries.map(
+        (entry: { body: string }) => Array.from(entry.body).length,
+      ),
+    ).toEqual([2_000, 2_000, 1_000]);
+    expect(result.entries).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: expect.anything() }),
+      ]),
+    );
+    expect(fs.readFileSync(experienceFile, "utf8")).toBe(readBefore);
+    expect(api.runtime.agent).not.toHaveProperty("runEmbeddedAgent");
+  });
+
+  it("uses the catalog canonical identity for the invoking agent visibility intersection", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const stateDir = path.join(tmp, "state");
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+    const mainWorkspace = path.join(tmp, "main-workspace");
+    const analystWorkspace = path.join(tmp, "analyst-workspace");
+    const api = createApi(stateDir, {
+      main: mainWorkspace,
+      analyst: analystWorkspace,
+    });
+    writeSkill(mainWorkspace, "react");
+    writeSkill(analystWorkspace, "vue");
+    writeExperience(dataRoot, "react", "forms", "Use controlled forms.");
+    writeExperience(dataRoot, "vue", "signals", "Use explicit signals.");
+
+    registerSkillTools(api, {
+      experienceCatalog: SkillExperienceCatalog.create(dataRoot),
+    });
+    const result = await runTool(
+      toolsForAgent(api, "main").get("skill_experience"),
+      { skills: ["ＲＥＡＣＴ", "ＶＵＥ"] },
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      requested_skills: ["react", "vue"],
+      unavailable_skills: ["vue"],
+      entries: [expect.objectContaining({ identity: "react/forms" })],
+    });
+  });
+
+  it("validates skill count and Unicode query length at execution", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const stateDir = path.join(tmp, "state");
+    const workspace = path.join(tmp, "workspace");
+    const api = createApi(stateDir, workspace);
+    writeSkill(workspace, "react");
+    registerSkillTools(api, {
+      experienceCatalog: SkillExperienceCatalog.create(
+        path.join(stateDir, "plugins", "skill-harness"),
+      ),
+    });
+    const tool = toolsForAgent(api).get("skill_experience");
+
+    await expect(runTool(tool, { skills: [] })).resolves.toMatchObject({
+      success: false,
+    });
+    await expect(
+      runTool(tool, { skills: ["react", 3] }),
+    ).resolves.toMatchObject({ success: false });
+    await expect(
+      runTool(tool, {
+        skills: Array.from({ length: 7 }, (_, index) => `s${index}`),
+      }),
+    ).resolves.toMatchObject({ success: false });
+    await expect(
+      runTool(tool, { skills: ["react"], query: "😀".repeat(501) }),
+    ).resolves.toEqual({
+      success: false,
+      error: "query must contain at most 500 Unicode code points",
+    });
+    await expect(
+      runTool(tool, { skills: ["react"], query: 3 }),
+    ).resolves.toEqual({
+      success: false,
+      error: "query must be a string",
+    });
+  });
+
+  it("returns an explicit empty result when visible skills have no experience", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const stateDir = path.join(tmp, "state");
+    const workspace = path.join(tmp, "workspace");
+    const api = createApi(stateDir, workspace);
+    writeSkill(workspace, "react");
+    registerSkillTools(api, {
+      experienceCatalog: SkillExperienceCatalog.create(
+        path.join(stateDir, "plugins", "skill-harness"),
+      ),
+    });
+
+    await expect(
+      runTool(toolsForAgent(api).get("skill_experience"), {
+        skills: ["react"],
+      }),
+    ).resolves.toEqual({
+      success: true,
+      requested_skills: ["react"],
+      unavailable_skills: [],
+      entries: [],
+    });
   });
 
   it("searches with the invoking agent's skill roots and filtered intents", async () => {

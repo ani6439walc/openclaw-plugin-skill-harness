@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "../../api.js";
+import { logger } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import {
   coverageEpochMilestone,
@@ -13,12 +14,14 @@ import {
   SKILL_HARNESS_INTENT_CONTEXT,
   SKILL_HARNESS_SYSTEM_CONTEXT as BASE_SKILL_HARNESS_SYSTEM_CONTEXT,
 } from "./system-context.js";
-import { defaultTracker } from "../session/index.js";
+import { defaultTracker, type SessionState } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { defaultCatalog, filterIntentsForAgent } from "../intents/index.js";
 import type { IntentCatalogEntry } from "../types.js";
 import { resolvePackageRoot } from "../file-utils.js";
 import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness";
+import { TurnAssociationRegistry } from "./turn-associations.js";
+import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 
 vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
   emitAgentEvent: vi.fn(),
@@ -94,6 +97,123 @@ describe("keyword coverage scheduling", () => {
 });
 
 describe("createHookHandlers tracking guards", () => {
+  function bindAssociation(
+    registry: TurnAssociationRegistry,
+    params: {
+      sessionId: string;
+      turnKey: string;
+      runId?: string;
+      sessionKey?: string;
+    },
+  ) {
+    const reservation = params.runId
+      ? registry.reserve(params.runId)
+      : registry.reserveAnonymous();
+    if (reservation.status !== "reserved")
+      throw new Error("reservation failed");
+    const association = {
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+      turnKey: params.turnKey,
+    };
+    if (params.runId) {
+      registry.bind(reservation.token, params.runId, association);
+    } else {
+      registry.bindAnonymous(reservation.token, association);
+    }
+  }
+
+  function seedAssociation(
+    sessionId = "session-1",
+    turnKey = "run-1",
+    runId?: string,
+    sessionKey?: string,
+  ) {
+    const registry = new TurnAssociationRegistry();
+    bindAssociation(registry, { sessionId, sessionKey, turnKey, runId });
+    return registry;
+  }
+
+  function mockExactTurnMerge() {
+    const record = vi.fn();
+    const merge = vi
+      .spyOn(defaultTracker, "mergeTurnAndPersist")
+      .mockImplementation(({ sessionId, data }) => {
+        record(sessionId, { current: data });
+        return Promise.resolve("applied");
+      });
+    return { merge, record };
+  }
+
+  function createExactTurnToolHarness(
+    params: {
+      sessionId?: string;
+      turnKey?: string;
+      sessionKey?: string;
+      api?: Partial<OpenClawPluginApi>;
+    } = {},
+  ) {
+    const sessionId = params.sessionId ?? "session-1";
+    const turnKey = params.turnKey ?? "run-1";
+    const sessionKey = params.sessionKey;
+    const turnAssociations = seedAssociation(
+      sessionId,
+      turnKey,
+      undefined,
+      sessionKey,
+    );
+    const { merge, record } = mockExactTurnMerge();
+    return {
+      handlers: createHandlers(params.api ?? {}, { turnAssociations }),
+      merge,
+      record,
+      sessionId,
+      turnKey,
+    };
+  }
+
+  function createFinalizedTurnHarness(
+    state: SessionState,
+    params: {
+      sessionId?: string;
+      turnKey?: string;
+      sessionKey?: string;
+      api?: Partial<OpenClawPluginApi>;
+      deps?: Record<string, unknown>;
+    } = {},
+  ) {
+    const sessionId = params.sessionId ?? "session-1";
+    const turnKey = params.turnKey ?? "run-1";
+    const sessionKey = params.sessionKey;
+    const turnAssociations = seedAssociation(
+      sessionId,
+      turnKey,
+      undefined,
+      sessionKey,
+    );
+    const finalizeTurn = vi
+      .spyOn(defaultTracker, "finalizeTurnFromAgentEnd")
+      .mockResolvedValue("applied");
+    const getTurnState = vi
+      .spyOn(defaultTracker, "getTurnState")
+      .mockImplementation((candidateSessionId, candidateTurnKey) =>
+        candidateSessionId === sessionId && candidateTurnKey === turnKey
+          ? state
+          : undefined,
+      );
+    return {
+      handlers: createHandlers(params.api ?? {}, {
+        ...params.deps,
+        turnAssociations,
+      }),
+      finalizeTurn,
+      getTurnState,
+      sessionId,
+      sessionKey,
+      turnKey,
+    };
+  }
+
   afterEach(() => {
     vi.restoreAllMocks();
     emitHostAgentEvent.mockReset();
@@ -117,7 +237,7 @@ describe("createHookHandlers tracking guards", () => {
       {},
     );
 
-    expect(resolveCurrentSessionId).toHaveBeenCalledWith({});
+    expect(resolveCurrentSessionId).not.toHaveBeenCalled();
     expect(record).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
   });
@@ -139,19 +259,47 @@ describe("createHookHandlers tracking guards", () => {
       { sessionId: "session-without-intent" },
     );
 
-    expect(defaultTracker.resolveCurrentSessionId).toHaveBeenCalledWith({
-      sessionId: "session-without-intent",
-    });
+    expect(defaultTracker.resolveCurrentSessionId).not.toHaveBeenCalled();
     expect(record).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
   });
 
-  it("records skill metadata from full read output while storing truncated tool output", async () => {
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
+  it("attributes a late tool result by canonical session key without reading current state", async () => {
+    const sessionKey = "agent:main:direct:123";
+    const turnAssociations = seedAssociation(
       "session-1",
+      "run-1",
+      undefined,
+      sessionKey,
     );
-    const record = vi.spyOn(defaultTracker, "record");
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const resolveCurrentSessionId = vi.spyOn(
+      defaultTracker,
+      "resolveCurrentSessionId",
+    );
+    const { merge } = mockExactTurnMerge();
+
+    await createHandlers({}, { turnAssociations }).onAfterToolCall(
+      {
+        toolName: "read",
+        params: { path: "/safe/file" },
+        result: "ok",
+        durationMs: 1,
+      } as never,
+      { sessionKey },
+    );
+
+    expect(merge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        expectedTurnKey: "run-1",
+      }),
+    );
+    expect(resolveCurrentSessionId).not.toHaveBeenCalled();
+  });
+
+  it("records skill metadata from full read output while storing truncated tool output", async () => {
+    const sessionKey = "agent:main:discord:channel:1490722656197152878";
+    const { handlers, record } = createExactTurnToolHarness({ sessionKey });
     const longSkillOutput = `---
 name: skill-harness
 description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing a review finding (review), or analyzing intent complexity and extracting oversized intents into skills (extract)."
@@ -159,14 +307,14 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
 
 # Skill Harness`;
 
-    await createHandlers().onAfterToolCall(
+    await handlers.onAfterToolCall(
       {
         toolName: "read",
         params: { path: "/skills/skill-harness/SKILL.md" },
         result: longSkillOutput,
         durationMs: 1,
       } as never,
-      { sessionKey: "agent:main:discord:channel:1490722656197152878" },
+      { sessionKey },
     );
 
     expect(record).toHaveBeenCalledWith(
@@ -190,11 +338,8 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
   });
 
   it("records skill metadata from successful skill_view output", async () => {
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "session-1",
-    );
-    const record = vi.spyOn(defaultTracker, "record");
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const sessionKey = "agent:main:discord:channel:1490722656197152878";
+    const { handlers, record } = createExactTurnToolHarness({ sessionKey });
     const skillViewOutput = JSON.stringify({
       success: true,
       name: "skill-harness",
@@ -203,14 +348,14 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
       skill_dir: "/skills/skill-harness",
     });
 
-    await createHandlers().onAfterToolCall(
+    await handlers.onAfterToolCall(
       {
         toolName: "skill_view",
         params: { name: "skill-harness" },
         result: skillViewOutput,
         durationMs: 1,
       } as never,
-      { sessionKey: "agent:main:discord:channel:1490722656197152878" },
+      { sessionKey },
     );
 
     expect(record).toHaveBeenCalledWith(
@@ -237,24 +382,21 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
   });
 
   it("records result-level skill tool failures as explicit failures", async () => {
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "session-1",
-    );
-    const record = vi.spyOn(defaultTracker, "record");
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const sessionKey = "agent:main:discord:channel:1490722656197152878";
+    const { handlers, record } = createExactTurnToolHarness({ sessionKey });
     const failureOutput = JSON.stringify({
       success: false,
       error: "Skill not found: missing-skill",
     });
 
-    await createHandlers().onAfterToolCall(
+    await handlers.onAfterToolCall(
       {
         toolName: "skill_view",
         params: { name: "missing-skill" },
         result: failureOutput,
         durationMs: 1,
       } as never,
-      { sessionKey: "agent:main:discord:channel:1490722656197152878" },
+      { sessionKey },
     );
 
     expect(record).toHaveBeenCalledWith(
@@ -276,21 +418,18 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
   });
 
   it("does not treat read file content containing success false as a tool failure", async () => {
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "session-1",
-    );
-    const record = vi.spyOn(defaultTracker, "record");
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const sessionKey = "agent:main:discord:channel:1490722656197152878";
+    const { handlers, record } = createExactTurnToolHarness({ sessionKey });
     const fileContent = JSON.stringify({ success: false, value: "fixture" });
 
-    await createHandlers().onAfterToolCall(
+    await handlers.onAfterToolCall(
       {
         toolName: "read",
         params: { path: "/repo/fixture.json" },
         result: fileContent,
         durationMs: 1,
       } as never,
-      { sessionKey: "agent:main:discord:channel:1490722656197152878" },
+      { sessionKey },
     );
 
     expect(record).toHaveBeenCalledWith(
@@ -311,18 +450,14 @@ description: "Design, inventory, evolve, or extract intent definitions for the s
   });
 
   it("records skill metadata from persisted tool results when after_tool_call is unavailable", async () => {
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "session-1",
-    );
-    const record = vi.spyOn(defaultTracker, "record");
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const sessionKey = "agent:main:discord:direct:529296776637972480";
+    const { handlers, record } = createExactTurnToolHarness({ sessionKey });
     const skillOutput = `---
 name: tokyo
 description: Navigate Tokyo.
 ---
 
 # Tokyo`;
-    const handlers = createHandlers();
 
     await handlers.onBeforeToolCall(
       {
@@ -331,7 +466,7 @@ description: Navigate Tokyo.
         toolCallId: "call-read-tokyo",
       } as never,
       {
-        sessionKey: "agent:main:discord:direct:529296776637972480",
+        sessionKey,
         toolName: "read",
         toolCallId: "call-read-tokyo",
       } as never,
@@ -346,10 +481,16 @@ description: Navigate Tokyo.
         },
       } as never,
       {
-        sessionKey: "agent:main:discord:direct:529296776637972480",
+        sessionKey,
         toolName: "read",
         toolCallId: "call-read-tokyo",
       } as never,
+    );
+
+    expect(record).not.toHaveBeenCalled();
+    await handlers.onBeforeAgentFinalize(
+      { messages: [] } as never,
+      { sessionKey } as never,
     );
 
     expect(record).toHaveBeenCalledWith(
@@ -374,16 +515,12 @@ description: Navigate Tokyo.
   });
 
   it("records persisted result-level failures as explicit failures", async () => {
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "session-1",
-    );
-    const record = vi.spyOn(defaultTracker, "record");
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const sessionKey = "agent:main:discord:direct:529296776637972480";
+    const { handlers, record } = createExactTurnToolHarness({ sessionKey });
     const failureOutput = JSON.stringify({
       success: false,
       error: "query or at least one filter is required",
     });
-    const handlers = createHandlers();
 
     await handlers.onBeforeToolCall(
       {
@@ -392,7 +529,7 @@ description: Navigate Tokyo.
         toolCallId: "call-search-failure",
       } as never,
       {
-        sessionKey: "agent:main:discord:direct:529296776637972480",
+        sessionKey,
         toolName: "skill_search",
         toolCallId: "call-search-failure",
       } as never,
@@ -407,10 +544,16 @@ description: Navigate Tokyo.
         },
       } as never,
       {
-        sessionKey: "agent:main:discord:direct:529296776637972480",
+        sessionKey,
         toolName: "skill_search",
         toolCallId: "call-search-failure",
       } as never,
+    );
+
+    expect(record).not.toHaveBeenCalled();
+    await handlers.onBeforeAgentFinalize(
+      { messages: [] } as never,
+      { sessionKey } as never,
     );
 
     expect(record).toHaveBeenCalledWith(
@@ -432,12 +575,8 @@ description: Navigate Tokyo.
   });
 
   it("does not double-record a persisted tool result when after_tool_call also arrives", async () => {
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "session-1",
-    );
-    const record = vi.spyOn(defaultTracker, "record");
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
-    const handlers = createHandlers();
+    const sessionKey = "agent:main:discord:direct:529296776637972480";
+    const { handlers, record } = createExactTurnToolHarness({ sessionKey });
 
     await handlers.onBeforeToolCall(
       {
@@ -446,7 +585,7 @@ description: Navigate Tokyo.
         toolCallId: "call-read-tokyo",
       } as never,
       {
-        sessionKey: "agent:main:discord:direct:529296776637972480",
+        sessionKey,
         toolName: "read",
         toolCallId: "call-read-tokyo",
       } as never,
@@ -458,10 +597,14 @@ description: Navigate Tokyo.
         message: { role: "toolResult", content: "ok" },
       } as never,
       {
-        sessionKey: "agent:main:discord:direct:529296776637972480",
+        sessionKey,
         toolName: "read",
         toolCallId: "call-read-tokyo",
       } as never,
+    );
+    await handlers.onBeforeAgentFinalize(
+      { messages: [] } as never,
+      { sessionKey } as never,
     );
     await handlers.onAfterToolCall(
       {
@@ -471,7 +614,7 @@ description: Navigate Tokyo.
         result: "ok",
       } as never,
       {
-        sessionKey: "agent:main:discord:direct:529296776637972480",
+        sessionKey,
         toolName: "read",
         toolCallId: "call-read-tokyo",
       } as never,
@@ -480,7 +623,112 @@ description: Navigate Tokyo.
     expect(record).toHaveBeenCalledTimes(1);
   });
 
-  it("resolves the canonical session key for tool tracking when hook context omits it", async () => {
+  it("warns and discards an ambiguous persisted fallback without reassigning ownership", async () => {
+    const sessionKey = "agent:main:direct:ambiguous-fallback";
+    const toolFallbacks = new ToolFallbackRegistry();
+    toolFallbacks.stage("shared-call", {
+      association: { sessionId: "session-a", turnKey: "turn-a" },
+      fallback: {
+        toolCallId: "shared-call",
+        name: "read",
+        params: { path: "/safe/a" },
+        result: "first",
+        success: true,
+      },
+    });
+    const turnAssociations = seedAssociation(
+      "session-b",
+      "turn-b",
+      undefined,
+      sessionKey,
+    );
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const handlers = createHandlers({}, { turnAssociations, toolFallbacks });
+    await handlers.onBeforeToolCall(
+      {
+        toolName: "read",
+        params: { path: "/safe/b" },
+        toolCallId: "shared-call",
+      } as never,
+      { sessionKey, toolCallId: "shared-call", toolName: "read" } as never,
+    );
+
+    handlers.onToolResultPersist(
+      {
+        toolName: "read",
+        toolCallId: "shared-call",
+        message: { role: "toolResult", content: "second" },
+      } as never,
+      { sessionKey, toolCallId: "shared-call", toolName: "read" } as never,
+    );
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(toolFallbacks.get("shared-call")).toBeUndefined();
+  });
+
+  it("fails open without terminal or downstream work when pre-finalize fallback merge is contended", async () => {
+    const sessionKey = "agent:main:direct:contended";
+    const turnAssociations = seedAssociation(
+      "session-1",
+      "run-1",
+      undefined,
+      sessionKey,
+    );
+    const toolFallbacks = new ToolFallbackRegistry();
+    toolFallbacks.stage("tool-a", {
+      association: {
+        sessionId: "session-1",
+        sessionKey,
+        turnKey: "run-1",
+      },
+      fallback: {
+        toolCallId: "tool-a",
+        name: "read",
+        params: { path: "/skills/a/SKILL.md" },
+        result: "done",
+        success: true,
+      },
+    });
+    const mergeTurnAndPersist = vi.fn().mockResolvedValue("retryable-failure");
+    const finalizeTurnFromAgentEnd = vi.fn();
+    const recordStats = vi.spyOn(defaultStatsAggregator, "record");
+    const reviewQueue = vi.fn();
+    const handlers = createHandlers(
+      {},
+      {
+        turnAssociations,
+        toolFallbacks,
+        tracker: {
+          mergeTurnAndPersist,
+          finalizeTurnFromAgentEnd,
+        },
+        reviewQueue: { enqueue: reviewQueue },
+      },
+    );
+    const startedAt = performance.now();
+
+    await handlers.onBeforeAgentFinalize(
+      { messages: [] } as never,
+      {
+        sessionKey,
+      } as never,
+    );
+
+    expect(performance.now() - startedAt).toBeLessThan(100);
+    expect(mergeTurnAndPersist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        expectedTurnKey: "run-1",
+        maxWaitMs: 0,
+      }),
+    );
+    expect(finalizeTurnFromAgentEnd).not.toHaveBeenCalled();
+    expect(recordStats).not.toHaveBeenCalled();
+    expect(reviewQueue).not.toHaveBeenCalled();
+    expect(toolFallbacks.get("tool-a")).toBeDefined();
+  });
+
+  it("does not reconstruct a missing terminal association from mutable session state", async () => {
     const sessionKey = "agent:main:discord:direct:529296776637972480";
     const api = {
       runtime: {
@@ -496,9 +744,10 @@ description: Navigate Tokyo.
         },
       },
     };
-    const resolveCurrentSessionId = vi
-      .spyOn(defaultTracker, "resolveCurrentSessionId")
-      .mockReturnValue("latest-prompt-session");
+    const resolveCurrentSessionId = vi.spyOn(
+      defaultTracker,
+      "resolveCurrentSessionId",
+    );
     const record = vi.spyOn(defaultTracker, "record");
     vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
 
@@ -512,21 +761,9 @@ description: Navigate Tokyo.
       { sessionId: "stale-event-session", agentId: "main" },
     );
 
-    expect(api.runtime.agent.session.listSessionEntries).toHaveBeenCalledWith({
-      agentId: "main",
-    });
-    expect(resolveCurrentSessionId).toHaveBeenCalledWith({
-      sessionId: "stale-event-session",
-      sessionKey,
-    });
-    expect(record).toHaveBeenCalledWith(
-      "latest-prompt-session",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          toolCalls: [expect.objectContaining({ name: "read" })],
-        }),
-      }),
-    );
+    expect(api.runtime.agent.session.listSessionEntries).not.toHaveBeenCalled();
+    expect(resolveCurrentSessionId).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
   });
 
   it("aggregates the completed current turn on agent_end", async () => {
@@ -553,24 +790,155 @@ description: Navigate Tokyo.
         prompt: "Follow the version-control workflow.",
       },
     };
-    vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
     const recordStats = vi
       .spyOn(defaultStatsAggregator, "record")
       .mockReturnValue(true);
+    const { handlers, finalizeTurn, getTurnState } =
+      createFinalizedTurnHarness(state);
 
-    await createHandlers().onAgentEnd(
+    await handlers.onAgentEnd(
       { messages: [{ role: "assistant", content: "done" }] } as never,
       { sessionId: "session-1" },
     );
 
+    expect(finalizeTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        expectedTurnKey: "run-1",
+        result: "done",
+      }),
+    );
+    expect(getTurnState).toHaveBeenCalledWith("session-1", "run-1");
     expect(recordStats).toHaveBeenCalledWith("session-1", state, definition);
   });
 
-  it("aggregates the completed current turn before agent finalize", async () => {
+  it("passes every staged fallback for the exact turn through one agent_end finalization", async () => {
+    const state = {
+      input: "read two skills",
+      timestamps: { start: "2026-06-11T00:00:00.000Z" },
+    };
+    const toolFallbacks = new ToolFallbackRegistry();
+    for (const [toolCallId, name] of [
+      ["tool-a", "read"],
+      ["tool-b", "skill_view"],
+    ] as const) {
+      toolFallbacks.stage(toolCallId, {
+        association: { sessionId: "session-1", turnKey: "run-1" },
+        fallback: {
+          toolCallId,
+          name,
+          params: {},
+          result: `${toolCallId}-result`,
+          success: true,
+        },
+      });
+    }
+    const { handlers, finalizeTurn } = createFinalizedTurnHarness(state, {
+      deps: { toolFallbacks },
+    });
+
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "session-1",
+    });
+
+    expect(finalizeTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        expectedTurnKey: "run-1",
+        stagedToolFallbacks: [
+          expect.objectContaining({ toolCallId: "tool-a" }),
+          expect.objectContaining({ toolCallId: "tool-b" }),
+        ],
+      }),
+    );
+    expect(toolFallbacks.get("tool-a")).toBeUndefined();
+    expect(toolFallbacks.get("tool-b")).toBeUndefined();
+  });
+
+  it("does not repeat downstream effects for a duplicate terminal hook", async () => {
+    const state = {
+      input: "commit this",
+      intent: {
+        result: {
+          intent: "version-control",
+          reason: "test",
+          confidence: 0.9,
+          complexity: "low" as const,
+        },
+      },
+      timestamps: { start: "2026-06-11T00:00:00.000Z" },
+    };
+    const definition = {
+      id: "version-control",
+      definition: {
+        triggers: ["commit"],
+        examples: [],
+        domain: "git",
+        skills: ["git-master"],
+        fastpath: { keywords: [] },
+        prompt: "Follow the version-control workflow.",
+      },
+    };
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
+    const recordStats = vi
+      .spyOn(defaultStatsAggregator, "record")
+      .mockReturnValue(true);
+    const { handlers, finalizeTurn } = createFinalizedTurnHarness(state);
+    finalizeTurn
+      .mockResolvedValueOnce("applied")
+      .mockResolvedValueOnce("already-finalized");
+
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "session-1",
+    });
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "session-1",
+    });
+
+    expect(recordStats).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears a duplicate terminal fallback only when its tool call is durable", async () => {
+    const state = {
+      input: "read skill",
+      intent: {
+        result: {
+          intent: "skill-lifecycle",
+          reason: "test",
+          confidence: 0.9,
+          complexity: "low" as const,
+        },
+      },
+      toolCalls: [{ toolCallId: "tool-a", name: "read", success: true }],
+      timestamps: { start: "2026-06-11T00:00:00.000Z" },
+    };
+    const toolFallbacks = new ToolFallbackRegistry();
+    toolFallbacks.stage("tool-a", {
+      association: { sessionId: "session-1", turnKey: "run-1" },
+      fallback: {
+        toolCallId: "tool-a",
+        name: "read",
+        params: { path: "/skills/a/SKILL.md" },
+        result: "done",
+        success: true,
+      },
+    });
+    const recordStats = vi.spyOn(defaultStatsAggregator, "record");
+    const { handlers, finalizeTurn } = createFinalizedTurnHarness(state, {
+      deps: { toolFallbacks },
+    });
+    finalizeTurn.mockResolvedValue("already-finalized");
+
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "session-1",
+    });
+
+    expect(toolFallbacks.get("tool-a")).toBeUndefined();
+    expect(recordStats).not.toHaveBeenCalled();
+  });
+
+  it("does not own terminal state or stats before agent finalize", async () => {
     const state = {
       input: "read vue skill",
       intent: {
@@ -614,14 +982,12 @@ description: Navigate Tokyo.
       {} as never,
     );
 
-    expect(recordStats).toHaveBeenCalledWith(
-      "event-context-session",
-      state,
-      definition,
-    );
+    expect(recordStats).not.toHaveBeenCalled();
+    expect(defaultTracker.record).not.toHaveBeenCalled();
+    expect(defaultTracker.write).not.toHaveBeenCalled();
   });
 
-  it("aggregates agent_end using the tracked session resolved from sessionKey", async () => {
+  it("aggregates agent_end using the prepared turn bound to sessionKey", async () => {
     const state = {
       input: "read skill-harness",
       intent: {
@@ -646,23 +1012,19 @@ description: Navigate Tokyo.
         prompt: "Follow the skill workflow.",
       },
     };
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "tracked-session",
-    );
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
     const recordStats = vi
       .spyOn(defaultStatsAggregator, "record")
       .mockReturnValue(true);
+    const sessionKey = "agent:main:discord:channel:1490722656197152878";
+    const { handlers } = createFinalizedTurnHarness(state, {
+      sessionId: "tracked-session",
+      sessionKey,
+    });
 
-    await createHandlers().onAgentEnd(
+    await handlers.onAgentEnd(
       { messages: [{ role: "assistant", content: "done" }] } as never,
-      {
-        sessionId: "event-context-session",
-        sessionKey: "agent:main:discord:channel:1490722656197152878",
-      } as never,
+      { sessionKey } as never,
     );
 
     expect(recordStats).toHaveBeenCalledWith(
@@ -705,12 +1067,6 @@ description: Navigate Tokyo.
       },
     ];
     const resolveInventory = vi.fn().mockResolvedValue(inventory);
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "tracked-session",
-    );
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
     vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
@@ -718,12 +1074,14 @@ description: Navigate Tokyo.
       .spyOn(defaultStatsAggregator, "record")
       .mockReturnValue(true);
 
-    await createHandlers(
-      {},
-      { skillInventoryResolver: resolveInventory },
-    ).onAgentEnd(
+    const { handlers } = createFinalizedTurnHarness(state, {
+      sessionId: "tracked-session",
+      deps: { skillInventoryResolver: resolveInventory },
+    });
+
+    await handlers.onAgentEnd(
       { messages: [{ role: "assistant", content: "done" }] } as never,
-      { sessionId: "event-session", agentId: "agent-b" } as never,
+      { sessionId: "tracked-session", agentId: "agent-b" } as never,
     );
 
     expect(resolveInventory).toHaveBeenCalledWith(
@@ -753,12 +1111,6 @@ description: Navigate Tokyo.
       },
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
     };
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "tracked-session",
-    );
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
     vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue({
       sessionId: "tracked-session",
@@ -784,9 +1136,9 @@ description: Navigate Tokyo.
       "selectSkillPlacementCandidate",
     );
 
-    await createHandlers(
-      {},
-      {
+    const { handlers } = createFinalizedTurnHarness(state, {
+      sessionId: "tracked-session",
+      deps: {
         config: () => resolveConfig({ review: { enabled: true } }),
         skillInventoryResolver: resolver,
         reviewLogWriter: {
@@ -794,9 +1146,11 @@ description: Navigate Tokyo.
           record: vi.fn(),
         },
       },
-    ).onAgentEnd(
+    });
+
+    await handlers.onAgentEnd(
       { messages: [{ role: "assistant", content: "done" }] } as never,
-      { sessionId: "event-session", agentId: "agent-a" } as never,
+      { sessionId: "tracked-session", agentId: "agent-a" } as never,
     );
 
     expect(recordStats).toHaveBeenCalledWith(
@@ -885,7 +1239,7 @@ description: Navigate Tokyo.
     },
   );
 
-  it("aggregates agent_end using canonical session key when hook context omits it", async () => {
+  it("does not reconstruct a missing terminal association from mutable session state", async () => {
     const sessionKey = "agent:main:discord:direct:529296776637972480";
     const api = {
       runtime: {
@@ -925,8 +1279,9 @@ description: Navigate Tokyo.
         prompt: "Follow the skill lifecycle workflow.",
       },
     };
-    vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
-      "latest-prompt-session",
+    const resolveCurrentSessionId = vi.spyOn(
+      defaultTracker,
+      "resolveCurrentSessionId",
     );
     vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
     vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
@@ -941,18 +1296,9 @@ description: Navigate Tokyo.
       { sessionId: "stale-event-session", agentId: "main" },
     );
 
-    expect(api.runtime.agent.session.listSessionEntries).toHaveBeenCalledWith({
-      agentId: "main",
-    });
-    expect(defaultTracker.resolveCurrentSessionId).toHaveBeenCalledWith({
-      sessionId: "stale-event-session",
-      sessionKey,
-    });
-    expect(recordStats).toHaveBeenCalledWith(
-      "latest-prompt-session",
-      state,
-      definition,
-    );
+    expect(api.runtime.agent.session.listSessionEntries).not.toHaveBeenCalled();
+    expect(resolveCurrentSessionId).not.toHaveBeenCalled();
+    expect(recordStats).not.toHaveBeenCalled();
   });
 
   it("does not aggregate agent_end without a tracked current turn", async () => {
@@ -986,10 +1332,7 @@ description: Navigate Tokyo.
       recent: [],
       intentCatalog: [],
     };
-    vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue({
+    const state = {
       input: snapshot.current.input,
       intent: { result: snapshot.current.intent },
       toolCalls: snapshot.current.toolCalls?.map((call) => ({
@@ -997,8 +1340,14 @@ description: Navigate Tokyo.
         params: {},
       })),
       timestamps: snapshot.current.timestamps,
-    });
-    vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue(snapshot);
+    };
+    vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd").mockResolvedValue(
+      "applied",
+    );
+    vi.spyOn(defaultTracker, "getTurnState").mockReturnValue(state);
+    vi.spyOn(defaultTracker, "getReviewSnapshotForTurn").mockReturnValue(
+      snapshot,
+    );
     vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
     const definition = {
       id: "other",
@@ -1034,6 +1383,7 @@ description: Navigate Tokyo.
       completedSkillEpochKeys: vi.fn().mockReturnValue(undefined),
       record: vi.fn(),
     };
+    const turnAssociations = seedAssociation("session-1", "run-1");
     const handlers = createHookHandlers({
       api: {
         config: {},
@@ -1056,6 +1406,7 @@ description: Navigate Tokyo.
       reviewQueue: { enqueue },
       reviewer,
       reviewLogWriter,
+      turnAssociations,
     });
 
     await handlers.onAgentEnd({ messages: [] } as never, {
@@ -1146,15 +1497,18 @@ description: Navigate Tokyo.
       usageTurns: 0,
       recommendedTurns: 0,
     };
-    vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue({
+    const state = {
       input: snapshot.current.input,
       intent: { result: snapshot.current.intent },
       timestamps: snapshot.current.timestamps,
-    });
-    vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue(snapshot);
+    };
+    vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd").mockResolvedValue(
+      "applied",
+    );
+    vi.spyOn(defaultTracker, "getTurnState").mockReturnValue(state);
+    vi.spyOn(defaultTracker, "getReviewSnapshotForTurn").mockReturnValue(
+      snapshot,
+    );
     vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("persisted-agent");
     vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
     vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
@@ -1166,6 +1520,17 @@ description: Navigate Tokyo.
     const reviewer = vi.fn().mockResolvedValue({
       findings: [],
       outcome: "nofinding" as const,
+    });
+    const turnAssociations = new TurnAssociationRegistry();
+    bindAssociation(turnAssociations, {
+      sessionId: snapshot.sessionId,
+      turnKey: "run-a",
+      runId: "run-a",
+    });
+    bindAssociation(turnAssociations, {
+      sessionId: snapshot.sessionId,
+      turnKey: "run-b",
+      runId: "run-b",
     });
     const handlers = createHookHandlers({
       api: {
@@ -1204,10 +1569,11 @@ description: Navigate Tokyo.
         record: vi.fn(async () => true),
       },
       skillInventoryResolver: vi.fn().mockResolvedValue([]),
+      turnAssociations,
     });
 
-    await handlers.onAgentEnd({ messages: [] } as never, {
-      sessionId: "event-session-fallback-a",
+    await handlers.onAgentEnd({ messages: [], runId: "run-a" } as never, {
+      sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
 
@@ -1222,8 +1588,8 @@ description: Navigate Tokyo.
     expect(reviewer.mock.calls[0][0].snapshot).not.toHaveProperty(
       "skillPlacementCandidate",
     );
-    await handlers.onAgentEnd({ messages: [] } as never, {
-      sessionId: "event-session-fallback-b",
+    await handlers.onAgentEnd({ messages: [], runId: "run-b" } as never, {
+      sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
     expect(selectCandidate).toHaveBeenCalledTimes(2);
@@ -1271,15 +1637,18 @@ description: Navigate Tokyo.
         prompt: "## Guidelines\n\n- Ask for context.",
       },
     };
-    vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue({
+    const state = {
       input: snapshot.current.input,
       intent: { result: snapshot.current.intent },
       timestamps: snapshot.current.timestamps,
-    });
-    vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue(snapshot);
+    };
+    vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd").mockResolvedValue(
+      "applied",
+    );
+    vi.spyOn(defaultTracker, "getTurnState").mockReturnValue(state);
+    vi.spyOn(defaultTracker, "getReviewSnapshotForTurn").mockReturnValue(
+      snapshot,
+    );
     vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("persisted-agent");
     vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
     vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
@@ -1331,6 +1700,21 @@ description: Navigate Tokyo.
         return true;
       }),
     };
+    const turnAssociations = new TurnAssociationRegistry();
+    for (const runId of [
+      "run-a",
+      "run-b",
+      "run-c",
+      "run-d",
+      "run-e",
+      "run-f",
+    ]) {
+      bindAssociation(turnAssociations, {
+        sessionId: snapshot.sessionId,
+        turnKey: runId,
+        runId,
+      });
+    }
     const handlers = createHookHandlers({
       api: {
         config: {},
@@ -1368,15 +1752,16 @@ description: Navigate Tokyo.
       reviewer,
       reviewLogWriter,
       skillInventoryResolver: vi.fn().mockResolvedValue([]),
+      turnAssociations,
     });
 
     await Promise.all([
-      handlers.onAgentEnd({ messages: [] } as never, {
-        sessionId: "event-session-a",
+      handlers.onAgentEnd({ messages: [], runId: "run-a" } as never, {
+        sessionId: snapshot.sessionId,
         agentId: "ctx-agent",
       }),
-      handlers.onAgentEnd({ messages: [] } as never, {
-        sessionId: "event-session-b",
+      handlers.onAgentEnd({ messages: [], runId: "run-b" } as never, {
+        sessionId: snapshot.sessionId,
         agentId: "ctx-agent",
       }),
     ]);
@@ -1386,20 +1771,20 @@ description: Navigate Tokyo.
       new Set<string>(),
     );
     expect(enqueue).not.toHaveBeenCalled();
-    await handlers.onAgentEnd({ messages: [] } as never, {
-      sessionId: "event-session-c",
+    await handlers.onAgentEnd({ messages: [], runId: "run-c" } as never, {
+      sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
     expect(enqueue).toHaveBeenCalledOnce();
     await expect(enqueue.mock.calls[0][0]()).rejects.toThrow("reviewer failed");
-    await handlers.onAgentEnd({ messages: [] } as never, {
-      sessionId: "event-session-d",
+    await handlers.onAgentEnd({ messages: [], runId: "run-d" } as never, {
+      sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
     expect(enqueue).toHaveBeenCalledTimes(2);
     await enqueue.mock.calls[1][0]();
-    await handlers.onAgentEnd({ messages: [] } as never, {
-      sessionId: "event-session-e",
+    await handlers.onAgentEnd({ messages: [], runId: "run-e" } as never, {
+      sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
     expect(enqueue).toHaveBeenCalledTimes(3);
@@ -1441,8 +1826,8 @@ description: Navigate Tokyo.
         }),
       }),
     );
-    await handlers.onAgentEnd({ messages: [] } as never, {
-      sessionId: "event-session-f",
+    await handlers.onAgentEnd({ messages: [], runId: "run-f" } as never, {
+      sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
     expect(enqueue).toHaveBeenCalledTimes(3);
@@ -1904,6 +2289,7 @@ describe("createHookHandlers topic switch flow", () => {
     getConfiguredAgentSkills?: (
       agentId: string,
     ) => string[] | Promise<string[]>;
+    turnAssociations?: TurnAssociationRegistry;
   }) {
     emitHostAgentEvent.mockReset();
     const intents = params.intents ?? [intent];
@@ -1915,6 +2301,16 @@ describe("createHookHandlers topic switch flow", () => {
         .fn()
         .mockReturnValue(params.historicalIntents),
       resolveCurrentSessionId: vi.fn().mockReturnValue(undefined),
+      preparePromptTurn: vi.fn().mockImplementation(({ runId }) =>
+        Promise.resolve({
+          status: "applied",
+          identity: { turnKey: runId ?? "anonymous-turn", reused: false },
+        }),
+      ),
+      mergeTurnAndPersist: vi.fn().mockImplementation(({ sessionId, data }) => {
+        record(sessionId, { current: data });
+        return Promise.resolve("applied");
+      }),
       rotate,
       record,
       write,
@@ -1975,6 +2371,7 @@ describe("createHookHandlers topic switch flow", () => {
       classifier,
       topicChecker,
       instructionWriter,
+      turnAssociations: params.turnAssociations,
       bundledSkillsDir: params.bundledSkillsDir,
       getConfiguredAgentSkills: params.getConfiguredAgentSkills,
     });
@@ -2329,18 +2726,24 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       prompt: "謝謝",
       messages: [{ role: "user", content: "謝謝" }],
     } as never;
-    const { handlers, rotate, record, write } = createTopicFlowHarness({
-      historicalIntents: [],
-    });
+    const { handlers, tracker, rotate, record, write } = createTopicFlowHarness(
+      {
+        historicalIntents: [],
+      },
+    );
 
     await handlers.onBeforePromptBuild(fastEvent, ctx);
 
-    expect(rotate).toHaveBeenCalledWith("session-1");
+    expect(tracker.preparePromptTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        runId: "run-1",
+        input: "謝謝",
+      }),
+    );
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
-        sessionKey: "agent:main:direct:123",
-        agentId: "main",
         current: expect.objectContaining({
           input: "謝謝",
           intent: expect.objectContaining({
@@ -2355,11 +2758,75 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
             instructionText: "Reply warmly.",
             recommendedSkills: [],
           }),
-          timestamps: expect.objectContaining({ start: expect.any(String) }),
         }),
       }),
     );
-    expect(write).toHaveBeenCalledWith("session-1");
+    expect(tracker.mergeTurnAndPersist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        expectedTurnKey: "run-1",
+        maxWaitMs: 0,
+      }),
+    );
+    expect(rotate).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("fails open before durable prompt preparation when association capacity is full", async () => {
+    const turnAssociations = new TurnAssociationRegistry({ maxEntries: 1 });
+    const occupied = turnAssociations.reserve("occupied-run");
+    if (occupied.status !== "reserved") throw new Error("reservation failed");
+    turnAssociations.bind(occupied.token, "occupied-run", {
+      sessionId: "occupied-session",
+      turnKey: "occupied-turn",
+    });
+    const { handlers, tracker, classifier, topicChecker, instructionWriter } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        turnAssociations,
+      });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
+    expect(tracker.preparePromptTurn).not.toHaveBeenCalled();
+    expect(tracker.mergeTurnAndPersist).not.toHaveBeenCalled();
+    expect(topicChecker).not.toHaveBeenCalled();
+    expect(classifier).not.toHaveBeenCalled();
+    expect(instructionWriter).not.toHaveBeenCalled();
+  });
+
+  it("fails open before durable preparation when a terminal run ID is reused for a different turn", async () => {
+    const turnAssociations = new TurnAssociationRegistry();
+    const reservation = turnAssociations.reserve("run-1");
+    if (reservation.status !== "reserved") {
+      throw new Error("reservation failed");
+    }
+    const previousAssociation = {
+      sessionId: "session-1",
+      turnKey: "previous-turn",
+    };
+    turnAssociations.bind(reservation.token, "run-1", previousAssociation);
+    turnAssociations.markTerminal("run-1", previousAssociation);
+    const { handlers, tracker, classifier, topicChecker, instructionWriter } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        turnAssociations,
+      });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result).toEqual({
+      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
+    });
+    expect(tracker.preparePromptTurn).not.toHaveBeenCalled();
+    expect(tracker.mergeTurnAndPersist).not.toHaveBeenCalled();
+    expect(topicChecker).not.toHaveBeenCalled();
+    expect(classifier).not.toHaveBeenCalled();
+    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(turnAssociations.resolve("run-1")).toBeUndefined();
   });
 
   it("uses a resolved session key for prompt-build eligibility when hook ctx omits it", async () => {
@@ -2368,23 +2835,25 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       messages: [{ role: "user", content: "謝謝" }],
     } as never;
     const resolvedSessionKey = "agent:main:discord:direct:resolved";
-    const { handlers, rotate, record, write } = createTopicFlowHarness({
-      historicalIntents: [],
-      api: {
-        runtime: {
-          agent: {
-            session: {
-              listSessionEntries: vi.fn().mockReturnValue([
-                {
-                  sessionKey: resolvedSessionKey,
-                  entry: { sessionId: ctx.sessionId },
-                },
-              ]),
+    const { handlers, tracker, rotate, record, write } = createTopicFlowHarness(
+      {
+        historicalIntents: [],
+        api: {
+          runtime: {
+            agent: {
+              session: {
+                listSessionEntries: vi.fn().mockReturnValue([
+                  {
+                    sessionKey: resolvedSessionKey,
+                    entry: { sessionId: ctx.sessionId },
+                  },
+                ]),
+              },
             },
-          },
-        } as never,
+          } as never,
+        },
       },
-    });
+    );
 
     const result = await handlers.onBeforePromptBuild(fastEvent, {
       ...ctx,
@@ -2394,17 +2863,29 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     });
 
     expect(result?.prependContext).toContain("Reply warmly.");
-    expect(rotate).toHaveBeenCalledWith("session-1");
+    expect(tracker.preparePromptTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        sessionKey: resolvedSessionKey,
+        runId: "run-1",
+        input: "謝謝",
+      }),
+    );
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
-        sessionKey: resolvedSessionKey,
-        current: expect.objectContaining({
-          input: "謝謝",
-        }),
+        current: expect.objectContaining({ input: "謝謝" }),
       }),
     );
-    expect(write).toHaveBeenCalledWith("session-1");
+    expect(tracker.mergeTurnAndPersist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        expectedTurnKey: "run-1",
+        maxWaitMs: 0,
+      }),
+    );
+    expect(rotate).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("records prompt-build data into the current keyed session when hook ctx omits sessionId", async () => {
@@ -2416,9 +2897,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ],
     } as never;
     const { handlers, tracker, rotate, record, write } = createTopicFlowHarness(
-      {
-        historicalIntents: [],
-      },
+      { historicalIntents: [] },
     );
     tracker.resolveCurrentSessionId.mockReturnValue("session-1");
 
@@ -2431,17 +2910,29 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(tracker.resolveCurrentSessionId).toHaveBeenCalledWith({
       sessionKey: "agent:main:direct:123",
     });
-    expect(rotate).toHaveBeenCalledWith("session-1");
+    expect(tracker.preparePromptTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        sessionKey: "agent:main:direct:123",
+        runId: "run-1",
+        input: "qrcode",
+      }),
+    );
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
-        sessionKey: "agent:main:direct:123",
-        current: expect.objectContaining({
-          input: "qrcode",
-        }),
+        current: expect.objectContaining({ input: "qrcode" }),
       }),
     );
-    expect(write).toHaveBeenCalledWith("session-1");
+    expect(tracker.mergeTurnAndPersist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        expectedTurnKey: "run-1",
+        maxWaitMs: 0,
+      }),
+    );
+    expect(rotate).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("does not persist prompt-build intent data without a session id or current keyed session", async () => {

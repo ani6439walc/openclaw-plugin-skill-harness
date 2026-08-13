@@ -5,6 +5,7 @@ import {
   UNTRUSTED_CONTEXT_HEADER,
 } from "../constants.js";
 import { indentXmlLines } from "../xml-format.js";
+import type { SkillExperienceEntry } from "../experiences/types.js";
 import type {
   AvailableSkill,
   ClassifiedIntentionResult,
@@ -58,6 +59,14 @@ const SKILL_HARNESS_CONTEXT_POLICY = taggedBlock(
   "context_policy",
   `- \`domain_skill_candidates\`: domain-derived candidates; use \`path\` to load a selected skill, while \`related_skills\` are optional direct relations and are not automatically required; ignore irrelevant listed skills if the selected domain is wrong.
 - \`## Instruction Hint\`: advisory; follow only when it matches the user's request and verified context.
+- Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.`,
+);
+
+const ROUTING_CONTEXT_POLICY = taggedBlock(
+  "context_policy",
+  `- \`selected_intent\` and \`intent_guidance\` describe the current routing decision; treat low-confidence routing as tentative.
+- \`skill_candidates\` are resolved discovery leads, not proof that every listed skill applies.
+- \`skill_experiences\` are bounded reference material for the selected skills; apply only relevant entries.
 - Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.`,
 );
 
@@ -761,6 +770,58 @@ function formatSkillXml(
     }
   }
   return taggedBlock("skill", lines.join("\n"));
+}
+
+function formatExperienceXml(experience: SkillExperienceEntry): string {
+  return taggedBlock(
+    "skill_experience",
+    [
+      formatXmlTextElement("skill", experience.skill),
+      formatXmlTextElement("identity", experience.identity),
+      formatXmlTextElement("body", experience.body),
+    ].join("\n"),
+  );
+}
+
+function truncateCodePoints(value: string, limit: number): string {
+  return Array.from(value).slice(0, limit).join("");
+}
+
+function formatBoundedExperiences(
+  experiences: readonly SkillExperienceEntry[],
+): string | undefined {
+  let remainingBodyCodePoints = 3_000;
+  const rendered = experiences.slice(0, 3).map((experience) => {
+    const body = truncateCodePoints(
+      experience.body,
+      Math.min(1_200, remainingBodyCodePoints),
+    );
+    remainingBodyCodePoints -= Array.from(body).length;
+    return formatExperienceXml({ ...experience, body });
+  });
+
+  return rendered.length > 0
+    ? taggedBlock("skill_experiences", rendered.join("\n"))
+    : undefined;
+}
+
+export function buildRoutingContext(params: {
+  result: IntentionResult;
+  guidance: string;
+  candidates: readonly AvailableSkill[];
+  experiences: readonly SkillExperienceEntry[];
+}): string {
+  const blocks = [
+    ROUTING_CONTEXT_POLICY,
+    formatXmlTextElement("selected_intent", params.result.intent),
+    formatXmlTextElement("intent_guidance", params.guidance),
+    params.candidates.length > 0
+      ? formatSkillXmlBlock("skill_candidates", [...params.candidates])
+      : undefined,
+    formatBoundedExperiences(params.experiences),
+  ].filter((block): block is string => Boolean(block));
+
+  return taggedBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
 }
 
 export function formatDomainSkills(

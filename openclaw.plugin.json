@@ -6,7 +6,13 @@
     "onStartup": true
   },
   "contracts": {
-    "tools": ["skill_list", "skill_search", "skill_view", "skill_manage"]
+    "tools": [
+      "skill_list",
+      "skill_search",
+      "skill_view",
+      "skill_manage",
+      "skill_experience"
+    ]
   },
   "skills": ["./skills"],
   "uiHints": {
@@ -190,6 +196,47 @@
             "minimum": 250,
             "maximum": 120000,
             "default": 20000
+          }
+        },
+        "default": {}
+      },
+      "curation": {
+        "type": "object",
+        "description": "Enabled-by-default background curator settings. Curation is independent of Intent Review and does not depend on review.enabled.",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "model": {
+            "type": "string",
+            "description": "Explicit dedicated model for the background curator. If unset, inherits the top-level model before current-session and agent-primary resolution."
+          },
+          "modelFallback": {
+            "type": "string",
+            "description": "Last-resort background curator model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
+          },
+          "thinking": {
+            "type": "string",
+            "enum": [
+              "off",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "adaptive",
+              "max"
+            ],
+            "description": "Thinking level for the background curator sub-agent.",
+            "default": "medium"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 250,
+            "maximum": 600000,
+            "default": 30000
           }
         },
         "default": {}

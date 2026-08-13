@@ -1,5 +1,6 @@
 import path from "node:path";
 import * as fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import type {
   RecentTurn,
   IntentionResult,
@@ -8,21 +9,31 @@ import type {
   HistoricalIntentRecord,
 } from "../types.js";
 import type { ReviewSnapshot, ReviewState } from "../review/types.js";
+import type {
+  CuratedSkillCandidate,
+  CurationScheduleReservation,
+  CurationWriteResult,
+  SessionCurationRecord,
+  TurnRecommendationState,
+} from "../curation/types.js";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
 import {
   agentSessionsPath,
+  FileLock,
   pluginRoot,
   sessionsDirPath,
   sessionsPath,
   fileExists,
   readJsonFile,
   safeWriteJson,
+  withFileLock,
+  writeJsonAtomic,
 } from "../file-utils.js";
 import { isIntentComplexity } from "../constants.js";
 import { sanitizeHistoricalIntentInput } from "../classification/conversation.js";
 
-const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+export const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const EMBEDDED_AGENT_SESSION_SUFFIXES = [
   ".session.jsonl",
   ".session.trajectory.jsonl",
@@ -65,20 +76,33 @@ export interface SkillRecord {
   description?: string;
 }
 
+export interface ToolResultFallback {
+  toolCallId: string;
+  name: string;
+  params: Record<string, unknown>;
+  result?: string;
+  error?: string;
+  success?: boolean;
+  durationMs?: number;
+}
+
 export interface IntentState {
   input?: RecentTurn[];
   trigger?: IntentTrigger;
   result?: IntentionResult;
   instructionText?: string;
   recommendedSkills?: string[];
+  recommendationState?: TurnRecommendationState;
   intentProjection?: IntentProjectionTelemetry;
 }
 
 export interface SessionState {
+  turnKey?: string;
   input?: string;
   intent?: IntentState;
   skillsUsed?: SkillRecord[];
   toolCalls?: Array<{
+    toolCallId?: string;
     name: string;
     params: Record<string, unknown>;
     result?: string;
@@ -100,6 +124,32 @@ export interface SessionData {
   agentId?: string;
   current: SessionState;
   history?: SessionState[];
+  curation?: SessionCurationRecord;
+}
+
+export interface PromptTurnIdentity {
+  turnKey: string;
+  reused: boolean;
+}
+
+export type PromptTurnPrepareResult =
+  | { status: "applied"; identity: PromptTurnIdentity }
+  | { status: "reused"; identity: PromptTurnIdentity }
+  | { status: "retryable-failure" };
+
+type PersistedPromptTurnPrepareResult = Exclude<
+  PromptTurnPrepareResult,
+  { status: "retryable-failure" }
+>;
+
+export function resolveTurnEventId(
+  sessionId: string,
+  state: Pick<SessionState, "turnKey" | "timestamps">,
+): string | undefined {
+  const turnKey = state.turnKey?.trim();
+  if (turnKey) return `${sessionId}:turn:${turnKey}`;
+  const start = state.timestamps?.start;
+  return start ? `${sessionId}:${start}` : undefined;
 }
 
 function truncate(value: string | undefined, maxChars: number) {
@@ -383,13 +433,59 @@ function appendToolCalls(
     return;
   }
 
-  current.toolCalls = [...(current.toolCalls || []), ...toolCalls];
-  const skillsFromToolCalls = toolCalls.map((toolCall) =>
+  const existing = current.toolCalls || [];
+  const existingIds = new Set(
+    existing.flatMap((call) => (call.toolCallId ? [call.toolCallId] : [])),
+  );
+  const additions = toolCalls.filter(
+    (call) => !call.toolCallId || !existingIds.has(call.toolCallId),
+  );
+  current.toolCalls = [...existing, ...additions];
+  const skillsFromToolCalls = additions.map((toolCall) =>
     extractSkillInfo(toolCall.name, toolCall.params, toolCall.result),
   );
   const skillsUsed = mergeUniqueSkills(current.skillsUsed, skillsFromToolCalls);
   if (skillsUsed) {
     current.skillsUsed = skillsUsed;
+  }
+}
+
+function mergeSessionState(
+  current: SessionState,
+  data: Partial<SessionState>,
+): void {
+  if (data.input !== undefined) current.input = data.input;
+  if (data.intent) {
+    if (!current.intent) current.intent = {};
+    if (data.intent.input !== undefined)
+      current.intent.input = data.intent.input;
+    if (data.intent.trigger !== undefined)
+      current.intent.trigger = data.intent.trigger;
+    if (data.intent.result !== undefined)
+      current.intent.result = data.intent.result;
+    if (data.intent.instructionText !== undefined) {
+      current.intent.instructionText = data.intent.instructionText;
+    }
+    if (data.intent.recommendedSkills !== undefined) {
+      current.intent.recommendedSkills = [...data.intent.recommendedSkills];
+    }
+    if (data.intent.recommendationState !== undefined) {
+      current.intent.recommendationState = structuredClone(
+        data.intent.recommendationState,
+      );
+    }
+    if (data.intent.intentProjection !== undefined) {
+      current.intent.intentProjection = data.intent.intentProjection;
+    }
+  }
+  if (data.result !== undefined) current.result = data.result;
+  if (data.error !== undefined) current.error = data.error;
+  if (data.timestamps) {
+    current.timestamps = { ...(current.timestamps ?? {}), ...data.timestamps };
+  }
+  if (data.toolCalls) appendToolCalls(current, data.toolCalls);
+  if (data.skillsUsed) {
+    current.skillsUsed = mergeUniqueSkills(current.skillsUsed, data.skillsUsed);
   }
 }
 
@@ -435,11 +531,19 @@ export class SessionTracker {
         const migrated = migrateSessionData(sessionData);
         this.sessionData.set(sessionData.sessionId, sessionData);
         if (migrated) {
-          safeWriteJson(
-            filePath,
-            sessionData,
-            "failed to migrate session file",
-          );
+          const lock = new FileLock(filePath);
+          if (lock.tryAcquire()) {
+            try {
+              writeJsonAtomic(filePath, sessionData);
+            } catch (error) {
+              logger.warn("failed to migrate session file", {
+                error,
+                path: filePath,
+              });
+            } finally {
+              lock.release();
+            }
+          }
         }
       } catch (err) {
         logger.warn("failed to load session file", {
@@ -457,6 +561,620 @@ export class SessionTracker {
 
   getCurrentState(sessionId: string): SessionState | undefined {
     return this.sessionData.get(sessionId)?.current;
+  }
+
+  getTurnState(sessionId: string, turnKey: string): SessionState | undefined {
+    const session = this.sessionData.get(sessionId);
+    if (!session) return;
+    const matches = [session.current, ...(session.history ?? [])].filter(
+      (state) => state.turnKey === turnKey,
+    );
+    return matches.length === 1 ? structuredClone(matches[0]) : undefined;
+  }
+
+  getCuration(sessionId: string): SessionCurationRecord | undefined {
+    const curation = this.sessionData.get(sessionId)?.curation;
+    return curation ? structuredClone(curation) : undefined;
+  }
+
+  private async mutateSession<T>(params: {
+    sessionId: string;
+    maxWaitMs?: number;
+    mutate: (session: SessionData) => { result: T; changed: boolean };
+  }): Promise<{ acquired: false } | { acquired: true; result: T }> {
+    const filename = `${params.sessionId}.json`;
+    if (!params.sessionId || path.basename(filename) !== filename) {
+      return { acquired: false };
+    }
+    const filePath = sessionsPath(filename, this.pluginRoot);
+    const locked = await withFileLock(
+      filePath,
+      async () => {
+        const durable = fileExists(filePath)
+          ? readJsonFile<SessionData>(filePath)
+          : this.sessionData.get(params.sessionId);
+        const draft = durable
+          ? structuredClone(durable)
+          : ({
+              sessionId: params.sessionId,
+              current: { intent: {} },
+            } satisfies SessionData);
+        const mutation = params.mutate(draft);
+        if (mutation.changed) writeJsonAtomic(filePath, draft);
+        this.sessionData.set(params.sessionId, draft);
+        return mutation.result;
+      },
+      { maxWaitMs: params.maxWaitMs },
+    );
+    return locked === undefined
+      ? { acquired: false }
+      : { acquired: true, result: locked };
+  }
+
+  async preparePromptTurn(params: {
+    sessionId: string;
+    sessionKey?: string;
+    agentId: string;
+    runId?: string;
+    input: string;
+    startedAt: string;
+  }): Promise<PromptTurnPrepareResult> {
+    const requestedRunId = params.runId?.trim();
+    try {
+      const outcome =
+        await this.mutateSession<PersistedPromptTurnPrepareResult>({
+          sessionId: params.sessionId,
+          maxWaitMs: 0,
+          mutate: (session) => {
+            const current = session.current;
+            const reusableWithoutRunId =
+              !requestedRunId &&
+              !current.timestamps?.end &&
+              current.turnKey &&
+              current.input?.trim() === params.input.trim();
+            if (
+              (requestedRunId && current.turnKey === requestedRunId) ||
+              reusableWithoutRunId
+            ) {
+              return {
+                result: {
+                  status: "reused" as const,
+                  identity: { turnKey: current.turnKey!, reused: true },
+                },
+                changed: false,
+              };
+            }
+
+            if (
+              current.turnKey ||
+              current.input ||
+              current.result ||
+              current.error ||
+              current.toolCalls?.length
+            ) {
+              session.history = [
+                ...(session.history ?? []),
+                structuredClone(current),
+              ];
+            }
+            const turnKey = requestedRunId || randomUUID();
+            session.sessionKey = params.sessionKey;
+            session.agentId = params.agentId;
+            session.current = {
+              turnKey,
+              input: params.input,
+              intent: {},
+              timestamps: { start: params.startedAt },
+            };
+            return {
+              result: {
+                status: "applied" as const,
+                identity: { turnKey, reused: false },
+              },
+              changed: true,
+            };
+          },
+        });
+      return outcome.acquired
+        ? outcome.result
+        : { status: "retryable-failure" };
+    } catch (error) {
+      logger.warn("failed to prepare prompt turn", {
+        error,
+        sessionId: params.sessionId,
+      });
+      return { status: "retryable-failure" };
+    }
+  }
+
+  async mergeTurnAndPersist(params: {
+    sessionId: string;
+    expectedTurnKey: string;
+    data: Partial<SessionState>;
+    maxWaitMs?: number;
+  }): Promise<"applied" | "stale" | "retryable-failure"> {
+    try {
+      const outcome = await this.mutateSession({
+        sessionId: params.sessionId,
+        maxWaitMs: params.maxWaitMs,
+        mutate: (session) => {
+          const matches = [session.current, ...(session.history ?? [])].filter(
+            (state) => state.turnKey === params.expectedTurnKey,
+          );
+          if (matches.length !== 1 || matches[0]?.timestamps?.end) {
+            return { result: "stale" as const, changed: false };
+          }
+          mergeSessionState(matches[0], params.data);
+          return { result: "applied" as const, changed: true };
+        },
+      });
+      return outcome.acquired ? outcome.result : "retryable-failure";
+    } catch (error) {
+      logger.warn("failed to merge turn", {
+        error,
+        sessionId: params.sessionId,
+      });
+      return "retryable-failure";
+    }
+  }
+
+  async finalizeTurnFromAgentEnd(params: {
+    sessionId: string;
+    expectedTurnKey: string;
+    stagedToolFallbacks?: readonly ToolResultFallback[];
+    result?: string;
+    error?: string;
+    endedAt: string;
+    maxWaitMs?: number;
+  }): Promise<"applied" | "already-finalized" | "stale" | "retryable-failure"> {
+    try {
+      const outcome = await this.mutateSession<
+        "applied" | "already-finalized" | "stale"
+      >({
+        sessionId: params.sessionId,
+        maxWaitMs: params.maxWaitMs,
+        mutate: (session) => {
+          const matches = [session.current, ...(session.history ?? [])].filter(
+            (state) => state.turnKey === params.expectedTurnKey,
+          );
+          if (matches.length !== 1) {
+            return { result: "stale" as const, changed: false };
+          }
+          const target = matches[0];
+          if (target.timestamps?.end) {
+            const sameTerminalPayload =
+              target.result === params.result && target.error === params.error;
+            const fallbackAlreadyPresent = (
+              params.stagedToolFallbacks ?? []
+            ).every((fallback) =>
+              target.toolCalls?.some(
+                (call) => call.toolCallId === fallback.toolCallId,
+              ),
+            );
+            return {
+              result:
+                sameTerminalPayload && fallbackAlreadyPresent
+                  ? ("already-finalized" as const)
+                  : ("stale" as const),
+              changed: false,
+            };
+          }
+
+          const missingFallbackIds = new Set<string>();
+          const missingFallbacks = (params.stagedToolFallbacks ?? []).filter(
+            (fallback) => {
+              if (
+                missingFallbackIds.has(fallback.toolCallId) ||
+                target.toolCalls?.some(
+                  (call) => call.toolCallId === fallback.toolCallId,
+                )
+              ) {
+                return false;
+              }
+              missingFallbackIds.add(fallback.toolCallId);
+              return true;
+            },
+          );
+          if (missingFallbacks.length > 0) {
+            appendToolCalls(target, structuredClone(missingFallbacks));
+          }
+          if (params.result !== undefined) target.result = params.result;
+          if (params.error !== undefined) target.error = params.error;
+          target.timestamps = {
+            ...(target.timestamps ?? {}),
+            end: params.endedAt,
+          };
+          return { result: "applied" as const, changed: true };
+        },
+      });
+      return outcome.acquired ? outcome.result : "retryable-failure";
+    } catch (error) {
+      logger.warn("failed to finalize exact turn", {
+        error,
+        sessionId: params.sessionId,
+      });
+      return "retryable-failure";
+    }
+  }
+
+  async reserveCurationSchedule(params: {
+    sessionId: string;
+    turnKey: string;
+    expectedTopicEpoch: number;
+    expectedRevision: number;
+    now: string;
+  }): Promise<
+    | "reserved"
+    | "already-pending"
+    | "already-finished"
+    | "stale"
+    | "retryable-failure"
+  > {
+    try {
+      const outcome = await this.mutateSession<
+        "reserved" | "already-pending" | "already-finished" | "stale"
+      >({
+        sessionId: params.sessionId,
+        mutate: (session) => {
+          const matches = [session.current, ...(session.history ?? [])].filter(
+            (state) => state.turnKey === params.turnKey,
+          );
+          if (matches.length !== 1 || !session.agentId) {
+            return { result: "stale" as const, changed: false };
+          }
+          const target = matches[0];
+          const recommendation = target.intent?.recommendationState;
+          if (
+            !target.timestamps?.end ||
+            target.error !== undefined ||
+            recommendation?.topicEpoch !== params.expectedTopicEpoch ||
+            recommendation.curationRevision !== params.expectedRevision
+          ) {
+            return { result: "stale" as const, changed: false };
+          }
+          const existing = recommendation.curationSchedule;
+          if (existing) {
+            return {
+              result:
+                existing.status === "pending"
+                  ? ("already-pending" as const)
+                  : ("already-finished" as const),
+              changed: false,
+            };
+          }
+          const anotherPending = [
+            session.current,
+            ...(session.history ?? []),
+          ].some((state) => {
+            const schedule =
+              state.intent?.recommendationState?.curationSchedule;
+            return (
+              schedule?.status === "pending" &&
+              schedule.expectedTopicEpoch === params.expectedTopicEpoch
+            );
+          });
+          if (anotherPending) {
+            return { result: "already-pending" as const, changed: false };
+          }
+          recommendation.curationSchedule = {
+            agentId: session.agentId,
+            schedulingTurnKey: params.turnKey,
+            expectedTopicEpoch: params.expectedTopicEpoch,
+            expectedRevision: params.expectedRevision,
+            status: "pending",
+            reservedAt: params.now,
+          };
+          return { result: "reserved" as const, changed: true };
+        },
+      });
+      return outcome.acquired ? outcome.result : "retryable-failure";
+    } catch (error) {
+      logger.warn("failed to reserve curation schedule", {
+        error,
+        sessionId: params.sessionId,
+      });
+      return "retryable-failure";
+    }
+  }
+
+  async listPendingCurationSchedules(): Promise<
+    readonly CurationScheduleReservation[]
+  > {
+    const reservations: CurationScheduleReservation[] = [];
+    for (const [sessionId, session] of this.sessionData) {
+      for (const state of [session.current, ...(session.history ?? [])]) {
+        const schedule = state.intent?.recommendationState?.curationSchedule;
+        if (schedule?.status === "pending") {
+          reservations.push({
+            sessionId,
+            schedule: structuredClone(schedule),
+          });
+        }
+      }
+    }
+    return reservations;
+  }
+
+  async commitCurationSchedule(params: {
+    sessionId: string;
+    schedulingTurnKey: string;
+    expectedTopicEpoch: number;
+    expectedRevision: number;
+    expectedIntentId: string;
+    candidates: readonly CuratedSkillCandidate[];
+    experienceRefs: readonly string[];
+    completedTurnCursor: number;
+    now: string;
+  }): Promise<CurationWriteResult> {
+    try {
+      const outcome = await this.mutateSession<
+        Exclude<CurationWriteResult, { status: "retryable-failure" }>
+      >({
+        sessionId: params.sessionId,
+        mutate: (session) => {
+          const matches = [session.current, ...(session.history ?? [])].filter(
+            (state) => state.turnKey === params.schedulingTurnKey,
+          );
+          const curation = session.curation;
+          if (matches.length !== 1 || !curation) {
+            return {
+              result: {
+                status: "stale" as const,
+                curation: curation ? structuredClone(curation) : undefined,
+              },
+              changed: false,
+            };
+          }
+          const schedule =
+            matches[0].intent?.recommendationState?.curationSchedule;
+          const scheduleMatches =
+            schedule?.schedulingTurnKey === params.schedulingTurnKey &&
+            schedule.expectedTopicEpoch === params.expectedTopicEpoch &&
+            schedule.expectedRevision === params.expectedRevision;
+          if (
+            scheduleMatches &&
+            schedule.status === "completed" &&
+            curation.topicEpoch === params.expectedTopicEpoch &&
+            curation.revision === params.expectedRevision + 1 &&
+            curation.intentId === params.expectedIntentId.trim().toLowerCase()
+          ) {
+            return {
+              result: {
+                status: "reused" as const,
+                curation: structuredClone(curation),
+              },
+              changed: false,
+            };
+          }
+          if (
+            !scheduleMatches ||
+            schedule.status !== "pending" ||
+            curation.topicEpoch !== params.expectedTopicEpoch ||
+            curation.revision !== params.expectedRevision ||
+            curation.intentId !==
+              params.expectedIntentId.trim().toLowerCase() ||
+            params.completedTurnCursor < curation.completedTurnCursor
+          ) {
+            return {
+              result: {
+                status: "stale" as const,
+                curation: structuredClone(curation),
+              },
+              changed: false,
+            };
+          }
+
+          curation.revision += 1;
+          curation.updatedAt = params.now;
+          curation.candidates = structuredClone([...params.candidates]);
+          curation.experienceRefs = [...params.experienceRefs];
+          curation.completedTurnCursor = params.completedTurnCursor;
+          schedule.status = "completed";
+          schedule.finishedAt = params.now;
+          return {
+            result: {
+              status: "applied" as const,
+              curation: structuredClone(curation),
+            },
+            changed: true,
+          };
+        },
+      });
+      return outcome.acquired
+        ? outcome.result
+        : { status: "retryable-failure" };
+    } catch (error) {
+      logger.warn("failed to commit curation schedule", {
+        error,
+        sessionId: params.sessionId,
+      });
+      return { status: "retryable-failure" };
+    }
+  }
+
+  async finishCurationSchedule(params: {
+    sessionId: string;
+    turnKey: string;
+    expectedTopicEpoch: number;
+    expectedRevision: number;
+    outcome: "failed" | "obsolete";
+    now: string;
+  }): Promise<"applied" | "already-finished" | "stale" | "retryable-failure"> {
+    try {
+      const result = await this.mutateSession<
+        "applied" | "already-finished" | "stale"
+      >({
+        sessionId: params.sessionId,
+        mutate: (session) => {
+          const matches = [session.current, ...(session.history ?? [])].filter(
+            (state) => state.turnKey === params.turnKey,
+          );
+          if (matches.length !== 1) {
+            return { result: "stale" as const, changed: false };
+          }
+          const schedule =
+            matches[0].intent?.recommendationState?.curationSchedule;
+          if (
+            !schedule ||
+            schedule.expectedTopicEpoch !== params.expectedTopicEpoch ||
+            schedule.expectedRevision !== params.expectedRevision ||
+            schedule.schedulingTurnKey !== params.turnKey
+          ) {
+            return { result: "stale" as const, changed: false };
+          }
+          if (schedule.status !== "pending") {
+            return { result: "already-finished" as const, changed: false };
+          }
+          schedule.status = params.outcome;
+          schedule.finishedAt = params.now;
+          return { result: "applied" as const, changed: true };
+        },
+      });
+      return result.acquired ? result.result : "retryable-failure";
+    } catch (error) {
+      logger.warn("failed to finish curation schedule", {
+        error,
+        sessionId: params.sessionId,
+      });
+      return "retryable-failure";
+    }
+  }
+
+  async ensureColdStart(params: {
+    sessionId: string;
+    turnKey: string;
+    intentId: string;
+    topicChangeReason?: IntentionResult["topicChangeReason"];
+    trustworthySameTopic: boolean;
+    trustworthyTopicEvidence: boolean;
+    draftCandidates: readonly CuratedSkillCandidate[];
+    now: string;
+  }): Promise<CurationWriteResult> {
+    try {
+      const outcome = await this.mutateSession<
+        Exclude<CurationWriteResult, { status: "retryable-failure" }>
+      >({
+        sessionId: params.sessionId,
+        maxWaitMs: 0,
+        mutate: (session) => {
+          const current = session.current;
+          const existing = session.curation;
+          const stale = () => ({
+            result: {
+              status: "stale" as const,
+              curation: existing ? structuredClone(existing) : undefined,
+            },
+            changed: false,
+          });
+          if (current.turnKey !== params.turnKey || current.timestamps?.end) {
+            return stale();
+          }
+          if (existing?.startedByTurnKey === params.turnKey) {
+            return {
+              result: {
+                status: "reused" as const,
+                curation: structuredClone(existing),
+              },
+              changed: false,
+            };
+          }
+
+          const intentId = params.intentId.trim().toLowerCase();
+          if (!intentId) return stale();
+          const recognizedChange =
+            params.topicChangeReason !== undefined &&
+            TOPIC_CHANGE_REASONS.has(params.topicChangeReason);
+          if (
+            existing &&
+            existing.intentId === intentId &&
+            !recognizedChange &&
+            (params.trustworthySameTopic || params.trustworthyTopicEvidence)
+          ) {
+            return {
+              result: {
+                status: "reused" as const,
+                curation: structuredClone(existing),
+              },
+              changed: false,
+            };
+          }
+
+          const curation: SessionCurationRecord = {
+            topicEpoch: existing ? existing.topicEpoch + 1 : 1,
+            intentId,
+            revision: 0,
+            createdAt: params.now,
+            updatedAt: params.now,
+            startedByTurnKey: params.turnKey,
+            candidates: structuredClone([...params.draftCandidates]),
+            experienceRefs: [],
+            completedTurnCursor: 0,
+          };
+          session.curation = curation;
+          return {
+            result: {
+              status: "applied" as const,
+              curation: structuredClone(curation),
+            },
+            changed: true,
+          };
+        },
+      });
+      return outcome.acquired
+        ? outcome.result
+        : { status: "retryable-failure" };
+    } catch (error) {
+      logger.warn("failed to ensure cold-start curation", {
+        error,
+        sessionId: params.sessionId,
+      });
+      return { status: "retryable-failure" };
+    }
+  }
+
+  async commitPromptRecommendation(params: {
+    sessionId: string;
+    turnKey: string;
+    expectedTopicEpoch: number;
+    expectedRevision: number;
+    recommendedSkills: readonly string[];
+    recommendationState: TurnRecommendationState;
+  }): Promise<"applied" | "stale" | "retryable-failure"> {
+    try {
+      const outcome = await this.mutateSession<"applied" | "stale">({
+        sessionId: params.sessionId,
+        maxWaitMs: 0,
+        mutate: (session) => {
+          const current = session.current;
+          const curation = session.curation;
+          if (
+            current.turnKey !== params.turnKey ||
+            current.timestamps?.end ||
+            curation?.topicEpoch !== params.expectedTopicEpoch ||
+            curation.revision !== params.expectedRevision ||
+            params.recommendationState.topicEpoch !==
+              params.expectedTopicEpoch ||
+            params.recommendationState.curationRevision !==
+              params.expectedRevision
+          ) {
+            return { result: "stale" as const, changed: false };
+          }
+          current.intent ??= {};
+          current.intent.recommendedSkills = [...params.recommendedSkills];
+          current.intent.recommendationState = structuredClone(
+            params.recommendationState,
+          );
+          return { result: "applied" as const, changed: true };
+        },
+      });
+      return outcome.acquired ? outcome.result : "retryable-failure";
+    } catch (error) {
+      logger.warn("failed to commit prompt recommendation", {
+        error,
+        sessionId: params.sessionId,
+      });
+      return "retryable-failure";
+    }
   }
 
   /** Snapshot of retained sessions currently loaded in memory (14-day retention). */
@@ -528,6 +1246,37 @@ export class SessionTracker {
     };
   }
 
+  getReviewSnapshotForTurn(
+    sessionId: string,
+    turnKey: string,
+  ): ReviewSnapshot | undefined {
+    const session = this.sessionData.get(sessionId);
+    if (!session) return;
+    const ordered = [...(session.history ?? []), session.current];
+    const matches = ordered
+      .map((state, index) => ({ state, index }))
+      .filter(({ state }) => state.turnKey === turnKey);
+    if (matches.length !== 1) return;
+    const { state: target, index: targetIndex } = matches[0];
+    const eventId = resolveTurnEventId(sessionId, target);
+    if (!target.intent?.result || !target.timestamps?.end || !eventId) return;
+    const throughTarget = ordered
+      .slice(0, targetIndex + 1)
+      .filter((state) => state.intent?.result);
+    return {
+      sessionId,
+      sessionKey: session.sessionKey,
+      agentId: session.agentId,
+      eventId,
+      turnNumber: throughTarget.length,
+      current: createReviewState(target),
+      recent: throughTarget
+        .slice(-10, -1)
+        .map((state) => createReviewState(state, { preserveFullResult: true })),
+      intentCatalog: [],
+    };
+  }
+
   getHistoricalIntentRecords(sessionId: string): HistoricalIntentRecord[] {
     const session = this.sessionData.get(sessionId);
     if (!session) return [];
@@ -553,7 +1302,7 @@ export class SessionTracker {
     });
   }
 
-  rotate(sessionId: string): void {
+  private rotate(sessionId: string): void {
     const session = this.sessionData.get(sessionId);
     if (!session) return;
     const snapshot = session.current;
@@ -573,7 +1322,7 @@ export class SessionTracker {
     session.current = { intent: {} };
   }
 
-  record(sessionId: string, data: Partial<SessionData>): void {
+  private record(sessionId: string, data: Partial<SessionData>): void {
     if (!sessionId) {
       return;
     }
@@ -650,7 +1399,7 @@ export class SessionTracker {
     }
   }
 
-  write(sessionId: string): void {
+  private write(sessionId: string): void {
     const session = this.sessionData.get(sessionId);
     if (!session) return;
 
@@ -782,5 +1531,14 @@ export class SessionTracker {
     return deletedCount;
   }
 }
+
+type LegacyPublicMutation = Extract<
+  keyof SessionTracker,
+  "record" | "rotate" | "write"
+>;
+const legacyMutationsArePrivate: [LegacyPublicMutation] extends [never]
+  ? true
+  : false = true;
+void legacyMutationsArePrivate;
 
 export const defaultTracker = SessionTracker.create(pluginRoot);

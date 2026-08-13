@@ -19,10 +19,12 @@ import {
 } from "./review/trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { registerSkillTools } from "./skills/index.js";
+import { SkillExperienceCatalog } from "./experiences/index.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   intentsPath,
+  experiencesPath,
   keywordCoverageLogPath,
   reviewLogPath,
   packageRoot as defaultPackageRoot,
@@ -90,6 +92,7 @@ export function initializePluginDataRoot({
   try {
     fs.mkdirSync(dataRoot, { recursive: true });
     fs.mkdirSync(sessionsDirPath(dataRoot), { recursive: true });
+    fs.mkdirSync(experiencesPath(dataRoot), { recursive: true });
   } catch (err) {
     logger.warn("failed to create skill-harness data root", {
       error: err,
@@ -262,6 +265,7 @@ export function createPlugin(
       initializePluginDataRoot({ dataRoot });
 
       const catalog = IntentCatalog.create(dataRoot);
+      const experienceCatalog = SkillExperienceCatalog.create(dataRoot);
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const reviewPath = reviewLogPath(dataRoot);
@@ -318,6 +322,7 @@ export function createPlugin(
       api.on("session_end", handlers.onSessionEnd);
       registerSkillTools(api, {
         getIntents: (agentId) => catalog.filterForAgent(config, agentId),
+        experienceCatalog,
       });
     },
   });

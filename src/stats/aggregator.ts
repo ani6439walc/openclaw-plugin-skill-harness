@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { logger } from "../../api.js";
+import { resolveTurnEventId } from "../session/index.js";
 import type { SessionState } from "../session/index.js";
 import type { IntentCatalogEntry } from "../types.js";
 import {
@@ -1538,6 +1539,27 @@ export class StatsAggregator {
     return aggregator;
   }
 
+  listProcessedEventIds(): Set<string> {
+    const statsFilePath = statsPath(this.pluginRoot);
+    if (!fileExists(statsFilePath)) return new Set();
+    try {
+      const stats = readJsonFile<unknown>(statsFilePath);
+      assertStatsBase(stats);
+      if (stats.schemaVersion !== 4) {
+        throw new Error("unsupported or invalid stats schema");
+      }
+      assertStatsV3(stats);
+      assertStatsV4(stats);
+      return new Set(Object.keys(stats.processedEvents));
+    } catch (error) {
+      logger.warn("failed to read processed stats events", {
+        error,
+        path: statsFilePath,
+      });
+      return new Set();
+    }
+  }
+
   selectSkillPlacementCandidate(
     agentId: string,
     excludedEpochKeys: ReadonlySet<string> = new Set(),
@@ -1619,7 +1641,8 @@ export class StatsAggregator {
         state.timestamps?.end ?? options.nowMs ?? Date.now(),
       ).toISOString();
       const stats = loadStats(statsFilePath, eventTime);
-      return !stats.processedEvents[`${sessionId}:${start}`];
+      const eventId = resolveTurnEventId(sessionId, state);
+      return eventId ? !stats.processedEvents[eventId] : false;
     } catch (error) {
       logger.warn("failed to preflight stats event", {
         error,
@@ -1644,7 +1667,8 @@ export class StatsAggregator {
     try {
       const nowMs = options.nowMs ?? Date.now();
       const eventTime = new Date(state.timestamps?.end ?? nowMs).toISOString();
-      const eventId = `${sessionId}:${start}`;
+      const eventId = resolveTurnEventId(sessionId, state);
+      if (!eventId) return false;
 
       const stats = loadStats(statsFilePath, eventTime);
       if (stats.processedEvents[eventId]) return false;

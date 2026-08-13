@@ -23,11 +23,22 @@ import type {
 } from "../classification/index.js";
 import type { ReviewTriggerKeywords } from "../review/trigger-keywords.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
+import type {
+  TurnAssociation,
+  TurnAssociationRegistry,
+} from "./turn-associations.js";
+import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 
 export interface PendingToolCall {
   name: string;
   params: Record<string, unknown>;
-  ctx: { sessionId?: string; agentId?: string; sessionKey?: string };
+  ctx: {
+    sessionId?: string;
+    agentId?: string;
+    sessionKey?: string;
+    runId?: string;
+  };
+  association: TurnAssociation;
 }
 
 export type HookDeps = {
@@ -69,4 +80,6 @@ export type HookDeps = {
 
   bundledSkillsDir?: string;
   dataRoot?: string;
+  turnAssociations?: TurnAssociationRegistry;
+  toolFallbacks?: ToolFallbackRegistry;
 };

@@ -16,7 +16,11 @@ import type {
 } from "openclaw/plugin-sdk/types";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
-import { defaultTracker, extractSkillInfo } from "../session/index.js";
+import {
+  defaultTracker,
+  extractSkillInfo,
+  type SessionState,
+} from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { defaultReviewLogWriter } from "../review/log-writer.js";
 import { enqueueReview } from "../review/queue.js";
@@ -90,6 +94,11 @@ import type {
 } from "../types.js";
 import { emitPipelineEvent } from "./pipeline-events.js";
 import type { HookDeps, PendingToolCall } from "./types.js";
+import {
+  TurnAssociationRegistry,
+  type TurnAssociation,
+} from "./turn-associations.js";
+import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import {
   isToolResultError,
   resolveToolCallKey,
@@ -250,19 +259,6 @@ function readTriggerKeywordsFailOpen(
     logger.warn("failed to read review trigger keywords", { error });
     return DEFAULT_REVIEW_TRIGGER_KEYWORDS;
   }
-}
-
-function recordTrackedSession(
-  tracker: typeof defaultTracker,
-  context: { sessionId?: string; sessionKey?: string },
-  data: Parameters<typeof defaultTracker.record>[1],
-): string | undefined {
-  const sessionId = tracker.resolveCurrentSessionId(context);
-  if (!sessionId) return;
-
-  tracker.record(sessionId, data);
-  tracker.write(sessionId);
-  return sessionId;
 }
 
 function toPromptBuildResult(
@@ -552,13 +548,17 @@ export function createHookHandlers(deps: HookDeps) {
   const keywordCoverageWriter = deps.keywordCoverageWriter;
   const bundledSkillsDir = deps.bundledSkillsDir;
   const pendingToolCalls = new Map<string, PendingToolCall>();
+  const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
   const recordedToolCalls = new Set<string>();
   const pendingSkillEpochKeys = new Set<string>();
   const pendingCoverageEpochKeys = new Set<string>();
+  const turnAssociations =
+    deps.turnAssociations ?? new TurnAssociationRegistry();
 
   interface PromptBuildIdentity {
     effectiveAgentId: string;
     resolvedSessionKey?: string;
+    association?: TurnAssociation;
   }
 
   function resolvePromptBuildIdentity(
@@ -576,6 +576,87 @@ export function createHookHandlers(deps: HookDeps) {
         : undefined);
 
     return { effectiveAgentId: resolvedAgentId, resolvedSessionKey };
+  }
+
+  async function prepareTrackingTurn(params: {
+    ctx: PluginHookAgentContext;
+    routing: PromptBuildIdentity;
+    latestUserMessage: string;
+  }): Promise<TurnAssociation | undefined> {
+    const sessionId =
+      params.ctx.sessionId ??
+      tracker.resolveCurrentSessionId({
+        sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+      });
+    if (!sessionId) return;
+    const runId = params.ctx.runId?.trim();
+    const reservation = runId
+      ? turnAssociations.reserve(runId)
+      : turnAssociations.reserveAnonymous();
+    if (reservation.status === "full" || reservation.status === "ambiguous") {
+      return;
+    }
+    if (reservation.status === "invalid") return;
+    if (reservation.status === "existing") {
+      if (reservation.association.sessionId !== sessionId) {
+        turnAssociations.bindExisting(runId, {
+          sessionId,
+          turnKey: reservation.association.turnKey,
+        });
+        return;
+      }
+      return reservation.association;
+    }
+
+    const prepared = await tracker.preparePromptTurn({
+      sessionId,
+      sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+      agentId: params.routing.effectiveAgentId,
+      runId,
+      input: params.latestUserMessage,
+      startedAt: new Date().toISOString(),
+    });
+    if (prepared.status === "retryable-failure") {
+      if (reservation.status === "reserved") {
+        turnAssociations.release(reservation.token);
+      }
+      return;
+    }
+    const association = {
+      sessionId,
+      sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+      turnKey: prepared.identity.turnKey,
+    };
+    const bound =
+      reservation.status === "reserved"
+        ? runId
+          ? turnAssociations.bind(reservation.token, runId, association)
+          : turnAssociations.bindAnonymous(reservation.token, association)
+        : turnAssociations.bindExisting(runId, association);
+    return bound === "bound" ? association : undefined;
+  }
+
+  function resolveAssociatedTurn(params: {
+    eventRunId?: string;
+    contextRunId?: string;
+    sessionId?: string;
+    sessionKey?: string;
+  }): TurnAssociation | undefined {
+    const eventRunId = params.eventRunId?.trim();
+    const contextRunId = params.contextRunId?.trim();
+    if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
+    const runId = eventRunId || contextRunId;
+    const association = runId
+      ? turnAssociations.resolve(runId)
+      : turnAssociations.resolveSession(params.sessionId ?? params.sessionKey);
+    if (
+      !association ||
+      (params.sessionId && association.sessionId !== params.sessionId) ||
+      (params.sessionKey && association.sessionKey !== params.sessionKey)
+    ) {
+      return;
+    }
+    return association;
   }
 
   function isPromptBuildChatAllowed(
@@ -683,6 +764,7 @@ export function createHookHandlers(deps: HookDeps) {
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
     effectiveAgentId: string;
     resolvedSessionKey?: string;
+    association?: TurnAssociation;
     latestUserMessage: string;
     historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
@@ -871,11 +953,8 @@ export function createHookHandlers(deps: HookDeps) {
           dataRoot: deps.dataRoot,
         });
       } catch (error) {
-        recordPromptBuildSession({
-          sessionId: params.ctx.sessionId,
-          resolvedSessionKey: params.resolvedSessionKey,
-          fallbackSessionKey: params.ctx.sessionKey,
-          effectiveAgentId: params.effectiveAgentId,
+        await recordPromptBuildSession({
+          association: params.association,
           latestUserMessage: params.latestUserMessage,
           trigger: "classifier",
           intentProjection,
@@ -900,11 +979,8 @@ export function createHookHandlers(deps: HookDeps) {
           : { error: "classifier returned no result" },
       );
       if (!result) {
-        recordPromptBuildSession({
-          sessionId: params.ctx.sessionId,
-          resolvedSessionKey: params.resolvedSessionKey,
-          fallbackSessionKey: params.ctx.sessionKey,
-          effectiveAgentId: params.effectiveAgentId,
+        await recordPromptBuildSession({
+          association: params.association,
           latestUserMessage: params.latestUserMessage,
           trigger: "classifier",
           intentProjection,
@@ -926,11 +1002,8 @@ export function createHookHandlers(deps: HookDeps) {
     return;
   }
 
-  function recordPromptBuildSession(params: {
-    sessionId?: string;
-    resolvedSessionKey?: string;
-    fallbackSessionKey?: string;
-    effectiveAgentId: string;
+  async function recordPromptBuildSession(params: {
+    association?: TurnAssociation;
     latestUserMessage: string;
     trigger: IntentTrigger;
     result?: IntentionResult;
@@ -938,17 +1011,13 @@ export function createHookHandlers(deps: HookDeps) {
     recommendedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
-  }): void {
-    const sessionKey = params.resolvedSessionKey ?? params.fallbackSessionKey;
-    const sessionId =
-      params.sessionId ?? tracker.resolveCurrentSessionId({ sessionKey });
-    if (!sessionId) return;
-
-    tracker.rotate(sessionId);
-    tracker.record(sessionId, {
-      sessionKey,
-      agentId: params.effectiveAgentId,
-      current: {
+  }): Promise<void> {
+    if (!params.association) return;
+    await tracker.mergeTurnAndPersist({
+      sessionId: params.association.sessionId,
+      expectedTurnKey: params.association.turnKey,
+      maxWaitMs: 0,
+      data: {
         input: params.latestUserMessage,
         intent: {
           ...(params.result?.topicChangeReason
@@ -962,13 +1031,11 @@ export function createHookHandlers(deps: HookDeps) {
             ? { intentProjection: params.intentProjection }
             : {}),
         },
-        timestamps: { start: new Date().toISOString() },
       },
     });
-    tracker.write(sessionId);
   }
 
-  function recordPromptBuildResult(params: {
+  async function recordPromptBuildResult(params: {
     ctx: PluginHookAgentContext;
     routing: PromptBuildIdentity;
     latestUserMessage: string;
@@ -978,12 +1045,9 @@ export function createHookHandlers(deps: HookDeps) {
     recommendedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
-  }): void {
-    recordPromptBuildSession({
-      sessionId: params.ctx.sessionId,
-      resolvedSessionKey: params.routing.resolvedSessionKey,
-      fallbackSessionKey: params.ctx.sessionKey,
-      effectiveAgentId: params.routing.effectiveAgentId,
+  }): Promise<void> {
+    await recordPromptBuildSession({
+      association: params.routing.association,
       latestUserMessage: params.latestUserMessage,
       trigger: params.trigger,
       result: params.result,
@@ -1157,7 +1221,7 @@ export function createHookHandlers(deps: HookDeps) {
         domain: result.domain,
         availableIntents: params.availableIntents,
       });
-      recordPromptBuildResult({
+      await recordPromptBuildResult({
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
@@ -1177,7 +1241,7 @@ export function createHookHandlers(deps: HookDeps) {
       domain: result.domain,
       availableIntents: params.availableIntents,
     });
-    recordPromptBuildResult({
+    await recordPromptBuildResult({
       ctx: params.ctx,
       routing: params.routing,
       latestUserMessage: params.latestUserMessage,
@@ -1217,7 +1281,7 @@ export function createHookHandlers(deps: HookDeps) {
         domain: result.domain,
         availableIntents: params.availableIntents,
       });
-      recordPromptBuildResult({
+      await recordPromptBuildResult({
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
@@ -1361,7 +1425,7 @@ export function createHookHandlers(deps: HookDeps) {
       domainSkills.push(skill);
     }
 
-    recordPromptBuildResult({
+    await recordPromptBuildResult({
       ctx: params.ctx,
       routing: params.routing,
       latestUserMessage: params.latestUserMessage,
@@ -1459,6 +1523,14 @@ export function createHookHandlers(deps: HookDeps) {
       }
       const { latestUserMessage, historicalIntents, conversation } =
         buildConversationContext(event, ctx, refreshedConfig);
+      routing.association = await prepareTrackingTurn({
+        ctx,
+        routing,
+        latestUserMessage,
+      });
+      if (!routing.association) {
+        return toPromptBuildResult(undefined, configuredSkillsXml);
+      }
 
       refreshIntents();
       if (catalog.count === 0) {
@@ -1524,6 +1596,7 @@ export function createHookHandlers(deps: HookDeps) {
             refreshedConfig,
             effectiveAgentId: routing.effectiveAgentId,
             resolvedSessionKey: routing.resolvedSessionKey,
+            association: routing.association,
             latestUserMessage,
             historicalIntents,
             conversation,
@@ -1563,7 +1636,12 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function onAfterToolCall(
     event: PluginHookAfterToolCallEvent,
-    ctx: { sessionId?: string; agentId?: string; sessionKey?: string },
+    ctx: {
+      sessionId?: string;
+      agentId?: string;
+      sessionKey?: string;
+      runId?: string;
+    },
   ): Promise<void> {
     const toolCallKey = resolveToolCallKey({
       toolCallId: event.toolCallId,
@@ -1576,6 +1654,13 @@ export function createHookHandlers(deps: HookDeps) {
       pendingToolCalls.delete(toolCallKey);
       return;
     }
+    const association = resolveAssociatedTurn({
+      eventRunId: event.runId,
+      contextRunId: ctx.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+    });
+    if (!association) return;
     const failed =
       event.error !== undefined ||
       isToolResultError(event.result, event.toolName);
@@ -1587,10 +1672,14 @@ export function createHookHandlers(deps: HookDeps) {
       ? undefined
       : extractSkillInfo(event.toolName, event.params, outputStr);
 
-    recordTrackedSession(tracker, resolveTrackingContext(ctx), {
-      current: {
+    const merged = await tracker.mergeTurnAndPersist({
+      sessionId: association.sessionId,
+      expectedTurnKey: association.turnKey,
+      maxWaitMs: 0,
+      data: {
         toolCalls: [
           {
+            toolCallId: event.toolCallId,
             name: event.toolName,
             params: event.params,
             result: failed ? undefined : truncatedOutput,
@@ -1602,9 +1691,10 @@ export function createHookHandlers(deps: HookDeps) {
         skillsUsed: skillUsed ? [skillUsed] : undefined,
       },
     });
-    if (toolCallKey) {
+    if (toolCallKey && merged === "applied") {
       recordedToolCalls.add(toolCallKey);
       pendingToolCalls.delete(toolCallKey);
+      toolFallbacks.delete(toolCallKey);
     }
   }
 
@@ -1619,10 +1709,18 @@ export function createHookHandlers(deps: HookDeps) {
       sessionKey: ctx.sessionKey,
     });
     if (!toolCallKey) return;
+    const association = resolveAssociatedTurn({
+      eventRunId: event.runId,
+      contextRunId: ctx.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+    });
+    if (!association) return;
     pendingToolCalls.set(toolCallKey, {
       name: event.toolName,
       params: event.params,
       ctx,
+      association,
     });
   }
 
@@ -1634,80 +1732,70 @@ export function createHookHandlers(deps: HookDeps) {
       toolCallId: event.toolCallId ?? ctx.toolCallId,
       sessionKey: ctx.sessionKey,
     });
-    if (toolCallKey && recordedToolCalls.has(toolCallKey)) {
-      recordedToolCalls.delete(toolCallKey);
-      return;
-    }
-
+    if (!toolCallKey || recordedToolCalls.has(toolCallKey)) return;
     const pending = toolCallKey ? pendingToolCalls.get(toolCallKey) : undefined;
     const toolName = event.toolName ?? ctx.toolName ?? pending?.name;
-    if (!toolName) return;
+    if (!toolName || !pending) return;
 
     const outputStr = resolveToolResultText(event.message);
     const truncatedOutput = outputStr.slice(0, 200);
     const failed = isToolResultError(event.message, toolName);
     const error = failed ? truncatedOutput : undefined;
     const params = pending?.params ?? {};
-    const trackingCtx = resolveTrackingContext({
-      ...pending?.ctx,
-      agentId: ctx.agentId ?? pending?.ctx.agentId,
-      sessionKey: ctx.sessionKey ?? pending?.ctx.sessionKey,
-    });
-    const skillUsed = error
+    const skillUsed = failed
       ? undefined
       : extractSkillInfo(toolName, params, outputStr);
-
-    recordTrackedSession(tracker, trackingCtx, {
-      current: {
-        toolCalls: [
-          {
-            name: toolName,
-            params,
-            result: failed ? undefined : truncatedOutput,
-            error,
-            success: !failed,
-          },
-        ],
-        skillsUsed: skillUsed ? [skillUsed] : undefined,
+    const staged = toolFallbacks.stage(toolCallKey, {
+      association: pending.association,
+      skillUsed,
+      fallback: {
+        toolCallId: toolCallKey,
+        name: toolName,
+        params,
+        result: failed ? undefined : truncatedOutput,
+        error,
+        success: !failed,
       },
     });
-
-    if (toolCallKey) {
-      recordedToolCalls.add(toolCallKey);
-      pendingToolCalls.delete(toolCallKey);
+    if (staged === "full" || staged === "ambiguous") {
+      logger.warn("discarded persisted tool fallback", {
+        reason: staged,
+        toolName,
+      });
     }
   }
 
-  function recordFinalResult(
-    params: {
-      messages?: unknown[];
-      lastAssistantMessage?: string;
-      error?: string;
-    },
-    ctx: PluginHookAgentContext,
-  ): string | undefined {
-    const turns = extractRecentTurns(
-      (params.messages ?? []) as Array<{
-        role?: string;
-        content?: string;
-      }>,
-    );
-    const lastAssistantTurn = turns
+  function extractAgentEndPayload(params: {
+    messages?: unknown[];
+    lastAssistantMessage?: string;
+    error?: string;
+  }): { result?: string; error?: string } {
+    const lastAssistantMessage = (params.messages ?? [])
       .slice()
       .reverse()
-      .find((t) => t.role === "assistant");
+      .find(
+        (message): message is { role: "assistant"; content?: unknown } =>
+          typeof message === "object" &&
+          message !== null &&
+          (message as { role?: unknown }).role === "assistant",
+      );
+    const content = lastAssistantMessage?.content;
+    const result =
+      typeof content === "string"
+        ? content.trim()
+        : content !== undefined
+          ? resolveToolResultText({ content })
+          : undefined;
 
-    return recordTrackedSession(tracker, resolveTrackingContext(ctx), {
-      current: {
-        result: lastAssistantTurn?.text ?? params.lastAssistantMessage,
-        error: params.error,
-        timestamps: { end: new Date().toISOString() },
-      },
-    });
+    return {
+      result: result || params.lastAssistantMessage,
+      error: params.error,
+    };
   }
 
-  async function recordAgentEndStats(sessionId: string) {
-    const state = tracker.getCurrentState(sessionId);
+  async function recordAgentEndStats(association: TurnAssociation) {
+    const { sessionId, turnKey } = association;
+    const state = tracker.getTurnState(sessionId, turnKey);
     if (!state) return;
 
     const intentDefinition = findIntentDefinition(
@@ -2221,11 +2309,11 @@ export function createHookHandlers(deps: HookDeps) {
   }
 
   async function finalizeTrackedTurn(
-    trackedSessionId: string | undefined,
+    association: TurnAssociation | undefined,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    if (!trackedSessionId) return;
-    const agentEndStats = await recordAgentEndStats(trackedSessionId);
+    if (!association) return;
+    const agentEndStats = await recordAgentEndStats(association);
     if (!agentEndStats) return;
 
     const resolvedConfig = config();
@@ -2245,7 +2333,10 @@ export function createHookHandlers(deps: HookDeps) {
       logger.warn("failed to evaluate keyword coverage schedule", { error });
     }
 
-    const baseSnapshot = tracker.getReviewSnapshot(trackedSessionId);
+    const baseSnapshot = tracker.getReviewSnapshotForTurn(
+      association.sessionId,
+      association.turnKey,
+    );
     if (!baseSnapshot) return;
     const triggers: ReviewTrigger[] = checkReviewTriggers(
       baseSnapshot.current,
@@ -2360,32 +2451,91 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    const trackedSessionId = recordFinalResult(
-      { messages: event.messages, error: event.error },
-      ctx,
+    const eventRunId = (event as { runId?: string }).runId;
+    const association = resolveAssociatedTurn({
+      eventRunId,
+      contextRunId: ctx.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+    });
+    if (!association) return;
+    const stagedEntries = toolFallbacks.listForAssociation(association);
+    const stagedToolFallbacks = stagedEntries.map(
+      ([, staged]) => staged.fallback,
     );
-    await finalizeTrackedTurn(trackedSessionId, ctx);
+    const payload = extractAgentEndPayload({
+      messages: event.messages,
+      error: event.error,
+    });
+    const finalized = await tracker.finalizeTurnFromAgentEnd({
+      sessionId: association.sessionId,
+      expectedTurnKey: association.turnKey,
+      stagedToolFallbacks,
+      result: payload.result,
+      error: payload.error,
+      endedAt: new Date().toISOString(),
+    });
+    if (finalized !== "applied" && finalized !== "already-finalized") return;
+    turnAssociations.markAssociationTerminal(association);
+    toolFallbacks.markAssociationTerminal(association);
+    if (finalized === "already-finalized") {
+      if (stagedEntries.length > 0) {
+        const durableTurn = tracker.getTurnState(
+          association.sessionId,
+          association.turnKey,
+        );
+        const fallbacksAreDurable = stagedEntries.every(([, staged]) =>
+          durableTurn?.toolCalls?.some(
+            (call) => call.toolCallId === staged.fallback.toolCallId,
+          ),
+        );
+        if (fallbacksAreDurable) {
+          for (const [toolCallId] of stagedEntries) {
+            toolFallbacks.delete(toolCallId);
+            pendingToolCalls.delete(toolCallId);
+            recordedToolCalls.add(toolCallId);
+          }
+        }
+      }
+      return;
+    }
+    for (const [toolCallId] of stagedEntries) {
+      toolFallbacks.delete(toolCallId);
+      pendingToolCalls.delete(toolCallId);
+      recordedToolCalls.add(toolCallId);
+    }
+    await finalizeTrackedTurn(association, ctx);
   }
 
   async function onBeforeAgentFinalize(
     event: PluginHookBeforeAgentFinalizeEvent,
     ctx: PluginHookAgentContext,
   ): Promise<PluginHookBeforeAgentFinalizeResult | void> {
-    const trackingCtx: PluginHookAgentContext = {
-      ...ctx,
+    const eventRunId = event.runId?.trim();
+    const association = resolveAssociatedTurn({
+      eventRunId,
+      contextRunId: ctx.runId,
       sessionId: event.sessionId ?? ctx.sessionId,
-      sessionKey: event.sessionKey ?? ctx.sessionKey,
-      runId: event.runId ?? ctx.runId,
-      modelId: event.model ?? ctx.modelId,
-    };
-    const trackedSessionId = recordFinalResult(
-      {
-        messages: event.messages,
-        lastAssistantMessage: event.lastAssistantMessage,
-      },
-      trackingCtx,
-    );
-    await finalizeTrackedTurn(trackedSessionId, trackingCtx);
+      sessionKey: ctx.sessionKey,
+    });
+    if (!association) return;
+    const entries = toolFallbacks.listForAssociation(association);
+    for (const [toolCallId, staged] of entries) {
+      const merged = await tracker.mergeTurnAndPersist({
+        sessionId: association.sessionId,
+        expectedTurnKey: association.turnKey,
+        maxWaitMs: 0,
+        data: {
+          toolCalls: [staged.fallback],
+          skillsUsed: staged.skillUsed ? [staged.skillUsed] : undefined,
+        },
+      });
+      if (merged === "applied") {
+        toolFallbacks.delete(toolCallId);
+        pendingToolCalls.delete(toolCallId);
+        recordedToolCalls.add(toolCallId);
+      }
+    }
     return;
   }
 
@@ -2393,6 +2543,14 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookSessionEndEvent,
     ctx: PluginHookSessionContext,
   ): Promise<void> {
+    turnAssociations.removeSession(ctx.sessionId);
+    toolFallbacks.removeSession(ctx.sessionId);
+    for (const [toolCallId, pending] of pendingToolCalls) {
+      if (pending.association.sessionId === ctx.sessionId) {
+        pendingToolCalls.delete(toolCallId);
+        recordedToolCalls.delete(toolCallId);
+      }
+    }
     tracker.cleanup(ctx.sessionId, {
       deleteFile: false,
     });

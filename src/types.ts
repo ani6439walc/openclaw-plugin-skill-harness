@@ -72,6 +72,21 @@ export type ResolvedInstructionConfig = {
   timeoutMs: number;
 };
 
+export type CurationConfig = {
+  enabled?: boolean;
+  model?: string;
+  modelFallback?: string;
+  thinking?: ThinkLevel;
+  timeoutMs?: number;
+};
+
+export type ResolvedCurationConfig = Required<
+  Pick<CurationConfig, "enabled" | "thinking" | "timeoutMs">
+> & {
+  model?: string;
+  modelFallback?: string;
+};
+
 export type SkillHarnessPluginConfig = {
   agents?: string[];
   intentDeny?: Record<string, string[]>;
@@ -86,6 +101,7 @@ export type SkillHarnessPluginConfig = {
   contextWindow?: ContextWindow;
   timeoutMs?: number;
   instruction?: InstructionConfig;
+  curation?: CurationConfig;
   review?: ReviewConfig;
 };
 
@@ -103,6 +119,7 @@ export type ResolvedSkillHarnessPluginConfig = {
   contextWindow: ContextWindow;
   timeoutMs: number;
   instruction: ResolvedInstructionConfig;
+  curation: ResolvedCurationConfig;
   review: ResolvedReviewConfig;
 };
 

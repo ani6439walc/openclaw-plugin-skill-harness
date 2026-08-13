@@ -11,6 +11,7 @@ describe("SKILL_HARNESS_SYSTEM_CONTEXT", () => {
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_search`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_view`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_manage`");
+    expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_experience`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain(
       "Use only the Skill Harness tools exposed in the current turn",
     );
@@ -44,11 +45,13 @@ describe("SKILL_HARNESS_SYSTEM_CONTEXT", () => {
         "### Using Skill Harness context",
       ),
     ).toBe(true);
-    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("domain_skill_candidates");
-    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("Instruction Hint");
-    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain(
-      "search with 1-3 concise task concepts",
+    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("intent_guidance");
+    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("skill_candidates");
+    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("skill_experiences");
+    expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain(
+      "domain_skill_candidates",
     );
+    expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("Instruction Hint");
     expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("## Skills (mandatory)");
   });
 });

@@ -57,6 +57,10 @@ export function intentsPath(dataRoot: string): string {
   return path.join(dataRoot, "intents");
 }
 
+export function experiencesPath(dataRoot: string): string {
+  return path.join(dataRoot, "experiences");
+}
+
 export function sessionsDirPath(dataRoot: string): string {
   return path.join(dataRoot, "sessions");
 }
@@ -153,7 +157,6 @@ export function fileExists(filePath: string): boolean {
 // ============================================================================
 
 import {
-  LOCK_STALE_THRESHOLD_MS,
   LOCK_MAX_WAIT_MS,
   LOCK_INITIAL_BACKOFF_MS,
   LOCK_MAX_BACKOFF_MS,
@@ -180,12 +183,30 @@ export class FileLock {
     this.lockPath = `${targetPath}.lock`;
   }
 
+  tryAcquire(): boolean {
+    try {
+      fs.mkdirSync(path.dirname(this.lockPath), { recursive: true });
+      fs.mkdirSync(this.lockPath);
+      return true;
+    } catch (error) {
+      const errno = error as NodeJS.ErrnoException;
+      if (errno.code !== "EEXIST") {
+        logger.warn("failed to acquire file lock", {
+          error,
+          path: this.lockPath,
+        });
+      }
+      return false;
+    }
+  }
+
   /**
    * Acquire the lock with exponential backoff (async, non-blocking).
    * Returns true if acquired, false if timeout.
    */
-  async acquire(): Promise<boolean> {
+  async acquire(options: { maxWaitMs?: number } = {}): Promise<boolean> {
     const start = Date.now();
+    const maxWaitMs = Math.max(0, options.maxWaitMs ?? LOCK_MAX_WAIT_MS);
     let backoff = LOCK_INITIAL_BACKOFF_MS;
 
     // Ensure parent directory exists so mkdir for lock doesn't fail on missing parent
@@ -210,51 +231,16 @@ export class FileLock {
           });
           return false;
         }
-        // EEXIST means lock already exists — check if stale.
-        // Known limitation: TOCTOU race condition exists when multiple processes
-        // detect staleness simultaneously and both steal the lock. In this plugin's
-        // usage pattern (single-process Node.js plugin with occasional background tasks),
-        // concurrent stale-lock stealing is extremely unlikely. If true cross-process
-        // safety is required, consider using atomic rename or external lock libraries.
-        if (this.isStale()) {
-          this.forceRelease();
-          // Fall through to sleep/timeout check — prevents infinite loop if rmdirSync fails silently
-        }
       }
 
       // Check timeout
       const elapsed = Date.now() - start;
-      if (elapsed >= LOCK_MAX_WAIT_MS) return false;
+      if (elapsed >= maxWaitMs) return false;
 
       // Non-blocking exponential backoff wait
-      const sleepTime = Math.min(backoff, LOCK_MAX_WAIT_MS - elapsed);
+      const sleepTime = Math.min(backoff, maxWaitMs - elapsed);
       await sleep(sleepTime);
       backoff = Math.min(backoff * 2, LOCK_MAX_BACKOFF_MS);
-    }
-  }
-
-  /**
-   * Check if the lock is stale (older than threshold).
-   */
-  private isStale(): boolean {
-    try {
-      const stat = fs.statSync(this.lockPath);
-      const age = Date.now() - stat.mtimeMs;
-      return age > LOCK_STALE_THRESHOLD_MS;
-    } catch {
-      return false; // Directory doesn't exist, not stale
-    }
-  }
-
-  /**
-   * Force release a stale lock.
-   */
-  private forceRelease(): void {
-    try {
-      // Use rmSync with recursive+force to handle stray files (e.g., .DS_Store)
-      fs.rmSync(this.lockPath, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
     }
   }
 
@@ -278,9 +264,10 @@ export class FileLock {
 export async function withFileLock<T>(
   targetPath: string,
   fn: () => Promise<T>,
+  options: { maxWaitMs?: number } = {},
 ): Promise<T | undefined> {
   const lock = new FileLock(targetPath);
-  if (!(await lock.acquire())) return undefined;
+  if (!(await lock.acquire(options))) return undefined;
   try {
     return await fn();
   } finally {
