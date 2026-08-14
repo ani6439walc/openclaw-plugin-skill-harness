@@ -33,14 +33,6 @@ const DEFAULT_CONTEXT_WINDOW: ContextWindow = {
   },
 };
 
-const DEFAULT_INSTRUCTION = {
-  enabled: true,
-  model: undefined,
-  modelFallback: undefined,
-  thinking: "medium",
-  timeoutMs: 30_000,
-} as const;
-
 const DEFAULT_CURATION = {
   enabled: true,
   model: undefined,
@@ -85,7 +77,6 @@ const DEFAULT_CONFIG = {
   queryMode: DEFAULT_QUERY_MODE,
   contextWindow: DEFAULT_CONTEXT_WINDOW,
   timeoutMs: DEFAULT_TIMEOUT_MS,
-  instruction: DEFAULT_INSTRUCTION,
   curation: DEFAULT_CURATION,
   review: DEFAULT_REVIEW,
 } satisfies ResolvedSkillHarnessPluginConfig;
@@ -144,15 +135,6 @@ const ThinkLevelSchema = z
 const LowThinkingModeSchema = z
   .enum(["fastpath-only", "full", "off"])
   .catch("fastpath-only");
-const InstructionSchema = z
-  .object({
-    enabled: z.boolean().catch(true),
-    model: z.string().optional().catch(undefined),
-    modelFallback: z.string().optional().catch(undefined),
-    thinking: ThinkLevelSchema,
-    timeoutMs: boundedInt(30_000, 250, 600_000),
-  })
-  .catch(DEFAULT_INSTRUCTION);
 const CurationSchema = z
   .object({
     enabled: z.boolean().catch(true),
@@ -254,7 +236,6 @@ const SkillHarnessConfigSchema = z
     queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
     contextWindow: ContextWindowSchema,
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 250, 120_000),
-    instruction: InstructionSchema,
     curation: CurationSchema,
     review: ReviewSchema,
   })

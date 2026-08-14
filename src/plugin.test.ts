@@ -180,7 +180,7 @@ describe("createPlugin", () => {
     expect(api.registerCommand).not.toHaveBeenCalled();
   });
 
-  it("budgets before_prompt_build timeout for three scanner subagent rounds", () => {
+  it("budgets before_prompt_build timeout for topic and classifier rounds only", () => {
     const api = createApi();
 
     createPlugin(api).register(api);
@@ -188,7 +188,7 @@ describe("createPlugin", () => {
     expect(api.on).toHaveBeenCalledWith(
       "before_prompt_build",
       expect.any(Function),
-      { timeoutMs: 10_500 },
+      { timeoutMs: 7_500 },
     );
   });
 

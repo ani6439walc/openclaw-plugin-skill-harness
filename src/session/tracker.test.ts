@@ -109,16 +109,21 @@ describe("SessionTracker", () => {
       expect(customTracker).toBeInstanceOf(SessionTracker);
     });
 
-    it("should load existing session files from sessions folder", () => {
+    it("loads legacy session JSON while ignoring removed instruction text", () => {
       // Create sessions directory with a test file
       const sessionsDir = path.join(tempDir, "sessions");
+      const removedLegacyField = ["instruction", "Text"].join("");
       fs.mkdirSync(sessionsDir, { recursive: true });
 
       const testSession = {
         sessionId: "existing-session-123",
         current: {
           input: "existing test prompt",
-          intent: { result: { intentions: [] } },
+          intent: {
+            [removedLegacyField]: "legacy writer output",
+            recommendedSkills: ["existing-skill"],
+            result: { intentions: [] },
+          },
         },
       };
       fs.writeFileSync(
@@ -129,6 +134,18 @@ describe("SessionTracker", () => {
       // Create new tracker - should load existing session
       const loadedTracker = SessionTracker.create(tempDir);
       expect(loadedTracker.hasIntentData("existing-session-123")).toBe(true);
+      expect(
+        loadedTracker
+          .listRetainedSessions()
+          .find((session) => session.sessionId === "existing-session-123")
+          ?.current.intent,
+      ).toMatchObject({ recommendedSkills: ["existing-skill"] });
+      expect(
+        loadedTracker
+          .listRetainedSessions()
+          .find((session) => session.sessionId === "existing-session-123")
+          ?.current.intent,
+      ).not.toHaveProperty(removedLegacyField);
     });
 
     it("excludes expired on-disk sessions from retained snapshots after restart", () => {
@@ -569,7 +586,7 @@ describe("SessionTracker", () => {
       expect(() => tracker.write("test-session-123")).not.toThrow();
     });
 
-    it("preserves prompt-build intent trigger metadata", () => {
+    it("preserves prompt-build intent trigger metadata without writer text", () => {
       tracker.record("test-session-123", {
         current: {
           input: "read a skill",
@@ -582,7 +599,6 @@ describe("SessionTracker", () => {
               confidence: 0.9,
               complexity: "low",
             },
-            instructionText: "Use the requested skill.",
             recommendedSkills: ["skill-viewer", "tool-reference"],
           },
         },
@@ -598,7 +614,6 @@ describe("SessionTracker", () => {
       );
       expect(saved.current.intent).toMatchObject({
         trigger: "classifier",
-        instructionText: "Use the requested skill.",
         recommendedSkills: ["skill-viewer", "tool-reference"],
         result: { intent: "tool-reference" },
       });

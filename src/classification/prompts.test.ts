@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import * as promptExports from "./prompts.js";
+
 import {
   buildRoutingContext,
   buildIntentionPrompt,
@@ -30,13 +30,6 @@ function conversationContextFrom(prompt: string): string {
   }
   return prompt.slice(start, end + closingTag.length);
 }
-
-describe("routing-only prompt contract", () => {
-  it("does not expose executable instruction-writer prompt or parser exports", () => {
-    expect(promptExports).not.toHaveProperty("buildIntentInstructionPrompt");
-    expect(promptExports).not.toHaveProperty("parseIntentInstructionResult");
-  });
-});
 
 describe("conversation context prompt serialization", () => {
   it("uses the topic checker compact format for every subagent prompt", () => {

@@ -323,7 +323,7 @@ export function createPlugin(
       refreshRuntimeIntents();
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
-        timeoutMs: config.timeoutMs * 3 + 1_500,
+        timeoutMs: config.timeoutMs * 2 + 1_500,
       });
       api.on("before_tool_call", handlers.onBeforeToolCall);
       api.on("after_tool_call", handlers.onAfterToolCall);

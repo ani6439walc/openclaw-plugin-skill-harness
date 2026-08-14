@@ -41,7 +41,6 @@ describe("StatsAggregator", () => {
           confidence: 0.75,
           complexity: "medium",
         },
-        instructionText: "Consider the injected skill candidates when useful.",
         recommendedSkills: ["git-master", "dev-lifecycle"],
       },
       skillsUsed: [{ name: "git-master", path: "/skills/git-master/SKILL.md" }],
@@ -1651,8 +1650,6 @@ describe("StatsAggregator", () => {
             confidence: 0.9,
             complexity: "medium",
           },
-          instructionText:
-            "Consider the injected prompt-engineering skill candidates.",
           recommendedSkills: ["prompt-engineering-expert"],
         },
         skillsUsed: [

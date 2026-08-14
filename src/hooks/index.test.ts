@@ -2713,9 +2713,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         }),
       }),
     );
-    expect(record.mock.calls[0]?.[1].current?.intent).not.toHaveProperty(
-      "instructionText",
-    );
   });
 
   it("keeps deterministic exact keyword hints in low thinking fastpath-only mode", async () => {
@@ -3888,15 +3885,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(result?.prependContext).toContain(
       "<selected_intent>coding</selected_intent>",
     );
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "hint-generate:started",
-        "hint-generate:completed",
-        "hint-generate:failed",
-        "low-confidence-observation:completed",
-        "prompt-prefix-injection:skipped",
-      ]),
-    );
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -3917,9 +3905,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
           }),
         }),
       }),
-    );
-    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
-      "instructionText",
     );
   });
 
@@ -3954,13 +3939,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     expect(result?.prependContext).toContain(
       "<intent_guidance>Implement the requested change.</intent_guidance>",
-    );
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "hint-generate:started",
-        "hint-generate:completed",
-        "hint-generate:failed",
-      ]),
     );
     expect(record).toHaveBeenCalled();
   });
@@ -4005,7 +3983,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     },
   );
 
-  it("injects deterministic guidance without hint-generate lifecycle events", async () => {
+  it("injects deterministic guidance with a complete parent pipeline", async () => {
     const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
     });
@@ -4016,15 +3994,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       "<intent_guidance>Reply warmly.</intent_guidance>",
     );
     expect(result?.appendSystemContext).toContain(SKILL_HARNESS_SYSTEM_CONTEXT);
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "hint-generate:started",
-        "hint-generate:completed",
-        "hint-generate:failed",
-      ]),
-    );
-    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
-      "instructionText",
+    expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
+    expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe(
+      "pipeline:completed",
     );
   });
 
@@ -4093,84 +4065,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     }
   });
 
-  it("still injects guidance when instruction config is disabled", async () => {
-    const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
-      historicalIntents: [],
-      configRaw: {
-        model: "google/test-intent",
-        instruction: { enabled: false },
-      },
-    });
-
-    const result = await handlers.onBeforePromptBuild(event, ctx);
-
-    expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
-    );
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "hint-generate:started",
-        "hint-generate:completed",
-        "hint-generate:failed",
-      ]),
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            result: expect.objectContaining({
-              intent: "social-casual",
-              topicChangeReason: "start",
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
-      "instructionText",
-    );
-  });
-
-  it("injects guidance without depending on instruction model resolution", async () => {
-    const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
-      historicalIntents: [],
-      configRaw: {
-        model: "google/test-intent",
-        instruction: { enabled: true, model: "/" },
-      },
-    });
-
-    const result = await handlers.onBeforePromptBuild(event, ctx);
-
-    expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
-    );
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "hint-generate:started",
-        "hint-generate:completed",
-        "hint-generate:failed",
-      ]),
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            result: expect.objectContaining({
-              intent: "social-casual",
-              topicChangeReason: "start",
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
-      "instructionText",
-    );
-  });
-
   it("runs topic checker on the first tracked turn to seed topic metadata", async () => {
     const topicContext = {
       keywords: ["start", "topic"],
@@ -4219,15 +4113,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         "intent-classify:completed",
       ]),
     );
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "hint-generate:started",
-        "hint-generate:completed",
-        "hint-generate:failed",
-        "session-record:completed",
-        "prompt-prefix-injection:completed",
-      ]),
-    );
+
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -4248,9 +4134,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
           }),
         }),
       }),
-    );
-    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
-      "instructionText",
     );
   });
 
@@ -4692,9 +4575,6 @@ Current user request: fresh clean request
         "intent-classify:started",
         "intent-classify:completed",
         "intent-classify:failed",
-        "hint-generate:started",
-        "hint-generate:completed",
-        "hint-generate:failed",
       ]),
     );
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(

@@ -90,7 +90,6 @@ export interface IntentState {
   input?: RecentTurn[];
   trigger?: IntentTrigger;
   result?: IntentionResult;
-  instructionText?: string;
   recommendedSkills?: string[];
   recommendationState?: TurnRecommendationState;
   intentProjection?: IntentProjectionTelemetry;
@@ -288,9 +287,34 @@ function migrateIntentionResult(result: IntentionResult): boolean {
   return changed;
 }
 
+const PERSISTED_INTENT_STATE_FIELDS = new Set<keyof IntentState>([
+  "input",
+  "trigger",
+  "result",
+  "recommendedSkills",
+  "recommendationState",
+  "intentProjection",
+]);
+
+function stripUnknownIntentStateFields(state: SessionState): boolean {
+  if (!state.intent) return false;
+
+  const unknownFields = Object.keys(state.intent).filter(
+    (field) => !PERSISTED_INTENT_STATE_FIELDS.has(field as keyof IntentState),
+  );
+  if (unknownFields.length === 0) return false;
+
+  const record = state.intent as Record<string, unknown>;
+  for (const field of unknownFields) {
+    delete record[field];
+  }
+  return true;
+}
+
 function migrateSessionData(sessionData: SessionData): boolean {
   let changed = false;
   for (const state of [sessionData.current, ...(sessionData.history ?? [])]) {
+    if (stripUnknownIntentStateFields(state)) changed = true;
     const result = state.intent?.result;
     if (result && migrateIntentionResult(result)) changed = true;
   }
@@ -463,9 +487,6 @@ function mergeSessionState(
       current.intent.trigger = data.intent.trigger;
     if (data.intent.result !== undefined)
       current.intent.result = data.intent.result;
-    if (data.intent.instructionText !== undefined) {
-      current.intent.instructionText = data.intent.instructionText;
-    }
     if (data.intent.recommendedSkills !== undefined) {
       current.intent.recommendedSkills = [...data.intent.recommendedSkills];
     }
@@ -1356,9 +1377,6 @@ export class SessionTracker {
         }
         if (data.current.intent.result !== undefined) {
           current.intent.result = data.current.intent.result;
-        }
-        if (data.current.intent.instructionText !== undefined) {
-          current.intent.instructionText = data.current.intent.instructionText;
         }
         if (data.current.intent.recommendedSkills !== undefined) {
           current.intent.recommendedSkills = [

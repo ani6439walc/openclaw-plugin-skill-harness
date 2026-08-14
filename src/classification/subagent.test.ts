@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
-import * as subagentExports from "./subagent.js";
+
 import {
   buildIntentionEmbeddedRunParams,
   getModelRef,
@@ -9,13 +9,6 @@ import {
   runIntentionSubagent,
   runTopicSwitchSubagent,
 } from "./subagent.js";
-
-describe("routing-only subagent contract", () => {
-  it("does not expose instruction-writer execution or model-resolution exports", () => {
-    expect(subagentExports).not.toHaveProperty("getInstructionModelRef");
-    expect(subagentExports).not.toHaveProperty("runIntentInstructionSubagent");
-  });
-});
 
 describe("model resolution", () => {
   const api = {
@@ -198,7 +191,7 @@ describe("runIntentionSubagent", () => {
         domain: "development",
         skills: [],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n- Do allowed work.",
+        guidance: "Do allowed work.",
       },
     },
   ];

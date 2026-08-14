@@ -48,13 +48,7 @@ describe("resolveConfig", () => {
         },
         keywordCoverage: { everyAcceptedTurns: 50 },
       });
-      expect(result.instruction).toMatchObject({
-        enabled: true,
-        model: undefined,
-        modelFallback: undefined,
-        thinking: "medium",
-        timeoutMs: 30000,
-      });
+      expect(result).not.toHaveProperty("instruction");
     });
 
     it("should handle empty object loading", () => {
@@ -162,15 +156,13 @@ describe("resolveConfig", () => {
       });
     });
 
-    it("falls back for invalid classifier, instruction, and review thinking levels", () => {
+    it("falls back for invalid classifier and review thinking levels", () => {
       const result = resolveConfig({
         thinking: "invalid",
-        instruction: { thinking: "invalid" },
         review: { thinking: "invalid" },
       });
 
       expect(result.thinking).toBe("medium");
-      expect(result.instruction.thinking).toBe("medium");
       expect(result.review.thinking).toBe("medium");
     });
 
@@ -206,8 +198,8 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("instruction", () => {
-    it("parses and clamps instruction-writer settings without triggers", () => {
+  describe("removed instruction writer configuration", () => {
+    it("ignores instruction settings instead of hydrating a public writer config", () => {
       const result = resolveConfig({
         instruction: {
           enabled: true,
@@ -219,14 +211,7 @@ describe("resolveConfig", () => {
         },
       });
 
-      expect(result.instruction).toMatchObject({
-        enabled: true,
-        model: "google/gemini-3-flash",
-        modelFallback: "openai/gpt-5-mini",
-        thinking: "high",
-        timeoutMs: 600000,
-      });
-      expect(result.instruction).not.toHaveProperty("triggers");
+      expect(result).not.toHaveProperty("instruction");
     });
   });
 

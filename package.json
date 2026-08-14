@@ -47,7 +47,8 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'",
     "test": "vitest run",
-    "build": "tsc"
+    "build": "rm -rf dist && tsc",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "dependencies": {
     "gray-matter": "4.0.3",

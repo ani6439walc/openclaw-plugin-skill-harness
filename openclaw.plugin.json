@@ -159,47 +159,6 @@
         },
         "default": {}
       },
-      "instruction": {
-        "type": "object",
-        "description": "Optional instruction writer hints injected after intent classification. When disabled, only available domain skills are injected and generated hints are skipped.",
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "model": {
-            "type": "string",
-            "description": "Explicit dedicated model for instruction writer hints. If unset, inherits the top-level model before current-session and agent-primary resolution."
-          },
-          "modelFallback": {
-            "type": "string",
-            "description": "Last-resort instruction writer model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
-          },
-          "thinking": {
-            "type": "string",
-            "enum": [
-              "off",
-              "minimal",
-              "low",
-              "medium",
-              "high",
-              "xhigh",
-              "adaptive",
-              "max"
-            ],
-            "description": "Thinking level for the instruction writer sub-agent.",
-            "default": "medium"
-          },
-          "timeoutMs": {
-            "type": "integer",
-            "minimum": 250,
-            "maximum": 120000,
-            "default": 20000
-          }
-        },
-        "default": {}
-      },
       "curation": {
         "type": "object",
         "description": "Enabled-by-default background curator settings. Curation is independent of Intent Review and does not depend on review.enabled.",

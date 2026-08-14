@@ -79,8 +79,6 @@ describe("skill-harness manifest", () => {
     const optionalModels = [
       properties.model,
       properties.modelFallback,
-      properties.instruction.properties.model,
-      properties.instruction.properties.modelFallback,
       properties.curation.properties.model,
       properties.curation.properties.modelFallback,
       properties.review.properties.model,
@@ -170,39 +168,8 @@ describe("skill-harness manifest", () => {
     ).toBe(0.5);
   });
 
-  it("exposes enabled-by-default instruction writer settings without triggers", () => {
-    const instruction = manifest.configSchema.properties.instruction;
-
-    expect(instruction.description).toContain("instruction writer");
-    expect(instruction.properties.enabled.default).toBe(true);
-    expect(instruction.properties.model.description).toContain(
-      "Explicit dedicated model",
-    );
-    expect(instruction.properties.modelFallback.description).toContain(
-      "Last-resort instruction writer model",
-    );
-    expect(instruction.properties.modelFallback.description).toContain(
-      "not a runtime retry model",
-    );
-    expect(instruction.properties.thinking).toMatchObject({
-      default: "medium",
-      enum: [
-        "off",
-        "minimal",
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "adaptive",
-        "max",
-      ],
-    });
-    expect(instruction.properties.timeoutMs).toMatchObject({
-      minimum: 250,
-      maximum: 120000,
-      default: 20000,
-    });
-    expect(instruction.properties).not.toHaveProperty("triggers");
+  it("does not expose removed instruction writer settings", () => {
+    expect(manifest.configSchema.properties).not.toHaveProperty("instruction");
   });
 
   it("accepts deprecated keyword seeds for strict-schema upgrades", () => {
