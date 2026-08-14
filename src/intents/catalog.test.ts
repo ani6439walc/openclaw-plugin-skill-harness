@@ -169,6 +169,35 @@ guidance: "Keep routing focused on current metadata."
     expect(catalog.get()).toEqual([]);
   });
 
+  it("loads valid siblings when another runtime intent is invalid", () => {
+    fs.writeFileSync(
+      path.join(root, "intents", "current.md"),
+      `---
+triggers: ["route"]
+examples: ["route this"]
+domain: "routing"
+guidance: "Route this request using stable evidence."
+---
+`,
+    );
+    fs.writeFileSync(
+      path.join(root, "intents", "legacy.md"),
+      `---
+triggers: ["legacy route"]
+examples: ["legacy"]
+domain: "legacy"
+fastpath:
+  hint: "Legacy hint."
+guidance: "Keep routing focused on current metadata."
+---
+`,
+    );
+
+    const catalog = IntentCatalog.create(root);
+    expect(catalog.load("intents", { silent: true })).toBe(1);
+    expect(catalog.get().map((intent) => intent.id)).toEqual(["current"]);
+  });
+
   it("rejects invalid candidate metadata instead of coercing it", () => {
     fs.writeFileSync(
       path.join(root, "intents", "invalid-candidate.md"),

@@ -119,7 +119,6 @@ export class IntentCatalog {
           logger.warn(`skipping invalid intent catalog: ${error}`);
         }
       }
-      return [];
     }
     return validation.intents.map(({ id, definition }) => ({ id, definition }));
   }

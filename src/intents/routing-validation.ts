@@ -12,7 +12,7 @@ const TOP_LEVEL_FIELDS = new Set([
   "guidance",
 ]);
 const CANDIDATE_FIELDS = new Set(["scope", "keywords"]);
-const FASTPATH_FIELDS = new Set(["keywords", "hint"]);
+const FASTPATH_FIELDS = new Set(["keywords"]);
 const TERMINAL_DELIMITERS = new Set([".", "!", "?", "。", "！", "？"]);
 const MARKDOWN_PREFIX_PATTERN =
   /^\s*(?:#{1,6}(?:\s|$)|```|~~~|[-+*]\s+|\d+[.)]\s+)/;
@@ -487,14 +487,13 @@ export function validateRoutingIntentDirectory(
         } else {
           const rawFastpath = data.fastpath;
           for (const field of Object.keys(rawFastpath).sort()) {
-            if (!FASTPATH_FIELDS.has(field)) {
+            if (field === "hint") {
+              fileErrors.push(`${file}: fastpath.hint is not supported`);
+            } else if (!FASTPATH_FIELDS.has(field)) {
               fileErrors.push(
                 `${file}: fastpath contains unsupported field ${field}`,
               );
             }
-          }
-          if ("hint" in rawFastpath) {
-            fileErrors.push(`${file}: fastpath.hint is not supported`);
           }
           if (rawFastpath.keywords !== undefined) {
             const keywords = normalizedStringArray(rawFastpath.keywords);
