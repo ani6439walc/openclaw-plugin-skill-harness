@@ -2,7 +2,6 @@ import {
   FALLBACK_INTENT,
   isIntentComplexity,
   SKILL_HARNESS_PLUGIN_TAG,
-  UNTRUSTED_CONTEXT_HEADER,
 } from "../constants.js";
 import { indentXmlLines } from "../xml-format.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
@@ -11,7 +10,6 @@ import type {
   ClassifiedIntentionResult,
   HistoricalIntentRecord,
   IntentCatalogEntry,
-  IntentDefinition,
   IntentionResult,
   RecentTurn,
 } from "../types.js";
@@ -45,13 +43,6 @@ const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
 - Keep exact code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged.
 - Do not abbreviate technical names into unclear shorthand.
 - Do not omit required schema fields, safety constraints, ordering, or key qualifiers to make text shorter.`;
-
-const SKILL_HARNESS_CONTEXT_POLICY = taggedBlock(
-  "context_policy",
-  `- \`domain_skill_candidates\`: domain-derived candidates; use \`path\` to load a selected skill, while \`related_skills\` are optional direct relations and are not automatically required; ignore irrelevant listed skills if the selected domain is wrong.
-- \`## Routing Guidance\` is stable routing-only context for the selected intent; follow it only when it matches the user's request and verified context.
-- Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.`,
-);
 
 const ROUTING_CONTEXT_POLICY = taggedBlock(
   "context_policy",
@@ -571,14 +562,6 @@ export function buildRoutingContext(params: {
   return taggedBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
 }
 
-export function formatDomainSkills(
-  skills: AvailableSkill[] | undefined,
-): string {
-  if (!skills?.length) return "";
-
-  return formatSkillXmlBlock("domain_skill_candidates", skills, "", true);
-}
-
 function escapeXmlText(value: string | null | undefined): string {
   return (value ?? "")
     .replaceAll("&", "&amp;")
@@ -831,74 +814,6 @@ export function parseIntentionResult(
     // Graceful fallback on any parse failure
     return undefined;
   }
-}
-
-function buildPromptPrefixLines(intentDef: IntentDefinition): string[] {
-  return intentDef.guidance.trim()
-    ? [`## Routing Guidance\n${escapeXmlText(intentDef.guidance)}`]
-    : [];
-}
-
-function formatSkillHarnessPluginPrefix(
-  result: IntentionResult,
-  blocks: readonly string[],
-): string | undefined {
-  const content = blocks
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .join("\n\n");
-  if (!content) return;
-
-  const confidence = result.confidence ?? 0;
-  const pct = Math.round(confidence * 100);
-  const confidenceHint =
-    pct < 90
-      ? ` confidence="${pct}%" low-confidence-hint="treat-as-suggestion"`
-      : ` confidence="${pct}%"`;
-
-  return `${UNTRUSTED_CONTEXT_HEADER}\n${taggedBlock(
-    SKILL_HARNESS_PLUGIN_TAG,
-    `${SKILL_HARNESS_CONTEXT_POLICY}\n\n${content}`,
-    confidenceHint,
-  )}`;
-}
-
-function resolveIntentId(intent: string): string {
-  const trimmed = intent.trim();
-  const idNameMatch = trimmed.match(/^([A-Za-z0-9_-]+)\s*\(/);
-  return idNameMatch ? idNameMatch[1] : trimmed;
-}
-
-function findEnabledIntent(
-  result: IntentionResult,
-  intents: readonly IntentCatalogEntry[],
-): IntentDefinition | undefined {
-  const intentId = resolveIntentId(result.intent).toLowerCase();
-  return intents.find((intent) => intent.id.toLowerCase() === intentId)
-    ?.definition;
-}
-
-export function buildPromptPrefix(
-  result: IntentionResult,
-  intents: readonly IntentCatalogEntry[],
-  _config: unknown,
-  domainSkills?: AvailableSkill[],
-): string | undefined {
-  const intentDef = findEnabledIntent(result, intents);
-  const effectiveDef = intentDef ?? FALLBACK_INTENT;
-  const lines = buildPromptPrefixLines(effectiveDef);
-  const domainSkillsBlock = formatDomainSkills(domainSkills);
-
-  return formatSkillHarnessPluginPrefix(result, [domainSkillsBlock, ...lines]);
-}
-
-export function buildDomainSkillsPromptPrefix(
-  result: IntentionResult,
-  domainSkills?: AvailableSkill[],
-): string | undefined {
-  return formatSkillHarnessPluginPrefix(result, [
-    formatDomainSkills(domainSkills),
-  ]);
 }
 
 export function formatConfiguredSkills(

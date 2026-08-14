@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import matter from "gray-matter";
 import { z } from "zod";
 import type { OpenClawPluginApi } from "../../api.js";
@@ -32,7 +33,7 @@ import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
 } from "../subagent-runtime.js";
-import { agentSessionsPath } from "../file-utils.js";
+import { agentSessionsPath, withFileLock } from "../file-utils.js";
 import { extractPayloadText } from "../classification/index.js";
 
 export interface ReviewSubagentResult {
@@ -77,7 +78,7 @@ const REVIEW_INSTRUCTIONS: Record<
       "Review one host-selected resolved skill from skill_placement_candidate and decide whether one existing class-level runtime intent should reference it. Use the complete Intent Catalog skills metadata to avoid duplicate or weak placement.",
     goal: "Place the selected skill in exactly one best-fit runtime intent, or return no_finding when its existing placement is already adequate or no durable intent boundary fits.",
     workflow:
-      "skill-placement: treat skill_placement_candidate as the only target skill. Inspect only the selected skill with skill_view; do not inspect unrelated skills. Choose exactly one existing best-fit class-level intent from the full Intent Catalog. A positive finding must use operation=refine, exactly one targetIntentId, and a direct edit to that runtime intent Markdown. Add or preserve the exact selected skill name in frontmatter skills and add only the minimum durable guidance needed to explain when it applies. Do not create, split, merge, rename, or delete intents; do not edit the skill itself, source code, config, or state JSON. Return no_finding when the selected skill is already adequately placed, is transient or too narrow, or has no suitable durable intent boundary.",
+      "skill-placement: treat skill_placement_candidate and host-provided selected_placement_skill as the only target skill evidence; do not inspect unrelated skills. Choose exactly one existing best-fit class-level intent from the full Intent Catalog. A positive finding must use operation=refine, exactly one targetIntentId, and a direct edit to that runtime intent Markdown. Add or preserve the exact selected skill name in frontmatter skills and add only the minimum durable guidance needed to explain when it applies. Do not create, split, merge, rename, or delete intents; do not edit the skill itself, source code, config, or state JSON. Return no_finding when the selected skill is already adequately placed, is transient or too narrow, or has no suitable durable intent boundary.",
   },
   "process-gap": {
     focus:
@@ -680,8 +681,8 @@ Important reminders for tool use:
 function buildReviewToolsAllow(triggers: readonly ReviewTrigger[]): string[] {
   const tools = ["read", "write", "apply_patch"];
   if (
-    triggers.includes("skill-candidate") ||
-    triggers.includes("skill-placement")
+    triggers.includes("skill-candidate") &&
+    !triggers.includes("skill-placement")
   ) {
     tools.push("skill_view");
   }
@@ -1066,7 +1067,49 @@ function concurrentIntentConflicts(
     .sort((a, b) => a.localeCompare(b));
 }
 
+function placementFrontmatter(content: string): Record<string, unknown> {
+  const data: unknown = matter(content).data;
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return {};
+  }
+  return data as Record<string, unknown>;
+}
+
+function placementSkills(value: unknown): string[] | undefined {
+  return Array.isArray(value) &&
+    value.every((skill) => typeof skill === "string")
+    ? value
+    : undefined;
+}
+
+function placementMetadata(
+  frontmatter: Record<string, unknown>,
+): Record<string, unknown> {
+  const { guidance: _guidance, skills: _skills, ...metadata } = frontmatter;
+  return metadata;
+}
+
+function hasAllowedPlacementSkills(
+  beforeSkills: readonly string[],
+  afterSkills: readonly string[],
+  candidateName: string,
+): boolean {
+  const canonicalCandidateName = candidateName.trim().toLowerCase();
+  const candidateWasPresent = beforeSkills.some(
+    (skill) => skill.trim().toLowerCase() === canonicalCandidateName,
+  );
+  if (candidateWasPresent) {
+    return isDeepStrictEqual(afterSkills, beforeSkills);
+  }
+  return (
+    afterSkills.length === beforeSkills.length + 1 &&
+    beforeSkills.every((skill, index) => afterSkills[index] === skill) &&
+    afterSkills.at(-1) === candidateName
+  );
+}
+
 function validateSkillPlacementChanges(params: {
+  before: ReadonlyMap<string, string>;
   snapshot: ReviewSnapshot;
   findings: readonly ReviewFinding[];
   after: ReadonlyMap<string, string>;
@@ -1098,24 +1141,40 @@ function validateSkillPlacementChanges(params: {
   }
 
   const targetIntentId = finding.targetIntentIds[0]!;
-  const content = params.after.get(`${targetIntentId}.md`);
-  if (content === undefined) {
+  const file = `${targetIntentId}.md`;
+  const beforeContent = params.before.get(file);
+  const afterContent = params.after.get(file);
+  if (beforeContent === undefined || afterContent === undefined) {
     return [
       `skill-placement target ${targetIntentId} must remain an intent file`,
     ];
   }
-  const skills = matter(content).data.skills;
-  const candidateName = candidate.name.trim().toLowerCase();
+  const beforeFrontmatter = placementFrontmatter(beforeContent);
+  const afterFrontmatter = placementFrontmatter(afterContent);
   if (
-    !Array.isArray(skills) ||
-    !skills.some(
-      (skill) =>
-        typeof skill === "string" &&
-        skill.trim().toLowerCase() === candidateName,
+    !isDeepStrictEqual(
+      placementMetadata(beforeFrontmatter),
+      placementMetadata(afterFrontmatter),
     )
   ) {
     return [
+      "skill-placement must not change routing metadata outside skills or guidance",
+    ];
+  }
+  const beforeSkills = placementSkills(beforeFrontmatter.skills) ?? [];
+  const afterSkills = placementSkills(afterFrontmatter.skills);
+  const candidateName = candidate.name.trim().toLowerCase();
+  if (
+    !afterSkills ||
+    !afterSkills.some((skill) => skill.trim().toLowerCase() === candidateName)
+  ) {
+    return [
       `skill-placement target ${targetIntentId} does not reference selected skill ${candidate.name}`,
+    ];
+  }
+  if (!hasAllowedPlacementSkills(beforeSkills, afterSkills, candidate.name)) {
+    return [
+      `skill-placement target ${targetIntentId} must preserve existing skills and add only selected skill ${candidate.name}`,
     ];
   }
   return [];
@@ -1431,6 +1490,7 @@ export async function runReviewSubagent(params: {
       }
     }
     const skillPlacementErrors = validateSkillPlacementChanges({
+      before: beforeIntentFiles,
       snapshot: params.snapshot,
       findings,
       after: afterIntentFiles,
@@ -1442,30 +1502,44 @@ export async function runReviewSubagent(params: {
         validationErrors: skillPlacementErrors,
       };
     }
-    const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
-    const conflictIds = concurrentIntentConflicts(
-      beforeIntentFiles,
-      liveIntentFiles,
-      changedIds,
+    const applyConflicts = await withFileLock(
+      params.intentDirectory,
+      async () => {
+        const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
+        const conflictIds = concurrentIntentConflicts(
+          beforeIntentFiles,
+          liveIntentFiles,
+          changedIds,
+        );
+        if (conflictIds.length > 0) return conflictIds;
+        applyIntentWorkspaceChanges({
+          intentDirectory: params.intentDirectory,
+          before: beforeIntentFiles,
+          after: afterIntentFiles,
+          changedIds,
+        });
+        return [];
+      },
     );
-    if (conflictIds.length > 0) {
+    if (applyConflicts === undefined) {
+      return {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: ["could not acquire runtime intent apply lock"],
+      };
+    }
+    if (applyConflicts.length > 0) {
       logger.warn("review skipped concurrent runtime intent edits", {
-        conflictIntentIds: conflictIds,
+        conflictIntentIds: applyConflicts,
       });
       return {
         findings: [],
         outcome: "validation-failed",
         validationErrors: [
-          `runtime intent files changed during review: ${conflictIds.join(", ")}`,
+          `runtime intent files changed during review: ${applyConflicts.join(", ")}`,
         ],
       };
     }
-    applyIntentWorkspaceChanges({
-      intentDirectory: params.intentDirectory,
-      before: beforeIntentFiles,
-      after: afterIntentFiles,
-      changedIds,
-    });
     return {
       findings,
       ...(changedIds.length > 0 ? { changedIntentIds: changedIds } : {}),

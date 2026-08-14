@@ -10,7 +10,7 @@ Map the user's request to one action:
 - `rename` — the boundary is correct but the filename-derived id is wrong.
 - `split` — one intent contains multiple independent responsibilities.
 - `merge` — two or more intents duplicate the same user goal.
-- `refine` — the intent exists and needs clearer triggers, examples, or body guidance.
+- `refine` — the intent exists and needs clearer routing metadata or guidance.
 
 For rename, split, merge, deletion, or broad boundary changes, explain the planned file operations and wait for explicit confirmation before writing.
 
@@ -23,10 +23,9 @@ Minimum information before drafting:
 1. Purpose and boundary.
 2. Required `domain`.
 3. Concrete triggers and examples.
-4. Optional fastpath keywords and hint.
-5. Skills worth listing in frontmatter and durable tool guidance worth moving into `## Experience`.
-6. Concrete shell commands or stable CLI equivalents that should be preserved in `## Experience`, including mcporter-backed documentation calls.
-7. Neighboring or colliding intents.
+4. Optional exact fastpath keywords.
+5. One durable routing `guidance` sentence and direct skills worth listing in frontmatter.
+6. Neighboring or colliding intents.
 
 ## Step 3 — Ground against existing intents
 
@@ -44,24 +43,21 @@ Do not rely on shell-only listing/search examples when the host provides structu
 Follow `references/format.md` exactly:
 
 - Required frontmatter: `triggers[]`, `examples[]`, `domain`; optional `fastpath`.
-- Optional frontmatter: `fastpath`, `skills[]`.
-- Required body sections: `## Guidelines`, `## Response Strategy`; optional `## Concrete Workflow`, optional `## Experience`.
-- Do not include `## Skills & Tools`; put skill names in frontmatter `skills[]`.
-- Preserve concrete shell commands as bare commands in `## Experience`; for Context7, DeepWiki, or GoogleDeveloperKnowledge calls, add `mcporter` to `skills[]` and write the `mcporter call ...` command instead of MCP wrapper syntax.
-- No body cross-references to other intent ids.
+- Required frontmatter: `triggers[]`, `examples[]`, `domain`, and one `guidance` sentence.
+- Optional frontmatter: `fastpath.keywords`, `candidate`, and direct `skills[]`.
+- Do not include Markdown body sections, tool instructions, workflows, or experiences; intent bodies are unsupported.
+- No intent-metadata cross-references to other intent ids.
 
 ## Step 5 — Format check and delivery
 
 Before writing or showing the final draft, perform simple format checks:
 
-- Frontmatter exists and closes before body sections.
+- Frontmatter exists and is the complete intent file.
 - Required fields exist with the right shape.
-- Required body sections are present and ordered.
 - Trigger/example text is concrete enough for routing.
-- Skill dependencies use frontmatter `skills[]`; any tool guidance follows the `## Concrete Workflow` and `## Experience` rules in `references/format.md`.
-- Concrete shell commands and mcporter-backed documentation lookups are written as bare commands in `## Experience`; no `exec({ command: ... })` or vague runtime-capability wording remains.
-- No legacy `## Skills & Tools` section remains.
-- No body cross-references to other intent ids.
+- Guidance is one durable routing sentence.
+- Skill dependencies use direct frontmatter `skills[]`; no tool guidance, workflow, or experience body remains.
+- No intent-metadata cross-references to other intent ids.
 - The target filename-derived id matches the declared boundary.
 - The chosen domain passes the domain-intent consistency criteria from `references/clustering.md`.
 

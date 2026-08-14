@@ -10,8 +10,6 @@ export {
 } from "./conversation.js";
 export {
   buildRoutingContext,
-  buildDomainSkillsPromptPrefix,
-  buildPromptPrefix,
   formatConfiguredSkills,
   measureIntentCatalogCodePoints,
 } from "./prompts.js";

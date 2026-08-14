@@ -18,6 +18,9 @@ type ReviewSnapshotBlockName =
   | "review_snapshot"
   | "snapshot_manifest"
   | "skill_placement_candidate"
+  | "selected_placement_skill"
+  | "skill_metadata"
+  | "skill_content"
   | "current_turn"
   | "recent_turn"
   | "recent_turns"
@@ -482,24 +485,68 @@ function formatSkillPlacementCandidate(
   );
 }
 
+function formatSelectedPlacementSkill(
+  skill: ReviewSnapshot["selectedPlacementSkill"],
+): string | undefined {
+  if (!skill) return undefined;
+  return wrapRequiredReviewSnapshotBlock(
+    "selected_placement_skill",
+    [
+      wrapRequiredReviewSnapshotBlock(
+        "skill_metadata",
+        stringifySnapshotJson({
+          name: skill.name,
+          description: skill.description,
+          ...(skill.omittedCodePointCount !== undefined
+            ? { omittedCodePointCount: skill.omittedCodePointCount }
+            : {}),
+        }),
+      ),
+      wrapRequiredReviewSnapshotBlock(
+        "skill_content",
+        escapeSnapshotText(skill.content),
+      ),
+    ].join("\n\n"),
+  );
+}
+
 export function formatReviewSnapshot(
   snapshot: ReviewSnapshot,
   options: FormatReviewSnapshotOptions = {},
 ): string {
+  const placementReview =
+    options.requestedTriggers?.includes("skill-placement");
+  const renderedSnapshot = placementReview
+    ? {
+        ...snapshot,
+        availableSkills: [],
+        current: {
+          ...snapshot.current,
+          recommendationCandidates: undefined,
+          skillsUsed: undefined,
+        },
+        recent: snapshot.recent.map((state) => ({
+          ...state,
+          skillsUsed: undefined,
+        })),
+      }
+    : snapshot;
   const catalogProjection =
     options.includeIntentCatalog === false
       ? undefined
-      : projectIntentCatalog(snapshot, options.requestedTriggers ?? []);
+      : projectIntentCatalog(renderedSnapshot, options.requestedTriggers ?? []);
   const catalogManifest = catalogProjection ?? {
     mode: "omitted" as const,
-    originalCount: snapshot.intentCatalog.length,
+    originalCount: renderedSnapshot.intentCatalog.length,
     includedCount: 0 as const,
-    omittedCount: snapshot.intentCatalog.length,
+    omittedCount: renderedSnapshot.intentCatalog.length,
   };
-  const availableSkills = formatAvailableSkills(snapshot.availableSkills);
+  const availableSkills = formatAvailableSkills(
+    renderedSnapshot.availableSkills,
+  );
   const recent = wrapOptionalReviewSnapshotBlock(
     "recent_turns",
-    snapshot.recent
+    renderedSnapshot.recent
       .map((state, index) =>
         formatReviewState("recent_turn", state, { recentIndex: index + 1 }),
       )
@@ -508,16 +555,21 @@ export function formatReviewSnapshot(
 
   const blocks = [
     formatSnapshotManifest(
-      snapshot,
+      renderedSnapshot,
       options,
       availableSkills ? Array.from(indentXmlLines(availableSkills)).length : 0,
       catalogManifest,
     ),
-    formatSkillPlacementCandidate(snapshot.skillPlacementCandidate),
-    formatReviewState("current_turn", snapshot.current, {
-      turnNumber: snapshot.turnNumber,
+    placementReview
+      ? formatSkillPlacementCandidate(renderedSnapshot.skillPlacementCandidate)
+      : undefined,
+    placementReview
+      ? formatSelectedPlacementSkill(renderedSnapshot.selectedPlacementSkill)
+      : undefined,
+    formatReviewState("current_turn", renderedSnapshot.current, {
+      turnNumber: renderedSnapshot.turnNumber,
     }),
-    formatMatchedIntent(snapshot),
+    formatMatchedIntent(renderedSnapshot),
     recent,
     availableSkills,
     catalogProjection ? formatIntentCatalog(catalogProjection) : undefined,

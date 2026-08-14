@@ -19,8 +19,8 @@ Session cleanup preserves the ended main session and removes only expired `sessi
 
 The README reports one deployment's observed routed turns, confidence, recommendation adoption, candidate reduction, rendered catalog size, and local projection time. These are operational measurements, not a synthetic benchmark.
 
-- A recommendation opportunity is each top-level skill entry actually injected into the final `<domain_skill_candidates>` block after domain and verified additional candidates are resolved and deduplicated. Related-skill metadata nested under a candidate is not counted as a separate opportunity.
-- A recommendation is adopted when that injected candidate is used during the same turn. Instruction-hint prose is not parsed for skill names.
+- A recommendation opportunity is each top-level skill entry actually injected into the final direct `<skill_candidates>` block for the selected intent. Related-skill metadata nested under a candidate is not counted as a separate opportunity.
+- A recommendation is adopted when that injected candidate is used during the same turn. Routing-guidance prose is not parsed for skill names.
 - Recommendation adoption is measured separately from skill usage outside the injected candidate set.
 - Rendered catalog size is measured in Unicode code points, not provider-billed tokens.
 - Provider tokenization and context injected by OpenClaw or other plugins are outside Skill Harness's measurement scope.

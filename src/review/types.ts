@@ -35,6 +35,14 @@ export type SkillPlacementReviewCandidate = SkillPlacementCandidate & {
   currentlyReferencedIntentIds: string[];
 };
 
+export type SelectedPlacementSkill = Pick<
+  AvailableSkill,
+  "name" | "description"
+> & {
+  content: string;
+  omittedCodePointCount?: number;
+};
+
 export type ReviewSnapshot = {
   sessionId: string;
   sessionKey?: string;
@@ -46,6 +54,7 @@ export type ReviewSnapshot = {
   matchedIntent?: IntentCatalogEntry;
   availableSkills?: AvailableSkill[];
   skillPlacementCandidate?: SkillPlacementReviewCandidate;
+  selectedPlacementSkill?: SelectedPlacementSkill;
   intentCatalog: Array<
     { id: string } & Pick<IntentDefinition, "triggers" | "examples"> &
       Partial<

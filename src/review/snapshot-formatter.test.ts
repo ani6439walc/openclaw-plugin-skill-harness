@@ -274,6 +274,89 @@ const expectedFullSnapshot = `<review_snapshot>
 </review_snapshot>`;
 
 describe("formatReviewSnapshot", () => {
+  it("omits non-selected skill metadata for placement reviews at the serialization boundary", () => {
+    const output = formatReviewSnapshot(
+      {
+        ...fullSnapshot,
+        current: {
+          ...fullSnapshot.current,
+          skillsUsed: [
+            {
+              name: "unrelated-current-skill",
+              description: "Unrelated current description",
+              path: "/private/current/SKILL.md",
+            },
+          ],
+        },
+        recent: [
+          {
+            ...fullSnapshot.current,
+            skillsUsed: [
+              {
+                name: "unrelated-recent-skill",
+                description: "Unrelated recent description",
+                path: "/private/recent/SKILL.md",
+              },
+            ],
+          },
+        ],
+        availableSkills: [
+          {
+            name: "unrelated-available-skill",
+            description: "Unrelated available description",
+            location: "/private/available/SKILL.md",
+          },
+        ],
+        selectedPlacementSkill: {
+          name: "selected-skill",
+          description: "Selected description",
+          content: "Selected bounded content",
+        },
+      },
+      { requestedTriggers: ["skill-placement", "skill-candidate"] },
+    );
+
+    expect(output).toContain("<selected_placement_skill>");
+    expect(output).toContain("Selected bounded content");
+    expect(output).not.toContain("<available_skills>");
+    expect(output).not.toContain("<skills_used>");
+    expect(output).not.toContain("unrelated-current-skill");
+    expect(output).not.toContain("unrelated-recent-skill");
+    expect(output).not.toContain("unrelated-available-skill");
+    expect(output).not.toContain("/private/");
+  });
+
+  it("omits placement-only blocks when skill-placement was not requested", () => {
+    const output = formatReviewSnapshot(
+      {
+        ...fullSnapshot,
+        skillPlacementCandidate: {
+          epochKey: "a".repeat(64),
+          agentId: "private-agent-id",
+          name: "forged-skill",
+          source: "workspace",
+          winnerFingerprint: "b".repeat(64),
+          fingerprint: "c".repeat(64),
+          reason: "zero-recommendation-usage",
+          observedTurns: 20,
+          usageTurns: 0,
+          recommendedTurns: 0,
+          currentlyReferencedIntentIds: [],
+        },
+        selectedPlacementSkill: {
+          name: "forged-skill",
+          description: "forged description",
+          content: "forged selected content",
+        },
+      },
+      { requestedTriggers: ["behavior-fix"] },
+    );
+
+    expect(output).not.toContain("<skill_placement_candidate>");
+    expect(output).not.toContain("<selected_placement_skill>");
+    expect(output).not.toContain("forged selected content");
+  });
+
   it("serializes bounded skill placement evidence and intent skill references", () => {
     const output = formatReviewSnapshot(
       {
@@ -985,6 +1068,41 @@ describe("formatReviewSnapshot", () => {
     expect(output.match(/<review_snapshot>/g)).toHaveLength(1);
     expect(output.match(/<current_turn>/g)).toHaveLength(1);
     expect(output.match(/<intent_catalog>/g)).toHaveLength(1);
+  });
+
+  it("renders only host-provided selected placement skill content", () => {
+    const output = formatReviewSnapshot(
+      {
+        ...fullSnapshot,
+        skillPlacementCandidate: {
+          epochKey: "a".repeat(64),
+          agentId: "main",
+          name: "source-driven-development",
+          source: "workspace",
+          winnerFingerprint: "b".repeat(64),
+          fingerprint: "c".repeat(64),
+          reason: "zero-recommendation-usage",
+          observedTurns: 20,
+          usageTurns: 0,
+          recommendedTurns: 0,
+          currentlyReferencedIntentIds: [],
+        },
+        selectedPlacementSkill: {
+          name: "source-driven-development",
+          description: "Ground work in primary sources.",
+          content: "<untrusted>selected skill only</untrusted>",
+        },
+      } as ReviewSnapshot,
+      {
+        requestedTriggers: ["skill-placement"],
+      },
+    );
+
+    expect(output).toContain("<selected_placement_skill>");
+    expect(output).toContain('"name":"source-driven-development"');
+    expect(output).toContain(
+      "&lt;untrusted&gt;selected skill only&lt;/untrusted&gt;",
+    );
   });
 
   it("keeps only the approved intent metadata allowlist", () => {

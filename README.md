@@ -45,7 +45,7 @@ Large skill catalogs create two practical problems:
 
 Skill Harness addresses both:
 
-1. **Focused context per turn.** Eligible user turns receive focused `<domain_skill_candidates>` and, when justified, a concise instruction hint. The fixed system context does not include the runtime skill inventory.
+1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and bounded skill experiences. The fixed system context does not include the runtime skill inventory.
 2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption and can refine runtime intent Markdown and selected review trigger keywords. It does not train the base model or rewrite skill files.
 
 ## How it works
@@ -102,11 +102,6 @@ Configure Skill Harness in `openclaw.json`:
           lowThinkingMode: "fastpath-only",
           queryMode: "recent",
           timeoutMs: 10000,
-          instruction: {
-            enabled: true,
-            thinking: "medium",
-            timeoutMs: 20000,
-          },
           review: {
             enabled: false,
           },
@@ -119,22 +114,22 @@ Configure Skill Harness in `openclaw.json`:
 
 ### Important options
 
-| Option                                   | Default           | Purpose                                                                                       |
-| ---------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
-| `agents`                                 | `["main"]`        | OpenClaw agent IDs eligible for scanning.                                                     |
-| `allowedChatTypes`                       | `["direct"]`      | Chat types that may run the scanner.                                                          |
-| `allowedChatIds` / `deniedChatIds`       | `[]`              | Optional chat allow-list and deny-list.                                                       |
-| `intentDeny`                             | `{}`              | Per-agent intent deny-list with wildcard-style keys.                                          |
-| `model` / `modelFallback`                | unset             | Scanner model and last-resort resolution fallback.                                            |
-| `thinking`                               | `"medium"`        | Intent-classifier thinking level.                                                             |
-| `lowThinkingMode`                        | `"fastpath-only"` | Behavior when the main agent uses off, minimal, or low thinking.                              |
-| `queryMode` / `contextWindow`            | `"recent"`        | Scanner context and its limits.                                                               |
-| `timeoutMs`                              | `10000`           | Topic-checker and intent-classifier time budget.                                              |
-| `instruction.enabled`                    | `true`            | Enables post-classification instruction hints.                                                |
-| `review.enabled`                         | `false`           | Enables post-turn Intent Review.                                                              |
-| `review.triggers.skillPlacement.enabled` | `true`            | Reviews one eligible resolved skill for placement in a runtime intent when Review is enabled. |
+| Option                             | Default           | Purpose                                                          |
+| ---------------------------------- | ----------------- | ---------------------------------------------------------------- |
+| `agents`                           | `["main"]`        | OpenClaw agent IDs eligible for scanning.                        |
+| `allowedChatTypes`                 | `["direct"]`      | Chat types that may run the scanner.                             |
+| `allowedChatIds` / `deniedChatIds` | `[]`              | Optional chat allow-list and deny-list.                          |
+| `intentDeny`                       | `{}`              | Per-agent intent deny-list with wildcard-style keys.             |
+| `model` / `modelFallback`          | unset             | Scanner model and last-resort resolution fallback.               |
+| `thinking`                         | `"medium"`        | Intent-classifier thinking level.                                |
+| `lowThinkingMode`                  | `"fastpath-only"` | Behavior when the main agent uses off, minimal, or low thinking. |
+| `queryMode` / `contextWindow`      | `"recent"`        | Scanner context and its limits.                                  |
+| `timeoutMs`                        | `10000`           | Topic-checker and intent-classifier time budget.                 |
 
-Topic Checker, Intent Classifier, Hint Writer, and Intent Review resolve models in this order: explicit configured model, current session model, agent primary model, then configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
+| `review.enabled` | `false` | Enables post-turn Intent Review. |
+| `review.triggers.skillPlacement.enabled` | `true` | Reviews one eligible resolved skill for placement in a runtime intent when Review is enabled. |
+
+Topic Checker, Intent Classifier, and Intent Review resolve models in this order: explicit configured model, current session model, agent primary model, then configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
 ## Runtime intents
 
@@ -164,7 +159,7 @@ Keep each intent narrow and concrete:
 - domain metadata that matches the requested outcome
 - `fastpath.keywords` only for deterministic shortcuts
 - `skills[]` only when the skill genuinely helps
-- experience notes for durable pitfalls, commands, and verification steps
+- one durable `guidance` sentence for routing behavior
 
 ### Human maintenance skill
 
@@ -176,7 +171,7 @@ The bundled `skill-harness` skill is the explicit human-maintenance surface for 
 - `keyword-audit` — generate a private, report-only cross-session analysis of Review keyword matches, misses, and collisions, then propose a bounded delta without writing runtime state.
 - `runtime-health` — generate a private, report-only aggregate snapshot of Review outcomes, coverage state, v3/v4 stats, session retention, and agent-artifact growth without exposing retained text or modifying runtime state.
 
-This skill does not manually repeat production-owned work: per-turn classification and hint generation, startup seeding, trigger-driven intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, or session cleanup. Broad routing changes and skill extraction remain human-owned because they require semantic calibration and explicit write approval.
+This skill does not manually repeat production-owned work: per-turn classification and routing injection, startup seeding, trigger-driven intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, or session cleanup. Broad routing changes and skill extraction remain human-owned because they require semantic calibration and explicit write approval.
 
 ## Skill tools
 
@@ -215,7 +210,7 @@ The `successful-pattern`, `behavior-fix`, and `entity-context` triggers may also
 
 This automatic keyword learning is event-driven, not a corpus audit. Each keyword-capable trigger must first pass its structural gates **and match an existing keyword** before it can request a keyword finding. Separately, opt-in keyword coverage runs every configured accepted-turn cadence, scans retained sessions for bounded target-specific addition gaps or complete cross-session removal evidence, and uses a tool-free two-stage reviewer. Failed epochs retry every five accepted turns without blocking the main agent. The bundled `keyword-audit` mode covers that evidence gap as a private report-and-proposal workflow, but it does not persist approved changes manually.
 
-The `skill-placement` trigger consumes current per-agent resolved-inventory observations. It selects at most one skill per accepted turn, prioritizes an existing low-adoption `needsReview` signal, and otherwise requires 20 continuous observations with zero recommendations and zero usage. The placement reviewer receives the selected skill through `skill_view` plus the complete intent catalog, and may refine exactly one existing runtime intent. It cannot create or modify skills. `applied` and `nofinding` complete that inventory epoch; technical, validation, queue, and log-write failures remain retryable.
+The `skill-placement` trigger consumes current per-agent resolved-inventory observations. It selects at most one skill per accepted turn, prioritizes an existing low-adoption `needsReview` signal, and otherwise requires 20 continuous observations with zero recommendations and zero usage. The host resolves and supplies only the selected skill's bounded content plus the complete intent catalog; the placement reviewer may refine exactly one existing runtime intent and cannot inspect, create, or modify skills. `applied` and `nofinding` outcomes atomically record the skill epoch; failed or invalid review runs release it for retry.
 
 See [Intent Review](docs/intent-review.md) for safeguards and decision rules.
 
@@ -250,7 +245,7 @@ pnpm run build
 
 ### No hints are injected
 
-Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the scanner model can resolve. With low thinking, `lowThinkingMode: "off"` disables the scanner and `"fastpath-only"` requires a matching fast path. A classifier confidence below `0.8` skips the optional instruction writer but preserves available domain candidates.
+Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the scanner model can resolve. With low thinking, `lowThinkingMode: "off"` disables the scanner and `"fastpath-only"` requires a matching fast path. A classifier confidence below `0.8` remains conservative and injects only routing context derived from the selected intent's direct skills.
 
 ### Runtime intents are missing
 

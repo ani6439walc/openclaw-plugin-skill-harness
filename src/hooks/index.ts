@@ -29,6 +29,7 @@ import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { runReviewSubagent } from "../review/subagent.js";
 import type {
   IntentMarkdownReviewFinding,
+  SelectedPlacementSkill,
   TriggerKeywordsReviewFinding,
 } from "../review/types.js";
 import type { SkillPlacementReviewCandidate } from "../review/types.js";
@@ -42,6 +43,7 @@ import {
   runKeywordCoverageReview,
 } from "../review/index.js";
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
 import {
   extractLatestUserMessage,
   limitConversationTurns,
@@ -91,7 +93,7 @@ import {
   validateAndCommitCuration,
   type CuratedSkillCandidate,
 } from "../curation/index.js";
-import type { AvailableSkill } from "../skills/types.js";
+import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
@@ -138,6 +140,7 @@ const KEYWORD_COVERAGE_TARGETS: readonly TriggerKeywordTarget[] = [
   "entity-context",
 ];
 const KEYWORD_COVERAGE_RETRY_INTERVAL = 5;
+const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
 
 type CoverageRuntimeTargets = Partial<
   Record<
@@ -145,6 +148,70 @@ type CoverageRuntimeTargets = Partial<
     { cursor: number; lastCompletedAcceptedTurn: number }
   >
 >;
+
+function truncateSelectedPlacementSkillContent(content: string): {
+  content: string;
+  omittedCodePointCount?: number;
+} {
+  const codePoints = Array.from(content);
+  if (codePoints.length <= MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS) {
+    return { content };
+  }
+  const headLength = Math.floor(MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS / 2);
+  const tailLength = MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS - headLength;
+  return {
+    content: `${codePoints.slice(0, headLength).join("")}\n\n${codePoints.slice(-tailLength).join("")}`,
+    omittedCodePointCount:
+      codePoints.length - MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS,
+  };
+}
+
+async function resolveSelectedPlacementSkill(
+  candidate: SkillPlacementReviewCandidate,
+  availableSkills: readonly AvailableSkill[],
+  skillInventory: readonly SkillInventoryItem[] | undefined,
+): Promise<SelectedPlacementSkill | undefined> {
+  const matchesInventory = skillInventory?.filter(
+    (skill) =>
+      skill.name.trim().toLowerCase() === candidate.name.trim().toLowerCase() &&
+      skill.source === candidate.source &&
+      skill.winnerFingerprint === candidate.winnerFingerprint &&
+      skill.fingerprint === candidate.fingerprint,
+  );
+  if (matchesInventory?.length !== 1) return;
+  const canonicalName = candidate.name.trim().toLowerCase();
+  const matches = availableSkills.filter(
+    (skill) => skill.name.trim().toLowerCase() === canonicalName,
+  );
+  if (matches.length !== 1) return;
+  const selected = matches[0]!;
+  try {
+    const realpath = await fs.realpath(selected.location);
+    const content = await fs.readFile(realpath);
+    if (
+      createHash("sha256").update(realpath).digest("hex") !==
+        candidate.winnerFingerprint ||
+      createHash("sha256").update(content).digest("hex") !==
+        candidate.fingerprint
+    ) {
+      return;
+    }
+    const bounded = truncateSelectedPlacementSkillContent(
+      content.toString("utf-8"),
+    );
+    return {
+      name: selected.name,
+      description: selected.description,
+      ...bounded,
+    };
+  } catch (error) {
+    logger.warn("failed to read selected placement skill", {
+      error,
+      skillName: selected.name,
+    });
+    return;
+  }
+}
 
 export function coverageEpochMilestone(params: {
   cadence: number;
@@ -1810,10 +1877,28 @@ export function createHookHandlers(deps: HookDeps) {
     agentId: string,
     skillPlacementCandidate?: SkillPlacementReviewCandidate,
   ) {
-    const availableSkillNames = [
-      ...(intentDefinition?.definition.skills ?? []),
-      ...(skillPlacementCandidate ? [skillPlacementCandidate.name] : []),
-    ];
+    const availableSkillNames = skillPlacementCandidate
+      ? [skillPlacementCandidate.name]
+      : [...(intentDefinition?.definition.skills ?? [])];
+    const resolvedAvailableSkills =
+      availableSkillNames.length > 0
+        ? await resolveAvailableSkills({
+            api,
+            agentId,
+            bundledSkillsDir,
+            skillNames: [...new Set(availableSkillNames)],
+          })
+        : [];
+    const skillInventory = skillPlacementCandidate
+      ? await skillInventoryResolver({ api, agentId, bundledSkillsDir })
+      : undefined;
+    const selectedPlacementSkill = skillPlacementCandidate
+      ? await resolveSelectedPlacementSkill(
+          skillPlacementCandidate,
+          resolvedAvailableSkills,
+          skillInventory,
+        )
+      : undefined;
     return {
       ...baseSnapshot,
       ...(skillPlacementCandidate ? { agentId } : {}),
@@ -1827,16 +1912,9 @@ export function createHookHandlers(deps: HookDeps) {
             },
           }
         : undefined,
-      availableSkills:
-        availableSkillNames.length > 0
-          ? await resolveAvailableSkills({
-              api,
-              agentId,
-              bundledSkillsDir,
-              skillNames: [...new Set(availableSkillNames)],
-            })
-          : [],
+      availableSkills: skillPlacementCandidate ? [] : resolvedAvailableSkills,
       ...(skillPlacementCandidate ? { skillPlacementCandidate } : {}),
+      ...(selectedPlacementSkill ? { selectedPlacementSkill } : {}),
       intentCatalog: catalog.get().map((entry) => ({
         id: entry.id,
         triggers: [...entry.definition.triggers],
@@ -2622,12 +2700,7 @@ export function createHookHandlers(deps: HookDeps) {
       const placementSkillName = skillPlacementCandidate?.name
         .trim()
         .toLowerCase();
-      if (
-        placementSkillName &&
-        !snapshot.availableSkills.some(
-          (skill) => skill.name.trim().toLowerCase() === placementSkillName,
-        )
-      ) {
+      if (placementSkillName && !snapshot.selectedPlacementSkill) {
         pendingSkillEpochKeys.delete(skillPlacementCandidate!.epochKey);
         ownsReservation = false;
         skillPlacementCandidate = undefined;

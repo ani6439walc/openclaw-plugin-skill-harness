@@ -24,10 +24,10 @@ Confirm these fields in order:
 4. one required `domain`
 5. `triggers`
 6. `examples`
-7. optional `fastpath.keywords` and short `fastpath.hint`
+7. optional exact `fastpath.keywords`
 8. optional cross-flow candidate scope or manual exact candidate keywords
-9. body scope
-10. skills and tools worth hinting
+9. one durable routing `guidance` sentence
+10. direct skills that help the routing outcome
 11. collision check with existing intents
 
 ## Rules
@@ -39,7 +39,7 @@ Confirm these fields in order:
 - If two intents are colliding, recommend the smallest clean split.
 - Do not propose `candidate.keywords` from a single example or review session. Require durable cross-domain evidence and check both intended matches and neighboring collisions.
 - Do not write the final intent file until the boundary is clear.
-- **No cross-references in body**: the markdown body must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, and fastpath metadata. (See `references/format.md` for full spec.)
+- **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, fastpath metadata, and guidance. (See `references/format.md` for full spec.)
 
 ## User-specified flow override
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1622,6 +1623,8 @@ description: Navigate Tokyo.
       agentId: "persisted-agent",
       name: "source-driven-development",
       source: "workspace" as const,
+      winnerFingerprint: "",
+      fingerprint: "",
       reason: "zero-recommendation-usage" as const,
       observedTurns: 20,
       usageTurns: 0,
@@ -1671,10 +1674,17 @@ description: Navigate Tokyo.
       "source-driven-development",
     );
     fs.mkdirSync(skillDir, { recursive: true });
+    const skillFile = path.join(skillDir, "SKILL.md");
     fs.writeFileSync(
-      path.join(skillDir, "SKILL.md"),
+      skillFile,
       "---\nname: source-driven-development\ndescription: Ground work in primary sources.\n---\n",
     );
+    candidate.winnerFingerprint = createHash("sha256")
+      .update(fs.realpathSync(skillFile))
+      .digest("hex");
+    candidate.fingerprint = createHash("sha256")
+      .update(fs.readFileSync(skillFile))
+      .digest("hex");
     const enqueue = vi.fn();
     const reviewer = vi
       .fn()
@@ -1752,7 +1762,14 @@ description: Navigate Tokyo.
       reviewQueue: { enqueue },
       reviewer,
       reviewLogWriter,
-      skillInventoryResolver: vi.fn().mockResolvedValue([]),
+      skillInventoryResolver: vi.fn().mockImplementation(async () => [
+        {
+          name: candidate.name,
+          source: candidate.source,
+          winnerFingerprint: candidate.winnerFingerprint,
+          fingerprint: candidate.fingerprint,
+        },
+      ]),
       turnAssociations,
     });
 
@@ -1799,13 +1816,13 @@ description: Navigate Tokyo.
             ...candidate,
             currentlyReferencedIntentIds: ["other"],
           },
-          availableSkills: [
-            {
-              name: "source-driven-development",
-              location: path.join(skillDir, "SKILL.md"),
-              description: "Ground work in primary sources.",
-            },
-          ],
+          availableSkills: [],
+          selectedPlacementSkill: {
+            name: "source-driven-development",
+            description: "Ground work in primary sources.",
+            content:
+              "---\nname: source-driven-development\ndescription: Ground work in primary sources.\n---\n",
+          },
           intentCatalog: [
             expect.objectContaining({
               id: "other",

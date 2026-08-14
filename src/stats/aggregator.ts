@@ -139,6 +139,8 @@ export interface SkillPlacementCandidate {
   agentId: string;
   name: string;
   source: SkillSource;
+  winnerFingerprint: string;
+  fingerprint: string;
   reason: SkillPlacementReason;
   observedTurns: number;
   usageTurns: number;
@@ -1597,6 +1599,8 @@ export class StatsAggregator {
               agentId,
               name: skill.name,
               source: skill.source,
+              winnerFingerprint: skill.winnerFingerprint,
+              fingerprint: skill.fingerprint,
               reason,
               observedTurns: skill.observedTurns,
               usageTurns: skill.usageTurns,

@@ -12,9 +12,8 @@ When enough information is collected, stop asking discovery questions and switch
 ## Safety checks
 
 - If the proposed design is still too broad or collides badly, do not force a final draft yet. Say what decision is still unresolved and ask the smallest next question.
-- Use the README's required frontmatter skills and experience format (see `references/format.md`).
-- Preserve concrete shell commands and stable mcporter-backed documentation calls as bare commands in `## Experience`; do not use `exec({ command: ... })` wrappers or generic runtime-capability wording.
-- Do not invent ad-hoc labels or recreate the legacy `## Skills & Tools` section.
+- Use the routing-only frontmatter format in `references/format.md`: required `guidance`, optional direct `skills[]`, and no Markdown body.
+- Keep commands, tool workflows, and durable lessons in referenced skills; do not add them to the intent definition.
 
 ## Collision warning format
 
@@ -36,4 +35,4 @@ Ask user to confirm resolution before proceeding to final draft.
 2. Show diff preview to user
 3. Confirm no conflicts
 4. Write to the active OpenClaw-resolved runtime intent catalog on approval (normally `~/.openclaw/plugins/skill-harness/intents/` with the default local state directory)
-5. Run simple format checks: frontmatter shape, required section order, concrete triggers/examples, frontmatter `skills[]` shape, `## Experience` guidance shape, concrete command preservation, no legacy `## Skills & Tools`, and no body cross-references to other intent ids.
+5. Run simple format checks: complete frontmatter shape, one `guidance` sentence, concrete triggers/examples, direct `skills[]` shape, no intent body, and no metadata cross-references to other intent ids.
