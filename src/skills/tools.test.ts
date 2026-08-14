@@ -75,7 +75,7 @@ const TOOL_TEST_INTENTS: IntentCatalogEntry[] = [
       domain: "writing",
       fastpath: { keywords: [] },
       skills: ["writer"],
-      prompt: "Use the writer skill.",
+      guidance: "Use the writer skill.",
     },
   },
   {
@@ -86,7 +86,7 @@ const TOOL_TEST_INTENTS: IntentCatalogEntry[] = [
       domain: "agent-ops",
       skills: ["writer"],
       fastpath: { keywords: [] },
-      prompt: "Use the writer workflow when drafting workflow text.",
+      guidance: "Use the writer workflow when drafting workflow text.",
     },
   },
 ];
@@ -363,7 +363,7 @@ describe("registerSkillTools", () => {
           domain: agentId,
           fastpath: { keywords: [] },
           skills: [`${agentId}-only`],
-          prompt: "",
+          guidance: "",
         },
       },
     ]);
@@ -437,7 +437,7 @@ describe("registerSkillTools", () => {
           domain: "web",
           fastpath: { keywords: [] },
           skills: ["nextjs"],
-          prompt: "",
+          guidance: "",
         },
       },
       {
@@ -448,7 +448,7 @@ describe("registerSkillTools", () => {
           domain: "frontend",
           fastpath: { keywords: [] },
           skills: ["react"],
-          prompt: "",
+          guidance: "",
         },
       },
     ];

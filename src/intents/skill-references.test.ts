@@ -623,7 +623,7 @@ describe("skill catalog", () => {
               domain: "coding",
               skills: ["architecture-diagram"],
               fastpath: { keywords: [] },
-              prompt: "Use diagrams when useful.",
+              guidance: "Use diagrams when useful.",
             },
           },
           {
@@ -634,7 +634,7 @@ describe("skill catalog", () => {
               domain: "coding",
               skills: ["test-driven-development"],
               fastpath: { keywords: [] },
-              prompt: "Use test-driven development.",
+              guidance: "Use test-driven development.",
             },
           },
           {
@@ -645,7 +645,7 @@ describe("skill catalog", () => {
               domain: "research",
               skills: ["blogwatcher"],
               fastpath: { keywords: [] },
-              prompt: "Watch relevant blogs.",
+              guidance: "Watch relevant blogs.",
             },
           },
         ],

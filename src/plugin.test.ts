@@ -11,17 +11,38 @@ import {
 import { IntentCatalog } from "./intents/index.js";
 import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
+import { SessionTracker } from "./session/index.js";
+import { StatsAggregator } from "./stats/index.js";
+
+const { createHookHandlersSpy } = vi.hoisted(() => ({
+  createHookHandlersSpy: vi.fn(),
+}));
+
+vi.mock("./hooks/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./hooks/index.js")>();
+  return {
+    ...actual,
+    createHookHandlers: (
+      ...args: Parameters<typeof actual.createHookHandlers>
+    ) => {
+      createHookHandlersSpy(args[0]);
+      return actual.createHookHandlers(...args);
+    },
+  };
+});
 
 describe("createPlugin", () => {
   let stateDir: string;
 
   beforeEach(() => {
     stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-state-"));
+    createHookHandlersSpy.mockClear();
   });
 
   afterEach(() => {
     fs.rmSync(stateDir, { recursive: true, force: true });
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   function createApi(overrides: Partial<OpenClawPluginApi> = {}) {
@@ -76,6 +97,68 @@ describe("createPlugin", () => {
       "before_agent_finalize",
       expect.any(Function),
     );
+  });
+
+  it("injects a curation queue scoped to each plugin registration", () => {
+    const firstApi = createApi();
+    const secondApi = createApi();
+
+    createPlugin(firstApi).register(firstApi);
+    createPlugin(secondApi).register(secondApi);
+
+    const firstQueue = createHookHandlersSpy.mock.calls[0][0].curationQueue;
+    const secondQueue = createHookHandlersSpy.mock.calls[1][0].curationQueue;
+    expect(firstQueue).toEqual({
+      enqueue: expect.any(Function),
+      has: expect.any(Function),
+    });
+    expect(secondQueue).not.toBe(firstQueue);
+  });
+
+  it("defers curation recovery independently of review enablement", async () => {
+    vi.useFakeTimers();
+    const api = createApi({ pluginConfig: { review: { enabled: false } } });
+    const listProcessedEventIds = vi
+      .spyOn(StatsAggregator.prototype, "listProcessedEventIds")
+      .mockReturnValue(new Set());
+    const listRetainedSessions = vi
+      .spyOn(SessionTracker.prototype, "listRetainedSessions")
+      .mockReturnValue([]);
+    const listPendingCurationSchedules = vi
+      .spyOn(SessionTracker.prototype, "listPendingCurationSchedules")
+      .mockResolvedValue([]);
+
+    createPlugin(api).register(api);
+
+    expect(api.registerTool).toHaveBeenCalledTimes(5);
+    expect(api.on).toHaveBeenCalledWith("session_end", expect.any(Function));
+    expect(listProcessedEventIds).not.toHaveBeenCalled();
+    expect(listRetainedSessions).not.toHaveBeenCalled();
+    expect(listPendingCurationSchedules).not.toHaveBeenCalled();
+
+    await vi.runAllTimersAsync();
+
+    expect(listProcessedEventIds).toHaveBeenCalled();
+    expect(listRetainedSessions).toHaveBeenCalled();
+    expect(listPendingCurationSchedules).toHaveBeenCalled();
+  });
+
+  it("fails open when deferred curation recovery fails", async () => {
+    vi.useFakeTimers();
+    const api = createApi();
+    const error = new Error("pending schedules unavailable");
+    vi.spyOn(
+      SessionTracker.prototype,
+      "listPendingCurationSchedules",
+    ).mockRejectedValue(error);
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    expect(() => createPlugin(api).register(api)).not.toThrow();
+    await vi.runAllTimersAsync();
+
+    expect(warn).toHaveBeenCalledWith("failed to recover curation schedules", {
+      error,
+    });
   });
 
   it("registers skill tools without legacy review command surfaces", () => {

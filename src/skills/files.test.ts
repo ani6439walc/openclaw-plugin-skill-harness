@@ -42,7 +42,7 @@ const FILE_TEST_INTENTS: IntentCatalogEntry[] = [
       domain: "writing",
       fastpath: { keywords: [] },
       skills: ["writer"],
-      prompt: "Use the writer skill.",
+      guidance: "Use the writer skill.",
     },
   },
 ];

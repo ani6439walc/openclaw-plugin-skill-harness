@@ -8,17 +8,15 @@ function intent(
   domain: string,
   candidate?: IntentCatalogEntry["definition"]["candidate"],
 ): IntentCatalogEntry {
-  return {
-    id,
-    definition: {
-      triggers: [`trigger ${id}`],
-      examples: [`example ${id}`],
-      domain,
-      ...(candidate ? { candidate } : {}),
-      fastpath: { keywords: [] },
-      prompt: `prompt ${id}`,
-    },
+  const definition: IntentCatalogEntry["definition"] = {
+    triggers: [`trigger ${id}`],
+    examples: [`example ${id}`],
+    domain,
+    fastpath: { keywords: [] },
+    guidance: `prompt ${id}`,
   };
+  if (candidate) definition.candidate = candidate;
+  return { id, definition };
 }
 
 function topicContext(

@@ -787,7 +787,7 @@ description: Navigate Tokyo.
         domain: "git",
         skills: ["git-master"],
         fastpath: { keywords: [] },
-        prompt: "Follow the version-control workflow.",
+        guidance: "Follow the version-control workflow.",
       },
     };
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
@@ -877,7 +877,7 @@ description: Navigate Tokyo.
         domain: "git",
         skills: ["git-master"],
         fastpath: { keywords: [] },
-        prompt: "Follow the version-control workflow.",
+        guidance: "Follow the version-control workflow.",
       },
     };
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
@@ -960,7 +960,7 @@ description: Navigate Tokyo.
         domain: "agent-ops",
         skills: ["vue"],
         fastpath: { keywords: [] },
-        prompt: "Follow the skill workflow.",
+        guidance: "Follow the skill workflow.",
       },
     };
     vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
@@ -1009,7 +1009,7 @@ description: Navigate Tokyo.
         domain: "agent-ops",
         skills: ["skill-harness"],
         fastpath: { keywords: [] },
-        prompt: "Follow the skill workflow.",
+        guidance: "Follow the skill workflow.",
       },
     };
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
@@ -1055,7 +1055,7 @@ description: Navigate Tokyo.
         domain: "agent-ops",
         skills: ["skill-harness"],
         fastpath: { keywords: [] },
-        prompt: "Follow the skill workflow.",
+        guidance: "Follow the skill workflow.",
       },
     };
     const inventory = [
@@ -1276,7 +1276,7 @@ description: Navigate Tokyo.
         domain: "agent-ops",
         skills: ["skill-lifecycle"],
         fastpath: { keywords: [] },
-        prompt: "Follow the skill lifecycle workflow.",
+        guidance: "Follow the skill lifecycle workflow.",
       },
     };
     const resolveCurrentSessionId = vi.spyOn(
@@ -1357,7 +1357,7 @@ description: Navigate Tokyo.
         domain: "other",
         skills: ["analysis"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\n- Ask for context.",
+        guidance: "Ask for context.",
       },
     };
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
@@ -1436,7 +1436,7 @@ description: Navigate Tokyo.
               examples: ["help"],
               domain: "other",
               skills: ["analysis"],
-              fastpath: { keywords: [], hint: undefined },
+              fastpath: { keywords: [] },
             },
           ],
         }),
@@ -1634,7 +1634,7 @@ description: Navigate Tokyo.
         domain: "other",
         skills: ["source-driven-development"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\n- Ask for context.",
+        guidance: "Ask for context.",
       },
     };
     const state = {
@@ -1831,6 +1831,95 @@ description: Navigate Tokyo.
       agentId: "ctx-agent",
     });
     expect(enqueue).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not invoke the curator when its queued curation identity is no longer pending", async () => {
+    const current: SessionState = {
+      turnKey: "turn-3",
+      input: "third accepted turn",
+      timestamps: {
+        start: "2026-08-13T00:00:03.000Z",
+        end: "2026-08-13T00:01:03.000Z",
+      },
+      intent: {
+        recommendationState: {
+          topicEpoch: 1,
+          curationRevision: 0,
+          candidates: [],
+        },
+      },
+    };
+    const completedTurn = (turnKey: string): SessionState => ({
+      ...current,
+      turnKey,
+      input: `${turnKey} accepted turn`,
+    });
+    const session = {
+      sessionId: "session-1",
+      agentId: "tracked-agent",
+      history: [completedTurn("turn-1"), completedTurn("turn-2")],
+      current,
+      curation: {
+        topicEpoch: 1,
+        intentId: "other",
+        revision: 0,
+        createdAt: "2026-08-13T00:00:00.000Z",
+        updatedAt: "2026-08-13T00:00:00.000Z",
+        startedByTurnKey: "turn-1",
+        candidates: [],
+        experienceRefs: [],
+        completedTurnCursor: 0,
+      },
+    };
+    let queuedTask: Promise<void> | undefined;
+    const enqueue = vi.fn((_key: string, task: () => Promise<void>) => {
+      queuedTask = task();
+      return true;
+    });
+    const curator = vi.fn();
+    const commitCurationSchedule = vi.fn();
+    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("tracked-agent");
+    vi.spyOn(defaultTracker, "listRetainedSessions").mockReturnValue([session]);
+    vi.spyOn(defaultTracker, "reserveCurationSchedule").mockResolvedValue(
+      "reserved",
+    );
+    vi.spyOn(defaultTracker, "listPendingCurationSchedules").mockResolvedValue([
+      {
+        sessionId: "session-1",
+        schedule: {
+          agentId: "tracked-agent",
+          schedulingTurnKey: "turn-3",
+          expectedTopicEpoch: 1,
+          expectedRevision: 1,
+          status: "pending",
+          reservedAt: "2026-08-13T00:01:03.000Z",
+        },
+      },
+    ]);
+    vi.spyOn(defaultTracker, "commitCurationSchedule").mockImplementation(
+      commitCurationSchedule,
+    );
+    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+
+    const { handlers } = createFinalizedTurnHarness(current, {
+      turnKey: "turn-3",
+      deps: {
+        config: () => resolveConfig({ curation: { enabled: true } }),
+        curationQueue: { enqueue, has: vi.fn() },
+        curator,
+        dataRoot: "/missing-curation-data",
+      },
+    });
+
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "session-1",
+    });
+    await queuedTask!;
+
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(curator).not.toHaveBeenCalled();
+    expect(commitCurationSchedule).not.toHaveBeenCalled();
   });
 });
 
@@ -2131,7 +2220,6 @@ describe("createHookHandlers internal turn guards", () => {
       const refreshIntents = vi.fn();
       const topicChecker = vi.fn();
       const classifier = vi.fn();
-      const instructionWriter = vi.fn();
       const handlers = createHookHandlers({
         api: {
           config: {},
@@ -2145,7 +2233,6 @@ describe("createHookHandlers internal turn guards", () => {
         refreshIntents,
         topicChecker,
         classifier,
-        instructionWriter,
       });
 
       try {
@@ -2183,7 +2270,6 @@ describe("createHookHandlers internal turn guards", () => {
         expect(refreshIntents).not.toHaveBeenCalled();
         expect(topicChecker).not.toHaveBeenCalled();
         expect(classifier).not.toHaveBeenCalled();
-        expect(instructionWriter).not.toHaveBeenCalled();
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }
@@ -2239,10 +2325,9 @@ describe("createHookHandlers topic switch flow", () => {
       examples: ["hi"],
       domain: "chat",
       fastpath: {
-        hint: "Reply warmly.",
         keywords: ["hi", "謝謝"],
       },
-      prompt: "## Guidelines\n\n- Reply warmly.",
+      guidance: "Reply warmly.",
     },
   };
   const versionControlIntent = {
@@ -2252,7 +2337,7 @@ describe("createHookHandlers topic switch flow", () => {
       examples: ["commit this"],
       domain: "git",
       fastpath: { keywords: ["commit"] },
-      prompt: "## Guidelines\n\n- Use git carefully.",
+      guidance: "Use git carefully.",
     },
   };
 
@@ -2283,19 +2368,33 @@ describe("createHookHandlers topic switch flow", () => {
     intents?: IntentCatalogEntry[];
     classifier?: ReturnType<typeof vi.fn>;
     topicChecker?: ReturnType<typeof vi.fn>;
-    instructionWriter?: ReturnType<typeof vi.fn>;
     api?: Partial<OpenClawPluginApi>;
     bundledSkillsDir?: string;
     getConfiguredAgentSkills?: (
       agentId: string,
     ) => string[] | Promise<string[]>;
     turnAssociations?: TurnAssociationRegistry;
+    ensureColdStart?: ReturnType<typeof vi.fn>;
+    commitPromptRecommendation?: ReturnType<typeof vi.fn>;
   }) {
     emitHostAgentEvent.mockReset();
     const intents = params.intents ?? [intent];
     const record = vi.fn();
     const rotate = vi.fn();
     const write = vi.fn();
+    const ensureColdStart =
+      params.ensureColdStart ??
+      vi.fn().mockImplementation(async (params) => ({
+        status: "applied" as const,
+        curation: {
+          topicEpoch: 1,
+          revision: 1,
+          candidates: params.draftCandidates ?? [],
+          experienceRefs: [],
+        },
+      }));
+    const commitPromptRecommendation =
+      params.commitPromptRecommendation ?? vi.fn().mockResolvedValue("applied");
     const tracker = {
       getHistoricalIntentRecords: vi
         .fn()
@@ -2311,6 +2410,9 @@ describe("createHookHandlers topic switch flow", () => {
         record(sessionId, { current: data });
         return Promise.resolve("applied");
       }),
+      ensureColdStart,
+      commitPromptRecommendation,
+      listRetainedSessions: vi.fn().mockReturnValue([]),
       rotate,
       record,
       write,
@@ -2336,23 +2438,10 @@ describe("createHookHandlers topic switch flow", () => {
         complexity: "medium" as const,
       });
     const topicChecker = params.topicChecker ?? vi.fn();
-    const instructionWriter =
-      params.instructionWriter ??
-      vi.fn().mockResolvedValue({
-        instructionHint: "Follow the generated coding instructions.",
-        additionalCandidateSkills: [],
-      });
     const emitAgentEvent = emitHostAgentEvent;
     const rawConfig = {
       model: "google/test-intent",
       ...((params.configRaw as Record<string, unknown> | undefined) ?? {}),
-      instruction: {
-        enabled: true,
-        ...((
-          params.configRaw as
-            { instruction?: Record<string, unknown> } | undefined
-        )?.instruction ?? {}),
-      },
     };
     const handlers = createHookHandlers({
       api: {
@@ -2370,7 +2459,6 @@ describe("createHookHandlers topic switch flow", () => {
       tracker: tracker as never,
       classifier,
       topicChecker,
-      instructionWriter,
       turnAssociations: params.turnAssociations,
       bundledSkillsDir: params.bundledSkillsDir,
       getConfiguredAgentSkills: params.getConfiguredAgentSkills,
@@ -2381,7 +2469,8 @@ describe("createHookHandlers topic switch flow", () => {
       tracker,
       classifier,
       topicChecker,
-      instructionWriter,
+      ensureColdStart,
+      commitPromptRecommendation,
       rotate,
       record,
       write,
@@ -2541,23 +2630,19 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         },
       ],
     } as never;
-    const {
-      handlers,
-      classifier,
-      topicChecker,
-      instructionWriter,
-      record,
-      emitAgentEvent,
-    } = createTopicFlowHarness({ historicalIntents: [] });
+    const { handlers, classifier, topicChecker, record, emitAgentEvent } =
+      createTopicFlowHarness({ historicalIntents: [] });
 
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
     expect(result?.prependContext).toContain("<skill_harness_plugin");
-    expect(result?.prependContext).toContain("Reply warmly.");
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
+    );
     expect(result?.prependContext).not.toContain("## Guidelines");
+    expect(result?.prependContext).not.toContain("## Instruction Hint");
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
       "topic-triage:completed",
     );
@@ -2589,7 +2674,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               domain: "chat",
               topicChangeReason: "start",
             }),
-            instructionText: "Reply warmly.",
           }),
         }),
       }),
@@ -2599,37 +2683,38 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     ).not.toHaveProperty("complexity");
   });
 
-  it("skips exact keyword hints when instruction config is disabled", async () => {
+  it("injects deterministic guidance for exact keyword matches", async () => {
     const fastEvent = {
       prompt: "謝謝",
       messages: [{ role: "user", content: "謝謝" }],
     } as never;
-    const { handlers, classifier, topicChecker, instructionWriter, record } =
+    const { handlers, classifier, topicChecker, record } =
       createTopicFlowHarness({
         historicalIntents: [],
-        configRaw: {
-          model: "google/test-intent",
-          instruction: { enabled: false },
-        },
       });
 
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
+    );
+    expect(result?.prependContext).toContain(
+      "<selected_intent>social-casual</selected_intent>",
+    );
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
         current: expect.objectContaining({
-          intent: expect.not.objectContaining({
-            instructionText: expect.any(String),
+          intent: expect.objectContaining({
+            result: expect.objectContaining({ intent: "social-casual" }),
           }),
         }),
       }),
+    );
+    expect(record.mock.calls[0]?.[1].current?.intent).not.toHaveProperty(
+      "instructionText",
     );
   });
 
@@ -2638,8 +2723,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       prompt: "謝謝",
       messages: [{ role: "user", content: "謝謝" }],
     } as never;
-    const { handlers, classifier, topicChecker, instructionWriter } =
-      createTopicFlowHarness({ historicalIntents: [] });
+    const { handlers, classifier, topicChecker } = createTopicFlowHarness({
+      historicalIntents: [],
+    });
 
     const result = await handlers.onBeforePromptBuild(fastEvent, {
       ...ctx,
@@ -2649,11 +2735,10 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(result?.prependContext).toContain("Reply warmly.");
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
   });
 
   it("skips every LLM subagent when low thinking fastpath-only mode has no exact keyword match", async () => {
-    const { handlers, classifier, topicChecker, instructionWriter, record } =
+    const { handlers, classifier, topicChecker, record } =
       createTopicFlowHarness({ historicalIntents: [] });
 
     const result = await handlers.onBeforePromptBuild(event, {
@@ -2666,7 +2751,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     });
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).not.toHaveBeenCalled();
   });
 
@@ -2675,7 +2759,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       prompt: "謝謝",
       messages: [{ role: "user", content: "謝謝" }],
     } as never;
-    const { handlers, classifier, topicChecker, instructionWriter, record } =
+    const { handlers, classifier, topicChecker, record } =
       createTopicFlowHarness({
         historicalIntents: [],
         configRaw: {
@@ -2694,19 +2778,17 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     });
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).not.toHaveBeenCalled();
   });
 
   it("runs the full scanner pipeline for low thinking when configured to full", async () => {
-    const { handlers, classifier, topicChecker, instructionWriter } =
-      createTopicFlowHarness({
-        historicalIntents: [],
-        configRaw: {
-          model: "google/test-intent",
-          lowThinkingMode: "full",
-        },
-      });
+    const { handlers, classifier, topicChecker } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: {
+        model: "google/test-intent",
+        lowThinkingMode: "full",
+      },
+    });
 
     const result = await handlers.onBeforePromptBuild(event, {
       ...ctx,
@@ -2714,11 +2796,13 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     } as never);
 
     expect(result?.prependContext).toContain(
-      "Follow the generated coding instructions.",
+      "<intent_guidance>Reply warmly.</intent_guidance>",
+    );
+    expect(result?.prependContext).toContain(
+      "<selected_intent>social-casual</selected_intent>",
     );
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).toHaveBeenCalledOnce();
-    expect(instructionWriter).toHaveBeenCalledOnce();
   });
 
   it("persists prompt-build intent data for exact keyword matches", async () => {
@@ -2755,8 +2839,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               intent: "social-casual",
               topicChangeReason: "start",
             }),
-            instructionText: "Reply warmly.",
-            recommendedSkills: [],
           }),
         }),
       }),
@@ -2780,7 +2862,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       sessionId: "occupied-session",
       turnKey: "occupied-turn",
     });
-    const { handlers, tracker, classifier, topicChecker, instructionWriter } =
+    const { handlers, tracker, classifier, topicChecker } =
       createTopicFlowHarness({
         historicalIntents: [],
         turnAssociations,
@@ -2795,7 +2877,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(tracker.mergeTurnAndPersist).not.toHaveBeenCalled();
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
   });
 
   it("fails open before durable preparation when a terminal run ID is reused for a different turn", async () => {
@@ -2810,7 +2891,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     };
     turnAssociations.bind(reservation.token, "run-1", previousAssociation);
     turnAssociations.markTerminal("run-1", previousAssociation);
-    const { handlers, tracker, classifier, topicChecker, instructionWriter } =
+    const { handlers, tracker, classifier, topicChecker } =
       createTopicFlowHarness({
         historicalIntents: [],
         turnAssociations,
@@ -2825,7 +2906,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(tracker.mergeTurnAndPersist).not.toHaveBeenCalled();
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
     expect(turnAssociations.resolve("run-1")).toBeUndefined();
   });
 
@@ -2862,7 +2942,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       messageProvider: undefined,
     });
 
-    expect(result?.prependContext).toContain("Reply warmly.");
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
+    );
     expect(tracker.preparePromptTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "session-1",
@@ -2956,7 +3038,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(write).not.toHaveBeenCalled();
   });
 
-  it("requires a fastpath hint for exact keyword injection", async () => {
+  it("uses exact keyword match with guidance even without a fastpath hint field", async () => {
     const exactOnlyIntent = {
       id: "social-casual",
       definition: {
@@ -2964,16 +3046,16 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         examples: ["hi"],
         domain: "chat",
         fastpath: { keywords: ["hi"] },
-        prompt: "## Guidelines\n\n- Reply warmly.",
+        guidance: "Reply warmly.",
       },
     };
-    const { handlers, topicChecker } = createTopicFlowHarness({
+    const { handlers, topicChecker, classifier } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [exactOnlyIntent],
       topicChecker: vi.fn().mockResolvedValue(undefined),
     });
 
-    await handlers.onBeforePromptBuild(
+    const result = await handlers.onBeforePromptBuild(
       {
         prompt: "hi",
         messages: [{ role: "user", content: "hi" }],
@@ -2981,7 +3063,11 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ctx,
     );
 
-    expect(topicChecker).toHaveBeenCalledOnce();
+    expect(topicChecker).not.toHaveBeenCalled();
+    expect(classifier).not.toHaveBeenCalled();
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
+    );
   });
 
   it("emits topic checker no-context failures with only an error", async () => {
@@ -3147,18 +3233,12 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       reason: undefined,
       confidence: 0.9,
     };
-    const {
-      handlers,
-      classifier,
-      topicChecker,
-      instructionWriter,
-      record,
-      emitAgentEvent,
-    } = createTopicFlowHarness({
-      historicalIntents: [],
-      intents: [intent, versionControlIntent],
-      topicChecker: vi.fn().mockResolvedValue(topicContext),
-    });
+    const { handlers, classifier, topicChecker, record, emitAgentEvent } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        intents: [intent, versionControlIntent],
+        topicChecker: vi.fn().mockResolvedValue(topicContext),
+      });
 
     const result = await handlers.onBeforePromptBuild(
       {
@@ -3168,15 +3248,18 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ctx,
     );
 
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Use git carefully.</intent_guidance>",
+    );
+    expect(result?.prependContext).toContain(
+      "<selected_intent>version-control</selected_intent>",
+    );
+    expect(result?.appendSystemContext).toBe(SKILL_HARNESS_SYSTEM_CONTEXT);
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(topicChecker).toHaveBeenCalledWith(
       expect.objectContaining({ domains: ["chat", "git"] }),
     );
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
       "topic-triage:completed",
     );
@@ -3291,7 +3374,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         examples: ["deploy this"],
         domain: "operations",
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\n- Deploy safely.",
+        guidance: "Deploy safely.",
       },
     };
     const classifier = vi.fn().mockResolvedValue({
@@ -3358,8 +3441,8 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
-  it("uses topic keyword similarity to write an instruction on changed topics", async () => {
-    const { handlers, classifier, instructionWriter } = createTopicFlowHarness({
+  it("uses topic keyword similarity to inject deterministic guidance on changed topics", async () => {
+    const { handlers, classifier, record } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [intent, versionControlIntent],
       topicChecker: vi.fn().mockResolvedValue({
@@ -3382,19 +3465,27 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
 
     expect(result?.prependContext).toContain("<skill_harness_plugin");
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Use git carefully.</intent_guidance>",
+    );
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).toHaveBeenCalledWith(
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({
-        result: expect.objectContaining({
-          intent: "version-control",
-          domain: "git",
-          topicChangeReason: "start",
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              intent: "version-control",
+              domain: "git",
+              topicChangeReason: "start",
+            }),
+          }),
         }),
       }),
     );
-    expect(instructionWriter.mock.calls[0]?.[0].result).not.toHaveProperty(
-      "complexity",
-    );
+    expect(
+      record.mock.calls[0]?.[1].current?.intent?.result,
+    ).not.toHaveProperty("complexity");
   });
 
   it("falls back to the classifier when topic keyword similarity is ambiguous", async () => {
@@ -3405,7 +3496,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         examples: [],
         domain: "git",
         fastpath: { keywords: ["comitx"] },
-        prompt: "## Guidelines\n\n- Handle the near match.",
+        guidance: "Handle the near match.",
       },
     };
     const { handlers, classifier } = createTopicFlowHarness({
@@ -3441,7 +3532,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         examples: [],
         domain: "infra",
         fastpath: { keywords: ["deploy"] },
-        prompt: "## Guidelines\n\n- Be careful with deployment.",
+        guidance: "Be careful with deployment.",
       },
     };
     const { handlers, classifier } = createTopicFlowHarness({
@@ -3477,12 +3568,19 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         examples: [],
         domain: "docs",
         fastpath: { keywords: ["documentation"] },
-        prompt: "## Guidelines\n\n- Write docs.",
+        guidance: "Write docs.",
       },
     };
-    const { handlers, classifier, instructionWriter } = createTopicFlowHarness({
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "docs-commit",
+      reason: "docs work",
+      confidence: 0.9,
+      complexity: "low" as const,
+    });
+    const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [versionControlIntent, docsIntent],
+      classifier,
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["commit"],
         topic: "User wants docs work.",
@@ -3494,7 +3592,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       }),
     });
 
-    await handlers.onBeforePromptBuild(
+    const result = await handlers.onBeforePromptBuild(
       {
         prompt: "commit this",
         messages: [{ role: "user", content: "commit this" }],
@@ -3503,9 +3601,17 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
 
     expect(classifier).toHaveBeenCalledOnce();
-    expect(instructionWriter).toHaveBeenCalledWith(
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Write docs.</intent_guidance>",
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({
-        result: expect.objectContaining({ intent: "social-casual" }),
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({ intent: "docs-commit" }),
+          }),
+        }),
       }),
     );
   });
@@ -3541,7 +3647,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
   });
 
   it("keeps same-topic inheritance ahead of topic keyword similarity without inheriting complexity", async () => {
-    const { handlers, classifier, instructionWriter, record, emitAgentEvent } =
+    const { handlers, classifier, record, emitAgentEvent } =
       createTopicFlowHarness({
         historicalIntents: [
           {
@@ -3574,11 +3680,13 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ctx,
     );
 
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Use git carefully.</intent_guidance>",
+    );
+    expect(result?.prependContext).toContain(
+      "<selected_intent>version-control</selected_intent>",
+    );
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -3745,7 +3853,17 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     ).not.toHaveProperty("complexity");
   });
 
-  it("does not emit instruction hint events when confidence is undefined (treated as 0)", async () => {
+  it("injects deterministic guidance even when classifier confidence is undefined", async () => {
+    const codingIntent: IntentCatalogEntry = {
+      id: "coding",
+      definition: {
+        triggers: ["implement"],
+        examples: ["implement topic checker"],
+        domain: "coding",
+        fastpath: { keywords: [] },
+        guidance: "Implement the requested change.",
+      },
+    };
     const classifier = vi.fn().mockResolvedValue({
       intent: "coding",
       reason: "User wants implementation",
@@ -3756,18 +3874,20 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       // confidence intentionally omitted (undefined)
       complexity: "medium" as const,
     });
-    const { handlers, instructionWriter, record, emitAgentEvent } =
-      createTopicFlowHarness({
-        historicalIntents: [],
-        classifier,
-      });
+    const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [codingIntent],
+      classifier,
+    });
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
-    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Implement the requested change.</intent_guidance>",
+    );
+    expect(result?.prependContext).toContain(
+      "<selected_intent>coding</selected_intent>",
+    );
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
         "hint-generate:started",
@@ -3798,42 +3918,66 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         }),
       }),
     );
-    expect(
-      record.mock.calls[0][1].current.intent.instructionText,
-    ).toBeUndefined();
+    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
+      "instructionText",
+    );
   });
 
-  it("skips hint injection when confidence is undefined (treated as 0)", async () => {
+  it("does not gate routing guidance on classifier confidence", async () => {
+    const codingIntent: IntentCatalogEntry = {
+      id: "coding",
+      definition: {
+        triggers: ["implement"],
+        examples: ["implement topic checker"],
+        domain: "coding",
+        fastpath: { keywords: [] },
+        guidance: "Implement the requested change.",
+      },
+    };
     const classifier = vi.fn().mockResolvedValue({
       intent: "coding",
       reason: "User wants implementation",
       keywords: ["topic", "flow"],
       topic: "User wants implementation help for the topic flow.",
-      changed: true,
+      domain: "coding",
       topicChangeReason: "start",
-      // confidence intentionally omitted (undefined)
+      confidence: 0.1,
       complexity: "medium" as const,
     });
-    const { handlers, instructionWriter, record } = createTopicFlowHarness({
+    const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
+      intents: [codingIntent],
       classifier,
     });
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
-    expect(instructionWriter).not.toHaveBeenCalled();
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Implement the requested change.</intent_guidance>",
+    );
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining([
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
+      ]),
+    );
     expect(record).toHaveBeenCalled();
   });
 
-  it.each([
-    { confidence: 0.79, shouldRun: false },
-    { confidence: 0.8, shouldRun: true },
-  ])(
-    "uses 0.8 as the instruction writer confidence gate for $confidence",
-    async ({ confidence, shouldRun }) => {
+  it.each([{ confidence: 0.79 }, { confidence: 0.8 }])(
+    "injects intent guidance for classifier confidence $confidence without a writer gate",
+    async ({ confidence }) => {
+      const codingIntent: IntentCatalogEntry = {
+        id: "coding",
+        definition: {
+          triggers: ["implement"],
+          examples: ["implement topic checker"],
+          domain: "coding",
+          fastpath: { keywords: [] },
+          guidance: "Implement the requested change.",
+        },
+      };
       const classifier = vi.fn().mockResolvedValue({
         intent: "coding",
         reason: "User wants implementation",
@@ -3844,58 +3988,47 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         confidence,
         complexity: "medium" as const,
       });
-      const { handlers, instructionWriter } = createTopicFlowHarness({
+      const { handlers } = createTopicFlowHarness({
         historicalIntents: [],
+        intents: [codingIntent],
         classifier,
       });
 
-      await handlers.onBeforePromptBuild(event, ctx);
+      const result = await handlers.onBeforePromptBuild(event, ctx);
 
-      if (shouldRun) {
-        expect(instructionWriter).toHaveBeenCalledOnce();
-      } else {
-        expect(instructionWriter).not.toHaveBeenCalled();
-      }
+      expect(result?.prependContext).toContain(
+        "<intent_guidance>Implement the requested change.</intent_guidance>",
+      );
+      expect(result?.prependContext).toContain(
+        "<selected_intent>coding</selected_intent>",
+      );
     },
   );
 
-  it("treats a nullable instruction result as a successful no-op", async () => {
-    const instructionWriter = vi.fn().mockResolvedValue({
-      instructionHint: null,
-      additionalCandidateSkills: [],
-    });
+  it("injects deterministic guidance without hint-generate lifecycle events", async () => {
     const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
-      instructionWriter,
     });
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(instructionWriter).toHaveBeenCalledOnce();
-    expect(result?.prependContext).toBeUndefined();
-    expect(result?.appendSystemContext).toContain("## Skills (mandatory)");
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "hint-generate",
-          state: "completed",
-        }),
-      }),
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
     );
-    expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "hint-generate",
-          state: "failed",
-        }),
-      }),
+    expect(result?.appendSystemContext).toContain(SKILL_HARNESS_SYSTEM_CONTEXT);
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining([
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
+      ]),
     );
-    expect(
-      record.mock.calls[0][1].current.intent.instructionText,
-    ).toBeUndefined();
+    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
+      "instructionText",
+    );
   });
 
-  it("preserves domain skill candidates for a nullable instruction result", async () => {
+  it("includes declared skill candidates in routing context", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-null-hint-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -3912,7 +4045,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         domain: "coding",
         skills: ["domain-test-skill"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\nImplement the requested change.",
+        guidance: "Implement the requested change.",
       },
     };
     const classifier = vi.fn().mockResolvedValue({
@@ -3925,218 +4058,116 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       confidence: 0.9,
       complexity: "medium" as const,
     });
-    const instructionWriter = vi.fn().mockResolvedValue({
-      instructionHint: null,
-      additionalCandidateSkills: [],
-    });
-    const { handlers, record } = createTopicFlowHarness({
-      historicalIntents: [],
-      intents: [codingIntent],
-      classifier,
-      instructionWriter,
-      api: {
-        runtime: {
-          state: { resolveStateDir: () => state },
-          agent: { resolveAgentWorkspaceDir: () => workspace },
-        },
-      } as unknown as Partial<OpenClawPluginApi>,
-    });
-
-    const result = await handlers.onBeforePromptBuild(event, ctx);
-
-    expect(result?.prependContext).toContain("<domain_skill_candidates>");
-    expect(result?.prependContext).toContain("<name>domain-test-skill</name>");
-    expect(result?.prependContext).not.toContain("\n## Instruction Hint\n");
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            recommendedSkills: ["domain-test-skill"],
-          }),
-        }),
-      }),
-    );
-  });
-
-  it.each([undefined, "", "   "])(
-    "reports a concrete instruction generation failure for missing error %j",
-    async (error) => {
-      const instructionWriter = vi.fn().mockResolvedValue({ error });
-      const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
+    const { handlers, record, ensureColdStart, commitPromptRecommendation } =
+      createTopicFlowHarness({
         historicalIntents: [],
-        instructionWriter,
+        intents: [codingIntent],
+        classifier,
+        api: {
+          runtime: {
+            state: { resolveStateDir: () => state },
+            agent: { resolveAgentWorkspaceDir: () => workspace },
+          },
+        } as unknown as Partial<OpenClawPluginApi>,
       });
 
+    try {
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
-      expect(instructionWriter).toHaveBeenCalledOnce();
-      expect(result?.prependContext).toContain("<skill_harness_plugin");
-      expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect(result?.prependContext).toContain("<skill_candidates>");
+      expect(result?.prependContext).toContain(
+        "<name>domain-test-skill</name>",
+      );
+      expect(result?.prependContext).toContain(
+        "<intent_guidance>Implement the requested change.</intent_guidance>",
+      );
+      expect(result?.prependContext).not.toContain("\n## Instruction Hint\n");
+      expect(ensureColdStart).toHaveBeenCalled();
+      expect(commitPromptRecommendation).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            phase: "hint-generate",
-            state: "failed",
-            error: "instruction writer produced invalid JSON",
-          }),
+          recommendedSkills: ["domain-test-skill"],
         }),
       );
-      const failedEvent = emittedPipelineEvents(emitAgentEvent).find(
-        (event) =>
-          event.data.phase === "hint-generate" && event.data.state === "failed",
-      );
-      expect(failedEvent?.data).not.toHaveProperty("reason");
-      expect(failedEvent?.data).not.toHaveProperty("result");
-      expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            phase: "hint-generate",
-            state: "completed",
-          }),
-        }),
-      );
-      expect(record).toHaveBeenCalledWith(
-        "session-1",
-        expect.objectContaining({
-          current: expect.objectContaining({
-            intent: expect.objectContaining({
-              input: expect.arrayContaining([
-                expect.objectContaining({
-                  role: "user",
-                  text: "implement topic checker",
-                }),
-              ]),
-              result: expect.objectContaining({
-                intent: "social-casual",
-                topicChangeReason: "start",
-              }),
-            }),
-          }),
-        }),
-      );
-      expect(
-        record.mock.calls[0][1].current.intent.instructionText,
-      ).toBeUndefined();
-    },
-  );
-
-  it("skips instruction writer hints when instruction config is disabled", async () => {
-    const { handlers, instructionWriter, record, emitAgentEvent } =
-      createTopicFlowHarness({
-        historicalIntents: [],
-        configRaw: {
-          model: "google/test-intent",
-          instruction: { enabled: false },
-        },
-      });
-
-    const result = await handlers.onBeforePromptBuild(event, ctx);
-
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
-    expect(instructionWriter).not.toHaveBeenCalled();
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "hint-generate:started",
-        "hint-generate:completed",
-        "hint-generate:failed",
-      ]),
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            result: expect.objectContaining({
-              intent: "social-casual",
-              topicChangeReason: "start",
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(
-      record.mock.calls[0][1].current.intent.instructionText,
-    ).toBeUndefined();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
-  it("falls back to no prefix when instruction model cannot be resolved and no domain skills exist", async () => {
-    const { handlers, instructionWriter, record, emitAgentEvent } =
-      createTopicFlowHarness({
-        historicalIntents: [],
-        configRaw: {
-          model: "google/test-intent",
-          instruction: { enabled: true, model: "/" },
-        },
-      });
-
-    const result = await handlers.onBeforePromptBuild(event, ctx);
-
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
-    expect(instructionWriter).not.toHaveBeenCalled();
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "hint-generate:started",
-        "hint-generate:completed",
-        "hint-generate:failed",
-      ]),
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            result: expect.objectContaining({
-              intent: "social-casual",
-              topicChangeReason: "start",
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(
-      record.mock.calls[0][1].current.intent.instructionText,
-    ).toBeUndefined();
-  });
-
-  it("reports instruction generation errors without emitting a completed result", async () => {
-    const instructionWriter = vi.fn().mockResolvedValue({
-      error: "Model timed out",
-    });
-    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+  it("still injects guidance when instruction config is disabled", async () => {
+    const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
-      instructionWriter,
+      configRaw: {
+        model: "google/test-intent",
+        instruction: { enabled: false },
+      },
     });
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(instructionWriter).toHaveBeenCalledOnce();
-    expect(result?.prependContext).toContain("<skill_harness_plugin");
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
+    );
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining([
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
+      ]),
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "hint-generate",
-          state: "failed",
-          error: "Model timed out",
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              intent: "social-casual",
+              topicChangeReason: "start",
+            }),
+          }),
         }),
       }),
     );
-    const failedEvent = emittedPipelineEvents(emitAgentEvent).find(
-      (event) =>
-        event.data.phase === "hint-generate" && event.data.state === "failed",
+    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
+      "instructionText",
     );
-    expect(failedEvent?.data).not.toHaveProperty("reason");
-    expect(failedEvent?.data).not.toHaveProperty("result");
-    expect(emittedPipelineEvents(emitAgentEvent)).not.toContainEqual(
+  });
+
+  it("injects guidance without depending on instruction model resolution", async () => {
+    const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: {
+        model: "google/test-intent",
+        instruction: { enabled: true, model: "/" },
+      },
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
+    );
+    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
+      expect.arrayContaining([
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
+      ]),
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "hint-generate",
-          state: "completed",
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              intent: "social-casual",
+              topicChangeReason: "start",
+            }),
+          }),
         }),
       }),
+    );
+    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
+      "instructionText",
     );
   });
 
@@ -4149,17 +4180,11 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       reason: "start" as const,
       complexity: "low" as const,
     };
-    const {
-      handlers,
-      classifier,
-      topicChecker,
-      instructionWriter,
-      record,
-      emitAgentEvent,
-    } = createTopicFlowHarness({
-      historicalIntents: [],
-      topicChecker: vi.fn().mockResolvedValue(topicContext),
-    });
+    const { handlers, classifier, topicChecker, record, emitAgentEvent } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        topicChecker: vi.fn().mockResolvedValue(topicContext),
+      });
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
@@ -4178,11 +4203,13 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ topicContext }),
     );
-    expect(instructionWriter).toHaveBeenCalledOnce();
     expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
     expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe(
       "pipeline:completed",
+    );
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
     );
     expect(emittedPhaseStates(emitAgentEvent)).toEqual(
       expect.arrayContaining([
@@ -4190,12 +4217,13 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         "topic-triage:completed",
         "intent-classify:started",
         "intent-classify:completed",
-        "hint-generate:started",
-        "hint-generate:completed",
       ]),
     );
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
+        "hint-generate:started",
+        "hint-generate:completed",
+        "hint-generate:failed",
         "session-record:completed",
         "prompt-prefix-injection:completed",
       ]),
@@ -4217,10 +4245,12 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               domain: "chat",
               topicChangeReason: "start",
             }),
-            instructionText: "Follow the generated coding instructions.",
           }),
         }),
       }),
+    );
+    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty(
+      "instructionText",
     );
   });
 
@@ -4245,7 +4275,7 @@ Current user request: previous clean request
       reason: "shift",
       confidence: 0.9,
     });
-    const { handlers, classifier, instructionWriter } = createTopicFlowHarness({
+    const { handlers, classifier } = createTopicFlowHarness({
       historicalIntents: [
         {
           input: legacyInput,
@@ -4287,8 +4317,7 @@ Current user request: fresh clean request
 
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).toHaveBeenCalledOnce();
-    expect(instructionWriter).toHaveBeenCalledOnce();
-    for (const subagent of [topicChecker, classifier, instructionWriter]) {
+    for (const subagent of [topicChecker, classifier]) {
       expect(JSON.stringify(subagent.mock.calls)).not.toContain(toolOutput);
       expect(JSON.stringify(subagent.mock.calls)).not.toContain(
         "OpenClaw assembled context for this turn:",
@@ -4311,7 +4340,7 @@ Current user request: fresh clean request
       reason: "marker" as const,
       complexity: "high" as const,
     };
-    const { handlers, classifier, topicChecker, instructionWriter } =
+    const { handlers, classifier, topicChecker, record } =
       createTopicFlowHarness({
         historicalIntents: [
           {
@@ -4327,7 +4356,7 @@ Current user request: fresh clean request
         topicChecker: vi.fn().mockResolvedValue(topicContext),
       });
 
-    await handlers.onBeforePromptBuild(event, ctx);
+    const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(topicChecker).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4346,11 +4375,19 @@ Current user request: fresh clean request
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ topicContext }),
     );
-    expect(instructionWriter).toHaveBeenCalledWith(
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({
-        result: expect.objectContaining({
-          complexity: "medium", // classifier value preserved
-          previousTopic: "topic / checker",
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              complexity: "medium", // classifier value preserved
+              previousTopic: "topic / checker",
+            }),
+          }),
         }),
       }),
     );
@@ -4372,7 +4409,7 @@ Current user request: fresh clean request
       confidence: 0.95,
       complexity: "medium" as const,
     });
-    const { handlers, instructionWriter } = createTopicFlowHarness({
+    const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [
         {
           input: "plan topic checker",
@@ -4389,15 +4426,23 @@ Current user request: fresh clean request
       topicChecker: vi.fn().mockResolvedValue(topicContext),
     });
 
-    await handlers.onBeforePromptBuild(event, ctx);
+    const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(instructionWriter).toHaveBeenCalledWith(
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Use git carefully.</intent_guidance>",
+    );
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({
-        result: expect.objectContaining({
-          keywords: ["deploy", "production", "kubernetes"],
-          domain: "git",
-          complexity: "medium",
-          previousTopic: "topic / checker",
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              keywords: ["deploy", "production", "kubernetes"],
+              domain: "git",
+              complexity: "medium",
+              previousTopic: "topic / checker",
+            }),
+          }),
         }),
       }),
     );
@@ -4420,26 +4465,33 @@ Current user request: fresh clean request
       confidence: 0.9,
       complexity: "low" as const,
     });
-    const { handlers, instructionWriter } = createTopicFlowHarness({
+    const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [versionControlIntent],
       classifier,
       topicChecker: vi.fn().mockResolvedValue(topicContext),
     });
 
-    await handlers.onBeforePromptBuild(event, ctx);
+    const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(instructionWriter).toHaveBeenCalledWith(
+    // "other" is not a catalog entry, so no guidance prepend is expected
+    expect(result?.prependContext).toBeUndefined();
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({
-        result: expect.objectContaining({
-          intent: "other",
-          domain: "other",
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            result: expect.objectContaining({
+              intent: "other",
+              domain: "other",
+            }),
+          }),
         }),
       }),
     );
   });
 
-  it("passes referenced skill metadata to the instruction writer", async () => {
+  it("includes declared skill candidates from intent skills in routing context", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-hook-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -4462,11 +4514,6 @@ Current user request: fresh clean request
     );
     writeSkill(path.join(state, "skills"), "blogwatcher", "Watch blogs.");
     writeSkill(bundled, "codegraph-analysis", "Analyze code graphs.");
-    writeSkill(
-      bundled,
-      "search-discovered-skill",
-      "A skill discovered by the hint writer.",
-    );
 
     const skillIntent = {
       id: "architecture",
@@ -4476,7 +4523,7 @@ Current user request: fresh clean request
         domain: "coding",
         skills: ["architecture-diagram"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\nDraw the requested architecture.",
+        guidance: "Draw the requested architecture.",
       },
     };
     const testingIntent = {
@@ -4487,7 +4534,7 @@ Current user request: fresh clean request
         domain: "coding",
         skills: ["test-driven-development"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\nUse test-driven development.",
+        guidance: "Use test-driven development.",
       },
     };
     const researchIntent = {
@@ -4498,7 +4545,7 @@ Current user request: fresh clean request
         domain: "research",
         skills: ["blogwatcher"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\nWatch relevant blogs.",
+        guidance: "Watch relevant blogs.",
       },
     };
     const codegraphIntent = {
@@ -4509,7 +4556,7 @@ Current user request: fresh clean request
         domain: "coding",
         skills: ["codegraph-analysis"],
         fastpath: { keywords: [] },
-        prompt: "## Guidelines\n\nAnalyze code graphs when requested.",
+        guidance: "Analyze code graphs when requested.",
       },
     };
     const classifier = vi.fn().mockResolvedValue({
@@ -4522,115 +4569,46 @@ Current user request: fresh clean request
       confidence: 0.95,
       complexity: "medium" as const,
     });
-    const instructionWriter = vi.fn().mockResolvedValue({
-      instructionHint: "Consider the directly applicable discovered workflow.",
-      additionalCandidateSkills: ["search-discovered-skill"],
-    });
-    const { handlers, record } = createTopicFlowHarness({
-      historicalIntents: [],
-      intents: [skillIntent, testingIntent, researchIntent, codegraphIntent],
-      classifier,
-      instructionWriter,
-      bundledSkillsDir: bundled,
-      api: {
-        runtime: {
-          state: { resolveStateDir: () => state },
-          agent: { resolveAgentWorkspaceDir: () => workspace },
-        },
-      } as unknown as Partial<OpenClawPluginApi>,
-    });
+    const { handlers, record, ensureColdStart, commitPromptRecommendation } =
+      createTopicFlowHarness({
+        historicalIntents: [],
+        intents: [skillIntent, testingIntent, researchIntent, codegraphIntent],
+        classifier,
+        bundledSkillsDir: bundled,
+        api: {
+          runtime: {
+            state: { resolveStateDir: () => state },
+            agent: { resolveAgentWorkspaceDir: () => workspace },
+          },
+        } as unknown as Partial<OpenClawPluginApi>,
+      });
 
-    const result = await handlers.onBeforePromptBuild(
-      {
-        prompt: "draw architecture",
-        messages: [{ role: "user", content: "draw architecture" }],
-      } as never,
-      ctx,
-    );
+    try {
+      const result = await handlers.onBeforePromptBuild(
+        {
+          prompt: "draw architecture",
+          messages: [{ role: "user", content: "draw architecture" }],
+        } as never,
+        ctx,
+      );
 
-    expect(instructionWriter).toHaveBeenCalledWith(
-      expect.objectContaining({
-        availableSkills: [
-          expect.objectContaining({
-            name: "architecture-diagram",
-            location: path.join(
-              workspace,
-              "skills",
-              "architecture-diagram",
-              "SKILL.md",
-            ),
-            description: "Draw architecture diagrams.",
-          }),
-          expect.objectContaining({
-            name: "visual-design",
-            location: path.join(
-              workspace,
-              "skills",
-              "visual-design",
-              "SKILL.md",
-            ),
-            description: "Polish visual presentation.",
-          }),
-        ],
-      }),
-    );
-    expect(result?.prependContext).toContain("<domain_skill_candidates>");
-    expect(result?.prependContext).toContain(
-      "<name>architecture-diagram</name>",
-    );
-    expect(result?.prependContext).toContain(
-      "<name>test-driven-development</name>",
-    );
-    expect(result?.prependContext).toContain(
-      `<path>${path.join(state, "plugin-skills", "test-driven-development", "SKILL.md")}</path>`,
-    );
-    expect(result?.prependContext).toContain(
-      "<description>Drive changes with tests.</description>",
-    );
-    expect(result?.prependContext).toContain("<name>codegraph-analysis</name>");
-    expect(result?.prependContext).toContain(
-      `<path>${path.join(bundled, "codegraph-analysis", "SKILL.md")}</path>`,
-    );
-    expect(result?.prependContext).toContain(
-      "<description>Analyze code graphs.</description>",
-    );
-    expect(result?.prependContext).toContain("<related_skills>");
-    expect(result?.prependContext).toContain("<related_skill>");
-    expect(result?.prependContext).toContain("<name>visual-design</name>");
-    expect(result?.prependContext).toContain(
-      "<reason>Use visual design guidance for polished diagrams.</reason>",
-    );
-    expect(result?.prependContext).toContain(
-      "<direction>current-to-related</direction>",
-    );
-    expect(result?.prependContext).toContain(
-      "<name>search-discovered-skill</name>",
-    );
-    expect(result?.prependContext).toContain(
-      `<path>${path.join(bundled, "search-discovered-skill", "SKILL.md")}</path>`,
-    );
-    expect(result?.prependContext).toContain(
-      "Consider the directly applicable discovered workflow.",
-    );
-    expect(
-      result?.prependContext.match(/<name>architecture-diagram<\/name>/g),
-    ).toHaveLength(1);
-    expect(result?.prependContext).not.toContain("blogwatcher");
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            recommendedSkills: [
-              "architecture-diagram",
-              "test-driven-development",
-              "codegraph-analysis",
-              "search-discovered-skill",
-            ],
-          }),
+      expect(result?.prependContext).toContain(
+        "<intent_guidance>Draw the requested architecture.</intent_guidance>",
+      );
+      expect(result?.prependContext).toContain("<skill_candidates>");
+      expect(result?.prependContext).toContain(
+        "<name>architecture-diagram</name>",
+      );
+      expect(result?.prependContext).not.toContain("blogwatcher");
+      expect(ensureColdStart).toHaveBeenCalled();
+      expect(commitPromptRecommendation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recommendedSkills: expect.arrayContaining(["architecture-diagram"]),
         }),
-      }),
-    );
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("falls back to classifier-only when topic checker returns no result", async () => {
@@ -4672,7 +4650,7 @@ Current user request: fresh clean request
     );
   });
 
-  it("records same-topic continuations without classifier or hint events", async () => {
+  it("records same-topic continuations with deterministic guidance and without classifier or hint events", async () => {
     const topicContext = {
       basis: "Latest message continues the topic checker implementation.",
       keywords: ["topic", "checker"],
@@ -4683,36 +4661,32 @@ Current user request: fresh clean request
       confidence: 0.9,
       complexity: "low" as const,
     };
-    const {
-      handlers,
-      classifier,
-      topicChecker,
-      instructionWriter,
-      record,
-      emitAgentEvent,
-    } = createTopicFlowHarness({
-      historicalIntents: [
-        {
-          input: "plan topic checker",
-          intent: "social-casual",
-          keywords: ["topic", "checker"],
-          topic: "topic / checker",
-          domain: "chat",
-          confidence: 0.85,
-          complexity: "high",
-        },
-      ],
-      topicChecker: vi.fn().mockResolvedValue(topicContext),
-    });
+    const { handlers, classifier, topicChecker, record, emitAgentEvent } =
+      createTopicFlowHarness({
+        historicalIntents: [
+          {
+            input: "plan topic checker",
+            intent: "social-casual",
+            keywords: ["topic", "checker"],
+            topic: "topic / checker",
+            domain: "chat",
+            confidence: 0.85,
+            complexity: "high",
+          },
+        ],
+        topicChecker: vi.fn().mockResolvedValue(topicContext),
+      });
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).not.toHaveBeenCalled();
-    expect(instructionWriter).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
+    expect(result?.prependContext).toContain(
+      "<intent_guidance>Reply warmly.</intent_guidance>",
+    );
+    expect(result?.prependContext).toContain(
+      "<selected_intent>social-casual</selected_intent>",
+    );
     expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
       expect.arrayContaining([
         "intent-classify:started",

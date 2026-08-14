@@ -9,6 +9,7 @@ export {
   sanitizeHistoricalIntentInput,
 } from "./conversation.js";
 export {
+  buildRoutingContext,
   buildDomainSkillsPromptPrefix,
   buildPromptPrefix,
   formatConfiguredSkills,
@@ -23,10 +24,8 @@ export type {
 } from "./candidates.js";
 export {
   extractPayloadText,
-  getInstructionModelRef,
   getModelRef,
   getReviewModelRef,
-  runIntentInstructionSubagent,
   runIntentionSubagent,
   runTopicSwitchSubagent,
 } from "./subagent.js";

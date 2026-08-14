@@ -18,6 +18,7 @@ import {
   type ReviewTriggerKeywords,
 } from "./review/trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
+import { createCurationQueue } from "./curation/index.js";
 import { registerSkillTools } from "./skills/index.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
 import * as fs from "node:fs";
@@ -49,6 +50,14 @@ function readKeywordCoverageKeywordsFailOpen(
     logger.warn("failed to read keyword coverage keywords", { error: err });
     return normalizeReviewTriggerKeywords({});
   }
+}
+
+function recoverCurationSchedulesFailOpen(params: {
+  recover: () => Promise<void>;
+}): void {
+  void params.recover().catch((error) => {
+    logger.warn("failed to recover curation schedules", { error });
+  });
 }
 
 function copyFileIfMissing(sourcePath: string, targetPath: string): void {
@@ -268,6 +277,7 @@ export function createPlugin(
       const experienceCatalog = SkillExperienceCatalog.create(dataRoot);
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
+      const curationQueue = createCurationQueue();
       const reviewPath = reviewLogPath(dataRoot);
       const keywordCoveragePath = keywordCoverageLogPath(dataRoot);
 
@@ -295,6 +305,7 @@ export function createPlugin(
         catalog,
         tracker,
         statsAggregator,
+        curationQueue,
         reviewLogWriter,
         keywordCoverageWriter,
         triggerKeywords: () => triggerKeywordCache,
@@ -323,6 +334,12 @@ export function createPlugin(
       registerSkillTools(api, {
         getIntents: (agentId) => catalog.filterForAgent(config, agentId),
         experienceCatalog,
+      });
+
+      setImmediate(() => {
+        recoverCurationSchedulesFailOpen({
+          recover: handlers.recoverCurationSchedules,
+        });
       });
     },
   });

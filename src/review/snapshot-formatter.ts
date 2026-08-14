@@ -342,12 +342,6 @@ function formatMatchedIntent(snapshot: ReviewSnapshot): string | undefined {
         "intent_metadata",
         stringifySnapshotJson(formatIntentEntryMetadata(intent)),
       ),
-      wrapOptionalReviewSnapshotBlock(
-        "intent_body",
-        intent.definition.prompt.trim()
-          ? escapeSnapshotText(intent.definition.prompt)
-          : "",
-      ),
     ]
       .filter((field): field is string => field !== undefined)
       .join("\n\n"),
@@ -370,11 +364,11 @@ function formatIntentEntryMetadata(
   if (definition.skills !== undefined) {
     metadata.skills = [...definition.skills];
   }
+  if ("guidance" in definition) metadata.guidance = definition.guidance;
   const fastpath = definition.fastpath;
   if (fastpath) {
     metadata.fastpath = {
       keywords: [...fastpath.keywords],
-      ...(fastpath.hint !== undefined ? { hint: fastpath.hint } : {}),
     };
   }
   const candidate = definition.candidate;

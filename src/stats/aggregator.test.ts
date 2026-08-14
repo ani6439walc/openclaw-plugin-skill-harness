@@ -24,8 +24,10 @@ describe("StatsAggregator", () => {
     definition: {
       triggers: ["commit"],
       examples: [],
+      domain: "development",
       skills: ["git-master", "dev-lifecycle"],
-      prompt: "Follow the version-control workflow.",
+      fastpath: { keywords: [] },
+      guidance: "Follow the version-control workflow.",
     },
   };
 
@@ -1627,7 +1629,9 @@ describe("StatsAggregator", () => {
       definition: {
         triggers: ["prompt"],
         examples: [],
-        prompt: [
+        domain: "development",
+        fastpath: { keywords: [] },
+        guidance: [
           "Candidate skills:",
           "  skill: prompt-engineering-expert",
           "  skill: interview-me",
@@ -1736,7 +1740,13 @@ describe("StatsAggregator", () => {
   it("is idempotent and excludes intents without recommended skills from routing", () => {
     const noSkillsIntent: IntentCatalogEntry = {
       id: "chat",
-      definition: { triggers: ["chat"], examples: [], prompt: "Just chat." },
+      definition: {
+        triggers: ["chat"],
+        examples: [],
+        domain: "chat",
+        fastpath: { keywords: [] },
+        guidance: "Just chat.",
+      },
     };
     const state = createState({
       intent: {

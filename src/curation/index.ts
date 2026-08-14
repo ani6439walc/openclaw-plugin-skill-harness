@@ -23,3 +23,5 @@ export type {
   SessionCurationRecord,
   TurnRecommendationState,
 } from "./types.js";
+export { getCurationModelRef, runCurationSubagent } from "./subagent.js";
+export type { CurationSubagentParams, CuratorProposal } from "./subagent.js";

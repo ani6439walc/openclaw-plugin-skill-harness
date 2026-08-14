@@ -22,7 +22,7 @@ export const FALLBACK_INTENT: IntentDefinition = {
   examples: [],
   domain: "other",
   fastpath: { keywords: [] },
-  prompt:
+  guidance:
     "No predefined intent detected. Main Agent should determine the user's true intent and choose an appropriate strategy.",
 };
 

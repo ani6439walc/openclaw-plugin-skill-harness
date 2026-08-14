@@ -59,15 +59,13 @@ const fullSnapshot: ReviewSnapshot = {
       examples: ["Check whether an intent covers the workflow."],
       fastpath: {
         keywords: ["intent", "review"],
-        hint: "Inspect the existing intent first.",
       },
       candidate: {
         scope: "cross-flow",
         keywords: ["approval", "confirm"],
       },
-      prompt: `Use current workspace intent files as canonical content.
-
-Only propose durable intent-level corrections supported by the review evidence.`,
+      guidance:
+        "Use current workspace intent files as canonical content and propose only durable intent-level corrections supported by review evidence.",
     },
   },
   recent: [
@@ -119,7 +117,6 @@ Only propose durable intent-level corrections supported by the review evidence.`
       examples: ["Check whether an intent covers the workflow."],
       fastpath: {
         keywords: ["intent", "review"],
-        hint: "Inspect the existing intent first.",
       },
       candidate: {
         scope: "cross-flow",
@@ -229,14 +226,8 @@ const expectedFullSnapshot = `<review_snapshot>
 
   <matched_intent>
     <intent_metadata>
-      {"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}
+      {"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"guidance":"Use current workspace intent files as canonical content and propose only durable intent-level corrections supported by review evidence.","fastpath":{"keywords":["intent","review"]},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}
     </intent_metadata>
-
-    <intent_body>
-      Use current workspace intent files as canonical content.
-
-      Only propose durable intent-level corrections supported by the review evidence.
-    </intent_body>
   </matched_intent>
 
   <recent_turns>
@@ -277,7 +268,7 @@ const expectedFullSnapshot = `<review_snapshot>
   </available_skills>
 
   <intent_catalog>
-    <intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}</intent>
+    <intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"]},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}</intent>
     <intent>{"id":"debugging","domain":"development","triggers":[],"examples":[],"fastpath":{"keywords":["debug","failure"]}}</intent>
   </intent_catalog>
 </review_snapshot>`;
@@ -395,7 +386,7 @@ describe("formatReviewSnapshot", () => {
       '<intent>{"id":"cross-operations","domain":"operations","triggers":["operational review"],"examples":[],"fastpath":{"keywords":["Ｒｅｖｉｅｗ"]},"selectionReasons":["exact-fastpath-keyword-overlap"]}</intent>',
     );
     expect(output).toContain(
-      '<intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]},"selectionReasons":["matched-intent","observed-intent","observed-domain","exact-fastpath-keyword-overlap"]}</intent>',
+      '<intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"]},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]},"selectionReasons":["matched-intent","observed-intent","observed-domain","exact-fastpath-keyword-overlap"]}</intent>',
     );
     expect(catalog.indexOf('"id":"cross-operations"')).toBeLessThan(
       catalog.indexOf('"id":"debugging"'),
@@ -897,20 +888,23 @@ describe("formatReviewSnapshot", () => {
     expect(output).not.toContain("<agent_error");
   });
 
-  it("retains matched intent metadata while omitting a blank intent body", () => {
+  it("renders matched guidance as metadata without a Markdown body", () => {
     const output = formatReviewSnapshot({
       ...fullSnapshot,
       matchedIntent: {
         ...fullSnapshot.matchedIntent!,
         definition: {
           ...fullSnapshot.matchedIntent!.definition,
-          prompt: " \n\t",
+          guidance: "Use host-owned routing guidance only.",
         },
       },
     });
 
     expect(output).toContain("<matched_intent>");
     expect(output).toContain('"id":"intent-review"');
+    expect(output).toContain(
+      '"guidance":"Use host-owned routing guidance only."',
+    );
     expect(output).not.toContain("<intent_body");
   });
 

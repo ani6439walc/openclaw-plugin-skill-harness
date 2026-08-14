@@ -59,7 +59,6 @@ function catalogEntryTieBreakKey(entry: CatalogEntry): string {
     entry.triggers ?? [],
     entry.examples ?? [],
     entry.fastpath?.keywords ?? [],
-    entry.fastpath?.hint ?? null,
     entry.candidate?.scope ?? null,
     entry.candidate?.keywords ?? [],
   ]);

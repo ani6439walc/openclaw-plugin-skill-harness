@@ -65,7 +65,7 @@ function snapshot(
         triggers: [],
         examples: [],
         fastpath: { keywords: [] },
-        prompt: "matched body",
+        guidance: "Matched routing guidance.",
       },
     },
     intentCatalog,

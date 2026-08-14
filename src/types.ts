@@ -134,9 +134,8 @@ export type IntentDefinition = {
   };
   fastpath: {
     keywords: string[];
-    hint?: string;
   };
-  prompt: string;
+  guidance: string;
 };
 
 export type IntentCatalogEntry = {

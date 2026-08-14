@@ -17,12 +17,14 @@ import type {
   KeywordCoverageReviewerResult,
 } from "../review/keyword-coverage-subagent.js";
 import type {
-  runIntentInstructionSubagent,
   runIntentionSubagent,
   runTopicSwitchSubagent,
 } from "../classification/index.js";
 import type { ReviewTriggerKeywords } from "../review/trigger-keywords.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
+import type { SkillExperienceCatalog } from "../experiences/index.js";
+import type { CurationQueue } from "../curation/index.js";
+import type { SampleWithoutReplacement } from "../curation/index.js";
 import type {
   TurnAssociation,
   TurnAssociationRegistry,
@@ -50,6 +52,10 @@ export type HookDeps = {
   tracker?: typeof defaultTracker;
   statsAggregator?: typeof defaultStatsAggregator;
   skillInventoryResolver?: typeof resolveSkillInventory;
+  clock?: () => Date;
+  sampleWithoutReplacement?: SampleWithoutReplacement;
+  experienceCatalog?: SkillExperienceCatalog;
+  curationQueue?: CurationQueue;
   reviewQueue?: { enqueue(task: () => Promise<void>): void };
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],
@@ -59,7 +65,7 @@ export type HookDeps = {
   ) => Promise<KeywordCoverageReviewerResult | undefined>;
   classifier?: typeof runIntentionSubagent;
   topicChecker?: typeof runTopicSwitchSubagent;
-  instructionWriter?: typeof runIntentInstructionSubagent;
+  curator?: typeof import("../curation/subagent.js").runCurationSubagent;
   reviewLogWriter?: Pick<ReviewLogWriter, "record"> &
     Partial<
       Pick<ReviewLogWriter, "completedSkillEpochKeys"> &

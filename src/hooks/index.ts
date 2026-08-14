@@ -19,6 +19,7 @@ import { defaultCatalog } from "../intents/index.js";
 import {
   defaultTracker,
   extractSkillInfo,
+  resolveTurnEventId,
   type SessionState,
 } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
@@ -64,27 +65,33 @@ import {
   resolveCanonicalSessionKeyFromSessionId,
 } from "../session/index.js";
 import {
-  getInstructionModelRef,
   getModelRef,
   getReviewModelRef,
-  runIntentInstructionSubagent,
   runIntentionSubagent,
   runTopicSwitchSubagent,
 } from "../classification/index.js";
 import {
-  buildDomainSkillsPromptPrefix,
-  buildPromptPrefix,
+  buildRoutingContext,
   formatConfiguredSkills,
 } from "../classification/index.js";
 import {
   listAvailableSkills,
   resolveAvailableSkills,
-  resolveAvailableSkillsWithRelated,
-  resolveDomainSkills,
   resolveSkillInventory,
 } from "../intents/index.js";
 import { FALLBACK_INTENT, isIntentComplexity } from "../constants.js";
 import { intentsPath } from "../file-utils.js";
+import { SkillExperienceCatalog } from "../experiences/index.js";
+import {
+  evaluateCurationCadence,
+  reconcileCurationSchedules,
+  runCurationSubagent,
+  sampleWithoutReplacement,
+  selectColdStartCandidates,
+  validateAndCommitCuration,
+  type CuratedSkillCandidate,
+} from "../curation/index.js";
+import type { AvailableSkill } from "../skills/types.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
@@ -120,7 +127,7 @@ function sanitizeHistoricalIntentRecords(
 }
 
 const LOW_THINKING_EFFORTS = new Set(["off", "minimal", "low"]);
-const INSTRUCTION_WRITER_MIN_CONFIDENCE = 0.8;
+
 const TOPIC_PROJECTION_CONFIDENCE = 0.8;
 const MAX_PROJECTION_CANDIDATE_IDS = 128;
 const MAX_PROJECTION_MATCHED_KEYWORDS = 32;
@@ -290,7 +297,7 @@ function findIntentDefinition(
 }
 
 function findIntentEntry<
-  T extends { id: string; definition: { prompt: string; skills?: string[] } },
+  T extends { id: string; definition: { guidance: string; skills?: string[] } },
 >(intents: readonly T[], intent: string | undefined): T | undefined {
   const intentId = intent?.match(/^([A-Za-z0-9_-]+)/)?.[1];
   if (!intentId) return;
@@ -359,17 +366,14 @@ function getNormalizedFastpathKeywords(
 function findExactKeywordIntent(
   latest: string,
   intents: readonly IntentCatalogEntry[],
-): { intent: IntentCatalogEntry; keyword: string; hint: string } | undefined {
+): { intent: IntentCatalogEntry; keyword: string } | undefined {
   const normalizedLatest = normalizeKeywordForMatching(latest);
   if (!normalizedLatest) return;
 
   for (const intent of intents) {
-    const hint = intent.definition.fastpath.hint;
-    if (!hint) continue;
-
     for (const keyword of getNormalizedFastpathKeywords(intent)) {
       if (keyword.normalized === normalizedLatest) {
-        return { intent, keyword: keyword.keyword, hint };
+        return { intent, keyword: keyword.keyword };
       }
     }
   }
@@ -540,8 +544,14 @@ export function createHookHandlers(deps: HookDeps) {
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier ?? runIntentionSubagent;
   const topicChecker = deps.topicChecker ?? runTopicSwitchSubagent;
-  const instructionWriter =
-    deps.instructionWriter ?? runIntentInstructionSubagent;
+  const curator = deps.curator ?? runCurationSubagent;
+  const clock = deps.clock ?? (() => new Date());
+  const chooseWithoutReplacement =
+    deps.sampleWithoutReplacement ?? sampleWithoutReplacement;
+  const experienceCatalog =
+    deps.experienceCatalog ??
+    (deps.dataRoot ? SkillExperienceCatalog.create(deps.dataRoot) : undefined);
+
   const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
     deps.reviewLogWriter ?? defaultReviewLogWriter;
   const coverageReviewer = deps.coverageReviewer ?? runKeywordCoverageReview;
@@ -1007,7 +1017,6 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     trigger: IntentTrigger;
     result?: IntentionResult;
-    instructionText?: string;
     recommendedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
@@ -1025,7 +1034,6 @@ export function createHookHandlers(deps: HookDeps) {
             : {}),
           trigger: params.trigger,
           ...(params.result ? { result: params.result } : {}),
-          instructionText: params.instructionText,
           recommendedSkills: params.recommendedSkills,
           ...(params.intentProjection
             ? { intentProjection: params.intentProjection }
@@ -1041,7 +1049,6 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     trigger: IntentTrigger;
     result: IntentionResult;
-    instructionText?: string;
     recommendedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
@@ -1051,25 +1058,122 @@ export function createHookHandlers(deps: HookDeps) {
       latestUserMessage: params.latestUserMessage,
       trigger: params.trigger,
       result: params.result,
-      instructionText: params.instructionText,
       recommendedSkills: params.recommendedSkills,
       intentProjection: params.intentProjection,
       conversation: params.conversation,
     });
   }
 
-  async function resolvePromptDomainSkills(params: {
-    agentId: string;
-    domain: string;
-    availableIntents: readonly IntentCatalogEntry[];
-  }) {
-    return await resolveDomainSkills({
+  async function resolveRoutingContext(params: {
+    routing: PromptBuildIdentity;
+    result: IntentionResult;
+    intent: IntentCatalogEntry;
+  }): Promise<{
+    candidates: AvailableSkill[];
+    provenance: CuratedSkillCandidate[];
+    experiences: ReturnType<SkillExperienceCatalog["listForSkills"]>;
+    durable: boolean;
+  }> {
+    const directSkills = await resolveAvailableSkills({
       api,
-      agentId: params.agentId,
+      agentId: params.routing.effectiveAgentId,
       bundledSkillsDir,
-      domain: params.domain,
-      intents: params.availableIntents,
+      skillNames: params.intent.definition.skills ?? [],
     });
+    const selection = selectColdStartCandidates({
+      agentId: params.routing.effectiveAgentId,
+      intentId: params.intent.id,
+      declaredSkillNames: params.intent.definition.skills ?? [],
+      inventory: directSkills,
+      sessions: tracker.listRetainedSessions(),
+      nowMs: clock().getTime(),
+      retentionMs: 14 * 24 * 60 * 60 * 1_000,
+      sampleWithoutReplacement: chooseWithoutReplacement,
+    });
+    const fallback = selection.ranked.slice(0, 4);
+    const resolveCandidates = async (
+      candidates: readonly CuratedSkillCandidate[],
+    ): Promise<AvailableSkill[]> => {
+      const resolved = await resolveAvailableSkills({
+        api,
+        agentId: params.routing.effectiveAgentId,
+        bundledSkillsDir,
+        skillNames: candidates.map((candidate) => candidate.name),
+      });
+      const byIdentity = new Map(
+        resolved.map((skill) => [skill.name.trim().toLowerCase(), skill]),
+      );
+      return candidates.flatMap((candidate) => {
+        const skill = byIdentity.get(candidate.name.trim().toLowerCase());
+        return skill ? [skill] : [];
+      });
+    };
+    const fallbackCandidates = await resolveCandidates(fallback);
+    const association = params.routing.association;
+    if (!association) {
+      return {
+        candidates: fallbackCandidates,
+        provenance: fallback,
+        experiences: [],
+        durable: false,
+      };
+    }
+    const coldStart = await tracker.ensureColdStart({
+      sessionId: association.sessionId,
+      turnKey: association.turnKey,
+      intentId: params.intent.id,
+      topicChangeReason: params.result.topicChangeReason,
+      trustworthySameTopic:
+        params.result.topicChangeReason === undefined &&
+        (params.result.confidence ?? 0) >= TOPIC_CONTINUITY_INHERIT_CONFIDENCE,
+      trustworthyTopicEvidence:
+        (params.result.confidence ?? 0) >= TOPIC_CONTINUITY_INHERIT_CONFIDENCE,
+      draftCandidates: selection.selected,
+      now: clock().toISOString(),
+    });
+    if (coldStart.status !== "applied" && coldStart.status !== "reused") {
+      return {
+        candidates: fallbackCandidates,
+        provenance: fallback,
+        experiences: [],
+        durable: false,
+      };
+    }
+    const provenance = coldStart.curation.candidates;
+    const candidates = await resolveCandidates(provenance);
+    const candidateNames = candidates.map((candidate) => candidate.name);
+    const experiences = experienceCatalog
+      ? coldStart.curation.experienceRefs.flatMap((identity) => {
+          const experience = experienceCatalog.resolve(identity);
+          return experience &&
+            candidateNames.some(
+              (name) => name.trim().toLowerCase() === experience.skill,
+            )
+            ? [experience]
+            : [];
+        })
+      : [];
+    const committed = await tracker.commitPromptRecommendation({
+      sessionId: association.sessionId,
+      turnKey: association.turnKey,
+      expectedTopicEpoch: coldStart.curation.topicEpoch,
+      expectedRevision: coldStart.curation.revision,
+      recommendedSkills: candidateNames,
+      recommendationState: {
+        topicEpoch: coldStart.curation.topicEpoch,
+        curationRevision: coldStart.curation.revision,
+        candidates: provenance,
+      },
+    });
+    if (committed !== "applied") {
+      return {
+        candidates: fallbackCandidates,
+        provenance: fallback,
+        experiences: [],
+        durable: false,
+      };
+    }
+    return { candidates, provenance, experiences, durable: true };
   }
 
   function buildExactKeywordIntentResult(params: {
@@ -1215,50 +1319,39 @@ export function createHookHandlers(deps: HookDeps) {
         reason: result.topicChangeReason,
       },
     );
-    if (!params.refreshedConfig.instruction.enabled) {
-      const domainSkills = await resolvePromptDomainSkills({
-        agentId: params.routing.effectiveAgentId,
-        domain: result.domain,
-        availableIntents: params.availableIntents,
-      });
-      await recordPromptBuildResult({
-        ctx: params.ctx,
-        routing: params.routing,
-        latestUserMessage: params.latestUserMessage,
-        trigger: "exact-keyword",
-        result,
-        recommendedSkills: domainSkills.map((skill) => skill.name),
-        conversation: params.conversation,
-      });
-      return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(result, domainSkills),
-        params.configuredSkillsXml,
-      );
-    }
-
-    const domainSkills = await resolvePromptDomainSkills({
-      agentId: params.routing.effectiveAgentId,
-      domain: result.domain,
-      availableIntents: params.availableIntents,
-    });
     await recordPromptBuildResult({
       ctx: params.ctx,
       routing: params.routing,
       latestUserMessage: params.latestUserMessage,
       trigger: "exact-keyword",
       result,
-      instructionText: params.exactKeywordMatch.hint,
-      recommendedSkills: domainSkills.map((skill) => skill.name),
       conversation: params.conversation,
     });
-    const promptPrefix = buildPromptPrefix(
+    const routingContext = await resolveRoutingContext({
+      routing: params.routing,
       result,
-      params.availableIntents,
-      params.refreshedConfig,
-      params.exactKeywordMatch.hint,
-      domainSkills,
+      intent: params.exactKeywordMatch.intent,
+    });
+    if (!routingContext.durable) {
+      await recordPromptBuildResult({
+        ctx: params.ctx,
+        routing: params.routing,
+        latestUserMessage: params.latestUserMessage,
+        trigger: "exact-keyword",
+        result,
+        recommendedSkills: routingContext.candidates.map((skill) => skill.name),
+        conversation: params.conversation,
+      });
+    }
+    return toPromptBuildResult(
+      buildRoutingContext({
+        result,
+        guidance: params.exactKeywordMatch.intent.definition.guidance,
+        candidates: routingContext.candidates,
+        experiences: routingContext.experiences,
+      }),
+      params.configuredSkillsXml,
     );
-    return toPromptBuildResult(promptPrefix, params.configuredSkillsXml);
   }
 
   async function handleClassifiedPromptBuild(params: {
@@ -1275,176 +1368,50 @@ export function createHookHandlers(deps: HookDeps) {
     const result = params.classification.result;
     logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
 
-    const recordAndReturnDomainSkillsPrefix = async () => {
-      const domainSkills = await resolvePromptDomainSkills({
-        agentId: params.routing.effectiveAgentId,
-        domain: result.domain,
-        availableIntents: params.availableIntents,
-      });
+    const recordAndReturnRoutingContext = async () => {
       await recordPromptBuildResult({
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
         trigger: params.classification.trigger,
         result,
-        recommendedSkills: domainSkills.map((skill) => skill.name),
         intentProjection: params.classification.intentProjection,
         conversation: params.conversation,
       });
+      const intent = findIntentEntry(params.availableIntents, result.intent);
+      if (!intent)
+        return toPromptBuildResult(undefined, params.configuredSkillsXml);
+      const routingContext = await resolveRoutingContext({
+        routing: params.routing,
+        result,
+        intent,
+      });
+      if (!routingContext.durable) {
+        await recordPromptBuildResult({
+          ctx: params.ctx,
+          routing: params.routing,
+          latestUserMessage: params.latestUserMessage,
+          trigger: params.classification.trigger,
+          result,
+          recommendedSkills: routingContext.candidates.map(
+            (skill) => skill.name,
+          ),
+          intentProjection: params.classification.intentProjection,
+          conversation: params.conversation,
+        });
+      }
       return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(result, domainSkills),
+        buildRoutingContext({
+          result,
+          guidance: intent.definition.guidance,
+          candidates: routingContext.candidates,
+          experiences: routingContext.experiences,
+        }),
         params.configuredSkillsXml,
       );
     };
 
-    if (params.classification.kind === "same-topic") {
-      logger.debug("topic unchanged; recording inherited intent only.");
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    // Safety fallback: skip intent instruction subagent and hint injection when topic unchanged
-    if (!result.topicChangeReason) {
-      logger.debug(
-        "topic unchanged; skipping intent instruction subagent and hint injection.",
-      );
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    // Skip intent instruction subagent when confidence is too low
-    if ((result.confidence ?? 0) < INSTRUCTION_WRITER_MIN_CONFIDENCE) {
-      logger.debug(
-        `confidence ${result.confidence} below ${INSTRUCTION_WRITER_MIN_CONFIDENCE}; skipping intent instruction subagent and hint injection.`,
-      );
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    if (!params.refreshedConfig.instruction.enabled) {
-      logger.debug(
-        "instruction writer disabled; injecting domain skills without generated hint.",
-      );
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    const instructionModelRef = getInstructionModelRef(
-      api,
-      params.routing.effectiveAgentId,
-      params.refreshedConfig,
-      {
-        modelProviderId: params.ctx.modelProviderId,
-        modelId: params.ctx.modelId,
-      },
-    );
-    if (!instructionModelRef) {
-      logger.debug(
-        "instruction writer model unavailable; injecting domain skills without generated hint.",
-      );
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    emitPipelineEvent(
-      params.ctx,
-      params.routing.resolvedSessionKey,
-      "hint-generate",
-      "started",
-    );
-    const intentEntry = findIntentEntry(params.availableIntents, result.intent);
-    const intentBody = intentEntry?.definition.prompt ?? FALLBACK_INTENT.prompt;
-    const instructionResult = await instructionWriter({
-      api,
-      config: params.refreshedConfig,
-      agentId: params.routing.effectiveAgentId,
-      sessionKey: params.routing.resolvedSessionKey,
-      sessionId: params.ctx.sessionId,
-      conversation: params.conversation,
-      latest: params.latestUserMessage,
-      result,
-      intentBody,
-      availableSkills: await resolveAvailableSkillsWithRelated({
-        api,
-        agentId: params.routing.effectiveAgentId,
-        bundledSkillsDir,
-        skillNames: intentEntry?.definition.skills,
-      }),
-      messageProvider: params.ctx.messageProvider,
-      modelRef: instructionModelRef,
-      dataRoot: deps.dataRoot,
-    });
-    const instructionText = instructionResult.instructionHint ?? undefined;
-    if (instructionText) {
-      emitPipelineEvent(
-        params.ctx,
-        params.routing.resolvedSessionKey,
-        "hint-generate",
-        "completed",
-        {
-          result: instructionText,
-        },
-      );
-    } else if (instructionResult.instructionHint === null) {
-      emitPipelineEvent(
-        params.ctx,
-        params.routing.resolvedSessionKey,
-        "hint-generate",
-        "completed",
-      );
-    } else {
-      const instructionError =
-        instructionResult.error?.trim() ||
-        "instruction writer produced invalid JSON";
-      emitPipelineEvent(
-        params.ctx,
-        params.routing.resolvedSessionKey,
-        "hint-generate",
-        "failed",
-        {
-          error: instructionError,
-        },
-      );
-    }
-
-    const domainSkills = await resolvePromptDomainSkills({
-      agentId: params.routing.effectiveAgentId,
-      domain: result.domain,
-      availableIntents: params.availableIntents,
-    });
-    const additionalSkills = instructionResult.additionalCandidateSkills?.length
-      ? await resolveAvailableSkills({
-          api,
-          agentId: params.routing.effectiveAgentId,
-          bundledSkillsDir,
-          skillNames: instructionResult.additionalCandidateSkills,
-        })
-      : [];
-    const seenSkillNames = new Set(
-      domainSkills.map((skill) => skill.name.toLowerCase()),
-    );
-    for (const skill of additionalSkills) {
-      const normalizedName = skill.name.toLowerCase();
-      if (seenSkillNames.has(normalizedName)) continue;
-      seenSkillNames.add(normalizedName);
-      domainSkills.push(skill);
-    }
-
-    await recordPromptBuildResult({
-      ctx: params.ctx,
-      routing: params.routing,
-      latestUserMessage: params.latestUserMessage,
-      trigger: params.classification.trigger,
-      result,
-      instructionText,
-      recommendedSkills: domainSkills.map((skill) => skill.name),
-      intentProjection: params.classification.intentProjection,
-      conversation: params.conversation,
-    });
-
-    const promptPrefix = buildPromptPrefix(
-      result,
-      params.availableIntents,
-      params.refreshedConfig,
-      instructionResult.instructionHint,
-      domainSkills,
-    );
-    return toPromptBuildResult(promptPrefix, params.configuredSkillsXml);
+    return await recordAndReturnRoutingContext();
   }
 
   async function runPromptBuildPipeline<T>(
@@ -1878,7 +1845,6 @@ export function createHookHandlers(deps: HookDeps) {
         skills: [...(entry.definition.skills ?? [])],
         fastpath: {
           keywords: [...(entry.definition.fastpath?.keywords ?? [])],
-          hint: entry.definition.fastpath?.hint,
         },
         ...(entry.definition.candidate
           ? {
@@ -2308,6 +2274,260 @@ export function createHookHandlers(deps: HookDeps) {
     }
   }
 
+  function enqueueCurationKey(
+    key: string,
+    identity: {
+      sessionId: string;
+      schedulingTurnKey: string;
+      expectedTopicEpoch: number;
+      expectedRevision: number;
+    },
+  ): boolean {
+    const curationQueue = deps.curationQueue;
+    if (!curationQueue) return false;
+    return curationQueue.enqueue(key, async () => {
+      await runQueuedCuration(identity);
+    });
+  }
+
+  async function runQueuedCuration(identity: {
+    sessionId: string;
+    schedulingTurnKey: string;
+    expectedTopicEpoch: number;
+    expectedRevision: number;
+  }): Promise<void> {
+    const resolvedConfig = config();
+    if (!resolvedConfig.curation.enabled || !deps.dataRoot) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "obsolete",
+        now: clock().toISOString(),
+      });
+      return;
+    }
+
+    const pending = (await tracker.listPendingCurationSchedules()).find(
+      (entry) =>
+        entry.sessionId === identity.sessionId &&
+        entry.schedule.schedulingTurnKey === identity.schedulingTurnKey &&
+        entry.schedule.expectedTopicEpoch === identity.expectedTopicEpoch &&
+        entry.schedule.expectedRevision === identity.expectedRevision &&
+        entry.schedule.status === "pending",
+    );
+    if (!pending) return;
+
+    const session = tracker
+      .listRetainedSessions()
+      .find((candidate) => candidate.sessionId === identity.sessionId);
+    const expected = session?.curation;
+    if (
+      !session?.agentId ||
+      !expected ||
+      expected.topicEpoch !== identity.expectedTopicEpoch ||
+      expected.revision !== identity.expectedRevision
+    ) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "obsolete",
+        now: clock().toISOString(),
+      });
+      return;
+    }
+
+    const acceptedEventIds = statsAggregator.listProcessedEventIds();
+    const allTurns = [...(session.history ?? []), session.current];
+    const acceptedTurns = allTurns.filter((turn) => {
+      const eventId = resolveTurnEventId(identity.sessionId, turn);
+      return eventId !== undefined && acceptedEventIds.has(eventId);
+    });
+    const schedulingIndex = acceptedTurns.findIndex(
+      (turn) => turn.turnKey === identity.schedulingTurnKey,
+    );
+    if (schedulingIndex < 0) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "obsolete",
+        now: clock().toISOString(),
+      });
+      return;
+    }
+
+    const conversationTurns = acceptedTurns
+      .slice(0, schedulingIndex + 1)
+      .flatMap((turn) => {
+        if (!turn.input) return [];
+        return [
+          {
+            role: "user",
+            text: turn.input,
+            ...(turn.intent?.result
+              ? {
+                  historicalIntent: {
+                    intent: turn.intent.result.intent,
+                    domain: turn.intent.result.domain,
+                    topic: turn.intent.result.topic,
+                    keywords: turn.intent.result.keywords,
+                  },
+                }
+              : {}),
+          },
+        ];
+      });
+
+    const visibleSkills = await listAvailableSkills({
+      api,
+      agentId: session.agentId,
+      bundledSkillsDir,
+      usageStats: {},
+    });
+    const activeExperienceCatalog =
+      experienceCatalog ?? SkillExperienceCatalog.create(deps.dataRoot);
+
+    let proposal;
+    try {
+      proposal = await curator({
+        api,
+        config: resolvedConfig,
+        agentId: session.agentId,
+        sessionId: identity.sessionId,
+        dataRoot: deps.dataRoot,
+        curation: expected,
+        conversation: conversationTurns,
+        candidates: visibleSkills,
+        experienceIdentities: expected.experienceRefs,
+      });
+    } catch (error) {
+      logger.warn("curation subagent failed", { error });
+      proposal = undefined;
+    }
+
+    if (!proposal) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "failed",
+        now: clock().toISOString(),
+      });
+      return;
+    }
+
+    await validateAndCommitCuration({
+      schedule: pending,
+      expected,
+      proposal,
+      visibleSkills,
+      experienceCatalog: activeExperienceCatalog,
+      completedTurnCursor: schedulingIndex + 1,
+      finalizedTurns: acceptedTurns,
+      acceptedEventIds,
+      now: clock().toISOString(),
+      commit: tracker.commitCurationSchedule.bind(tracker),
+      finish: tracker.finishCurationSchedule.bind(tracker),
+    });
+  }
+
+  async function maybeScheduleCuration(
+    association: TurnAssociation,
+    resolvedConfig: ResolvedSkillHarnessPluginConfig,
+  ): Promise<void> {
+    const curationQueue = deps.curationQueue;
+    if (!curationQueue || !resolvedConfig.curation.enabled) return;
+
+    const current = tracker.getTurnState(
+      association.sessionId,
+      association.turnKey,
+    );
+    if (!current?.intent?.recommendationState) return;
+
+    try {
+      const session = tracker
+        .listRetainedSessions()
+        .find((candidate) => candidate.sessionId === association.sessionId);
+      const curation = session?.curation;
+      if (!curation) return;
+      const cadence = evaluateCurationCadence({
+        curation,
+        finalizedTurns: [...(session.history ?? []), session.current],
+      });
+      if (!cadence.eligible || !cadence.schedulingTurnKey) return;
+
+      const reserved = await tracker.reserveCurationSchedule({
+        sessionId: association.sessionId,
+        turnKey: cadence.schedulingTurnKey,
+        expectedTopicEpoch: curation.topicEpoch,
+        expectedRevision: curation.revision,
+        now: clock().toISOString(),
+      });
+      if (reserved !== "reserved") return;
+
+      const key = `curation:${association.sessionId}:${cadence.schedulingTurnKey}:${curation.topicEpoch}:${curation.revision}`;
+      enqueueCurationKey(key, {
+        sessionId: association.sessionId,
+        schedulingTurnKey: cadence.schedulingTurnKey,
+        expectedTopicEpoch: curation.topicEpoch,
+        expectedRevision: curation.revision,
+      });
+    } catch (error) {
+      logger.warn("failed to schedule curation", { error });
+    }
+  }
+
+  async function recoverCurationSchedules(): Promise<void> {
+    const curationQueue = deps.curationQueue;
+    if (!curationQueue) return;
+    const resolvedConfig = config();
+    if (!resolvedConfig.curation.enabled) return;
+
+    try {
+      const acceptedEventIds = statsAggregator.listProcessedEventIds();
+      const missing = reconcileCurationSchedules({
+        sessions: tracker.listRetainedSessions(),
+        acceptedEventIds,
+      });
+      for (const candidate of missing) {
+        const reserved = await tracker.reserveCurationSchedule({
+          sessionId: candidate.sessionId,
+          turnKey: candidate.turnKey,
+          expectedTopicEpoch: candidate.expectedTopicEpoch,
+          expectedRevision: candidate.expectedRevision,
+          now: clock().toISOString(),
+        });
+        if (reserved !== "reserved" && reserved !== "already-pending") continue;
+        const key = `curation:${candidate.sessionId}:${candidate.turnKey}:${candidate.expectedTopicEpoch}:${candidate.expectedRevision}`;
+        enqueueCurationKey(key, {
+          sessionId: candidate.sessionId,
+          schedulingTurnKey: candidate.turnKey,
+          expectedTopicEpoch: candidate.expectedTopicEpoch,
+          expectedRevision: candidate.expectedRevision,
+        });
+      }
+
+      const pending = await tracker.listPendingCurationSchedules();
+      for (const entry of pending) {
+        const key = `curation:${entry.sessionId}:${entry.schedule.schedulingTurnKey}:${entry.schedule.expectedTopicEpoch}:${entry.schedule.expectedRevision}`;
+        enqueueCurationKey(key, {
+          sessionId: entry.sessionId,
+          schedulingTurnKey: entry.schedule.schedulingTurnKey,
+          expectedTopicEpoch: entry.schedule.expectedTopicEpoch,
+          expectedRevision: entry.schedule.expectedRevision,
+        });
+      }
+    } catch (error) {
+      logger.warn("failed to recover curation schedules", { error });
+    }
+  }
+
   async function finalizeTrackedTurn(
     association: TurnAssociation | undefined,
     ctx: PluginHookAgentContext,
@@ -2317,6 +2537,7 @@ export function createHookHandlers(deps: HookDeps) {
     if (!agentEndStats) return;
 
     const resolvedConfig = config();
+    await maybeScheduleCuration(association, resolvedConfig);
     const reviewConfig = resolvedConfig.review;
     if (!reviewConfig.enabled) return;
 
@@ -2565,5 +2786,6 @@ export function createHookHandlers(deps: HookDeps) {
     onBeforeAgentFinalize,
     onAgentEnd,
     onSessionEnd,
+    recoverCurationSchedules,
   };
 }
