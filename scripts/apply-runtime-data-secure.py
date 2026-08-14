@@ -82,16 +82,80 @@ def ensure_directory(fd: int, label: str) -> None:
         fail(f"{label} is not a directory")
 
 
-def open_parent(root_fd: int, segments: list[str], create: bool) -> int:
+def open_existing_parent(root_fd: int, segments: list[str]) -> int:
     current = os.dup(root_fd)
     try:
         for segment in segments[:-1]:
+            child = os.open(segment, READ_DIRECTORY_FLAGS, dir_fd=current)
+            os.close(current)
+            current = child
+        return current
+    except Exception:
+        os.close(current)
+        raise
+
+
+def assert_directory_continuity(
+    active_root_path: str,
+    active_root_fd: int,
+    directory_segments: list[str],
+    directory_fd: int,
+) -> None:
+    assert_root_continuity(active_root_path, active_root_fd)
+    visible_fd = os.dup(active_root_fd)
+    try:
+        for segment in directory_segments:
+            child_fd = os.open(segment, READ_DIRECTORY_FLAGS, dir_fd=visible_fd)
+            os.close(visible_fd)
+            visible_fd = child_fd
+        if not same_identity(directory_fd, visible_fd):
+            fail("active ancestor changed")
+    except OSError:
+        fail("active ancestor changed")
+    finally:
+        os.close(visible_fd)
+
+
+def mkdir_checked(
+    active_root_path: str,
+    active_root_fd: int,
+    directory_segments: list[str],
+    parent_fd: int,
+    name: str,
+) -> None:
+    assert_directory_continuity(
+        active_root_path, active_root_fd, directory_segments, parent_fd
+    )
+    os.mkdir(name, dir_fd=parent_fd)
+    try:
+        assert_directory_continuity(
+            active_root_path, active_root_fd, directory_segments, parent_fd
+        )
+    except Exception:
+        try:
+            os.rmdir(name, dir_fd=parent_fd)
+        except OSError:
+            pass
+        raise
+
+
+def open_parent(
+    active_root_path: str,
+    root_fd: int,
+    segments: list[str],
+    create: bool,
+) -> int:
+    current = os.dup(root_fd)
+    try:
+        for index, segment in enumerate(segments[:-1]):
             try:
                 child = os.open(segment, READ_DIRECTORY_FLAGS, dir_fd=current)
             except FileNotFoundError:
                 if not create:
                     raise
-                os.mkdir(segment, dir_fd=current)
+                mkdir_checked(
+                    active_root_path, root_fd, segments[:index], current, segment
+                )
                 child = os.open(segment, READ_DIRECTORY_FLAGS, dir_fd=current)
             os.close(current)
             current = child
@@ -118,6 +182,11 @@ def same_identity(left_fd: int, right_fd: int) -> bool:
     return left.st_dev == right.st_dev and left.st_ino == right.st_ino
 
 
+def fd_identity(fd: int) -> tuple[int, int]:
+    value = os.fstat(fd)
+    return value.st_dev, value.st_ino
+
+
 def renameat2(
     old_parent_fd: int,
     old_name: str,
@@ -136,14 +205,111 @@ def renameat2(
         raise OSError(error, os.strerror(error))
 
 
-def make_temporary(parent_fd: int, name: str) -> tuple[str, int]:
+def restore_delete_exchange(parent_fd: int, name: str, temporary: str) -> None:
+    renameat2(parent_fd, name, parent_fd, temporary, RENAME_EXCHANGE)
+
+
+def restore_replace_exchange(parent_fd: int, name: str, temporary: str) -> None:
+    renameat2(parent_fd, temporary, parent_fd, name, RENAME_EXCHANGE)
+
+
+def discard_temporary(parent_fd: int, temporary: str) -> None:
+    try:
+        os.unlink(temporary, dir_fd=parent_fd)
+    except FileNotFoundError:
+        pass
+
+
+def restore_delete_exchange_checked(
+    active_root_path: str,
+    active_root_fd: int,
+    destination_segments: list[str],
+    parent_fd: int,
+    name: str,
+    temporary: str,
+) -> None:
+    try:
+        assert_parent_continuity(
+            active_root_path, active_root_fd, destination_segments, parent_fd
+        )
+    except Exception:
+        restore_delete_exchange(parent_fd, name, temporary)
+        discard_temporary(parent_fd, temporary)
+        raise
+    restore_delete_exchange(parent_fd, name, temporary)
+    try:
+        assert_parent_continuity(
+            active_root_path, active_root_fd, destination_segments, parent_fd
+        )
+    except Exception:
+        discard_temporary(parent_fd, temporary)
+        raise
+    assert_parent_continuity(
+        active_root_path, active_root_fd, destination_segments, parent_fd
+    )
+    discard_temporary(parent_fd, temporary)
+    assert_parent_continuity(
+        active_root_path, active_root_fd, destination_segments, parent_fd
+    )
+
+
+def make_temporary(
+    active_root_path: str,
+    active_root_fd: int,
+    destination_segments: list[str],
+    parent_fd: int,
+    name: str,
+) -> tuple[str, int]:
     for _ in range(32):
         temporary = f".{name}.{os.getpid()}.{secrets.token_hex(12)}.tmp"
         try:
-            return temporary, os.open(temporary, WRITE_FILE_FLAGS, 0o600, dir_fd=parent_fd)
+            assert_parent_continuity(
+                active_root_path, active_root_fd, destination_segments, parent_fd
+            )
+            temporary_fd = os.open(
+                temporary, WRITE_FILE_FLAGS, 0o600, dir_fd=parent_fd
+            )
+            try:
+                assert_parent_continuity(
+                    active_root_path, active_root_fd, destination_segments, parent_fd
+                )
+            except Exception:
+                os.close(temporary_fd)
+                try:
+                    os.unlink(temporary, dir_fd=parent_fd)
+                except OSError:
+                    pass
+                raise
+            return temporary, temporary_fd
         except FileExistsError:
             continue
     fail("unable to create unique temporary file")
+
+
+def copy_temporary_checked(
+    active_root_path: str,
+    active_root_fd: int,
+    destination_segments: list[str],
+    parent_fd: int,
+    temporary: str,
+    source_fd: int,
+    temporary_fd: int,
+) -> None:
+    try:
+        assert_parent_continuity(
+            active_root_path, active_root_fd, destination_segments, parent_fd
+        )
+        copy_fd(source_fd, temporary_fd)
+        assert_parent_continuity(
+            active_root_path, active_root_fd, destination_segments, parent_fd
+        )
+    except Exception:
+        os.close(temporary_fd)
+        try:
+            os.unlink(temporary, dir_fd=parent_fd)
+        except OSError:
+            pass
+        raise
 
 
 def matches_path(path: str, fd: int) -> bool:
@@ -158,6 +324,25 @@ def matches_path(path: str, fd: int) -> bool:
 def assert_root_continuity(path: str, root_fd: int) -> None:
     if not matches_path(path, root_fd):
         fail("active root changed")
+
+
+def assert_parent_continuity(
+    active_root_path: str,
+    active_root_fd: int,
+    destination_segments: list[str],
+    parent_fd: int,
+) -> None:
+    assert_root_continuity(active_root_path, active_root_fd)
+    visible_parent_fd = None
+    try:
+        visible_parent_fd = open_existing_parent(active_root_fd, destination_segments)
+        if not same_identity(parent_fd, visible_parent_fd):
+            fail("active ancestor changed")
+    except OSError:
+        fail("active ancestor changed")
+    finally:
+        if visible_parent_fd is not None:
+            os.close(visible_parent_fd)
 
 
 def scan_directory(root_fd: int, relative_root: str, output: dict[str, str]) -> None:
@@ -194,18 +379,65 @@ def scan_directory(root_fd: int, relative_root: str, output: dict[str, str]) -> 
         os.close(directory_fd)
 
 
-def scan_active_preimages(active_root_fd: int) -> dict[str, str]:
+def scan_active_preimages(
+    active_root_fd: int,
+) -> tuple[dict[str, str], dict[str, tuple[int, int] | None]]:
     result: dict[str, str] = {}
-    for root_name in ("intents", "experiences"):
-        try:
-            owned_fd = os.open(root_name, READ_DIRECTORY_FLAGS, dir_fd=active_root_fd)
-        except FileNotFoundError:
-            continue
-        try:
+    owned_fds: dict[str, int] = {}
+    try:
+        for root_name in ("intents", "experiences"):
+            try:
+                owned_fds[root_name] = os.open(
+                    root_name, READ_DIRECTORY_FLAGS, dir_fd=active_root_fd
+                )
+            except FileNotFoundError:
+                continue
+        for root_name, owned_fd in owned_fds.items():
             scan_directory(owned_fd, root_name, result)
-        finally:
+        identities = {
+            root_name: fd_identity(owned_fds[root_name])
+            if root_name in owned_fds
+            else None
+            for root_name in ("intents", "experiences")
+        }
+        for root_name, owned_fd in owned_fds.items():
+            visible_fd = None
+            try:
+                visible_fd = os.open(
+                    root_name, READ_DIRECTORY_FLAGS, dir_fd=active_root_fd
+                )
+                if not same_identity(owned_fd, visible_fd):
+                    fail("active owned root changed")
+            except OSError:
+                fail("active owned root changed")
+            finally:
+                if visible_fd is not None:
+                    os.close(visible_fd)
+    finally:
+        for owned_fd in owned_fds.values():
             os.close(owned_fd)
-    return result
+    return result, identities
+
+
+def assert_owned_roots_continuity(
+    active_root_fd: int, identities: dict[str, tuple[int, int] | None]
+) -> None:
+    for root_name, expected in identities.items():
+        visible_fd = None
+        try:
+            visible_fd = os.open(
+                root_name, READ_DIRECTORY_FLAGS, dir_fd=active_root_fd
+            )
+            if expected is None or fd_identity(visible_fd) != expected:
+                fail("active owned root changed")
+        except FileNotFoundError:
+            if expected is not None:
+                fail("active owned root changed")
+        except OSError:
+            fail("active owned root changed")
+        finally:
+            if visible_fd is not None:
+                os.close(visible_fd)
 
 
 def parse_manifest() -> tuple[dict[str, str], list[dict]]:
@@ -233,7 +465,25 @@ def parse_manifest() -> tuple[dict[str, str], list[dict]]:
     return expected, operations
 
 
+def apply_to_expected_postimage(expected: dict[str, str], item: dict) -> None:
+    operation = item.get("operation")
+    destination = item.get("destination")
+    if operation not in {"create", "replace", "delete"}:
+        fail("operations manifest is invalid")
+    parse_owned_path(destination)
+    if operation == "delete":
+        if destination not in expected:
+            fail("operations manifest is invalid")
+        del expected[destination]
+        return
+    source_hash = item.get("sha256")
+    if not isinstance(source_hash, str) or len(source_hash) != 64:
+        fail("operations manifest is invalid")
+    expected[destination] = source_hash
+
+
 def execute_operation(
+    active_root_path: str,
     active_root_fd: int,
     artifact_root_fd: int,
     item: dict,
@@ -249,7 +499,12 @@ def execute_operation(
     source_fd = None
     temporary_fd = None
     try:
-        parent_fd = open_parent(active_root_fd, destination_segments, operation == "create")
+        parent_fd = open_parent(
+            active_root_path,
+            active_root_fd,
+            destination_segments,
+            operation == "create",
+        )
         destination_fd = open_regular(parent_fd, name)
         if operation == "create":
             if destination_fd is not None:
@@ -264,27 +519,74 @@ def execute_operation(
                 fail("active preimage changed")
 
         if operation == "delete":
-            temporary, temporary_fd = make_temporary(parent_fd, name)
+            temporary, temporary_fd = make_temporary(
+                active_root_path,
+                active_root_fd,
+                destination_segments,
+                parent_fd,
+                name,
+            )
             os.close(temporary_fd)
             temporary_fd = None
+            assert_parent_continuity(
+                active_root_path, active_root_fd, destination_segments, parent_fd
+            )
             renameat2(parent_fd, name, parent_fd, temporary, RENAME_EXCHANGE)
             swapped_fd = open_regular(parent_fd, temporary)
             try:
                 if swapped_fd is None or not same_identity(destination_fd, swapped_fd):
-                    renameat2(parent_fd, name, parent_fd, temporary, RENAME_EXCHANGE)
+                    restore_delete_exchange_checked(
+                        active_root_path,
+                        active_root_fd,
+                        destination_segments,
+                        parent_fd,
+                        name,
+                        temporary,
+                    )
                     fail("active preimage changed")
                 if sha256_fd(swapped_fd) != item["expectedSha256"]:
-                    renameat2(parent_fd, name, parent_fd, temporary, RENAME_EXCHANGE)
+                    restore_delete_exchange_checked(
+                        active_root_path,
+                        active_root_fd,
+                        destination_segments,
+                        parent_fd,
+                        name,
+                        temporary,
+                    )
                     fail("active preimage changed")
             finally:
                 if swapped_fd is not None:
                     os.close(swapped_fd)
+            try:
+                assert_parent_continuity(
+                    active_root_path,
+                    active_root_fd,
+                    destination_segments,
+                    parent_fd,
+                )
+            except Exception:
+                restore_delete_exchange(parent_fd, name, temporary)
+                discard_temporary(parent_fd, temporary)
+                raise
             os.unlink(temporary, dir_fd=parent_fd)
+            try:
+                assert_parent_continuity(
+                    active_root_path,
+                    active_root_fd,
+                    destination_segments,
+                    parent_fd,
+                )
+            except Exception:
+                discard_temporary(parent_fd, name)
+                raise
             os.unlink(name, dir_fd=parent_fd)
+            assert_parent_continuity(
+                active_root_path, active_root_fd, destination_segments, parent_fd
+            )
             return
 
         source_segments = parse_owned_path(item.get("source"))
-        source_parent_fd = open_parent(artifact_root_fd, source_segments, False)
+        source_parent_fd = open_existing_parent(artifact_root_fd, source_segments)
         try:
             source_fd = open_regular(source_parent_fd, source_segments[-1])
         finally:
@@ -297,28 +599,68 @@ def execute_operation(
         ):
             fail("artifact source changed")
 
-        temporary, temporary_fd = make_temporary(parent_fd, name)
-        copy_fd(source_fd, temporary_fd)
+        temporary, temporary_fd = make_temporary(
+            active_root_path,
+            active_root_fd,
+            destination_segments,
+            parent_fd,
+            name,
+        )
+        copy_temporary_checked(
+            active_root_path,
+            active_root_fd,
+            destination_segments,
+            parent_fd,
+            temporary,
+            source_fd,
+            temporary_fd,
+        )
         if sha256_fd(temporary_fd) != expected_source:
+            os.close(temporary_fd)
+            temporary_fd = None
+            try:
+                os.unlink(temporary, dir_fd=parent_fd)
+            except OSError:
+                pass
             fail("temporary file hash mismatch")
         os.close(temporary_fd)
         temporary_fd = None
         if operation == "create":
+            assert_parent_continuity(
+                active_root_path, active_root_fd, destination_segments, parent_fd
+            )
             renameat2(parent_fd, temporary, parent_fd, name, RENAME_NOREPLACE)
+            assert_parent_continuity(
+                active_root_path, active_root_fd, destination_segments, parent_fd
+            )
         else:
+            assert_parent_continuity(
+                active_root_path, active_root_fd, destination_segments, parent_fd
+            )
             renameat2(parent_fd, temporary, parent_fd, name, RENAME_EXCHANGE)
             swapped_fd = open_regular(parent_fd, temporary)
             try:
                 if swapped_fd is None or not same_identity(destination_fd, swapped_fd):
-                    renameat2(parent_fd, temporary, parent_fd, name, RENAME_EXCHANGE)
                     fail("active preimage changed")
                 if sha256_fd(swapped_fd) != item["expectedSha256"]:
-                    renameat2(parent_fd, temporary, parent_fd, name, RENAME_EXCHANGE)
                     fail("active preimage changed")
+                assert_parent_continuity(
+                    active_root_path,
+                    active_root_fd,
+                    destination_segments,
+                    parent_fd,
+                )
+            except Exception:
+                restore_replace_exchange(parent_fd, name, temporary)
+                discard_temporary(parent_fd, temporary)
+                raise
             finally:
                 if swapped_fd is not None:
                     os.close(swapped_fd)
             os.unlink(temporary, dir_fd=parent_fd)
+            assert_parent_continuity(
+                active_root_path, active_root_fd, destination_segments, parent_fd
+            )
     finally:
         for fd in (temporary_fd, destination_fd, source_fd, parent_fd):
             if fd is not None:
@@ -340,11 +682,26 @@ def main() -> None:
         ensure_directory(active_root_fd, "active root")
         ensure_directory(artifact_root_fd, "artifact root")
         expected, operations = parse_manifest()
-        if scan_active_preimages(active_root_fd) != expected:
+        preimages, _ = scan_active_preimages(active_root_fd)
+        if preimages != expected:
             fail("STALE")
+        expected_postimage = dict(expected)
         for item in operations:
-            execute_operation(active_root_fd, artifact_root_fd, item)
+            execute_operation(args.active_root_path, active_root_fd, artifact_root_fd, item)
             assert_root_continuity(args.active_root_path, active_root_fd)
+            apply_to_expected_postimage(expected_postimage, item)
+        postimage, owned_root_identities = scan_active_preimages(active_root_fd)
+        if postimage != expected_postimage:
+            fail("active postimage changed")
+        assert_owned_roots_continuity(active_root_fd, owned_root_identities)
+        assert_root_continuity(args.active_root_path, active_root_fd)
+        final_postimage, final_owned_root_identities = scan_active_preimages(
+            active_root_fd
+        )
+        if final_postimage != expected_postimage:
+            fail("active postimage changed")
+        assert_owned_roots_continuity(active_root_fd, final_owned_root_identities)
+        assert_root_continuity(args.active_root_path, active_root_fd)
     finally:
         os.close(artifact_root_fd)
         os.close(active_root_fd)

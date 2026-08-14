@@ -32,12 +32,17 @@ function runScript(scriptPath, args, env = {}) {
   });
 }
 
-
 function instrumentSecureScript(temporary, marker, injected) {
-  const instrumented = path.join(temporary, "instrumented-apply-runtime-data.py");
+  const instrumented = path.join(
+    temporary,
+    "instrumented-apply-runtime-data.py",
+  );
   const source = fs.readFileSync(secureScript, "utf8");
   assert.equal(source.includes(marker), true, `missing marker: ${marker}`);
-  fs.writeFileSync(instrumented, source.replace(marker, `${injected}${marker}`));
+  fs.writeFileSync(
+    instrumented,
+    source.replace(marker, `${injected}${marker}`),
+  );
   return instrumented;
 }
 
@@ -55,6 +60,20 @@ function instrumentRuntimeScript(temporary, marker, injected) {
   return instrumented;
 }
 
+function instrumentRuntimeScriptLast(temporary, marker, injected) {
+  const directory = path.join(temporary, "instrumented-runtime-last");
+  fs.mkdirSync(directory);
+  const helper = fs.readFileSync(secureScript, "utf8");
+  const offset = helper.lastIndexOf(marker);
+  assert.notEqual(offset, -1, `missing marker: ${marker}`);
+  fs.writeFileSync(
+    path.join(directory, "apply-runtime-data-secure.py"),
+    `${helper.slice(0, offset)}${injected}${helper.slice(offset)}`,
+  );
+  const instrumented = path.join(directory, "apply-runtime-data.mjs");
+  fs.copyFileSync(script, instrumented);
+  return instrumented;
+}
 
 function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
@@ -134,7 +153,6 @@ function args(item, mode) {
     mode,
   ];
 }
-
 
 test("dry-run validates the exact transition without writing", () => {
   const temporary = temporaryDirectory();
@@ -277,6 +295,68 @@ test("creates a destination when its entire owned parent tree is absent", () => 
         "utf8",
       ),
       "new\n",
+    );
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("does not create missing owned parents through a detached active root", () => {
+  const temporary = temporaryDirectory();
+  try {
+    const artifact = path.join(temporary, "artifact");
+    const active = path.join(temporary, "active");
+    const marker = path.join(temporary, "missing-parent-swap-marker");
+    fs.mkdirSync(active, { recursive: true });
+    write(artifact, "experiences/react/new.md", "new\n");
+    const operations = path.join(artifact, "runtime-operations.json");
+    fs.writeFileSync(
+      operations,
+      JSON.stringify({
+        version: 1,
+        activePreimages: [],
+        operations: [
+          {
+            operation: "create",
+            destination: "experiences/react/new.md",
+            source: "experiences/react/new.md",
+            sha256: sha256("new\n"),
+          },
+        ],
+      }),
+    );
+    const instrumented = instrumentRuntimeScript(
+      temporary,
+      "    os.mkdir(name, dir_fd=parent_fd)\n",
+      `    with open(os.environ["SKILL_HARNESS_TEST_MISSING_PARENT_SWAP_MARKER"], "w", encoding="utf-8") as handle:
+                    handle.write("swapped\\n")
+    root_path = active_root_path
+    os.rename(root_path, f"{root_path}-swapped")
+    os.mkdir(root_path)
+
+`,
+    );
+
+    const result = runScript(
+      instrumented,
+      [
+        "--artifact-root",
+        artifact,
+        "--active-root",
+        active,
+        "--operations",
+        operations,
+        "--apply",
+      ],
+      { SKILL_HARNESS_TEST_MISSING_PARENT_SWAP_MARKER: marker },
+    );
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "swapped\n");
+    assert.equal(
+      fs.existsSync(path.join(`${active}-swapped`, "experiences")),
+      false,
     );
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
@@ -469,88 +549,434 @@ test("rejects symlink artifact sources and active destination ancestors", () => 
   }
 });
 
-test("does not rename through an owned-ancestor swap after final verification", () => {
+test("does not leave a copied temporary through an owned-ancestor swap", () => {
   const temporary = temporaryDirectory();
   try {
     const item = fixture(temporary);
     const outside = path.join(temporary, "outside-final-rename");
+    const marker = path.join(temporary, "final-rename-marker");
     write(outside, "replace.md", "outside\n");
     const instrumented = instrumentRuntimeScript(
       temporary,
-      "        if operation == \"create\":\n",
-      `        if operation == "replace":
+      "        copy_fd(source_fd, temporary_fd)\n",
+      `        if destination_segments == ["intents", "replace.md"]:
             os.rename(
-            os.path.join(args.active_root_path, "intents"),
-            os.path.join(args.active_root_path, "intents-swapped"),
+            os.path.join(os.readlink(f"/proc/self/fd/{active_root_fd}"), "intents"),
+            os.path.join(os.readlink(f"/proc/self/fd/{active_root_fd}"), "intents-swapped"),
             )
-            with open(
-            os.path.join(os.environ["SKILL_HARNESS_TEST_FINAL_SWAP_TARGET"], temporary),
-            "w",
-            encoding="utf-8",
-            ) as handle:
-                handle.write("outside temporary sentinel\\n")
             os.symlink(
             os.environ["SKILL_HARNESS_TEST_FINAL_SWAP_TARGET"],
-            os.path.join(args.active_root_path, "intents"),
+            os.path.join(os.readlink(f"/proc/self/fd/{active_root_fd}"), "intents"),
             target_is_directory=True,
             )
+            with open(os.environ["SKILL_HARNESS_TEST_FINAL_SWAP_MARKER"], "w", encoding="utf-8") as handle:
+                handle.write("replace\\n")
 
 `,
     );
 
-    const result = runScript(
-      instrumented,
-      args(item, "--apply"),
-      {
-        SKILL_HARNESS_TEST_FINAL_SWAP_TARGET: outside,
-      },
-    );
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_FINAL_SWAP_TARGET: outside,
+      SKILL_HARNESS_TEST_FINAL_SWAP_MARKER: marker,
+    });
 
     assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "replace\n");
     assert.equal(
       fs.readFileSync(path.join(outside, "replace.md"), "utf8"),
       "outside\n",
+    );
+    assert.equal(
+      fs.readFileSync(
+        path.join(item.active, "intents-swapped", "replace.md"),
+        "utf8",
+      ),
+      "before\n",
+    );
+    assert.deepEqual(
+      fs.readdirSync(path.join(item.active, "intents-swapped")),
+      ["create.md", "replace.md"],
     );
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
 });
 
-test("does not unlink through an owned-ancestor swap after final verification", () => {
+test("does not create a delete temporary through an owned-ancestor swap", () => {
   const temporary = temporaryDirectory();
   try {
     const item = fixture(temporary);
     const outside = path.join(temporary, "outside-final-unlink");
+    const marker = path.join(temporary, "final-unlink-marker");
     write(outside, "react/delete.md", "outside delete\n");
     const instrumented = instrumentRuntimeScript(
       temporary,
-      "            temporary, temporary_fd = make_temporary(parent_fd, name)\n",
+      "            temporary, temporary_fd = make_temporary(\n",
       `            os.rename(
-                os.path.join(args.active_root_path, "experiences"),
-                os.path.join(args.active_root_path, "experiences-swapped"),
+                os.path.join(os.readlink(f"/proc/self/fd/{active_root_fd}"), "experiences"),
+                os.path.join(os.readlink(f"/proc/self/fd/{active_root_fd}"), "experiences-swapped"),
             )
             os.symlink(
                 os.environ["SKILL_HARNESS_TEST_FINAL_SWAP_TARGET"],
-                os.path.join(args.active_root_path, "experiences"),
+                os.path.join(os.readlink(f"/proc/self/fd/{active_root_fd}"), "experiences"),
                 target_is_directory=True,
             )
+            with open(os.environ["SKILL_HARNESS_TEST_FINAL_SWAP_MARKER"], "w", encoding="utf-8") as handle:
+                handle.write("delete\\n")
 
 `,
     );
 
-    const result = runScript(
-      instrumented,
-      args(item, "--apply"),
-      {
-        SKILL_HARNESS_TEST_FINAL_SWAP_TARGET: outside,
-      },
-    );
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_FINAL_SWAP_TARGET: outside,
+      SKILL_HARNESS_TEST_FINAL_SWAP_MARKER: marker,
+    });
 
     assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "delete\n");
     assert.equal(
       fs.readFileSync(path.join(outside, "react", "delete.md"), "utf8"),
       "outside delete\n",
     );
+    assert.equal(
+      fs.readFileSync(
+        path.join(item.active, "experiences-swapped", "react", "delete.md"),
+        "utf8",
+      ),
+      "delete\n",
+    );
+    assert.deepEqual(
+      fs.readdirSync(path.join(item.active, "experiences-swapped", "react")),
+      ["delete.md"],
+    );
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("restores a delete exchange when its parent detaches", () => {
+  const temporary = temporaryDirectory();
+  try {
+    const item = fixture(temporary);
+    const outside = path.join(temporary, "outside-delete-exchange");
+    const marker = path.join(temporary, "delete-exchange-marker");
+    write(outside, "react/delete.md", "outside delete\n");
+    const instrumented = instrumentRuntimeScript(
+      temporary,
+      "            swapped_fd = open_regular(parent_fd, temporary)\n",
+      `            os.rename(
+                os.path.join(os.readlink(f"/proc/self/fd/{active_root_fd}"), "experiences"),
+                os.path.join(os.readlink(f"/proc/self/fd/{active_root_fd}"), "experiences-swapped"),
+            )
+            os.symlink(
+                os.environ["SKILL_HARNESS_TEST_DELETE_EXCHANGE_TARGET"],
+                os.path.join(os.readlink(f"/proc/self/fd/{active_root_fd}"), "experiences"),
+                target_is_directory=True,
+            )
+            with open(os.environ["SKILL_HARNESS_TEST_DELETE_EXCHANGE_MARKER"], "w", encoding="utf-8") as handle:
+                handle.write("swapped\\n")
+
+`,
+    );
+
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_DELETE_EXCHANGE_MARKER: marker,
+      SKILL_HARNESS_TEST_DELETE_EXCHANGE_TARGET: outside,
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "swapped\n");
+    assert.deepEqual(
+      fs.readdirSync(path.join(item.active, "experiences-swapped", "react")),
+      ["delete.md"],
+    );
+    assert.equal(
+      fs.readFileSync(
+        path.join(item.active, "experiences-swapped", "react", "delete.md"),
+        "utf8",
+      ),
+      "delete\n",
+    );
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("restores a replace exchange when its parent detaches", () => {
+  const temporary = temporaryDirectory();
+  try {
+    const item = fixture(temporary);
+    const outside = path.join(temporary, "outside-replace-exchange");
+    const marker = path.join(temporary, "replace-exchange-marker");
+    write(outside, "replace.md", "outside replace\n");
+    const instrumented = instrumentRuntimeScript(
+      temporary,
+      `            renameat2(parent_fd, temporary, parent_fd, name, RENAME_EXCHANGE)
+            swapped_fd = open_regular(parent_fd, temporary)
+`,
+      `            if destination_segments == ["intents", "replace.md"]:
+                active_root_path = os.readlink(f"/proc/self/fd/{active_root_fd}")
+                intents_path = os.path.join(active_root_path, "intents")
+                os.rename(intents_path, f"{intents_path}-swapped")
+                os.symlink(
+                    os.environ["SKILL_HARNESS_TEST_REPLACE_EXCHANGE_TARGET"],
+                    intents_path,
+                    target_is_directory=True,
+                )
+                with open(os.environ["SKILL_HARNESS_TEST_REPLACE_EXCHANGE_MARKER"], "w", encoding="utf-8") as handle:
+                    handle.write("swapped\\n")
+
+`,
+    );
+
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_REPLACE_EXCHANGE_MARKER: marker,
+      SKILL_HARNESS_TEST_REPLACE_EXCHANGE_TARGET: outside,
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "swapped\n");
+    assert.deepEqual(
+      fs.readdirSync(path.join(item.active, "intents-swapped")),
+      ["create.md", "replace.md"],
+    );
+    assert.equal(
+      fs.readFileSync(
+        path.join(item.active, "intents-swapped", "replace.md"),
+        "utf8",
+      ),
+      "before\n",
+    );
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("removes an exchanged delete placeholder when its parent detaches", () => {
+  const temporary = temporaryDirectory();
+  try {
+    const item = fixture(temporary);
+    const outside = path.join(temporary, "outside-delete-placeholder");
+    const marker = path.join(temporary, "delete-placeholder-marker");
+    write(outside, "react/delete.md", "outside delete\n");
+    const instrumented = instrumentRuntimeScript(
+      temporary,
+      `            os.unlink(temporary, dir_fd=parent_fd)
+            try:
+                assert_parent_continuity(
+                    active_root_path,
+                    active_root_fd,
+                    destination_segments,
+                    parent_fd,
+                )
+`,
+      `            active_root_path = os.readlink(f"/proc/self/fd/{active_root_fd}")
+            experiences_path = os.path.join(active_root_path, "experiences")
+            os.rename(experiences_path, f"{experiences_path}-swapped")
+            os.symlink(
+                os.environ["SKILL_HARNESS_TEST_DELETE_PLACEHOLDER_TARGET"],
+                experiences_path,
+                target_is_directory=True,
+            )
+            with open(os.environ["SKILL_HARNESS_TEST_DELETE_PLACEHOLDER_MARKER"], "w", encoding="utf-8") as handle:
+                handle.write("swapped\\n")
+
+`,
+    );
+
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_DELETE_PLACEHOLDER_MARKER: marker,
+      SKILL_HARNESS_TEST_DELETE_PLACEHOLDER_TARGET: outside,
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "swapped\n");
+    assert.deepEqual(
+      fs.readdirSync(path.join(item.active, "experiences-swapped", "react")),
+      [],
+    );
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("fails closed when a deleted temporary name is recreated", () => {
+  const temporary = temporaryDirectory();
+  try {
+    const item = fixture(temporary);
+    const marker = path.join(temporary, "delete-temporary-marker");
+    const instrumented = instrumentRuntimeScript(
+      temporary,
+      "            os.unlink(name, dir_fd=parent_fd)\n",
+      `            attacker_fd = os.open(temporary, WRITE_FILE_FLAGS, 0o600, dir_fd=parent_fd)
+            try:
+                os.write(attacker_fd, b"attacker\\n")
+            finally:
+                os.close(attacker_fd)
+            with open(os.environ["SKILL_HARNESS_TEST_DELETE_TEMPORARY_MARKER"], "w", encoding="utf-8") as handle:
+                handle.write("recreated\\n")
+
+`,
+    );
+
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_DELETE_TEMPORARY_MARKER: marker,
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "recreated\n");
+    assert.equal(
+      fs.existsSync(
+        path.join(item.active, "experiences", "react", "delete.md"),
+      ),
+      false,
+    );
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("fails closed when the active root changes after the final postimage scan", () => {
+  const temporary = temporaryDirectory();
+  try {
+    const item = fixture(temporary);
+    const marker = path.join(temporary, "final-root-marker");
+    const instrumented = instrumentRuntimeScriptLast(
+      temporary,
+      "        assert_root_continuity(args.active_root_path, active_root_fd)\n",
+      `        with open(os.environ["SKILL_HARNESS_TEST_FINAL_ROOT_MARKER"], "w", encoding="utf-8") as handle:
+            handle.write("swapped\\n")
+        active_root_path = os.readlink(f"/proc/self/fd/{active_root_fd}")
+        os.rename(active_root_path, f"{active_root_path}-swapped")
+        os.mkdir(active_root_path)
+
+`,
+    );
+
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_FINAL_ROOT_MARKER: marker,
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "swapped\n");
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("fails closed when an owned root changes after the final postimage scan", () => {
+  const temporary = temporaryDirectory();
+  try {
+    const item = fixture(temporary);
+    const marker = path.join(temporary, "final-owned-root-marker");
+    const instrumented = instrumentRuntimeScriptLast(
+      temporary,
+      "        assert_owned_roots_continuity(active_root_fd, owned_root_identities)\n",
+      `        with open(os.environ["SKILL_HARNESS_TEST_FINAL_OWNED_ROOT_MARKER"], "w", encoding="utf-8") as handle:
+            handle.write("swapped\\n")
+        active_root_path = os.readlink(f"/proc/self/fd/{active_root_fd}")
+        intents_path = os.path.join(active_root_path, "intents")
+        os.rename(intents_path, f"{intents_path}-swapped")
+        os.mkdir(intents_path)
+        replacement_fd = os.open("replacement.md", WRITE_FILE_FLAGS, 0o600, dir_fd=os.open(intents_path, READ_DIRECTORY_FLAGS))
+        try:
+            os.write(replacement_fd, b"replacement\\n")
+        finally:
+            os.close(replacement_fd)
+
+`,
+    );
+
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_FINAL_OWNED_ROOT_MARKER: marker,
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "swapped\n");
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("fails closed when owned content changes between final postimage scans", () => {
+  const temporary = temporaryDirectory();
+  try {
+    const item = fixture(temporary);
+    const marker = path.join(temporary, "final-content-marker");
+    const instrumented = instrumentRuntimeScript(
+      temporary,
+      `        assert_root_continuity(args.active_root_path, active_root_fd)
+        final_postimage, final_owned_root_identities = scan_active_preimages(
+            active_root_fd
+        )
+`,
+      `        intents_fd = os.open("intents", READ_DIRECTORY_FLAGS, dir_fd=active_root_fd)
+        try:
+            late_fd = os.open("late.md", WRITE_FILE_FLAGS, 0o600, dir_fd=intents_fd)
+            try:
+                os.write(late_fd, b"late\\n")
+            finally:
+                os.close(late_fd)
+        finally:
+            os.close(intents_fd)
+        with open(os.environ["SKILL_HARNESS_TEST_FINAL_CONTENT_MARKER"], "w", encoding="utf-8") as handle:
+            handle.write("changed\\n")
+
+`,
+    );
+
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_FINAL_CONTENT_MARKER: marker,
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(
+      fs.existsSync(marker),
+      true,
+      `${result.stdout}\n${result.stderr}`,
+    );
+    assert.equal(fs.readFileSync(marker, "utf8"), "changed\n");
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("removes a staged temporary when its hash changes", () => {
+  const temporary = temporaryDirectory();
+  try {
+    const item = fixture(temporary);
+    const marker = path.join(temporary, "temporary-hash-marker");
+    const instrumented = instrumentRuntimeScript(
+      temporary,
+      "        if sha256_fd(temporary_fd) != expected_source:\n",
+      `        if destination_segments == ["intents", "create.md"]:
+            os.lseek(temporary_fd, 0, os.SEEK_SET)
+            os.write(temporary_fd, b"drift\\n")
+            with open(os.environ["SKILL_HARNESS_TEST_TEMPORARY_HASH_MARKER"], "w", encoding="utf-8") as handle:
+                handle.write("changed\\n")
+
+`,
+    );
+
+    const result = runScript(instrumented, args(item, "--apply"), {
+      SKILL_HARNESS_TEST_TEMPORARY_HASH_MARKER: marker,
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /applied/);
+    assert.equal(fs.readFileSync(marker, "utf8"), "changed\n");
+    assert.deepEqual(fs.readdirSync(path.join(item.active, "intents")), [
+      "replace.md",
+    ]);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
