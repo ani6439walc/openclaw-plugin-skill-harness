@@ -80,6 +80,7 @@ Runtime data root:
 Rules:
 
 - The active intent catalog always loads from `intentsPath(dataRoot)`; with the default local state directory this is `~/.openclaw/plugins/skill-harness/intents`.
+- Runtime experience records load separately from `experiencesPath(dataRoot)`; with the default local state directory this is `~/.openclaw/plugins/skill-harness/experiences`. They are not intent bodies and startup seeding does not create or overwrite them.
 - `stats.json`, `review.json`, and `keyword-coverage.json` are root-level runtime files. They must not be placed under `sessions/`.
 - Startup initialization may copy example intent files from `skills/skill-harness/assets/*.md` when the runtime `intents/` directory is absent or contains no Markdown files.
 - Startup initialization must not overwrite existing runtime intent files.
@@ -104,7 +105,9 @@ Use the existing module boundaries:
 - `src/config.ts`: Zod-backed config parsing, defaults, and clamps.
 - `src/file-utils.ts`: shared path helpers and atomic filesystem primitives.
 - `src/intents/catalog.ts`: runtime intent catalog loading.
+- `src/experiences/catalog.ts`: runtime skill-experience catalog validation and bounded lookup.
 - `src/session/tracker.ts`: session JSON state under `dataRoot/sessions`.
+- `src/curation/selector.ts`, `src/curation/scheduler.ts`, `src/curation/subagent.ts`: session-local direct-skill cold-start selection, three-turn curator cadence, and validated curation revisions. Keep this independent from Intent Review.
 - `src/stats/aggregator.ts`: usage, candidate-projection, agent-scoped resolved-skill inventory, and post-boundary daily attribution aggregation into schema-v4 `dataRoot/stats.json`, including explicit valid-v1/v2/v3 migration without historical attribution backfill.
 - `src/review/log-writer.ts`: direct Intent Review outcomes into `dataRoot/review.json`.
 - `src/review/keyword-coverage-writer.ts`: independent trigger-keyword state, coverage epochs, and keyword mutations in `dataRoot/keyword-coverage.json`.
@@ -117,7 +120,7 @@ Use the existing module boundaries:
 - `src/review/trigger-keywords.ts`: default and normalized runtime keyword sets for `successful-pattern`, `behavior-fix`, and `entity-context` triggers.
 - `src/session/guards.ts`: session eligibility guards.
 - `src/*.test.ts`: tests are colocated with the module they protect.
-- `skills/skill-harness/SKILL.md`: human-owned inventory, single-intent design, complexity/extraction, and report-only Review keyword-audit workflows. It must not instruct agents to repeat production-owned routing, seeding, Review persistence, skill-placement, stats, or cleanup.
+- `skills/skill-harness/SKILL.md`: human-owned inventory, single-intent design, complexity/extraction, and report-only Review keyword-audit workflows. It must not instruct agents to repeat production-owned routing, session-local curation, seeding, experience maintenance, Review persistence, skill-placement, stats, or cleanup.
 - `skills/skill-harness/scripts/review-keyword-audit.py`: private report-only replay and cross-session evidence analysis for Review trigger keywords. It is an approximate structural replay, not a production matcher or runtime writer.
 
 Conversation prompts are intentionally structured as XML-like blocks. Keep recent-turn context inside `<conversation_context>` and split historical topics with `<topic_segment>` and `<topic_boundary>`. Prompt-facing topic checker output requires bounded `basis`, `reason`, joint `confidence`, keywords, topic, and domain; confidence measures the combined correctness of reason, domain, and keywords, and the prompt must not ask the model for `changed` or complexity. Host parsing derives `changed` exclusively from `reason`. Same-topic inheritance requires confidence at or above `0.8` plus historical intent data, keeps the prior intent and intent confidence, and refreshes topic, domain, and keywords from the latest topic check, but never inherits complexity. Exact fastpaths and topic-keyword similarity also leave complexity absent; uncertain results reach the classifier path instead. The intent classifier is the only result producer that owns required final complexity. Dynamic routing renders only selected intent metadata, one routing `guidance` string, direct matched-intent skill candidates, and bounded experiences. Stats still record the turn but increment complexity buckets only for known values. Persisted intent results may still store `topicChangeReason`; do not reintroduce separate `intentChange` state.
@@ -167,7 +170,7 @@ Rules:
 - Use `safeWriteJson()` for fail-open writes that should log instead of throw.
 - Use `readJsonFile<T>()` for JSON reads.
 - Do not add production code that combines `fs.readFileSync` with `JSON.parse`, or `fs.writeFileSync` with `JSON.stringify`, when the file-utils helpers fit.
-- Session cleanup may delete expired `sessions/*.json` and embedded-agent session artifacts (`agents/*/sessions/*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json`) through the 14-day retention sweep only. `session_end` should preserve the ended session JSON for audit/reload; it must not delete current session files or touch root-level `stats.json`, root-level `review.json`, intent files, skills, transcripts, or package files.
+- Session cleanup may delete expired `sessions/*.json` and embedded-agent session artifacts (`agents/*/sessions/*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json`) through the 14-day retention sweep only. Session loading strips retired unknown intent-state fields such as `instructionText` before use or migration rewrite. `session_end` should preserve the ended session JSON for audit/reload; it must not delete current session files or touch root-level `stats.json`, root-level `review.json`, intent files, skills, transcripts, or package files.
 
 ## Testing Expectations
 

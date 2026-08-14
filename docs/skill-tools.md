@@ -1,13 +1,16 @@
 # Skill Tools
 
-Skill Harness registers four OpenClaw tools.
+Skill Harness registers four skill-catalog tools plus an agent-scoped experience lookup tool.
 
-| Tool           | Behavior                                                                                                                           |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `skill_list`   | Broad inventory fallback when the task is broad, terminology is uncertain, or focused search is insufficient.                      |
-| `skill_search` | Focused deterministic discovery when injected candidates do not fit. Results are candidates, not a substitute for reading a skill. |
-| `skill_view`   | Reads a visible skill or allowed support file. Read the complete skill before following its workflow.                              |
-| `skill_manage` | Authorized write-capable skill maintenance through the main agent's resolved catalog. Prefer focused patches and verify mutations. |
+| Tool               | Behavior                                                                                                                                                                                                    |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skill_list`       | Broad inventory fallback when the task is broad, terminology is uncertain, or focused search is insufficient.                                                                                               |
+| `skill_search`     | Focused deterministic discovery when injected candidates do not fit. Results are candidates, not a substitute for reading a skill.                                                                          |
+| `skill_view`       | Reads a visible skill or allowed support file. Read the complete skill before following its workflow.                                                                                                       |
+| `skill_manage`     | Authorized write-capable skill maintenance through the main agent's resolved catalog. Prefer focused patches and verify mutations.                                                                          |
+| `skill_experience` | Searches bounded runtime experience records for up to six skills visible to the invoking agent. It returns unavailable requested names separately and does not provide a catalog-wide experience inventory. |
+
+`skill_experience` accepts an optional query of at most 500 Unicode code points. It returns at most three entries, each body capped at 2,000 code points and all returned bodies capped at 5,000 code points.
 
 ## Visibility
 

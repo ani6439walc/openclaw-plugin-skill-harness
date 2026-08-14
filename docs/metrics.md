@@ -7,6 +7,7 @@ Skill Harness keeps package files and runtime state separate. The paths below us
 | Path                                                      | Purpose                                                                                         |
 | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `~/.openclaw/plugins/skill-harness/intents/`              | Editable runtime intent catalog.                                                                |
+| `~/.openclaw/plugins/skill-harness/experiences/`          | Skill-scoped runtime experience catalog selected only through session curation.                 |
 | `~/.openclaw/plugins/skill-harness/sessions/`             | Per-session JSON snapshots for audit and review context.                                        |
 | `~/.openclaw/plugins/skill-harness/agents/*/sessions/`    | Embedded-agent session transcripts.                                                             |
 | `~/.openclaw/plugins/skill-harness/stats.json`            | Schema-v4 intent, skill, tool, routing, projection, inventory-observation, and daily telemetry. |
@@ -15,9 +16,13 @@ Skill Harness keeps package files and runtime state separate. The paths below us
 
 Session cleanup preserves the ended main session and removes only expired `sessions/*.json` and embedded-agent session artifacts: `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json`. It does not delete root-level statistics, review data, intents, skills, transcripts outside the embedded-agent session directories, or package files.
 
+When retained session files are loaded, the tracker strips retired intent-state fields such as `instructionText` before using or rewriting migrated state. This is a compatibility cleanup, not a source of routing behavior; normal retention still controls when expired session files are removed.
+
 ## Interpreting local observations
 
 The README reports one deployment's observed routed turns, confidence, recommendation adoption, candidate reduction, rendered catalog size, and local projection time. These are operational measurements, not a synthetic benchmark.
+
+Those observations predate the session-curation deployment boundary. They must not be presented as a causal curation comparison until a post-cutover measurement window is collected with the same definitions.
 
 - A recommendation opportunity is each top-level skill entry actually injected into the final direct `<skill_candidates>` block for the selected intent. Related-skill metadata nested under a candidate is not counted as a separate opportunity.
 - A recommendation is adopted when that injected candidate is used during the same turn. Routing-guidance prose is not parsed for skill names.

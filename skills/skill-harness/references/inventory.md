@@ -16,7 +16,7 @@ List currently available tools from the runtime catalog, config, built-in help, 
 
 ### Existing intents
 
-Use structured file/search tools to list and inspect runtime intent Markdown in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`.
+Use structured file/search tools to list and inspect runtime intent Markdown in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`. Experience records live separately under `experiences/`; treat them as host-curated runtime evidence, not as intent content or inventory-maintenance input.
 
 ## Step 2 — Capability table
 

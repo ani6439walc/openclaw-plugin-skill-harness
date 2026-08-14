@@ -14,6 +14,7 @@ When enough information is collected, stop asking discovery questions and switch
 - If the proposed design is still too broad or collides badly, do not force a final draft yet. Say what decision is still unresolved and ask the smallest next question.
 - Use the routing-only frontmatter format in `references/format.md`: required `guidance`, optional direct `skills[]`, and no Markdown body.
 - Keep commands, tool workflows, and durable lessons in referenced skills; do not add them to the intent definition.
+- Do not draft or change runtime experience entries: session-local curation owns those skill-scoped records.
 
 ## Collision warning format
 

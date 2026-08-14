@@ -42,7 +42,6 @@ Do not rely on shell-only listing/search examples when the host provides structu
 
 Follow `references/format.md` exactly:
 
-- Required frontmatter: `triggers[]`, `examples[]`, `domain`; optional `fastpath`.
 - Required frontmatter: `triggers[]`, `examples[]`, `domain`, and one `guidance` sentence.
 - Optional frontmatter: `fastpath.keywords`, `candidate`, and direct `skills[]`.
 - Do not include Markdown body sections, tool instructions, workflows, or experiences; intent bodies are unsupported.

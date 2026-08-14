@@ -36,6 +36,14 @@ Projected candidates preserve canonical catalog order. They may include the pred
 
 Exact projection phrases use NFKC, locale-independent lowercasing, and collapsed whitespace. Latin and symbol-heavy phrases use boundary-safe matching. Multi-code-point CJK phrases use substring matching; one-code-point phrases must equal the latest message or an exact topic keyword. Punctuation remains literal, so hyphens and underscores are not interchangeable aliases.
 
+## Runtime data and session-local recommendation curation
+
+Runtime state is resolved from OpenClaw's state directory, not from the plugin package. With the default local state directory it lives under `~/.openclaw/plugins/skill-harness/`. Runtime intents load from `intents/`; first startup copies bundled examples only when that directory has no Markdown files and never overwrites an existing runtime intent. `experiences/<skill>/<entry>.md` is a separate skill-scoped runtime catalog. An experience is eligible only when the current topic epoch's curation record selected both its direct skill candidate and its reference; it is not intent-body content and does not expand the static skill inventory.
+
+After deterministic or model-backed routing selects an intent, the host creates a revision-0 curation record for the current topic epoch. Its cold start ranks only the intent's resolved direct `skills[]` using successful same-agent, same-intent observations retained for 14 days: the first four are fixed exploitation candidates and up to two remaining candidates are sampled without replacement for exploration. If the catalog or session mutation is unavailable, routing falls back to the ranked direct candidates without durable curation state.
+
+The independent background curator runs after each three additional successful accepted turns in the same topic epoch. It can advance a validated curation revision with at most six visible direct skill candidates and three matching experience references. Topic changes, stale reservations, invalid proposals, unavailable skills, and failed writes do not block the agent turn; they preserve or safely fall back from the prior recommendation state. Curation does not edit intents, skills, `review.json`, or `keyword-coverage.json`, and it remains enabled independently of `review.enabled`.
+
 ## Helper subagents
 
 When deterministic routing is insufficient, bounded helper subagents provide guidance:

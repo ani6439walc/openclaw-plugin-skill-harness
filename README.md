@@ -47,6 +47,7 @@ Skill Harness addresses both:
 
 1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and bounded skill experiences. The fixed system context does not include the runtime skill inventory.
 2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption and can refine runtime intent Markdown and selected review trigger keywords. It does not train the base model or rewrite skill files.
+3. **Session-local recommendation curation.** The enabled-by-default background curator refines a topic epoch's direct skill candidates and bounded experience references without changing intent definitions, skill files, or Review state.
 
 ## How it works
 
@@ -73,7 +74,7 @@ For lifecycle contracts, projection rules, helper subagents, dynamic prompt shap
 
 ## Observed local results
 
-One local deployment recorded these operational measurements between 2026-07-08 and 2026-07-19. They are not a synthetic benchmark and should not be treated as a provider-token estimate.
+One local deployment recorded these operational measurements between 2026-07-08 and 2026-07-19. They are not a synthetic benchmark and should not be treated as a provider-token estimate. They predate the session-curation cutover, so they are a historical baseline rather than a measured before/after comparison for the current curation behavior.
 
 - **840 routed turns:** 96.8% mapped to a named intent rather than the `other` fallback, with 91.0% average classification confidence.
 - **193 skill-assisted turns:** 331 recorded skill usages, tracked separately from recommendation telemetry.
@@ -102,6 +103,9 @@ Configure Skill Harness in `openclaw.json`:
           lowThinkingMode: "fastpath-only",
           queryMode: "recent",
           timeoutMs: 10000,
+          curation: {
+            enabled: true,
+          },
           review: {
             enabled: false,
           },
@@ -114,22 +118,25 @@ Configure Skill Harness in `openclaw.json`:
 
 ### Important options
 
-| Option                             | Default           | Purpose                                                          |
-| ---------------------------------- | ----------------- | ---------------------------------------------------------------- |
-| `agents`                           | `["main"]`        | OpenClaw agent IDs eligible for scanning.                        |
-| `allowedChatTypes`                 | `["direct"]`      | Chat types that may run the scanner.                             |
-| `allowedChatIds` / `deniedChatIds` | `[]`              | Optional chat allow-list and deny-list.                          |
-| `intentDeny`                       | `{}`              | Per-agent intent deny-list with wildcard-style keys.             |
-| `model` / `modelFallback`          | unset             | Scanner model and last-resort resolution fallback.               |
-| `thinking`                         | `"medium"`        | Intent-classifier thinking level.                                |
-| `lowThinkingMode`                  | `"fastpath-only"` | Behavior when the main agent uses off, minimal, or low thinking. |
-| `queryMode` / `contextWindow`      | `"recent"`        | Scanner context and its limits.                                  |
-| `timeoutMs`                        | `10000`           | Topic-checker and intent-classifier time budget.                 |
+| Option                             | Default              | Purpose                                                                                             |
+| ---------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
+| `agents`                           | `["main"]`           | OpenClaw agent IDs eligible for scanning.                                                           |
+| `allowedChatTypes`                 | `["direct"]`         | Chat types that may run the scanner.                                                                |
+| `allowedChatIds` / `deniedChatIds` | `[]`                 | Optional chat allow-list and deny-list.                                                             |
+| `intentDeny`                       | `{}`                 | Per-agent intent deny-list with wildcard-style keys.                                                |
+| `model` / `modelFallback`          | unset                | Scanner model and last-resort resolution fallback.                                                  |
+| `thinking`                         | `"medium"`           | Intent-classifier thinking level.                                                                   |
+| `lowThinkingMode`                  | `"fastpath-only"`    | Behavior when the main agent uses off, minimal, or low thinking.                                    |
+| `queryMode` / `contextWindow`      | `"recent"`           | Scanner context and its limits.                                                                     |
+| `timeoutMs`                        | `10000`              | Topic-checker and intent-classifier time budget.                                                    |
+| `curation.enabled`                 | `true`               | Enables session-local direct-skill and experience recommendation curation, independently of Review. |
+| `curation.model` / `modelFallback` | unset                | Optional dedicated curator model and resolution fallback.                                           |
+| `curation.thinking` / `timeoutMs`  | `"medium"` / `30000` | Curator thinking level and time budget.                                                             |
 
 | `review.enabled` | `false` | Enables post-turn Intent Review. |
 | `review.triggers.skillPlacement.enabled` | `true` | Reviews one eligible resolved skill for placement in a runtime intent when Review is enabled. |
 
-Topic Checker, Intent Classifier, and Intent Review resolve models in this order: explicit configured model, current session model, agent primary model, then configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
+Topic Checker, Intent Classifier, background Curator, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
 ## Runtime intents
 
@@ -137,9 +144,12 @@ Runtime intents live under the OpenClaw state directory. With the default local 
 
 ```text
 ~/.openclaw/plugins/skill-harness/intents/*.md
+~/.openclaw/plugins/skill-harness/experiences/<skill>/<entry>.md
 ```
 
 On first startup, the plugin seeds bundled examples only when this directory is absent or has no Markdown intent files. Existing runtime intents are never overwritten.
+
+Intent files remain YAML-frontmatter-only routing definitions. Experience files are separate, skill-scoped Markdown records with `skill`, `summary`, and `keywords` frontmatter; they are injected only when a session-local curation record selects the matching direct skill and experience reference.
 
 ### Runtime Review state
 
@@ -169,18 +179,19 @@ The bundled `skill-harness` skill is the explicit human-maintenance surface for 
 - `design` — create, refine, rename, split, or merge one intent through a staged preview and confirmation workflow;
 - `extract` — score intent complexity, identify independent responsibilities, and draft skill blueprints plus a slimmed intent after approval;
 - `keyword-audit` — generate a private, report-only cross-session analysis of Review keyword matches, misses, and collisions, then propose a bounded delta without writing runtime state.
-- `runtime-health` — generate a private, report-only aggregate snapshot of Review outcomes, coverage state, v3/v4 stats, session retention, and agent-artifact growth without exposing retained text or modifying runtime state.
+- `runtime-health` — generate a private, report-only aggregate snapshot of Review outcomes, coverage state, v3/v4 stats, session retention, curation state, and agent-artifact growth without exposing retained text or modifying runtime state.
 
 This skill does not manually repeat production-owned work: per-turn classification and routing injection, startup seeding, trigger-driven intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, or session cleanup. Broad routing changes and skill extraction remain human-owned because they require semantic calibration and explicit write approval.
 
 ## Skill tools
 
-| Tool           | Purpose                                                            |
-| -------------- | ------------------------------------------------------------------ |
-| `skill_list`   | Broad inventory fallback for broad or uncertain tasks.             |
-| `skill_search` | Focused discovery when injected candidates do not fit.             |
-| `skill_view`   | Reads a visible skill or allowed support file before use.          |
-| `skill_manage` | Authorized write-capable maintenance through the resolved catalog. |
+| Tool               | Purpose                                                            |
+| ------------------ | ------------------------------------------------------------------ |
+| `skill_list`       | Broad inventory fallback for broad or uncertain tasks.             |
+| `skill_search`     | Focused discovery when injected candidates do not fit.             |
+| `skill_view`       | Reads a visible skill or allowed support file before use.          |
+| `skill_manage`     | Authorized write-capable maintenance through the resolved catalog. |
+| `skill_experience` | Searches bounded runtime experiences for currently visible skills. |
 
 See [Skill tools](docs/skill-tools.md) for visibility, filtering, cache, and search behavior.
 

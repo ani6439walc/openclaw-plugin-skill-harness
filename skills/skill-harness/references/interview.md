@@ -38,6 +38,7 @@ Confirm these fields in order:
 - If the user is describing an existing intent, say so directly.
 - If two intents are colliding, recommend the smallest clean split.
 - Do not propose `candidate.keywords` from a single example or review session. Require durable cross-domain evidence and check both intended matches and neighboring collisions.
+- Gather only direct `skills[]` dependencies. Session-local curation owns candidate ranking and runtime experience references; do not interview for or add experience records.
 - Do not write the final intent file until the boundary is clear.
 - **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, fastpath metadata, and guidance. (See `references/format.md` for full spec.)
 

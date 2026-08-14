@@ -8,6 +8,8 @@ An intent is YAML frontmatter only. Required fields are `domain`, `triggers[]`, 
 
 Do not create Markdown body sections, a `## Skills & Tools` section, workflow text, or experience text. Durable workflows and lessons belong in referenced skills, not intent definitions.
 
+Runtime experience records are host-curated, skill-scoped files under `experiences/`; do not create, edit, or reference them while drafting an intent.
+
 ## Frontmatter routing fields
 
 ```yaml

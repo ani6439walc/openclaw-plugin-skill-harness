@@ -14,6 +14,7 @@ Analyze intent complexity and recommend extracting oversized intents into standa
 - Treat the analysis as advisory — the user decides what to extract.
 - Preserve existing triggers and examples when proposing intent slim-down.
 - Prefer drafts and diff previews before writes.
+- Treat runtime experience records and session-local curation as host-owned evidence. Extraction may adjust direct frontmatter `skills[]` after approval, but it must not create, move, or rewrite `experiences/` entries.
 
 ## Step 1 — Complexity scan
 
@@ -128,6 +129,7 @@ Use structured file/search tools to check:
 - The slimmed intent keeps enough triggers/examples for routing.
 - The slimmed intent has one routing `guidance` sentence and direct frontmatter `skills[]`; no intent body is present.
 - Commands, workflows, and durable lessons belong in the extracted skill, not the slimmed intent.
+- Runtime experience records remain separate host-curated evidence, not a migration target for extracted intent text.
 - Proposed triggers do not obviously collide with remaining runtime intents.
 - The slimmed intent and any moved/renamed domain relationship pass the domain-intent consistency criteria in `references/clustering.md`.
 
