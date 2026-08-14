@@ -231,11 +231,23 @@ function sanitizeToolParamsForReview(
 
 function createReviewState(
   state: SessionState,
-  options?: { preserveFullResult?: boolean },
+  options?: {
+    preserveFullResult?: boolean;
+    includeRecommendationCandidates?: boolean;
+  },
 ): ReviewState {
   return {
     input: sanitizeReviewInput(state.input),
     intent: state.intent?.result ? { ...state.intent.result } : undefined,
+    ...(options?.includeRecommendationCandidates
+      ? {
+          recommendationCandidates:
+            state.intent?.recommendationState?.candidates.map((candidate) => ({
+              name: candidate.name,
+              provenance: candidate.provenance,
+            })),
+        }
+      : {}),
     skillsUsed: state.skillsUsed?.map((skill) => ({ ...skill })),
     toolCalls: state.toolCalls?.map((call) => ({
       name: call.name,
@@ -1259,7 +1271,9 @@ export class SessionTracker {
       agentId: session.agentId,
       eventId: `${sessionId}:${start}`,
       turnNumber: completedStates.length,
-      current: createReviewState(session.current),
+      current: createReviewState(session.current, {
+        includeRecommendationCandidates: true,
+      }),
       recent: completedStates
         .slice(-10, -1)
         .map((state) => createReviewState(state, { preserveFullResult: true })),
@@ -1290,7 +1304,9 @@ export class SessionTracker {
       agentId: session.agentId,
       eventId,
       turnNumber: throughTarget.length,
-      current: createReviewState(target),
+      current: createReviewState(target, {
+        includeRecommendationCandidates: true,
+      }),
       recent: throughTarget
         .slice(-10, -1)
         .map((state) => createReviewState(state, { preserveFullResult: true })),
@@ -1363,54 +1379,7 @@ export class SessionTracker {
 
     const current = session.current;
 
-    if (data.current) {
-      if (data.current.input !== undefined) {
-        current.input = data.current.input;
-      }
-      if (data.current.intent) {
-        if (!current.intent) current.intent = {};
-        if (data.current.intent.input !== undefined) {
-          current.intent.input = data.current.intent.input;
-        }
-        if (data.current.intent.trigger !== undefined) {
-          current.intent.trigger = data.current.intent.trigger;
-        }
-        if (data.current.intent.result !== undefined) {
-          current.intent.result = data.current.intent.result;
-        }
-        if (data.current.intent.recommendedSkills !== undefined) {
-          current.intent.recommendedSkills = [
-            ...data.current.intent.recommendedSkills,
-          ];
-        }
-        if (data.current.intent.intentProjection !== undefined) {
-          current.intent.intentProjection =
-            data.current.intent.intentProjection;
-        }
-      }
-      if (data.current.result !== undefined) {
-        current.result = data.current.result;
-      }
-      if (data.current.error !== undefined) {
-        current.error = data.current.error;
-      }
-      if (data.current.timestamps) {
-        current.timestamps = {
-          ...(current.timestamps || {}),
-          ...(data.current.timestamps || {}),
-        };
-      }
-
-      if (data.current.toolCalls) {
-        appendToolCalls(current, data.current.toolCalls);
-      }
-      if (data.current.skillsUsed) {
-        current.skillsUsed = mergeUniqueSkills(
-          current.skillsUsed,
-          data.current.skillsUsed,
-        );
-      }
-    }
+    if (data.current) mergeSessionState(current, data.current);
 
     if (data.history) {
       session.history = data.history;

@@ -2,6 +2,7 @@ import type { ReviewTrigger } from "./triggers.js";
 import type { ReviewOperation } from "./log.js";
 import type { TriggerKeywordTarget } from "./trigger-keywords.js";
 import type { SkillPlacementCandidate } from "../stats/aggregator.js";
+import type { CuratedSkillCandidate } from "../curation/types.js";
 import type {
   AvailableSkill,
   IntentCatalogEntry,
@@ -12,6 +13,7 @@ import type {
 export type ReviewState = {
   input?: string;
   intent?: IntentionResult;
+  recommendationCandidates?: CuratedSkillCandidate[];
   skillsUsed?: Array<{
     name: string;
     description?: string;
@@ -47,7 +49,10 @@ export type ReviewSnapshot = {
   intentCatalog: Array<
     { id: string } & Pick<IntentDefinition, "triggers" | "examples"> &
       Partial<
-        Pick<IntentDefinition, "domain" | "fastpath" | "candidate" | "skills">
+        Pick<
+          IntentDefinition,
+          "domain" | "fastpath" | "candidate" | "skills" | "guidance"
+        >
       >
   >;
 };

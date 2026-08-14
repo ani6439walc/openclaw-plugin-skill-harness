@@ -30,7 +30,6 @@ type ReviewSnapshotBlockName =
   | "assistant_result_omission"
   | "agent_error"
   | "matched_intent"
-  | "intent_body"
   | "skill"
   | "name"
   | "description"
@@ -69,18 +68,27 @@ function addDefined(
 
 function formatIntentMetadata(
   intent: ReviewSnapshot["current"]["intent"],
+  recommendationCandidates?: ReviewSnapshot["current"]["recommendationCandidates"],
 ): string {
-  if (!intent) return "";
+  if (!intent && !recommendationCandidates?.length) return "";
   const metadata: Record<string, unknown> = {};
-  addDefined(metadata, "intent", intent.intent);
-  addDefined(metadata, "domain", intent.domain);
-  addDefined(metadata, "confidence", intent.confidence);
-  addDefined(metadata, "complexity", intent.complexity);
-  addDefined(metadata, "reason", intent.reason);
-  addDefined(metadata, "topic", intent.topic);
-  addDefined(metadata, "keywords", intent.keywords);
-  addDefined(metadata, "topicChangeReason", intent.topicChangeReason);
-  addDefined(metadata, "suggestion", intent.suggestion);
+  addDefined(metadata, "intent", intent?.intent);
+  addDefined(metadata, "domain", intent?.domain);
+  addDefined(metadata, "confidence", intent?.confidence);
+  addDefined(metadata, "complexity", intent?.complexity);
+  addDefined(metadata, "reason", intent?.reason);
+  addDefined(metadata, "topic", intent?.topic);
+  addDefined(metadata, "keywords", intent?.keywords);
+  addDefined(metadata, "topicChangeReason", intent?.topicChangeReason);
+  addDefined(metadata, "suggestion", intent?.suggestion);
+  if (recommendationCandidates?.length) {
+    metadata.recommendationCandidates = recommendationCandidates.map(
+      (candidate) => ({
+        name: candidate.name,
+        provenance: candidate.provenance,
+      }),
+    );
+  }
   return stringifySnapshotJson(metadata);
 }
 
@@ -296,7 +304,12 @@ function formatReviewState(
     ),
     wrapOptionalReviewSnapshotBlock(
       "intent_metadata",
-      formatIntentMetadata(state.intent),
+      formatIntentMetadata(
+        state.intent,
+        blockName === "current_turn"
+          ? state.recommendationCandidates
+          : undefined,
+      ),
     ),
     state.skillsUsed?.length
       ? wrapRequiredReviewSnapshotBlock(

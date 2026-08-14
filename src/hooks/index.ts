@@ -1842,6 +1842,7 @@ export function createHookHandlers(deps: HookDeps) {
         triggers: [...entry.definition.triggers],
         examples: [...entry.definition.examples],
         domain: entry.definition.domain,
+        guidance: entry.definition.guidance,
         skills: [...(entry.definition.skills ?? [])],
         fastpath: {
           keywords: [...(entry.definition.fastpath?.keywords ?? [])],

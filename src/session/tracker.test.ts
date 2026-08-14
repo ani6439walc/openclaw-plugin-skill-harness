@@ -1892,5 +1892,107 @@ Current user request: ${request}
       expect(JSON.stringify(snapshot)).not.toContain("intentProjection");
       expect(JSON.stringify(snapshot)).not.toContain("originalIntentCount");
     });
+
+    it("projects ordered recommendation provenance without curation scheduling state", () => {
+      tracker.record("recommendation-review", {
+        current: {
+          input: "review this route",
+          intent: {
+            result: {
+              intent: "code-review",
+              reason: "test",
+              domain: "development",
+              confidence: 0.9,
+              complexity: "low",
+            },
+            recommendationState: {
+              topicEpoch: 4,
+              curationRevision: 2,
+              candidates: [
+                { name: "alpha", provenance: "historical-top" },
+                { name: "beta", provenance: "random-exploration" },
+                { name: "gamma", provenance: "curator-kept" },
+                { name: "delta", provenance: "curator-added" },
+              ],
+              curationSchedule: {
+                agentId: "private-agent",
+                schedulingTurnKey: "private-turn",
+                expectedTopicEpoch: 4,
+                expectedRevision: 2,
+                status: "pending",
+                reservedAt: "2026-08-14T00:00:00.000Z",
+              },
+            },
+          },
+          timestamps: { start: "2026-08-14T00:00:00.000Z" },
+        },
+      });
+
+      const snapshot = tracker.getReviewSnapshot("recommendation-review");
+
+      expect(snapshot?.current.recommendationCandidates).toEqual([
+        { name: "alpha", provenance: "historical-top" },
+        { name: "beta", provenance: "random-exploration" },
+        { name: "gamma", provenance: "curator-kept" },
+        { name: "delta", provenance: "curator-added" },
+      ]);
+      expect(JSON.stringify(snapshot)).not.toContain("curationSchedule");
+      expect(JSON.stringify(snapshot)).not.toContain("private-agent");
+      expect(JSON.stringify(snapshot)).not.toContain("private-turn");
+    });
+
+    it("keeps recommendation candidate provenance out of recent review turns", () => {
+      tracker.record("recommendation-history", {
+        current: {
+          input: "historical input",
+          intent: {
+            result: {
+              intent: "historical-intent",
+              reason: "test",
+              domain: "history",
+              confidence: 0.9,
+              complexity: "low",
+            },
+            recommendationState: {
+              topicEpoch: 1,
+              curationRevision: 1,
+              candidates: [
+                { name: "historical", provenance: "historical-top" },
+              ],
+            },
+          },
+          timestamps: { start: "2026-08-14T00:00:00.000Z" },
+        },
+      });
+      tracker.rotate("recommendation-history");
+      tracker.record("recommendation-history", {
+        current: {
+          input: "current input",
+          intent: {
+            result: {
+              intent: "current-intent",
+              reason: "test",
+              domain: "current",
+              confidence: 0.9,
+              complexity: "low",
+            },
+            recommendationState: {
+              topicEpoch: 2,
+              curationRevision: 1,
+              candidates: [{ name: "current", provenance: "curator-added" }],
+            },
+          },
+          timestamps: { start: "2026-08-14T00:01:00.000Z" },
+        },
+      });
+
+      const snapshot = tracker.getReviewSnapshot("recommendation-history");
+
+      expect(snapshot?.current.recommendationCandidates).toEqual([
+        { name: "current", provenance: "curator-added" },
+      ]);
+      expect(snapshot?.recent).toHaveLength(1);
+      expect(snapshot?.recent[0]?.recommendationCandidates).toBeUndefined();
+    });
   });
 });

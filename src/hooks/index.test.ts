@@ -1437,6 +1437,7 @@ description: Navigate Tokyo.
               domain: "other",
               skills: ["analysis"],
               fastpath: { keywords: [] },
+              guidance: "Ask for context.",
             },
           ],
         }),

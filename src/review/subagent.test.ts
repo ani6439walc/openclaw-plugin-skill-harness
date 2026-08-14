@@ -136,8 +136,8 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "A trigger firing is an opportunity to investigate, not evidence by itself",
   "prefer applying the smallest valid correction over returning hasFinding=false",
   "In that evidence-qualified case, hasFinding=false is a high bar",
-  "class-level intents with rich, maintainable Markdown sections",
-  "not a flat list of one-intent-per-session artifacts",
+  "class-level routing definitions with strict frontmatter only; Markdown bodies are unsupported",
+  "Do not create one-intent-per-session artifacts",
   "classification ambiguity",
   "frontmatter triggers/examples/domain/fastpath",
   "### Target preference order",
@@ -501,6 +501,15 @@ describe("buildReviewPrompt", () => {
     );
     expect(weakPrompt).not.toContain("trigger keyword adjustments");
     expect(weakPrompt).not.toContain('targetKind="trigger-keywords"');
+  });
+
+  it("keeps workflow lessons in routing guidance without automatic experience writes", () => {
+    const prompt = buildReviewPrompt(snapshot, ["skill-candidate"]);
+
+    expect(prompt).toContain("Do not create body sections or an intent body");
+    expect(prompt).toContain(
+      "Automatic experience writes are unavailable in this release",
+    );
   });
 
   it("scopes trigger keyword output instructions to requested keyword triggers", () => {
@@ -1469,7 +1478,7 @@ Some more reasoning text here.
   });
 
   it("extracts the first complete JSON object when extra trailing closers follow it", () => {
-    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":true,"operation":"refine","targetIntentIds":["system-diagnostics"],"dedupeKey":"memory-search-performance-diagnosis","summary":"Record memory search performance diagnosis methodology","evidence":["Compared CLI and tool timing"],"correctionGoal":"Add memory search diagnosis experience","suggestedChange":"Add an Experience note about comparing searchMs and elapsed timings."}]}]}`;
+    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":true,"operation":"refine","targetIntentIds":["system-diagnostics"],"dedupeKey":"memory-search-performance-diagnosis","summary":"Record memory search performance diagnosis methodology","evidence":["Compared CLI and tool timing"],"correctionGoal":"Refine routing guidance for timing comparisons","suggestedChange":"Update guidance to compare searchMs and elapsed timings."}]}]}`;
 
     expect(parseReviewFindings(raw, ["skill-candidate"])).toEqual([
       {
@@ -1480,15 +1489,15 @@ Some more reasoning text here.
         dedupeKey: "memory-search-performance-diagnosis",
         summary: "Record memory search performance diagnosis methodology",
         evidence: ["Compared CLI and tool timing"],
-        correctionGoal: "Add memory search diagnosis experience",
+        correctionGoal: "Refine routing guidance for timing comparisons",
         suggestedChange:
-          "Add an Experience note about comparing searchMs and elapsed timings.",
+          "Update guidance to compare searchMs and elapsed timings.",
       },
     ]);
   });
 
   it("extracts the first complete JSON object when an extra object closer follows it", () => {
-    const raw = `{"findings":[{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"retry-timeout","summary":"Preserve timeout retry flow","evidence":["GLM-5 timed out"],"correctionGoal":"Add timeout retry note","suggestedChange":"Add an Experience note about retrying fallback models."}]}}`;
+    const raw = `{"findings":[{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"retry-timeout","summary":"Preserve timeout retry flow","evidence":["GLM-5 timed out"],"correctionGoal":"Refine timeout retry guidance","suggestedChange":"Update guidance with the fallback retry boundary."}]}}`;
 
     expect(parseReviewFindings(raw, ["process-gap"])).toEqual([
       {
@@ -1499,15 +1508,14 @@ Some more reasoning text here.
         dedupeKey: "retry-timeout",
         summary: "Preserve timeout retry flow",
         evidence: ["GLM-5 timed out"],
-        correctionGoal: "Add timeout retry note",
-        suggestedChange:
-          "Add an Experience note about retrying fallback models.",
+        correctionGoal: "Refine timeout retry guidance",
+        suggestedChange: "Update guidance with the fallback retry boundary.",
       },
     ]);
   });
 
   it("recovers positive findings after an initial no-finding object in a malformed findings array", () => {
-    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":false},{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"timeout-fallback","summary":"Retry fallback model after review timeout","evidence":["review subagent error: timeout"],"correctionGoal":"Add review timeout fallback guidance","suggestedChange":"Add an Experience note about retrying fallback model after provider timeout."}]`;
+    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":false},{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"timeout-fallback","summary":"Retry fallback model after review timeout","evidence":["review subagent error: timeout"],"correctionGoal":"Refine review timeout fallback guidance","suggestedChange":"Update guidance with the fallback retry boundary."}]`;
 
     expect(
       parseReviewFindings(raw, ["skill-candidate", "process-gap"]),
@@ -1520,9 +1528,8 @@ Some more reasoning text here.
         dedupeKey: "timeout-fallback",
         summary: "Retry fallback model after review timeout",
         evidence: ["review subagent error: timeout"],
-        correctionGoal: "Add review timeout fallback guidance",
-        suggestedChange:
-          "Add an Experience note about retrying fallback model after provider timeout.",
+        correctionGoal: "Refine review timeout fallback guidance",
+        suggestedChange: "Update guidance with the fallback retry boundary.",
       },
     ]);
   });
@@ -2659,6 +2666,80 @@ describe("runReviewSubagent", () => {
     });
   });
 
+  it.each([
+    {
+      name: "a Markdown body",
+      mutate: (content: string) => `${content.trimEnd()}\n\nPersistent body.\n`,
+      validationError: "social-casual.md: Markdown body must be empty",
+    },
+    {
+      name: "a retired fastpath hint",
+      mutate: (content: string) =>
+        content.replace(
+          "guidance:",
+          "fastpath:\n  hint: Legacy routing prose\n  keywords: []\nguidance:",
+        ),
+      validationError: "social-casual.md: fastpath.hint is not supported",
+    },
+  ])(
+    "rejects review refinements that introduce $name",
+    async ({ mutate, validationError }) => {
+      const intentDirectory = createIntentDirectory();
+      const targetPath = path.join(intentDirectory, "social-casual.md");
+      const original = fs.readFileSync(targetPath, "utf-8");
+      const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+        const workspacePath = path.join(
+          options.workspaceDir,
+          "social-casual.md",
+        );
+        fs.writeFileSync(workspacePath, mutate(original));
+        return {
+          payloads: [
+            {
+              text: JSON.stringify({
+                findings: [
+                  {
+                    trigger: "behavior-fix",
+                    hasFinding: true,
+                    targetKind: "intent-markdown",
+                    operation: "refine",
+                    targetIntentIds: ["social-casual"],
+                    dedupeKey: "routing-boundary",
+                    summary: "Clarify the routing boundary",
+                    evidence: ["The request was routed too broadly"],
+                    correctionGoal: "Refine routing guidance",
+                    suggestedChange: "Update routing guidance.",
+                  },
+                ],
+              }),
+            },
+          ],
+        };
+      });
+      const api = {
+        config: {},
+        runtime: { agent: { runEmbeddedAgent } },
+      } as unknown as OpenClawPluginApi;
+
+      await expect(
+        runReviewSubagent({
+          api,
+          config: resolveConfig({ review: { enabled: true } }),
+          agentId: "main",
+          intentDirectory,
+          modelRef: { provider: "google", model: "review" },
+          snapshot,
+          triggers: ["behavior-fix"],
+        }),
+      ).resolves.toEqual({
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: [validationError],
+      });
+      expect(fs.readFileSync(targetPath, "utf-8")).toBe(original);
+    },
+  );
+
   it("rejects intent-markdown findings that declare unchanged runtime intent files", async () => {
     const intentDirectory = createIntentDirectory();
     const originalSocial = fs.readFileSync(
@@ -3421,7 +3502,7 @@ describe("runReviewSubagent", () => {
                 summary: "Missing dedupe key",
                 evidence: ["Reusable successful ordering"],
                 correctionGoal: "Preserve the ordering",
-                suggestedChange: "Add an Experience note.",
+                suggestedChange: "Update routing guidance.",
               },
             ],
           }),

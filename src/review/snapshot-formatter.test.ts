@@ -369,6 +369,53 @@ describe("formatReviewSnapshot", () => {
     expect(output).not.toContain("<skills_used");
   });
 
+  it("renders routing guidance and ordered recommendation provenance without intent bodies", () => {
+    const output = formatReviewSnapshot({
+      ...fullSnapshot,
+      current: {
+        ...fullSnapshot.current,
+        recommendationCandidates: [
+          { name: "alpha", provenance: "historical-top" },
+          { name: "beta", provenance: "random-exploration" },
+          { name: "gamma", provenance: "curator-kept" },
+          { name: "delta", provenance: "curator-added" },
+        ],
+      },
+      intentCatalog: [
+        {
+          ...fullSnapshot.intentCatalog[0]!,
+          guidance: "Route intent review through current workspace metadata.",
+        } as unknown as ReviewSnapshot["intentCatalog"][number],
+      ],
+    });
+
+    expect(output).toContain(
+      '"recommendationCandidates":[{"name":"alpha","provenance":"historical-top"},{"name":"beta","provenance":"random-exploration"},{"name":"gamma","provenance":"curator-kept"},{"name":"delta","provenance":"curator-added"}]',
+    );
+    expect(output).toContain(
+      '"guidance":"Route intent review through current workspace metadata."',
+    );
+    expect(output).not.toContain("<intent_body>");
+    expect(output).not.toContain("fastpath.hint");
+  });
+
+  it("does not render recommendation provenance from recent turns", () => {
+    const output = formatReviewSnapshot({
+      ...fullSnapshot,
+      recent: [
+        {
+          ...fullSnapshot.recent[0]!,
+          recommendationCandidates: [
+            { name: "historical-recent", provenance: "historical-top" },
+          ],
+        },
+      ],
+    });
+
+    expect(output).not.toContain("historical-recent");
+    expect(output).not.toContain('"recommendationCandidates"');
+  });
+
   it("renders a projected catalog with exact manifest accounting and local reasons", () => {
     const output = formatReviewSnapshot(projectionReadySnapshot(), {
       includeIntentCatalog: true,

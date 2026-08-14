@@ -61,6 +61,8 @@ function catalogEntryTieBreakKey(entry: CatalogEntry): string {
     entry.fastpath?.keywords ?? [],
     entry.candidate?.scope ?? null,
     entry.candidate?.keywords ?? [],
+    entry.skills ?? [],
+    entry.guidance ?? null,
   ]);
 }
 

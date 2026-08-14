@@ -167,7 +167,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - Once those gates pass, prefer applying the smallest valid correction over returning hasFinding=false.
 - In that evidence-qualified case, hasFinding=false is a high bar: use it only when the apparent lesson is already covered, transient, privacy-sensitive, outside the intent boundary, or cannot support a concrete valid change.
 - A trigger firing is an opportunity to investigate, not evidence by itself. Do not invent evidence, import another trigger's criteria, or edit merely to increase the finding rate.
-- The target library shape is class-level intents with rich, maintainable Markdown sections, not a flat list of one-intent-per-session artifacts.
+- The target library shape is class-level routing definitions with strict frontmatter only; Markdown bodies are unsupported. Do not create one-intent-per-session artifacts.
 
 ### Target preference order
 - Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, fastpath, candidate, domain, or direct-skill improvements.
@@ -187,6 +187,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - guidance is a required host-owned string. Keep it concise, task-class scoped, and limited to behavior that should apply whenever this intent routes.
 - Skill dependencies belong in frontmatter skills[]. Add only exact skill names that the intent should load or strongly prefer.
 - Do not create body sections or an intent body. Keep durable tool, workflow, parameter, recovery, and pitfall lessons within the one guidance string only when they are truly intent-wide.
+- Automatic experience writes are unavailable in this release. Do not propose, create, or edit experience records.
 - If two existing intents appear to overlap, mention the overlap in the finding summary or suggestedChange so the background curator can consider larger consolidation. Do not perform broad consolidation unless the requested trigger and evidence justify a concrete class-level routing edit.
 
 ### Recordability filter
