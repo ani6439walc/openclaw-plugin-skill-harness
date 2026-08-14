@@ -7,6 +7,10 @@ const manifest = JSON.parse(
 const packageJson = JSON.parse(
   fs.readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
 );
+const readme = fs.readFileSync(
+  new URL("./README.md", import.meta.url),
+  "utf-8",
+);
 
 describe("skill-harness manifest", () => {
   it("declares skill tools without legacy command surfaces", () => {
@@ -170,6 +174,14 @@ describe("skill-harness manifest", () => {
 
   it("does not expose removed instruction writer settings", () => {
     expect(manifest.configSchema.properties).not.toHaveProperty("instruction");
+  });
+
+  it("documents the strict upgrade path for removed instruction settings", () => {
+    expect(readme).toContain("### Upgrade from the removed instruction writer");
+    expect(readme).toContain(
+      "remove the entire legacy `instruction: { ... }` block",
+    );
+    expect(readme).toContain("no automatic migration or compatibility parser");
   });
 
   it("accepts deprecated keyword seeds for strict-schema upgrades", () => {

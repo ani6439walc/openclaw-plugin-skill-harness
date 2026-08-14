@@ -138,6 +138,12 @@ Configure Skill Harness in `openclaw.json`:
 
 Topic Checker, Intent Classifier, background Curator, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
+### Upgrade from the removed instruction writer
+
+This release intentionally removes `plugins.entries.skill-harness.config.instruction`. OpenClaw validates the strict plugin config schema before the plugin runtime loads, so a retained `instruction` block prevents the upgraded plugin from loading.
+
+Before upgrading, remove the entire legacy `instruction: { ... }` block from `plugins.entries.skill-harness.config`. There is no automatic migration or compatibility parser. Do not copy its writer model, thinking, timeout, or trigger settings into `curation`: curation is a separate session-local recommendation feature with different behavior.
+
 ## Runtime intents
 
 Runtime intents live under the OpenClaw state directory. With the default local state directory:
