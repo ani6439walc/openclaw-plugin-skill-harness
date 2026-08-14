@@ -56,6 +56,8 @@ pnpm run format             # Prettier for md/json/ts files
 
 Run `pnpm run typecheck` and `pnpm run test` before handing off code changes. Run `pnpm run build` when changing package metadata, SDK imports, or anything that depends on emitted `dist/` output. The build script must remove `dist/` before `tsc`; package hygiene checks should verify `pnpm pack --dry-run` does not include stale renamed artifacts such as `dist/src/classification/embedded-agent.*` or root tooling output such as `dist/vitest.config.*`.
 
+The only root `scripts/` workflow is `verify-package.mjs`. The sealed runtime-data cutover toolchain was retired after its completed authorized application; do not treat its historical plan records or retained runtime evidence as a routine maintenance workflow. Day-to-day runtime intent changes follow the applicable validator, full test, and build rules below.
+
 ## Runtime Data Layout
 
 Keep package files and runtime data separate.
