@@ -149,6 +149,7 @@ export async function validateAndCommitCuration(params: {
   expected: SessionCurationRecord;
   proposal: CuratorProposal;
   visibleSkills: readonly AvailableSkill[];
+  directSkills: readonly AvailableSkill[];
   experienceCatalog: SkillExperienceCatalog;
   completedTurnCursor: number;
   finalizedTurns: readonly SessionState[];
@@ -223,11 +224,15 @@ export async function validateAndCommitCuration(params: {
       ambiguousVisibleIdentities.add(canonical);
     else visibleByIdentity.set(canonical, skill);
   }
+  const directIdentities = new Set(
+    params.directSkills.map((skill) => canonicalIdentity(skill.name)),
+  );
   if (
     candidates.some(
       (candidate) =>
         !visibleByIdentity.has(candidate) ||
-        ambiguousVisibleIdentities.has(candidate),
+        ambiguousVisibleIdentities.has(candidate) ||
+        !directIdentities.has(candidate),
     )
   ) {
     return finish("failed");

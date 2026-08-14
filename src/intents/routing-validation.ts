@@ -103,6 +103,7 @@ const SHELL_DIRECT_COMMANDS = new Set([
   "python",
   "python3",
   "rm",
+  "rsync",
   "sed",
   "set",
   "sh",
@@ -121,6 +122,7 @@ const PATH_PATTERN =
   /(?:^|[\s("'`])(?:\.{1,2}[\\/]|~[\\/]|[a-z]:[\\/]|\\\\|\/(?:[^\s/]+(?:\/[^\s/]+)*)?|[^\s/\\]+[\\/][^\s]+)/i;
 const SKILL_DIRECTIVE_PATTERN =
   /\b(?:use|load|read|invoke)\b[^.!?。！？\n]*\bskills?\b/i;
+const NATURAL_SENTENCE_COMMANDS = new Set(["go", "make", "set"]);
 
 export interface RoutingIntentDefinition {
   triggers: string[];
@@ -176,10 +178,15 @@ function startsWithShellCommand(value: string): boolean {
   if (SHELL_OPTION_PREFIX_PATTERN.test(value)) return true;
   const firstToken = value.trimStart().match(/^([A-Za-z0-9_.+-]+)/u)?.[1];
   if (!firstToken) return false;
+  const canonicalToken = firstToken.toLowerCase();
+  const isShellCommand =
+    SHELL_WRAPPER_COMMANDS.has(canonicalToken) ||
+    SHELL_BUILTIN_COMMANDS.has(canonicalToken) ||
+    SHELL_DIRECT_COMMANDS.has(canonicalToken);
   return (
-    SHELL_WRAPPER_COMMANDS.has(firstToken) ||
-    SHELL_BUILTIN_COMMANDS.has(firstToken) ||
-    SHELL_DIRECT_COMMANDS.has(firstToken)
+    isShellCommand &&
+    (firstToken === canonicalToken ||
+      !NATURAL_SENTENCE_COMMANDS.has(canonicalToken))
   );
 }
 

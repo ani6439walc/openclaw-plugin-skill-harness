@@ -2468,6 +2468,26 @@ export function createHookHandlers(deps: HookDeps) {
       bundledSkillsDir,
       usageStats: {},
     });
+    const matchedIntent = findIntentDefinition(catalog, expected.intentId);
+    const directSkills = matchedIntent
+      ? await resolveAvailableSkills({
+          api,
+          agentId: session.agentId,
+          bundledSkillsDir,
+          skillNames: matchedIntent.definition.skills ?? [],
+        })
+      : [];
+    if (directSkills.length === 0) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "failed",
+        now: clock().toISOString(),
+      });
+      return;
+    }
     const activeExperienceCatalog =
       experienceCatalog ?? SkillExperienceCatalog.create(deps.dataRoot);
 
@@ -2481,7 +2501,7 @@ export function createHookHandlers(deps: HookDeps) {
         dataRoot: deps.dataRoot,
         curation: expected,
         conversation: conversationTurns,
-        candidates: visibleSkills,
+        candidates: directSkills,
         experienceIdentities: expected.experienceRefs,
       });
     } catch (error) {
@@ -2506,6 +2526,7 @@ export function createHookHandlers(deps: HookDeps) {
       expected,
       proposal,
       visibleSkills,
+      directSkills,
       experienceCatalog: activeExperienceCatalog,
       completedTurnCursor: schedulingIndex + 1,
       finalizedTurns: acceptedTurns,

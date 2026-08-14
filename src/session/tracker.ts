@@ -20,7 +20,6 @@ import matter from "gray-matter";
 import { logger } from "../../api.js";
 import {
   agentSessionsPath,
-  FileLock,
   pluginRoot,
   sessionsDirPath,
   sessionsPath,
@@ -561,23 +560,8 @@ export class SessionTracker {
       try {
         if (fs.statSync(filePath).mtimeMs < cutoffMs) continue;
         const sessionData: SessionData = readJsonFile<SessionData>(filePath);
-        const migrated = migrateSessionData(sessionData);
+        migrateSessionData(sessionData);
         this.sessionData.set(sessionData.sessionId, sessionData);
-        if (migrated) {
-          const lock = new FileLock(filePath);
-          if (lock.tryAcquire()) {
-            try {
-              writeJsonAtomic(filePath, sessionData);
-            } catch (error) {
-              logger.warn("failed to migrate session file", {
-                error,
-                path: filePath,
-              });
-            } finally {
-              lock.release();
-            }
-          }
-        }
       } catch (err) {
         logger.warn("failed to load session file", {
           error: err,

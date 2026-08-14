@@ -130,6 +130,8 @@ describe("SessionTracker", () => {
         path.join(sessionsDir, "existing-session-123.json"),
         JSON.stringify(testSession),
       );
+      const filePath = path.join(sessionsDir, "existing-session-123.json");
+      const originalBytes = fs.readFileSync(filePath, "utf8");
 
       // Create new tracker - should load existing session
       const loadedTracker = SessionTracker.create(tempDir);
@@ -146,6 +148,7 @@ describe("SessionTracker", () => {
           .find((session) => session.sessionId === "existing-session-123")
           ?.current.intent,
       ).not.toHaveProperty(removedLegacyField);
+      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
     it("excludes expired on-disk sessions from retained snapshots after restart", () => {
@@ -171,7 +174,7 @@ describe("SessionTracker", () => {
       ).not.toContain("expired");
     });
 
-    it("migrates legacy topic metadata and missing domain on load", () => {
+    it("migrates legacy topic metadata and missing domain in memory on load", () => {
       const sessionsDir = path.join(tempDir, "sessions");
       fs.mkdirSync(sessionsDir, { recursive: true });
       const filePath = path.join(sessionsDir, "legacy-topic.json");
@@ -209,8 +212,8 @@ describe("SessionTracker", () => {
         }),
       );
 
+      const originalBytes = fs.readFileSync(filePath, "utf8");
       const loadedTracker = SessionTracker.create(tempDir);
-      const migrated = JSON.parse(fs.readFileSync(filePath, "utf-8"));
 
       expect(loadedTracker.getHistoricalIntentRecords("legacy-topic")).toEqual([
         expect.objectContaining({
@@ -225,17 +228,7 @@ describe("SessionTracker", () => {
           topicChangeReason: "change",
         }),
       ]);
-      expect(migrated.history[0].intent.result).not.toHaveProperty(
-        "topicChanged",
-      );
-      expect(migrated.history[0].intent.result).not.toHaveProperty(
-        "topicChangeReason",
-      );
-      expect(migrated.current.intent.result).not.toHaveProperty("topicChanged");
-      expect(migrated.current.intent.result).toMatchObject({
-        domain: "other",
-        topicChangeReason: "change",
-      });
+      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
     it("does not overwrite a locked legacy session while loading its in-memory migration", () => {
@@ -278,7 +271,7 @@ describe("SessionTracker", () => {
       }
     });
 
-    it("migrates legacy topic reason names to short names", () => {
+    it("migrates legacy topic reason names to short names in memory", () => {
       const sessionsDir = path.join(tempDir, "sessions");
       fs.mkdirSync(sessionsDir, { recursive: true });
       const filePath = path.join(sessionsDir, "legacy-reasons.json");
@@ -302,15 +295,13 @@ describe("SessionTracker", () => {
         }),
       );
 
+      const originalBytes = fs.readFileSync(filePath, "utf8");
       const loadedTracker = SessionTracker.create(tempDir);
-      const migrated = JSON.parse(fs.readFileSync(filePath, "utf-8"));
 
       expect(
         loadedTracker.getHistoricalIntentRecords("legacy-reasons"),
       ).toEqual([expect.objectContaining({ topicChangeReason: "shift" })]);
-      expect(migrated.current.intent.result).toMatchObject({
-        topicChangeReason: "shift",
-      });
+      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
     it("should skip corrupted JSON files and log warning", () => {

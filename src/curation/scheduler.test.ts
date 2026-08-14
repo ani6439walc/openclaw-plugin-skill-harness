@@ -383,10 +383,22 @@ describe("validateAndCommitCuration", () => {
   >[0];
 
   function validateAndCommitCuration(
-    params: Omit<ValidationParams, "finalizedTurns" | "acceptedEventIds"> &
-      Partial<Pick<ValidationParams, "finalizedTurns" | "acceptedEventIds">>,
+    params: Omit<
+      ValidationParams,
+      "directSkills" | "finalizedTurns" | "acceptedEventIds"
+    > &
+      Partial<
+        Pick<
+          ValidationParams,
+          "directSkills" | "finalizedTurns" | "acceptedEventIds"
+        >
+      >,
   ) {
-    return validateAndCommitCurationProduction({ ...evidence(), ...params });
+    return validateAndCommitCurationProduction({
+      ...evidence(),
+      directSkills: visibleSkills,
+      ...params,
+    });
   }
 
   it("canonicalizes visible candidates and derives host-owned provenance before CAS", async () => {
@@ -421,6 +433,30 @@ describe("validateAndCommitCuration", () => {
       now: "2026-08-13T00:02:00.000Z",
     });
     expect(finish).not.toHaveBeenCalled();
+  });
+
+  it("rejects a visible candidate that is not a direct skill of the matched intent", async () => {
+    const { commit, finish } = deps();
+
+    await expect(
+      validateAndCommitCuration({
+        schedule: reservation,
+        expected,
+        proposal,
+        visibleSkills,
+        directSkills: visibleSkills.slice(0, 2),
+        experienceCatalog: experienceCatalog(),
+        completedTurnCursor: 3,
+        now: "2026-08-13T00:02:00.000Z",
+        commit,
+        finish,
+      }),
+    ).resolves.toMatchObject({ status: "stale" });
+
+    expect(commit).not.toHaveBeenCalled();
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "failed" }),
+    );
   });
 
   it("rejects a completed cursor that does not identify the accepted scheduling turn", async () => {
