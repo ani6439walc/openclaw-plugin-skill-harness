@@ -56,7 +56,7 @@ export type ResolvedReviewConfig = {
   };
 };
 
-export type InstructionConfig = {
+export type CurationConfig = {
   enabled?: boolean;
   model?: string;
   modelFallback?: string;
@@ -64,12 +64,11 @@ export type InstructionConfig = {
   timeoutMs?: number;
 };
 
-export type ResolvedInstructionConfig = {
-  enabled: boolean;
-  model: string | undefined;
-  modelFallback: string | undefined;
-  thinking: ThinkLevel;
-  timeoutMs: number;
+export type ResolvedCurationConfig = Required<
+  Pick<CurationConfig, "enabled" | "thinking" | "timeoutMs">
+> & {
+  model?: string;
+  modelFallback?: string;
 };
 
 export type SkillHarnessPluginConfig = {
@@ -85,7 +84,7 @@ export type SkillHarnessPluginConfig = {
   queryMode?: string;
   contextWindow?: ContextWindow;
   timeoutMs?: number;
-  instruction?: InstructionConfig;
+  curation?: CurationConfig;
   review?: ReviewConfig;
 };
 
@@ -102,7 +101,7 @@ export type ResolvedSkillHarnessPluginConfig = {
   queryMode: "message" | "recent" | "full";
   contextWindow: ContextWindow;
   timeoutMs: number;
-  instruction: ResolvedInstructionConfig;
+  curation: ResolvedCurationConfig;
   review: ResolvedReviewConfig;
 };
 
@@ -117,9 +116,8 @@ export type IntentDefinition = {
   };
   fastpath: {
     keywords: string[];
-    hint?: string;
   };
-  prompt: string;
+  guidance: string;
 };
 
 export type IntentCatalogEntry = {

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import matter from "gray-matter";
 import { z } from "zod";
 import type { OpenClawPluginApi } from "../../api.js";
@@ -32,7 +33,7 @@ import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
 } from "../subagent-runtime.js";
-import { agentSessionsPath } from "../file-utils.js";
+import { agentSessionsPath, withFileLock } from "../file-utils.js";
 import { extractPayloadText } from "../classification/index.js";
 
 export interface ReviewSubagentResult {
@@ -67,38 +68,38 @@ const REVIEW_INSTRUCTIONS: Record<
 > = {
   "skill-candidate": {
     focus:
-      "Identify reusable skills, tools, execution sequences, tool-call compression tactics, tips, parameters, and pitfalls that the matched intent Markdown or an existing catalog intent should preserve. When concrete skill usage, required ordering, recovery, a tool-specific pitfall, or a safe way to reduce future tool calls exists, prefer a small direct Experience or Concrete Workflow edit over no_finding. Exclude one-off tool usage and capabilities outside durable intent boundaries.",
-    goal: "Refine the matched intent Markdown's frontmatter skills, Concrete Workflow, or Experience when the sequence or lesson is stable.",
+      "Identify reusable skills, tools, execution sequences, tool-call compression tactics, tips, parameters, and pitfalls that the matched intent's host-owned routing metadata or guidance should preserve. Exclude one-off tool usage and capabilities outside durable intent boundaries.",
+    goal: "Refine the matched intent's frontmatter skills, routing metadata, or guidance when the sequence or lesson is stable.",
     workflow:
-      "skill-candidate: first look for the smallest reusable Experience or Concrete Workflow refinement: concrete skill/tool evidence, stable parameters, recovery, pitfalls, required ordering, or tool-call compression. When the trigger came from many tool calls, explicitly check whether future turns could use batched reads, one-purpose scripts, safe pipelines, reusable command templates, or a more specific skill to reduce repeated calls. Prefer refining the matched intent; if it is the wrong boundary, use the Intent Catalog to choose an existing umbrella intent to refine before returning outside-intent-scope. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
+      "skill-candidate: first look for the smallest reusable guidance or routing-metadata refinement: concrete skill/tool evidence, stable parameters, recovery, pitfalls, required ordering, or tool-call compression. When the trigger came from many tool calls, explicitly check whether future turns could use batched reads, one-purpose scripts, safe pipelines, reusable command templates, or a more specific skill to reduce repeated calls. Prefer refining the matched intent; if it is the wrong boundary, use the Intent Catalog to choose an existing umbrella intent to refine before returning outside-intent-scope. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
   },
   "skill-placement": {
     focus:
       "Review one host-selected resolved skill from skill_placement_candidate and decide whether one existing class-level runtime intent should reference it. Use the complete Intent Catalog skills metadata to avoid duplicate or weak placement.",
     goal: "Place the selected skill in exactly one best-fit runtime intent, or return no_finding when its existing placement is already adequate or no durable intent boundary fits.",
     workflow:
-      "skill-placement: treat skill_placement_candidate as the only target skill. Inspect only the selected skill with skill_view; do not inspect unrelated skills. Choose exactly one existing best-fit class-level intent from the full Intent Catalog. A positive finding must use operation=refine, exactly one targetIntentId, and a direct edit to that runtime intent Markdown. Add or preserve the exact selected skill name in frontmatter skills and add only the minimum durable workflow or Experience guidance needed to explain when it applies. Do not create, split, merge, rename, or delete intents; do not edit the skill itself, source code, config, or state JSON. Return no_finding when the selected skill is already adequately placed, is transient or too narrow, or has no suitable durable intent boundary.",
+      "skill-placement: treat skill_placement_candidate and host-provided selected_placement_skill as the only target skill evidence; do not inspect unrelated skills. Choose exactly one existing best-fit class-level intent from the full Intent Catalog. A positive finding must use operation=refine, exactly one targetIntentId, and a direct edit to that runtime intent Markdown. Add or preserve the exact selected skill name in frontmatter skills and add only the minimum durable guidance needed to explain when it applies. Do not create, split, merge, rename, or delete intents; do not edit the skill itself, source code, config, or state JSON. Return no_finding when the selected skill is already adequately placed, is transient or too narrow, or has no suitable durable intent boundary.",
   },
   "process-gap": {
     focus:
-      "Trace the failed execution and recovery path, then identify which missing intent guideline, tool call example, workflow step, or Experience pitfall would have prevented the gap.",
-    goal: "Refine the matched intent Markdown's Guidelines, frontmatter skills, Concrete Workflow, or Experience so future runs follow the successful path.",
+      "Trace the failed execution and recovery path, then identify which missing intent guidance, routing metadata, tool call example, workflow step, or pitfall would have prevented the gap.",
+    goal: "Refine the matched intent Markdown's guidance, routing metadata, or frontmatter skills so future runs follow the successful path.",
     workflow:
       "process-gap: reconstruct the failed path and successful recovery; preserve only the missing step, guard, parameter, or pitfall that would have prevented recurrence.",
   },
   "successful-pattern": {
     focus:
       "Identify reusable workflow, multi-step tool sequence, skill usage, parameters, recovery path, and pitfalls from a completed successful turn. Keep a high bar: routine completion without reusable ordering, parameters, or recovery remains no_finding. Do not write outside runtime intent Markdown.",
-    goal: "Refine the matched intent Markdown's Experience, Concrete Workflow, or Response Strategy so future runs preserve the successful pattern without interrupting the user.",
+    goal: "Refine the matched intent Markdown's guidance or routing metadata so future runs preserve the successful pattern without interrupting the user.",
     workflow:
       "successful-pattern: stay precision-biased; routine success is no_finding unless there is reusable ordering, parameters, recovery, or pitfalls that future turns would otherwise miss. Also check whether the turn exposes a trigger keyword gap; suggest only stable phrases that clearly mean completed successful work.",
   },
   "satisfaction-check": {
     focus:
-      "Inspect recent turns for dissatisfaction, repeated requests, style/format complaints, verbosity complaints, workflow corrections, or routing corrections that reveal an intent boundary, body guidance, style, format, verbosity, workflow, or response-strategy problem. Return no_finding without evidence.",
-    goal: "Refine the relevant intent Markdown's boundary, examples, Guidelines, or Response Strategy; recommend split or merge only when evidence shows a collision.",
+      "Inspect recent turns for dissatisfaction, repeated requests, style/format complaints, verbosity complaints, workflow corrections, or routing corrections that reveal an intent boundary, guidance, style, format, verbosity, or workflow problem. Return no_finding without evidence.",
+    goal: "Refine the relevant intent Markdown's routing metadata or guidance; recommend split or merge only when evidence shows a collision.",
     workflow:
-      "satisfaction-check: map dissatisfaction to the smallest boundary, body guidance, style, format, verbosity, workflow, or Response Strategy correction; user corrections to style, tone, format, verbosity, workflow, or step order are first-class behavior signals when grounded in snapshot evidence. Preserve a task-class scoped preference in Response Strategy, Concrete Workflow, or Experience rather than as a global personality note. Prefer refine; split or merge only with concrete collision evidence.",
+      "satisfaction-check: map dissatisfaction to the smallest boundary, guidance, style, format, verbosity, or workflow correction; user corrections to style, tone, format, verbosity, workflow, or step order are first-class behavior signals when grounded in snapshot evidence. Preserve a task-class scoped preference in guidance rather than as a global personality note. Prefer refine; split or merge only with concrete collision evidence.",
   },
   "missing-intent": {
     focus:
@@ -110,21 +111,21 @@ const REVIEW_INSTRUCTIONS: Record<
   "weak-intent": {
     focus:
       "Explain the classification ambiguity, likely matched intent, neighboring collision, and missing or misleading trigger/example/domain/fastpath/candidate coverage.",
-    goal: "Refine the matched intent Markdown frontmatter triggers/examples/domain/fastpath/candidate metadata and clarify its boundary without adding classification prose to the body.",
+    goal: "Refine the matched intent Markdown frontmatter triggers/examples/domain/fastpath/candidate metadata and clarify its boundary without adding unrelated guidance.",
     workflow:
-      "weak-intent: focus on frontmatter triggers, examples, domain, fastpath, candidate metadata, and boundary clarity; prefer refine and do not add execution body prose for classification-only ambiguity. Use split or merge only when concrete neighboring-collision evidence proves refinement cannot preserve a clear class-level boundary.",
+      "weak-intent: focus on frontmatter triggers, examples, domain, fastpath, candidate metadata, and boundary clarity; prefer refine and do not change guidance for classification-only ambiguity. Use split or merge only when concrete neighboring-collision evidence proves refinement cannot preserve a clear class-level boundary.",
   },
   "behavior-fix": {
     focus:
-      "Compare the user correction with the matched intent's routed behavior and identify the specific Markdown instruction, domain, or fastpath hint/keyword that caused, allowed, or failed to prevent the mistake. Treat style, tone, format, verbosity, workflow, or step-order correction as first-class behavior evidence when concrete. When the snapshot shows an explicit user correction, misroute, or wrong tool/no-tool behavior with concrete evidence, prefer a narrow finding over no_finding.",
-    goal: "Refine the matched intent Markdown's domain, fastpath metadata, frontmatter skills, Guidelines, Response Strategy, Concrete Workflow, or Experience to encode the corrected behavior.",
+      "Compare the user correction with the matched intent's routed behavior and identify the specific host-owned guidance, domain, fastpath keyword, or skill metadata that caused, allowed, or failed to prevent the mistake. Treat style, tone, format, verbosity, workflow, or step-order correction as first-class behavior evidence when concrete. When the snapshot shows an explicit user correction, misroute, or wrong tool/no-tool behavior with concrete evidence, prefer a narrow finding over no_finding.",
+    goal: "Refine the matched intent Markdown's domain, fastpath metadata, frontmatter skills, or guidance to encode the corrected behavior.",
     workflow:
-      "behavior-fix: if the snapshot contains an explicit user correction, style/tone/format/verbosity/workflow/step-order correction, concrete misroute, or wrong tool/no-tool behavior, prefer a narrow finding over no_finding; encode the smallest correction that would prevent recurrence. Preserve a task-class scoped behavior preference in Response Strategy, Concrete Workflow, or Experience rather than as a global personality note. Prefer refine; use split or merge only with concrete boundary-collision evidence. Also check whether the turn exposes a trigger keyword gap; suggest only stable phrases that clearly mean agent/routing correction.",
+      "behavior-fix: if the snapshot contains an explicit user correction, style/tone/format/verbosity/workflow/step-order correction, concrete misroute, or wrong tool/no-tool behavior, prefer a narrow finding over no_finding; encode the smallest correction that would prevent recurrence. Preserve a task-class scoped behavior preference in guidance rather than as a global personality note. Prefer refine; use split or merge only with concrete boundary-collision evidence. Also check whether the turn exposes a trigger keyword gap; suggest only stable phrases that clearly mean agent/routing correction.",
   },
   "entity-context": {
     focus:
       "Review explicit entity/context lookup learning. Only consider TOOLS.md, MEMORY.md, or paths containing memory when they are mentioned in the snapshot text or sanitized read/search tool params. Do not infer from entity-like tokens or domain words alone.",
-    goal: "Refine the matched intent Markdown's Experience or Concrete Workflow with a reusable context lookup habit, or report triggerKeywords.entityContext phrase updates for immediate logging, without copying raw private memory.",
+    goal: "Refine the matched intent Markdown's guidance with a reusable context lookup habit, or report triggerKeywords.entityContext phrase updates for immediate logging, without copying raw private memory.",
     workflow:
       "entity-context: stay bounded to explicit TOOLS.md, MEMORY.md, or memory-path signals and never copy raw private memory; apply only reusable lookup habits or report triggerKeywords.entityContext phrases. Entity-context reviews are limited to reusable lookup habits grounded in explicit candidate sources; if the source is absent, missing, or does not support a reusable habit, return no_finding. Also check whether the turn exposes a trigger keyword gap; suggest only stable phrases that clearly mean explicit entity/context lookup learning.",
   },
@@ -167,36 +168,32 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - Once those gates pass, prefer applying the smallest valid correction over returning hasFinding=false.
 - In that evidence-qualified case, hasFinding=false is a high bar: use it only when the apparent lesson is already covered, transient, privacy-sensitive, outside the intent boundary, or cannot support a concrete valid change.
 - A trigger firing is an opportunity to investigate, not evidence by itself. Do not invent evidence, import another trigger's criteria, or edit merely to increase the finding rate.
-- The target library shape is class-level intents with rich, maintainable Markdown sections, not a flat list of one-intent-per-session artifacts.
+- The target library shape is class-level routing definitions with strict frontmatter only; Markdown bodies are unsupported. Do not create one-intent-per-session artifacts.
 
 ### Target preference order
-- Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small preference, workflow, trigger, fastpath, Response Strategy, Concrete Workflow, or Experience improvements.
+- Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, fastpath, candidate, domain, or direct-skill improvements.
 - If the matched intent is absent or clearly wrong, prefer updating an existing class-level/umbrella intent from the Intent Catalog when catalog context is available and one intent already covers the broader task class.
 - Use only operations justified by the requested trigger's workflow. Prefer refine; create, split, or merge only when that trigger's concrete evidence establishes the corresponding class-level boundary change.
-- Do not create support files or propose references/templates/scripts. Preserve conversation-specific but reusable details directly inside the relevant intent Markdown, usually as concise Experience bullets, Concrete Workflow steps, or Response Strategy rules.
+- Do not create support files or propose references/templates/scripts. Preserve conversation-specific but reusable details only as concise routing metadata or guidance changes in the relevant intent Markdown.
 
 ### Intent shape and boundaries
 - Prefer the smallest maintainable boundary and the least disruptive operation allowed by the requested trigger workflow.
 - Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional fastpath metadata, optional candidate metadata, and optional skills[].
 - Triggers describe the user goal and boundary; examples are realistic user messages; domain is the broad routing bucket.
-- fastpath.keywords are exact/similarity routing phrases. fastpath.hint is a short injected A1 hint for safe exact matches. Add or change fastpath only when evidence shows a stable short phrase or a fastpath misroute.
+- fastpath.keywords are exact/similarity routing phrases. Add or change them only when evidence shows a stable short phrase or a fastpath misroute.
 - candidate.scope="cross-flow" keeps a durable domain-independent intent in conservative classifier projections. Add it only when the intent must remain available across unrelated domains.
 - candidate.keywords are manual exact projection evidence, not fastpaths or body guidance. Do not infer candidate.keywords from one review snapshot; require telemetry or labeled evidence plus positive-match and collision fixtures.
 - Do not create one-session intent boundaries; prefer the smallest durable class-level boundary that can help future turns.
-- Never mention another intent name or id inside an intent body. Express scope boundaries through frontmatter triggers, examples, domain, and fastpath.
-
-### Body sections and execution guidance
-- The body guides execution and must use this order: ## Guidelines, ## Response Strategy, then optional ## Concrete Workflow, then optional ## Experience.
+### Routing metadata and guidance
+- guidance is a required host-owned string. Keep it concise, task-class scoped, and limited to behavior that should apply whenever this intent routes.
 - Skill dependencies belong in frontmatter skills[]. Add only exact skill names that the intent should load or strongly prefer.
-- Do not create a ## Skills & Tools section. Migrate legacy skill lists into frontmatter skills[] and preserve durable guidance in Experience.
-- Put concrete tool call shapes in workflow steps; do not use vague tool prose.
-- Include Concrete Workflow for multi-step or sequence-sensitive intents. Use short numbered "### Step N — <name>" sections.
-- Use Experience for reusable tips, parameters, pitfalls, stable skill/tool lessons, and recovery notes that help future turns with the same intent.
-- If two existing intents appear to overlap, mention the overlap in the finding summary or suggestedChange so the background curator can consider larger consolidation. Do not perform broad consolidation unless the requested trigger and evidence justify a concrete class-level intent edit.
+- Do not create body sections or an intent body. Keep durable tool, workflow, parameter, recovery, and pitfall lessons within the one guidance string only when they are truly intent-wide.
+- Automatic experience writes are unavailable in this release. Do not propose, create, or edit experience records.
+- If two existing intents appear to overlap, mention the overlap in the finding summary or suggestedChange so the background curator can consider larger consolidation. Do not perform broad consolidation unless the requested trigger and evidence justify a concrete class-level routing edit.
 
 ### Recordability filter
 - The core question is whether the lesson will save future time.
-- A lesson is recordable only when the requested trigger's own criteria establish a concrete, reusable lesson and a direct improvement to an allowed target in the matched intent's frontmatter, Guidelines, Response Strategy, Concrete Workflow, or Experience.
+- A lesson is recordable only when the requested trigger's own criteria establish a concrete, reusable lesson and a direct improvement to allowed routing metadata or guidance in the matched intent.
 - One-off Q&A, pure conceptual explanations, general knowledge, and session narratives are not recordable without that trigger-specific qualification.
 - Never capture transient environment state as a durable restriction: missing binaries, fresh-install errors, post-migration path mismatches, "command not found", unconfigured credentials, or uninstalled packages are not persistent limitations.
 - Never capture negative claims about tools or features such as "browser tool does not work", "X tool is broken", or "cannot use Y from execute_code". Those claims harden into future refusal reasons after the actual issue is fixed.
@@ -223,8 +220,8 @@ function buildIntentCraftRubric(includeTriggerKeywordRules: boolean): string {
 - For trigger keyword updates, reject generic words like "ok", "好", "不要", and one-off wording. Suggest removals only with concrete false-positive evidence.`
     : "";
   const noFindingRule = includeTriggerKeywordRules
-    ? "- After the requested trigger passes its evidence, durability, scope, and coverage gates, prefer the smallest valid Experience, Response Strategy, Concrete Workflow, frontmatter, or trigger keyword correction. Return no finding only when no valid in-scope correction remains."
-    : "- After the requested trigger passes its evidence, durability, scope, and coverage gates, prefer the smallest valid Experience, Response Strategy, Concrete Workflow, or frontmatter correction. Return no finding only when no valid in-scope correction remains.";
+    ? "- After the requested trigger passes its evidence, durability, scope, and coverage gates, prefer the smallest valid guidance, routing-metadata, or trigger keyword correction. Return no finding only when no valid in-scope correction remains."
+    : "- After the requested trigger passes its evidence, durability, scope, and coverage gates, prefer the smallest valid guidance or routing-metadata correction. Return no finding only when no valid in-scope correction remains.";
 
   return INTENT_CRAFT_RUBRIC_BASE.replace(
     INTENT_CRAFT_RUBRIC_TARGET_RULES_MARKER,
@@ -684,8 +681,8 @@ Important reminders for tool use:
 function buildReviewToolsAllow(triggers: readonly ReviewTrigger[]): string[] {
   const tools = ["read", "write", "apply_patch"];
   if (
-    triggers.includes("skill-candidate") ||
-    triggers.includes("skill-placement")
+    triggers.includes("skill-candidate") &&
+    !triggers.includes("skill-placement")
   ) {
     tools.push("skill_view");
   }
@@ -1070,7 +1067,49 @@ function concurrentIntentConflicts(
     .sort((a, b) => a.localeCompare(b));
 }
 
+function placementFrontmatter(content: string): Record<string, unknown> {
+  const data: unknown = matter(content).data;
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return {};
+  }
+  return data as Record<string, unknown>;
+}
+
+function placementSkills(value: unknown): string[] | undefined {
+  return Array.isArray(value) &&
+    value.every((skill) => typeof skill === "string")
+    ? value
+    : undefined;
+}
+
+function placementMetadata(
+  frontmatter: Record<string, unknown>,
+): Record<string, unknown> {
+  const { guidance: _guidance, skills: _skills, ...metadata } = frontmatter;
+  return metadata;
+}
+
+function hasAllowedPlacementSkills(
+  beforeSkills: readonly string[],
+  afterSkills: readonly string[],
+  candidateName: string,
+): boolean {
+  const canonicalCandidateName = candidateName.trim().toLowerCase();
+  const candidateWasPresent = beforeSkills.some(
+    (skill) => skill.trim().toLowerCase() === canonicalCandidateName,
+  );
+  if (candidateWasPresent) {
+    return isDeepStrictEqual(afterSkills, beforeSkills);
+  }
+  return (
+    afterSkills.length === beforeSkills.length + 1 &&
+    beforeSkills.every((skill, index) => afterSkills[index] === skill) &&
+    afterSkills.at(-1) === candidateName
+  );
+}
+
 function validateSkillPlacementChanges(params: {
+  before: ReadonlyMap<string, string>;
   snapshot: ReviewSnapshot;
   findings: readonly ReviewFinding[];
   after: ReadonlyMap<string, string>;
@@ -1102,24 +1141,40 @@ function validateSkillPlacementChanges(params: {
   }
 
   const targetIntentId = finding.targetIntentIds[0]!;
-  const content = params.after.get(`${targetIntentId}.md`);
-  if (content === undefined) {
+  const file = `${targetIntentId}.md`;
+  const beforeContent = params.before.get(file);
+  const afterContent = params.after.get(file);
+  if (beforeContent === undefined || afterContent === undefined) {
     return [
       `skill-placement target ${targetIntentId} must remain an intent file`,
     ];
   }
-  const skills = matter(content).data.skills;
-  const candidateName = candidate.name.trim().toLowerCase();
+  const beforeFrontmatter = placementFrontmatter(beforeContent);
+  const afterFrontmatter = placementFrontmatter(afterContent);
   if (
-    !Array.isArray(skills) ||
-    !skills.some(
-      (skill) =>
-        typeof skill === "string" &&
-        skill.trim().toLowerCase() === candidateName,
+    !isDeepStrictEqual(
+      placementMetadata(beforeFrontmatter),
+      placementMetadata(afterFrontmatter),
     )
   ) {
     return [
+      "skill-placement must not change routing metadata outside skills or guidance",
+    ];
+  }
+  const beforeSkills = placementSkills(beforeFrontmatter.skills) ?? [];
+  const afterSkills = placementSkills(afterFrontmatter.skills);
+  const candidateName = candidate.name.trim().toLowerCase();
+  if (
+    !afterSkills ||
+    !afterSkills.some((skill) => skill.trim().toLowerCase() === candidateName)
+  ) {
+    return [
       `skill-placement target ${targetIntentId} does not reference selected skill ${candidate.name}`,
+    ];
+  }
+  if (!hasAllowedPlacementSkills(beforeSkills, afterSkills, candidate.name)) {
+    return [
+      `skill-placement target ${targetIntentId} must preserve existing skills and add only selected skill ${candidate.name}`,
     ];
   }
   return [];
@@ -1435,6 +1490,7 @@ export async function runReviewSubagent(params: {
       }
     }
     const skillPlacementErrors = validateSkillPlacementChanges({
+      before: beforeIntentFiles,
       snapshot: params.snapshot,
       findings,
       after: afterIntentFiles,
@@ -1446,30 +1502,44 @@ export async function runReviewSubagent(params: {
         validationErrors: skillPlacementErrors,
       };
     }
-    const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
-    const conflictIds = concurrentIntentConflicts(
-      beforeIntentFiles,
-      liveIntentFiles,
-      changedIds,
+    const applyConflicts = await withFileLock(
+      params.intentDirectory,
+      async () => {
+        const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
+        const conflictIds = concurrentIntentConflicts(
+          beforeIntentFiles,
+          liveIntentFiles,
+          changedIds,
+        );
+        if (conflictIds.length > 0) return conflictIds;
+        applyIntentWorkspaceChanges({
+          intentDirectory: params.intentDirectory,
+          before: beforeIntentFiles,
+          after: afterIntentFiles,
+          changedIds,
+        });
+        return [];
+      },
     );
-    if (conflictIds.length > 0) {
+    if (applyConflicts === undefined) {
+      return {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: ["could not acquire runtime intent apply lock"],
+      };
+    }
+    if (applyConflicts.length > 0) {
       logger.warn("review skipped concurrent runtime intent edits", {
-        conflictIntentIds: conflictIds,
+        conflictIntentIds: applyConflicts,
       });
       return {
         findings: [],
         outcome: "validation-failed",
         validationErrors: [
-          `runtime intent files changed during review: ${conflictIds.join(", ")}`,
+          `runtime intent files changed during review: ${applyConflicts.join(", ")}`,
         ],
       };
     }
-    applyIntentWorkspaceChanges({
-      intentDirectory: params.intentDirectory,
-      before: beforeIntentFiles,
-      after: afterIntentFiles,
-      changedIds,
-    });
     return {
       findings,
       ...(changedIds.length > 0 ? { changedIntentIds: changedIds } : {}),

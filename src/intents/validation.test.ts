@@ -20,41 +20,42 @@ examples:
   - "example"
 domain: "test"
 fastpath:
-  hint: "Use a tiny direct hint."
   keywords:
     - "hi"
+guidance: "Handle the test request."
 ---
-## Guidelines
-- Do it.
-
-## Response Strategy
-- Respond.
 `;
 
-  it("accepts valid intents and requested targets", () => {
+  it("accepts guidance-only intents and requested targets", () => {
     fs.writeFileSync(path.join(dir, "one.md"), valid());
+
     expect(validateIntentDirectory(dir, ["one"])).toMatchObject({
       valid: true,
       errors: [],
     });
   });
 
-  it("accepts optional Experience after Concrete Workflow", () => {
+  it("rejects non-empty Markdown bodies, including obsolete sections", () => {
     fs.writeFileSync(
       path.join(dir, "one.md"),
       `${valid()}
+## Guidelines
+- Do it.
+
 ## Concrete Workflow
 - Step.
 
 ## Experience
 - Tip.
+
+## Skills & Tools
+- skill-lifecycle
 `,
     );
 
-    expect(validateIntentDirectory(dir)).toMatchObject({
-      valid: true,
-      errors: [],
-    });
+    const result = validateIntentDirectory(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("one.md: Markdown body must be empty");
   });
 
   it("accepts non-empty skill dependencies only in frontmatter", () => {
@@ -119,25 +120,21 @@ fastpath:
 
     const result = validateIntentDirectory(dir);
     expect(result.valid).toBe(false);
-    expect(result.errors.join("\n")).toContain(
+    expect(result.errors).toContain(
       "bad-scope.md: candidate.scope must be cross-flow when provided",
     );
-    expect(result.errors.join("\n")).toContain(
-      "bad-keywords.md: candidate.keywords must contain only non-empty strings",
+    expect(result.errors).toContain(
+      "bad-keywords.md: candidate.keywords must be an array containing only non-empty strings",
     );
-    expect(result.errors.join("\n")).toContain(
+    expect(result.errors).toContain(
       "unknown-field.md: candidate contains unsupported field weight",
     );
-    expect(result.errors.join("\n")).toContain(
+    expect(result.errors).toContain(
       "not-object.md: candidate must be an object",
     );
   });
 
-  it("rejects legacy Skills & Tools sections and invalid skills metadata", () => {
-    fs.writeFileSync(
-      path.join(dir, "legacy.md"),
-      `${valid()}\n## Skills & Tools\n- skill-lifecycle\n  - skill: skill-lifecycle\n`,
-    );
+  it("rejects invalid skills metadata", () => {
     fs.writeFileSync(
       path.join(dir, "invalid-skills.md"),
       valid().replace(
@@ -148,181 +145,120 @@ fastpath:
 
     const result = validateIntentDirectory(dir);
     expect(result.valid).toBe(false);
-    expect(result.errors.join("\n")).toContain(
-      "legacy.md: legacy ## Skills & Tools section is not allowed; move skill dependencies to frontmatter skills",
-    );
-    expect(result.errors.join("\n")).toContain(
-      "invalid-skills.md: skills must contain only non-empty strings",
+    expect(result.errors).toContain(
+      "invalid-skills.md: skills must be an array containing only non-empty strings",
     );
   });
 
-  it("rejects duplicate Experience sections and bad section order", () => {
+  it("rejects unsupported top-level frontmatter fields", () => {
     fs.writeFileSync(
       path.join(dir, "one.md"),
-      `${valid()}
-## Experience
-- Tip.
-
-## Concrete Workflow
-- Step.
-
-## Experience
-- Duplicate.
-`,
+      valid().replace(
+        "triggers:",
+        'id: one\nname: One\nenabled: true\nkeywords: ["hi"]\ntriggers:',
+      ),
     );
 
     const result = validateIntentDirectory(dir);
     expect(result.valid).toBe(false);
-    expect(result.errors.join("\n")).toContain(
-      "duplicate ## Experience section",
+    expect(result.errors).toContain("one.md: unsupported top-level field id");
+    expect(result.errors).toContain("one.md: unsupported top-level field name");
+    expect(result.errors).toContain(
+      "one.md: unsupported top-level field enabled",
     );
-    expect(result.errors.join("\n")).toContain(
-      "standard sections are out of order",
+    expect(result.errors).toContain(
+      "one.md: unsupported top-level field keywords",
     );
   });
 
-  it("rejects stale frontmatter fields", () => {
+  it("rejects unsupported fastpath hints and invalid fastpath fields", () => {
     fs.writeFileSync(
       path.join(dir, "one.md"),
-      `---
-id: ONE
-name: One
-enabled: true
-triggers: ["trigger"]
-examples: ["example"]
-domain: "test"
-keywords: ["hi"]
----
-## Guidelines
-- Do it.
-
-## Response Strategy
-- Respond.
-`,
+      valid().replace(
+        'fastpath:\n  keywords:\n    - "hi"',
+        'fastpath:\n  hint: "Use a tiny direct hint."\n  keywords:\n    - ""\n    - 123\n  mode: direct',
+      ),
     );
 
     const result = validateIntentDirectory(dir);
     expect(result.valid).toBe(false);
-    expect(result.errors.join("\n")).toContain(
-      "one.md: stale frontmatter field id",
+    expect(result.errors).toContain("one.md: fastpath.hint is not supported");
+    expect(result.errors).toContain(
+      "one.md: fastpath.keywords must be an array containing only non-empty strings",
     );
-    expect(result.errors.join("\n")).toContain(
-      "one.md: stale frontmatter field name",
-    );
-    expect(result.errors.join("\n")).toContain(
-      "one.md: stale frontmatter field enabled",
-    );
-    expect(result.errors.join("\n")).toContain(
-      "one.md: stale frontmatter field keywords",
-    );
-  });
-
-  it("rejects invalid fastpath metadata", () => {
-    fs.writeFileSync(
-      path.join(dir, "one.md"),
-      `---
-triggers: ["trigger"]
-examples: ["example"]
-domain: "test"
-fastpath:
-  hint: ""
-  keywords:
-    - "hi"
-    - ""
-    - 123
----
-## Guidelines
-- Do it.
-
-## Response Strategy
-- Respond.
-`,
-    );
-
-    const result = validateIntentDirectory(dir);
-    expect(result.valid).toBe(false);
-    expect(result.errors.join("\n")).toContain(
-      "one.md: fastpath.keywords must contain only non-empty strings",
-    );
-    expect(result.errors.join("\n")).toContain(
-      "one.md: fastpath.hint must be a non-empty string",
+    expect(result.errors).toContain(
+      "one.md: fastpath contains unsupported field mode",
     );
   });
 
   it("rejects missing, non-string, or empty domain", () => {
     fs.writeFileSync(
       path.join(dir, "missing.md"),
-      `---
-triggers: ["trigger"]
-examples: ["example"]
----
-## Guidelines
-- Do it.
-
-## Response Strategy
-- Respond.
-`,
+      valid().replace('domain: "test"\n', ""),
     );
     fs.writeFileSync(
       path.join(dir, "invalid.md"),
-      `---
-triggers: ["trigger"]
-examples: ["example"]
-domain: 123
----
-## Guidelines
-- Do it.
-
-## Response Strategy
-- Respond.
-`,
+      valid().replace('domain: "test"', "domain: 123"),
     );
     fs.writeFileSync(
       path.join(dir, "empty.md"),
-      `---
-triggers: ["trigger"]
-examples: ["example"]
-domain: ""
----
-## Guidelines
-- Do it.
-
-## Response Strategy
-- Respond.
-`,
+      valid().replace('domain: "test"', 'domain: ""'),
     );
 
     const result = validateIntentDirectory(dir);
     expect(result.valid).toBe(false);
-    expect(result.errors.join("\n")).toContain(
+    expect(result.errors).toContain(
       "missing.md: domain must be a non-empty string",
     );
-    expect(result.errors.join("\n")).toContain(
+    expect(result.errors).toContain(
       "invalid.md: domain must be a non-empty string",
     );
-    expect(result.errors.join("\n")).toContain(
+    expect(result.errors).toContain(
       "empty.md: domain must be a non-empty string",
     );
   });
 
-  it("rejects duplicate filename IDs, missing frontmatter, and section order", () => {
-    fs.writeFileSync(path.join(dir, "one.md"), valid());
+  it("rejects missing or invalid guidance", () => {
     fs.writeFileSync(
-      path.join(dir, "ONE.md"),
+      path.join(dir, "missing.md"),
+      valid().replace('guidance: "Handle the test request."\n', ""),
+    );
+    fs.writeFileSync(
+      path.join(dir, "lowercase.md"),
       valid().replace(
-        "## Response Strategy\n- Respond.",
-        "## Guidelines\n- Again.",
+        'guidance: "Handle the test request."',
+        'guidance: "handle the test request."',
       ),
     );
+    fs.writeFileSync(
+      path.join(dir, "unterminated.md"),
+      valid().replace(
+        'guidance: "Handle the test request."',
+        'guidance: "Handle the test request"',
+      ),
+    );
+
+    const result = validateIntentDirectory(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain(
+      "missing.md: guidance must be a non-empty string",
+    );
+    expect(result.errors).toContain(
+      "lowercase.md: guidance must start with an uppercase ASCII letter when it starts with an ASCII letter",
+    );
+    expect(result.errors).toContain(
+      "unterminated.md: guidance must contain exactly one terminal delimiter and it must be the final code point",
+    );
+  });
+
+  it("rejects duplicate filename IDs and missing requested targets", () => {
+    fs.writeFileSync(path.join(dir, "one.md"), valid());
+    fs.writeFileSync(path.join(dir, "ONE.md"), valid());
+
     const result = validateIntentDirectory(dir, ["MISSING"]);
     expect(result.valid).toBe(false);
     expect(result.errors.join("\n")).toContain("duplicate intent id one");
-    expect(result.errors.join("\n")).toContain(
-      "duplicate ## Guidelines section",
-    );
-    expect(result.errors.join("\n")).toContain(
-      "target intent not found: MISSING",
-    );
+    expect(result.errors).toContain("target intent not found: MISSING");
   });
 
   it("accepts bundled skill asset examples", () => {

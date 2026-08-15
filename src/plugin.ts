@@ -18,11 +18,14 @@ import {
   type ReviewTriggerKeywords,
 } from "./review/trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
+import { createCurationQueue } from "./curation/index.js";
 import { registerSkillTools } from "./skills/index.js";
+import { SkillExperienceCatalog } from "./experiences/index.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   intentsPath,
+  experiencesPath,
   keywordCoverageLogPath,
   reviewLogPath,
   packageRoot as defaultPackageRoot,
@@ -47,6 +50,14 @@ function readKeywordCoverageKeywordsFailOpen(
     logger.warn("failed to read keyword coverage keywords", { error: err });
     return normalizeReviewTriggerKeywords({});
   }
+}
+
+function recoverCurationSchedulesFailOpen(params: {
+  recover: () => Promise<void>;
+}): void {
+  void params.recover().catch((error) => {
+    logger.warn("failed to recover curation schedules", { error });
+  });
 }
 
 function copyFileIfMissing(sourcePath: string, targetPath: string): void {
@@ -90,6 +101,7 @@ export function initializePluginDataRoot({
   try {
     fs.mkdirSync(dataRoot, { recursive: true });
     fs.mkdirSync(sessionsDirPath(dataRoot), { recursive: true });
+    fs.mkdirSync(experiencesPath(dataRoot), { recursive: true });
   } catch (err) {
     logger.warn("failed to create skill-harness data root", {
       error: err,
@@ -262,8 +274,10 @@ export function createPlugin(
       initializePluginDataRoot({ dataRoot });
 
       const catalog = IntentCatalog.create(dataRoot);
+      const experienceCatalog = SkillExperienceCatalog.create(dataRoot);
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
+      const curationQueue = createCurationQueue();
       const reviewPath = reviewLogPath(dataRoot);
       const keywordCoveragePath = keywordCoverageLogPath(dataRoot);
 
@@ -291,6 +305,7 @@ export function createPlugin(
         catalog,
         tracker,
         statsAggregator,
+        curationQueue,
         reviewLogWriter,
         keywordCoverageWriter,
         triggerKeywords: () => triggerKeywordCache,
@@ -308,7 +323,7 @@ export function createPlugin(
       refreshRuntimeIntents();
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
-        timeoutMs: config.timeoutMs * 3 + 1_500,
+        timeoutMs: config.timeoutMs * 2 + 1_500,
       });
       api.on("before_tool_call", handlers.onBeforeToolCall);
       api.on("after_tool_call", handlers.onAfterToolCall);
@@ -318,6 +333,13 @@ export function createPlugin(
       api.on("session_end", handlers.onSessionEnd);
       registerSkillTools(api, {
         getIntents: (agentId) => catalog.filterForAgent(config, agentId),
+        experienceCatalog,
+      });
+
+      setImmediate(() => {
+        recoverCurationSchedulesFailOpen({
+          recover: handlers.recoverCurationSchedules,
+        });
       });
     },
   });

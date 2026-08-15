@@ -7,6 +7,10 @@ const manifest = JSON.parse(
 const packageJson = JSON.parse(
   fs.readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
 );
+const readme = fs.readFileSync(
+  new URL("./README.md", import.meta.url),
+  "utf-8",
+);
 
 describe("skill-harness manifest", () => {
   it("declares skill tools without legacy command surfaces", () => {
@@ -15,6 +19,7 @@ describe("skill-harness manifest", () => {
       "skill_search",
       "skill_view",
       "skill_manage",
+      "skill_experience",
     ]);
     expect(manifest).not.toHaveProperty("commandAliases");
   });
@@ -78,8 +83,8 @@ describe("skill-harness manifest", () => {
     const optionalModels = [
       properties.model,
       properties.modelFallback,
-      properties.instruction.properties.model,
-      properties.instruction.properties.modelFallback,
+      properties.curation.properties.model,
+      properties.curation.properties.modelFallback,
       properties.review.properties.model,
       properties.review.properties.modelFallback,
     ];
@@ -88,6 +93,39 @@ describe("skill-harness manifest", () => {
       expect(model.type).toBe("string");
       expect(model).not.toHaveProperty("default");
     }
+  });
+
+  it("exposes enabled-by-default independent curator settings", () => {
+    const curation = manifest.configSchema.properties.curation;
+
+    expect(curation.description).toContain("background curator");
+    expect(curation.additionalProperties).toBe(false);
+    expect(curation.properties.enabled.default).toBe(true);
+    expect(curation.properties.model.description).toContain(
+      "inherits the top-level model",
+    );
+    expect(curation.properties.modelFallback.description).toContain(
+      "not a runtime retry model",
+    );
+    expect(curation.properties.thinking).toMatchObject({
+      default: "medium",
+      enum: [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "adaptive",
+        "max",
+      ],
+    });
+    expect(curation.properties.timeoutMs).toMatchObject({
+      minimum: 250,
+      maximum: 600_000,
+      default: 30_000,
+    });
+    expect(curation.default).toEqual({});
   });
 
   it("exposes disabled-by-default Review settings", () => {
@@ -134,39 +172,16 @@ describe("skill-harness manifest", () => {
     ).toBe(0.5);
   });
 
-  it("exposes enabled-by-default instruction writer settings without triggers", () => {
-    const instruction = manifest.configSchema.properties.instruction;
+  it("does not expose removed instruction writer settings", () => {
+    expect(manifest.configSchema.properties).not.toHaveProperty("instruction");
+  });
 
-    expect(instruction.description).toContain("instruction writer");
-    expect(instruction.properties.enabled.default).toBe(true);
-    expect(instruction.properties.model.description).toContain(
-      "Explicit dedicated model",
+  it("documents the strict upgrade path for removed instruction settings", () => {
+    expect(readme).toContain("### Upgrade from the removed instruction writer");
+    expect(readme).toContain(
+      "remove the entire legacy `instruction: { ... }` block",
     );
-    expect(instruction.properties.modelFallback.description).toContain(
-      "Last-resort instruction writer model",
-    );
-    expect(instruction.properties.modelFallback.description).toContain(
-      "not a runtime retry model",
-    );
-    expect(instruction.properties.thinking).toMatchObject({
-      default: "medium",
-      enum: [
-        "off",
-        "minimal",
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "adaptive",
-        "max",
-      ],
-    });
-    expect(instruction.properties.timeoutMs).toMatchObject({
-      minimum: 250,
-      maximum: 120000,
-      default: 20000,
-    });
-    expect(instruction.properties).not.toHaveProperty("triggers");
+    expect(readme).toContain("no automatic migration or compatibility parser");
   });
 
   it("accepts deprecated keyword seeds for strict-schema upgrades", () => {

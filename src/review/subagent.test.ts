@@ -5,6 +5,7 @@ import * as path from "node:path";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { resolveConfig } from "../config.js";
+import { FileLock } from "../file-utils.js";
 import {
   applyIntentWorkspaceChanges,
   buildReviewPrompt,
@@ -30,15 +31,8 @@ domain: other
 fastpath:
   keywords:
     - help
+guidance: Ask for context and keep the response short.
 ---
-
-## Guidelines
-
-- Ask for context.
-
-## Response Strategy
-
-- Keep the response short.
 `,
   );
   fs.writeFileSync(
@@ -49,15 +43,8 @@ triggers:
 examples:
   - hi
 domain: social
+guidance: Chat casually and reply warmly.
 ---
-
-## Guidelines
-
-- Chat casually.
-
-## Response Strategy
-
-- Reply warmly.
 `,
   );
   return root;
@@ -114,9 +101,8 @@ const snapshot: ReviewSnapshot = {
       domain: "other",
       fastpath: {
         keywords: ["help"],
-        hint: "Ask one clarifying question.",
       },
-      prompt: "## Guidelines\n\n- Ask for context.",
+      guidance: "Ask for context.",
     },
   },
   availableSkills: [
@@ -134,7 +120,6 @@ const snapshot: ReviewSnapshot = {
       domain: "other",
       fastpath: {
         keywords: ["help"],
-        hint: "Ask one clarifying question.",
       },
     },
   ],
@@ -152,8 +137,8 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "A trigger firing is an opportunity to investigate, not evidence by itself",
   "prefer applying the smallest valid correction over returning hasFinding=false",
   "In that evidence-qualified case, hasFinding=false is a high bar",
-  "class-level intents with rich, maintainable Markdown sections",
-  "not a flat list of one-intent-per-session artifacts",
+  "class-level routing definitions with strict frontmatter only; Markdown bodies are unsupported",
+  "Do not create one-intent-per-session artifacts",
   "classification ambiguity",
   "frontmatter triggers/examples/domain/fastpath",
   "### Target preference order",
@@ -161,28 +146,23 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "prefer updating an existing class-level/umbrella intent from the Intent Catalog",
   "Use only operations justified by the requested trigger's workflow",
   "Do not create support files or propose references/templates/scripts",
-  "Preserve conversation-specific but reusable details directly inside the relevant intent Markdown",
+  "Preserve conversation-specific but reusable details only as concise routing metadata or guidance changes",
   "### Intent shape and boundaries",
-  "### Body sections and execution guidance",
   "### Recordability filter",
   "### Target and mutation boundaries",
   "Intent ids come from Markdown filenames without the .md suffix",
   "Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional fastpath metadata, optional candidate metadata, and optional skills[]",
   "Do not infer candidate.keywords from one review snapshot",
   "fastpath.keywords are exact/similarity routing phrases",
-  "fastpath.hint is a short injected A1 hint",
-  "## Guidelines, ## Response Strategy",
+  "guidance is a required host-owned string",
+  "### Routing metadata and guidance",
   "Skill dependencies belong in frontmatter skills[]",
-  "Do not create a ## Skills & Tools section",
-  "Concrete Workflow",
-  "optional ## Experience",
-  "reusable tips, parameters, pitfalls",
   "two existing intents appear to overlap",
   "mention the overlap in the finding summary or suggestedChange",
   "background curator can consider larger consolidation",
   "Recordability filter",
   "requested trigger's own criteria establish a concrete, reusable lesson",
-  "direct improvement to an allowed target in the matched intent",
+  "direct improvement to allowed routing metadata or guidance in the matched intent",
   "Routine tool usage",
   "Never capture transient environment state as a durable restriction",
   "post-migration path mismatches",
@@ -212,7 +192,6 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "do not propose external file formats or writes",
   "One-off Q&A",
   "pure conceptual explanations, general knowledge, and session narratives",
-  "Never mention another intent name or id inside an intent body",
   "The only correction target is runtime intent Markdown content",
   "suggestedChange must concisely summarize the file edit already applied",
   "For split or merge operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to:",
@@ -258,7 +237,7 @@ describe("buildReviewPrompt", () => {
     [
       "skill-candidate",
       "tool-call compression tactics",
-      "frontmatter skills, Concrete Workflow, or Experience",
+      "frontmatter skills, routing metadata, or guidance",
     ],
     [
       "skill-placement",
@@ -268,7 +247,7 @@ describe("buildReviewPrompt", () => {
     [
       "process-gap",
       "failed execution and recovery path",
-      "Guidelines, frontmatter skills, Concrete Workflow, or Experience",
+      "guidance, routing metadata, or frontmatter skills",
     ],
     [
       "successful-pattern",
@@ -277,7 +256,7 @@ describe("buildReviewPrompt", () => {
     ],
     [
       "satisfaction-check",
-      "style, format, verbosity, workflow, or response-strategy problem",
+      "style, format, verbosity, or workflow problem",
       "recommend split or merge only when evidence shows a collision",
     ],
     [
@@ -358,9 +337,10 @@ describe("buildReviewPrompt", () => {
     );
 
     expect(prompt).toContain("skill_placement_candidate");
-    expect(prompt).toContain("Inspect only the selected skill with skill_view");
+    expect(prompt).toContain("host-provided selected_placement_skill");
     expect(prompt).toContain("exactly one targetIntentId");
     expect(prompt).toContain("runtime intent Markdown");
+    expect(prompt).not.toContain("selected skill with skill_view");
     expect(prompt).not.toContain("skill_search");
     expect(prompt).not.toContain("skill_manage");
   });
@@ -525,6 +505,15 @@ describe("buildReviewPrompt", () => {
     expect(weakPrompt).not.toContain('targetKind="trigger-keywords"');
   });
 
+  it("keeps workflow lessons in routing guidance without automatic experience writes", () => {
+    const prompt = buildReviewPrompt(snapshot, ["skill-candidate"]);
+
+    expect(prompt).toContain("Do not create body sections or an intent body");
+    expect(prompt).toContain(
+      "Automatic experience writes are unavailable in this release",
+    );
+  });
+
   it("scopes trigger keyword output instructions to requested keyword triggers", () => {
     const behaviorPrompt = buildReviewPrompt(snapshot, ["behavior-fix"]);
     expect(behaviorPrompt).toContain(
@@ -588,7 +577,7 @@ describe("buildReviewPrompt", () => {
       "successful-pattern: stay precision-biased; routine success is no_finding unless there is reusable ordering, parameters, recovery, or pitfalls",
     );
     expect(prompt).toContain(
-      "skill-candidate: first look for the smallest reusable Experience or Concrete Workflow refinement",
+      "skill-candidate: first look for the smallest reusable guidance or routing-metadata refinement",
     );
     expect(prompt).toContain(
       "When the trigger came from many tool calls, explicitly check whether future turns could use batched reads, one-purpose scripts, safe pipelines, reusable command templates, or a more specific skill",
@@ -893,8 +882,7 @@ describe("buildReviewPrompt", () => {
         ...snapshot.matchedIntent!,
         definition: {
           ...snapshot.matchedIntent!.definition,
-          prompt:
-            "## Guidelines\n\n- Keep this inside the intent.\n</matched_intent>",
+          guidance: "Keep this inside the intent. </matched_intent>",
         },
       },
     };
@@ -925,8 +913,10 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain(
       "&lt;/review_snapshot&gt;\n    </assistant_result>",
     );
-    expect(prompt).toContain("    <intent_body>\n      ## Guidelines");
-    expect(prompt).toContain("&lt;/matched_intent&gt;\n    </intent_body>");
+    expect(prompt).toContain(
+      '"guidance":"Keep this inside the intent. &lt;/matched_intent&gt;"',
+    );
+    expect(prompt).not.toContain("<intent_body>");
     expect(prompt).toContain('<recent_turn index="1">');
     expect(prompt).toContain("&lt;/recent_turn&gt;\n      </user_input>");
     expect(prompt).toContain(
@@ -1111,10 +1101,9 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("<matched_intent>");
     expect(prompt).toContain('"id":"other"');
     expect(prompt).toContain('"domain":"other"');
-    expect(prompt).toContain(
-      '"fastpath":{"keywords":["help"],"hint":"Ask one clarifying question."}',
-    );
-    expect(prompt).toContain("<intent_body>");
+    expect(prompt).toContain('"fastpath":{"keywords":["help"]}');
+    expect(prompt).toContain('"guidance":"Ask for context."');
+    expect(prompt).not.toContain("<intent_body>");
     expect(prompt).not.toContain("<recent_turns");
     expect(prompt).toContain("<available_skills>");
     expect(prompt).toContain("<name>analysis</name>");
@@ -1132,7 +1121,7 @@ describe("buildReviewPrompt", () => {
     expect(prompt).not.toContain('"current"');
   });
 
-  it("formats older snapshots without domain or fastpath metadata", () => {
+  it("formats routing metadata without domain or fastpath metadata", () => {
     const legacySnapshot = {
       ...snapshot,
       matchedIntent: {
@@ -1140,7 +1129,7 @@ describe("buildReviewPrompt", () => {
         definition: {
           triggers: ["legacy trigger"],
           examples: ["legacy example"],
-          prompt: "## Guidelines\n\n- Legacy body.",
+          guidance: "Legacy guidance.",
         },
       },
       intentCatalog: [
@@ -1155,7 +1144,7 @@ describe("buildReviewPrompt", () => {
     const prompt = buildReviewPrompt(legacySnapshot, ["weak-intent"]);
 
     expect(prompt).toContain(
-      '    <intent_metadata>\n      {"id":"legacy","domain":null,"triggers":["legacy trigger"],"examples":["legacy example"]}\n    </intent_metadata>',
+      '    <intent_metadata>\n      {"id":"legacy","domain":null,"triggers":["legacy trigger"],"examples":["legacy example"],"guidance":"Legacy guidance."}\n    </intent_metadata>',
     );
     expect(prompt).toContain('"domain":null');
     expect(prompt).not.toContain('"fastpath":');
@@ -1491,7 +1480,7 @@ Some more reasoning text here.
   });
 
   it("extracts the first complete JSON object when extra trailing closers follow it", () => {
-    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":true,"operation":"refine","targetIntentIds":["system-diagnostics"],"dedupeKey":"memory-search-performance-diagnosis","summary":"Record memory search performance diagnosis methodology","evidence":["Compared CLI and tool timing"],"correctionGoal":"Add memory search diagnosis experience","suggestedChange":"Add an Experience note about comparing searchMs and elapsed timings."}]}]}`;
+    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":true,"operation":"refine","targetIntentIds":["system-diagnostics"],"dedupeKey":"memory-search-performance-diagnosis","summary":"Record memory search performance diagnosis methodology","evidence":["Compared CLI and tool timing"],"correctionGoal":"Refine routing guidance for timing comparisons","suggestedChange":"Update guidance to compare searchMs and elapsed timings."}]}]}`;
 
     expect(parseReviewFindings(raw, ["skill-candidate"])).toEqual([
       {
@@ -1502,15 +1491,15 @@ Some more reasoning text here.
         dedupeKey: "memory-search-performance-diagnosis",
         summary: "Record memory search performance diagnosis methodology",
         evidence: ["Compared CLI and tool timing"],
-        correctionGoal: "Add memory search diagnosis experience",
+        correctionGoal: "Refine routing guidance for timing comparisons",
         suggestedChange:
-          "Add an Experience note about comparing searchMs and elapsed timings.",
+          "Update guidance to compare searchMs and elapsed timings.",
       },
     ]);
   });
 
   it("extracts the first complete JSON object when an extra object closer follows it", () => {
-    const raw = `{"findings":[{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"retry-timeout","summary":"Preserve timeout retry flow","evidence":["GLM-5 timed out"],"correctionGoal":"Add timeout retry note","suggestedChange":"Add an Experience note about retrying fallback models."}]}}`;
+    const raw = `{"findings":[{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"retry-timeout","summary":"Preserve timeout retry flow","evidence":["GLM-5 timed out"],"correctionGoal":"Refine timeout retry guidance","suggestedChange":"Update guidance with the fallback retry boundary."}]}}`;
 
     expect(parseReviewFindings(raw, ["process-gap"])).toEqual([
       {
@@ -1521,15 +1510,14 @@ Some more reasoning text here.
         dedupeKey: "retry-timeout",
         summary: "Preserve timeout retry flow",
         evidence: ["GLM-5 timed out"],
-        correctionGoal: "Add timeout retry note",
-        suggestedChange:
-          "Add an Experience note about retrying fallback models.",
+        correctionGoal: "Refine timeout retry guidance",
+        suggestedChange: "Update guidance with the fallback retry boundary.",
       },
     ]);
   });
 
   it("recovers positive findings after an initial no-finding object in a malformed findings array", () => {
-    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":false},{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"timeout-fallback","summary":"Retry fallback model after review timeout","evidence":["review subagent error: timeout"],"correctionGoal":"Add review timeout fallback guidance","suggestedChange":"Add an Experience note about retrying fallback model after provider timeout."}]`;
+    const raw = `{"findings":[{"trigger":"skill-candidate","hasFinding":false},{"trigger":"process-gap","hasFinding":true,"operation":"refine","targetIntentIds":["debugging"],"dedupeKey":"timeout-fallback","summary":"Retry fallback model after review timeout","evidence":["review subagent error: timeout"],"correctionGoal":"Refine review timeout fallback guidance","suggestedChange":"Update guidance with the fallback retry boundary."}]`;
 
     expect(
       parseReviewFindings(raw, ["skill-candidate", "process-gap"]),
@@ -1542,9 +1530,8 @@ Some more reasoning text here.
         dedupeKey: "timeout-fallback",
         summary: "Retry fallback model after review timeout",
         evidence: ["review subagent error: timeout"],
-        correctionGoal: "Add review timeout fallback guidance",
-        suggestedChange:
-          "Add an Experience note about retrying fallback model after provider timeout.",
+        correctionGoal: "Refine review timeout fallback guidance",
+        suggestedChange: "Update guidance with the fallback retry boundary.",
       },
     ]);
   });
@@ -1660,43 +1647,79 @@ describe("runReviewSubagent", () => {
     );
   });
 
-  it.each(["skill-candidate", "skill-placement"] as const)(
-    "allows skill_view for %s reviews without broader skill tools",
-    async (trigger) => {
-      const runEmbeddedAgent = vi.fn().mockResolvedValue({
-        payloads: [{ text: '{"findings":[]}' }],
-      });
-      const api = {
-        config: {},
-        runtime: { agent: { runEmbeddedAgent } },
-      } as unknown as OpenClawPluginApi;
+  it("allows skill_view for skill-candidate reviews without broader skill tools", async () => {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [{ text: '{"findings":[]}' }],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
 
-      await runReviewSubagent({
-        api,
-        config: resolveConfig({ review: { enabled: true } }),
-        agentId: "main",
-        intentDirectory: createIntentDirectory(),
-        modelRef: { provider: "google", model: "review" },
-        snapshot,
-        triggers: [trigger],
-      });
+    await runReviewSubagent({
+      api,
+      config: resolveConfig({ review: { enabled: true } }),
+      agentId: "main",
+      intentDirectory: createIntentDirectory(),
+      modelRef: { provider: "google", model: "review" },
+      snapshot,
+      triggers: ["skill-candidate"],
+    });
 
-      expect(runEmbeddedAgent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          toolsAllow: ["read", "write", "apply_patch", "skill_view"],
-        }),
-      );
-      expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
-        "skill_list",
-      );
-      expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
-        "skill_search",
-      );
-      expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
-        "skill_manage",
-      );
-    },
-  );
+    expect(runEmbeddedAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolsAllow: ["read", "write", "apply_patch", "skill_view"],
+      }),
+    );
+    expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
+      "skill_list",
+    );
+    expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
+      "skill_search",
+    );
+    expect(runEmbeddedAgent.mock.calls[0][0].toolsAllow).not.toContain(
+      "skill_manage",
+    );
+  });
+
+  it("does not allow generic skill_view for skill-placement reviews", async () => {
+    const runEmbeddedAgent = vi.fn().mockResolvedValue({
+      payloads: [{ text: '{"findings":[]}' }],
+    });
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await runReviewSubagent({
+      api,
+      config: resolveConfig({ review: { enabled: true } }),
+      agentId: "main",
+      intentDirectory: createIntentDirectory(),
+      modelRef: { provider: "google", model: "review" },
+      snapshot: {
+        ...snapshot,
+        skillPlacementCandidate: {
+          epochKey: "a".repeat(64),
+          agentId: "main",
+          name: "source-driven-development",
+          source: "workspace",
+          reason: "zero-recommendation-usage",
+          observedTurns: 20,
+          usageTurns: 0,
+          recommendedTurns: 0,
+          currentlyReferencedIntentIds: [],
+        },
+      },
+      triggers: ["skill-placement", "skill-candidate"],
+    });
+
+    expect(runEmbeddedAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolsAllow: ["read", "write", "apply_patch"],
+      }),
+    );
+  });
 
   it.each([
     {
@@ -1732,8 +1755,10 @@ describe("runReviewSubagent", () => {
       for (const id of targetIntentIds) {
         const original = originals.get(id)!;
         const withGuidance = original.replace(
-          id === "social-casual" ? "- Chat casually." : "- Ask for context.",
-          "- Use source-driven-development for source-grounded tasks.",
+          id === "social-casual"
+            ? "Chat casually and reply warmly."
+            : "Ask for context and keep the response short.",
+          "Use source-driven-development for source-grounded tasks.",
         );
         fs.writeFileSync(
           path.join(options.workspaceDir, `${id}.md`),
@@ -1878,8 +1903,8 @@ describe("runReviewSubagent", () => {
     );
     fs.writeFileSync(targetPath, preplaced);
     const updated = preplaced.replace(
-      "- Chat casually.",
-      "- Use source-driven-development for source-grounded tasks.",
+      "Chat casually and reply warmly.",
+      "Use source-driven-development for source-grounded tasks.",
     );
     const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
       fs.writeFileSync(
@@ -1942,6 +1967,106 @@ describe("runReviewSubagent", () => {
     });
     expect(fs.readFileSync(targetPath, "utf-8")).toBe(updated);
   });
+
+  it.each([
+    {
+      name: "domain",
+      mutate: (content: string) =>
+        content.replace("domain: social", "domain: other"),
+    },
+    {
+      name: "triggers",
+      mutate: (content: string) =>
+        content.replace("- Casual social chat", "- Privileged production work"),
+    },
+    {
+      name: "candidate",
+      mutate: (content: string) =>
+        content.replace(
+          "domain: social",
+          "domain: social\ncandidate:\n  scope: cross-flow",
+        ),
+    },
+    {
+      name: "fastpath keywords",
+      mutate: (content: string) =>
+        content.replace("- hi", "- deploy production"),
+    },
+  ])(
+    "rejects a skill-placement edit that changes $name routing metadata",
+    async ({ mutate }) => {
+      const intentDirectory = createIntentDirectory();
+      const targetPath = path.join(intentDirectory, "social-casual.md");
+      const original = fs.readFileSync(targetPath, "utf-8");
+      const withSelectedSkill = original.replace(
+        "domain: social",
+        "domain: social\nskills:\n  - source-driven-development",
+      );
+      const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+        fs.writeFileSync(
+          path.join(options.workspaceDir, "social-casual.md"),
+          mutate(withSelectedSkill),
+        );
+        return {
+          payloads: [
+            {
+              text: JSON.stringify({
+                findings: [
+                  {
+                    trigger: "skill-placement",
+                    hasFinding: true,
+                    targetKind: "intent-markdown",
+                    operation: "refine",
+                    targetIntentIds: ["social-casual"],
+                    dedupeKey: "place-source-driven-development",
+                    summary: "Place the selected skill",
+                    evidence: ["Host selected the skill after 20 turns"],
+                    correctionGoal: "Reference the selected skill",
+                    suggestedChange: "Refine social-casual.md.",
+                  },
+                ],
+              }),
+            },
+          ],
+        };
+      });
+
+      await expect(
+        runReviewSubagent({
+          api: {
+            config: {},
+            runtime: { agent: { runEmbeddedAgent } },
+          } as unknown as OpenClawPluginApi,
+          config: resolveConfig({ review: { enabled: true } }),
+          agentId: "main",
+          intentDirectory,
+          modelRef: { provider: "google", model: "review" },
+          snapshot: {
+            ...snapshot,
+            skillPlacementCandidate: {
+              epochKey: "a".repeat(64),
+              agentId: "main",
+              name: "source-driven-development",
+              source: "workspace",
+              reason: "zero-recommendation-usage",
+              observedTurns: 20,
+              usageTurns: 0,
+              recommendedTurns: 0,
+              currentlyReferencedIntentIds: [],
+            },
+          },
+          triggers: ["skill-placement"],
+        }),
+      ).resolves.toEqual({
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: [
+          "skill-placement must not change routing metadata outside skills or guidance",
+        ],
+      });
+      expect(fs.readFileSync(targetPath, "utf-8")).toBe(original);
+    },
+  );
 
   it("reports embedded agent error payloads as subagent errors", async () => {
     const intentDirectory = createIntentDirectory();
@@ -2045,8 +2170,8 @@ describe("runReviewSubagent", () => {
       fs.writeFileSync(
         targetPath,
         current.replace(
-          "- Chat casually.",
-          "- Chat casually.\n- Exclude specific tool capability questions.",
+          "Chat casually and reply warmly.",
+          "Chat casually and reply warmly; exclude specific tool capability questions.",
         ),
       );
       return {
@@ -2113,8 +2238,8 @@ describe("runReviewSubagent", () => {
       fs.writeFileSync(
         targetPath,
         current.replace(
-          "- Chat casually.",
-          "- Chat casually.\n- Treat tool capability questions as implementation support, not casual chat.",
+          "Chat casually and reply warmly.",
+          "Chat casually and reply warmly; treat tool capability questions as implementation support, not casual chat.",
         ),
       );
       return {
@@ -2164,7 +2289,7 @@ describe("runReviewSubagent", () => {
     });
     expect(
       fs.readFileSync(path.join(intentDirectory, "social-casual.md"), "utf-8"),
-    ).toContain("Treat tool capability questions as implementation support");
+    ).toContain("treat tool capability questions as implementation support");
     expect(fs.existsSync(path.join(intentDirectory, "temp.json"))).toBe(false);
   });
 
@@ -2175,7 +2300,7 @@ describe("runReviewSubagent", () => {
     const before = new Map([[file, fs.readFileSync(targetPath, "utf-8")]]);
     const afterContent = before
       .get(file)!
-      .replace("- Chat casually.", "- Route tool support away.");
+      .replace("Chat casually and reply warmly.", "Route tool support away.");
 
     applyIntentWorkspaceChanges({
       intentDirectory,
@@ -2185,7 +2310,7 @@ describe("runReviewSubagent", () => {
     });
 
     expect(fs.readFileSync(targetPath, "utf-8")).toContain(
-      "- Route tool support away.",
+      "Route tool support away.",
     );
     expect(fs.readdirSync(intentDirectory)).not.toContain(
       expect.stringContaining(".tmp"),
@@ -2215,11 +2340,17 @@ describe("runReviewSubagent", () => {
           [
             "other.md",
             originalOther.replace(
-              "- Keep the response short.",
-              "- Stay direct.",
+              "Ask for context and keep the response short.",
+              "Stay direct.",
             ),
           ],
-          [file, originalSocial.replace("- Chat casually.", "- Stay casual.")],
+          [
+            file,
+            originalSocial.replace(
+              "Chat casually and reply warmly.",
+              "Stay casual.",
+            ),
+          ],
         ]),
         changedIds: ["other", "social-casual"],
       }),
@@ -2243,7 +2374,10 @@ describe("runReviewSubagent", () => {
     const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
       fs.writeFileSync(
         path.join(options.workspaceDir, "social-casual.md"),
-        original.replace("- Chat casually.", "- Drift into tool support."),
+        original.replace(
+          "Chat casually and reply warmly.",
+          "Drift into tool support.",
+        ),
       );
       return {
         payloads: [
@@ -2293,13 +2427,16 @@ describe("runReviewSubagent", () => {
     const targetPath = path.join(intentDirectory, "social-casual.md");
     const original = fs.readFileSync(targetPath, "utf-8");
     const concurrent = original.replace(
-      "- Chat casually.",
-      "- Preserve a manual concurrent edit.",
+      "Chat casually and reply warmly.",
+      "Preserve a manual concurrent edit.",
     );
     const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
       fs.writeFileSync(
         path.join(options.workspaceDir, "social-casual.md"),
-        original.replace("- Chat casually.", "- Invalid review edit."),
+        original.replace(
+          "Chat casually and reply warmly.",
+          "Invalid review edit.",
+        ),
       );
       fs.writeFileSync(path.join(options.workspaceDir, "temp.json"), "{}");
       fs.writeFileSync(targetPath, concurrent);
@@ -2333,14 +2470,20 @@ describe("runReviewSubagent", () => {
       if (runEmbeddedAgent.mock.calls.length === 1) {
         fs.writeFileSync(
           path.join(options.workspaceDir, "social-casual.md"),
-          original.replace("- Chat casually.", "- Invalid primary edit."),
+          original.replace(
+            "Chat casually and reply warmly.",
+            "Invalid primary edit.",
+          ),
         );
         return { payloads: [{ text: "not json" }] };
       }
 
       fs.writeFileSync(
         path.join(options.workspaceDir, "social-casual.md"),
-        original.replace("- Chat casually.", "- Route tool support away."),
+        original.replace(
+          "Chat casually and reply warmly.",
+          "Route tool support away.",
+        ),
       );
       return {
         payloads: [
@@ -2386,7 +2529,7 @@ describe("runReviewSubagent", () => {
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
     expect(fs.readFileSync(targetPath, "utf-8")).toBe(original);
     expect(fs.readFileSync(targetPath, "utf-8")).not.toContain(
-      "- Invalid primary edit.",
+      "Invalid primary edit.",
     );
   });
 
@@ -2400,8 +2543,8 @@ describe("runReviewSubagent", () => {
       fs.writeFileSync(
         path.join(options.workspaceDir, "social-casual.md"),
         originalSocial.replace(
-          "- Chat casually.",
-          "- Route tool support away.",
+          "Chat casually and reply warmly.",
+          "Route tool support away.",
         ),
       );
 
@@ -2409,8 +2552,8 @@ describe("runReviewSubagent", () => {
         fs.writeFileSync(
           path.join(options.workspaceDir, "other.md"),
           originalOther.replace(
-            "- Ask for context.",
-            "- Ask for specific context.",
+            "Ask for context and keep the response short.",
+            "Ask for specific context.",
           ),
         );
       }
@@ -2472,13 +2615,16 @@ describe("runReviewSubagent", () => {
     const targetPath = path.join(intentDirectory, "social-casual.md");
     const original = fs.readFileSync(targetPath, "utf-8");
     const concurrent = original.replace(
-      "- Chat casually.",
-      "- Preserve a manual concurrent edit.",
+      "Chat casually and reply warmly.",
+      "Preserve a manual concurrent edit.",
     );
     const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
       fs.writeFileSync(
         path.join(options.workspaceDir, "social-casual.md"),
-        original.replace("- Chat casually.", "- Route tool support away."),
+        original.replace(
+          "Chat casually and reply warmly.",
+          "Route tool support away.",
+        ),
       );
       fs.writeFileSync(targetPath, concurrent);
       return {
@@ -2532,6 +2678,78 @@ describe("runReviewSubagent", () => {
     expect(fs.readFileSync(targetPath, "utf-8")).toBe(concurrent);
   });
 
+  it("rechecks live intents after acquiring the apply lock", async () => {
+    const intentDirectory = createIntentDirectory();
+    const targetPath = path.join(intentDirectory, "social-casual.md");
+    const original = fs.readFileSync(targetPath, "utf-8");
+    const concurrent = original.replace(
+      "Chat casually and reply warmly.",
+      "Preserve a manual concurrent edit.",
+    );
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      fs.writeFileSync(
+        path.join(options.workspaceDir, "social-casual.md"),
+        original.replace(
+          "Chat casually and reply warmly.",
+          "Route tool support away.",
+        ),
+      );
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "behavior-fix",
+                  hasFinding: true,
+                  targetKind: "intent-markdown",
+                  operation: "refine",
+                  targetIntentIds: ["social-casual"],
+                  dedupeKey: "tool-inquiry-boundary",
+                  summary: "Tool inquiries need a clearer boundary",
+                  evidence: ["User asked whether a tool exists"],
+                  correctionGoal: "Clarify the casual-chat boundary",
+                  suggestedChange: "Update social-casual.md Guidelines.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+    const applyLock = new FileLock(intentDirectory);
+    expect(applyLock.tryAcquire()).toBe(true);
+
+    try {
+      const review = runReviewSubagent({
+        api: {
+          config: {},
+          runtime: { agent: { runEmbeddedAgent } },
+        } as unknown as OpenClawPluginApi,
+        config: resolveConfig({ review: { enabled: true } }),
+        agentId: "main",
+        intentDirectory,
+        modelRef: { provider: "google", model: "review" },
+        snapshot,
+        triggers: ["behavior-fix"],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      fs.writeFileSync(targetPath, concurrent);
+      applyLock.release();
+
+      await expect(review).resolves.toEqual({
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: [
+          "runtime intent files changed during review: social-casual",
+        ],
+      });
+      expect(fs.readFileSync(targetPath, "utf-8")).toBe(concurrent);
+    } finally {
+      applyLock.release();
+    }
+  });
+
   it("rejects review edits to undeclared runtime intent files", async () => {
     const intentDirectory = createIntentDirectory();
     const originalSocial = fs.readFileSync(
@@ -2546,15 +2764,15 @@ describe("runReviewSubagent", () => {
       fs.writeFileSync(
         path.join(options.workspaceDir, "social-casual.md"),
         originalSocial.replace(
-          "- Chat casually.",
-          "- Route tool support away.",
+          "Chat casually and reply warmly.",
+          "Route tool support away.",
         ),
       );
       fs.writeFileSync(
         path.join(options.workspaceDir, "other.md"),
         originalOther.replace(
-          "- Ask for context.",
-          "- Ask for specific context.",
+          "Ask for context and keep the response short.",
+          "Ask for specific context.",
         ),
       );
       return {
@@ -2658,6 +2876,80 @@ describe("runReviewSubagent", () => {
     });
   });
 
+  it.each([
+    {
+      name: "a Markdown body",
+      mutate: (content: string) => `${content.trimEnd()}\n\nPersistent body.\n`,
+      validationError: "social-casual.md: Markdown body must be empty",
+    },
+    {
+      name: "a retired fastpath hint",
+      mutate: (content: string) =>
+        content.replace(
+          "guidance:",
+          "fastpath:\n  hint: Legacy routing prose\n  keywords: []\nguidance:",
+        ),
+      validationError: "social-casual.md: fastpath.hint is not supported",
+    },
+  ])(
+    "rejects review refinements that introduce $name",
+    async ({ mutate, validationError }) => {
+      const intentDirectory = createIntentDirectory();
+      const targetPath = path.join(intentDirectory, "social-casual.md");
+      const original = fs.readFileSync(targetPath, "utf-8");
+      const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+        const workspacePath = path.join(
+          options.workspaceDir,
+          "social-casual.md",
+        );
+        fs.writeFileSync(workspacePath, mutate(original));
+        return {
+          payloads: [
+            {
+              text: JSON.stringify({
+                findings: [
+                  {
+                    trigger: "behavior-fix",
+                    hasFinding: true,
+                    targetKind: "intent-markdown",
+                    operation: "refine",
+                    targetIntentIds: ["social-casual"],
+                    dedupeKey: "routing-boundary",
+                    summary: "Clarify the routing boundary",
+                    evidence: ["The request was routed too broadly"],
+                    correctionGoal: "Refine routing guidance",
+                    suggestedChange: "Update routing guidance.",
+                  },
+                ],
+              }),
+            },
+          ],
+        };
+      });
+      const api = {
+        config: {},
+        runtime: { agent: { runEmbeddedAgent } },
+      } as unknown as OpenClawPluginApi;
+
+      await expect(
+        runReviewSubagent({
+          api,
+          config: resolveConfig({ review: { enabled: true } }),
+          agentId: "main",
+          intentDirectory,
+          modelRef: { provider: "google", model: "review" },
+          snapshot,
+          triggers: ["behavior-fix"],
+        }),
+      ).resolves.toEqual({
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: [validationError],
+      });
+      expect(fs.readFileSync(targetPath, "utf-8")).toBe(original);
+    },
+  );
+
   it("rejects intent-markdown findings that declare unchanged runtime intent files", async () => {
     const intentDirectory = createIntentDirectory();
     const originalSocial = fs.readFileSync(
@@ -2672,8 +2964,8 @@ describe("runReviewSubagent", () => {
       fs.writeFileSync(
         path.join(options.workspaceDir, "social-casual.md"),
         originalSocial.replace(
-          "- Chat casually.",
-          "- Route tool support away.",
+          "Chat casually and reply warmly.",
+          "Route tool support away.",
         ),
       );
       return {
@@ -2739,8 +3031,8 @@ describe("runReviewSubagent", () => {
       fs.writeFileSync(
         path.join(options.workspaceDir, "social-casual.md"),
         originalSocial.replace(
-          "- Chat casually.",
-          "- Chat casually.\n- Include fallback handling from the merged intent.",
+          "Chat casually and reply warmly.",
+          "Chat casually and reply warmly; include fallback handling from the merged intent.",
         ),
       );
       return {
@@ -2793,7 +3085,7 @@ describe("runReviewSubagent", () => {
     );
     expect(fs.existsSync(otherPath)).toBe(false);
     expect(fs.readFileSync(socialPath, "utf-8")).toContain(
-      "Include fallback handling from the merged intent",
+      "include fallback handling from the merged intent",
     );
   });
 
@@ -2925,7 +3217,10 @@ describe("runReviewSubagent", () => {
           targetPath,
           fs
             .readFileSync(targetPath, "utf-8")
-            .replace("- Chat casually.", "- Route tool support away."),
+            .replace(
+              "Chat casually and reply warmly.",
+              "Route tool support away.",
+            ),
         );
       },
     },
@@ -2941,7 +3236,10 @@ describe("runReviewSubagent", () => {
           targetPath,
           fs
             .readFileSync(targetPath, "utf-8")
-            .replace("- Chat casually.", "- Route tool support away."),
+            .replace(
+              "Chat casually and reply warmly.",
+              "Route tool support away.",
+            ),
         );
       },
     },
@@ -2958,13 +3256,19 @@ describe("runReviewSubagent", () => {
           socialPath,
           fs
             .readFileSync(socialPath, "utf-8")
-            .replace("- Chat casually.", "- Route tool support away."),
+            .replace(
+              "Chat casually and reply warmly.",
+              "Route tool support away.",
+            ),
         );
         fs.writeFileSync(
           otherPath,
           fs
             .readFileSync(otherPath, "utf-8")
-            .replace("- Ask for context.", "- Ask for specific context."),
+            .replace(
+              "Ask for context and keep the response short.",
+              "Ask for specific context.",
+            ),
         );
       },
     },
@@ -2985,8 +3289,8 @@ describe("runReviewSubagent", () => {
           fs
             .readFileSync(sourcePath, "utf-8")
             .replace(
-              "- Chat casually.",
-              "- Keep the remaining casual scope narrow.",
+              "Chat casually and reply warmly.",
+              "Keep the remaining casual scope narrow.",
             ),
         );
       },
@@ -3085,8 +3389,8 @@ describe("runReviewSubagent", () => {
           fs
             .readFileSync(sourcePath, "utf-8")
             .replace(
-              "- Chat casually.",
-              "- Keep the remaining casual scope narrow.",
+              "Chat casually and reply warmly.",
+              "Keep the remaining casual scope narrow.",
             ),
         );
       },
@@ -3408,7 +3712,7 @@ describe("runReviewSubagent", () => {
                 summary: "Missing dedupe key",
                 evidence: ["Reusable successful ordering"],
                 correctionGoal: "Preserve the ordering",
-                suggestedChange: "Add an Experience note.",
+                suggestedChange: "Update routing guidance.",
               },
             ],
           }),

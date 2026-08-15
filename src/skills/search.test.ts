@@ -63,7 +63,7 @@ describe("buildSkillIntentReferenceMap", () => {
           domain: "writing",
           fastpath: { keywords: [] },
           skills: ["writer"],
-          prompt: "Use skill: writer for workflow prose.",
+          guidance: "Use skill: writer for workflow prose.",
         },
       },
       {
@@ -73,7 +73,7 @@ describe("buildSkillIntentReferenceMap", () => {
           examples: [],
           domain: "writing",
           fastpath: { keywords: [] },
-          prompt: "Use skill: body-only-skill.",
+          guidance: "Use skill: body-only-skill.",
         },
       },
     ]);

@@ -65,7 +65,7 @@ function snapshot(
         triggers: [],
         examples: [],
         fastpath: { keywords: [] },
-        prompt: "matched body",
+        guidance: "Matched routing guidance.",
       },
     },
     intentCatalog,
@@ -189,6 +189,37 @@ describe("projectIntentCatalog", () => {
     expect(
       forward.entries.find((entry) => entry.entry.id === "same-domain")?.entry,
     ).toEqual(withCandidate);
+  });
+
+  it("uses routing guidance and direct skills in duplicate-ID deterministic tie-breaking", () => {
+    const base = catalogEntry("same-domain", "development");
+    const first = {
+      ...base,
+      guidance: "Route through the first direct skill.",
+      skills: ["alpha"],
+    };
+    const second = {
+      ...base,
+      guidance: "Route through the second direct skill.",
+      skills: ["beta"],
+    };
+    const catalog = projectionCatalog.filter(
+      (entry) => entry.id !== "same-domain",
+    );
+
+    const forward = projectIntentCatalog(
+      snapshot([...catalog, second, first]),
+      ["behavior-fix"],
+    );
+    const reversed = projectIntentCatalog(
+      snapshot([...catalog, first, second]),
+      ["behavior-fix"],
+    );
+
+    expect(reversed).toEqual(forward);
+    expect(
+      forward.entries.find((entry) => entry.entry.id === "same-domain")?.entry,
+    ).toEqual(first);
   });
 
   it.each([

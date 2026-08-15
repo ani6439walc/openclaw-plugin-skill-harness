@@ -26,6 +26,17 @@ const memoryLookupAssetPath = path.resolve(
 const memoryCompareAssetPath = path.resolve(
   "skills/skill-harness/assets/memory-compare.md",
 );
+const routingOnlyReferencePaths = [
+  skillPath,
+  "skills/skill-harness/references/format.md",
+  "skills/skill-harness/references/interview.md",
+  "skills/skill-harness/references/design.md",
+  "skills/skill-harness/references/extract.md",
+  "skills/skill-harness/references/closing.md",
+  "skills/skill-harness/references/inventory.md",
+  "README.md",
+  "docs/skill-placement-review.md",
+].map((file) => path.resolve(file));
 
 describe("skill-harness review mode", () => {
   it("keeps automated runtime work out of the human maintenance skill", () => {
@@ -75,5 +86,24 @@ describe("skill-harness review mode", () => {
     expect(runtimeHealth).toContain("ordinary Intent Review only");
     expect(memoryLookup).not.toContain("Ani");
     expect(memoryCompare).not.toContain("Discord style guide");
+  });
+
+  it("keeps intent-maintenance references routing-only", () => {
+    const references = routingOnlyReferencePaths.map((reference) =>
+      fs.readFileSync(reference, "utf-8"),
+    );
+
+    for (const reference of references) {
+      expect(reference).toContain("guidance");
+      expect(reference).not.toContain("fastpath.hint");
+      expect(reference).not.toContain("## Guidelines");
+      expect(reference).not.toContain("## Response Strategy");
+      expect(reference).not.toContain("## Concrete Workflow");
+      expect(reference).not.toContain("## Experience");
+      expect(reference).not.toMatch(/Use `skill_view`/);
+      expect(reference).not.toMatch(/runtime experience overlays?/i);
+      expect(reference).not.toMatch(/skills or experiences/i);
+      expect(reference).not.toContain("hint generation");
+    }
   });
 });

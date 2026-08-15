@@ -16,7 +16,12 @@ import type {
 } from "openclaw/plugin-sdk/types";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
-import { defaultTracker, extractSkillInfo } from "../session/index.js";
+import {
+  defaultTracker,
+  extractSkillInfo,
+  resolveTurnEventId,
+  type SessionState,
+} from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { defaultReviewLogWriter } from "../review/log-writer.js";
 import { enqueueReview } from "../review/queue.js";
@@ -24,6 +29,7 @@ import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { runReviewSubagent } from "../review/subagent.js";
 import type {
   IntentMarkdownReviewFinding,
+  SelectedPlacementSkill,
   TriggerKeywordsReviewFinding,
 } from "../review/types.js";
 import type { SkillPlacementReviewCandidate } from "../review/types.js";
@@ -37,6 +43,7 @@ import {
   runKeywordCoverageReview,
 } from "../review/index.js";
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
 import {
   extractLatestUserMessage,
   limitConversationTurns,
@@ -60,27 +67,33 @@ import {
   resolveCanonicalSessionKeyFromSessionId,
 } from "../session/index.js";
 import {
-  getInstructionModelRef,
   getModelRef,
   getReviewModelRef,
-  runIntentInstructionSubagent,
   runIntentionSubagent,
   runTopicSwitchSubagent,
 } from "../classification/index.js";
 import {
-  buildDomainSkillsPromptPrefix,
-  buildPromptPrefix,
+  buildRoutingContext,
   formatConfiguredSkills,
 } from "../classification/index.js";
 import {
   listAvailableSkills,
   resolveAvailableSkills,
-  resolveAvailableSkillsWithRelated,
-  resolveDomainSkills,
   resolveSkillInventory,
 } from "../intents/index.js";
 import { FALLBACK_INTENT, isIntentComplexity } from "../constants.js";
 import { intentsPath } from "../file-utils.js";
+import { SkillExperienceCatalog } from "../experiences/index.js";
+import {
+  evaluateCurationCadence,
+  reconcileCurationSchedules,
+  runCurationSubagent,
+  sampleWithoutReplacement,
+  selectColdStartCandidates,
+  validateAndCommitCuration,
+  type CuratedSkillCandidate,
+} from "../curation/index.js";
+import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
@@ -90,6 +103,11 @@ import type {
 } from "../types.js";
 import { emitPipelineEvent } from "./pipeline-events.js";
 import type { HookDeps, PendingToolCall } from "./types.js";
+import {
+  TurnAssociationRegistry,
+  type TurnAssociation,
+} from "./turn-associations.js";
+import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import {
   isToolResultError,
   resolveToolCallKey,
@@ -111,7 +129,7 @@ function sanitizeHistoricalIntentRecords(
 }
 
 const LOW_THINKING_EFFORTS = new Set(["off", "minimal", "low"]);
-const INSTRUCTION_WRITER_MIN_CONFIDENCE = 0.8;
+
 const TOPIC_PROJECTION_CONFIDENCE = 0.8;
 const MAX_PROJECTION_CANDIDATE_IDS = 128;
 const MAX_PROJECTION_MATCHED_KEYWORDS = 32;
@@ -122,6 +140,7 @@ const KEYWORD_COVERAGE_TARGETS: readonly TriggerKeywordTarget[] = [
   "entity-context",
 ];
 const KEYWORD_COVERAGE_RETRY_INTERVAL = 5;
+const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
 
 type CoverageRuntimeTargets = Partial<
   Record<
@@ -129,6 +148,70 @@ type CoverageRuntimeTargets = Partial<
     { cursor: number; lastCompletedAcceptedTurn: number }
   >
 >;
+
+function truncateSelectedPlacementSkillContent(content: string): {
+  content: string;
+  omittedCodePointCount?: number;
+} {
+  const codePoints = Array.from(content);
+  if (codePoints.length <= MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS) {
+    return { content };
+  }
+  const headLength = Math.floor(MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS / 2);
+  const tailLength = MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS - headLength;
+  return {
+    content: `${codePoints.slice(0, headLength).join("")}\n\n${codePoints.slice(-tailLength).join("")}`,
+    omittedCodePointCount:
+      codePoints.length - MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS,
+  };
+}
+
+async function resolveSelectedPlacementSkill(
+  candidate: SkillPlacementReviewCandidate,
+  availableSkills: readonly AvailableSkill[],
+  skillInventory: readonly SkillInventoryItem[] | undefined,
+): Promise<SelectedPlacementSkill | undefined> {
+  const matchesInventory = skillInventory?.filter(
+    (skill) =>
+      skill.name.trim().toLowerCase() === candidate.name.trim().toLowerCase() &&
+      skill.source === candidate.source &&
+      skill.winnerFingerprint === candidate.winnerFingerprint &&
+      skill.fingerprint === candidate.fingerprint,
+  );
+  if (matchesInventory?.length !== 1) return;
+  const canonicalName = candidate.name.trim().toLowerCase();
+  const matches = availableSkills.filter(
+    (skill) => skill.name.trim().toLowerCase() === canonicalName,
+  );
+  if (matches.length !== 1) return;
+  const selected = matches[0]!;
+  try {
+    const realpath = await fs.realpath(selected.location);
+    const content = await fs.readFile(realpath);
+    if (
+      createHash("sha256").update(realpath).digest("hex") !==
+        candidate.winnerFingerprint ||
+      createHash("sha256").update(content).digest("hex") !==
+        candidate.fingerprint
+    ) {
+      return;
+    }
+    const bounded = truncateSelectedPlacementSkillContent(
+      content.toString("utf-8"),
+    );
+    return {
+      name: selected.name,
+      description: selected.description,
+      ...bounded,
+    };
+  } catch (error) {
+    logger.warn("failed to read selected placement skill", {
+      error,
+      skillName: selected.name,
+    });
+    return;
+  }
+}
 
 export function coverageEpochMilestone(params: {
   cadence: number;
@@ -252,19 +335,6 @@ function readTriggerKeywordsFailOpen(
   }
 }
 
-function recordTrackedSession(
-  tracker: typeof defaultTracker,
-  context: { sessionId?: string; sessionKey?: string },
-  data: Parameters<typeof defaultTracker.record>[1],
-): string | undefined {
-  const sessionId = tracker.resolveCurrentSessionId(context);
-  if (!sessionId) return;
-
-  tracker.record(sessionId, data);
-  tracker.write(sessionId);
-  return sessionId;
-}
-
 function toPromptBuildResult(
   prependContext?: string,
   configuredSkillsXml?: string,
@@ -294,7 +364,7 @@ function findIntentDefinition(
 }
 
 function findIntentEntry<
-  T extends { id: string; definition: { prompt: string; skills?: string[] } },
+  T extends { id: string; definition: { guidance: string; skills?: string[] } },
 >(intents: readonly T[], intent: string | undefined): T | undefined {
   const intentId = intent?.match(/^([A-Za-z0-9_-]+)/)?.[1];
   if (!intentId) return;
@@ -363,17 +433,14 @@ function getNormalizedFastpathKeywords(
 function findExactKeywordIntent(
   latest: string,
   intents: readonly IntentCatalogEntry[],
-): { intent: IntentCatalogEntry; keyword: string; hint: string } | undefined {
+): { intent: IntentCatalogEntry; keyword: string } | undefined {
   const normalizedLatest = normalizeKeywordForMatching(latest);
   if (!normalizedLatest) return;
 
   for (const intent of intents) {
-    const hint = intent.definition.fastpath.hint;
-    if (!hint) continue;
-
     for (const keyword of getNormalizedFastpathKeywords(intent)) {
       if (keyword.normalized === normalizedLatest) {
-        return { intent, keyword: keyword.keyword, hint };
+        return { intent, keyword: keyword.keyword };
       }
     }
   }
@@ -544,21 +611,31 @@ export function createHookHandlers(deps: HookDeps) {
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier ?? runIntentionSubagent;
   const topicChecker = deps.topicChecker ?? runTopicSwitchSubagent;
-  const instructionWriter =
-    deps.instructionWriter ?? runIntentInstructionSubagent;
+  const curator = deps.curator ?? runCurationSubagent;
+  const clock = deps.clock ?? (() => new Date());
+  const chooseWithoutReplacement =
+    deps.sampleWithoutReplacement ?? sampleWithoutReplacement;
+  const experienceCatalog =
+    deps.experienceCatalog ??
+    (deps.dataRoot ? SkillExperienceCatalog.create(deps.dataRoot) : undefined);
+
   const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
     deps.reviewLogWriter ?? defaultReviewLogWriter;
   const coverageReviewer = deps.coverageReviewer ?? runKeywordCoverageReview;
   const keywordCoverageWriter = deps.keywordCoverageWriter;
   const bundledSkillsDir = deps.bundledSkillsDir;
   const pendingToolCalls = new Map<string, PendingToolCall>();
+  const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
   const recordedToolCalls = new Set<string>();
   const pendingSkillEpochKeys = new Set<string>();
   const pendingCoverageEpochKeys = new Set<string>();
+  const turnAssociations =
+    deps.turnAssociations ?? new TurnAssociationRegistry();
 
   interface PromptBuildIdentity {
     effectiveAgentId: string;
     resolvedSessionKey?: string;
+    association?: TurnAssociation;
   }
 
   function resolvePromptBuildIdentity(
@@ -576,6 +653,87 @@ export function createHookHandlers(deps: HookDeps) {
         : undefined);
 
     return { effectiveAgentId: resolvedAgentId, resolvedSessionKey };
+  }
+
+  async function prepareTrackingTurn(params: {
+    ctx: PluginHookAgentContext;
+    routing: PromptBuildIdentity;
+    latestUserMessage: string;
+  }): Promise<TurnAssociation | undefined> {
+    const sessionId =
+      params.ctx.sessionId ??
+      tracker.resolveCurrentSessionId({
+        sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+      });
+    if (!sessionId) return;
+    const runId = params.ctx.runId?.trim();
+    const reservation = runId
+      ? turnAssociations.reserve(runId)
+      : turnAssociations.reserveAnonymous();
+    if (reservation.status === "full" || reservation.status === "ambiguous") {
+      return;
+    }
+    if (reservation.status === "invalid") return;
+    if (reservation.status === "existing") {
+      if (reservation.association.sessionId !== sessionId) {
+        turnAssociations.bindExisting(runId, {
+          sessionId,
+          turnKey: reservation.association.turnKey,
+        });
+        return;
+      }
+      return reservation.association;
+    }
+
+    const prepared = await tracker.preparePromptTurn({
+      sessionId,
+      sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+      agentId: params.routing.effectiveAgentId,
+      runId,
+      input: params.latestUserMessage,
+      startedAt: new Date().toISOString(),
+    });
+    if (prepared.status === "retryable-failure") {
+      if (reservation.status === "reserved") {
+        turnAssociations.release(reservation.token);
+      }
+      return;
+    }
+    const association = {
+      sessionId,
+      sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+      turnKey: prepared.identity.turnKey,
+    };
+    const bound =
+      reservation.status === "reserved"
+        ? runId
+          ? turnAssociations.bind(reservation.token, runId, association)
+          : turnAssociations.bindAnonymous(reservation.token, association)
+        : turnAssociations.bindExisting(runId, association);
+    return bound === "bound" ? association : undefined;
+  }
+
+  function resolveAssociatedTurn(params: {
+    eventRunId?: string;
+    contextRunId?: string;
+    sessionId?: string;
+    sessionKey?: string;
+  }): TurnAssociation | undefined {
+    const eventRunId = params.eventRunId?.trim();
+    const contextRunId = params.contextRunId?.trim();
+    if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
+    const runId = eventRunId || contextRunId;
+    const association = runId
+      ? turnAssociations.resolve(runId)
+      : turnAssociations.resolveSession(params.sessionId ?? params.sessionKey);
+    if (
+      !association ||
+      (params.sessionId && association.sessionId !== params.sessionId) ||
+      (params.sessionKey && association.sessionKey !== params.sessionKey)
+    ) {
+      return;
+    }
+    return association;
   }
 
   function isPromptBuildChatAllowed(
@@ -683,6 +841,7 @@ export function createHookHandlers(deps: HookDeps) {
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
     effectiveAgentId: string;
     resolvedSessionKey?: string;
+    association?: TurnAssociation;
     latestUserMessage: string;
     historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
@@ -871,11 +1030,8 @@ export function createHookHandlers(deps: HookDeps) {
           dataRoot: deps.dataRoot,
         });
       } catch (error) {
-        recordPromptBuildSession({
-          sessionId: params.ctx.sessionId,
-          resolvedSessionKey: params.resolvedSessionKey,
-          fallbackSessionKey: params.ctx.sessionKey,
-          effectiveAgentId: params.effectiveAgentId,
+        await recordPromptBuildSession({
+          association: params.association,
           latestUserMessage: params.latestUserMessage,
           trigger: "classifier",
           intentProjection,
@@ -900,11 +1056,8 @@ export function createHookHandlers(deps: HookDeps) {
           : { error: "classifier returned no result" },
       );
       if (!result) {
-        recordPromptBuildSession({
-          sessionId: params.ctx.sessionId,
-          resolvedSessionKey: params.resolvedSessionKey,
-          fallbackSessionKey: params.ctx.sessionKey,
-          effectiveAgentId: params.effectiveAgentId,
+        await recordPromptBuildSession({
+          association: params.association,
           latestUserMessage: params.latestUserMessage,
           trigger: "classifier",
           intentProjection,
@@ -926,29 +1079,21 @@ export function createHookHandlers(deps: HookDeps) {
     return;
   }
 
-  function recordPromptBuildSession(params: {
-    sessionId?: string;
-    resolvedSessionKey?: string;
-    fallbackSessionKey?: string;
-    effectiveAgentId: string;
+  async function recordPromptBuildSession(params: {
+    association?: TurnAssociation;
     latestUserMessage: string;
     trigger: IntentTrigger;
     result?: IntentionResult;
-    instructionText?: string;
     recommendedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
-  }): void {
-    const sessionKey = params.resolvedSessionKey ?? params.fallbackSessionKey;
-    const sessionId =
-      params.sessionId ?? tracker.resolveCurrentSessionId({ sessionKey });
-    if (!sessionId) return;
-
-    tracker.rotate(sessionId);
-    tracker.record(sessionId, {
-      sessionKey,
-      agentId: params.effectiveAgentId,
-      current: {
+  }): Promise<void> {
+    if (!params.association) return;
+    await tracker.mergeTurnAndPersist({
+      sessionId: params.association.sessionId,
+      expectedTurnKey: params.association.turnKey,
+      maxWaitMs: 0,
+      data: {
         input: params.latestUserMessage,
         intent: {
           ...(params.result?.topicChangeReason
@@ -956,56 +1101,146 @@ export function createHookHandlers(deps: HookDeps) {
             : {}),
           trigger: params.trigger,
           ...(params.result ? { result: params.result } : {}),
-          instructionText: params.instructionText,
           recommendedSkills: params.recommendedSkills,
           ...(params.intentProjection
             ? { intentProjection: params.intentProjection }
             : {}),
         },
-        timestamps: { start: new Date().toISOString() },
       },
     });
-    tracker.write(sessionId);
   }
 
-  function recordPromptBuildResult(params: {
+  async function recordPromptBuildResult(params: {
     ctx: PluginHookAgentContext;
     routing: PromptBuildIdentity;
     latestUserMessage: string;
     trigger: IntentTrigger;
     result: IntentionResult;
-    instructionText?: string;
     recommendedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
-  }): void {
-    recordPromptBuildSession({
-      sessionId: params.ctx.sessionId,
-      resolvedSessionKey: params.routing.resolvedSessionKey,
-      fallbackSessionKey: params.ctx.sessionKey,
-      effectiveAgentId: params.routing.effectiveAgentId,
+  }): Promise<void> {
+    await recordPromptBuildSession({
+      association: params.routing.association,
       latestUserMessage: params.latestUserMessage,
       trigger: params.trigger,
       result: params.result,
-      instructionText: params.instructionText,
       recommendedSkills: params.recommendedSkills,
       intentProjection: params.intentProjection,
       conversation: params.conversation,
     });
   }
 
-  async function resolvePromptDomainSkills(params: {
-    agentId: string;
-    domain: string;
-    availableIntents: readonly IntentCatalogEntry[];
-  }) {
-    return await resolveDomainSkills({
+  async function resolveRoutingContext(params: {
+    routing: PromptBuildIdentity;
+    result: IntentionResult;
+    intent: IntentCatalogEntry;
+  }): Promise<{
+    candidates: AvailableSkill[];
+    provenance: CuratedSkillCandidate[];
+    experiences: ReturnType<SkillExperienceCatalog["listForSkills"]>;
+    durable: boolean;
+  }> {
+    const directSkills = await resolveAvailableSkills({
       api,
-      agentId: params.agentId,
+      agentId: params.routing.effectiveAgentId,
       bundledSkillsDir,
-      domain: params.domain,
-      intents: params.availableIntents,
+      skillNames: params.intent.definition.skills ?? [],
     });
+    const selection = selectColdStartCandidates({
+      agentId: params.routing.effectiveAgentId,
+      intentId: params.intent.id,
+      declaredSkillNames: params.intent.definition.skills ?? [],
+      inventory: directSkills,
+      sessions: tracker.listRetainedSessions(),
+      nowMs: clock().getTime(),
+      retentionMs: 14 * 24 * 60 * 60 * 1_000,
+      sampleWithoutReplacement: chooseWithoutReplacement,
+    });
+    const fallback = selection.ranked.slice(0, 4);
+    const resolveCandidates = async (
+      candidates: readonly CuratedSkillCandidate[],
+    ): Promise<AvailableSkill[]> => {
+      const resolved = await resolveAvailableSkills({
+        api,
+        agentId: params.routing.effectiveAgentId,
+        bundledSkillsDir,
+        skillNames: candidates.map((candidate) => candidate.name),
+      });
+      const byIdentity = new Map(
+        resolved.map((skill) => [skill.name.trim().toLowerCase(), skill]),
+      );
+      return candidates.flatMap((candidate) => {
+        const skill = byIdentity.get(candidate.name.trim().toLowerCase());
+        return skill ? [skill] : [];
+      });
+    };
+    const fallbackCandidates = await resolveCandidates(fallback);
+    const association = params.routing.association;
+    if (!association) {
+      return {
+        candidates: fallbackCandidates,
+        provenance: fallback,
+        experiences: [],
+        durable: false,
+      };
+    }
+    const coldStart = await tracker.ensureColdStart({
+      sessionId: association.sessionId,
+      turnKey: association.turnKey,
+      intentId: params.intent.id,
+      topicChangeReason: params.result.topicChangeReason,
+      trustworthySameTopic:
+        params.result.topicChangeReason === undefined &&
+        (params.result.confidence ?? 0) >= TOPIC_CONTINUITY_INHERIT_CONFIDENCE,
+      trustworthyTopicEvidence:
+        (params.result.confidence ?? 0) >= TOPIC_CONTINUITY_INHERIT_CONFIDENCE,
+      draftCandidates: selection.selected,
+      now: clock().toISOString(),
+    });
+    if (coldStart.status !== "applied" && coldStart.status !== "reused") {
+      return {
+        candidates: fallbackCandidates,
+        provenance: fallback,
+        experiences: [],
+        durable: false,
+      };
+    }
+    const provenance = coldStart.curation.candidates;
+    const candidates = await resolveCandidates(provenance);
+    const candidateNames = candidates.map((candidate) => candidate.name);
+    const experiences = experienceCatalog
+      ? coldStart.curation.experienceRefs.flatMap((identity) => {
+          const experience = experienceCatalog.resolve(identity);
+          return experience &&
+            candidateNames.some(
+              (name) => name.trim().toLowerCase() === experience.skill,
+            )
+            ? [experience]
+            : [];
+        })
+      : [];
+    const committed = await tracker.commitPromptRecommendation({
+      sessionId: association.sessionId,
+      turnKey: association.turnKey,
+      expectedTopicEpoch: coldStart.curation.topicEpoch,
+      expectedRevision: coldStart.curation.revision,
+      recommendedSkills: candidateNames,
+      recommendationState: {
+        topicEpoch: coldStart.curation.topicEpoch,
+        curationRevision: coldStart.curation.revision,
+        candidates: provenance,
+      },
+    });
+    if (committed !== "applied") {
+      return {
+        candidates: fallbackCandidates,
+        provenance: fallback,
+        experiences: [],
+        durable: false,
+      };
+    }
+    return { candidates, provenance, experiences, durable: true };
   }
 
   function buildExactKeywordIntentResult(params: {
@@ -1151,50 +1386,39 @@ export function createHookHandlers(deps: HookDeps) {
         reason: result.topicChangeReason,
       },
     );
-    if (!params.refreshedConfig.instruction.enabled) {
-      const domainSkills = await resolvePromptDomainSkills({
-        agentId: params.routing.effectiveAgentId,
-        domain: result.domain,
-        availableIntents: params.availableIntents,
-      });
-      recordPromptBuildResult({
-        ctx: params.ctx,
-        routing: params.routing,
-        latestUserMessage: params.latestUserMessage,
-        trigger: "exact-keyword",
-        result,
-        recommendedSkills: domainSkills.map((skill) => skill.name),
-        conversation: params.conversation,
-      });
-      return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(result, domainSkills),
-        params.configuredSkillsXml,
-      );
-    }
-
-    const domainSkills = await resolvePromptDomainSkills({
-      agentId: params.routing.effectiveAgentId,
-      domain: result.domain,
-      availableIntents: params.availableIntents,
-    });
-    recordPromptBuildResult({
+    await recordPromptBuildResult({
       ctx: params.ctx,
       routing: params.routing,
       latestUserMessage: params.latestUserMessage,
       trigger: "exact-keyword",
       result,
-      instructionText: params.exactKeywordMatch.hint,
-      recommendedSkills: domainSkills.map((skill) => skill.name),
       conversation: params.conversation,
     });
-    const promptPrefix = buildPromptPrefix(
+    const routingContext = await resolveRoutingContext({
+      routing: params.routing,
       result,
-      params.availableIntents,
-      params.refreshedConfig,
-      params.exactKeywordMatch.hint,
-      domainSkills,
+      intent: params.exactKeywordMatch.intent,
+    });
+    if (!routingContext.durable) {
+      await recordPromptBuildResult({
+        ctx: params.ctx,
+        routing: params.routing,
+        latestUserMessage: params.latestUserMessage,
+        trigger: "exact-keyword",
+        result,
+        recommendedSkills: routingContext.candidates.map((skill) => skill.name),
+        conversation: params.conversation,
+      });
+    }
+    return toPromptBuildResult(
+      buildRoutingContext({
+        result,
+        guidance: params.exactKeywordMatch.intent.definition.guidance,
+        candidates: routingContext.candidates,
+        experiences: routingContext.experiences,
+      }),
+      params.configuredSkillsXml,
     );
-    return toPromptBuildResult(promptPrefix, params.configuredSkillsXml);
   }
 
   async function handleClassifiedPromptBuild(params: {
@@ -1211,176 +1435,50 @@ export function createHookHandlers(deps: HookDeps) {
     const result = params.classification.result;
     logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
 
-    const recordAndReturnDomainSkillsPrefix = async () => {
-      const domainSkills = await resolvePromptDomainSkills({
-        agentId: params.routing.effectiveAgentId,
-        domain: result.domain,
-        availableIntents: params.availableIntents,
-      });
-      recordPromptBuildResult({
+    const recordAndReturnRoutingContext = async () => {
+      await recordPromptBuildResult({
         ctx: params.ctx,
         routing: params.routing,
         latestUserMessage: params.latestUserMessage,
         trigger: params.classification.trigger,
         result,
-        recommendedSkills: domainSkills.map((skill) => skill.name),
         intentProjection: params.classification.intentProjection,
         conversation: params.conversation,
       });
+      const intent = findIntentEntry(params.availableIntents, result.intent);
+      if (!intent)
+        return toPromptBuildResult(undefined, params.configuredSkillsXml);
+      const routingContext = await resolveRoutingContext({
+        routing: params.routing,
+        result,
+        intent,
+      });
+      if (!routingContext.durable) {
+        await recordPromptBuildResult({
+          ctx: params.ctx,
+          routing: params.routing,
+          latestUserMessage: params.latestUserMessage,
+          trigger: params.classification.trigger,
+          result,
+          recommendedSkills: routingContext.candidates.map(
+            (skill) => skill.name,
+          ),
+          intentProjection: params.classification.intentProjection,
+          conversation: params.conversation,
+        });
+      }
       return toPromptBuildResult(
-        buildDomainSkillsPromptPrefix(result, domainSkills),
+        buildRoutingContext({
+          result,
+          guidance: intent.definition.guidance,
+          candidates: routingContext.candidates,
+          experiences: routingContext.experiences,
+        }),
         params.configuredSkillsXml,
       );
     };
 
-    if (params.classification.kind === "same-topic") {
-      logger.debug("topic unchanged; recording inherited intent only.");
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    // Safety fallback: skip intent instruction subagent and hint injection when topic unchanged
-    if (!result.topicChangeReason) {
-      logger.debug(
-        "topic unchanged; skipping intent instruction subagent and hint injection.",
-      );
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    // Skip intent instruction subagent when confidence is too low
-    if ((result.confidence ?? 0) < INSTRUCTION_WRITER_MIN_CONFIDENCE) {
-      logger.debug(
-        `confidence ${result.confidence} below ${INSTRUCTION_WRITER_MIN_CONFIDENCE}; skipping intent instruction subagent and hint injection.`,
-      );
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    if (!params.refreshedConfig.instruction.enabled) {
-      logger.debug(
-        "instruction writer disabled; injecting domain skills without generated hint.",
-      );
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    const instructionModelRef = getInstructionModelRef(
-      api,
-      params.routing.effectiveAgentId,
-      params.refreshedConfig,
-      {
-        modelProviderId: params.ctx.modelProviderId,
-        modelId: params.ctx.modelId,
-      },
-    );
-    if (!instructionModelRef) {
-      logger.debug(
-        "instruction writer model unavailable; injecting domain skills without generated hint.",
-      );
-      return await recordAndReturnDomainSkillsPrefix();
-    }
-
-    emitPipelineEvent(
-      params.ctx,
-      params.routing.resolvedSessionKey,
-      "hint-generate",
-      "started",
-    );
-    const intentEntry = findIntentEntry(params.availableIntents, result.intent);
-    const intentBody = intentEntry?.definition.prompt ?? FALLBACK_INTENT.prompt;
-    const instructionResult = await instructionWriter({
-      api,
-      config: params.refreshedConfig,
-      agentId: params.routing.effectiveAgentId,
-      sessionKey: params.routing.resolvedSessionKey,
-      sessionId: params.ctx.sessionId,
-      conversation: params.conversation,
-      latest: params.latestUserMessage,
-      result,
-      intentBody,
-      availableSkills: await resolveAvailableSkillsWithRelated({
-        api,
-        agentId: params.routing.effectiveAgentId,
-        bundledSkillsDir,
-        skillNames: intentEntry?.definition.skills,
-      }),
-      messageProvider: params.ctx.messageProvider,
-      modelRef: instructionModelRef,
-      dataRoot: deps.dataRoot,
-    });
-    const instructionText = instructionResult.instructionHint ?? undefined;
-    if (instructionText) {
-      emitPipelineEvent(
-        params.ctx,
-        params.routing.resolvedSessionKey,
-        "hint-generate",
-        "completed",
-        {
-          result: instructionText,
-        },
-      );
-    } else if (instructionResult.instructionHint === null) {
-      emitPipelineEvent(
-        params.ctx,
-        params.routing.resolvedSessionKey,
-        "hint-generate",
-        "completed",
-      );
-    } else {
-      const instructionError =
-        instructionResult.error?.trim() ||
-        "instruction writer produced invalid JSON";
-      emitPipelineEvent(
-        params.ctx,
-        params.routing.resolvedSessionKey,
-        "hint-generate",
-        "failed",
-        {
-          error: instructionError,
-        },
-      );
-    }
-
-    const domainSkills = await resolvePromptDomainSkills({
-      agentId: params.routing.effectiveAgentId,
-      domain: result.domain,
-      availableIntents: params.availableIntents,
-    });
-    const additionalSkills = instructionResult.additionalCandidateSkills?.length
-      ? await resolveAvailableSkills({
-          api,
-          agentId: params.routing.effectiveAgentId,
-          bundledSkillsDir,
-          skillNames: instructionResult.additionalCandidateSkills,
-        })
-      : [];
-    const seenSkillNames = new Set(
-      domainSkills.map((skill) => skill.name.toLowerCase()),
-    );
-    for (const skill of additionalSkills) {
-      const normalizedName = skill.name.toLowerCase();
-      if (seenSkillNames.has(normalizedName)) continue;
-      seenSkillNames.add(normalizedName);
-      domainSkills.push(skill);
-    }
-
-    recordPromptBuildResult({
-      ctx: params.ctx,
-      routing: params.routing,
-      latestUserMessage: params.latestUserMessage,
-      trigger: params.classification.trigger,
-      result,
-      instructionText,
-      recommendedSkills: domainSkills.map((skill) => skill.name),
-      intentProjection: params.classification.intentProjection,
-      conversation: params.conversation,
-    });
-
-    const promptPrefix = buildPromptPrefix(
-      result,
-      params.availableIntents,
-      params.refreshedConfig,
-      instructionResult.instructionHint,
-      domainSkills,
-    );
-    return toPromptBuildResult(promptPrefix, params.configuredSkillsXml);
+    return await recordAndReturnRoutingContext();
   }
 
   async function runPromptBuildPipeline<T>(
@@ -1459,6 +1557,14 @@ export function createHookHandlers(deps: HookDeps) {
       }
       const { latestUserMessage, historicalIntents, conversation } =
         buildConversationContext(event, ctx, refreshedConfig);
+      routing.association = await prepareTrackingTurn({
+        ctx,
+        routing,
+        latestUserMessage,
+      });
+      if (!routing.association) {
+        return toPromptBuildResult(undefined, configuredSkillsXml);
+      }
 
       refreshIntents();
       if (catalog.count === 0) {
@@ -1524,6 +1630,7 @@ export function createHookHandlers(deps: HookDeps) {
             refreshedConfig,
             effectiveAgentId: routing.effectiveAgentId,
             resolvedSessionKey: routing.resolvedSessionKey,
+            association: routing.association,
             latestUserMessage,
             historicalIntents,
             conversation,
@@ -1563,7 +1670,12 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function onAfterToolCall(
     event: PluginHookAfterToolCallEvent,
-    ctx: { sessionId?: string; agentId?: string; sessionKey?: string },
+    ctx: {
+      sessionId?: string;
+      agentId?: string;
+      sessionKey?: string;
+      runId?: string;
+    },
   ): Promise<void> {
     const toolCallKey = resolveToolCallKey({
       toolCallId: event.toolCallId,
@@ -1576,6 +1688,13 @@ export function createHookHandlers(deps: HookDeps) {
       pendingToolCalls.delete(toolCallKey);
       return;
     }
+    const association = resolveAssociatedTurn({
+      eventRunId: event.runId,
+      contextRunId: ctx.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+    });
+    if (!association) return;
     const failed =
       event.error !== undefined ||
       isToolResultError(event.result, event.toolName);
@@ -1587,10 +1706,14 @@ export function createHookHandlers(deps: HookDeps) {
       ? undefined
       : extractSkillInfo(event.toolName, event.params, outputStr);
 
-    recordTrackedSession(tracker, resolveTrackingContext(ctx), {
-      current: {
+    const merged = await tracker.mergeTurnAndPersist({
+      sessionId: association.sessionId,
+      expectedTurnKey: association.turnKey,
+      maxWaitMs: 0,
+      data: {
         toolCalls: [
           {
+            toolCallId: event.toolCallId,
             name: event.toolName,
             params: event.params,
             result: failed ? undefined : truncatedOutput,
@@ -1602,9 +1725,10 @@ export function createHookHandlers(deps: HookDeps) {
         skillsUsed: skillUsed ? [skillUsed] : undefined,
       },
     });
-    if (toolCallKey) {
+    if (toolCallKey && merged === "applied") {
       recordedToolCalls.add(toolCallKey);
       pendingToolCalls.delete(toolCallKey);
+      toolFallbacks.delete(toolCallKey);
     }
   }
 
@@ -1619,10 +1743,18 @@ export function createHookHandlers(deps: HookDeps) {
       sessionKey: ctx.sessionKey,
     });
     if (!toolCallKey) return;
+    const association = resolveAssociatedTurn({
+      eventRunId: event.runId,
+      contextRunId: ctx.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+    });
+    if (!association) return;
     pendingToolCalls.set(toolCallKey, {
       name: event.toolName,
       params: event.params,
       ctx,
+      association,
     });
   }
 
@@ -1634,80 +1766,70 @@ export function createHookHandlers(deps: HookDeps) {
       toolCallId: event.toolCallId ?? ctx.toolCallId,
       sessionKey: ctx.sessionKey,
     });
-    if (toolCallKey && recordedToolCalls.has(toolCallKey)) {
-      recordedToolCalls.delete(toolCallKey);
-      return;
-    }
-
+    if (!toolCallKey || recordedToolCalls.has(toolCallKey)) return;
     const pending = toolCallKey ? pendingToolCalls.get(toolCallKey) : undefined;
     const toolName = event.toolName ?? ctx.toolName ?? pending?.name;
-    if (!toolName) return;
+    if (!toolName || !pending) return;
 
     const outputStr = resolveToolResultText(event.message);
     const truncatedOutput = outputStr.slice(0, 200);
     const failed = isToolResultError(event.message, toolName);
     const error = failed ? truncatedOutput : undefined;
     const params = pending?.params ?? {};
-    const trackingCtx = resolveTrackingContext({
-      ...pending?.ctx,
-      agentId: ctx.agentId ?? pending?.ctx.agentId,
-      sessionKey: ctx.sessionKey ?? pending?.ctx.sessionKey,
-    });
-    const skillUsed = error
+    const skillUsed = failed
       ? undefined
       : extractSkillInfo(toolName, params, outputStr);
-
-    recordTrackedSession(tracker, trackingCtx, {
-      current: {
-        toolCalls: [
-          {
-            name: toolName,
-            params,
-            result: failed ? undefined : truncatedOutput,
-            error,
-            success: !failed,
-          },
-        ],
-        skillsUsed: skillUsed ? [skillUsed] : undefined,
+    const staged = toolFallbacks.stage(toolCallKey, {
+      association: pending.association,
+      skillUsed,
+      fallback: {
+        toolCallId: toolCallKey,
+        name: toolName,
+        params,
+        result: failed ? undefined : truncatedOutput,
+        error,
+        success: !failed,
       },
     });
-
-    if (toolCallKey) {
-      recordedToolCalls.add(toolCallKey);
-      pendingToolCalls.delete(toolCallKey);
+    if (staged === "full" || staged === "ambiguous") {
+      logger.warn("discarded persisted tool fallback", {
+        reason: staged,
+        toolName,
+      });
     }
   }
 
-  function recordFinalResult(
-    params: {
-      messages?: unknown[];
-      lastAssistantMessage?: string;
-      error?: string;
-    },
-    ctx: PluginHookAgentContext,
-  ): string | undefined {
-    const turns = extractRecentTurns(
-      (params.messages ?? []) as Array<{
-        role?: string;
-        content?: string;
-      }>,
-    );
-    const lastAssistantTurn = turns
+  function extractAgentEndPayload(params: {
+    messages?: unknown[];
+    lastAssistantMessage?: string;
+    error?: string;
+  }): { result?: string; error?: string } {
+    const lastAssistantMessage = (params.messages ?? [])
       .slice()
       .reverse()
-      .find((t) => t.role === "assistant");
+      .find(
+        (message): message is { role: "assistant"; content?: unknown } =>
+          typeof message === "object" &&
+          message !== null &&
+          (message as { role?: unknown }).role === "assistant",
+      );
+    const content = lastAssistantMessage?.content;
+    const result =
+      typeof content === "string"
+        ? content.trim()
+        : content !== undefined
+          ? resolveToolResultText({ content })
+          : undefined;
 
-    return recordTrackedSession(tracker, resolveTrackingContext(ctx), {
-      current: {
-        result: lastAssistantTurn?.text ?? params.lastAssistantMessage,
-        error: params.error,
-        timestamps: { end: new Date().toISOString() },
-      },
-    });
+    return {
+      result: result || params.lastAssistantMessage,
+      error: params.error,
+    };
   }
 
-  async function recordAgentEndStats(sessionId: string) {
-    const state = tracker.getCurrentState(sessionId);
+  async function recordAgentEndStats(association: TurnAssociation) {
+    const { sessionId, turnKey } = association;
+    const state = tracker.getTurnState(sessionId, turnKey);
     if (!state) return;
 
     const intentDefinition = findIntentDefinition(
@@ -1755,10 +1877,28 @@ export function createHookHandlers(deps: HookDeps) {
     agentId: string,
     skillPlacementCandidate?: SkillPlacementReviewCandidate,
   ) {
-    const availableSkillNames = [
-      ...(intentDefinition?.definition.skills ?? []),
-      ...(skillPlacementCandidate ? [skillPlacementCandidate.name] : []),
-    ];
+    const availableSkillNames = skillPlacementCandidate
+      ? [skillPlacementCandidate.name]
+      : [...(intentDefinition?.definition.skills ?? [])];
+    const resolvedAvailableSkills =
+      availableSkillNames.length > 0
+        ? await resolveAvailableSkills({
+            api,
+            agentId,
+            bundledSkillsDir,
+            skillNames: [...new Set(availableSkillNames)],
+          })
+        : [];
+    const skillInventory = skillPlacementCandidate
+      ? await skillInventoryResolver({ api, agentId, bundledSkillsDir })
+      : undefined;
+    const selectedPlacementSkill = skillPlacementCandidate
+      ? await resolveSelectedPlacementSkill(
+          skillPlacementCandidate,
+          resolvedAvailableSkills,
+          skillInventory,
+        )
+      : undefined;
     return {
       ...baseSnapshot,
       ...(skillPlacementCandidate ? { agentId } : {}),
@@ -1772,25 +1912,18 @@ export function createHookHandlers(deps: HookDeps) {
             },
           }
         : undefined,
-      availableSkills:
-        availableSkillNames.length > 0
-          ? await resolveAvailableSkills({
-              api,
-              agentId,
-              bundledSkillsDir,
-              skillNames: [...new Set(availableSkillNames)],
-            })
-          : [],
+      availableSkills: skillPlacementCandidate ? [] : resolvedAvailableSkills,
       ...(skillPlacementCandidate ? { skillPlacementCandidate } : {}),
+      ...(selectedPlacementSkill ? { selectedPlacementSkill } : {}),
       intentCatalog: catalog.get().map((entry) => ({
         id: entry.id,
         triggers: [...entry.definition.triggers],
         examples: [...entry.definition.examples],
         domain: entry.definition.domain,
+        guidance: entry.definition.guidance,
         skills: [...(entry.definition.skills ?? [])],
         fastpath: {
           keywords: [...(entry.definition.fastpath?.keywords ?? [])],
-          hint: entry.definition.fastpath?.hint,
         },
         ...(entry.definition.candidate
           ? {
@@ -2220,15 +2353,291 @@ export function createHookHandlers(deps: HookDeps) {
     }
   }
 
+  function enqueueCurationKey(
+    key: string,
+    identity: {
+      sessionId: string;
+      schedulingTurnKey: string;
+      expectedTopicEpoch: number;
+      expectedRevision: number;
+    },
+  ): boolean {
+    const curationQueue = deps.curationQueue;
+    if (!curationQueue) return false;
+    return curationQueue.enqueue(key, async () => {
+      await runQueuedCuration(identity);
+    });
+  }
+
+  async function runQueuedCuration(identity: {
+    sessionId: string;
+    schedulingTurnKey: string;
+    expectedTopicEpoch: number;
+    expectedRevision: number;
+  }): Promise<void> {
+    const resolvedConfig = config();
+    if (!resolvedConfig.curation.enabled || !deps.dataRoot) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "obsolete",
+        now: clock().toISOString(),
+      });
+      return;
+    }
+
+    const pending = (await tracker.listPendingCurationSchedules()).find(
+      (entry) =>
+        entry.sessionId === identity.sessionId &&
+        entry.schedule.schedulingTurnKey === identity.schedulingTurnKey &&
+        entry.schedule.expectedTopicEpoch === identity.expectedTopicEpoch &&
+        entry.schedule.expectedRevision === identity.expectedRevision &&
+        entry.schedule.status === "pending",
+    );
+    if (!pending) return;
+
+    const session = tracker
+      .listRetainedSessions()
+      .find((candidate) => candidate.sessionId === identity.sessionId);
+    const expected = session?.curation;
+    if (
+      !session?.agentId ||
+      !expected ||
+      expected.topicEpoch !== identity.expectedTopicEpoch ||
+      expected.revision !== identity.expectedRevision
+    ) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "obsolete",
+        now: clock().toISOString(),
+      });
+      return;
+    }
+
+    const acceptedEventIds = statsAggregator.listProcessedEventIds();
+    const allTurns = [...(session.history ?? []), session.current];
+    const acceptedTurns = allTurns.filter((turn) => {
+      const eventId = resolveTurnEventId(identity.sessionId, turn);
+      return eventId !== undefined && acceptedEventIds.has(eventId);
+    });
+    const schedulingIndex = acceptedTurns.findIndex(
+      (turn) => turn.turnKey === identity.schedulingTurnKey,
+    );
+    if (schedulingIndex < 0) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "obsolete",
+        now: clock().toISOString(),
+      });
+      return;
+    }
+
+    const conversationTurns = acceptedTurns
+      .slice(0, schedulingIndex + 1)
+      .flatMap((turn) => {
+        if (!turn.input) return [];
+        return [
+          {
+            role: "user",
+            text: turn.input,
+            ...(turn.intent?.result
+              ? {
+                  historicalIntent: {
+                    intent: turn.intent.result.intent,
+                    domain: turn.intent.result.domain,
+                    topic: turn.intent.result.topic,
+                    keywords: turn.intent.result.keywords,
+                  },
+                }
+              : {}),
+          },
+        ];
+      });
+
+    const visibleSkills = await listAvailableSkills({
+      api,
+      agentId: session.agentId,
+      bundledSkillsDir,
+      usageStats: {},
+    });
+    const matchedIntent = findIntentDefinition(catalog, expected.intentId);
+    const directSkills = matchedIntent
+      ? await resolveAvailableSkills({
+          api,
+          agentId: session.agentId,
+          bundledSkillsDir,
+          skillNames: matchedIntent.definition.skills ?? [],
+        })
+      : [];
+    if (directSkills.length === 0) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "failed",
+        now: clock().toISOString(),
+      });
+      return;
+    }
+    const activeExperienceCatalog =
+      experienceCatalog ?? SkillExperienceCatalog.create(deps.dataRoot);
+
+    let proposal;
+    try {
+      proposal = await curator({
+        api,
+        config: resolvedConfig,
+        agentId: session.agentId,
+        sessionId: identity.sessionId,
+        dataRoot: deps.dataRoot,
+        curation: expected,
+        conversation: conversationTurns,
+        candidates: directSkills,
+        experienceIdentities: expected.experienceRefs,
+      });
+    } catch (error) {
+      logger.warn("curation subagent failed", { error });
+      proposal = undefined;
+    }
+
+    if (!proposal) {
+      await tracker.finishCurationSchedule({
+        sessionId: identity.sessionId,
+        turnKey: identity.schedulingTurnKey,
+        expectedTopicEpoch: identity.expectedTopicEpoch,
+        expectedRevision: identity.expectedRevision,
+        outcome: "failed",
+        now: clock().toISOString(),
+      });
+      return;
+    }
+
+    await validateAndCommitCuration({
+      schedule: pending,
+      expected,
+      proposal,
+      visibleSkills,
+      directSkills,
+      experienceCatalog: activeExperienceCatalog,
+      completedTurnCursor: schedulingIndex + 1,
+      finalizedTurns: acceptedTurns,
+      acceptedEventIds,
+      now: clock().toISOString(),
+      commit: tracker.commitCurationSchedule.bind(tracker),
+      finish: tracker.finishCurationSchedule.bind(tracker),
+    });
+  }
+
+  async function maybeScheduleCuration(
+    association: TurnAssociation,
+    resolvedConfig: ResolvedSkillHarnessPluginConfig,
+  ): Promise<void> {
+    const curationQueue = deps.curationQueue;
+    if (!curationQueue || !resolvedConfig.curation.enabled) return;
+
+    const current = tracker.getTurnState(
+      association.sessionId,
+      association.turnKey,
+    );
+    if (!current?.intent?.recommendationState) return;
+
+    try {
+      const session = tracker
+        .listRetainedSessions()
+        .find((candidate) => candidate.sessionId === association.sessionId);
+      const curation = session?.curation;
+      if (!curation) return;
+      const cadence = evaluateCurationCadence({
+        curation,
+        finalizedTurns: [...(session.history ?? []), session.current],
+      });
+      if (!cadence.eligible || !cadence.schedulingTurnKey) return;
+
+      const reserved = await tracker.reserveCurationSchedule({
+        sessionId: association.sessionId,
+        turnKey: cadence.schedulingTurnKey,
+        expectedTopicEpoch: curation.topicEpoch,
+        expectedRevision: curation.revision,
+        now: clock().toISOString(),
+      });
+      if (reserved !== "reserved") return;
+
+      const key = `curation:${association.sessionId}:${cadence.schedulingTurnKey}:${curation.topicEpoch}:${curation.revision}`;
+      enqueueCurationKey(key, {
+        sessionId: association.sessionId,
+        schedulingTurnKey: cadence.schedulingTurnKey,
+        expectedTopicEpoch: curation.topicEpoch,
+        expectedRevision: curation.revision,
+      });
+    } catch (error) {
+      logger.warn("failed to schedule curation", { error });
+    }
+  }
+
+  async function recoverCurationSchedules(): Promise<void> {
+    const curationQueue = deps.curationQueue;
+    if (!curationQueue) return;
+    const resolvedConfig = config();
+    if (!resolvedConfig.curation.enabled) return;
+
+    try {
+      const acceptedEventIds = statsAggregator.listProcessedEventIds();
+      const missing = reconcileCurationSchedules({
+        sessions: tracker.listRetainedSessions(),
+        acceptedEventIds,
+      });
+      for (const candidate of missing) {
+        const reserved = await tracker.reserveCurationSchedule({
+          sessionId: candidate.sessionId,
+          turnKey: candidate.turnKey,
+          expectedTopicEpoch: candidate.expectedTopicEpoch,
+          expectedRevision: candidate.expectedRevision,
+          now: clock().toISOString(),
+        });
+        if (reserved !== "reserved" && reserved !== "already-pending") continue;
+        const key = `curation:${candidate.sessionId}:${candidate.turnKey}:${candidate.expectedTopicEpoch}:${candidate.expectedRevision}`;
+        enqueueCurationKey(key, {
+          sessionId: candidate.sessionId,
+          schedulingTurnKey: candidate.turnKey,
+          expectedTopicEpoch: candidate.expectedTopicEpoch,
+          expectedRevision: candidate.expectedRevision,
+        });
+      }
+
+      const pending = await tracker.listPendingCurationSchedules();
+      for (const entry of pending) {
+        const key = `curation:${entry.sessionId}:${entry.schedule.schedulingTurnKey}:${entry.schedule.expectedTopicEpoch}:${entry.schedule.expectedRevision}`;
+        enqueueCurationKey(key, {
+          sessionId: entry.sessionId,
+          schedulingTurnKey: entry.schedule.schedulingTurnKey,
+          expectedTopicEpoch: entry.schedule.expectedTopicEpoch,
+          expectedRevision: entry.schedule.expectedRevision,
+        });
+      }
+    } catch (error) {
+      logger.warn("failed to recover curation schedules", { error });
+    }
+  }
+
   async function finalizeTrackedTurn(
-    trackedSessionId: string | undefined,
+    association: TurnAssociation | undefined,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    if (!trackedSessionId) return;
-    const agentEndStats = await recordAgentEndStats(trackedSessionId);
+    if (!association) return;
+    const agentEndStats = await recordAgentEndStats(association);
     if (!agentEndStats) return;
 
     const resolvedConfig = config();
+    await maybeScheduleCuration(association, resolvedConfig);
     const reviewConfig = resolvedConfig.review;
     if (!reviewConfig.enabled) return;
 
@@ -2245,7 +2654,10 @@ export function createHookHandlers(deps: HookDeps) {
       logger.warn("failed to evaluate keyword coverage schedule", { error });
     }
 
-    const baseSnapshot = tracker.getReviewSnapshot(trackedSessionId);
+    const baseSnapshot = tracker.getReviewSnapshotForTurn(
+      association.sessionId,
+      association.turnKey,
+    );
     if (!baseSnapshot) return;
     const triggers: ReviewTrigger[] = checkReviewTriggers(
       baseSnapshot.current,
@@ -2309,12 +2721,7 @@ export function createHookHandlers(deps: HookDeps) {
       const placementSkillName = skillPlacementCandidate?.name
         .trim()
         .toLowerCase();
-      if (
-        placementSkillName &&
-        !snapshot.availableSkills.some(
-          (skill) => skill.name.trim().toLowerCase() === placementSkillName,
-        )
-      ) {
+      if (placementSkillName && !snapshot.selectedPlacementSkill) {
         pendingSkillEpochKeys.delete(skillPlacementCandidate!.epochKey);
         ownsReservation = false;
         skillPlacementCandidate = undefined;
@@ -2360,32 +2767,91 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    const trackedSessionId = recordFinalResult(
-      { messages: event.messages, error: event.error },
-      ctx,
+    const eventRunId = (event as { runId?: string }).runId;
+    const association = resolveAssociatedTurn({
+      eventRunId,
+      contextRunId: ctx.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+    });
+    if (!association) return;
+    const stagedEntries = toolFallbacks.listForAssociation(association);
+    const stagedToolFallbacks = stagedEntries.map(
+      ([, staged]) => staged.fallback,
     );
-    await finalizeTrackedTurn(trackedSessionId, ctx);
+    const payload = extractAgentEndPayload({
+      messages: event.messages,
+      error: event.error,
+    });
+    const finalized = await tracker.finalizeTurnFromAgentEnd({
+      sessionId: association.sessionId,
+      expectedTurnKey: association.turnKey,
+      stagedToolFallbacks,
+      result: payload.result,
+      error: payload.error,
+      endedAt: new Date().toISOString(),
+    });
+    if (finalized !== "applied" && finalized !== "already-finalized") return;
+    turnAssociations.markAssociationTerminal(association);
+    toolFallbacks.markAssociationTerminal(association);
+    if (finalized === "already-finalized") {
+      if (stagedEntries.length > 0) {
+        const durableTurn = tracker.getTurnState(
+          association.sessionId,
+          association.turnKey,
+        );
+        const fallbacksAreDurable = stagedEntries.every(([, staged]) =>
+          durableTurn?.toolCalls?.some(
+            (call) => call.toolCallId === staged.fallback.toolCallId,
+          ),
+        );
+        if (fallbacksAreDurable) {
+          for (const [toolCallId] of stagedEntries) {
+            toolFallbacks.delete(toolCallId);
+            pendingToolCalls.delete(toolCallId);
+            recordedToolCalls.add(toolCallId);
+          }
+        }
+      }
+      return;
+    }
+    for (const [toolCallId] of stagedEntries) {
+      toolFallbacks.delete(toolCallId);
+      pendingToolCalls.delete(toolCallId);
+      recordedToolCalls.add(toolCallId);
+    }
+    await finalizeTrackedTurn(association, ctx);
   }
 
   async function onBeforeAgentFinalize(
     event: PluginHookBeforeAgentFinalizeEvent,
     ctx: PluginHookAgentContext,
   ): Promise<PluginHookBeforeAgentFinalizeResult | void> {
-    const trackingCtx: PluginHookAgentContext = {
-      ...ctx,
+    const eventRunId = event.runId?.trim();
+    const association = resolveAssociatedTurn({
+      eventRunId,
+      contextRunId: ctx.runId,
       sessionId: event.sessionId ?? ctx.sessionId,
-      sessionKey: event.sessionKey ?? ctx.sessionKey,
-      runId: event.runId ?? ctx.runId,
-      modelId: event.model ?? ctx.modelId,
-    };
-    const trackedSessionId = recordFinalResult(
-      {
-        messages: event.messages,
-        lastAssistantMessage: event.lastAssistantMessage,
-      },
-      trackingCtx,
-    );
-    await finalizeTrackedTurn(trackedSessionId, trackingCtx);
+      sessionKey: ctx.sessionKey,
+    });
+    if (!association) return;
+    const entries = toolFallbacks.listForAssociation(association);
+    for (const [toolCallId, staged] of entries) {
+      const merged = await tracker.mergeTurnAndPersist({
+        sessionId: association.sessionId,
+        expectedTurnKey: association.turnKey,
+        maxWaitMs: 0,
+        data: {
+          toolCalls: [staged.fallback],
+          skillsUsed: staged.skillUsed ? [staged.skillUsed] : undefined,
+        },
+      });
+      if (merged === "applied") {
+        toolFallbacks.delete(toolCallId);
+        pendingToolCalls.delete(toolCallId);
+        recordedToolCalls.add(toolCallId);
+      }
+    }
     return;
   }
 
@@ -2393,6 +2859,14 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookSessionEndEvent,
     ctx: PluginHookSessionContext,
   ): Promise<void> {
+    turnAssociations.removeSession(ctx.sessionId);
+    toolFallbacks.removeSession(ctx.sessionId);
+    for (const [toolCallId, pending] of pendingToolCalls) {
+      if (pending.association.sessionId === ctx.sessionId) {
+        pendingToolCalls.delete(toolCallId);
+        recordedToolCalls.delete(toolCallId);
+      }
+    }
     tracker.cleanup(ctx.sessionId, {
       deleteFile: false,
     });
@@ -2407,5 +2881,6 @@ export function createHookHandlers(deps: HookDeps) {
     onBeforeAgentFinalize,
     onAgentEnd,
     onSessionEnd,
+    recoverCurationSchedules,
   };
 }

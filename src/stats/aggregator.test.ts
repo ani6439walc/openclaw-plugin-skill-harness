@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import { createHash } from "node:crypto";
 import * as os from "node:os";
@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { StatsAggregator } from "./aggregator.js";
 import type { IntentCatalogEntry } from "../types.js";
 import type { SessionState } from "../session/index.js";
+import { logger } from "../../api.js";
 
 const WINNER_A = "a".repeat(64);
 const WINNER_B = "b".repeat(64);
@@ -23,8 +24,10 @@ describe("StatsAggregator", () => {
     definition: {
       triggers: ["commit"],
       examples: [],
+      domain: "development",
       skills: ["git-master", "dev-lifecycle"],
-      prompt: "Follow the version-control workflow.",
+      fastpath: { keywords: [] },
+      guidance: "Follow the version-control workflow.",
     },
   };
 
@@ -38,7 +41,6 @@ describe("StatsAggregator", () => {
           confidence: 0.75,
           complexity: "medium",
         },
-        instructionText: "Consider the injected skill candidates when useful.",
         recommendedSkills: ["git-master", "dev-lifecycle"],
       },
       skillsUsed: [{ name: "git-master", path: "/skills/git-master/SKILL.md" }],
@@ -92,6 +94,58 @@ describe("StatsAggregator", () => {
       } finally {
         fs.rmSync(otherDir, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe("listProcessedEventIds", () => {
+    it("returns copied new and retained legacy event ids without rewriting stats", () => {
+      aggregator.record(
+        "session-a",
+        createState({ turnKey: "turn-a" }),
+        intent,
+      );
+      const statsFile = path.join(tempDir, "stats.json");
+      const stats = JSON.parse(fs.readFileSync(statsFile, "utf-8"));
+      stats.processedEvents["legacy-session:2026-06-11T00:00:00.000Z"] =
+        "2026-06-11T00:01:00.000Z";
+      fs.writeFileSync(statsFile, JSON.stringify(stats, null, 2));
+      const before = fs.readFileSync(statsFile);
+
+      const ids = aggregator.listProcessedEventIds();
+
+      expect(ids).toEqual(
+        new Set([
+          "session-a:turn:turn-a",
+          "legacy-session:2026-06-11T00:00:00.000Z",
+        ]),
+      );
+      ids.add("caller-only");
+      expect(aggregator.listProcessedEventIds()).not.toContain("caller-only");
+      expect(fs.readFileSync(statsFile)).toEqual(before);
+    });
+
+    it("returns an empty set without creating a missing stats file", () => {
+      expect(aggregator.listProcessedEventIds()).toEqual(new Set());
+      expect(fs.existsSync(path.join(tempDir, "stats.json"))).toBe(false);
+    });
+
+    it.each([
+      ["malformed", "{not-json"],
+      [
+        "schema-invalid",
+        JSON.stringify({ schemaVersion: 4, processedEvents: {} }),
+      ],
+    ])("fails open for %s stats without rewriting bytes", (_name, contents) => {
+      const statsFile = path.join(tempDir, "stats.json");
+      fs.writeFileSync(statsFile, contents);
+      const before = fs.readFileSync(statsFile);
+      const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      warn.mockClear();
+
+      expect(aggregator.listProcessedEventIds()).toEqual(new Set());
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(fs.readFileSync(statsFile)).toEqual(before);
     });
   });
 
@@ -217,6 +271,19 @@ describe("StatsAggregator", () => {
     expect(aggregator.isRecordable("session-1", state)).toBe(true);
     expect(aggregator.record("session-1", state, intent)).toBe(true);
     expect(aggregator.isRecordable("session-1", state)).toBe(false);
+  });
+
+  it("uses durable turn keys for new stats event identities", () => {
+    const first = createState({ turnKey: "run-a" });
+    const second = createState({ turnKey: "run-b" });
+
+    expect(aggregator.record("session-1", first, intent)).toBe(true);
+    expect(aggregator.record("session-1", second, intent)).toBe(true);
+    expect(aggregator.record("session-1", first, intent)).toBe(false);
+    expect(Object.keys(readStats().processedEvents).sort()).toEqual([
+      "session-1:turn:run-a",
+      "session-1:turn:run-b",
+    ]);
   });
 
   it("records resolved skill inventory observations independently per agent", () => {
@@ -1561,7 +1628,9 @@ describe("StatsAggregator", () => {
       definition: {
         triggers: ["prompt"],
         examples: [],
-        prompt: [
+        domain: "development",
+        fastpath: { keywords: [] },
+        guidance: [
           "Candidate skills:",
           "  skill: prompt-engineering-expert",
           "  skill: interview-me",
@@ -1581,8 +1650,6 @@ describe("StatsAggregator", () => {
             confidence: 0.9,
             complexity: "medium",
           },
-          instructionText:
-            "Consider the injected prompt-engineering skill candidates.",
           recommendedSkills: ["prompt-engineering-expert"],
         },
         skillsUsed: [
@@ -1670,7 +1737,13 @@ describe("StatsAggregator", () => {
   it("is idempotent and excludes intents without recommended skills from routing", () => {
     const noSkillsIntent: IntentCatalogEntry = {
       id: "chat",
-      definition: { triggers: ["chat"], examples: [], prompt: "Just chat." },
+      definition: {
+        triggers: ["chat"],
+        examples: [],
+        domain: "chat",
+        fastpath: { keywords: [] },
+        guidance: "Just chat.",
+      },
     };
     const state = createState({
       intent: {

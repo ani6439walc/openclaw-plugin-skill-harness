@@ -91,6 +91,35 @@ def ensure_git_config(key, value):
     )
 
 
+def command_failure_detail(error):
+    details = []
+    for label, value in (("stdout", error.stdout), ("stderr", error.stderr)):
+        if not value:
+            continue
+        text = str(value).strip()
+        for secret_name in ("GITHUB_TOKEN", "JULES_API_KEY"):
+            secret = os.environ.get(secret_name)
+            if secret:
+                text = text.replace(secret, "[REDACTED]")
+        details.append(f"{label}: {text[:4000]}")
+    return "\n".join(details) or f"git exited with status {error.returncode}"
+
+
+def push_diff_branch(branch_name):
+    try:
+        subprocess.run(
+            ["git", "push", "origin", branch_name],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(
+            f"Failed to push temporary diff branch {branch_name}:\n"
+            f"{command_failure_detail(error)}"
+        ) from error
+
+
 def get_pr_diff(owner, repo, pr_number):
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
     return request("GET", url, github_headers("application/vnd.github.v3.diff"))
@@ -129,7 +158,7 @@ def create_diff_branch(pr_number, diff_text):
         check=True,
         capture_output=True
     )
-    subprocess.run(["git", "push", "origin", branch_name], check=True, capture_output=True)
+    push_diff_branch(branch_name)
     
     # Switch back to original commit
     subprocess.run(["git", "checkout", original_commit], check=True, capture_output=True)
@@ -150,7 +179,7 @@ def delete_diff_branch(branch_name):
         )
         log(f"Deleted diff branch: {branch_name}")
     except subprocess.CalledProcessError as e:
-        log(f"Failed to delete diff branch: {e.stderr}")
+        log(f"Failed to delete diff branch: {command_failure_detail(e)}")
 
 
 def create_jules_session(owner, repo, diff_text, diff_branch=None):

@@ -309,7 +309,7 @@ describe("skill indexer", () => {
           domain: "workspace-domain",
           skills: ["shared-skill", "zeta-skill"],
           fastpath: { keywords: [] },
-          prompt: "Use the workspace skill workflow.",
+          guidance: "Use the workspace skill workflow.",
         },
       },
     ];

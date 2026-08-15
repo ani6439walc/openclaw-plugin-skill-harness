@@ -7,7 +7,7 @@ description: "Audit Skill Harness intents, runtime health, and Review data."
 
 Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), complexity analysis or skill extraction (extract), evidence-backed Intent Review keyword auditing (keyword-audit), and report-only runtime health analysis (runtime-health). Background subagents handle automated self-improvement; use analysis modes only for deliberate human-requested review.
 
-Do not manually repeat production-owned work: per-turn classification and hint generation, startup intent seeding, trigger-driven runtime intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, and session cleanup. This skill is for explicit human maintenance requests and the judgment or confirmation those automated paths do not own.
+Do not manually repeat production-owned work: per-turn classification and routing injection, startup intent seeding, trigger-driven runtime intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, and session cleanup. This skill is for explicit human maintenance requests and the judgment or confirmation those automated paths do not own.
 
 ## Quick routing
 
@@ -29,11 +29,13 @@ If ambiguous, ask one routing question: "Are you working on one intent, auditing
 - Current source layout:
   - Bundled skill assets live under this skill directory, especially `assets/` and `references/`.
   - Runtime editable intents live in the active OpenClaw-resolved runtime intent catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`.
+  - Runtime experiences live in a separate skill-scoped catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/experiences/`; do not treat them as intent bodies or manually curate them.
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
 - Treat runtime session text as private. Keyword-audit and runtime-health reports stay local; never send raw retained conversations, tool payloads, Review suggestions, or Review evidence to external tools or artifacts.
-- Check changed intent files for canonical format: valid frontmatter shape, required sections in order, concrete triggers/examples, conservative optional `candidate` metadata, frontmatter `skills[]` when skill loading is needed, durable `## Experience` guidance when operational lessons are needed, no legacy `## Skills & Tools`, and no body cross-references to other intent ids.
-- When preserving concrete shell commands or stable CLI equivalents for MCP documentation calls, write the bare command in `## Experience` instead of tool-wrapper syntax such as `exec({ command: ... })` or vague "runtime capability" language. For Bifrost-backed Context7, DeepWiki, or GoogleDeveloperKnowledge calls, add `mcporter` to frontmatter `skills[]` and document the matching `mcporter call ...` command.
+- Do not hand-edit `review.json`, `keyword-coverage.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, session-local curation, startup seeding, Review persistence, skill-placement, stats, or cleanup workflows in this skill.
+- Check changed intent files for canonical routing-only format: complete valid frontmatter, one `guidance` sentence, concrete triggers/examples, conservative optional `candidate` metadata, direct frontmatter `skills[]` when skill loading is needed, and no cross-references to other intent ids. Intent bodies are unsupported.
+- Keep concrete shell commands, MCP documentation calls, workflows, and durable lessons in referenced skills; do not add them to intent definitions.
 - When reviewing, creating, splitting, merging, or extracting intents, validate domain-intent consistency using `references/clustering.md`.
 
 ---
@@ -106,13 +108,13 @@ Read and follow `references/design.md`. Keep these checkpoints visible:
 
 ### Anti-patterns
 
-| #   | Anti-pattern                                    | Why not                                                        | Do instead                                                           |
-| --- | ----------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- |
-| 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality                       | Interview one question at a time                                     |
-| 2   | **Cross-reference other intents in body**       | Classifier only sees frontmatter, while fastpaths use metadata | Express boundaries via triggers, examples, domain, and fastpath only |
-| 3   | **Skip format rules before writing**            | Inconsistent format breaks plugin parsing                      | Read `references/format.md` first                                    |
-| 4   | **Create a new intent when one already exists** | Causes duplication and collision                               | Check existing intents during interview                              |
-| 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately                         | Use concrete phrases or keywords                                     |
+| #   | Anti-pattern                                    | Why not                                   | Do instead                                                                |
+| --- | ----------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------- |
+| 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality  | Interview one question at a time                                          |
+| 2   | **Cross-reference other intents in metadata**   | Classifier only sees routing metadata     | Express boundaries via triggers, examples, domain, fastpath, and guidance |
+| 3   | **Skip format rules before writing**            | Inconsistent format breaks plugin parsing | Read `references/format.md` first                                         |
+| 4   | **Create a new intent when one already exists** | Causes duplication and collision          | Check existing intents during interview                                   |
+| 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately    | Use concrete phrases or keywords                                          |
 
 ---
 
@@ -137,12 +139,12 @@ Read and follow `references/extract.md`. Keep these checkpoints visible:
 
 ### Failure modes
 
-| Trigger                                   | First fix                                    | Fallback                                              |
-| ----------------------------------------- | -------------------------------------------- | ----------------------------------------------------- |
-| **No intents above threshold**            | Report all scores, confirm system is healthy | Suggest re-running after adding more intents          |
-| **Sub-responsibility boundaries unclear** | Ask user to clarify stay vs extract          | Keep intent unchanged, flag for next review           |
-| **Skill name collision**                  | Suggest alternative name                     | Use namespaced name (e.g., `<domain>-ops`)            |
-| **User rejects extraction**               | Respect decision                             | Suggest lighter alternative (rewrite guidelines only) |
+| Trigger                                   | First fix                                    | Fallback                                                   |
+| ----------------------------------------- | -------------------------------------------- | ---------------------------------------------------------- |
+| **No intents above threshold**            | Report all scores, confirm system is healthy | Suggest re-running after adding more intents               |
+| **Sub-responsibility boundaries unclear** | Ask user to clarify stay vs extract          | Keep intent unchanged, flag for next review                |
+| **Skill name collision**                  | Suggest alternative name                     | Use namespaced name (e.g., `<domain>-ops`)                 |
+| **User rejects extraction**               | Respect decision                             | Suggest lighter alternative (refine routing guidance only) |
 
 ### Anti-patterns
 
@@ -237,15 +239,13 @@ Read and follow `references/runtime-health-audit.md`. Keep these checkpoints vis
 
 Use structured file/search tools to inspect intent format. Keep checks simple and local:
 
-- Frontmatter exists, closes before the body, and has required fields with the right shapes.
-- Body sections appear in the canonical order from `references/format.md`.
+- Frontmatter is the complete intent file and has required fields with the right shapes.
+- `guidance` is one durable routing sentence; no intent body is present.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
 - `candidate.scope: cross-flow` is used only for durable domain-independent coverage; manual `candidate.keywords` have labeled positive and collision evidence and are never inferred from one session.
 - Review trigger keywords are a separate runtime surface. Analyze them with `references/keyword-audit.md` and `scripts/review-keyword-audit.py`; never infer a write from phrase frequency alone.
-- Skill dependencies use frontmatter `skills[]`, and `## Experience` uses the expected skill/tool guidance shape.
-- Concrete shell commands and mcporter-backed documentation lookups are preserved as bare commands in `## Experience`, with `mcporter` listed in `skills[]` when needed.
-- Legacy `## Skills & Tools` sections are absent from new or updated intents.
-- Body text does not cross-reference other intent ids.
+- Skill dependencies use direct frontmatter `skills[]`; tools, workflows, commands, and lessons stay in referenced skills.
+- Intent metadata does not cross-reference other intent ids.
 - Proposed triggers do not obviously collide with existing runtime intent boundaries.
 
 ### Decision style

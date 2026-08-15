@@ -41,35 +41,20 @@ describe("IntentCatalog", () => {
     });
   });
 
-  it("derives intent ids from filenames and ignores stale metadata fields", () => {
+  it("derives intent ids from filenames and normalizes strict routing metadata", () => {
     fs.writeFileSync(
       path.join(root, "intents", "agent-dispatch.md"),
       `---
-id: AGENT_DISPATCH
-name: Old Name
-enabled: false
 triggers:
-  - "User manages agent workflow"
+  - "route"
 examples:
-  - "spawn a subagent"
-domain: "agent"
-skills:
-  - code-review
-  - 123
-  - ""
+  - "route this"
+domain: "routing"
 fastpath:
-  hint: "Route lightweight agent dispatch requests directly."
   keywords:
-    - "spawn"
-    - "派代理"
-candidate:
-  scope: cross-flow
-  keywords:
-    - "  agent dispatch  "
-    - "代理派送"
+    - "route"
+guidance: "Route this request using stable evidence."
 ---
-## Guidelines
-- Route by filename.
 `,
     );
 
@@ -80,19 +65,13 @@ candidate:
       {
         id: "agent-dispatch",
         definition: {
-          triggers: ["User manages agent workflow"],
-          examples: ["spawn a subagent"],
-          domain: "agent",
-          skills: ["code-review"],
+          triggers: ["route"],
+          examples: ["route this"],
+          domain: "routing",
           fastpath: {
-            keywords: ["spawn", "派代理"],
-            hint: "Route lightweight agent dispatch requests directly.",
+            keywords: ["route"],
           },
-          candidate: {
-            scope: "cross-flow",
-            keywords: ["  agent dispatch  ", "代理派送"],
-          },
-          prompt: "## Guidelines\n- Route by filename.",
+          guidance: "Route this request using stable evidence.",
         },
       },
     ]);
@@ -107,9 +86,8 @@ triggers:
 examples:
   - "hi"
 domain: "chat"
+guidance: "Reply naturally to this social interaction."
 ---
-## Guidelines
-- Reply naturally.
 `,
     );
 
@@ -119,7 +97,56 @@ domain: "chat"
     expect(catalog.get()[0]?.definition.fastpath).toEqual({ keywords: [] });
   });
 
-  it("maps legacy top-level keywords into fastpath keywords", () => {
+  it("loads the strict routing contract without a legacy Markdown body", () => {
+    fs.writeFileSync(
+      path.join(root, "intents", "routing.md"),
+      `---
+triggers: ["route"]
+examples: ["route this"]
+domain: "routing"
+fastpath:
+  keywords: ["route"]
+guidance: "Route this request using stable evidence."
+---
+`,
+    );
+
+    const catalog = IntentCatalog.create(root);
+    expect(catalog.load("intents", { silent: true })).toBe(1);
+    expect(catalog.get()).toEqual([
+      {
+        id: "routing",
+        definition: {
+          triggers: ["route"],
+          examples: ["route this"],
+          domain: "routing",
+          fastpath: { keywords: ["route"] },
+          guidance: "Route this request using stable evidence.",
+        },
+      },
+    ]);
+    expect(catalog.get()[0]?.definition).not.toHaveProperty("prompt");
+  });
+
+  it("rejects legacy intent bodies instead of loading a second parser contract", () => {
+    fs.writeFileSync(
+      path.join(root, "intents", "legacy.md"),
+      `---
+triggers: ["route"]
+examples: ["route this"]
+domain: "routing"
+guidance: "Route this request using stable evidence."
+---
+## Legacy
+`,
+    );
+
+    const catalog = IntentCatalog.create(root);
+    expect(catalog.load("intents", { silent: true })).toBe(0);
+    expect(catalog.get()).toEqual([]);
+  });
+
+  it("rejects legacy top-level keywords instead of coercing them", () => {
     fs.writeFileSync(
       path.join(root, "intents", "legacy.md"),
       `---
@@ -133,20 +160,45 @@ keywords:
   - ""
   - 123
 ---
-## Guidelines
-- Keep old routing alive.
+guidance: "Keep routing focused on current metadata."
+`,
+    );
+
+    const catalog = IntentCatalog.create(root);
+    expect(catalog.load("intents", { silent: true })).toBe(0);
+    expect(catalog.get()).toEqual([]);
+  });
+
+  it("loads valid siblings when another runtime intent is invalid", () => {
+    fs.writeFileSync(
+      path.join(root, "intents", "current.md"),
+      `---
+triggers: ["route"]
+examples: ["route this"]
+domain: "routing"
+guidance: "Route this request using stable evidence."
+---
+`,
+    );
+    fs.writeFileSync(
+      path.join(root, "intents", "legacy.md"),
+      `---
+triggers: ["legacy route"]
+examples: ["legacy"]
+domain: "legacy"
+fastpath:
+  hint: "Legacy hint."
+guidance: "Keep routing focused on current metadata."
+---
 `,
     );
 
     const catalog = IntentCatalog.create(root);
     expect(catalog.load("intents", { silent: true })).toBe(1);
-
-    expect(catalog.get()[0]?.definition.fastpath).toEqual({
-      keywords: ["old"],
-    });
+    expect(catalog.get().map((intent) => intent.id)).toEqual(["current"]);
   });
 
-  it("omits invalid candidate metadata instead of coercing it", () => {
+  it("rejects invalid candidate metadata instead of coercing it", () => {
     fs.writeFileSync(
       path.join(root, "intents", "invalid-candidate.md"),
       `---
@@ -160,14 +212,13 @@ candidate:
     - ""
     - 123
 ---
-## Guidelines
-- Route carefully.
+guidance: "Route carefully using verified metadata."
 `,
     );
 
     const catalog = IntentCatalog.create(root);
-    expect(catalog.load("intents", { silent: true })).toBe(1);
-    expect(catalog.get()[0]?.definition.candidate).toBeUndefined();
+    expect(catalog.load("intents", { silent: true })).toBe(0);
+    expect(catalog.get()).toEqual([]);
   });
 
   it("skips files without triggers or domain", () => {
@@ -209,7 +260,7 @@ examples:
           examples: [],
           domain: "chat",
           fastpath: { keywords: [] },
-          prompt: "Chat hint",
+          guidance: "Chat hint",
         },
       },
       {
@@ -219,7 +270,7 @@ examples:
           examples: [],
           domain: "memory",
           fastpath: { keywords: [] },
-          prompt: "Memory hint",
+          guidance: "Memory hint",
         },
       },
       {
@@ -229,7 +280,7 @@ examples:
           examples: [],
           domain: "typing",
           fastpath: { keywords: [] },
-          prompt: "Typo hint",
+          guidance: "Typo hint",
         },
       },
     ];
@@ -288,7 +339,7 @@ describe("filterIntentsForAgent", () => {
           examples: [],
           domain: "chat",
           fastpath: { keywords: [] },
-          prompt: "Chat hint",
+          guidance: "Chat hint",
         },
       },
     ];

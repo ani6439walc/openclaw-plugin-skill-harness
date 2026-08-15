@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { readFile } from "node:fs/promises";
 import {
   DEFAULT_PROVIDER,
   parseModelRef,
@@ -7,16 +6,10 @@ import {
 } from "openclaw/plugin-sdk/agent-runtime";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
+import { FALLBACK_INTENT_ID } from "../constants.js";
 import {
-  FALLBACK_INTENT_ID,
-  INSTRUCTION_COMPLEXITY_PROMPTS,
-  isIntentComplexity,
-} from "../constants.js";
-import {
-  buildIntentInstructionPrompt,
   buildIntentionPrompt,
   buildTopicSwitchPrompt,
-  parseIntentInstructionResult,
   parseIntentionResult,
   parseTopicSwitchResult,
   type TopicSwitchResult,
@@ -25,16 +18,13 @@ import { resolveCanonicalSessionKeyFromSessionId } from "../session/index.js";
 import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
-  formatEmbeddedError,
 } from "../subagent-runtime.js";
 import { agentWorkspacePath, agentSessionsPath } from "../file-utils.js";
-import { validateInstructionSkillEvidence } from "./instruction-skill-evidence.js";
 import type {
   ClassifiedIntentionResult,
   HistoricalIntentRecord,
   IntentCatalogEntry,
   IntentionResult,
-  AvailableSkill,
   RecentTurn,
   ResolvedSkillHarnessPluginConfig,
 } from "../types.js";
@@ -82,14 +72,6 @@ export function extractPayloadText(result: { payloads?: unknown[] }): string {
     .join("\n")
     .trim();
 }
-
-export interface IntentInstructionSubagentResult {
-  instructionHint?: string | null;
-  additionalCandidateSkills?: string[];
-  error?: string;
-}
-
-const INSTRUCTION_SKILL_TOOL_NAMES = ["skill_view", "skill_search"];
 
 type ModelRef = { provider: string; model: string };
 
@@ -154,24 +136,6 @@ export function getReviewModelRef(
     agentId,
     [config.review.model ?? config.model, currentModelRef],
     [config.review.modelFallback ?? config.modelFallback],
-  );
-}
-
-export function getInstructionModelRef(
-  api: OpenClawPluginApi,
-  agentId: string,
-  config: ResolvedSkillHarnessPluginConfig,
-  currentRun: { modelProviderId?: string; modelId?: string },
-): { provider: string; model: string } | undefined {
-  return getModelRef(
-    api,
-    agentId,
-    {
-      ...config,
-      model: config.instruction.model ?? config.model,
-      modelFallback: config.instruction.modelFallback ?? config.modelFallback,
-    },
-    currentRun,
   );
 }
 
@@ -291,122 +255,12 @@ export async function runTopicSwitchSubagent(params: {
   }
 }
 
-export async function runIntentInstructionSubagent(params: {
-  api: OpenClawPluginApi;
-  config: ResolvedSkillHarnessPluginConfig;
-  agentId: string;
-  sessionKey?: string;
-  sessionId?: string;
-  conversation?: RecentTurn[];
-  latest: string;
-  result: IntentionResult;
-  intentBody: string;
-  availableSkills?: AvailableSkill[];
-  messageProvider?: string;
-  modelRef: { provider: string; model: string };
-  dataRoot?: string;
-}): Promise<IntentInstructionSubagentResult> {
-  const { subagentSessionId, subagentSessionKey } =
-    createSubagentSessionIdentity(params, {
-      runPrefix: "skill-harness",
-      keyPrefix: "skill-harness",
-      hashInput: `${params.latest}:${params.result.intent}`,
-    });
-
-  const prompt = buildIntentInstructionPrompt({
-    latest: params.latest,
-    result: params.result,
-    intentBody: params.intentBody,
-    availableSkills: params.availableSkills,
-    ...(isIntentComplexity(params.result.complexity)
-      ? {
-          complexityContext:
-            INSTRUCTION_COMPLEXITY_PROMPTS[params.result.complexity],
-        }
-      : {}),
-    conversation: params.conversation,
-    currentTime: resolveCurrentTime(params.api),
-  });
-
-  try {
-    const runParams = {
-      ...buildIntentionEmbeddedRunParams({
-        params,
-        subagentSessionId,
-        subagentSessionKey,
-        prompt,
-        agentName: "intent-instruction",
-      }),
-      timeoutMs: params.config.instruction.timeoutMs,
-      thinkLevel: params.config.instruction.thinking,
-      modelRun: false,
-      promptMode: "minimal" as const,
-      toolsAllow: INSTRUCTION_SKILL_TOOL_NAMES,
-      disableTools: false,
-      skillsSnapshot: {
-        prompt: "",
-        skills: [],
-        resolvedSkills: [],
-      },
-    };
-    const result = await params.api.runtime.agent.runEmbeddedAgent(runParams);
-    const embeddedError = extractEmbeddedRunError(result);
-    if (embeddedError) {
-      logger.warn("Intent instruction subagent returned an error", {
-        error: embeddedError,
-        intent: params.result.intent,
-      });
-      return { error: embeddedError };
-    }
-
-    const rawReply = extractPayloadText(result);
-    const instruction = parseIntentInstructionResult(rawReply);
-
-    if (!instruction) {
-      logger.warn("Intent instruction result parse failed", {
-        intent: params.result.intent,
-      });
-      return { error: "instruction writer produced invalid JSON" };
-    }
-    const transcript = await readFile(runParams.sessionFile, "utf8").catch(
-      () => "",
-    );
-    const resultMeta = result.meta as
-      { agentMeta?: { toolSummary?: unknown } } | undefined;
-    if (
-      !validateInstructionSkillEvidence({
-        additionalCandidateSkills: instruction.additionalCandidateSkills,
-        availableSkillNames: (params.availableSkills ?? []).map(
-          (skill) => skill.name,
-        ),
-        transcript,
-        toolSummary: resultMeta?.agentMeta?.toolSummary,
-      })
-    ) {
-      logger.warn(
-        "Intent instruction skill discovery validation failed; discarding unverified skill candidates",
-        {
-          intent: params.result.intent,
-        },
-      );
-      return {
-        instructionHint: instruction.instructionHint,
-        additionalCandidateSkills: [],
-      };
-    }
-    return instruction;
-  } catch (err) {
-    logger.warn("Intent instruction subagent error", { error: err });
-    return { error: formatEmbeddedError(err) ?? "instruction writer threw" };
-  }
-}
-
 export function buildIntentionEmbeddedRunParams(params: {
   params: EmbeddedSubagentBaseParams;
   subagentSessionId: string;
   subagentSessionKey: string;
   prompt: string;
-  agentName?: "topic-switch" | "intention" | "intent-instruction";
+  agentName?: "topic-switch" | "intention";
 }) {
   const dataRoot = params.params.dataRoot;
   const agentName = params.agentName ?? "intention";

@@ -1,13 +1,11 @@
-import fs from "node:fs";
 import path from "node:path";
-import matter from "gray-matter";
 import type {
   IntentCatalogEntry,
-  IntentDefinition,
   ResolvedSkillHarnessPluginConfig,
 } from "../types.js";
 import { logger } from "../../api.js";
 import { pluginRoot } from "../file-utils.js";
+import { validateRoutingIntentDirectory } from "./routing-validation.js";
 
 const catalogCache = new Map<string, IntentCatalog>();
 
@@ -41,82 +39,6 @@ function resolveIntentDenyPatterns(
     }
   }
   return [...new Set(patterns)];
-}
-
-function parseFastpath(
-  data: Record<string, unknown>,
-  fileName: string,
-  silent: boolean,
-): IntentDefinition["fastpath"] {
-  const legacyKeywords = Array.isArray(data.keywords)
-    ? data.keywords.filter(
-        (x): x is string => typeof x === "string" && !!x.trim(),
-      )
-    : [];
-  if (legacyKeywords.length && !silent) {
-    logger.warn(
-      `${fileName}: top-level keywords are deprecated; move them to fastpath.keywords.`,
-    );
-  }
-
-  const fastpath =
-    data.fastpath &&
-    typeof data.fastpath === "object" &&
-    !Array.isArray(data.fastpath)
-      ? (data.fastpath as Record<string, unknown>)
-      : {};
-  const keywords = Array.isArray(fastpath.keywords)
-    ? fastpath.keywords.filter(
-        (x): x is string => typeof x === "string" && !!x.trim(),
-      )
-    : legacyKeywords;
-  const hint =
-    typeof fastpath.hint === "string" && fastpath.hint.trim()
-      ? fastpath.hint.trim()
-      : undefined;
-
-  return hint ? { keywords, hint } : { keywords };
-}
-
-function parseCandidate(
-  data: Record<string, unknown>,
-): IntentDefinition["candidate"] | undefined {
-  if (data.candidate === undefined) return;
-  if (
-    !data.candidate ||
-    typeof data.candidate !== "object" ||
-    Array.isArray(data.candidate)
-  ) {
-    return;
-  }
-
-  const candidate = data.candidate as Record<string, unknown>;
-  if (
-    Object.keys(candidate).some((key) => !["scope", "keywords"].includes(key))
-  ) {
-    return;
-  }
-  if (candidate.scope !== undefined && candidate.scope !== "cross-flow") {
-    return;
-  }
-  if (
-    candidate.keywords !== undefined &&
-    (!Array.isArray(candidate.keywords) ||
-      candidate.keywords.some(
-        (value) => typeof value !== "string" || !value.trim(),
-      ))
-  ) {
-    return;
-  }
-
-  const keywords = Array.isArray(candidate.keywords)
-    ? [...candidate.keywords]
-    : undefined;
-  if (candidate.scope === undefined && keywords === undefined) return;
-  return {
-    ...(candidate.scope === "cross-flow" ? { scope: candidate.scope } : {}),
-    ...(keywords ? { keywords } : {}),
-  };
 }
 
 export function filterIntentsForAgent(
@@ -190,70 +112,15 @@ export class IntentCatalog {
     intentDirectory: string,
     silent: boolean,
   ): IntentCatalogEntry[] {
-    const result: IntentCatalogEntry[] = [];
-
-    if (!fs.existsSync(intentDirectory)) {
-      return result;
-    }
-
-    const entries = fs
-      .readdirSync(intentDirectory)
-      .filter((f) => f.endsWith(".md"))
-      .sort();
-
-    for (const entry of entries) {
-      const filePath = path.join(intentDirectory, entry);
-      const content = fs.readFileSync(filePath, "utf-8");
-      const parsed = matter(content);
-
-      const data = parsed.data as Record<string, unknown>;
-      const id = entry.slice(0, -".md".length);
-      const triggers = Array.isArray(data.triggers)
-        ? data.triggers.filter((x): x is string => typeof x === "string")
-        : [];
-      const examples = Array.isArray(data.examples)
-        ? data.examples.filter((x): x is string => typeof x === "string")
-        : [];
-      const domain = typeof data.domain === "string" ? data.domain.trim() : "";
-      const skills = Array.isArray(data.skills)
-        ? data.skills
-            .filter((x): x is string => typeof x === "string" && !!x.trim())
-            .map((x) => x.trim())
-        : [];
-      const fastpath = parseFastpath(data, entry, silent);
-      const candidate = parseCandidate(data);
-
-      if (!triggers.length) {
-        if (!silent) {
-          logger.warn(
-            `skipping invalid intent file: ${entry}. (missing triggers)`,
-          );
+    const validation = validateRoutingIntentDirectory(intentDirectory);
+    if (!validation.valid) {
+      if (!silent) {
+        for (const error of validation.errors) {
+          logger.warn(`skipping invalid intent catalog: ${error}`);
         }
-        continue;
       }
-      if (!domain) {
-        if (!silent) {
-          logger.warn(
-            `skipping invalid intent file: ${entry}. (missing domain)`,
-          );
-        }
-        continue;
-      }
-
-      const definition: IntentDefinition = {
-        triggers,
-        examples,
-        domain,
-        ...(skills.length > 0 ? { skills } : {}),
-        ...(candidate ? { candidate } : {}),
-        fastpath,
-        prompt: parsed.content.trim(),
-      };
-
-      result.push({ id, definition });
     }
-
-    return result;
+    return validation.intents.map(({ id, definition }) => ({ id, definition }));
   }
 }
 

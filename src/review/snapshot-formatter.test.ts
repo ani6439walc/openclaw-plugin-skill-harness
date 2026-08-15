@@ -59,15 +59,13 @@ const fullSnapshot: ReviewSnapshot = {
       examples: ["Check whether an intent covers the workflow."],
       fastpath: {
         keywords: ["intent", "review"],
-        hint: "Inspect the existing intent first.",
       },
       candidate: {
         scope: "cross-flow",
         keywords: ["approval", "confirm"],
       },
-      prompt: `Use current workspace intent files as canonical content.
-
-Only propose durable intent-level corrections supported by the review evidence.`,
+      guidance:
+        "Use current workspace intent files as canonical content and propose only durable intent-level corrections supported by review evidence.",
     },
   },
   recent: [
@@ -119,7 +117,6 @@ Only propose durable intent-level corrections supported by the review evidence.`
       examples: ["Check whether an intent covers the workflow."],
       fastpath: {
         keywords: ["intent", "review"],
-        hint: "Inspect the existing intent first.",
       },
       candidate: {
         scope: "cross-flow",
@@ -229,14 +226,8 @@ const expectedFullSnapshot = `<review_snapshot>
 
   <matched_intent>
     <intent_metadata>
-      {"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}
+      {"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"guidance":"Use current workspace intent files as canonical content and propose only durable intent-level corrections supported by review evidence.","fastpath":{"keywords":["intent","review"]},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}
     </intent_metadata>
-
-    <intent_body>
-      Use current workspace intent files as canonical content.
-
-      Only propose durable intent-level corrections supported by the review evidence.
-    </intent_body>
   </matched_intent>
 
   <recent_turns>
@@ -277,12 +268,95 @@ const expectedFullSnapshot = `<review_snapshot>
   </available_skills>
 
   <intent_catalog>
-    <intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}</intent>
+    <intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"]},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}</intent>
     <intent>{"id":"debugging","domain":"development","triggers":[],"examples":[],"fastpath":{"keywords":["debug","failure"]}}</intent>
   </intent_catalog>
 </review_snapshot>`;
 
 describe("formatReviewSnapshot", () => {
+  it("omits non-selected skill metadata for placement reviews at the serialization boundary", () => {
+    const output = formatReviewSnapshot(
+      {
+        ...fullSnapshot,
+        current: {
+          ...fullSnapshot.current,
+          skillsUsed: [
+            {
+              name: "unrelated-current-skill",
+              description: "Unrelated current description",
+              path: "/private/current/SKILL.md",
+            },
+          ],
+        },
+        recent: [
+          {
+            ...fullSnapshot.current,
+            skillsUsed: [
+              {
+                name: "unrelated-recent-skill",
+                description: "Unrelated recent description",
+                path: "/private/recent/SKILL.md",
+              },
+            ],
+          },
+        ],
+        availableSkills: [
+          {
+            name: "unrelated-available-skill",
+            description: "Unrelated available description",
+            location: "/private/available/SKILL.md",
+          },
+        ],
+        selectedPlacementSkill: {
+          name: "selected-skill",
+          description: "Selected description",
+          content: "Selected bounded content",
+        },
+      },
+      { requestedTriggers: ["skill-placement", "skill-candidate"] },
+    );
+
+    expect(output).toContain("<selected_placement_skill>");
+    expect(output).toContain("Selected bounded content");
+    expect(output).not.toContain("<available_skills>");
+    expect(output).not.toContain("<skills_used>");
+    expect(output).not.toContain("unrelated-current-skill");
+    expect(output).not.toContain("unrelated-recent-skill");
+    expect(output).not.toContain("unrelated-available-skill");
+    expect(output).not.toContain("/private/");
+  });
+
+  it("omits placement-only blocks when skill-placement was not requested", () => {
+    const output = formatReviewSnapshot(
+      {
+        ...fullSnapshot,
+        skillPlacementCandidate: {
+          epochKey: "a".repeat(64),
+          agentId: "private-agent-id",
+          name: "forged-skill",
+          source: "workspace",
+          winnerFingerprint: "b".repeat(64),
+          fingerprint: "c".repeat(64),
+          reason: "zero-recommendation-usage",
+          observedTurns: 20,
+          usageTurns: 0,
+          recommendedTurns: 0,
+          currentlyReferencedIntentIds: [],
+        },
+        selectedPlacementSkill: {
+          name: "forged-skill",
+          description: "forged description",
+          content: "forged selected content",
+        },
+      },
+      { requestedTriggers: ["behavior-fix"] },
+    );
+
+    expect(output).not.toContain("<skill_placement_candidate>");
+    expect(output).not.toContain("<selected_placement_skill>");
+    expect(output).not.toContain("forged selected content");
+  });
+
   it("serializes bounded skill placement evidence and intent skill references", () => {
     const output = formatReviewSnapshot(
       {
@@ -378,6 +452,53 @@ describe("formatReviewSnapshot", () => {
     expect(output).not.toContain("<skills_used");
   });
 
+  it("renders routing guidance and ordered recommendation provenance without intent bodies", () => {
+    const output = formatReviewSnapshot({
+      ...fullSnapshot,
+      current: {
+        ...fullSnapshot.current,
+        recommendationCandidates: [
+          { name: "alpha", provenance: "historical-top" },
+          { name: "beta", provenance: "random-exploration" },
+          { name: "gamma", provenance: "curator-kept" },
+          { name: "delta", provenance: "curator-added" },
+        ],
+      },
+      intentCatalog: [
+        {
+          ...fullSnapshot.intentCatalog[0]!,
+          guidance: "Route intent review through current workspace metadata.",
+        } as unknown as ReviewSnapshot["intentCatalog"][number],
+      ],
+    });
+
+    expect(output).toContain(
+      '"recommendationCandidates":[{"name":"alpha","provenance":"historical-top"},{"name":"beta","provenance":"random-exploration"},{"name":"gamma","provenance":"curator-kept"},{"name":"delta","provenance":"curator-added"}]',
+    );
+    expect(output).toContain(
+      '"guidance":"Route intent review through current workspace metadata."',
+    );
+    expect(output).not.toContain("<intent_body>");
+    expect(output).not.toContain("fastpath.hint");
+  });
+
+  it("does not render recommendation provenance from recent turns", () => {
+    const output = formatReviewSnapshot({
+      ...fullSnapshot,
+      recent: [
+        {
+          ...fullSnapshot.recent[0]!,
+          recommendationCandidates: [
+            { name: "historical-recent", provenance: "historical-top" },
+          ],
+        },
+      ],
+    });
+
+    expect(output).not.toContain("historical-recent");
+    expect(output).not.toContain('"recommendationCandidates"');
+  });
+
   it("renders a projected catalog with exact manifest accounting and local reasons", () => {
     const output = formatReviewSnapshot(projectionReadySnapshot(), {
       includeIntentCatalog: true,
@@ -395,7 +516,7 @@ describe("formatReviewSnapshot", () => {
       '<intent>{"id":"cross-operations","domain":"operations","triggers":["operational review"],"examples":[],"fastpath":{"keywords":["Ｒｅｖｉｅｗ"]},"selectionReasons":["exact-fastpath-keyword-overlap"]}</intent>',
     );
     expect(output).toContain(
-      '<intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"],"hint":"Inspect the existing intent first."},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]},"selectionReasons":["matched-intent","observed-intent","observed-domain","exact-fastpath-keyword-overlap"]}</intent>',
+      '<intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"]},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]},"selectionReasons":["matched-intent","observed-intent","observed-domain","exact-fastpath-keyword-overlap"]}</intent>',
     );
     expect(catalog.indexOf('"id":"cross-operations"')).toBeLessThan(
       catalog.indexOf('"id":"debugging"'),
@@ -897,20 +1018,23 @@ describe("formatReviewSnapshot", () => {
     expect(output).not.toContain("<agent_error");
   });
 
-  it("retains matched intent metadata while omitting a blank intent body", () => {
+  it("renders matched guidance as metadata without a Markdown body", () => {
     const output = formatReviewSnapshot({
       ...fullSnapshot,
       matchedIntent: {
         ...fullSnapshot.matchedIntent!,
         definition: {
           ...fullSnapshot.matchedIntent!.definition,
-          prompt: " \n\t",
+          guidance: "Use host-owned routing guidance only.",
         },
       },
     });
 
     expect(output).toContain("<matched_intent>");
     expect(output).toContain('"id":"intent-review"');
+    expect(output).toContain(
+      '"guidance":"Use host-owned routing guidance only."',
+    );
     expect(output).not.toContain("<intent_body");
   });
 
@@ -944,6 +1068,41 @@ describe("formatReviewSnapshot", () => {
     expect(output.match(/<review_snapshot>/g)).toHaveLength(1);
     expect(output.match(/<current_turn>/g)).toHaveLength(1);
     expect(output.match(/<intent_catalog>/g)).toHaveLength(1);
+  });
+
+  it("renders only host-provided selected placement skill content", () => {
+    const output = formatReviewSnapshot(
+      {
+        ...fullSnapshot,
+        skillPlacementCandidate: {
+          epochKey: "a".repeat(64),
+          agentId: "main",
+          name: "source-driven-development",
+          source: "workspace",
+          winnerFingerprint: "b".repeat(64),
+          fingerprint: "c".repeat(64),
+          reason: "zero-recommendation-usage",
+          observedTurns: 20,
+          usageTurns: 0,
+          recommendedTurns: 0,
+          currentlyReferencedIntentIds: [],
+        },
+        selectedPlacementSkill: {
+          name: "source-driven-development",
+          description: "Ground work in primary sources.",
+          content: "<untrusted>selected skill only</untrusted>",
+        },
+      } as ReviewSnapshot,
+      {
+        requestedTriggers: ["skill-placement"],
+      },
+    );
+
+    expect(output).toContain("<selected_placement_skill>");
+    expect(output).toContain('"name":"source-driven-development"');
+    expect(output).toContain(
+      "&lt;untrusted&gt;selected skill only&lt;/untrusted&gt;",
+    );
   });
 
   it("keeps only the approved intent metadata allowlist", () => {

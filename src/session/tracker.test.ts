@@ -1,17 +1,35 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { SessionTracker } from "./tracker.js";
+import {
+  resolveTurnEventId,
+  SessionTracker,
+  type SessionData,
+} from "./tracker.js";
 import { formatReviewSnapshot } from "../review/snapshot-formatter.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { sessionsPath } from "../file-utils.js";
+
+type LegacyTrackerForTest = Omit<
+  SessionTracker,
+  "record" | "rotate" | "write"
+> & {
+  record(sessionId: string, data: Partial<SessionData>): void;
+  rotate(sessionId: string): void;
+  write(sessionId: string): void;
+};
+
+function legacyTrackerForTest(pluginRoot: string): LegacyTrackerForTest {
+  return SessionTracker.create(pluginRoot) as unknown as LegacyTrackerForTest;
+}
 
 describe("SessionTracker", () => {
   let tempDir: string;
-  let tracker: SessionTracker;
+  let tracker: LegacyTrackerForTest;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-state-test-"));
-    tracker = SessionTracker.create(tempDir);
+    tracker = legacyTrackerForTest(tempDir);
   });
 
   afterEach(() => {
@@ -91,26 +109,46 @@ describe("SessionTracker", () => {
       expect(customTracker).toBeInstanceOf(SessionTracker);
     });
 
-    it("should load existing session files from sessions folder", () => {
+    it("loads legacy session JSON while ignoring removed instruction text", () => {
       // Create sessions directory with a test file
       const sessionsDir = path.join(tempDir, "sessions");
+      const removedLegacyField = ["instruction", "Text"].join("");
       fs.mkdirSync(sessionsDir, { recursive: true });
 
       const testSession = {
         sessionId: "existing-session-123",
         current: {
           input: "existing test prompt",
-          intent: { result: { intentions: [] } },
+          intent: {
+            [removedLegacyField]: "legacy writer output",
+            recommendedSkills: ["existing-skill"],
+            result: { intentions: [] },
+          },
         },
       };
       fs.writeFileSync(
         path.join(sessionsDir, "existing-session-123.json"),
         JSON.stringify(testSession),
       );
+      const filePath = path.join(sessionsDir, "existing-session-123.json");
+      const originalBytes = fs.readFileSync(filePath, "utf8");
 
       // Create new tracker - should load existing session
       const loadedTracker = SessionTracker.create(tempDir);
       expect(loadedTracker.hasIntentData("existing-session-123")).toBe(true);
+      expect(
+        loadedTracker
+          .listRetainedSessions()
+          .find((session) => session.sessionId === "existing-session-123")
+          ?.current.intent,
+      ).toMatchObject({ recommendedSkills: ["existing-skill"] });
+      expect(
+        loadedTracker
+          .listRetainedSessions()
+          .find((session) => session.sessionId === "existing-session-123")
+          ?.current.intent,
+      ).not.toHaveProperty(removedLegacyField);
+      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
     it("excludes expired on-disk sessions from retained snapshots after restart", () => {
@@ -136,7 +174,7 @@ describe("SessionTracker", () => {
       ).not.toContain("expired");
     });
 
-    it("migrates legacy topic metadata and missing domain on load", () => {
+    it("migrates legacy topic metadata and missing domain in memory on load", () => {
       const sessionsDir = path.join(tempDir, "sessions");
       fs.mkdirSync(sessionsDir, { recursive: true });
       const filePath = path.join(sessionsDir, "legacy-topic.json");
@@ -174,8 +212,8 @@ describe("SessionTracker", () => {
         }),
       );
 
+      const originalBytes = fs.readFileSync(filePath, "utf8");
       const loadedTracker = SessionTracker.create(tempDir);
-      const migrated = JSON.parse(fs.readFileSync(filePath, "utf-8"));
 
       expect(loadedTracker.getHistoricalIntentRecords("legacy-topic")).toEqual([
         expect.objectContaining({
@@ -190,20 +228,50 @@ describe("SessionTracker", () => {
           topicChangeReason: "change",
         }),
       ]);
-      expect(migrated.history[0].intent.result).not.toHaveProperty(
-        "topicChanged",
-      );
-      expect(migrated.history[0].intent.result).not.toHaveProperty(
-        "topicChangeReason",
-      );
-      expect(migrated.current.intent.result).not.toHaveProperty("topicChanged");
-      expect(migrated.current.intent.result).toMatchObject({
-        domain: "other",
-        topicChangeReason: "change",
-      });
+      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
-    it("migrates legacy topic reason names to short names", () => {
+    it("does not overwrite a locked legacy session while loading its in-memory migration", () => {
+      const sessionsDir = path.join(tempDir, "sessions");
+      fs.mkdirSync(sessionsDir, { recursive: true });
+      const filePath = sessionsPath("legacy-locked.json", tempDir);
+      fs.writeFileSync(
+        filePath,
+        JSON.stringify({
+          sessionId: "legacy-locked",
+          current: {
+            intent: {
+              result: {
+                intent: "coding",
+                reason: "changed",
+                topicChanged: true,
+                confidence: 0.9,
+                complexity: "medium",
+              },
+            },
+          },
+        }),
+      );
+      const lockPath = `${filePath}.lock`;
+      fs.mkdirSync(lockPath);
+
+      try {
+        const loadedTracker = SessionTracker.create(tempDir);
+        const durable = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+
+        expect(
+          loadedTracker.getCurrentState("legacy-locked")?.intent?.result,
+        ).toMatchObject({ domain: "other", topicChangeReason: "change" });
+        expect(durable.current.intent.result).toMatchObject({
+          topicChanged: true,
+        });
+        expect(durable.current.intent.result).not.toHaveProperty("domain");
+      } finally {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+      }
+    });
+
+    it("migrates legacy topic reason names to short names in memory", () => {
       const sessionsDir = path.join(tempDir, "sessions");
       fs.mkdirSync(sessionsDir, { recursive: true });
       const filePath = path.join(sessionsDir, "legacy-reasons.json");
@@ -227,15 +295,13 @@ describe("SessionTracker", () => {
         }),
       );
 
+      const originalBytes = fs.readFileSync(filePath, "utf8");
       const loadedTracker = SessionTracker.create(tempDir);
-      const migrated = JSON.parse(fs.readFileSync(filePath, "utf-8"));
 
       expect(
         loadedTracker.getHistoricalIntentRecords("legacy-reasons"),
       ).toEqual([expect.objectContaining({ topicChangeReason: "shift" })]);
-      expect(migrated.current.intent.result).toMatchObject({
-        topicChangeReason: "shift",
-      });
+      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
     it("should skip corrupted JSON files and log warning", () => {
@@ -286,6 +352,121 @@ describe("SessionTracker", () => {
         expect(loadedTracker.hasIntentData("legacy-session")).toBe(true);
       },
     );
+  });
+
+  describe("durable turn identity", () => {
+    it("uses turnKey for new event ids and preserves the legacy start fallback", () => {
+      expect(
+        resolveTurnEventId("session-a", {
+          turnKey: "run-a",
+          timestamps: { start: "2026-08-12T00:00:00.000Z" },
+        }),
+      ).toBe("session-a:turn:run-a");
+      expect(
+        resolveTurnEventId("session-a", {
+          timestamps: { start: "2026-08-12T00:00:00.000Z" },
+        }),
+      ).toBe("session-a:2026-08-12T00:00:00.000Z");
+      expect(resolveTurnEventId("session-a", {})).toBeUndefined();
+    });
+
+    it("prepares, persists, reuses, and rotates run-id turns atomically", async () => {
+      await expect(
+        tracker.preparePromptTurn({
+          sessionId: "session-a",
+          sessionKey: "agent:main:direct:a",
+          agentId: "main",
+          runId: " run-a ",
+          input: "first request",
+          startedAt: "2026-08-12T00:00:00.000Z",
+        }),
+      ).resolves.toEqual({
+        status: "applied",
+        identity: { turnKey: "run-a", reused: false },
+      });
+      await expect(
+        tracker.preparePromptTurn({
+          sessionId: "session-a",
+          sessionKey: "agent:main:direct:a",
+          agentId: "main",
+          runId: "run-a",
+          input: "first request",
+          startedAt: "2026-08-12T00:00:01.000Z",
+        }),
+      ).resolves.toEqual({
+        status: "reused",
+        identity: { turnKey: "run-a", reused: true },
+      });
+      await expect(
+        tracker.preparePromptTurn({
+          sessionId: "session-a",
+          sessionKey: "agent:main:direct:a",
+          agentId: "main",
+          runId: "run-b",
+          input: "second request",
+          startedAt: "2026-08-12T00:00:02.000Z",
+        }),
+      ).resolves.toMatchObject({
+        status: "applied",
+        identity: { turnKey: "run-b", reused: false },
+      });
+
+      const saved = JSON.parse(
+        fs.readFileSync(
+          path.join(tempDir, "sessions", "session-a.json"),
+          "utf8",
+        ),
+      );
+      expect(saved.current).toMatchObject({
+        turnKey: "run-b",
+        input: "second request",
+      });
+      expect(saved.history).toEqual([
+        expect.objectContaining({ turnKey: "run-a", input: "first request" }),
+      ]);
+    });
+
+    it("updates a unique retained turn without mutating the newer current turn", async () => {
+      for (const [runId, input] of [
+        ["run-a", "first request"],
+        ["run-b", "second request"],
+      ] as const) {
+        await tracker.preparePromptTurn({
+          sessionId: "session-a",
+          agentId: "main",
+          runId,
+          input,
+          startedAt: `2026-08-12T00:00:0${runId === "run-a" ? "0" : "1"}.000Z`,
+        });
+      }
+
+      await expect(
+        tracker.mergeTurnAndPersist({
+          sessionId: "session-a",
+          expectedTurnKey: "run-a",
+          data: { result: "late result for A" },
+          maxWaitMs: 0,
+        }),
+      ).resolves.toBe("applied");
+      expect(tracker.getTurnState("session-a", "run-a")).toMatchObject({
+        input: "first request",
+        result: "late result for A",
+      });
+      expect(tracker.getTurnState("session-a", "run-b")).toMatchObject({
+        input: "second request",
+      });
+      await expect(
+        tracker.mergeTurnAndPersist({
+          sessionId: "session-a",
+          expectedTurnKey: "missing",
+          data: { result: "must not land" },
+          maxWaitMs: 0,
+        }),
+      ).resolves.toBe("stale");
+      expect(
+        tracker.getTurnState("session-a", "run-b")?.result,
+      ).toBeUndefined();
+    });
   });
 
   describe("record", () => {
@@ -396,7 +577,7 @@ describe("SessionTracker", () => {
       expect(() => tracker.write("test-session-123")).not.toThrow();
     });
 
-    it("preserves prompt-build intent trigger metadata", () => {
+    it("preserves prompt-build intent trigger metadata without writer text", () => {
       tracker.record("test-session-123", {
         current: {
           input: "read a skill",
@@ -409,7 +590,6 @@ describe("SessionTracker", () => {
               confidence: 0.9,
               complexity: "low",
             },
-            instructionText: "Use the requested skill.",
             recommendedSkills: ["skill-viewer", "tool-reference"],
           },
         },
@@ -425,7 +605,6 @@ describe("SessionTracker", () => {
       );
       expect(saved.current.intent).toMatchObject({
         trigger: "classifier",
-        instructionText: "Use the requested skill.",
         recommendedSkills: ["skill-viewer", "tool-reference"],
         result: { intent: "tool-reference" },
       });
@@ -1703,6 +1882,108 @@ Current user request: ${request}
       expect(snapshot).toBeDefined();
       expect(JSON.stringify(snapshot)).not.toContain("intentProjection");
       expect(JSON.stringify(snapshot)).not.toContain("originalIntentCount");
+    });
+
+    it("projects ordered recommendation provenance without curation scheduling state", () => {
+      tracker.record("recommendation-review", {
+        current: {
+          input: "review this route",
+          intent: {
+            result: {
+              intent: "code-review",
+              reason: "test",
+              domain: "development",
+              confidence: 0.9,
+              complexity: "low",
+            },
+            recommendationState: {
+              topicEpoch: 4,
+              curationRevision: 2,
+              candidates: [
+                { name: "alpha", provenance: "historical-top" },
+                { name: "beta", provenance: "random-exploration" },
+                { name: "gamma", provenance: "curator-kept" },
+                { name: "delta", provenance: "curator-added" },
+              ],
+              curationSchedule: {
+                agentId: "private-agent",
+                schedulingTurnKey: "private-turn",
+                expectedTopicEpoch: 4,
+                expectedRevision: 2,
+                status: "pending",
+                reservedAt: "2026-08-14T00:00:00.000Z",
+              },
+            },
+          },
+          timestamps: { start: "2026-08-14T00:00:00.000Z" },
+        },
+      });
+
+      const snapshot = tracker.getReviewSnapshot("recommendation-review");
+
+      expect(snapshot?.current.recommendationCandidates).toEqual([
+        { name: "alpha", provenance: "historical-top" },
+        { name: "beta", provenance: "random-exploration" },
+        { name: "gamma", provenance: "curator-kept" },
+        { name: "delta", provenance: "curator-added" },
+      ]);
+      expect(JSON.stringify(snapshot)).not.toContain("curationSchedule");
+      expect(JSON.stringify(snapshot)).not.toContain("private-agent");
+      expect(JSON.stringify(snapshot)).not.toContain("private-turn");
+    });
+
+    it("keeps recommendation candidate provenance out of recent review turns", () => {
+      tracker.record("recommendation-history", {
+        current: {
+          input: "historical input",
+          intent: {
+            result: {
+              intent: "historical-intent",
+              reason: "test",
+              domain: "history",
+              confidence: 0.9,
+              complexity: "low",
+            },
+            recommendationState: {
+              topicEpoch: 1,
+              curationRevision: 1,
+              candidates: [
+                { name: "historical", provenance: "historical-top" },
+              ],
+            },
+          },
+          timestamps: { start: "2026-08-14T00:00:00.000Z" },
+        },
+      });
+      tracker.rotate("recommendation-history");
+      tracker.record("recommendation-history", {
+        current: {
+          input: "current input",
+          intent: {
+            result: {
+              intent: "current-intent",
+              reason: "test",
+              domain: "current",
+              confidence: 0.9,
+              complexity: "low",
+            },
+            recommendationState: {
+              topicEpoch: 2,
+              curationRevision: 1,
+              candidates: [{ name: "current", provenance: "curator-added" }],
+            },
+          },
+          timestamps: { start: "2026-08-14T00:01:00.000Z" },
+        },
+      });
+
+      const snapshot = tracker.getReviewSnapshot("recommendation-history");
+
+      expect(snapshot?.current.recommendationCandidates).toEqual([
+        { name: "current", provenance: "curator-added" },
+      ]);
+      expect(snapshot?.recent).toHaveLength(1);
+      expect(snapshot?.recent[0]?.recommendationCandidates).toBeUndefined();
     });
   });
 });

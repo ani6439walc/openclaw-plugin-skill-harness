@@ -2,7 +2,7 @@
 
 ## Objective
 
-Extend Intent Review with a dedicated `skill-placement` trigger that uses skill stats to improve runtime intent routing. The reviewer may add one eligible skill to the most appropriate runtime intent and, only when necessary, add minimal usage guidance. It must not create, edit, merge, rename, or delete skill files.
+Extend Intent Review with a dedicated `skill-placement` trigger that uses skill stats to improve runtime intent routing. The reviewer may add one eligible skill to the most appropriate runtime intent's direct `skills[]` frontmatter. It must not create, edit, merge, rename, or delete skill files.
 
 Success means an under-adopted or fully observed but never-recommended/never-used skill gets one evidence-grounded placement review per inventory epoch without repeatedly consuming review capacity or weakening existing Intent Review safety checks.
 
@@ -14,7 +14,7 @@ Success means an under-adopted or fully observed but never-recommended/never-use
 - Select at most one eligible skill after an accepted stats event.
 - Prefer low-adoption candidates over zero-recommendation/zero-usage candidates.
 - Provide targeted skill evidence and the complete intent catalog to the reviewer.
-- Permit validated runtime intent Markdown edits that place the skill in an appropriate `skills:` list and optionally add minimal usage guidance.
+- Permit validated routing-only intent frontmatter edits that place the skill in an appropriate `skills:` list and, only when necessary, refine the single `guidance` sentence.
 - Persist completed per-agent/per-skill/per-epoch review state.
 - Keep technical and validation failures retryable.
 - Replace legacy `review.json` compatibility paths with one current schema.
@@ -83,7 +83,7 @@ A selected candidate adds a single host-owned `skillPlacementCandidate` to the R
 - adoption rate when available;
 - currently referencing intent IDs.
 
-The prompt serialization adds a required candidate block only for `skill-placement`. Fingerprints and epoch keys are not serialized to the model.
+The prompt serialization adds a required candidate block only for `skill-placement`. Fingerprints and epoch keys are not serialized to the model. Placement runs omit `<available_skills>` entirely; the bounded `<selected_placement_skill>` block is their only skill-content evidence.
 
 Intent catalog metadata includes each intent's declared `skills[]` so the reviewer can detect existing placement. `skill-placement` always receives the complete catalog; it does not use candidate projection.
 
@@ -91,26 +91,25 @@ Intent catalog metadata includes each intent's declared `skills[]` so the review
 
 For the one targeted skill, the reviewer must:
 
-1. Use `skill_view` to inspect its current resolved description, domains, instructions, and usage contract.
+1. Use only the host-provided `<selected_placement_skill>` evidence for its resolved description and bounded `SKILL.md` content.
 2. Compare that evidence against complete intent catalog domains, triggers, examples, and existing `skills[]`.
 3. Return no finding when there is no durable, evidence-backed placement or the skill is already appropriately covered.
 4. Before editing, read the authoritative current Markdown for the selected intent in the isolated review workspace.
 5. Add the skill to the intent's frontmatter `skills:` without duplicates and while preserving unrelated entries.
-6. Add minimal use timing, workflow, or pitfall guidance only if the skill reference alone would not make correct use sufficiently clear.
+6. Add only the minimum durable `guidance` refinement needed to explain when the selected skill applies. Keep it as the intent's single routing sentence; workflows and pitfalls belong in the selected skill, never an intent body.
 7. Return an `intent-markdown` finding with exactly one target intent whose staged edit matches the finding.
 
-The reviewer must not inspect or modify unrelated skills, force a placement solely because usage is low, create an otherwise unjustified intent, or place the skill into every similar intent. Host validation aggregates all positive placement findings: the complete run must contain exactly one positive finding and one target intent.
+The reviewer must not inspect or modify unrelated skills, force a placement solely because usage is low, create an otherwise unjustified intent, or place the skill into every similar intent. Host validation aggregates all positive placement findings: the complete run must contain exactly one positive finding and one target intent. Before applying a placement edit, the host acquires the intent-directory transaction lock, compares the original and staged frontmatter, and rechecks the live target: every field except `skills[]` and `guidance` must be semantically identical; existing skill entries stay in order and the selected skill may only be appended when absent. Lock contention or live drift rejects the placement without applying it.
 
 ## Tool and Mutation Boundaries
 
-A `skill-placement` run receives only the established intent editing tools plus `skill_view`:
+A `skill-placement` run receives only the established intent editing tools:
 
 - `read`
 - `write`
 - `apply_patch`
-- `skill_view`
 
-It does not receive `skill_list`, `skill_search`, `skill_manage`, shell access, config write access, or arbitrary filesystem access.
+The host resolves exactly one selected skill, bounds its `SKILL.md` content, and includes it in the untrusted review snapshot. The reviewer does not receive `skill_view`, `skill_list`, `skill_search`, `skill_manage`, shell access, config write access, or arbitrary filesystem access.
 
 Intent edits continue through the existing isolated workspace, workspace-only filesystem policy, finding/edit symmetry checks, intent validation, concurrent-edit detection, staged writes, backups, rollback, and catalog refresh.
 

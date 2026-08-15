@@ -47,7 +47,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'",
     "test": "vitest run",
-    "build": "tsc"
+    "build": "rm -rf dist && tsc"
   },
   "dependencies": {
     "gray-matter": "4.0.3",

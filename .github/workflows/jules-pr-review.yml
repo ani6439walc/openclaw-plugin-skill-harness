@@ -5,7 +5,8 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: read
+  # Large PRs publish a temporary full-diff branch, then remove it after review.
+  contents: write
   pull-requests: write
   issues: write
 

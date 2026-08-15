@@ -16,7 +16,7 @@ List currently available tools from the runtime catalog, config, built-in help, 
 
 ### Existing intents
 
-Use structured file/search tools to list and inspect runtime intent Markdown in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`.
+Use structured file/search tools to list and inspect runtime intent Markdown in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`. Experience records live separately under `experiences/`; treat them as host-curated runtime evidence, not as intent content or inventory-maintenance input.
 
 ## Step 2 — Capability table
 
@@ -49,14 +49,12 @@ For each confirmed gap, use the design workflow and `references/format.md` to dr
 Use simple format checks instead of command-specific validation steps:
 
 - Frontmatter exists and required fields have the right shape.
-- Body sections follow the required order.
+- Frontmatter is the complete intent file and contains one routing `guidance` sentence.
 - Triggers/examples are concrete and non-duplicative.
 - Optional `candidate.scope` and `candidate.keywords` are justified by durable cross-domain evidence and collision checks rather than inferred from one session.
 - New intents do not collide with existing runtime intent boundaries.
 - Domain-intent consistency criteria pass for every changed or newly proposed domain/intent relationship.
-- Skill dependencies use frontmatter `skills[]`.
-- `## Experience` contains durable skill/tool guidance only; skill entries follow `references/format.md`, and tool entries usually describe capabilities instead of concrete tool names.
-- Concrete shell commands and mcporter-backed documentation calls are preserved as bare commands in `## Experience`; `mcporter` appears in `skills[]` when those commands are required.
-- No legacy `## Skills & Tools` section remains.
+- Skill dependencies use direct frontmatter `skills[]`; no intent body is present.
+- Commands, workflows, and durable lessons remain in referenced skills, not intent definitions.
 
 Report the inventory, proposed changes, and any unresolved ambiguities.

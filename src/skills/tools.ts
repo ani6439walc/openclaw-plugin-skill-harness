@@ -8,15 +8,22 @@ import { searchAvailableSkills } from "./search.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 import type { IntentCatalogEntry } from "../types.js";
+import type { SkillExperienceCatalog } from "../experiences/index.js";
 
 const DEFAULT_SKILL_LIST_LIMIT = 150;
 const MAX_SKILL_LIST_LIMIT = 500;
+const MAX_EXPERIENCE_SKILLS = 6;
+const MAX_EXPERIENCE_QUERY_CODE_POINTS = 500;
+const MAX_EXPERIENCE_ENTRIES = 3;
+const MAX_EXPERIENCE_BODY_CODE_POINTS = 2_000;
+const MAX_EXPERIENCE_TOTAL_CODE_POINTS = 5_000;
 const SKILL_SOURCE_SCHEMA = Type.Union(
   SKILL_SOURCE_ORDER.map((source) => Type.Literal(source)),
 );
 
 export interface RegisterSkillToolsOptions {
   getIntents?: (agentId: string) => readonly IntentCatalogEntry[];
+  experienceCatalog?: SkillExperienceCatalog;
 }
 
 function jsonToolResult(data: unknown) {
@@ -89,6 +96,22 @@ function defaultAgentId(): string {
 
 function toolAgentId(context: { agentId?: string }): string | undefined {
   return context.agentId?.trim() || undefined;
+}
+
+function canonicalSkillNames(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const value of values) {
+    const name = value.normalize("NFKC").trim().toLowerCase();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
+
+function truncateCodePoints(value: string, limit: number): string {
+  return Array.from(value).slice(0, Math.max(0, limit)).join("");
 }
 
 export function registerSkillTools(
@@ -371,4 +394,122 @@ export function registerSkillTools(
       );
     },
   });
+
+  api.registerTool(
+    (toolContext) => {
+      const agentId = toolAgentId(toolContext);
+      if (!agentId) return null;
+      return {
+        name: "skill_experience",
+        label: "Read Skill Experience",
+        description:
+          "Read bounded, deterministic experience notes for requested skills visible to the current agent. This tool is read-only and does not invoke a model.",
+        parameters: Type.Object({
+          skills: Type.Array(Type.String(), {
+            minItems: 1,
+            maxItems: MAX_EXPERIENCE_SKILLS,
+          }),
+          query: Type.Optional(
+            Type.String({ maxLength: MAX_EXPERIENCE_QUERY_CODE_POINTS }),
+          ),
+        }),
+        async execute(_toolCallId, params) {
+          const rawSkillsValue =
+            params && typeof params === "object"
+              ? (params as Record<string, unknown>).skills
+              : undefined;
+          if (
+            !Array.isArray(rawSkillsValue) ||
+            rawSkillsValue.length < 1 ||
+            rawSkillsValue.length > MAX_EXPERIENCE_SKILLS ||
+            rawSkillsValue.some((value) => typeof value !== "string")
+          ) {
+            return jsonToolResult({
+              success: false,
+              error: "skills must contain between 1 and 6 names",
+            });
+          }
+          const rawSkills = rawSkillsValue as string[];
+          const requestedSkills = canonicalSkillNames(rawSkills);
+          if (requestedSkills.length === 0) {
+            return jsonToolResult({
+              success: false,
+              error: "skills must contain between 1 and 6 non-empty names",
+            });
+          }
+          const rawQuery =
+            params && typeof params === "object"
+              ? (params as Record<string, unknown>).query
+              : undefined;
+          if (
+            params &&
+            typeof params === "object" &&
+            Object.prototype.hasOwnProperty.call(params, "query") &&
+            typeof rawQuery !== "string"
+          ) {
+            return jsonToolResult({
+              success: false,
+              error: "query must be a string",
+            });
+          }
+          const query = optionalStringParam(params, "query");
+          if (
+            query !== undefined &&
+            Array.from(query).length > MAX_EXPERIENCE_QUERY_CODE_POINTS
+          ) {
+            return jsonToolResult({
+              success: false,
+              error: "query must contain at most 500 Unicode code points",
+            });
+          }
+
+          const inventory = await listAvailableSkills({ api, agentId });
+          const visibleNames = new Set(
+            canonicalSkillNames(inventory.map((skill) => skill.name)),
+          );
+          const availableSkills = requestedSkills.filter((name) =>
+            visibleNames.has(name),
+          );
+          const unavailableSkills = requestedSkills.filter(
+            (name) => !visibleNames.has(name),
+          );
+          const matches = options.experienceCatalog
+            ? options.experienceCatalog.search({
+                skillNames: availableSkills,
+                query,
+                limit: MAX_EXPERIENCE_ENTRIES,
+              })
+            : [];
+
+          let remainingCodePoints = MAX_EXPERIENCE_TOTAL_CODE_POINTS;
+          const entries = matches.flatMap((entry) => {
+            if (remainingCodePoints <= 0) return [];
+            const body = truncateCodePoints(
+              entry.body,
+              Math.min(MAX_EXPERIENCE_BODY_CODE_POINTS, remainingCodePoints),
+            );
+            remainingCodePoints -= Array.from(body).length;
+            return [
+              {
+                identity: entry.identity,
+                skill: entry.skill,
+                entry_id: entry.entryId,
+                summary: entry.summary,
+                keywords: entry.keywords,
+                body,
+              },
+            ];
+          });
+
+          return jsonToolResult({
+            success: true,
+            requested_skills: requestedSkills,
+            unavailable_skills: unavailableSkills,
+            entries,
+          });
+        },
+      };
+    },
+    { name: "skill_experience" },
+  );
 }
