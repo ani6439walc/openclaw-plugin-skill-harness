@@ -287,7 +287,7 @@ openclaw plugins doctor
 pnpm run build
 ```
 
-### No hints are injected
+### No routing context is injected
 
 Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the scanner model can resolve. With low reasoning effort, `lowEffortRoutingMode: "off"` disables the scanner and `"fastpath-only"` requires a matching fast path. A classifier confidence below `0.8` remains conservative and injects only routing context derived from the selected intent's direct skills.
 

@@ -216,7 +216,7 @@ function buildIntentCraftRubric(includeTriggerKeywordRules: boolean): string {
     : "- Do not propose or write changes to skills, tools, AGENTS.md, SOUL.md, or other production files. The only correction target is runtime intent Markdown content.";
   const triggerKeywordRules = includeTriggerKeywordRules
     ? `
-- Trigger keyword updates are JSON-only findings for requested triggerKeywords.* targets. The host records those changes in review.json; do not edit review.json or openclaw.plugin.json yourself.
+- Trigger keyword updates are JSON-only findings for requested triggerKeywords.* targets. The host records those changes in keyword-coverage.json; do not edit review.json, keyword-coverage.json, or openclaw.plugin.json yourself.
 - For trigger keyword updates, reject generic words like "ok", "好", "不要", and one-off wording. Suggest removals only with concrete false-positive evidence.`
     : "";
   const noFindingRule = includeTriggerKeywordRules
@@ -573,7 +573,7 @@ function buildTriggerKeywordPromptContract(
     rolePurpose:
       "Your sole purpose is to improve runtime intent Markdown and, for the requested keyword-capable triggers, propose host-recorded trigger keyword adjustments.",
     targetArtifactShape:
-      "Target artifact shape: directly edit runtime intent Markdown files when evidence supports a change, and return JSON describing what changed. For requested trigger keyword updates, return JSON only; the host records them in review.json.",
+      "Target artifact shape: directly edit runtime intent Markdown files when evidence supports a change, and return JSON describing what changed. For requested trigger keyword updates, return JSON only; the host records them in keyword-coverage.json.",
     reviewTargetLabel:
       "runtime intent Markdown or a requested trigger keyword update",
     outputContract: `
@@ -675,7 +675,7 @@ Review the requested triggers now. Return exactly one raw JSON object with no Ma
 
 Important reminders for tool use:
 - ${workspacePathMsg}
-- Trigger keyword updates are JSON-only findings; do not write to or edit review.json. The host will record these in review.json for you.`;
+- Trigger keyword updates are JSON-only findings; do not write to or edit review.json or keyword-coverage.json. The host will record these in keyword-coverage.json for you.`;
 }
 
 function buildReviewToolsAllow(triggers: readonly ReviewTrigger[]): string[] {

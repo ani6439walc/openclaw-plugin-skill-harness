@@ -246,7 +246,7 @@ export function createPlugin(
     id: PLUGIN_ID,
     name: "Skill Harness",
     description:
-      "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
+      "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
     register() {
       const runtimeConfig = api.runtime?.config?.current
         ? (api.runtime.config.current() as OpenClawConfig)

@@ -14,7 +14,7 @@ Skill Harness registers four skill-catalog tools plus an agent-scoped experience
 
 ## Visibility
 
-`skill_list`, `skill_search`, and `skill_view` use the invoking agent's resolved skill roots, the same resolution used for prompt hints. Intent metadata used to derive domains and search matches is also filtered for the invoking agent.
+`skill_list`, `skill_search`, and `skill_view` use the invoking agent's resolved skill roots, the same resolution used for prompt context. Intent metadata used to derive domains and search matches is also filtered for the invoking agent.
 
 The tools deliberately do not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists while indexing those roots. The result is an unfiltered inventory from the invoking agent's workspace roots, subject to source precedence and disabled bundled-skill entries. Do not add allowlist filtering without an explicit product decision, migration, documentation, and tests.
 

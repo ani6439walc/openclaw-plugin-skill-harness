@@ -1636,7 +1636,9 @@ export function createHookHandlers(deps: HookDeps) {
           });
 
           if (!classification) {
-            logger.debug("intention subagent failed; skipping hint injection.");
+            logger.debug(
+              "intention subagent failed; skipping routing context injection.",
+            );
             return toPromptBuildResult(undefined, configuredSkillsXml);
           }
 

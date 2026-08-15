@@ -525,6 +525,12 @@ describe("buildReviewPrompt", () => {
     expect(behaviorPrompt).toContain(
       "the requested triggerKeywords.* keyword change",
     );
+    expect(behaviorPrompt).toContain(
+      "The host records those changes in keyword-coverage.json",
+    );
+    expect(behaviorPrompt).not.toContain(
+      "The host records those changes in review.json",
+    );
     expect(behaviorPrompt).not.toContain(
       'targetTrigger to one of "successful-pattern"',
     );
@@ -634,7 +640,7 @@ describe("buildReviewPrompt", () => {
       prompt
         .trim()
         .endsWith(
-          "Trigger keyword updates are JSON-only findings; do not write to or edit review.json. The host will record these in review.json for you.",
+          "Trigger keyword updates are JSON-only findings; do not write to or edit review.json or keyword-coverage.json. The host will record these in keyword-coverage.json for you.",
         ),
     ).toBe(true);
   });

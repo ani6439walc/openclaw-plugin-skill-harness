@@ -1,7 +1,7 @@
 {
   "id": "skill-harness",
   "name": "Skill Harness",
-  "description": "Pre-scans user intent before replies and injects routing hints via before_prompt_build hook.",
+  "description": "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
   "activation": {
     "onStartup": true
   },

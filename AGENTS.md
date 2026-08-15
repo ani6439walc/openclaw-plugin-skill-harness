@@ -1,6 +1,6 @@
 # Agent Guide: Skill Harness
 
-This repository is an OpenClaw plugin. It appends fixed skill-discovery system context to authorized main-agent turns, classifies eligible user intent, prepends dynamic routing hints through `before_prompt_build`, records per-session runtime data, aggregates usage stats, and optionally applies direct Review intent and trigger-keyword changes.
+This repository is an OpenClaw plugin. It appends fixed skill-discovery system context to authorized main-agent turns, classifies eligible user intent, prepends dynamic routing context through `before_prompt_build`, records per-session runtime data, aggregates usage stats, and optionally applies direct Review intent and trigger-keyword changes.
 
 Use this file as the working contract for coding agents. The README explains the product in more detail; this guide explains how to change the code safely.
 
