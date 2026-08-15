@@ -324,6 +324,23 @@ function stripUnknownIntentStateFields(state: SessionState): boolean {
 
 function migrateSessionData(sessionData: SessionData): boolean {
   let changed = false;
+  const curation = sessionData.curation as
+    (SessionCurationRecord & Record<string, unknown>) | undefined;
+  if (curation) {
+    const legacyRefs = curation.experienceRefs;
+    if (!Array.isArray(curation.recommendedExperienceRefs)) {
+      curation.recommendedExperienceRefs = Array.isArray(legacyRefs)
+        ? legacyRefs.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [];
+      changed = true;
+    }
+    if (Object.hasOwn(curation, "experienceRefs")) {
+      delete curation.experienceRefs;
+      changed = true;
+    }
+  }
   for (const state of [sessionData.current, ...(sessionData.history ?? [])]) {
     if (stripUnknownIntentStateFields(state)) changed = true;
     const result = state.intent?.result;
@@ -919,7 +936,7 @@ export class SessionTracker {
     expectedRevision: number;
     expectedIntentId: string;
     candidates: readonly CuratedSkillCandidate[];
-    experienceRefs: readonly string[];
+    recommendedExperienceRefs: readonly string[];
     completedTurnCursor: number;
     now: string;
   }): Promise<CurationWriteResult> {
@@ -984,7 +1001,9 @@ export class SessionTracker {
           curation.revision += 1;
           curation.updatedAt = params.now;
           curation.candidates = structuredClone([...params.candidates]);
-          curation.experienceRefs = [...params.experienceRefs];
+          curation.recommendedExperienceRefs = [
+            ...params.recommendedExperienceRefs,
+          ];
           curation.completedTurnCursor = params.completedTurnCursor;
           schedule.status = "completed";
           schedule.finishedAt = params.now;
@@ -1124,7 +1143,7 @@ export class SessionTracker {
             updatedAt: params.now,
             startedByTurnKey: params.turnKey,
             candidates: structuredClone([...params.draftCandidates]),
-            experienceRefs: [],
+            recommendedExperienceRefs: [],
             completedTurnCursor: 0,
           };
           session.curation = curation;

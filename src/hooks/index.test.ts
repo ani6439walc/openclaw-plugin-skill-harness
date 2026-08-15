@@ -1885,7 +1885,7 @@ description: Navigate Tokyo.
         updatedAt: "2026-08-13T00:00:00.000Z",
         startedByTurnKey: "turn-1",
         candidates: [],
-        experienceRefs: [],
+        recommendedExperienceRefs: [],
         completedTurnCursor: 0,
       },
     };
@@ -2391,6 +2391,7 @@ describe("createHookHandlers topic switch flow", () => {
     getConfiguredAgentSkills?: (
       agentId: string,
     ) => string[] | Promise<string[]>;
+    experienceCatalog?: { listForSkills: ReturnType<typeof vi.fn> };
     turnAssociations?: TurnAssociationRegistry;
     ensureColdStart?: ReturnType<typeof vi.fn>;
     commitPromptRecommendation?: ReturnType<typeof vi.fn>;
@@ -2408,7 +2409,7 @@ describe("createHookHandlers topic switch flow", () => {
           topicEpoch: 1,
           revision: 1,
           candidates: params.draftCandidates ?? [],
-          experienceRefs: [],
+          recommendedExperienceRefs: [],
         },
       }));
     const commitPromptRecommendation =
@@ -2477,6 +2478,7 @@ describe("createHookHandlers topic switch flow", () => {
       turnAssociations: params.turnAssociations,
       bundledSkillsDir: params.bundledSkillsDir,
       getConfiguredAgentSkills: params.getConfiguredAgentSkills,
+      experienceCatalog: params.experienceCatalog,
     });
 
     return {
@@ -2698,6 +2700,67 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(
       record.mock.calls[0]?.[1].current?.intent?.result,
     ).not.toHaveProperty("complexity");
+  });
+
+  it("immediately injects candidate-scoped experience metadata without bodies", async () => {
+    const temporarySkills = fs.mkdtempSync(
+      path.join(os.tmpdir(), "routing-experience-metadata-"),
+    );
+    const experienceCatalog = {
+      listForSkills: vi.fn().mockReturnValue([
+        {
+          identity: "openclaw/cron-registry-recovery",
+          skill: "openclaw",
+          entryId: "cron-registry-recovery",
+          summary: "Must not be injected.",
+          keywords: ["cron", "recovery"],
+          body: "Must not be injected.",
+          path: "/private/cron-registry-recovery.md",
+        },
+      ]),
+    };
+    writeSkill(temporarySkills, "openclaw", "OpenClaw operations.");
+    try {
+      const { handlers } = createTopicFlowHarness({
+        historicalIntents: [],
+        intents: [
+          {
+            ...intent,
+            definition: { ...intent.definition, skills: ["openclaw"] },
+          },
+        ],
+        bundledSkillsDir: temporarySkills,
+        experienceCatalog,
+      });
+
+      const result = await handlers.onBeforePromptBuild(
+        {
+          prompt: "hi",
+          messages: [
+            {
+              role: "user",
+              content: "hi",
+              provenance: { kind: "external_user" },
+            },
+          ],
+        } as never,
+        ctx,
+      );
+
+      expect(experienceCatalog.listForSkills).toHaveBeenCalledWith([
+        "openclaw",
+      ]);
+      expect(result?.prependContext).toContain(
+        "<identity>openclaw/cron-registry-recovery</identity>",
+      );
+      expect(result?.prependContext).toContain(
+        '<keywords>["cron","recovery"]</keywords>',
+      );
+      expect(result?.prependContext).not.toContain("Must not be injected.");
+      expect(result?.prependContext).not.toContain("<body>");
+    } finally {
+      fs.rmSync(temporarySkills, { recursive: true, force: true });
+    }
   });
 
   it("injects deterministic guidance for exact keyword matches", async () => {

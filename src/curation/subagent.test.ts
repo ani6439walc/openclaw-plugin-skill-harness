@@ -21,7 +21,7 @@ function proposal(overrides: Record<string, unknown> = {}): string {
     topicEpoch: 3,
     expectedRevision: 7,
     candidates: [],
-    experienceRefs: [],
+    recommendedExperienceRefs: [],
     reason: "Keep the current bounded recommendation set.",
     ...overrides,
   });
@@ -33,7 +33,7 @@ describe("parseCuratorProposal", () => {
       topicEpoch: 3,
       expectedRevision: 7,
       candidates: [],
-      experienceRefs: [],
+      recommendedExperienceRefs: [],
       reason: "Keep the current bounded recommendation set.",
     });
   });
@@ -85,14 +85,16 @@ describe("parseCuratorProposal", () => {
 
     expect(
       parseCuratorProposal(
-        proposal({ experienceRefs: ["skill/one", "skill/two", "skill/three"] }),
+        proposal({
+          recommendedExperienceRefs: ["skill/one", "skill/two", "skill/three"],
+        }),
         expected,
       ),
     ).toBeDefined();
     expect(
       parseCuratorProposal(
         proposal({
-          experienceRefs: [
+          recommendedExperienceRefs: [
             "skill/one",
             "skill/two",
             "skill/three",
@@ -104,7 +106,7 @@ describe("parseCuratorProposal", () => {
     ).toBeUndefined();
     expect(
       parseCuratorProposal(
-        proposal({ experienceRefs: ["Skill/One", " skill/one "] }),
+        proposal({ recommendedExperienceRefs: ["Skill/One", " skill/one "] }),
         expected,
       ),
     ).toBeUndefined();
@@ -140,8 +142,8 @@ describe("parseCuratorProposal", () => {
     expect(Array.from(atLimit)).toHaveLength(4_000);
     expect(parseCuratorProposal(atLimit, expected)).toBeDefined();
     const overLimit = atLimit.replace(
-      '"],"experienceRefs"',
-      '😀"],"experienceRefs"',
+      '"],"recommendedExperienceRefs"',
+      '😀"],"recommendedExperienceRefs"',
     );
     expect(Array.from(overLimit)).toHaveLength(4_001);
     expect(parseCuratorProposal(overLimit, expected)).toBeUndefined();
@@ -157,7 +159,7 @@ describe("buildCuratorPrompt", () => {
     updatedAt: "2026-08-13T00:00:00.000Z",
     startedByTurnKey: "must-not-render",
     candidates: [],
-    experienceRefs: [],
+    recommendedExperienceRefs: [],
     completedTurnCursor: 3,
   };
 
@@ -209,6 +211,28 @@ describe("buildCuratorPrompt", () => {
     expect(prompt).not.toContain("<identity>skill/four</identity>");
     expect(prompt).not.toContain("/private/");
     expect(prompt).not.toContain("must-not-render");
+  });
+
+  it("renders available experience keywords so curation can select high-relevance references", () => {
+    const prompt = buildCuratorPrompt({
+      curation,
+      conversation: [],
+      candidates: [],
+      experienceIdentities: [],
+      experienceCandidates: [
+        {
+          identity: "openclaw/cron-registry-recovery",
+          keywords: ["cron", "recovery"],
+        },
+      ],
+    });
+
+    expect(prompt).toContain("highly relevant to this sustained topic");
+    expect(prompt).toContain("<experience_candidates>");
+    expect(prompt).toContain(
+      "<identity>openclaw/cron-registry-recovery</identity>",
+    );
+    expect(prompt).toContain('<keywords>["cron","recovery"]</keywords>');
   });
 
   it("caps escaped conversation text at 2,000 Unicode code points", () => {
@@ -317,7 +341,7 @@ describe("curation subagent runtime", () => {
     updatedAt: "2026-08-13T00:00:00.000Z",
     startedByTurnKey: "parent-turn-must-not-render",
     candidates: [],
-    experienceRefs: [],
+    recommendedExperienceRefs: [],
     completedTurnCursor: 3,
   };
 
@@ -353,7 +377,7 @@ describe("curation subagent runtime", () => {
       topicEpoch: 3,
       expectedRevision: 7,
       candidates: [],
-      experienceRefs: [],
+      recommendedExperienceRefs: [],
       reason: "Keep the current bounded recommendation set.",
     });
 

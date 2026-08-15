@@ -1139,6 +1139,7 @@ export function createHookHandlers(deps: HookDeps) {
     candidates: AvailableSkill[];
     provenance: CuratedSkillCandidate[];
     experiences: ReturnType<SkillExperienceCatalog["listForSkills"]>;
+    recommendedExperienceIds: string[];
     durable: boolean;
   }> {
     const directSkills = await resolveAvailableSkills({
@@ -1175,13 +1176,22 @@ export function createHookHandlers(deps: HookDeps) {
         return skill ? [skill] : [];
       });
     };
+    const resolveExperienceReferences = (
+      candidates: readonly AvailableSkill[],
+    ): ReturnType<SkillExperienceCatalog["listForSkills"]> =>
+      experienceCatalog
+        ? experienceCatalog.listForSkills(
+            candidates.map((candidate) => candidate.name),
+          )
+        : [];
     const fallbackCandidates = await resolveCandidates(fallback);
     const association = params.routing.association;
     if (!association) {
       return {
         candidates: fallbackCandidates,
         provenance: fallback,
-        experiences: [],
+        experiences: resolveExperienceReferences(fallbackCandidates),
+        recommendedExperienceIds: [],
         durable: false,
       };
     }
@@ -1202,24 +1212,22 @@ export function createHookHandlers(deps: HookDeps) {
       return {
         candidates: fallbackCandidates,
         provenance: fallback,
-        experiences: [],
+        experiences: resolveExperienceReferences(fallbackCandidates),
+        recommendedExperienceIds: [],
         durable: false,
       };
     }
     const provenance = coldStart.curation.candidates;
     const candidates = await resolveCandidates(provenance);
     const candidateNames = candidates.map((candidate) => candidate.name);
-    const experiences = experienceCatalog
-      ? coldStart.curation.experienceRefs.flatMap((identity) => {
-          const experience = experienceCatalog.resolve(identity);
-          return experience &&
-            candidateNames.some(
-              (name) => name.trim().toLowerCase() === experience.skill,
-            )
-            ? [experience]
-            : [];
-        })
-      : [];
+    const experiences = resolveExperienceReferences(candidates);
+    const experienceIdentities = new Set(
+      experiences.map((experience) => experience.identity),
+    );
+    const recommendedExperienceIds =
+      coldStart.curation.recommendedExperienceRefs.filter((identity) =>
+        experienceIdentities.has(identity),
+      );
     const committed = await tracker.commitPromptRecommendation({
       sessionId: association.sessionId,
       turnKey: association.turnKey,
@@ -1236,11 +1244,18 @@ export function createHookHandlers(deps: HookDeps) {
       return {
         candidates: fallbackCandidates,
         provenance: fallback,
-        experiences: [],
+        experiences: resolveExperienceReferences(fallbackCandidates),
+        recommendedExperienceIds: [],
         durable: false,
       };
     }
-    return { candidates, provenance, experiences, durable: true };
+    return {
+      candidates,
+      provenance,
+      experiences,
+      recommendedExperienceIds,
+      durable: true,
+    };
   }
 
   function buildExactKeywordIntentResult(params: {
@@ -1416,6 +1431,7 @@ export function createHookHandlers(deps: HookDeps) {
         guidance: params.exactKeywordMatch.intent.definition.guidance,
         candidates: routingContext.candidates,
         experiences: routingContext.experiences,
+        recommendedExperienceIds: routingContext.recommendedExperienceIds,
       }),
       params.configuredSkillsXml,
     );
@@ -1473,6 +1489,7 @@ export function createHookHandlers(deps: HookDeps) {
           guidance: intent.definition.guidance,
           candidates: routingContext.candidates,
           experiences: routingContext.experiences,
+          recommendedExperienceIds: routingContext.recommendedExperienceIds,
         }),
         params.configuredSkillsXml,
       );
@@ -2532,7 +2549,10 @@ export function createHookHandlers(deps: HookDeps) {
         curation: expected,
         conversation: conversationTurns,
         candidates: directSkills,
-        experienceIdentities: expected.experienceRefs,
+        experienceIdentities: expected.recommendedExperienceRefs,
+        experienceCandidates: activeExperienceCatalog
+          .listForSkills(directSkills.map((skill) => skill.name))
+          .map(({ identity, keywords }) => ({ identity, keywords })),
       });
     } catch (error) {
       logger.warn("curation subagent failed", { error });

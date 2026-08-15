@@ -184,8 +184,8 @@ export async function validateAndCommitCuration(params: {
   }
 
   const candidates = uniqueCanonicalStrings(params.proposal.candidates, 6);
-  const experienceRefs = uniqueCanonicalStrings(
-    params.proposal.experienceRefs,
+  const recommendedExperienceRefs = uniqueCanonicalStrings(
+    params.proposal.recommendedExperienceRefs,
     3,
   );
   const acceptedTurns = qualifyingTurns(
@@ -210,7 +210,7 @@ export async function validateAndCommitCuration(params: {
     params.completedTurnCursor % 3 !== 0 ||
     verifiedCompletedTurnCursor !== params.completedTurnCursor ||
     !candidates ||
-    !experienceRefs
+    !recommendedExperienceRefs
   ) {
     return finish("failed");
   }
@@ -252,7 +252,7 @@ export async function validateAndCommitCuration(params: {
   const finalCandidateIdentities = new Set(candidates);
   const resolvedExperienceRefs: string[] = [];
   const resolvedExperienceIdentities = new Set<string>();
-  for (const identity of experienceRefs) {
+  for (const identity of recommendedExperienceRefs) {
     const entry = params.experienceCatalog.resolve(identity);
     if (
       !entry ||
@@ -272,7 +272,7 @@ export async function validateAndCommitCuration(params: {
     expectedRevision: schedule.expectedRevision,
     expectedIntentId: params.expected.intentId,
     candidates: finalCandidates,
-    experienceRefs: resolvedExperienceRefs,
+    recommendedExperienceRefs: resolvedExperienceRefs,
     completedTurnCursor: params.completedTurnCursor,
     now: params.now,
   });

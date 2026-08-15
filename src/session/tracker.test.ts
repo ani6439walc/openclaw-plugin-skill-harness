@@ -151,6 +151,41 @@ describe("SessionTracker", () => {
       expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
+    it("migrates legacy curation experienceRefs in memory without rewriting the session file", () => {
+      const sessionsDir = path.join(tempDir, "sessions");
+      fs.mkdirSync(sessionsDir, { recursive: true });
+      const filePath = path.join(sessionsDir, "legacy-curation.json");
+      fs.writeFileSync(
+        filePath,
+        JSON.stringify({
+          sessionId: "legacy-curation",
+          current: {},
+          curation: {
+            topicEpoch: 1,
+            intentId: "other",
+            revision: 0,
+            createdAt: "2026-08-15T00:00:00.000Z",
+            updatedAt: "2026-08-15T00:00:00.000Z",
+            startedByTurnKey: "turn-1",
+            candidates: [],
+            experienceRefs: ["openclaw/cron-registry-recovery"],
+            completedTurnCursor: 0,
+          },
+        }),
+      );
+      const originalBytes = fs.readFileSync(filePath, "utf8");
+
+      const loadedTracker = SessionTracker.create(tempDir);
+
+      expect(loadedTracker.getCuration("legacy-curation")).toMatchObject({
+        recommendedExperienceRefs: ["openclaw/cron-registry-recovery"],
+      });
+      expect(loadedTracker.getCuration("legacy-curation")).not.toHaveProperty(
+        "experienceRefs",
+      );
+      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
+    });
+
     it("excludes expired on-disk sessions from retained snapshots after restart", () => {
       const sessionsDir = path.join(tempDir, "sessions");
       fs.mkdirSync(sessionsDir, { recursive: true });

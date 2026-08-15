@@ -139,14 +139,16 @@ describe("buildRoutingContext", () => {
     expect(result).toContain(
       "<identity>architecture-diagram/layout</identity>",
     );
-    expect(result).toContain(
+    expect(result).toContain('<keywords>["diagram"]</keywords>');
+    expect(result).not.toContain(
       "Keep &lt;boundaries&gt; explicit &amp; reviewable.",
     );
+    expect(result).not.toContain("<body>");
     expect(result).not.toContain("/private/SKILL.md");
     expect(result).not.toContain("/private/experience.md");
   });
 
-  it("omits empty optional blocks and bounds experience bodies by Unicode code points", () => {
+  it("omits empty optional blocks and renders every candidate-scoped experience as metadata", () => {
     const experience = (
       entryId: string,
       body: string,
@@ -155,7 +157,7 @@ describe("buildRoutingContext", () => {
       skill: "skill",
       entryId,
       summary: "Summary.",
-      keywords: [],
+      keywords: ["keyword"],
       body,
       path: `/private/${entryId}.md`,
     });
@@ -185,9 +187,9 @@ describe("buildRoutingContext", () => {
       guidance: "Use only verified context.",
       candidates: [],
       experiences: [
-        experience("one", "😀".repeat(1_201)),
-        experience("two", "😀".repeat(1_201)),
-        experience("three", "😀".repeat(1_201)),
+        experience("one", "must not render"),
+        experience("two", "must not render"),
+        experience("three", "must not render"),
         experience("four", "must not render"),
       ],
     });
@@ -195,11 +197,50 @@ describe("buildRoutingContext", () => {
     expect(bounded).toContain("<identity>skill/one</identity>");
     expect(bounded).toContain("<identity>skill/two</identity>");
     expect(bounded).toContain("<identity>skill/three</identity>");
-    expect(bounded).not.toContain("<identity>skill/four</identity>");
-    expect(Array.from(bounded.match(/😀/gu)?.join("") ?? "")).toHaveLength(
-      3_000,
+    expect(bounded).toContain("<identity>skill/four</identity>");
+    expect(bounded).not.toContain("must not render");
+  });
+
+  it("expands only session-curated experiences with a possibly-relevant marker", () => {
+    const result = buildRoutingContext({
+      result: {
+        intent: "other",
+        reason: "No exact match.",
+        domain: "other",
+        confidence: 0.5,
+      },
+      guidance: "Use only verified context.",
+      candidates: [],
+      experiences: [
+        {
+          identity: "skill/recommended",
+          skill: "skill",
+          entryId: "recommended",
+          summary: "Hidden summary.",
+          keywords: ["selected"],
+          body: "Curated body.",
+          path: "/private/recommended.md",
+        },
+        {
+          identity: "skill/metadata-only",
+          skill: "skill",
+          entryId: "metadata-only",
+          summary: "Hidden summary.",
+          keywords: ["unselected"],
+          body: "Unselected body.",
+          path: "/private/metadata-only.md",
+        },
+      ],
+      recommendedExperienceIds: [" SKILL/RECOMMENDED "],
+    });
+
+    expect(result).toContain(
+      "<session_curation_recommendation>Possibly relevant experience selected by session curation; verify it fits the current request.</session_curation_recommendation>",
     );
-    expect(bounded).not.toContain("�");
+    expect(result).toContain("<body>Curated body.</body>");
+    expect(result).not.toContain("Unselected body.");
+    expect(result).toContain('<keywords>["selected"]</keywords>');
+    expect(result).toContain('<keywords>["unselected"]</keywords>');
   });
 });
 

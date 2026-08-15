@@ -49,7 +49,7 @@ const ROUTING_CONTEXT_POLICY = taggedBlock(
   `- \`selected_intent\` and \`intent_guidance\` describe the current routing decision; treat low-confidence routing as tentative.
 - \`task_complexity\`, when present, is the classifier's current scope estimate; use it to calibrate planning and verification, not to broaden the requested work.
 - \`skill_candidates\` are resolved discovery leads, not proof that every listed skill applies.
-- \`skill_experiences\` are bounded reference material for the selected skills; apply only relevant entries.
+- \`skill_experiences\` list candidate-scoped experience identities and keywords. Entries marked by session curation include bounded body text as possibly relevant reference; verify that it fits the current request. To read an unexpanded record or its full body, call \`skill_experience\` with its skill and identity as the query.
 - Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.`,
 );
 
@@ -511,32 +511,56 @@ function formatSkillXml(
   return taggedBlock("skill", lines.join("\n"));
 }
 
-function formatExperienceXml(experience: SkillExperienceEntry): string {
-  return taggedBlock(
-    "skill_experience",
-    [
-      formatXmlTextElement("skill", experience.skill),
-      formatXmlTextElement("identity", experience.identity),
-      formatXmlTextElement("body", experience.body),
-    ].join("\n"),
-  );
+function formatExperienceXml(
+  experience: SkillExperienceEntry,
+  recommendedBody?: string,
+): string {
+  const lines = [
+    formatXmlTextElement("identity", experience.identity),
+    formatXmlTextElement("keywords", JSON.stringify(experience.keywords)),
+  ];
+  if (recommendedBody !== undefined) {
+    lines.push(
+      formatXmlTextElement(
+        "session_curation_recommendation",
+        "Possibly relevant experience selected by session curation; verify it fits the current request.",
+      ),
+      formatXmlTextElement("body", recommendedBody),
+    );
+  }
+  return taggedBlock("skill_experience", lines.join("\n"));
+}
+
+function canonicalExperienceIdentity(identity: string): string {
+  return identity.normalize("NFKC").trim().toLowerCase();
 }
 
 function truncateCodePoints(value: string, limit: number): string {
   return Array.from(value).slice(0, limit).join("");
 }
 
-function formatBoundedExperiences(
+function formatExperienceReferences(
   experiences: readonly SkillExperienceEntry[],
+  recommendedExperienceIds: readonly string[],
 ): string | undefined {
-  let remainingBodyCodePoints = 3_000;
-  const rendered = experiences.slice(0, 3).map((experience) => {
-    const body = truncateCodePoints(
-      experience.body,
-      Math.min(1_200, remainingBodyCodePoints),
+  const recommended = new Set(
+    recommendedExperienceIds.map(canonicalExperienceIdentity),
+  );
+  let remainingRecommendedBodyCodePoints = 3_000;
+  const rendered = experiences.map((experience) => {
+    const selected = recommended.has(
+      canonicalExperienceIdentity(experience.identity),
     );
-    remainingBodyCodePoints -= Array.from(body).length;
-    return formatExperienceXml({ ...experience, body });
+    const body = selected
+      ? truncateCodePoints(
+          experience.body,
+          Math.min(1_200, remainingRecommendedBodyCodePoints),
+        )
+      : undefined;
+    if (body !== undefined) {
+      remainingRecommendedBodyCodePoints -= Array.from(body).length;
+    }
+    return formatExperienceXml(experience, body);
   });
 
   return rendered.length > 0
@@ -549,6 +573,7 @@ export function buildRoutingContext(params: {
   guidance: string;
   candidates: readonly AvailableSkill[];
   experiences: readonly SkillExperienceEntry[];
+  recommendedExperienceIds?: readonly string[];
 }): string {
   const blocks = [
     ROUTING_CONTEXT_POLICY,
@@ -560,7 +585,10 @@ export function buildRoutingContext(params: {
     params.candidates.length > 0
       ? formatSkillXmlBlock("skill_candidates", [...params.candidates])
       : undefined,
-    formatBoundedExperiences(params.experiences),
+    formatExperienceReferences(
+      params.experiences,
+      params.recommendedExperienceIds ?? [],
+    ),
   ].filter((block): block is string => Boolean(block));
 
   return taggedBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));

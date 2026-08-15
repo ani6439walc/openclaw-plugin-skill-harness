@@ -4,15 +4,15 @@
 
 Skill Harness keeps package files and runtime state separate. The paths below use the default local state directory.
 
-| Path                                                      | Purpose                                                                                                 |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `~/.openclaw/plugins/skill-harness/intents/`              | Editable runtime intent catalog.                                                                        |
-| `~/.openclaw/plugins/skill-harness/experiences/`          | Skill-scoped runtime experience catalog selected only through session curation.                         |
-| `~/.openclaw/plugins/skill-harness/sessions/`             | Per-session JSON snapshots for audit and review context.                                                |
-| `~/.openclaw/plugins/skill-harness/agents/*/sessions/`    | Embedded-agent session transcripts.                                                                     |
-| `~/.openclaw/plugins/skill-harness/stats.json`            | Schema-v4 intent, skill, tool, routing, projection, inventory-observation, and daily telemetry.         |
-| `~/.openclaw/plugins/skill-harness/review.json`           | Schema-v7 current-only Intent Review outcomes, experience writes, and completed skill-placement epochs. |
-| `~/.openclaw/plugins/skill-harness/keyword-coverage.json` | Schema-v1 trigger-keyword coverage state and epochs.                                                    |
+| Path                                                      | Purpose                                                                                                         |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `~/.openclaw/plugins/skill-harness/intents/`              | Editable runtime intent catalog.                                                                                |
+| `~/.openclaw/plugins/skill-harness/experiences/`          | Skill-scoped runtime experience catalog; current candidate skills immediately expose identity/keyword metadata. |
+| `~/.openclaw/plugins/skill-harness/sessions/`             | Per-session JSON snapshots for audit and review context.                                                        |
+| `~/.openclaw/plugins/skill-harness/agents/*/sessions/`    | Embedded-agent session transcripts.                                                                             |
+| `~/.openclaw/plugins/skill-harness/stats.json`            | Schema-v4 intent, skill, tool, routing, projection, inventory-observation, and daily telemetry.                 |
+| `~/.openclaw/plugins/skill-harness/review.json`           | Schema-v7 current-only Intent Review outcomes, experience writes, and completed skill-placement epochs.         |
+| `~/.openclaw/plugins/skill-harness/keyword-coverage.json` | Schema-v1 trigger-keyword coverage state and epochs.                                                            |
 
 Session cleanup preserves the ended main session and removes only expired `sessions/*.json` and embedded-agent session artifacts: `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json`. It does not delete root-level statistics, review data, intents, skills, transcripts outside the embedded-agent session directories, or package files.
 

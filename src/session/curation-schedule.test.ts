@@ -158,7 +158,7 @@ describe("SessionTracker curation schedule CAS", () => {
       expectedRevision: 0,
       expectedIntentId: "coding",
       candidates: REVISED,
-      experienceRefs: ["alpha/verify"],
+      recommendedExperienceRefs: ["alpha/verify"],
       completedTurnCursor: 3,
       now: "2026-08-12T00:00:05.000Z",
     } as const;
@@ -175,7 +175,7 @@ describe("SessionTracker curation schedule CAS", () => {
       topicEpoch: 1,
       revision: 1,
       candidates: REVISED,
-      experienceRefs: ["alpha/verify"],
+      recommendedExperienceRefs: ["alpha/verify"],
       completedTurnCursor: 3,
       updatedAt: "2026-08-12T00:00:05.000Z",
     });
@@ -214,7 +214,7 @@ describe("SessionTracker curation schedule CAS", () => {
         expectedRevision: 0,
         expectedIntentId: "coding",
         candidates: REVISED,
-        experienceRefs: ["beta/verify"],
+        recommendedExperienceRefs: ["beta/verify"],
         completedTurnCursor: 3,
         now: "2026-08-12T00:00:05.000Z",
       }),
@@ -241,7 +241,7 @@ describe("SessionTracker curation schedule CAS", () => {
     expect(restarted.getCuration("session-a")).toMatchObject({
       revision: 1,
       candidates: REVISED,
-      experienceRefs: ["beta/verify"],
+      recommendedExperienceRefs: ["beta/verify"],
     });
     expect(restarted.getTurnState("session-a", "run-b")?.toolCalls).toEqual([
       expect.objectContaining({ toolCallId: "tool-b", result: "done" }),

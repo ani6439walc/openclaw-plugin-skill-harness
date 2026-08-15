@@ -45,9 +45,9 @@ Large skill catalogs create two practical problems:
 
 Skill Harness addresses both:
 
-1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and bounded skill experiences. The fixed system context does not include the runtime skill inventory.
+1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and candidate-scoped skill-experience metadata (identity and keywords only). The fixed system context does not include the runtime skill inventory.
 2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption and can refine runtime intent Markdown and selected review trigger keywords. It does not train the base model or rewrite skill files.
-3. **Session-local recommendation curation.** The enabled-by-default background curator refines a topic epoch's direct skill candidates and bounded experience references without changing intent definitions, skill files, or Review state.
+3. **Session-local recommendation curation.** The enabled-by-default background curator refines a topic epoch's direct skill candidates and may select up to three high-relevance experience references for the next turn's expanded reference context, without changing intent definitions, skill files, or Review state.
 
 ## How it works
 
@@ -155,7 +155,7 @@ Runtime intents live under the OpenClaw state directory. With the default local 
 
 On first startup, the plugin seeds bundled examples only when this directory is absent or has no Markdown intent files. Existing runtime intents are never overwritten.
 
-Intent files use YAML frontmatter only for routing metadata; their complete plain-text Markdown body is the one routing `guidance` sentence. Experience files are separate, skill-scoped Markdown records with `skill`, `summary`, and `keywords` frontmatter; they are injected only when a session-local curation record selects the matching direct skill and experience reference.
+Intent files use YAML frontmatter only for routing metadata; their complete plain-text Markdown body is the one routing `guidance` sentence. Experience files are separate, skill-scoped Markdown records with `skill`, `summary`, and `keywords` frontmatter. Every record whose skill is a current direct candidate is injected immediately as identity-and-keyword metadata. Session curation may select at most three high-relevance records; on the next turn their bounded bodies are added with a `session_curation_recommendation` marker that says they are only possibly relevant. The main agent reads any unexpanded record, or a selected record's full body, through `skill_experience`, passing the matching skill and identity as the query.
 
 ### Runtime Review state
 

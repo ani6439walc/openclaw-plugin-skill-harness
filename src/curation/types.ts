@@ -14,7 +14,7 @@ export interface SessionCurationRecord {
   updatedAt: string;
   startedByTurnKey: string;
   candidates: CuratedSkillCandidate[];
-  experienceRefs: string[];
+  recommendedExperienceRefs: string[];
   completedTurnCursor: number;
 }
 

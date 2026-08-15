@@ -24,7 +24,7 @@ const CURATION: SessionCurationRecord = {
   updatedAt: "2026-08-13T00:00:00.000Z",
   startedByTurnKey: "turn-1",
   candidates: [],
-  experienceRefs: [],
+  recommendedExperienceRefs: [],
   completedTurnCursor: 0,
 };
 
@@ -331,7 +331,7 @@ describe("validateAndCommitCuration", () => {
     topicEpoch: 1,
     expectedRevision: 0,
     candidates: [" beta ", "GAMMA"],
-    experienceRefs: ["beta/verify"],
+    recommendedExperienceRefs: ["beta/verify"],
     reason: "Keep beta and add gamma.",
   };
 
@@ -428,7 +428,7 @@ describe("validateAndCommitCuration", () => {
         { name: "Beta", provenance: "curator-kept" },
         { name: "Gamma", provenance: "curator-added" },
       ],
-      experienceRefs: ["beta/verify"],
+      recommendedExperienceRefs: ["beta/verify"],
       completedTurnCursor: 3,
       now: "2026-08-13T00:02:00.000Z",
     });
@@ -536,7 +536,7 @@ describe("validateAndCommitCuration", () => {
       proposal: {
         ...proposal,
         candidates: ["alpha", "BETA"],
-        experienceRefs: [],
+        recommendedExperienceRefs: [],
       },
       visibleSkills,
       experienceCatalog: experienceCatalog(),
@@ -566,7 +566,11 @@ describe("validateAndCommitCuration", () => {
         ...expected,
         candidates: [{ name: "Alpha", provenance: "curator-kept" }],
       },
-      proposal: { ...proposal, candidates: ["Beta"], experienceRefs: [] },
+      proposal: {
+        ...proposal,
+        candidates: ["Beta"],
+        recommendedExperienceRefs: [],
+      },
       visibleSkills,
       experienceCatalog: experienceCatalog(),
       completedTurnCursor: 3,
@@ -626,13 +630,13 @@ describe("validateAndCommitCuration", () => {
     },
     {
       name: "unresolved experience",
-      proposal: { ...proposal, experienceRefs: ["beta/missing"] },
+      proposal: { ...proposal, recommendedExperienceRefs: ["beta/missing"] },
     },
     {
       name: "duplicate resolved experience",
       proposal: {
         ...proposal,
-        experienceRefs: ["beta/verify", "beta / verify"],
+        recommendedExperienceRefs: ["beta/verify", "beta / verify"],
       },
     },
     {

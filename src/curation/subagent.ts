@@ -5,6 +5,7 @@ import type { RecentTurn } from "../types.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { limitConversationTurns } from "../classification/conversation.js";
 import type { AvailableSkill } from "../skills/types.js";
+import type { SkillExperienceEntry } from "../experiences/types.js";
 import { indentXmlLines } from "../xml-format.js";
 import type { SessionCurationRecord } from "./types.js";
 import { getModelRef } from "../classification/subagent.js";
@@ -19,15 +20,15 @@ export interface CuratorProposal {
   topicEpoch: number;
   expectedRevision: number;
   candidates: string[];
-  experienceRefs: string[];
+  recommendedExperienceRefs: string[];
   reason: string;
 }
 
 const CURATOR_PROPOSAL_KEYS = [
   "candidates",
   "expectedRevision",
-  "experienceRefs",
   "reason",
+  "recommendedExperienceRefs",
   "topicEpoch",
 ] as const;
 
@@ -168,8 +169,15 @@ export function parseCuratorProposal(
   }
 
   const candidates = parseUniqueStrings(parsed.candidates, 6);
-  const experienceRefs = parseUniqueStrings(parsed.experienceRefs, 3);
-  if (!candidates || !experienceRefs || typeof parsed.reason !== "string") {
+  const recommendedExperienceRefs = parseUniqueStrings(
+    parsed.recommendedExperienceRefs,
+    3,
+  );
+  if (
+    !candidates ||
+    !recommendedExperienceRefs ||
+    typeof parsed.reason !== "string"
+  ) {
     return;
   }
   if (Array.from(parsed.reason).length > 500) return;
@@ -180,7 +188,7 @@ export function parseCuratorProposal(
     topicEpoch,
     expectedRevision,
     candidates,
-    experienceRefs,
+    recommendedExperienceRefs,
     reason,
   };
 }
@@ -190,6 +198,10 @@ export function buildCuratorPrompt(params: {
   conversation: readonly RecentTurn[];
   candidates: readonly AvailableSkill[];
   experienceIdentities: readonly string[];
+  experienceCandidates?: readonly Pick<
+    SkillExperienceEntry,
+    "identity" | "keywords"
+  >[];
 }): string {
   const conversation = formatConversation(params.conversation);
   const candidates = params.candidates
@@ -203,12 +215,23 @@ export function buildCuratorPrompt(params: {
         ].join("\n"),
       ),
     );
-  const experiences = params.experienceIdentities
-    .slice(0, 3)
-    .map((identity) => boundedXmlElement("identity", identity, 160));
+  const experienceCandidates = params.experienceCandidates
+    ? params.experienceCandidates.slice(0, 24)
+    : params.experienceIdentities
+        .slice(0, 3)
+        .map((identity) => ({ identity, keywords: [] }));
+  const experiences = experienceCandidates.map((experience) =>
+    xmlBlock(
+      "experience_candidate",
+      [
+        boundedXmlElement("identity", experience.identity, 160),
+        boundedXmlElement("keywords", JSON.stringify(experience.keywords), 800),
+      ].join("\n"),
+    ),
+  );
 
   return [
-    `You are a bounded skill curator. Return JSON only with exactly topicEpoch, expectedRevision, candidates, experienceRefs, and reason. Return zero to six unique candidate names, zero to three unique experience identities, and a reason of at most 500 Unicode code points. You must echo topicEpoch ${params.curation.topicEpoch} and expectedRevision ${params.curation.revision} exactly. Do not output experience bodies or any other key.`,
+    `You are a bounded skill curator. Return JSON only with exactly topicEpoch, expectedRevision, candidates, recommendedExperienceRefs, and reason. Return zero to six unique candidate names, zero to three unique experience identities, and a reason of at most 500 Unicode code points. Select recommendedExperienceRefs only from experience candidates and only when they are highly relevant to this sustained topic; selected records will be expanded as possibly relevant reference on the next main-agent turn. Return an empty recommendedExperienceRefs array otherwise. You must echo topicEpoch ${params.curation.topicEpoch} and expectedRevision ${params.curation.revision} exactly. Do not output experience bodies or any other key.`,
     xmlBlock(
       "curation_request",
       [
@@ -225,7 +248,7 @@ export function buildCuratorPrompt(params: {
           ? [xmlBlock("skill_candidates", candidates.join("\n"))]
           : []),
         ...(experiences.length > 0
-          ? [xmlBlock("experience_identities", experiences.join("\n"))]
+          ? [xmlBlock("experience_candidates", experiences.join("\n"))]
           : []),
       ].join("\n"),
     ),
@@ -264,6 +287,10 @@ export interface CurationSubagentParams {
   conversation: readonly RecentTurn[];
   candidates: readonly AvailableSkill[];
   experienceIdentities: readonly string[];
+  experienceCandidates?: readonly Pick<
+    SkillExperienceEntry,
+    "identity" | "keywords"
+  >[];
 }
 
 export async function runCurationSubagent(
