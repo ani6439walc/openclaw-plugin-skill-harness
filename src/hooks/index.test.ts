@@ -2654,6 +2654,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(result?.prependContext).toContain(
       "<intent_guidance>Reply warmly.</intent_guidance>",
     );
+    expect(result?.prependContext).not.toContain("<task_complexity>");
     expect(result?.prependContext).not.toContain("## Guidelines");
     expect(result?.prependContext).not.toContain("## Instruction Hint");
     expect(topicChecker).not.toHaveBeenCalled();
@@ -2812,6 +2813,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
     expect(result?.prependContext).toContain(
       "<selected_intent>social-casual</selected_intent>",
+    );
+    expect(result?.prependContext).toContain(
+      "<task_complexity>medium</task_complexity>",
     );
     expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).toHaveBeenCalledOnce();

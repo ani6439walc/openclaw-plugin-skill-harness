@@ -47,6 +47,7 @@ const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
 const ROUTING_CONTEXT_POLICY = taggedBlock(
   "context_policy",
   `- \`selected_intent\` and \`intent_guidance\` describe the current routing decision; treat low-confidence routing as tentative.
+- \`task_complexity\`, when present, is the classifier's current scope estimate; use it to calibrate planning and verification, not to broaden the requested work.
 - \`skill_candidates\` are resolved discovery leads, not proof that every listed skill applies.
 - \`skill_experiences\` are bounded reference material for the selected skills; apply only relevant entries.
 - Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.`,
@@ -552,6 +553,9 @@ export function buildRoutingContext(params: {
   const blocks = [
     ROUTING_CONTEXT_POLICY,
     formatXmlTextElement("selected_intent", params.result.intent),
+    isIntentComplexity(params.result.complexity)
+      ? formatXmlTextElement("task_complexity", params.result.complexity)
+      : undefined,
     formatXmlTextElement("intent_guidance", params.guidance),
     params.candidates.length > 0
       ? formatSkillXmlBlock("skill_candidates", [...params.candidates])

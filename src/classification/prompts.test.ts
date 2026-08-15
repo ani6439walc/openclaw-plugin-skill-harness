@@ -111,6 +111,7 @@ describe("buildRoutingContext", () => {
         reason: "User requested a diagram.",
         domain: "design",
         confidence: 0.95,
+        complexity: "medium",
       },
       guidance: "Render the selected skills with stable evidence.",
       candidates: [
@@ -125,6 +126,7 @@ describe("buildRoutingContext", () => {
 
     expect(result).toContain("<skill_harness_plugin>");
     expect(result).toContain("<selected_intent>architecture</selected_intent>");
+    expect(result).toContain("<task_complexity>medium</task_complexity>");
     expect(result).toContain(
       "<intent_guidance>Render the selected skills with stable evidence.</intent_guidance>",
     );
@@ -171,6 +173,7 @@ describe("buildRoutingContext", () => {
     });
     expect(empty).not.toContain("<skill_candidates>");
     expect(empty).not.toContain("<skill_experiences>");
+    expect(empty).not.toContain("<task_complexity>");
 
     const bounded = buildRoutingContext({
       result: {

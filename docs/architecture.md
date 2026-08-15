@@ -58,7 +58,7 @@ Every non-excluded normal agent turn receives fixed `appendSystemContext`, regar
 
 The separate `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills from the invoking agent's workspace `skills/` tree. Explicit order is preserved, workspace-only entries are appended in index order, duplicate names use the workspace winner, and each rendered entry includes its resolved description and path. The `agents` option controls the intent-routing static section and dynamic analysis; chat scope controls dynamic analysis only. Neither suppresses universal skill discovery or configured-skill context for normal agents.
 
-Eligible external-user turns may receive dynamic `prependContext` with `selected_intent`, `intent_guidance`, direct `skill_candidates`, and bounded `skill_experiences`. Candidate entries include their resolved path and directly visible related skills. Related skills are optional, not automatically required.
+Eligible external-user turns may receive dynamic `prependContext` with `selected_intent`, optional classifier-produced `task_complexity`, `intent_guidance`, direct `skill_candidates`, and bounded `skill_experiences`. `task_complexity` is absent for deterministic fast paths; when present, it helps the main agent calibrate planning and verification without broadening the request. Candidate entries include their resolved path and directly visible related skills. Related skills are optional, not automatically required.
 
 The static prompt requires agents to use only tools exposed for that turn. `before_prompt_build` cannot inspect the final tool-name set, so registered Skill Harness tools are a deployment contract rather than a runtime-detected fact.
 
