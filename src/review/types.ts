@@ -88,8 +88,15 @@ export type TriggerKeywordsReviewFinding = BaseReviewFinding & {
   removeKeywords: string[];
 };
 
+export type SkillExperienceReviewFinding = BaseReviewFinding & {
+  targetKind: "skill-experience";
+  targetExperienceIds: [string];
+};
+
 export type ReviewFinding =
-  IntentMarkdownReviewFinding | TriggerKeywordsReviewFinding;
+  | IntentMarkdownReviewFinding
+  | TriggerKeywordsReviewFinding
+  | SkillExperienceReviewFinding;
 
 export type ReviewSource = {
   sessionId: string;

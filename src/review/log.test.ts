@@ -6,7 +6,7 @@ import {
   createReviewLog,
   parseReviewLog,
   parseReviewLogV5ForMigration,
-  parseReviewLogV6,
+  parseReviewLogV7,
   pruneProcessedEvents,
   readReviewLog,
   readReviewTriggerKeywords,
@@ -14,7 +14,7 @@ import {
 import type {
   AppliedIntentReviewChange,
   IntentProcessedEventRecord,
-  ReviewLogV6,
+  ReviewLogV7,
 } from "./log.js";
 import { DEFAULT_REVIEW_TRIGGER_KEYWORDS } from "./trigger-keywords.js";
 
@@ -48,23 +48,23 @@ describe("review log", () => {
     });
   });
 
-  it("keeps a frozen v5 parser beside a strict v6 audit contract", () => {
+  it("keeps a frozen v5 parser beside a strict v7 audit contract", () => {
     const v5 = createReviewLog("2026-06-11T00:00:00.000Z");
     expect(parseReviewLogV5ForMigration(v5)).toEqual(v5);
 
     expect(
-      parseReviewLogV6({
-        schemaVersion: 6,
+      parseReviewLogV7({
+        schemaVersion: 7,
         createdAt: "2026-06-11T00:00:00.000Z",
         updatedAt: "2026-06-11T00:00:00.000Z",
         processedEvents: {},
         reviewedSkillEpochs: {},
         historicalKeywordAudits: {},
       }),
-    ).toMatchObject({ schemaVersion: 6, historicalKeywordAudits: {} });
+    ).toMatchObject({ schemaVersion: 7, historicalKeywordAudits: {} });
     expect(() =>
-      parseReviewLogV6({
-        schemaVersion: 6,
+      parseReviewLogV7({
+        schemaVersion: 7,
         createdAt: "2026-06-11T00:00:00.000Z",
         updatedAt: "2026-06-11T00:00:00.000Z",
         processedEvents: {},
@@ -73,7 +73,7 @@ describe("review log", () => {
         triggerKeywords: DEFAULT_REVIEW_TRIGGER_KEYWORDS,
       }),
     ).toThrow();
-    expectTypeOf<ReviewLogV6["processedEvents"]>().toEqualTypeOf<
+    expectTypeOf<ReviewLogV7["processedEvents"]>().toEqualTypeOf<
       Record<string, IntentProcessedEventRecord>
     >();
     expectTypeOf<IntentProcessedEventRecord["changes"]>().toEqualTypeOf<
@@ -81,10 +81,10 @@ describe("review log", () => {
     >();
   });
 
-  it("rejects keyword changes from mutable v6 processed events", () => {
+  it("rejects keyword changes from mutable v7 processed events", () => {
     expect(() =>
-      parseReviewLogV6({
-        schemaVersion: 6,
+      parseReviewLogV7({
+        schemaVersion: 7,
         createdAt: "2026-06-11T00:00:00.000Z",
         updatedAt: "2026-06-11T00:00:00.000Z",
         reviewedSkillEpochs: {},
@@ -116,10 +116,47 @@ describe("review log", () => {
     ).toThrow();
   });
 
-  it("rejects keyword operations disguised as intent changes in mutable v6 events", () => {
+  it("records create-only skill experiences in mutable v7 events", () => {
+    const parsed = parseReviewLogV7({
+      schemaVersion: 7,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      reviewedSkillEpochs: {},
+      historicalKeywordAudits: {},
+      processedEvents: {
+        event: {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["successful-pattern"],
+          changeCount: 1,
+          outcome: "applied",
+          changedExperienceIds: ["gitea/comment-contract"],
+          changes: [
+            {
+              trigger: "successful-pattern",
+              targetKind: "skill-experience",
+              operation: "create",
+              targetIntentIds: [],
+              targetExperienceIds: ["gitea/comment-contract"],
+              dedupeKey: "gitea-comment-contract",
+              summary: "Capture the comment command contract",
+              evidence: ["The current turn successfully used the skill."],
+              correctionGoal: "Preserve the reusable workflow",
+              suggestedChange: "Create the experience.",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.processedEvents.event?.changedExperienceIds).toEqual([
+      "gitea/comment-contract",
+    ]);
+  });
+
+  it("rejects keyword operations disguised as intent changes in mutable v7 events", () => {
     expect(() =>
-      parseReviewLogV6({
-        schemaVersion: 6,
+      parseReviewLogV7({
+        schemaVersion: 7,
         createdAt: "2026-06-11T00:00:00.000Z",
         updatedAt: "2026-06-11T00:00:00.000Z",
         reviewedSkillEpochs: {},
@@ -149,9 +186,9 @@ describe("review log", () => {
     ).toThrow();
   });
 
-  it("preserves migrated keyword audit records outside mutable v6 events", () => {
-    const parsed = parseReviewLogV6({
-      schemaVersion: 6,
+  it("preserves migrated keyword audit records outside mutable v7 events", () => {
+    const parsed = parseReviewLogV7({
+      schemaVersion: 7,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
       processedEvents: {},
@@ -186,9 +223,9 @@ describe("review log", () => {
     });
   });
 
-  it("keeps keyword-only evidence out of mutable v6 events and in history", () => {
+  it("keeps keyword-only evidence out of mutable v7 events and in history", () => {
     const base = {
-      schemaVersion: 6,
+      schemaVersion: 7,
       createdAt: "2026-06-11T00:00:00.000Z",
       updatedAt: "2026-06-11T00:00:00.000Z",
       reviewedSkillEpochs: {},
@@ -207,14 +244,14 @@ describe("review log", () => {
     };
 
     expect(() =>
-      parseReviewLogV6({
+      parseReviewLogV7({
         ...base,
         processedEvents: { event: noFindingKeywordEvent },
         historicalKeywordAudits: {},
       }),
     ).toThrow();
     expect(() =>
-      parseReviewLogV6({
+      parseReviewLogV7({
         ...base,
         processedEvents: {},
         historicalKeywordAudits: { event: intentEvent },

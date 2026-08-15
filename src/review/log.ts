@@ -66,9 +66,10 @@ export type SchemaRejectionReasonCounts = Partial<
 
 export type AppliedReviewChange = {
   trigger: ReviewTrigger;
-  targetKind: "intent-markdown" | "trigger-keywords";
+  targetKind: "intent-markdown" | "trigger-keywords" | "skill-experience";
   operation: ReviewOperation | "adjust-trigger-keywords";
   targetIntentIds: string[];
+  targetExperienceIds?: string[];
   targetTrigger?: TriggerKeywordTarget;
   keywordChange?: { add: string[]; remove: string[] };
   dedupeKey: string;
@@ -86,6 +87,7 @@ export type ProcessedEventRecord = {
   outcome: ProcessedEventOutcome;
   changes?: AppliedReviewChange[];
   changedIntentIds?: string[];
+  changedExperienceIds?: string[];
   validationErrors?: string[];
   noFindingReasonCounts?: NoFindingReasonCounts;
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
@@ -125,11 +127,11 @@ export type ReviewLog = {
   reviewedSkillEpochs: Record<string, ReviewedSkillEpoch>;
 };
 
-export type ReviewLogV6 = {
-  schemaVersion: 6;
+export type ReviewLogV7 = {
+  schemaVersion: 7;
   createdAt: string;
   updatedAt: string;
-  processedEvents: Record<string, IntentProcessedEventRecord>;
+  processedEvents: Record<string, ProcessedEventRecord>;
   reviewedSkillEpochs: Record<string, ReviewedSkillEpoch>;
   historicalKeywordAudits: Record<string, ProcessedEventRecord>;
 };
@@ -201,9 +203,14 @@ const KeywordChangeSchema = z
 const AppliedReviewChangeSchema = z
   .object({
     trigger: z.enum(REVIEW_TRIGGER_TYPES),
-    targetKind: z.enum(["intent-markdown", "trigger-keywords"]),
+    targetKind: z.enum([
+      "intent-markdown",
+      "trigger-keywords",
+      "skill-experience",
+    ]),
     operation: z.enum([...REVIEW_OPERATIONS, "adjust-trigger-keywords"]),
     targetIntentIds: z.array(z.string().trim().min(1)),
+    targetExperienceIds: z.array(z.string().trim().min(1)).optional(),
     targetTrigger: TriggerKeywordTargetSchema.optional(),
     keywordChange: KeywordChangeSchema.optional(),
     dedupeKey: z.string().trim().min(1),
@@ -240,6 +247,7 @@ const ProcessedEventRecordSchema = z
     outcome: ProcessedEventOutcomeSchema,
     changes: z.array(AppliedReviewChangeSchema).optional(),
     changedIntentIds: z.array(z.string()).optional(),
+    changedExperienceIds: z.array(z.string()).optional(),
     validationErrors: z.array(z.string()).optional(),
     noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
     schemaRejectionReasonCounts: SchemaRejectionReasonCountsSchema.optional(),
@@ -291,6 +299,26 @@ const IntentAppliedReviewChangeSchema = z
   })
   .strict();
 
+const SkillExperienceAppliedReviewChangeSchema = z
+  .object({
+    trigger: z.enum(REVIEW_TRIGGER_TYPES),
+    targetKind: z.literal("skill-experience"),
+    operation: z.literal("create"),
+    targetIntentIds: z.array(z.string()).length(0),
+    targetExperienceIds: z.array(z.string().trim().min(3)).length(1),
+    dedupeKey: z.string().trim().min(1),
+    summary: z.string().trim().min(1),
+    evidence: z.array(z.string()),
+    correctionGoal: z.string().trim().min(1),
+    suggestedChange: z.string().trim().min(1),
+  })
+  .strict();
+
+const RuntimeAppliedReviewChangeSchema = z.union([
+  IntentAppliedReviewChangeSchema,
+  SkillExperienceAppliedReviewChangeSchema,
+]);
+
 const IntentProcessedEventRecordSchema = z
   .object({
     processedAt: z.string(),
@@ -314,6 +342,36 @@ const IntentProcessedEventRecordSchema = z
     ),
   );
 
+const RuntimeProcessedEventRecordSchema = z
+  .object({
+    processedAt: z.string(),
+    source: ReviewSourceSchema.optional(),
+    triggers: z.array(z.enum(REVIEW_TRIGGER_TYPES)),
+    changeCount: z.number().int().nonnegative(),
+    outcome: ProcessedEventOutcomeSchema,
+    changes: z.array(RuntimeAppliedReviewChangeSchema).optional(),
+    changedIntentIds: z.array(z.string()).optional(),
+    changedExperienceIds: z.array(z.string()).optional(),
+    validationErrors: z.array(z.string()).optional(),
+    noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
+    schemaRejectionReasonCounts: SchemaRejectionReasonCountsSchema.optional(),
+  })
+  .strict()
+  .refine((record) => {
+    const hasKeywordTrigger = record.triggers.some(
+      (trigger) =>
+        trigger === "successful-pattern" ||
+        trigger === "behavior-fix" ||
+        trigger === "entity-context",
+    );
+    return (
+      !hasKeywordTrigger ||
+      (record.changes ?? []).some(
+        (change) => change.targetKind === "skill-experience",
+      )
+    );
+  }, "keyword-capable triggers belong in historical audits unless they create a skill experience");
+
 const HistoricalKeywordAuditRecordSchema = ProcessedEventRecordSchema.refine(
   (record) =>
     record.triggers.some(
@@ -327,12 +385,12 @@ const HistoricalKeywordAuditRecordSchema = ProcessedEventRecordSchema.refine(
     ),
 );
 
-export const ReviewLogV6Schema = z
+export const ReviewLogV7Schema = z
   .object({
-    schemaVersion: z.literal(6),
+    schemaVersion: z.literal(7),
     createdAt: z.string(),
     updatedAt: z.string(),
-    processedEvents: z.record(z.string(), IntentProcessedEventRecordSchema),
+    processedEvents: z.record(z.string(), RuntimeProcessedEventRecordSchema),
     reviewedSkillEpochs: ReviewedSkillEpochsSchema,
     historicalKeywordAudits: z.record(
       z.string(),
@@ -340,7 +398,7 @@ export const ReviewLogV6Schema = z
     ),
   })
   .strict()
-  .transform((log): ReviewLogV6 => log);
+  .transform((log): ReviewLogV7 => log);
 
 export function createReviewLog(
   nowIso: string,
@@ -356,9 +414,9 @@ export function createReviewLog(
   };
 }
 
-export function createReviewLogV6(nowIso: string): ReviewLogV6 {
+export function createReviewLogV7(nowIso: string): ReviewLogV7 {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     createdAt: nowIso,
     updatedAt: nowIso,
     processedEvents: {},
@@ -375,8 +433,8 @@ export function parseReviewLogV5ForMigration(raw: unknown): ReviewLog {
   return ReviewLogSchema.parse(raw);
 }
 
-export function parseReviewLogV6(raw: unknown): ReviewLogV6 {
-  return ReviewLogV6Schema.parse(raw);
+export function parseReviewLogV7(raw: unknown): ReviewLogV7 {
+  return ReviewLogV7Schema.parse(raw);
 }
 
 export function readReviewLog(logPath: string): ReviewLog {
@@ -405,8 +463,8 @@ export function pruneProcessedEvents(
   pruneEventRecords(log.processedEvents, nowMs);
 }
 
-export function pruneReviewLogV6Events(
-  log: ReviewLogV6,
+export function pruneReviewLogV7Events(
+  log: ReviewLogV7,
   nowMs: number = Date.now(),
 ): void {
   pruneEventRecords(log.processedEvents, nowMs);

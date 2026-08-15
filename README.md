@@ -162,11 +162,11 @@ Intent files use YAML frontmatter only for routing metadata; their complete plai
 Intent Review keeps its runtime state at the data-root level:
 
 ```text
-~/.openclaw/plugins/skill-harness/review.json             # schema v6
+~/.openclaw/plugins/skill-harness/review.json             # schema v7
 ~/.openclaw/plugins/skill-harness/keyword-coverage.json   # schema v1
 ```
 
-This plugin version supports only those current schemas. It does not migrate, recover, or rewrite legacy `review.json` schema v5 state. Upgrade a legacy installation through a compatible release before installing this version; otherwise Review and keyword coverage state remain fail-open rather than being converted automatically.
+This plugin version supports only those current schemas. It does not migrate, recover, or rewrite legacy `review.json` schema v6-or-older state. Upgrade a legacy installation through a compatible release before installing this version; otherwise Review and keyword coverage state remain fail-open rather than being converted automatically.
 
 Keep each intent narrow and concrete:
 

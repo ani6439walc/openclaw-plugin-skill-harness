@@ -346,7 +346,7 @@ describe("IntentReviewLogWriter", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("writes v6 intent audit records without active keyword state", async () => {
+  it("writes v7 intent audit records without active keyword state", async () => {
     const finding = {
       trigger: "skill-candidate" as const,
       targetKind: "intent-markdown" as const,
@@ -377,7 +377,7 @@ describe("IntentReviewLogWriter", () => {
       fs.readFileSync(path.join(root, "review.json"), "utf8"),
     );
     expect(log).toMatchObject({
-      schemaVersion: 6,
+      schemaVersion: 7,
       historicalKeywordAudits: {},
       processedEvents: {
         "session-1:turn-1": {
@@ -417,7 +417,7 @@ describe("IntentReviewLogWriter", () => {
     });
   });
 
-  it("prunes expired intent and historical keyword audits before v6 writes", async () => {
+  it("prunes expired intent and historical keyword audits before v7 writes", async () => {
     const source = {
       sessionId: "session-1",
       agentId: "main",
@@ -451,7 +451,7 @@ describe("IntentReviewLogWriter", () => {
     expect(log.historicalKeywordAudits).toEqual({});
   });
 
-  it("preserves v6 skill-placement epoch idempotency", async () => {
+  it("preserves v7 skill-placement epoch idempotency", async () => {
     const candidate = {
       epochKey: "a".repeat(64),
       agentId: "main",

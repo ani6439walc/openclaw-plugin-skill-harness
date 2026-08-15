@@ -8,7 +8,7 @@ This mode reads current trigger keywords from schema-v1 `keyword-coverage.json`:
 - `triggerKeywords.behaviorFix`
 - `triggerKeywords.entityContext`
 
-It reads ordinary Review outcome counts from schema-v6 `review.json.processedEvents`, historical keyword-triggered audit counts from `review.json.historicalKeywordAudits`, and keyword mutation / coverage epoch history from `keyword-coverage.json`.
+It reads ordinary Review outcome counts from schema-v7 `review.json.processedEvents`, historical keyword-triggered audit counts from `review.json.historicalKeywordAudits`, and keyword mutation / coverage epoch history from `keyword-coverage.json`.
 
 It does **not** analyze intent `fastpath.keywords` or `candidate.keywords`. For those, use design or inventory mode and require labeled positive and collision fixtures under `references/format.md`.
 
@@ -20,11 +20,11 @@ This workflow is report and proposal only. Keyword persistence belongs to produc
 
 ## Step 1 — Generate and inspect the retained evidence window
 
-The audit script automatically resolves the default OpenClaw state/config paths, loads current schema-v6 `review.json` and schema-v1 `keyword-coverage.json`, reads retained sessions, and records the effective successful-pattern threshold and input provenance. Do not reconstruct those defaults in a shell wrapper.
+The audit script automatically resolves the default OpenClaw state/config paths, loads current schema-v7 `review.json` and schema-v1 `keyword-coverage.json`, reads retained sessions, and records the effective successful-pattern threshold and input provenance. Do not reconstruct those defaults in a shell wrapper.
 
 Use `--data-root` or `--config` only for an intentionally nonstandard layout. The generated report records these inputs:
 
-- schema-v6 `review.json` ordinary and historical Review audit outcomes
+- schema-v7 `review.json` ordinary and historical Review audit outcomes
 - schema-v1 `keyword-coverage.json` trigger keywords, mutation events, target cursors/watermarks, and coverage epochs
 - retained `sessions/*.json` snapshots and `stats.json` as a retention/coverage cross-check
 - effective `plugins.entries["skill-harness"].config.review.triggers.successfulPattern.toolCalls` threshold

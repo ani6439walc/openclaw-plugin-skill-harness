@@ -23,7 +23,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         (self.root / "review.json").write_text(
             json.dumps(
                 {
-                    "schemaVersion": 6,
+                    "schemaVersion": 7,
                     "createdAt": "2026-08-01T00:00:00.000Z",
                     "updatedAt": "2026-08-01T00:00:00.000Z",
                     "processedEvents": {
@@ -316,7 +316,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
             text=True,
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("schema-v6", result.stderr)
+        self.assertIn("schema-v7", result.stderr)
 
 
 if __name__ == "__main__":

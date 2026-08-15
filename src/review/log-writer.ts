@@ -17,13 +17,13 @@ import type { ReviewTriggerKeywords } from "./trigger-keywords.js";
 import { normalizeKeywordList } from "./trigger-keywords.js";
 import {
   createReviewLog,
-  createReviewLogV6,
+  createReviewLogV7,
   readReviewLog,
   pruneProcessedEvents,
   ReviewLogSchema,
-  ReviewLogV6Schema,
-  parseReviewLogV6,
-  pruneReviewLogV6Events,
+  ReviewLogV7Schema,
+  parseReviewLogV7,
+  pruneReviewLogV7Events,
   normalizeNoFindingReasonCounts,
   normalizeSchemaRejectionReasonCounts,
   type AppliedIntentReviewChange,
@@ -46,6 +46,20 @@ function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
         add: [...finding.addKeywords],
         remove: [...finding.removeKeywords],
       },
+      dedupeKey: finding.dedupeKey,
+      summary: finding.summary,
+      evidence: [...finding.evidence],
+      correctionGoal: finding.correctionGoal,
+      suggestedChange: finding.suggestedChange,
+    };
+  }
+  if (finding.targetKind === "skill-experience") {
+    return {
+      trigger: finding.trigger,
+      targetKind: "skill-experience",
+      operation: "create",
+      targetIntentIds: [],
+      targetExperienceIds: [...finding.targetExperienceIds],
       dedupeKey: finding.dedupeKey,
       summary: finding.summary,
       evidence: [...finding.evidence],
@@ -138,6 +152,7 @@ export class ReviewLogWriter {
       triggers?: readonly ReviewTrigger[];
       outcome?: ProcessedEventOutcome;
       changedIntentIds?: readonly string[];
+      changedExperienceIds?: readonly string[];
       validationErrors?: readonly string[];
       noFindingReasonCounts?: NoFindingReasonCounts;
       schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
@@ -199,6 +214,13 @@ export class ReviewLogWriter {
               .filter(Boolean),
           ),
         ];
+        const changedExperienceIds = [
+          ...new Set(
+            (options.changedExperienceIds ?? [])
+              .map((identity) => identity.trim())
+              .filter(Boolean),
+          ),
+        ];
         const validationErrors = [
           ...new Set(
             (options.validationErrors ?? [])
@@ -247,6 +269,7 @@ export class ReviewLogWriter {
           outcome,
           ...(changes.length > 0 ? { changes } : {}),
           ...(changedIntentIds.length > 0 ? { changedIntentIds } : {}),
+          ...(changedExperienceIds.length > 0 ? { changedExperienceIds } : {}),
           ...(validationErrors.length > 0 ? { validationErrors } : {}),
           ...(noFindingReasonCounts ? { noFindingReasonCounts } : {}),
           ...(schemaRejectionReasonCounts
@@ -288,11 +311,11 @@ export class IntentReviewLogWriter {
     try {
       return new Set(
         Object.keys(
-          parseReviewLogV6(readJsonFile<unknown>(logPath)).reviewedSkillEpochs,
+          parseReviewLogV7(readJsonFile<unknown>(logPath)).reviewedSkillEpochs,
         ),
       );
     } catch (error) {
-      logger.warn("failed to read v6 completed skill epochs", {
+      logger.warn("failed to read v7 completed skill epochs", {
         error,
         path: logPath,
       });
@@ -309,6 +332,7 @@ export class IntentReviewLogWriter {
       triggers?: readonly ReviewTrigger[];
       outcome?: ProcessedEventOutcome;
       changedIntentIds?: readonly string[];
+      changedExperienceIds?: readonly string[];
       validationErrors?: readonly string[];
       noFindingReasonCounts?: NoFindingReasonCounts;
       schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
@@ -320,9 +344,9 @@ export class IntentReviewLogWriter {
       try {
         const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
         const log = fileExists(logPath)
-          ? parseReviewLogV6(readJsonFile<unknown>(logPath))
-          : createReviewLogV6(nowIso);
-        pruneReviewLogV6Events(log, options.nowMs ?? Date.now());
+          ? parseReviewLogV7(readJsonFile<unknown>(logPath))
+          : createReviewLogV7(nowIso);
+        pruneReviewLogV7Events(log, options.nowMs ?? Date.now());
         if (Object.hasOwn(log.historicalKeywordAudits, eventId)) return false;
 
         const changes = findings.map(appliedChangeFromFinding);
@@ -342,6 +366,9 @@ export class IntentReviewLogWriter {
           ...(options.changedIntentIds?.length
             ? { changedIntentIds: [...options.changedIntentIds] }
             : {}),
+          ...(options.changedExperienceIds?.length
+            ? { changedExperienceIds: [...options.changedExperienceIds] }
+            : {}),
           ...(options.validationErrors?.length
             ? { validationErrors: [...options.validationErrors] }
             : {}),
@@ -358,11 +385,11 @@ export class IntentReviewLogWriter {
         log.updatedAt = nowIso;
         return safeWriteJson(
           logPath,
-          ReviewLogV6Schema.parse(log),
-          "failed to write v6 historical keyword audit",
+          ReviewLogV7Schema.parse(log),
+          "failed to write v7 historical keyword audit",
         );
       } catch (error) {
-        logger.warn("failed to update v6 historical keyword audit", {
+        logger.warn("failed to update v7 historical keyword audit", {
           error,
           path: logPath,
         });
@@ -375,7 +402,7 @@ export class IntentReviewLogWriter {
   async record(
     eventId: string,
     source: ReviewSource,
-    findings: readonly IntentMarkdownReviewFinding[],
+    findings: readonly ReviewFinding[],
     options: {
       nowMs?: number;
       triggers?: readonly ReviewTrigger[];
@@ -393,12 +420,12 @@ export class IntentReviewLogWriter {
       try {
         const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
         const log = fileExists(logPath)
-          ? parseReviewLogV6(readJsonFile<unknown>(logPath))
-          : createReviewLogV6(nowIso);
-        pruneReviewLogV6Events(log, options.nowMs ?? Date.now());
+          ? parseReviewLogV7(readJsonFile<unknown>(logPath))
+          : createReviewLogV7(nowIso);
+        pruneReviewLogV7Events(log, options.nowMs ?? Date.now());
         if (Object.hasOwn(log.processedEvents, eventId)) return false;
 
-        const changes = findings.map(appliedIntentChangeFromFinding);
+        const changes = findings.map(appliedChangeFromFinding);
         const outcome =
           options.outcome ?? (changes.length > 0 ? "applied" : "nofinding");
         const candidate = options.skillPlacementCandidate;
@@ -455,11 +482,11 @@ export class IntentReviewLogWriter {
         log.updatedAt = nowIso;
         return safeWriteJson(
           logPath,
-          ReviewLogV6Schema.parse(log),
-          "failed to write v6 intent review log",
+          ReviewLogV7Schema.parse(log),
+          "failed to write v7 intent review log",
         );
       } catch (error) {
-        logger.warn("failed to update v6 intent review log", {
+        logger.warn("failed to update v7 intent review log", {
           error,
           path: logPath,
         });

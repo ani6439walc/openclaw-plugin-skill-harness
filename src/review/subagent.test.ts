@@ -505,15 +505,20 @@ describe("buildReviewPrompt", () => {
     expect(weakPrompt).not.toContain('targetKind="trigger-keywords"');
   });
 
-  it("keeps workflow lessons in plain-text body guidance without automatic experience writes", () => {
+  it("permits only observed execution-evidence skills to receive a new experience", () => {
     const prompt = buildReviewPrompt(snapshot, ["skill-candidate"]);
 
     expect(prompt).toContain(
       "Keep the body as one plain-text guidance sentence: no headings, lists, fences, commands, paths, or extra sections",
     );
     expect(prompt).toContain(
-      "Automatic experience writes are unavailable in this release",
+      "Skill experience writes are unavailable for this review",
     );
+    expect(
+      buildReviewPrompt(snapshot, ["skill-candidate"], undefined, [
+        "test-driven-development",
+      ]),
+    ).toContain("at most one new skill experience");
   });
 
   it("scopes trigger keyword output instructions to requested keyword triggers", () => {
@@ -1552,6 +1557,87 @@ Some more reasoning text here.
 });
 
 describe("runReviewSubagent", () => {
+  it("creates one validated experience for an observed visible skill", async () => {
+    const intentDirectory = createIntentDirectory();
+    const experienceDirectory = path.join(intentDirectory, "experiences");
+    const runEmbeddedAgent = vi.fn().mockImplementation(async (options) => {
+      const target = path.join(
+        options.workspaceDir,
+        "experiences",
+        "test-driven-development",
+        "red-green-refactor.md",
+      );
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(
+        target,
+        [
+          "---",
+          "skill: test-driven-development",
+          "summary: Keep red-green-refactor iterations focused.",
+          "keywords:",
+          "  - red green refactor",
+          "---",
+          "Write one failing focused test, implement the smallest change, then refactor only after green.",
+          "",
+        ].join("\n"),
+      );
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  trigger: "skill-candidate",
+                  hasFinding: true,
+                  targetKind: "skill-experience",
+                  targetExperienceIds: [
+                    "test-driven-development/red-green-refactor",
+                  ],
+                  dedupeKey: "td-red-green-refactor",
+                  summary: "Record the tested iteration workflow",
+                  evidence: [
+                    "The observed skill completed a focused test flow.",
+                  ],
+                  correctionGoal: "Preserve the reusable skill workflow",
+                  suggestedChange: "Create the red-green-refactor experience.",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    });
+
+    const result = await runReviewSubagent({
+      api: {
+        config: {},
+        runtime: { agent: { runEmbeddedAgent } },
+      } as unknown as OpenClawPluginApi,
+      config: resolveConfig({ review: { enabled: true } }),
+      agentId: "main",
+      intentDirectory,
+      experienceDirectory,
+      allowedExperienceSkills: ["test-driven-development"],
+      modelRef: { provider: "google", model: "review" },
+      snapshot,
+      triggers: ["skill-candidate"],
+    });
+
+    expect(result).toMatchObject({
+      outcome: "applied",
+      changedExperienceIds: ["test-driven-development/red-green-refactor"],
+    });
+    expect(
+      fs.existsSync(
+        path.join(
+          experienceDirectory,
+          "test-driven-development",
+          "red-green-refactor.md",
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("runs an isolated read/write review with the review timeout", async () => {
     const intentDirectory = createIntentDirectory();
     const runEmbeddedAgent = vi.fn().mockResolvedValue({

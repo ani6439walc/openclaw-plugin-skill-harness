@@ -186,8 +186,8 @@ def source_commit() -> str | None:
 
 def load_review_log(path: Path) -> dict[str, Any]:
     value = load_json(path)
-    if not isinstance(value, dict) or value.get("schemaVersion") != 6:
-        raise ValueError(f"{path} must be a current schema-v6 review log")
+    if not isinstance(value, dict) or value.get("schemaVersion") != 7:
+        raise ValueError(f"{path} must be a current schema-v7 review log")
     for field in ("processedEvents", "historicalKeywordAudits"):
         if not isinstance(value.get(field), dict):
             raise ValueError(f"{path} has an invalid {field}")

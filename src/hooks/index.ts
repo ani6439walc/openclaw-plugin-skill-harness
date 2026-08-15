@@ -82,7 +82,7 @@ import {
   resolveSkillInventory,
 } from "../intents/index.js";
 import { FALLBACK_INTENT, isIntentComplexity } from "../constants.js";
-import { intentsPath } from "../file-utils.js";
+import { experiencesPath, intentsPath } from "../file-utils.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import {
   evaluateCurationCadence,
@@ -347,7 +347,7 @@ function toPromptBuildResult(
     ? `${systemContext}\n\n${configuredSkillsXml}`
     : systemContext;
   return {
-    ...(prependContext ? { prependContext } : {}),
+    ...(prependContext ? { prependContext: `\n${prependContext}` } : {}),
     appendSystemContext,
   };
 }
@@ -1950,11 +1950,33 @@ export function createHookHandlers(deps: HookDeps) {
     try {
       enqueueReviewTask(async () => {
         try {
+          const observedSkillNames = new Set(
+            (params.snapshot.current.skillsUsed ?? []).map((skill) =>
+              skill.name.trim().toLowerCase(),
+            ),
+          );
+          let allowedExperienceSkills: string[] = [];
+          try {
+            const inventory = await skillInventoryResolver({
+              api,
+              agentId: params.agentId,
+              bundledSkillsDir,
+            });
+            allowedExperienceSkills = (inventory ?? [])
+              .map((skill) => skill.name.trim().toLowerCase())
+              .filter((skill) => observedSkillNames.has(skill));
+          } catch (error) {
+            logger.warn("failed to resolve review experience skill inventory", {
+              error,
+            });
+          }
           const reviewResult = await reviewer({
             api,
             config: params.resolvedConfig,
             agentId: params.agentId,
             intentDirectory: intentsPath(deps.dataRoot ?? "."),
+            experienceDirectory: experiencesPath(deps.dataRoot ?? "."),
+            allowedExperienceSkills,
             sessionKey: params.ctx.sessionKey ?? params.snapshot.sessionKey,
             messageProvider: params.ctx.messageProvider,
             modelRef: params.modelRef,
@@ -1979,6 +2001,7 @@ export function createHookHandlers(deps: HookDeps) {
                 triggers: params.triggers,
                 outcome: reviewResult.outcome,
                 changedIntentIds: reviewResult.changedIntentIds,
+                changedExperienceIds: reviewResult.changedExperienceIds,
                 validationErrors: reviewResult.validationErrors,
                 noFindingReasonCounts: reviewResult.noFindingReasonCounts,
                 schemaRejectionReasonCounts:
@@ -1995,6 +2018,9 @@ export function createHookHandlers(deps: HookDeps) {
             const intentFindings = reviewResult.findings.filter(
               (f): f is IntentMarkdownReviewFinding =>
                 f.targetKind === "intent-markdown",
+            );
+            const experienceFindings = reviewResult.findings.filter(
+              (f) => f.targetKind === "skill-experience",
             );
             const keywordTriggered = params.triggers.some(
               (trigger) =>
@@ -2055,6 +2081,7 @@ export function createHookHandlers(deps: HookDeps) {
             if (
               intentTriggers.length > 0 ||
               intentFindings.length > 0 ||
+              experienceFindings.length > 0 ||
               params.skillPlacementCandidate
             ) {
               await reviewLogWriter.record(
@@ -2065,11 +2092,15 @@ export function createHookHandlers(deps: HookDeps) {
                   agentId: params.snapshot.agentId,
                   turnStart: params.snapshot.current.timestamps!.start!,
                 },
-                intentFindings,
+                [...intentFindings, ...experienceFindings],
                 {
-                  triggers: intentTriggers,
+                  triggers: [
+                    ...intentTriggers,
+                    ...experienceFindings.map((finding) => finding.trigger),
+                  ],
                   outcome: reviewResult.outcome,
                   changedIntentIds: reviewResult.changedIntentIds,
+                  changedExperienceIds: reviewResult.changedExperienceIds,
                   validationErrors: reviewResult.validationErrors,
                   noFindingReasonCounts: reviewResult.noFindingReasonCounts,
                   schemaRejectionReasonCounts:

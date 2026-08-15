@@ -26,7 +26,7 @@ python3 skills/skill-harness/scripts/runtime-health-audit.py \
 
 The script resolves the standard data root automatically. Use `--data-root` only for an intentionally nonstandard layout.
 
-It reads and validates current schema-v6 `review.json`, schema-v1 `keyword-coverage.json`, and schema-v3 or schema-v4 `stats.json`. It records SHA-256 values for all three before loading, rereads them afterward, and refuses to produce a mixed-state report if any changed. Session files are intentionally not hashed or snapshotted; treat the report as an observed window, not an immutable whole-runtime snapshot.
+It reads and validates current schema-v7 `review.json`, schema-v1 `keyword-coverage.json`, and schema-v3 or schema-v4 `stats.json`. It records SHA-256 values for all three before loading, rereads them afterward, and refuses to produce a mixed-state report if any changed. Session files are intentionally not hashed or snapshotted; treat the report as an observed window, not an immutable whole-runtime snapshot.
 
 Completion criterion: report `reportOnly` is true, all privacy flags are false, and `provenance.stateSha256` contains all three runtime logs.
 

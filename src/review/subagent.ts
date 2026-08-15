@@ -11,6 +11,7 @@ import type {
   IntentMarkdownReviewFinding,
   ReviewFinding,
   ReviewSnapshot,
+  SkillExperienceReviewFinding,
 } from "./types.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
@@ -29,11 +30,16 @@ import {
 } from "./log.js";
 import { normalizeKeywordList } from "./trigger-keywords.js";
 import { validateIntentDirectory } from "../intents/index.js";
+import { validateExperienceDirectory } from "../experiences/index.js";
 import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
 } from "../subagent-runtime.js";
-import { agentSessionsPath, withFileLock } from "../file-utils.js";
+import {
+  agentSessionsPath,
+  experiencesPath,
+  withFileLock,
+} from "../file-utils.js";
 import { extractPayloadText } from "../classification/index.js";
 
 export interface ReviewSubagentResult {
@@ -48,6 +54,7 @@ export interface ReviewSubagentResult {
     | "validation-failed"
   >;
   changedIntentIds?: string[];
+  changedExperienceIds?: string[];
   validationErrors?: string[];
   noFindingReasonCounts?: NoFindingReasonCounts;
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
@@ -144,6 +151,13 @@ const TRIGGER_KEYWORD_UPDATE_TRIGGERS = new Set<ReviewTrigger>([
   "successful-pattern",
   "behavior-fix",
   "entity-context",
+]);
+
+const EXPERIENCE_WRITE_TRIGGERS = new Set<ReviewTrigger>([
+  "skill-candidate",
+  "process-gap",
+  "successful-pattern",
+  "behavior-fix",
 ]);
 
 const NO_FINDING_REASON_CODE_LIST = NO_FINDING_REASON_CODES.join(", ");
@@ -287,10 +301,19 @@ const TriggerKeywordFindingSchema = BasePositiveFindingSchema.extend({
     "trigger keyword findings must target their own requested trigger",
   );
 
+const SkillExperienceFindingSchema = BasePositiveFindingSchema.extend({
+  targetKind: z.literal("skill-experience"),
+  targetExperienceIds: z.array(z.string().trim().min(3).max(129)).length(1),
+}).refine(
+  (finding) => EXPERIENCE_WRITE_TRIGGERS.has(finding.trigger as ReviewTrigger),
+  "skill-experience findings require an execution-evidence trigger",
+);
+
 const FindingSchema = z.union([
   NoFindingSchema,
   IntentMarkdownFindingSchema,
   TriggerKeywordFindingSchema,
+  SkillExperienceFindingSchema,
 ]);
 
 function summarizeSchemaError(error: z.ZodError): {
@@ -589,12 +612,19 @@ export function buildReviewPrompt(
   snapshot: ReviewSnapshot,
   triggers: readonly ReviewTrigger[],
   workspaceDir?: string,
+  experienceSkillNames: readonly string[] = [],
 ): string {
   const workspacePathMsg = workspaceDir
     ? `All intent files are located directly in the root of your current workspace at '${workspaceDir}' (e.g., '${workspaceDir}/infra-operations.md'). Always read/write intent files using their plain filename directly or their absolute path under this directory, without any other directory prefixes (do not use paths like '.openclaw/...' or '/home/...').`
     : `All intent files are located directly in the root of your current workspace (e.g., 'infra-operations.md'). Always read/write intent files using their plain filename directly, without any directory prefixes (do not use paths like '.openclaw/...' or '/home/...').`;
   const includeIntentCatalog = shouldIncludeIntentCatalog(triggers);
   const keywordContract = buildTriggerKeywordPromptContract(triggers);
+  const experienceWriteAllowed =
+    triggers.some((trigger) => EXPERIENCE_WRITE_TRIGGERS.has(trigger)) &&
+    experienceSkillNames.length > 0;
+  const experienceContract = experienceWriteAllowed
+    ? `You may create at most one new skill experience only for these observed, currently visible skills: ${experienceSkillNames.join(", ")}. Create it at experiences/<skill>/<entry-id>.md with strict skill, summary, and keywords frontmatter plus a non-empty reusable Markdown body. Do not modify or delete existing experiences. A positive experience must set targetKind="skill-experience" and targetExperienceIds to exactly ["<skill>/<entry-id>"].`
+    : "Skill experience writes are unavailable for this review: no eligible observed skill and execution-evidence trigger are both present.";
   const catalogGuidance = includeIntentCatalog
     ? `Use the Intent Catalog section only to detect coverage gaps, overlaps, and boundary collisions.
 If matchedIntent is absent, propose a new intent only when the evidence is not already covered by intentCatalog.`
@@ -621,7 +651,8 @@ ${keywordContract.targetArtifactShape}
 Hard rules — do not violate:
 Review only the requested triggers. Each trigger is independent and may return hasFinding=false.
 Do not perform unrequested trigger work. Do not turn one requested review into a different trigger review, split, or merge recommendation unless that trigger was requested and the evidence supports it.
-Do not invent evidence. Modify only runtime intent Markdown files in the current workspace. Do not touch bundled/package intents, skills, config, source code, state JSON, or any path outside the runtime intents directory.
+Do not invent evidence. Modify only runtime intent Markdown files in the current workspace and the explicitly permitted new skill experience path below. Do not touch bundled/package intents, skills, config, source code, state JSON, or any other path.
+${experienceContract}
 The review_snapshot is historical routing and turn evidence; its Matched Intent section is not authoritative current file content.
 Before editing an existing intent, read its current Markdown file in the review workspace.
 Treat the current workspace file as canonical for file content and already-covered decisions. Preserve current workspace content when it differs from the Matched Intent snapshot; do not rewrite a file from the snapshot body.
@@ -764,6 +795,19 @@ function parseReviewFindingsDetailed(
         });
         continue;
       }
+      if ("targetExperienceIds" in finding) {
+        findings.push({
+          trigger: finding.trigger as ReviewTrigger,
+          targetKind: "skill-experience",
+          targetExperienceIds: [finding.targetExperienceIds[0]!],
+          dedupeKey: finding.dedupeKey,
+          summary: finding.summary,
+          evidence: finding.evidence,
+          correctionGoal: finding.correctionGoal,
+          suggestedChange: finding.suggestedChange,
+        });
+        continue;
+      }
       findings.push({
         trigger: finding.trigger as ReviewTrigger,
         targetKind: "intent-markdown",
@@ -891,6 +935,132 @@ export function createIntentWorkspace(before: Map<string, string>): string {
     throw err;
   }
   return workspaceDir;
+}
+
+function snapshotExperienceFiles(
+  experienceDirectory: string,
+  allowedSkills: ReadonlySet<string>,
+): Map<string, string> {
+  const snapshot = new Map<string, string>();
+  if (!fs.existsSync(experienceDirectory)) return snapshot;
+  const rootStat = fs.lstatSync(experienceDirectory);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return snapshot;
+  for (const skill of fs.readdirSync(experienceDirectory).sort()) {
+    if (!allowedSkills.has(skill)) continue;
+    const skillDirectory = path.join(experienceDirectory, skill);
+    if (!fs.lstatSync(skillDirectory).isDirectory()) continue;
+    for (const file of fs.readdirSync(skillDirectory).sort()) {
+      if (!file.endsWith(".md")) continue;
+      const filePath = path.join(skillDirectory, file);
+      if (!fs.lstatSync(filePath).isFile()) continue;
+      snapshot.set(`${skill}/${file}`, fs.readFileSync(filePath, "utf-8"));
+    }
+  }
+  return snapshot;
+}
+
+function copyExperienceWorkspace(
+  workspaceDir: string,
+  before: ReadonlyMap<string, string>,
+): string {
+  const directory = path.join(workspaceDir, "experiences");
+  for (const [relativePath, content] of before) {
+    const targetPath = path.join(directory, relativePath);
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, content);
+  }
+  return directory;
+}
+
+function findChangedExperienceIds(
+  before: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>,
+): string[] {
+  const files = new Set([...before.keys(), ...after.keys()]);
+  return [...files]
+    .filter((file) => before.get(file) !== after.get(file))
+    .map((file) => file.slice(0, -".md".length))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function validateExperienceChanges(params: {
+  before: ReadonlyMap<string, string>;
+  after: ReadonlyMap<string, string>;
+  changedIds: readonly string[];
+  findings: readonly ReviewFinding[];
+  allowedSkills: readonly string[];
+}): string[] {
+  const experienceFindings = params.findings.filter(
+    (finding): finding is SkillExperienceReviewFinding =>
+      finding.targetKind === "skill-experience",
+  );
+  if (params.changedIds.length > 1) {
+    return ["review may create at most one skill experience per run"];
+  }
+  if (params.changedIds.length > 0 && experienceFindings.length !== 1) {
+    return [
+      "review edited skill experiences without returning exactly one skill-experience finding",
+    ];
+  }
+  if (params.changedIds.length === 0 && experienceFindings.length > 0) {
+    return ["review returned a skill-experience finding without creating it"];
+  }
+  if (experienceFindings.length === 0) return [];
+  const finding = experienceFindings[0]!;
+  const changedId = params.changedIds[0]!;
+  if (finding.targetExperienceIds[0] !== changedId) {
+    return [
+      "review skill-experience finding must declare its created identity",
+    ];
+  }
+  const file = `${changedId}.md`;
+  if (params.before.has(file) || !params.after.has(file)) {
+    return ["review may only create new skill experience files"];
+  }
+  const skill = changedId.split("/", 1)[0] ?? "";
+  if (!params.allowedSkills.includes(skill)) {
+    return [`review skill experience targets unobserved skill ${skill}`];
+  }
+  return [];
+}
+
+function applyCreatedExperience(
+  experienceDirectory: string,
+  identity: string,
+  content: string,
+): void {
+  if (fs.existsSync(experienceDirectory)) {
+    const rootStat = fs.lstatSync(experienceDirectory);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+      throw new Error("runtime skill experience root is not a real directory");
+    }
+  }
+  const targetPath = path.join(experienceDirectory, `${identity}.md`);
+  if (fs.existsSync(targetPath)) {
+    throw new Error(`runtime skill experience already exists: ${identity}`);
+  }
+  const skillDirectory = path.dirname(targetPath);
+  if (fs.existsSync(skillDirectory)) {
+    const skillStat = fs.lstatSync(skillDirectory);
+    if (skillStat.isSymbolicLink() || !skillStat.isDirectory()) {
+      throw new Error(
+        `runtime skill experience directory is unsafe: ${identity}`,
+      );
+    }
+  } else {
+    fs.mkdirSync(skillDirectory, { recursive: true });
+  }
+  const tempPath = path.join(
+    path.dirname(targetPath),
+    `.${path.basename(targetPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tempPath, content);
+    fs.renameSync(tempPath, targetPath);
+  } catch (error) {
+    fs.rmSync(tempPath, { force: true });
+    throw error;
+  }
 }
 
 function undeclaredIntentEdits(
@@ -1286,6 +1456,8 @@ export async function runReviewSubagent(params: {
   config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
   intentDirectory: string;
+  experienceDirectory?: string;
+  allowedExperienceSkills?: readonly string[];
   sessionKey?: string;
   messageProvider?: string;
   modelRef: { provider: string; model: string };
@@ -1304,10 +1476,25 @@ export async function runReviewSubagent(params: {
     : `agent:${params.agentId}:skill-harness-review:${suffix}`;
   const beforeIntentFiles = snapshotIntentFiles(params.intentDirectory);
   const workspaceDir = createIntentWorkspace(beforeIntentFiles);
+  const allowedExperienceSkills = new Set(
+    (params.allowedExperienceSkills ?? []).map((skill) =>
+      skill.trim().toLowerCase(),
+    ),
+  );
+  const beforeExperienceFiles = params.experienceDirectory
+    ? snapshotExperienceFiles(
+        params.experienceDirectory,
+        allowedExperienceSkills,
+      )
+    : new Map<string, string>();
+  const workspaceExperienceDirectory = params.experienceDirectory
+    ? copyExperienceWorkspace(workspaceDir, beforeExperienceFiles)
+    : undefined;
   const prompt = buildReviewPrompt(
     params.snapshot,
     params.triggers,
     workspaceDir,
+    [...allowedExperienceSkills],
   );
   try {
     const result = await params.api.runtime.agent.runEmbeddedAgent({
@@ -1398,11 +1585,52 @@ export async function runReviewSubagent(params: {
     }
     const afterIntentFiles = snapshotIntentFiles(workspaceDir);
     const changedIds = changedIntentIds(beforeIntentFiles, afterIntentFiles);
+    const afterExperienceFiles = workspaceExperienceDirectory
+      ? snapshotExperienceFiles(
+          workspaceExperienceDirectory,
+          allowedExperienceSkills,
+        )
+      : new Map<string, string>();
+    const changedExperienceIds = findChangedExperienceIds(
+      beforeExperienceFiles,
+      afterExperienceFiles,
+    );
     const findings = reconcileIntentOperationChanges({
       before: beforeIntentFiles,
       after: afterIntentFiles,
       findings: parsed.findings,
     });
+    const experienceChangeErrors = validateExperienceChanges({
+      before: beforeExperienceFiles,
+      after: afterExperienceFiles,
+      changedIds: changedExperienceIds,
+      findings,
+      allowedSkills: [...allowedExperienceSkills],
+    });
+    if (experienceChangeErrors.length > 0) {
+      return {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: experienceChangeErrors,
+      };
+    }
+    if (changedExperienceIds.length > 0 && workspaceExperienceDirectory) {
+      const validation = validateExperienceDirectory({
+        experienceDirectory: workspaceExperienceDirectory,
+        visibleSkillsByAgent: {
+          [params.agentId]: [...allowedExperienceSkills],
+        },
+      });
+      if (!validation.valid) {
+        return {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: validation.errors.map(
+            (error) => `${error.file}: ${error.message}`,
+          ),
+        };
+      }
+    }
     const intentFindingTargets = new Set(
       findings
         .filter((finding) => finding.targetKind === "intent-markdown")
@@ -1503,7 +1731,7 @@ export async function runReviewSubagent(params: {
       };
     }
     const applyConflicts = await withFileLock(
-      params.intentDirectory,
+      params.dataRoot ?? params.intentDirectory,
       async () => {
         const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
         const conflictIds = concurrentIntentConflicts(
@@ -1512,6 +1740,29 @@ export async function runReviewSubagent(params: {
           changedIds,
         );
         if (conflictIds.length > 0) return conflictIds;
+        if (params.experienceDirectory && changedExperienceIds.length > 0) {
+          const liveExperienceFiles = snapshotExperienceFiles(
+            params.experienceDirectory,
+            allowedExperienceSkills,
+          );
+          const experienceConflicts = changedExperienceIds.filter((identity) =>
+            liveExperienceFiles.has(`${identity}.md`),
+          );
+          if (experienceConflicts.length > 0) {
+            return experienceConflicts.map(
+              (identity) => `experience:${identity}`,
+            );
+          }
+        }
+        if (params.experienceDirectory) {
+          for (const identity of changedExperienceIds) {
+            applyCreatedExperience(
+              params.experienceDirectory,
+              identity,
+              afterExperienceFiles.get(`${identity}.md`)!,
+            );
+          }
+        }
         applyIntentWorkspaceChanges({
           intentDirectory: params.intentDirectory,
           before: beforeIntentFiles,
@@ -1543,8 +1794,13 @@ export async function runReviewSubagent(params: {
     return {
       findings,
       ...(changedIds.length > 0 ? { changedIntentIds: changedIds } : {}),
+      ...(changedExperienceIds.length > 0 ? { changedExperienceIds } : {}),
       outcome:
-        findings.length > 0 || changedIds.length > 0 ? "applied" : "nofinding",
+        findings.length > 0 ||
+        changedIds.length > 0 ||
+        changedExperienceIds.length > 0
+          ? "applied"
+          : "nofinding",
       ...(parsed.noFindingReasonCounts
         ? { noFindingReasonCounts: parsed.noFindingReasonCounts }
         : {}),

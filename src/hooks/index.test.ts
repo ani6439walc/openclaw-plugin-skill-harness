@@ -2650,6 +2650,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
+    expect(result?.prependContext).toMatch(/^\n<skill_harness_plugin>/);
     expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(result?.prependContext).toContain(
       "<intent_guidance>Reply warmly.</intent_guidance>",

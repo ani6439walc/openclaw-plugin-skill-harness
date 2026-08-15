@@ -170,7 +170,7 @@ Do not use this mode for intent `fastpath.keywords` or `candidate.keywords`; rou
 
 Read and follow `references/keyword-audit.md`. Keep these checkpoints visible:
 
-1. **Generate a read-only report** — run `scripts/review-keyword-audit.py`; it resolves the default data root, validates current schema-v6 `review.json` plus schema-v1 `keyword-coverage.json`, and records provenance. Treat unmatched documents as structural proxies, not semantic misses, and keep snippets disabled unless local content inspection is explicitly necessary.
+1. **Generate a read-only report** — run `scripts/review-keyword-audit.py`; it resolves the default data root, validates current schema-v7 `review.json` plus schema-v1 `keyword-coverage.json`, and records provenance. Treat unmatched documents as structural proxies, not semantic misses, and keep snippets disabled unless local content inspection is explicitly necessary.
 2. **Label evidence** — build a private ref-only fixture from `templates/review-keyword-labels.json`, rerun with `--labels`, and inspect TP/FP/FN plus collisions locally; frequency alone is not approval.
 3. **Proposal checkpoint** — present before/after coverage and at most three exact additions/removals per target; wait for explicit confirmation.
 4. **Report and proposal only** — deliver the evidence-backed delta after confirmation, but do not invoke or emulate Intent Review's production-owned writer and do not hand-edit `review.json` or `keyword-coverage.json`.
@@ -208,7 +208,7 @@ Keywords: "skill harness health", "runtime health", "review 統計", "review 建
 Read and follow `references/runtime-health-audit.md`. Keep these checkpoints visible:
 
 1. **Generate a report-only snapshot** — run `scripts/runtime-health-audit.py` with local mode-`0600` output. Do not expose session text, tool payloads, Review suggestion text, or evidence.
-2. **Check structural state first** — current schema-v6 `review.json`, schema-v1 `keyword-coverage.json`, schema-v3 or schema-v4 `stats.json`, session shape counts, and retention metadata must be interpreted before quality trends. Read the report attribution boundary before interpreting v4 daily maps.
+2. **Check structural state first** — current schema-v7 `review.json`, schema-v1 `keyword-coverage.json`, schema-v3 or schema-v4 `stats.json`, session shape counts, and retention metadata must be interpreted before quality trends. Read the report attribution boundary before interpreting v4 daily maps.
 3. **Explain applied changes, not proposals** — use `processedEvents.changes.total`, `byTrigger`, `byOperation`, and target concentration. Keep ordinary Review separate from historical keyword audits.
 4. **Apply scheduler context** — empty coverage epochs can be normal after a restart or before the next eligible finalized turn; verify config, stats writes, model availability, and cadence before calling it a failure.
 5. **Report a bounded next observation** — state the provenance, actual counts, disk/retention state, and a next threshold. Do not modify runtime data from audit findings.
