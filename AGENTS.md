@@ -45,6 +45,15 @@ If tests already fail, capture the failure before changing code. Do not hide pre
 
 For read-only inspection or docs-only updates, still run `git status --short` first and inspect the exact source files behind any claim you plan to document.
 
+## Verification Scope
+
+`pnpm run typecheck` and `pnpm run test` verify this checkout's TypeScript and
+test contracts. They do not establish that a running OpenClaw Gateway has loaded
+the built plugin, that its live configuration enables a behavior, or that its
+runtime intent and Review data are healthy. When a task makes a runtime claim,
+verify it separately through the Gateway's runtime inspection commands and the
+resolved plugin data root.
+
 ## Commands
 
 ```bash

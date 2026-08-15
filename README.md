@@ -250,6 +250,33 @@ pnpm pack --dry-run
 | `pnpm run build`      | Compile the plugin to `dist/`.                            |
 | `pnpm pack --dry-run` | Inspect package contents before publishing or installing. |
 
+## Current implementation status
+
+The current plugin registers the complete runtime lifecycle: prompt construction,
+tool-call tracking, persisted tool results, agent finalization/end, and session
+cleanup. It also registers `skill_list`, `skill_search`, `skill_view`,
+`skill_manage`, and `skill_experience`.
+
+On startup, the plugin initializes its runtime data root, loads the runtime
+intent catalog, and seeds bundled example intents only when the runtime catalog
+has no Markdown files. Existing runtime intents are not overwritten.
+
+Routing is fail-open. Eligible turns first use deterministic exact-keyword
+routing; the classifier path runs only when a scanner model resolves and the
+turn is not excluded by the configured low-effort mode. Every eligible normal
+agent still receives the fixed skill-discovery context even when dynamic intent
+routing is skipped or fails.
+
+Session-local curation is enabled by default and is queued in the background.
+Intent Review is disabled by default; when enabled, its runtime edits and
+keyword-coverage writes are serialized so concurrent reviews cannot race on the
+runtime catalog.
+
+`pnpm run typecheck` and `pnpm run test` verify the checkout. They do not prove
+that a running OpenClaw Gateway has loaded this build or that its live plugin
+configuration and runtime data are healthy; use the runtime inspection commands
+in the troubleshooting section for that verification.
+
 ## Troubleshooting
 
 ### Plugin does not appear in OpenClaw
