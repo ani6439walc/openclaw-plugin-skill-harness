@@ -4,9 +4,9 @@ Rules for generating intent definition files. The canonical format spec lives in
 
 ## Routing-only format
 
-An intent is YAML frontmatter only. Required fields are `domain`, `triggers[]`, `examples[]`, and one `guidance` sentence. Optional routing metadata is `fastpath.keywords`, `candidate`, and direct `skills[]`.
+An intent has YAML frontmatter for classification metadata plus a plain-text Markdown body. Required frontmatter fields are `domain`, `triggers[]`, and `examples[]`; the complete body is one `guidance` sentence. Optional routing metadata is `fastpath.keywords`, `candidate`, and direct `skills[]`.
 
-Do not create Markdown body sections, a `## Skills & Tools` section, workflow text, or experience text. Durable workflows and lessons belong in referenced skills, not intent definitions.
+The body is the entire guidance value, not a Markdown document: do not create headings, lists, fences, commands, paths, a `## Skills & Tools` section, workflow text, or experience text. Durable workflows and lessons belong in referenced skills, not intent definitions.
 
 Runtime experience records are host-curated, skill-scoped files under `experiences/`; do not create, edit, or reference them while drafting an intent.
 
@@ -28,13 +28,13 @@ candidate:
     - "optional manual exact projection phrase"
 skills:
   - "optional-skill-name"
-guidance: "Route this request to the declared skills and follow the bounded routing context."
 ---
+Route this request to the declared skills and follow the bounded routing context.
 ```
 
 - `domain` is required and must be one string.
 - `skills` is optional and must be a list of exact skill names. Use it only for skills the intent should load or strongly prefer.
-- `guidance` is required, one durable routing-behavior sentence, and is shared by exact, inherited, and classified routes.
+- The complete plain-text body is required guidance, one durable routing-behavior sentence shared by exact, inherited, and classified routes.
 - `fastpath.keywords` is optional exact-match evidence. It does not contain a hint or workflow body.
 - `candidate` is optional classifier-projection metadata. `candidate.scope`, when present, must be `cross-flow`; use it only when the intent must remain available across unrelated domains.
 - `candidate.keywords` are manual exact projection evidence, not fastpaths and not body guidance. Normalize/deduplicate for matching with NFKC, locale-independent lowercasing, and collapsed whitespace without rewriting source text or treating hyphens and underscores as aliases. Require durable telemetry or labeled evidence plus positive-match and collision fixtures; never infer them from one session.
@@ -43,7 +43,7 @@ guidance: "Route this request to the declared skills and follow the bounded rout
 
 - Put skill dependencies in frontmatter `skills[]`.
 - List only skills that directly help this routing outcome.
-- Do not duplicate a skill list, tool instructions, commands, workflow text, or experience text in an intent body because bodies are unsupported.
+- Do not put a skill list, tool instructions, commands, workflow text, or experience text in the guidance body.
 
 ## No cross-references
 

@@ -69,7 +69,7 @@ const REVIEW_INSTRUCTIONS: Record<
   "skill-candidate": {
     focus:
       "Identify reusable skills, tools, execution sequences, tool-call compression tactics, tips, parameters, and pitfalls that the matched intent's host-owned routing metadata or guidance should preserve. Exclude one-off tool usage and capabilities outside durable intent boundaries.",
-    goal: "Refine the matched intent's frontmatter skills, routing metadata, or guidance when the sequence or lesson is stable.",
+    goal: "Refine the matched intent's frontmatter skills, routing metadata, or plain-text body guidance when the sequence or lesson is stable.",
     workflow:
       "skill-candidate: first look for the smallest reusable guidance or routing-metadata refinement: concrete skill/tool evidence, stable parameters, recovery, pitfalls, required ordering, or tool-call compression. When the trigger came from many tool calls, explicitly check whether future turns could use batched reads, one-purpose scripts, safe pipelines, reusable command templates, or a more specific skill to reduce repeated calls. Prefer refining the matched intent; if it is the wrong boundary, use the Intent Catalog to choose an existing umbrella intent to refine before returning outside-intent-scope. When Skills Used is none, do not invent a missing skill; require concrete reusable evidence from tool usage, recovery, parameters, or workflow ordering. You may use skill_view to inspect skills referenced by the review snapshot's Skills Used names when the skill description is not enough to judge an intent-local improvement; view only relevant skills.",
   },
@@ -78,7 +78,7 @@ const REVIEW_INSTRUCTIONS: Record<
       "Review one host-selected resolved skill from skill_placement_candidate and decide whether one existing class-level runtime intent should reference it. Use the complete Intent Catalog skills metadata to avoid duplicate or weak placement.",
     goal: "Place the selected skill in exactly one best-fit runtime intent, or return no_finding when its existing placement is already adequate or no durable intent boundary fits.",
     workflow:
-      "skill-placement: treat skill_placement_candidate and host-provided selected_placement_skill as the only target skill evidence; do not inspect unrelated skills. Choose exactly one existing best-fit class-level intent from the full Intent Catalog. A positive finding must use operation=refine, exactly one targetIntentId, and a direct edit to that runtime intent Markdown. Add or preserve the exact selected skill name in frontmatter skills and add only the minimum durable guidance needed to explain when it applies. Do not create, split, merge, rename, or delete intents; do not edit the skill itself, source code, config, or state JSON. Return no_finding when the selected skill is already adequately placed, is transient or too narrow, or has no suitable durable intent boundary.",
+      "skill-placement: treat skill_placement_candidate and host-provided selected_placement_skill as the only target skill evidence; do not inspect unrelated skills. Choose exactly one existing best-fit class-level intent from the full Intent Catalog. A positive finding must use operation=refine, exactly one targetIntentId, and a direct edit to that runtime intent Markdown. Add or preserve the exact selected skill name in frontmatter skills and add only the minimum durable plain-text body guidance needed to explain when it applies. Do not create, split, merge, rename, or delete intents; do not edit the skill itself, source code, config, or state JSON. Return no_finding when the selected skill is already adequately placed, is transient or too narrow, or has no suitable durable intent boundary.",
   },
   "process-gap": {
     focus:
@@ -168,7 +168,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - Once those gates pass, prefer applying the smallest valid correction over returning hasFinding=false.
 - In that evidence-qualified case, hasFinding=false is a high bar: use it only when the apparent lesson is already covered, transient, privacy-sensitive, outside the intent boundary, or cannot support a concrete valid change.
 - A trigger firing is an opportunity to investigate, not evidence by itself. Do not invent evidence, import another trigger's criteria, or edit merely to increase the finding rate.
-- The target library shape is class-level routing definitions with strict frontmatter only; Markdown bodies are unsupported. Do not create one-intent-per-session artifacts.
+- The target library shape is class-level routing definitions: strict classification frontmatter plus one plain-text guidance body. Do not create one-intent-per-session artifacts.
 
 ### Target preference order
 - Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, fastpath, candidate, domain, or direct-skill improvements.
@@ -185,9 +185,9 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - candidate.keywords are manual exact projection evidence, not fastpaths or body guidance. Do not infer candidate.keywords from one review snapshot; require telemetry or labeled evidence plus positive-match and collision fixtures.
 - Do not create one-session intent boundaries; prefer the smallest durable class-level boundary that can help future turns.
 ### Routing metadata and guidance
-- guidance is a required host-owned string. Keep it concise, task-class scoped, and limited to behavior that should apply whenever this intent routes.
+- The complete Markdown body is the required host-owned guidance string. Keep it concise, task-class scoped, and limited to behavior that should apply whenever this intent routes.
 - Skill dependencies belong in frontmatter skills[]. Add only exact skill names that the intent should load or strongly prefer.
-- Do not create body sections or an intent body. Keep durable tool, workflow, parameter, recovery, and pitfall lessons within the one guidance string only when they are truly intent-wide.
+- Keep the body as one plain-text guidance sentence: no headings, lists, fences, commands, paths, or extra sections. Keep durable tool, workflow, parameter, recovery, and pitfall lessons within that sentence only when they are truly intent-wide.
 - Automatic experience writes are unavailable in this release. Do not propose, create, or edit experience records.
 - If two existing intents appear to overlap, mention the overlap in the finding summary or suggestedChange so the background curator can consider larger consolidation. Do not perform broad consolidation unless the requested trigger and evidence justify a concrete class-level routing edit.
 
@@ -1085,7 +1085,7 @@ function placementSkills(value: unknown): string[] | undefined {
 function placementMetadata(
   frontmatter: Record<string, unknown>,
 ): Record<string, unknown> {
-  const { guidance: _guidance, skills: _skills, ...metadata } = frontmatter;
+  const { skills: _skills, ...metadata } = frontmatter;
   return metadata;
 }
 

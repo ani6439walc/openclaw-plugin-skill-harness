@@ -14,7 +14,7 @@ Success means an under-adopted or fully observed but never-recommended/never-use
 - Select at most one eligible skill after an accepted stats event.
 - Prefer low-adoption candidates over zero-recommendation/zero-usage candidates.
 - Provide targeted skill evidence and the complete intent catalog to the reviewer.
-- Permit validated routing-only intent frontmatter edits that place the skill in an appropriate `skills:` list and, only when necessary, refine the single `guidance` sentence.
+- Permit validated routing-only intent edits that place the skill in an appropriate `skills:` list and, only when necessary, refine the single plain-text body guidance sentence.
 - Persist completed per-agent/per-skill/per-epoch review state.
 - Keep technical and validation failures retryable.
 - Replace legacy `review.json` compatibility paths with one current schema.
@@ -96,10 +96,10 @@ For the one targeted skill, the reviewer must:
 3. Return no finding when there is no durable, evidence-backed placement or the skill is already appropriately covered.
 4. Before editing, read the authoritative current Markdown for the selected intent in the isolated review workspace.
 5. Add the skill to the intent's frontmatter `skills:` without duplicates and while preserving unrelated entries.
-6. Add only the minimum durable `guidance` refinement needed to explain when the selected skill applies. Keep it as the intent's single routing sentence; workflows and pitfalls belong in the selected skill, never an intent body.
+6. Add only the minimum durable body-guidance refinement needed to explain when the selected skill applies. Keep the complete body as one plain-text routing sentence; workflows and pitfalls belong in the selected skill.
 7. Return an `intent-markdown` finding with exactly one target intent whose staged edit matches the finding.
 
-The reviewer must not inspect or modify unrelated skills, force a placement solely because usage is low, create an otherwise unjustified intent, or place the skill into every similar intent. Host validation aggregates all positive placement findings: the complete run must contain exactly one positive finding and one target intent. Before applying a placement edit, the host acquires the intent-directory transaction lock, compares the original and staged frontmatter, and rechecks the live target: every field except `skills[]` and `guidance` must be semantically identical; existing skill entries stay in order and the selected skill may only be appended when absent. Lock contention or live drift rejects the placement without applying it.
+The reviewer must not inspect or modify unrelated skills, force a placement solely because usage is low, create an otherwise unjustified intent, or place the skill into every similar intent. Host validation aggregates all positive placement findings: the complete run must contain exactly one positive finding and one target intent. Before applying a placement edit, the host acquires the intent-directory transaction lock, compares the original and staged frontmatter, and rechecks the live target: every frontmatter field except `skills[]` must be semantically identical, while the plain-text body guidance may be refined; existing skill entries stay in order and the selected skill may only be appended when absent. Lock contention or live drift rejects the placement without applying it.
 
 ## Tool and Mutation Boundaries
 

@@ -15,6 +15,6 @@ examples:
 skills:
   - treemd
   - obsidian
-guidance: >-
-  Route comparisons of remembered subjects here, retrieve each subject independently, align only evidence-backed dimensions, and disclose ambiguity, missing records, or unequal support.
 ---
+
+Route comparisons of remembered subjects here, retrieve each subject independently, align only evidence-backed dimensions, and disclose ambiguity, missing records, or unequal support.

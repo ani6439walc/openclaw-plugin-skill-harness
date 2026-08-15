@@ -20,6 +20,6 @@ fastpath:
 skills:
   - treemd
   - obsidian
-guidance: >-
-  Route broad recall of prior records here, search using a self-contained evidence target, return the strongest recorded support first, and state clearly when memory is weak or absent.
 ---
+
+Route broad recall of prior records here, search using a self-contained evidence target, return the strongest recorded support first, and state clearly when memory is weak or absent.

@@ -29,6 +29,6 @@ fastpath:
     - so tired
     - sleepy
     - hug
-guidance: >-
-  Route purely social messages with no concrete request here and answer briefly, warmly, and in the user's tone, while routing any embedded task by its actual intent.
 ---
+
+Route purely social messages with no concrete request here and answer briefly, warmly, and in the user's tone, while routing any embedded task by its actual intent.

@@ -9,7 +9,6 @@ const TOP_LEVEL_FIELDS = new Set([
   "skills",
   "candidate",
   "fastpath",
-  "guidance",
 ]);
 const CANDIDATE_FIELDS = new Set(["scope", "keywords"]);
 const FASTPATH_FIELDS = new Set(["keywords"]);
@@ -508,10 +507,7 @@ export function validateRoutingIntentDirectory(
         }
       }
 
-      const guidance = validateGuidance(file, data.guidance, fileErrors);
-      if (parsed.content.trim()) {
-        fileErrors.push(`${file}: Markdown body must be empty`);
-      }
+      const guidance = validateGuidance(file, parsed.content, fileErrors);
 
       if (
         fileErrors.length === 0 &&

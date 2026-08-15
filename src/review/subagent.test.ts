@@ -31,8 +31,8 @@ domain: other
 fastpath:
   keywords:
     - help
-guidance: Ask for context and keep the response short.
 ---
+Ask for context and keep the response short.
 `,
   );
   fs.writeFileSync(
@@ -43,8 +43,8 @@ triggers:
 examples:
   - hi
 domain: social
-guidance: Chat casually and reply warmly.
 ---
+Chat casually and reply warmly.
 `,
   );
   return root;
@@ -137,7 +137,7 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "A trigger firing is an opportunity to investigate, not evidence by itself",
   "prefer applying the smallest valid correction over returning hasFinding=false",
   "In that evidence-qualified case, hasFinding=false is a high bar",
-  "class-level routing definitions with strict frontmatter only; Markdown bodies are unsupported",
+  "class-level routing definitions: strict classification frontmatter plus one plain-text guidance body",
   "Do not create one-intent-per-session artifacts",
   "classification ambiguity",
   "frontmatter triggers/examples/domain/fastpath",
@@ -154,7 +154,7 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional fastpath metadata, optional candidate metadata, and optional skills[]",
   "Do not infer candidate.keywords from one review snapshot",
   "fastpath.keywords are exact/similarity routing phrases",
-  "guidance is a required host-owned string",
+  "complete Markdown body is the required host-owned guidance string",
   "### Routing metadata and guidance",
   "Skill dependencies belong in frontmatter skills[]",
   "two existing intents appear to overlap",
@@ -237,7 +237,7 @@ describe("buildReviewPrompt", () => {
     [
       "skill-candidate",
       "tool-call compression tactics",
-      "frontmatter skills, routing metadata, or guidance",
+      "frontmatter skills, routing metadata, or plain-text body guidance",
     ],
     [
       "skill-placement",
@@ -505,10 +505,12 @@ describe("buildReviewPrompt", () => {
     expect(weakPrompt).not.toContain('targetKind="trigger-keywords"');
   });
 
-  it("keeps workflow lessons in routing guidance without automatic experience writes", () => {
+  it("keeps workflow lessons in plain-text body guidance without automatic experience writes", () => {
     const prompt = buildReviewPrompt(snapshot, ["skill-candidate"]);
 
-    expect(prompt).toContain("Do not create body sections or an intent body");
+    expect(prompt).toContain(
+      "Keep the body as one plain-text guidance sentence: no headings, lists, fences, commands, paths, or extra sections",
+    );
     expect(prompt).toContain(
       "Automatic experience writes are unavailable in this release",
     );
@@ -2884,16 +2886,18 @@ describe("runReviewSubagent", () => {
 
   it.each([
     {
-      name: "a Markdown body",
-      mutate: (content: string) => `${content.trimEnd()}\n\nPersistent body.\n`,
-      validationError: "social-casual.md: Markdown body must be empty",
+      name: "a Markdown-formatted guidance body",
+      mutate: (content: string) =>
+        content.replace("Chat casually and reply warmly.", "## Legacy."),
+      validationError:
+        "social-casual.md: guidance must not start with a Markdown list, heading, or fence",
     },
     {
       name: "a retired fastpath hint",
       mutate: (content: string) =>
         content.replace(
-          "guidance:",
-          "fastpath:\n  hint: Legacy routing prose\n  keywords: []\nguidance:",
+          "domain: social",
+          "domain: social\nfastpath:\n  hint: Legacy routing prose\n  keywords: []",
         ),
       validationError: "social-casual.md: fastpath.hint is not supported",
     },

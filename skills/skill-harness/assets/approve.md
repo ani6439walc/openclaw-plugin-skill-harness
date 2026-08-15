@@ -27,6 +27,6 @@ fastpath:
     - go ahead
     - do it
     - sounds good
-guidance: >-
-  Route a bare, context-dependent affirmation here only when the immediately preceding turn offers a clear, safe action; otherwise acknowledge briefly or clarify without inventing work.
 ---
+
+Route a bare, context-dependent affirmation here only when the immediately preceding turn offers a clear, safe action; otherwise acknowledge briefly or clarify without inventing work.

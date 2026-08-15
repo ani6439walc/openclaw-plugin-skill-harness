@@ -22,8 +22,8 @@ domain: "test"
 fastpath:
   keywords:
     - "hi"
-guidance: "Handle the test request."
 ---
+Handle the test request.
 `;
 
   it("accepts guidance-only intents and requested targets", () => {
@@ -35,11 +35,10 @@ guidance: "Handle the test request."
     });
   });
 
-  it("rejects non-empty Markdown bodies, including obsolete sections", () => {
+  it("rejects Markdown-formatted guidance bodies, including obsolete sections", () => {
     fs.writeFileSync(
       path.join(dir, "one.md"),
-      `${valid()}
-## Guidelines
+      `${valid().replace("Handle the test request.", "## Guidelines")}
 - Do it.
 
 ## Concrete Workflow
@@ -55,7 +54,9 @@ guidance: "Handle the test request."
 
     const result = validateIntentDirectory(dir);
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain("one.md: Markdown body must be empty");
+    expect(result.errors).toContain(
+      "one.md: guidance must not start with a Markdown list, heading, or fence",
+    );
   });
 
   it("accepts non-empty skill dependencies only in frontmatter", () => {
@@ -221,21 +222,15 @@ guidance: "Handle the test request."
   it("rejects missing or invalid guidance", () => {
     fs.writeFileSync(
       path.join(dir, "missing.md"),
-      valid().replace('guidance: "Handle the test request."\n', ""),
+      valid().replace("Handle the test request.", ""),
     );
     fs.writeFileSync(
       path.join(dir, "lowercase.md"),
-      valid().replace(
-        'guidance: "Handle the test request."',
-        'guidance: "handle the test request."',
-      ),
+      valid().replace("Handle the test request.", "handle the test request."),
     );
     fs.writeFileSync(
       path.join(dir, "unterminated.md"),
-      valid().replace(
-        'guidance: "Handle the test request."',
-        'guidance: "Handle the test request"',
-      ),
+      valid().replace("Handle the test request.", "Handle the test request"),
     );
 
     const result = validateIntentDirectory(dir);

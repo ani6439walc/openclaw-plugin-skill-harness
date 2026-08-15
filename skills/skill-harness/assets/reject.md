@@ -28,6 +28,6 @@ fastpath:
     - wait
     - hold on
     - start over
-guidance: >-
-  Route a context-dependent rejection, cancellation, or correction here, stop the rejected action, identify what changed from the recent context, and clarify only when the target is ambiguous.
 ---
+
+Route a context-dependent rejection, cancellation, or correction here, stop the rejected action, identify what changed from the recent context, and clarify only when the target is ambiguous.

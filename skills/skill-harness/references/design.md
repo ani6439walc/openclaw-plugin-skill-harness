@@ -24,7 +24,7 @@ Minimum information before drafting:
 2. Required `domain`.
 3. Concrete triggers and examples.
 4. Optional exact fastpath keywords.
-5. One durable routing `guidance` sentence and direct skills worth listing in frontmatter.
+5. One durable plain-text body guidance sentence and direct skills worth listing in frontmatter.
 6. Neighboring or colliding intents.
 
 ## Step 3 — Ground against existing intents
@@ -42,9 +42,9 @@ Do not rely on shell-only listing/search examples when the host provides structu
 
 Follow `references/format.md` exactly:
 
-- Required frontmatter: `triggers[]`, `examples[]`, `domain`, and one `guidance` sentence.
+- Required frontmatter: `triggers[]`, `examples[]`, and `domain`; the complete body is one `guidance` sentence.
 - Optional frontmatter: `fastpath.keywords`, `candidate`, and direct `skills[]`.
-- Do not include Markdown body sections, tool instructions, workflows, or experiences; intent bodies are unsupported.
+- Do not include Markdown body sections, tool instructions, workflows, or experiences; the body is only the plain-text guidance sentence.
 - No intent-metadata cross-references to other intent ids.
 
 ## Step 5 — Format check and delivery
@@ -54,8 +54,8 @@ Before writing or showing the final draft, perform simple format checks:
 - Frontmatter exists and is the complete intent file.
 - Required fields exist with the right shape.
 - Trigger/example text is concrete enough for routing.
-- Guidance is one durable routing sentence.
-- Skill dependencies use direct frontmatter `skills[]`; no tool guidance, workflow, or experience body remains.
+- The complete plain-text body is one durable routing sentence.
+- Skill dependencies use direct frontmatter `skills[]`; no tool guidance, workflow, or experience text belongs in the body.
 - No intent-metadata cross-references to other intent ids.
 - The target filename-derived id matches the declared boundary.
 - The chosen domain passes the domain-intent consistency criteria from `references/clustering.md`.

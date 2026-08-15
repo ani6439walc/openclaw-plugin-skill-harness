@@ -26,7 +26,7 @@ Confirm these fields in order:
 6. `examples`
 7. optional exact `fastpath.keywords`
 8. optional cross-flow candidate scope or manual exact candidate keywords
-9. one durable routing `guidance` sentence
+9. one durable plain-text body routing `guidance` sentence
 10. direct skills that help the routing outcome
 11. collision check with existing intents
 

@@ -12,7 +12,7 @@ When enough information is collected, stop asking discovery questions and switch
 ## Safety checks
 
 - If the proposed design is still too broad or collides badly, do not force a final draft yet. Say what decision is still unresolved and ask the smallest next question.
-- Use the routing-only frontmatter format in `references/format.md`: required `guidance`, optional direct `skills[]`, and no Markdown body.
+- Use the routing-only format in `references/format.md`: classification frontmatter, optional direct `skills[]`, and one plain-text guidance body.
 - Keep commands, tool workflows, and durable lessons in referenced skills; do not add them to the intent definition.
 - Do not draft or change runtime experience entries: session-local curation owns those skill-scoped records.
 
@@ -36,4 +36,4 @@ Ask user to confirm resolution before proceeding to final draft.
 2. Show diff preview to user
 3. Confirm no conflicts
 4. Write to the active OpenClaw-resolved runtime intent catalog on approval (normally `~/.openclaw/plugins/skill-harness/intents/` with the default local state directory)
-5. Run simple format checks: complete frontmatter shape, one `guidance` sentence, concrete triggers/examples, direct `skills[]` shape, no intent body, and no metadata cross-references to other intent ids.
+5. Run simple format checks: complete classification-frontmatter shape, one plain-text body guidance sentence, concrete triggers/examples, direct `skills[]` shape, and no metadata cross-references to other intent ids.

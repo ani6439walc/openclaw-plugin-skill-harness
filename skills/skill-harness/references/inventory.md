@@ -49,12 +49,12 @@ For each confirmed gap, use the design workflow and `references/format.md` to dr
 Use simple format checks instead of command-specific validation steps:
 
 - Frontmatter exists and required fields have the right shape.
-- Frontmatter is the complete intent file and contains one routing `guidance` sentence.
+- Frontmatter contains classification metadata; the complete plain-text body contains one routing `guidance` sentence.
 - Triggers/examples are concrete and non-duplicative.
 - Optional `candidate.scope` and `candidate.keywords` are justified by durable cross-domain evidence and collision checks rather than inferred from one session.
 - New intents do not collide with existing runtime intent boundaries.
 - Domain-intent consistency criteria pass for every changed or newly proposed domain/intent relationship.
-- Skill dependencies use direct frontmatter `skills[]`; no intent body is present.
+- Skill dependencies use direct frontmatter `skills[]`; the body remains only the one plain-text guidance sentence.
 - Commands, workflows, and durable lessons remain in referenced skills, not intent definitions.
 
 Report the inventory, proposed changes, and any unresolved ambiguities.

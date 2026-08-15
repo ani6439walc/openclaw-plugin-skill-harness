@@ -21,9 +21,9 @@ triggers:
 examples:
   - "  route this example  "
 domain: "  routing  "
-${params.frontmatter ?? ""}guidance: ${JSON.stringify(guidance)}
+${params.frontmatter ?? ""}
 ---
-${params.body ?? ""}`;
+${params.body ?? guidance}`;
 }
 
 describe("validateRoutingIntentDirectory", () => {
@@ -109,8 +109,8 @@ fastpath:
 triggers: ["route"]
 examples: []
 domain: "routing"
-guidance: "${"😀".repeat(299)}."
 ---
+${"😀".repeat(299)}.
 `,
     );
 
@@ -127,8 +127,8 @@ guidance: "${"😀".repeat(299)}."
 triggers: ["route"]
 examples: []
 domain: routing
-guidance: "   "
 ---
+
 `,
     );
     write("long.md", intentMarkdown({ guidance: `${"😀".repeat(300)}.` }));
@@ -147,10 +147,9 @@ domain: routing
 triggers: ["route"]
 examples: []
 domain: routing
-guidance: |-
-  Route this request.
-  Keep it focused.
 ---
+Route this request.
+Keep it focused.
 `,
     );
     write(
@@ -282,10 +281,14 @@ guidance: |-
     });
   });
 
-  it("rejects legacy and unknown fields plus non-empty Markdown bodies", () => {
+  it("rejects legacy guidance frontmatter, unknown fields, and Markdown bodies", () => {
     write(
       "body.md",
       intentMarkdown({ body: "## Guidelines\n- Legacy instructions.\n" }),
+    );
+    write(
+      "guidance.md",
+      intentMarkdown({ frontmatter: 'guidance: "Legacy guidance."\n' }),
     );
     write(
       "hint.md",
@@ -311,7 +314,8 @@ guidance: |-
 
     expect(errors()).toEqual(
       expect.arrayContaining([
-        "body.md: Markdown body must be empty",
+        "body.md: guidance must not start with a Markdown list, heading, or fence",
+        "guidance.md: unsupported top-level field guidance",
         "hint.md: fastpath.hint is not supported",
         "unknown.md: unsupported top-level field enabled",
         "unknown.md: unsupported top-level field name",
@@ -329,8 +333,8 @@ triggers: ["route", ""]
 examples: example
 domain: ""
 skills: ["valid", 3]
-guidance: "Route this request."
 ---
+Route this request.
 `,
     );
     write(

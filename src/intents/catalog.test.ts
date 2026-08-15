@@ -51,8 +51,8 @@ domain: "routing"
 fastpath:
   keywords:
     - "route"
-guidance: "Route this request using stable evidence."
 ---
+Route this request using stable evidence.
 `,
     );
 
@@ -84,8 +84,8 @@ triggers:
 examples:
   - "hi"
 domain: "chat"
-guidance: "Reply naturally to this social interaction."
 ---
+Reply naturally to this social interaction.
 `,
     );
 
@@ -104,8 +104,8 @@ examples: ["route this"]
 domain: "routing"
 fastpath:
   keywords: ["route"]
-guidance: "Route this request using stable evidence."
 ---
+Route this request using stable evidence.
 `,
     );
 
@@ -126,14 +126,13 @@ guidance: "Route this request using stable evidence."
     expect(catalog.get()[0]?.definition).not.toHaveProperty("prompt");
   });
 
-  it("rejects legacy intent bodies instead of loading a second parser contract", () => {
+  it("rejects Markdown-formatted guidance bodies instead of loading a second parser contract", () => {
     fs.writeFileSync(
       path.join(root, "intents", "legacy.md"),
       `---
 triggers: ["route"]
 examples: ["route this"]
 domain: "routing"
-guidance: "Route this request using stable evidence."
 ---
 ## Legacy
 `,
@@ -174,8 +173,8 @@ guidance: "Keep routing focused on current metadata."
 triggers: ["route"]
 examples: ["route this"]
 domain: "routing"
-guidance: "Route this request using stable evidence."
 ---
+Route this request using stable evidence.
 `,
     );
     fs.writeFileSync(
@@ -186,8 +185,8 @@ examples: ["legacy"]
 domain: "legacy"
 fastpath:
   hint: "Legacy hint."
-guidance: "Keep routing focused on current metadata."
 ---
+Keep routing focused on current metadata.
 `,
     );
 
@@ -210,7 +209,7 @@ candidate:
     - ""
     - 123
 ---
-guidance: "Route carefully using verified metadata."
+Route carefully using verified metadata.
 `,
     );
 

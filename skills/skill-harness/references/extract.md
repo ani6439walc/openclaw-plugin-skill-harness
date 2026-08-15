@@ -25,7 +25,7 @@ Use structured file/search tools where available:
 - List all intent Markdown files.
 - Count lines per intent.
 - Parse frontmatter to count triggers and examples.
-- Inspect frontmatter `skills[]` and `guidance` for routing dependencies and ownership boundaries.
+- Inspect frontmatter `skills[]` and the plain-text body guidance for routing dependencies and ownership boundaries.
 - Read suspiciously large intents to identify distinct sub-responsibilities.
 
 ### Complexity score
@@ -39,7 +39,7 @@ complexity_score =
   distinct_sub_responsibility_count × 5
 ```
 
-Count `distinct_sub_responsibility_count` by identifying separate user outcomes across an intent's triggers, examples, guidance, and direct skills. Each unrelated outcome counts as one.
+Count `distinct_sub_responsibility_count` by identifying separate user outcomes across an intent's triggers, examples, body guidance, and direct skills. Each unrelated outcome counts as one.
 
 ### Thresholds
 
@@ -57,7 +57,7 @@ Output a ranked table: `intent-id | lines | triggers | examples | sub-responsibi
 For each 🔴 or high 🟠 intent:
 
 1. Read the full intent file.
-2. Identify distinct sub-responsibilities — groups of triggers, examples, guidance, and direct skills that serve different user goals and could operate independently.
+2. Identify distinct sub-responsibilities — groups of triggers, examples, body guidance, and direct skills that serve different user goals and could operate independently.
 3. For each sub-responsibility, assess:
    - **Independence**: Can it function as a standalone skill with its own workflow?
    - **Cohesion**: Does it have a clear, single purpose?
@@ -86,12 +86,12 @@ For each confirmed extraction:
 1. Draft a `SKILL.md` following standard skill format:
    - frontmatter with `name` and `description`
    - clear workflow steps derived from the intent's guidelines
-   - frontmatter skill dependencies and routing guidance preserved from the original intent
+   - frontmatter skill dependencies and body guidance preserved from the original intent
    - failure modes and anti-patterns if the original intent included them
 
 2. Draft the slimmed-down intent:
    - Keep only classification triggers and examples needed for routing.
-   - Keep routing-only frontmatter with direct `skills[]` plus concise `guidance`:
+   - Keep routing-only classification frontmatter with direct `skills[]` plus concise plain-text body guidance:
 
      ```yaml
      ---
@@ -102,8 +102,8 @@ For each confirmed extraction:
      domain: "<domain>"
      skills:
        - <new-skill-name>
-     guidance: "Route this request to the extracted skill workflow."
      ---
+     Route this request to the extracted skill workflow.
      ```
 
    - Target: under 50 lines for the slimmed intent.
@@ -127,7 +127,7 @@ Use structured file/search tools to check:
 - New `SKILL.md` frontmatter exists and includes `name` and `description`.
 - The slimmed intent frontmatter has required fields with the right shapes.
 - The slimmed intent keeps enough triggers/examples for routing.
-- The slimmed intent has one routing `guidance` sentence and direct frontmatter `skills[]`; no intent body is present.
+- The slimmed intent has one plain-text body guidance sentence and direct frontmatter `skills[]`.
 - Commands, workflows, and durable lessons belong in the extracted skill, not the slimmed intent.
 - Runtime experience records remain separate host-curated evidence, not a migration target for extracted intent text.
 - Proposed triggers do not obviously collide with remaining runtime intents.

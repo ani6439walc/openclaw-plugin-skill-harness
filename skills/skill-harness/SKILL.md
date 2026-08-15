@@ -34,7 +34,7 @@ If ambiguous, ask one routing question: "Are you working on one intent, auditing
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
 - Treat runtime session text as private. Keyword-audit and runtime-health reports stay local; never send raw retained conversations, tool payloads, Review suggestions, or Review evidence to external tools or artifacts.
 - Do not hand-edit `review.json`, `keyword-coverage.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, session-local curation, startup seeding, Review persistence, skill-placement, stats, or cleanup workflows in this skill.
-- Check changed intent files for canonical routing-only format: complete valid frontmatter, one `guidance` sentence, concrete triggers/examples, conservative optional `candidate` metadata, direct frontmatter `skills[]` when skill loading is needed, and no cross-references to other intent ids. Intent bodies are unsupported.
+- Check changed intent files for canonical routing-only format: complete valid classification frontmatter, one plain-text body `guidance` sentence, concrete triggers/examples, conservative optional `candidate` metadata, direct frontmatter `skills[]` when skill loading is needed, and no cross-references to other intent ids. The entire body is guidance; do not add sections, lists, fences, commands, paths, or other Markdown formatting.
 - Keep concrete shell commands, MCP documentation calls, workflows, and durable lessons in referenced skills; do not add them to intent definitions.
 - When reviewing, creating, splitting, merging, or extracting intents, validate domain-intent consistency using `references/clustering.md`.
 
@@ -108,13 +108,13 @@ Read and follow `references/design.md`. Keep these checkpoints visible:
 
 ### Anti-patterns
 
-| #   | Anti-pattern                                    | Why not                                   | Do instead                                                                |
-| --- | ----------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------- |
-| 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality  | Interview one question at a time                                          |
-| 2   | **Cross-reference other intents in metadata**   | Classifier only sees routing metadata     | Express boundaries via triggers, examples, domain, fastpath, and guidance |
-| 3   | **Skip format rules before writing**            | Inconsistent format breaks plugin parsing | Read `references/format.md` first                                         |
-| 4   | **Create a new intent when one already exists** | Causes duplication and collision          | Check existing intents during interview                                   |
-| 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately    | Use concrete phrases or keywords                                          |
+| #   | Anti-pattern                                    | Why not                                   | Do instead                                                                     |
+| --- | ----------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
+| 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality  | Interview one question at a time                                               |
+| 2   | **Cross-reference other intents in metadata**   | Classifier only sees routing metadata     | Express boundaries via triggers, examples, domain, fastpath, and body guidance |
+| 3   | **Skip format rules before writing**            | Inconsistent format breaks plugin parsing | Read `references/format.md` first                                              |
+| 4   | **Create a new intent when one already exists** | Causes duplication and collision          | Check existing intents during interview                                        |
+| 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately    | Use concrete phrases or keywords                                               |
 
 ---
 
@@ -240,7 +240,7 @@ Read and follow `references/runtime-health-audit.md`. Keep these checkpoints vis
 Use structured file/search tools to inspect intent format. Keep checks simple and local:
 
 - Frontmatter is the complete intent file and has required fields with the right shapes.
-- `guidance` is one durable routing sentence; no intent body is present.
+- The complete plain-text intent body is one durable routing-guidance sentence.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
 - `candidate.scope: cross-flow` is used only for durable domain-independent coverage; manual `candidate.keywords` have labeled positive and collision evidence and are never inferred from one session.
 - Review trigger keywords are a separate runtime surface. Analyze them with `references/keyword-audit.md` and `scripts/review-keyword-audit.py`; never infer a write from phrase frequency alone.

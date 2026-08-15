@@ -155,7 +155,7 @@ Runtime intents live under the OpenClaw state directory. With the default local 
 
 On first startup, the plugin seeds bundled examples only when this directory is absent or has no Markdown intent files. Existing runtime intents are never overwritten.
 
-Intent files remain YAML-frontmatter-only routing definitions. Experience files are separate, skill-scoped Markdown records with `skill`, `summary`, and `keywords` frontmatter; they are injected only when a session-local curation record selects the matching direct skill and experience reference.
+Intent files use YAML frontmatter only for routing metadata; their complete plain-text Markdown body is the one routing `guidance` sentence. Experience files are separate, skill-scoped Markdown records with `skill`, `summary`, and `keywords` frontmatter; they are injected only when a session-local curation record selects the matching direct skill and experience reference.
 
 ### Runtime Review state
 
@@ -175,7 +175,7 @@ Keep each intent narrow and concrete:
 - domain metadata that matches the requested outcome
 - `fastpath.keywords` only for deterministic shortcuts
 - `skills[]` only when the skill genuinely helps
-- one durable `guidance` sentence for routing behavior
+- one durable plain-text body sentence for routing behavior
 
 ### Human maintenance skill
 
