@@ -45,7 +45,7 @@ Large skill catalogs create two practical problems:
 
 Skill Harness addresses both:
 
-1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and candidate-scoped skill-experience metadata (identity and keywords only). The fixed system context does not include the runtime skill inventory.
+1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and candidate-scoped `<skill_experience>` metadata (identity and keywords only) nested under the matching `<skill>`. The fixed system context does not include the runtime skill inventory.
 2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption and can refine runtime intent Markdown and selected review trigger keywords. It does not train the base model or rewrite skill files.
 3. **Session-local recommendation curation.** The enabled-by-default background curator refines a topic epoch's direct skill candidates and may select up to three high-relevance experience references for the next turn's expanded reference context, without changing intent definitions, skill files, or Review state.
 

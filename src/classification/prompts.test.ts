@@ -135,7 +135,10 @@ describe("buildRoutingContext", () => {
     expect(result).toContain(
       "<description>Draw &lt;clear&gt; diagrams &amp; validate them.</description>",
     );
-    expect(result).toContain("<skill_experiences>");
+    expect(result).not.toContain("<skill_experiences>");
+    expect(result).toMatch(
+      /<skill>\n\s+<name>architecture-diagram<\/name>\n\s+<description>Draw &lt;clear&gt; diagrams &amp; validate them.<\/description>\n\s+<skill_experience>/,
+    );
     expect(result).toContain(
       "<identity>architecture-diagram/layout</identity>",
     );
@@ -148,7 +151,7 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("/private/experience.md");
   });
 
-  it("omits empty optional blocks and renders every candidate-scoped experience as metadata", () => {
+  it("omits empty optional blocks and renders candidate-scoped experiences only within their matching skill", () => {
     const experience = (
       entryId: string,
       body: string,
@@ -185,7 +188,13 @@ describe("buildRoutingContext", () => {
         confidence: 0.5,
       },
       guidance: "Use only verified context.",
-      candidates: [],
+      candidates: [
+        {
+          name: "skill",
+          location: "/private/SKILL.md",
+          description: "Matching skill.",
+        },
+      ],
       experiences: [
         experience("one", "must not render"),
         experience("two", "must not render"),
@@ -199,6 +208,20 @@ describe("buildRoutingContext", () => {
     expect(bounded).toContain("<identity>skill/three</identity>");
     expect(bounded).toContain("<identity>skill/four</identity>");
     expect(bounded).not.toContain("must not render");
+
+    const unmatched = buildRoutingContext({
+      result: {
+        intent: "other",
+        reason: "No exact match.",
+        domain: "other",
+        confidence: 0.5,
+      },
+      guidance: "Use only verified context.",
+      candidates: [],
+      experiences: [experience("unmatched", "must not render")],
+    });
+    expect(unmatched).not.toContain("<skill_experience>");
+    expect(unmatched).not.toContain("skill/unmatched");
   });
 
   it("expands only session-curated experiences with a possibly-relevant marker", () => {
@@ -210,7 +233,13 @@ describe("buildRoutingContext", () => {
         confidence: 0.5,
       },
       guidance: "Use only verified context.",
-      candidates: [],
+      candidates: [
+        {
+          name: "skill",
+          location: "/private/SKILL.md",
+          description: "Matching skill.",
+        },
+      ],
       experiences: [
         {
           identity: "skill/recommended",

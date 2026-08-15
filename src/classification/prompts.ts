@@ -48,8 +48,8 @@ const ROUTING_CONTEXT_POLICY = taggedBlock(
   "context_policy",
   `- \`selected_intent\` and \`intent_guidance\` describe the current routing decision; treat low-confidence routing as tentative.
 - \`task_complexity\`, when present, is the classifier's current scope estimate; use it to calibrate planning and verification, not to broaden the requested work.
-- \`skill_candidates\` are resolved discovery leads, not proof that every listed skill applies.
-- \`skill_experiences\` list candidate-scoped experience identities and keywords. Entries marked by session curation include bounded body text as possibly relevant reference; verify that it fits the current request. To read an unexpanded record or its full body, call \`skill_experience\` with its skill and identity as the query.
+- \`skill_candidates\` are resolved discovery leads, not proof that every listed skill applies. A candidate may include nested \`skill_experience\` identity and keyword metadata.
+- Nested experiences marked by session curation include bounded body text as possibly relevant reference; verify that it fits the current request. To read an unexpanded record or its full body, call \`skill_experience\` with its skill and identity as the query.
 - Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.`,
 );
 
@@ -470,9 +470,16 @@ function formatSkillXmlBlock(
   skills: AvailableSkill[] | undefined,
   attributes = "",
   includeDetails = false,
+  experiencesBySkill?: ReadonlyMap<string, readonly string[]>,
 ): string {
   const body = skills
-    ?.map((skill) => formatSkillXml(skill, includeDetails))
+    ?.map((skill) =>
+      formatSkillXml(
+        skill,
+        includeDetails,
+        experiencesBySkill?.get(canonicalSkillName(skill.name)),
+      ),
+    )
     .join("\n");
   return taggedBlock(tag, body ?? "", attributes);
 }
@@ -480,10 +487,12 @@ function formatSkillXmlBlock(
 function formatSkillXml(
   skill: AvailableSkill,
   includeDetails: boolean,
+  experiences: readonly string[] = [],
 ): string {
   const lines = [
     formatXmlTextElement("name", skill.name),
     formatXmlTextElement("description", skill.description),
+    ...experiences,
   ];
   if (includeDetails) {
     lines.push(formatXmlTextElement("path", skill.location));
@@ -535,19 +544,24 @@ function canonicalExperienceIdentity(identity: string): string {
   return identity.normalize("NFKC").trim().toLowerCase();
 }
 
+function canonicalSkillName(name: string): string {
+  return name.normalize("NFKC").trim().toLowerCase();
+}
+
 function truncateCodePoints(value: string, limit: number): string {
   return Array.from(value).slice(0, limit).join("");
 }
 
-function formatExperienceReferences(
+function formatCandidateExperiences(
   experiences: readonly SkillExperienceEntry[],
   recommendedExperienceIds: readonly string[],
-): string | undefined {
+): ReadonlyMap<string, readonly string[]> {
   const recommended = new Set(
     recommendedExperienceIds.map(canonicalExperienceIdentity),
   );
   let remainingRecommendedBodyCodePoints = 3_000;
-  const rendered = experiences.map((experience) => {
+  const bySkill = new Map<string, string[]>();
+  for (const experience of experiences) {
     const selected = recommended.has(
       canonicalExperienceIdentity(experience.identity),
     );
@@ -560,12 +574,12 @@ function formatExperienceReferences(
     if (body !== undefined) {
       remainingRecommendedBodyCodePoints -= Array.from(body).length;
     }
-    return formatExperienceXml(experience, body);
-  });
-
-  return rendered.length > 0
-    ? taggedBlock("skill_experiences", rendered.join("\n"))
-    : undefined;
+    const key = canonicalSkillName(experience.skill);
+    const entries = bySkill.get(key) ?? [];
+    entries.push(formatExperienceXml(experience, body));
+    bySkill.set(key, entries);
+  }
+  return bySkill;
 }
 
 export function buildRoutingContext(params: {
@@ -575,6 +589,10 @@ export function buildRoutingContext(params: {
   experiences: readonly SkillExperienceEntry[];
   recommendedExperienceIds?: readonly string[];
 }): string {
+  const experiencesBySkill = formatCandidateExperiences(
+    params.experiences,
+    params.recommendedExperienceIds ?? [],
+  );
   const blocks = [
     ROUTING_CONTEXT_POLICY,
     formatXmlTextElement("selected_intent", params.result.intent),
@@ -583,12 +601,14 @@ export function buildRoutingContext(params: {
       : undefined,
     formatXmlTextElement("intent_guidance", params.guidance),
     params.candidates.length > 0
-      ? formatSkillXmlBlock("skill_candidates", [...params.candidates])
+      ? formatSkillXmlBlock(
+          "skill_candidates",
+          [...params.candidates],
+          "",
+          false,
+          experiencesBySkill,
+        )
       : undefined,
-    formatExperienceReferences(
-      params.experiences,
-      params.recommendedExperienceIds ?? [],
-    ),
   ].filter((block): block is string => Boolean(block));
 
   return taggedBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
