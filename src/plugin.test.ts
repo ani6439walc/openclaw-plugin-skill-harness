@@ -188,7 +188,7 @@ describe("createPlugin", () => {
     expect(api.on).toHaveBeenCalledWith(
       "before_prompt_build",
       expect.any(Function),
-      { timeoutMs: 7_500 },
+      { timeoutMs: 11_500 },
     );
   });
 

@@ -17,7 +17,7 @@ import {
 } from "./system-context.js";
 import { defaultTracker, type SessionState } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
-import { defaultCatalog, filterIntentsForAgent } from "../intents/index.js";
+import { defaultCatalog } from "../intents/index.js";
 import type { IntentCatalogEntry } from "../types.js";
 import { resolvePackageRoot } from "../file-utils.js";
 import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness";
@@ -2437,9 +2437,6 @@ describe("createHookHandlers topic switch flow", () => {
     };
     const catalog = {
       count: intents.length,
-      filterForAgent: vi.fn((config, agentId) =>
-        filterIntentsForAgent(intents, config, agentId),
-      ),
       get: vi.fn().mockReturnValue(intents),
     };
     const classifier =
@@ -2733,7 +2730,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
-  it("keeps deterministic exact keyword hints in low thinking fastpath-only mode", async () => {
+  it("keeps deterministic exact keyword hints in low-effort fastpath-only routing mode", async () => {
     const fastEvent = {
       prompt: "謝謝",
       messages: [{ role: "user", content: "謝謝" }],
@@ -2752,7 +2749,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(classifier).not.toHaveBeenCalled();
   });
 
-  it("skips every LLM subagent when low thinking fastpath-only mode has no exact keyword match", async () => {
+  it("skips every LLM subagent when low-effort fastpath-only routing mode has no exact keyword match", async () => {
     const { handlers, classifier, topicChecker, record } =
       createTopicFlowHarness({ historicalIntents: [] });
 
@@ -2769,7 +2766,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(record).not.toHaveBeenCalled();
   });
 
-  it("skips exact keyword hints when low thinking mode is off", async () => {
+  it("skips exact keyword hints when low-effort routing mode is off", async () => {
     const fastEvent = {
       prompt: "謝謝",
       messages: [{ role: "user", content: "謝謝" }],
@@ -2779,7 +2776,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         historicalIntents: [],
         configRaw: {
           model: "google/test-intent",
-          lowThinkingMode: "off",
+          lowEffortRoutingMode: "off",
         },
       });
 
@@ -2796,12 +2793,12 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(record).not.toHaveBeenCalled();
   });
 
-  it("runs the full scanner pipeline for low thinking when configured to full", async () => {
+  it("runs the full scanner pipeline for low effort when configured to full", async () => {
     const { handlers, classifier, topicChecker } = createTopicFlowHarness({
       historicalIntents: [],
       configRaw: {
         model: "google/test-intent",
-        lowThinkingMode: "full",
+        lowEffortRoutingMode: "full",
       },
     });
 
@@ -3217,7 +3214,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(topicChecker).toHaveBeenCalledOnce();
   });
 
-  it("does not use exact keyword match when the matched intent is denied", async () => {
+  it("uses exact keyword match when a retired intentDeny setting is supplied", async () => {
     const { handlers, topicChecker } = createTopicFlowHarness({
       historicalIntents: [],
       configRaw: {
@@ -3235,7 +3232,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ctx,
     );
 
-    expect(topicChecker).toHaveBeenCalledOnce();
+    expect(topicChecker).not.toHaveBeenCalled();
   });
 
   it("uses topic keyword similarity to skip the intent classifier", async () => {
@@ -3631,7 +3628,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
-  it("does not use topic keyword similarity when the matched intent is denied", async () => {
+  it("uses topic keyword similarity when a retired intentDeny setting is supplied", async () => {
     const { handlers, classifier } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [versionControlIntent],
@@ -3658,7 +3655,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ctx,
     );
 
-    expect(classifier).toHaveBeenCalledOnce();
+    expect(classifier).not.toHaveBeenCalled();
   });
 
   it("keeps same-topic inheritance ahead of topic keyword similarity without inheriting complexity", async () => {

@@ -100,9 +100,9 @@ Configure Skill Harness in `openclaw.json`:
           model: "google/gemini-3-flash",
           modelFallback: "openai/gpt-5-mini",
           thinking: "medium",
-          lowThinkingMode: "fastpath-only",
+          lowEffortRoutingMode: "fastpath-only",
           queryMode: "recent",
-          timeoutMs: 10000,
+          timeoutMs: 5000,
           curation: {
             enabled: true,
           },
@@ -118,22 +118,22 @@ Configure Skill Harness in `openclaw.json`:
 
 ### Important options
 
-| Option                             | Default              | Purpose                                                                                             |
-| ---------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
-| `agents`                           | `["main"]`           | OpenClaw agent IDs eligible for scanning.                                                           |
-| `allowedChatTypes`                 | `["direct"]`         | Chat types that may run the scanner.                                                                |
-| `allowedChatIds` / `deniedChatIds` | `[]`                 | Optional chat allow-list and deny-list.                                                             |
-| `intentDeny`                       | `{}`                 | Per-agent intent deny-list with wildcard-style keys.                                                |
-| `model` / `modelFallback`          | unset                | Scanner model and last-resort resolution fallback.                                                  |
-| `thinking`                         | `"medium"`           | Intent-classifier thinking level.                                                                   |
-| `lowThinkingMode`                  | `"fastpath-only"`    | Behavior when the main agent uses off, minimal, or low thinking.                                    |
-| `queryMode` / `contextWindow`      | `"recent"`           | Scanner context and its limits.                                                                     |
-| `timeoutMs`                        | `10000`              | Topic-checker and intent-classifier time budget.                                                    |
-| `curation.enabled`                 | `true`               | Enables session-local direct-skill and experience recommendation curation, independently of Review. |
-| `curation.model` / `modelFallback` | unset                | Optional dedicated curator model and resolution fallback.                                           |
-| `curation.thinking` / `timeoutMs`  | `"medium"` / `30000` | Curator thinking level and time budget.                                                             |
+| Option                                 | Default           | Purpose                                                                                             |
+| -------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------- |
+| `agents`                               | `["main"]`        | OpenClaw agent IDs eligible for scanning.                                                           |
+| `allowedChatTypes`                     | `["direct"]`      | Chat types that may run the scanner.                                                                |
+| `allowedChatIds` / `deniedChatIds`     | `[]`              | Optional chat allow-list and deny-list.                                                             |
+| `model` / `modelFallback`              | unset             | Scanner model and last-resort resolution fallback.                                                  |
+| `thinking`                             | `"medium"`        | Intent-classifier thinking level.                                                                   |
+| `lowEffortRoutingMode`                 | `"fastpath-only"` | Routing behavior when the main agent uses off, minimal, or low reasoning effort.                    |
+| `queryMode` / `contextWindow`          | `"recent"`        | Scanner context and its limits.                                                                     |
+| `timeoutMs`                            | `5000`            | Topic-checker and intent-classifier time budget.                                                    |
+| `curation.enabled`                     | `true`            | Enables session-local direct-skill and experience recommendation curation, independently of Review. |
+| `curation.model` / `modelFallback`     | unset             | Optional dedicated curator model and resolution fallback.                                           |
+| `curation.thinking` / `timeoutSeconds` | `"medium"` / `30` | Curator thinking level and time budget in seconds.                                                  |
 
 | `review.enabled` | `false` | Enables post-turn Intent Review. |
+| `review.timeoutSeconds` | `300` | Intent Review time budget in seconds. |
 | `review.triggers.skillPlacement.enabled` | `true` | Reviews one eligible resolved skill for placement in a runtime intent when Review is enabled. |
 
 Topic Checker, Intent Classifier, background Curator, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
@@ -262,7 +262,7 @@ pnpm run build
 
 ### No hints are injected
 
-Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the scanner model can resolve. With low thinking, `lowThinkingMode: "off"` disables the scanner and `"fastpath-only"` requires a matching fast path. A classifier confidence below `0.8` remains conservative and injects only routing context derived from the selected intent's direct skills.
+Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the scanner model can resolve. With low reasoning effort, `lowEffortRoutingMode: "off"` disables the scanner and `"fastpath-only"` requires a matching fast path. A classifier confidence below `0.8` remains conservative and injects only routing context derived from the selected intent's direct skills.
 
 ### Runtime intents are missing
 

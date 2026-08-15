@@ -1,6 +1,6 @@
 import type { IntentComplexity, IntentDefinition } from "./types.js";
 
-export const DEFAULT_TIMEOUT_MS = 3_000;
+export const DEFAULT_TIMEOUT_MS = 5_000;
 export const PROCESSED_EVENTS_RETENTION_DAYS = 90;
 export const KEYWORD_COVERAGE_RETENTION_DAYS = 30;
 export const LOCK_STALE_THRESHOLD_MS = 60_000;

@@ -1564,7 +1564,7 @@ describe("runReviewSubagent", () => {
         review: {
           enabled: true,
           thinking: "high",
-          timeoutMs: 1234,
+          timeoutSeconds: 1234,
         },
       }),
       agentId: "main",
@@ -1579,7 +1579,7 @@ describe("runReviewSubagent", () => {
       expect.objectContaining({
         provider: "google",
         model: "review",
-        timeoutMs: 1234,
+        timeoutMs: 1_234_000,
         thinkLevel: "high",
         trigger: "manual",
         promptMode: "minimal",

@@ -296,7 +296,7 @@ export async function runCurationSubagent(
     prompt,
     provider: modelRef.provider,
     model: modelRef.model,
-    timeoutMs: params.config.curation.timeoutMs,
+    timeoutMs: params.config.curation.timeoutSeconds * 1_000,
     runId,
     workspaceDir,
     agentDir: workspaceDir,

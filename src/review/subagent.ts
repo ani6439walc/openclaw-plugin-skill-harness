@@ -1322,7 +1322,7 @@ export async function runReviewSubagent(params: {
       prompt,
       provider: params.modelRef.provider,
       model: params.modelRef.model,
-      timeoutMs: params.config.review.timeoutMs,
+      timeoutMs: params.config.review.timeoutSeconds * 1_000,
       runId,
       workspaceDir,
       agentDir: workspaceDir,

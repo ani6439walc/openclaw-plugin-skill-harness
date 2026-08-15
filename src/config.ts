@@ -38,7 +38,7 @@ const DEFAULT_CURATION = {
   model: undefined,
   modelFallback: undefined,
   thinking: "medium",
-  timeoutMs: 30_000,
+  timeoutSeconds: 30,
 } as const;
 
 const DEFAULT_REVIEW = {
@@ -46,7 +46,7 @@ const DEFAULT_REVIEW = {
   model: undefined,
   modelFallback: undefined,
   thinking: "medium",
-  timeoutMs: 30_000,
+  timeoutSeconds: 300,
   keywordCoverage: { everyAcceptedTurns: 50 },
   triggers: {
     skillCandidate: { enabled: true, toolCalls: 5 },
@@ -66,11 +66,10 @@ const DEFAULT_REVIEW = {
 
 const DEFAULT_CONFIG = {
   agents: ["main"],
-  intentDeny: {},
   model: undefined,
   modelFallback: undefined,
   thinking: "medium",
-  lowThinkingMode: "fastpath-only",
+  lowEffortRoutingMode: "fastpath-only",
   allowedChatTypes: ["direct"],
   allowedChatIds: [],
   deniedChatIds: [],
@@ -132,7 +131,7 @@ const enabledSchema = z.boolean().catch(true);
 const ThinkLevelSchema = z
   .enum(["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"])
   .catch("medium");
-const LowThinkingModeSchema = z
+const LowEffortRoutingModeSchema = z
   .enum(["fastpath-only", "full", "off"])
   .catch("fastpath-only");
 const CurationSchema = z
@@ -141,7 +140,7 @@ const CurationSchema = z
     model: z.string().optional().catch(undefined),
     modelFallback: z.string().optional().catch(undefined),
     thinking: ThinkLevelSchema,
-    timeoutMs: boundedInt(30_000, 250, 600_000),
+    timeoutSeconds: boundedInt(30, 10, 600),
   })
   .catch(DEFAULT_CURATION);
 const ReviewSchema = z
@@ -150,7 +149,7 @@ const ReviewSchema = z
     model: z.string().optional().catch(undefined),
     modelFallback: z.string().optional().catch(undefined),
     thinking: ThinkLevelSchema,
-    timeoutMs: boundedInt(30_000, 250, 600_000),
+    timeoutSeconds: boundedInt(300, 60, 1_800),
     keywordCoverage: z
       .object({ everyAcceptedTurns: boundedInt(50, 10, 1_000) })
       .catch(DEFAULT_REVIEW.keywordCoverage),
@@ -206,36 +205,19 @@ const ReviewSchema = z
   })
   .catch(DEFAULT_REVIEW);
 
-const IntentDenySchema = z
-  .record(z.string(), z.unknown())
-  .catch({})
-  .transform((entries) => {
-    const result: Record<string, string[]> = {};
-    for (const [key, value] of Object.entries(entries)) {
-      const normalizedKey = key.trim();
-      if (!normalizedKey || !Array.isArray(value)) continue;
-      const patterns = StringListSchema.parse(value);
-      if (patterns.length > 0) {
-        result[normalizedKey] = patterns;
-      }
-    }
-    return result;
-  });
-
 const SkillHarnessConfigSchema = z
   .object({
     agents: stringListWithDefault(["main"]),
-    intentDeny: IntentDenySchema,
     model: z.string().optional().catch(undefined),
     modelFallback: z.string().optional().catch(undefined),
     thinking: ThinkLevelSchema,
-    lowThinkingMode: LowThinkingModeSchema,
+    lowEffortRoutingMode: LowEffortRoutingModeSchema,
     allowedChatTypes: stringListWithDefault(["direct"]),
     allowedChatIds: StringListSchema,
     deniedChatIds: StringListSchema,
     queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
     contextWindow: ContextWindowSchema,
-    timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 250, 120_000),
+    timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
     curation: CurationSchema,
     review: ReviewSchema,
   })

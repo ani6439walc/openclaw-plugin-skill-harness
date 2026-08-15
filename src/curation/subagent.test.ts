@@ -338,7 +338,7 @@ describe("curation subagent runtime", () => {
           curation: {
             model: "google/curator",
             thinking: "low",
-            timeoutMs: 4_321,
+            timeoutSeconds: 321,
           },
         }),
         agentId: "tracked-agent",
@@ -362,7 +362,7 @@ describe("curation subagent runtime", () => {
         agentId: "tracked-agent",
         provider: "google",
         model: "curator",
-        timeoutMs: 4_321,
+        timeoutMs: 321_000,
         thinkLevel: "low",
         modelRun: false,
         promptMode: "minimal",

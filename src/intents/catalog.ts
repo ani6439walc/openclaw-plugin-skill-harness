@@ -1,59 +1,10 @@
 import path from "node:path";
-import type {
-  IntentCatalogEntry,
-  ResolvedSkillHarnessPluginConfig,
-} from "../types.js";
+import type { IntentCatalogEntry } from "../types.js";
 import { logger } from "../../api.js";
 import { pluginRoot } from "../file-utils.js";
 import { validateRoutingIntentDirectory } from "./routing-validation.js";
 
 const catalogCache = new Map<string, IntentCatalog>();
-
-function wildcardToRegExp(pattern: string): RegExp {
-  const escaped = pattern
-    .replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
-    .replace(/\*/g, ".*")
-    .replace(/\\\?/g, ".");
-  return new RegExp(`^${escaped}$`, "i");
-}
-
-function matchesWildcard(pattern: string, value: string): boolean {
-  const normalizedPattern = pattern.trim();
-  if (!normalizedPattern) return false;
-  return wildcardToRegExp(normalizedPattern).test(value);
-}
-
-function resolveIntentDenyPatterns(
-  config: ResolvedSkillHarnessPluginConfig,
-  agentId: string | undefined,
-): string[] {
-  const normalizedAgentId = agentId?.trim();
-  if (!normalizedAgentId) return [];
-
-  const patterns: string[] = [];
-  for (const [agentPattern, intentPatterns] of Object.entries(
-    config.intentDeny,
-  )) {
-    if (matchesWildcard(agentPattern, normalizedAgentId)) {
-      patterns.push(...intentPatterns);
-    }
-  }
-  return [...new Set(patterns)];
-}
-
-export function filterIntentsForAgent(
-  intents: readonly IntentCatalogEntry[],
-  config: ResolvedSkillHarnessPluginConfig,
-  agentId: string | undefined,
-): IntentCatalogEntry[] {
-  const denyPatterns = resolveIntentDenyPatterns(config, agentId);
-  if (denyPatterns.length === 0) return [...intents];
-
-  return intents.filter(
-    (intent) =>
-      !denyPatterns.some((pattern) => matchesWildcard(pattern, intent.id)),
-  );
-}
 
 export class IntentCatalog {
   private intents: IntentCatalogEntry[] = [];
@@ -99,13 +50,6 @@ export class IntentCatalog {
 
   get count(): number {
     return this.intents.length;
-  }
-
-  filterForAgent(
-    config: ResolvedSkillHarnessPluginConfig,
-    agentId: string | undefined,
-  ): IntentCatalogEntry[] {
-    return filterIntentsForAgent(this.intents, config, agentId);
   }
 
   private loadFromDir(

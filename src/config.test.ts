@@ -31,7 +31,7 @@ describe("resolveConfig", () => {
         model: undefined,
         modelFallback: undefined,
         thinking: "medium",
-        timeoutMs: 30000,
+        timeoutSeconds: 300,
         triggers: {
           skillCandidate: { enabled: true, toolCalls: 5 },
           skillPlacement: { enabled: true },
@@ -53,7 +53,6 @@ describe("resolveConfig", () => {
 
     it("should handle empty object loading", () => {
       const result = resolveConfig({});
-      expect(result.intentDeny).toEqual({});
       expect(result.allowedChatIds).toEqual([]);
       expect(result.deniedChatIds).toEqual([]);
       expect(result.model).toBeUndefined();
@@ -65,7 +64,6 @@ describe("resolveConfig", () => {
         const result = resolveConfig(raw);
         expect(result.agents).toEqual(["main"]);
         expect(result.allowedChatTypes).toEqual(["direct"]);
-        expect(result.intentDeny).toEqual({});
         expect(result.queryMode).toBe(DEFAULT_QUERY_MODE);
         expect(result.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
       }
@@ -80,7 +78,7 @@ describe("resolveConfig", () => {
           model: "google/gemini-3-flash",
           modelFallback: "openai/gpt-5-mini",
           thinking: "high",
-          timeoutMs: 600000,
+          timeoutSeconds: 600,
           triggers: {
             skillCandidate: { enabled: false, toolCalls: 0 },
             skillPlacement: { enabled: false },
@@ -102,7 +100,7 @@ describe("resolveConfig", () => {
         model: "google/gemini-3-flash",
         modelFallback: "openai/gpt-5-mini",
         thinking: "high",
-        timeoutMs: 600000,
+        timeoutSeconds: 600,
         triggers: {
           skillCandidate: { enabled: false, toolCalls: 1 },
           skillPlacement: { enabled: false },
@@ -176,25 +174,32 @@ describe("resolveConfig", () => {
       expect(result).not.toHaveProperty("evolution");
     });
 
-    it("defaults low thinking mode to deterministic fastpath only", () => {
+    it("defaults low-effort routing mode to deterministic fastpath only", () => {
       const result = resolveConfig({});
 
-      expect(result.lowThinkingMode).toBe("fastpath-only");
+      expect(result.lowEffortRoutingMode).toBe("fastpath-only");
     });
 
-    it("accepts low thinking mode values and falls back on invalid values", () => {
-      expect(resolveConfig({ lowThinkingMode: "full" }).lowThinkingMode).toBe(
-        "full",
-      );
-      expect(resolveConfig({ lowThinkingMode: "off" }).lowThinkingMode).toBe(
-        "off",
-      );
+    it("accepts low-effort routing mode values and falls back on invalid values", () => {
       expect(
-        resolveConfig({ lowThinkingMode: "fastpath-only" }).lowThinkingMode,
+        resolveConfig({ lowEffortRoutingMode: "full" }).lowEffortRoutingMode,
+      ).toBe("full");
+      expect(
+        resolveConfig({ lowEffortRoutingMode: "off" }).lowEffortRoutingMode,
+      ).toBe("off");
+      expect(
+        resolveConfig({ lowEffortRoutingMode: "fastpath-only" })
+          .lowEffortRoutingMode,
       ).toBe("fastpath-only");
       expect(
-        resolveConfig({ lowThinkingMode: "invalid" }).lowThinkingMode,
+        resolveConfig({ lowEffortRoutingMode: "invalid" }).lowEffortRoutingMode,
       ).toBe("fastpath-only");
+    });
+
+    it("ignores the retired lowThinkingMode setting", () => {
+      expect(resolveConfig({ lowThinkingMode: "full" })).toMatchObject({
+        lowEffortRoutingMode: "fastpath-only",
+      });
     });
   });
 
@@ -222,7 +227,7 @@ describe("resolveConfig", () => {
         model: undefined,
         modelFallback: undefined,
         thinking: "medium",
-        timeoutMs: 30_000,
+        timeoutSeconds: 30,
       });
       expect(
         resolveConfig({ review: { enabled: false } }).curation.enabled,
@@ -237,7 +242,7 @@ describe("resolveConfig", () => {
             model: "google/curator",
             modelFallback: "openai/fallback",
             thinking: "high",
-            timeoutMs: 0,
+            timeoutSeconds: 0,
           },
         }).curation,
       ).toEqual({
@@ -245,11 +250,12 @@ describe("resolveConfig", () => {
         model: "google/curator",
         modelFallback: "openai/fallback",
         thinking: "high",
-        timeoutMs: 250,
+        timeoutSeconds: 10,
       });
       expect(
-        resolveConfig({ curation: { timeoutMs: 700_000 } }).curation.timeoutMs,
-      ).toBe(600_000);
+        resolveConfig({ curation: { timeoutSeconds: 700 } }).curation
+          .timeoutSeconds,
+      ).toBe(600);
     });
   });
 
@@ -276,60 +282,31 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("complex structure - intentDeny map", () => {
-    it("should parse intentDeny with valid structure", () => {
+  describe("retired configuration", () => {
+    it("ignores intentDeny", () => {
+      expect(
+        resolveConfig({ intentDeny: { main: ["chat"] } }),
+      ).not.toHaveProperty("intentDeny");
+    });
+
+    it("ignores nested timeoutMs settings", () => {
       const result = resolveConfig({
-        intentDeny: {
-          agent1: ["pattern1", "pattern2"],
-          agent2: ["pattern3"],
-        },
+        curation: { timeoutMs: 1 },
+        review: { timeoutMs: 1 },
       });
-      expect(result.intentDeny).toEqual({
-        agent1: ["pattern1", "pattern2"],
-        agent2: ["pattern3"],
-      });
-    });
 
-    it("should filter out empty patterns in intentDeny", () => {
-      const result = resolveConfig({
-        intentDeny: {
-          agent1: ["pattern1", "", "  ", "pattern2"],
-          agent2: [],
-        },
-      });
-      expect(result.intentDeny).toEqual({
-        agent1: ["pattern1", "pattern2"],
-      });
-    });
-
-    it("should trim keys in intentDeny", () => {
-      const result = resolveConfig({
-        intentDeny: {
-          "  agent1  ": ["pattern1"],
-        },
-      });
-      expect(result.intentDeny).toHaveProperty("agent1");
-      expect(result.intentDeny).not.toHaveProperty("  agent1  ");
-    });
-
-    it("should return empty object for non-object intentDeny", () => {
-      const result = resolveConfig({ intentDeny: "invalid" });
-      expect(result.intentDeny).toEqual({});
-    });
-
-    it("should return empty object for array intentDeny", () => {
-      const result = resolveConfig({ intentDeny: ["invalid"] });
-      expect(result.intentDeny).toEqual({});
+      expect(result.curation.timeoutSeconds).toBe(30);
+      expect(result.review.timeoutSeconds).toBe(300);
     });
   });
 
   describe("clampInt behavior", () => {
-    it("should clamp timeoutMs within bounds (250-120000)", () => {
+    it("should clamp timeoutMs within bounds (1000-60000)", () => {
       const lowResult = resolveConfig({ timeoutMs: 100 });
-      expect(lowResult.timeoutMs).toBe(250);
+      expect(lowResult.timeoutMs).toBe(1_000);
 
       const highResult = resolveConfig({ timeoutMs: 200000 });
-      expect(highResult.timeoutMs).toBe(120000);
+      expect(highResult.timeoutMs).toBe(60_000);
 
       const validResult = resolveConfig({ timeoutMs: 5000 });
       expect(validResult.timeoutMs).toBe(5000);

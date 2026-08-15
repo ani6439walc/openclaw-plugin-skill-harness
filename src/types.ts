@@ -6,7 +6,7 @@ export type ContextWindow = {
 export type ThinkLevel =
   "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive" | "max";
 
-export type LowThinkingMode = "fastpath-only" | "full" | "off";
+export type LowEffortRoutingMode = "fastpath-only" | "full" | "off";
 
 export type ReviewTriggersConfig = {
   skillCandidate?: { enabled?: boolean; toolCalls?: number };
@@ -28,7 +28,7 @@ export type ReviewConfig = {
   model?: string;
   modelFallback?: string;
   thinking?: ThinkLevel;
-  timeoutMs?: number;
+  timeoutSeconds?: number;
   keywordCoverage?: { everyAcceptedTurns?: number };
   triggers?: ReviewTriggersConfig;
 };
@@ -38,7 +38,7 @@ export type ResolvedReviewConfig = {
   model: string | undefined;
   modelFallback: string | undefined;
   thinking: ThinkLevel;
-  timeoutMs: number;
+  timeoutSeconds: number;
   keywordCoverage: { everyAcceptedTurns: number };
   triggers: {
     skillCandidate: { enabled: boolean; toolCalls: number };
@@ -61,11 +61,11 @@ export type CurationConfig = {
   model?: string;
   modelFallback?: string;
   thinking?: ThinkLevel;
-  timeoutMs?: number;
+  timeoutSeconds?: number;
 };
 
 export type ResolvedCurationConfig = Required<
-  Pick<CurationConfig, "enabled" | "thinking" | "timeoutMs">
+  Pick<CurationConfig, "enabled" | "thinking" | "timeoutSeconds">
 > & {
   model?: string;
   modelFallback?: string;
@@ -73,11 +73,10 @@ export type ResolvedCurationConfig = Required<
 
 export type SkillHarnessPluginConfig = {
   agents?: string[];
-  intentDeny?: Record<string, string[]>;
   model?: string;
   modelFallback?: string;
   thinking?: ThinkLevel;
-  lowThinkingMode?: LowThinkingMode;
+  lowEffortRoutingMode?: LowEffortRoutingMode;
   allowedChatTypes?: string[];
   allowedChatIds?: string[];
   deniedChatIds?: string[];
@@ -90,11 +89,10 @@ export type SkillHarnessPluginConfig = {
 
 export type ResolvedSkillHarnessPluginConfig = {
   agents: string[];
-  intentDeny: Record<string, string[]>;
   model: string | undefined;
   modelFallback: string | undefined;
   thinking: ThinkLevel;
-  lowThinkingMode: LowThinkingMode;
+  lowEffortRoutingMode: LowEffortRoutingMode;
   allowedChatTypes: string[];
   allowedChatIds: string[];
   deniedChatIds: string[];

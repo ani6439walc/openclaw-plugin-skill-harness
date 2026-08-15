@@ -128,7 +128,7 @@ function sanitizeHistoricalIntentRecords(
   });
 }
 
-const LOW_THINKING_EFFORTS = new Set(["off", "minimal", "low"]);
+const LOW_EFFORT_LEVELS = new Set(["off", "minimal", "low"]);
 
 const TOPIC_PROJECTION_CONFIDENCE = 0.8;
 const MAX_PROJECTION_CANDIDATE_IDS = 128;
@@ -304,23 +304,23 @@ function resolveReasoningEffort(
   return typeof value === "string" ? value.trim().toLowerCase() : undefined;
 }
 
-function isLowThinkingEffort(ctx: PluginHookAgentContext): boolean {
+function isLowEffort(ctx: PluginHookAgentContext): boolean {
   const effort = resolveReasoningEffort(ctx);
-  return effort ? LOW_THINKING_EFFORTS.has(effort) : false;
+  return effort ? LOW_EFFORT_LEVELS.has(effort) : false;
 }
 
-function shouldSkipAllForLowThinking(
+function shouldSkipAllForLowEffort(
   ctx: PluginHookAgentContext,
   config: ResolvedSkillHarnessPluginConfig,
 ): boolean {
-  return config.lowThinkingMode === "off" && isLowThinkingEffort(ctx);
+  return config.lowEffortRoutingMode === "off" && isLowEffort(ctx);
 }
 
-function shouldUseDeterministicLowThinkingMode(
+function shouldUseDeterministicLowEffortRoutingMode(
   ctx: PluginHookAgentContext,
   config: ResolvedSkillHarnessPluginConfig,
 ): boolean {
-  return config.lowThinkingMode === "fastpath-only" && isLowThinkingEffort(ctx);
+  return config.lowEffortRoutingMode === "fastpath-only" && isLowEffort(ctx);
 }
 
 function readTriggerKeywordsFailOpen(
@@ -846,7 +846,7 @@ export function createHookHandlers(deps: HookDeps) {
     historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
     modelRef: { provider: string; model: string };
-    availableIntents: ReturnType<typeof catalog.filterForAgent>;
+    availableIntents: readonly IntentCatalogEntry[];
   }): Promise<PromptBuildClassification | undefined> {
     emitPipelineEvent(
       params.ctx,
@@ -1362,7 +1362,7 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
-    availableIntents: ReturnType<typeof catalog.filterForAgent>;
+    availableIntents: readonly IntentCatalogEntry[];
     exactKeywordMatch: NonNullable<ReturnType<typeof findExactKeywordIntent>>;
     configuredSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
@@ -1427,7 +1427,7 @@ export function createHookHandlers(deps: HookDeps) {
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
     latestUserMessage: string;
     conversation: ReturnType<typeof limitConversationTurns>;
-    availableIntents: ReturnType<typeof catalog.filterForAgent>;
+    availableIntents: readonly IntentCatalogEntry[];
     classification: PromptBuildClassification;
     modelRef: NonNullable<ReturnType<typeof getModelRef>>;
     configuredSkillsXml?: string;
@@ -1549,9 +1549,9 @@ export function createHookHandlers(deps: HookDeps) {
       // THEN refresh config and intents
       refreshLiveConfigFromRuntime();
       const refreshedConfig = config();
-      if (shouldSkipAllForLowThinking(ctx, refreshedConfig)) {
+      if (shouldSkipAllForLowEffort(ctx, refreshedConfig)) {
         logger.debug(
-          "low thinking mode is off; skipping intention scan for low reasoning effort.",
+          "low-effort routing mode is off; skipping intention scan.",
         );
         return toPromptBuildResult(undefined, configuredSkillsXml);
       }
@@ -1576,10 +1576,7 @@ export function createHookHandlers(deps: HookDeps) {
         `before_prompt_build hook triggered, ctx: ${JSON.stringify(ctx)}`,
       );
 
-      const availableIntents = catalog.filterForAgent(
-        refreshedConfig,
-        routing.effectiveAgentId,
-      );
+      const availableIntents = catalog.get();
       const exactKeywordMatch = findExactKeywordIntent(
         latestUserMessage,
         availableIntents,
@@ -1603,9 +1600,9 @@ export function createHookHandlers(deps: HookDeps) {
         );
       }
 
-      if (shouldUseDeterministicLowThinkingMode(ctx, refreshedConfig)) {
+      if (shouldUseDeterministicLowEffortRoutingMode(ctx, refreshedConfig)) {
         logger.debug(
-          "low thinking fastpath-only mode found no exact keyword match; skipping LLM-based intent analysis.",
+          "low-effort fastpath-only routing mode found no exact keyword match; skipping LLM-based intent analysis.",
         );
         return toPromptBuildResult(undefined, configuredSkillsXml);
       }
@@ -2208,7 +2205,7 @@ export function createHookHandlers(deps: HookDeps) {
                 params.resolvedConfig.review.modelFallback ??
                 params.resolvedConfig.modelFallback,
               thinking: params.resolvedConfig.review.thinking,
-              timeoutMs: params.resolvedConfig.review.timeoutMs,
+              timeoutMs: params.resolvedConfig.review.timeoutSeconds * 1_000,
             },
             modelRef: params.modelRef,
             pluginConfig: params.resolvedConfig,

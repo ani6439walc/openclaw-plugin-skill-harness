@@ -15,24 +15,6 @@
     ]
   },
   "skills": ["./skills"],
-  "uiHints": {
-    "model": {
-      "label": "Scanner Model",
-      "help": "Lightweight model for the intention scanner (e.g. google/gemini-3-flash). Leave empty to use the agent's default model."
-    },
-    "thinking": {
-      "label": "Scanner Thinking",
-      "help": "Thinking level for the intent classifier sub-agent."
-    },
-    "lowThinkingMode": {
-      "label": "Low Thinking Mode",
-      "help": "Controls scanner behavior when the main agent uses off, minimal, or low thinking."
-    },
-    "timeoutMs": {
-      "label": "Scanner Timeout",
-      "help": "Budget in milliseconds for each intention scanner sub-agent run."
-    }
-  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -64,15 +46,6 @@
         "description": "Agent IDs eligible for intention scanning.",
         "default": ["main"]
       },
-      "intentDeny": {
-        "type": "object",
-        "description": "Per-agent deny-list for intent IDs injected into the intention classifier. Object keys are agent IDs or wildcard patterns; values are arrays of intent ID or wildcard patterns.",
-        "additionalProperties": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "default": {}
-      },
       "model": {
         "type": "string",
         "description": "Explicit lightweight model for the intention scanner (e.g. google/gemini-3-flash). If unset, resolves from the current session model, then the agent primary model, then modelFallback."
@@ -96,18 +69,18 @@
         "description": "Thinking level for the intent classifier sub-agent.",
         "default": "medium"
       },
-      "lowThinkingMode": {
+      "lowEffortRoutingMode": {
         "type": "string",
         "enum": ["fastpath-only", "full", "off"],
-        "description": "Behavior when the main agent uses off, minimal, or low thinking. fastpath-only preserves deterministic exact keyword hints but skips all LLM scanner sub-agents; full keeps the full pipeline; off disables the plugin for low-thinking turns.",
+        "description": "Intent-routing behavior when the main agent uses off, minimal, or low reasoning effort. fastpath-only preserves deterministic exact keyword hints but skips all LLM scanner sub-agents; full keeps the full pipeline; off disables the plugin for low-effort turns.",
         "default": "fastpath-only"
       },
       "timeoutMs": {
         "type": "integer",
-        "minimum": 250,
+        "minimum": 1000,
         "maximum": 60000,
         "description": "Budget in milliseconds for each intention scanner sub-agent run.",
-        "default": 10000
+        "default": 5000
       },
       "queryMode": {
         "type": "string",
@@ -191,11 +164,12 @@
             "description": "Thinking level for the background curator sub-agent.",
             "default": "medium"
           },
-          "timeoutMs": {
+          "timeoutSeconds": {
             "type": "integer",
-            "minimum": 250,
-            "maximum": 600000,
-            "default": 30000
+            "minimum": 10,
+            "maximum": 600,
+            "default": 30,
+            "description": "Budget in seconds for each background curator sub-agent run."
           }
         },
         "default": {}
@@ -232,11 +206,12 @@
             "description": "Thinking level for the Intent Review sub-agent.",
             "default": "medium"
           },
-          "timeoutMs": {
+          "timeoutSeconds": {
             "type": "integer",
-            "minimum": 60000,
-            "maximum": 1800000,
-            "default": 180000
+            "minimum": 60,
+            "maximum": 1800,
+            "default": 300,
+            "description": "Budget in seconds for each Intent Review sub-agent run."
           },
           "keywordCoverage": {
             "type": "object",
