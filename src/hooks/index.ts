@@ -729,8 +729,12 @@ export function createHookHandlers(deps: HookDeps) {
       : turnAssociations.resolveSession(params.sessionId ?? params.sessionKey);
     if (
       !association ||
-      (params.sessionId && association.sessionId !== params.sessionId) ||
-      (params.sessionKey && association.sessionKey !== params.sessionKey)
+      (params.sessionId &&
+        association.sessionId !== params.sessionId &&
+        association.sessionKey !== params.sessionId) ||
+      (params.sessionKey &&
+        association.sessionKey !== params.sessionKey &&
+        association.sessionId !== params.sessionKey)
     ) {
       return;
     }
