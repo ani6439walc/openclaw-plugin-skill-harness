@@ -97,6 +97,10 @@ describe("createPlugin", () => {
       "before_agent_finalize",
       expect.any(Function),
     );
+    expect(api.on).toHaveBeenCalledWith(
+      "message_sending",
+      expect.any(Function),
+    );
   });
 
   it("injects a curation queue scoped to each plugin registration", () => {

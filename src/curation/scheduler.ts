@@ -22,14 +22,14 @@ export interface CurationScheduleCandidate {
   expectedRevision: number;
 }
 
-function qualifyingTurns(
+export function qualifyingTurns(
   curation: SessionCurationRecord,
   turns: readonly SessionState[],
 ): SessionState[] {
   return turns.filter((turn) => {
     const recommendation = turn.intent?.recommendationState;
     return (
-      turn.timestamps?.end !== undefined &&
+      Boolean(turn.turnKey) &&
       turn.error === undefined &&
       recommendation?.topicEpoch === curation.topicEpoch
     );

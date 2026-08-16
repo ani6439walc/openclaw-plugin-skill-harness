@@ -38,12 +38,27 @@ describe("parseCuratorProposal", () => {
     });
   });
 
-  it("rejects prose, Markdown fences, extra keys, and echoed revision drift", () => {
+  it("accepts JSON wrapped in Markdown code fences", () => {
+    expect(
+      parseCuratorProposal(`\`\`\`json\n${proposal()}\n\`\`\``, expected),
+    ).toEqual({
+      topicEpoch: 3,
+      expectedRevision: 7,
+      candidates: [],
+      recommendedExperienceRefs: [],
+      reason: "Keep the current bounded recommendation set.",
+    });
+  });
+
+  it("rejects prose, extra keys, and echoed revision drift", () => {
     expect(
       parseCuratorProposal(`Result: ${proposal()}`, expected),
     ).toBeUndefined();
     expect(
-      parseCuratorProposal(`\`\`\`json\n${proposal()}\n\`\`\``, expected),
+      parseCuratorProposal(
+        `Here is the curation proposal:\n${proposal()}`,
+        expected,
+      ),
     ).toBeUndefined();
     expect(
       parseCuratorProposal(

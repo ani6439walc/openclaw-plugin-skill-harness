@@ -123,18 +123,17 @@ describe("evaluateCurationCadence", () => {
     },
   );
 
-  it("excludes errored, unfinished, prior-epoch, and legacy turns", () => {
+  it("excludes errored, prior-epoch, and legacy turns", () => {
     const finalizedTurns = [
       turn(1, { error: "failed" }),
       turn(2, { topicEpoch: 0 }),
-      turn(3, { finalized: false }),
-      turn(4, { legacy: true }),
-      turn(5),
+      turn(3, { legacy: true }),
+      turn(4),
     ];
 
     expect(
       evaluateCurationCadence({ curation: CURATION, finalizedTurns }),
-    ).toEqual({ eligible: true, schedulingTurnKey: "turn-5" });
+    ).toEqual({ eligible: true, schedulingTurnKey: "turn-4" });
   });
 
   it("defers later boundaries while one schedule is pending", () => {

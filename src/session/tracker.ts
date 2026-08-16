@@ -859,7 +859,6 @@ export class SessionTracker {
           const target = matches[0];
           const recommendation = target.intent?.recommendationState;
           if (
-            !target.timestamps?.end ||
             target.error !== undefined ||
             recommendation?.topicEpoch !== params.expectedTopicEpoch ||
             recommendation.curationRevision !== params.expectedRevision

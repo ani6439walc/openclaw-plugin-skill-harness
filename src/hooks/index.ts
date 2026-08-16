@@ -13,6 +13,7 @@ import type {
   PluginHookToolContext,
   PluginHookToolResultPersistContext,
   PluginHookToolResultPersistEvent,
+  PluginHookMessageSendingEvent,
 } from "openclaw/plugin-sdk/types";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
@@ -86,6 +87,7 @@ import { experiencesPath, intentsPath } from "../file-utils.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import {
   evaluateCurationCadence,
+  qualifyingTurns,
   reconcileCurationSchedules,
   runCurationSubagent,
   sampleWithoutReplacement,
@@ -725,10 +727,13 @@ export function createHookHandlers(deps: HookDeps) {
     if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
     const runId = eventRunId || contextRunId;
     const association = runId
-      ? turnAssociations.resolve(runId)
+      ? (turnAssociations.resolve(runId) ??
+        turnAssociations.resolveAnonymousSession(
+          params.sessionId ?? params.sessionKey,
+        ))
       : turnAssociations.resolveSession(params.sessionId ?? params.sessionKey);
+    if (!association) return;
     if (
-      !association ||
       (params.sessionId &&
         association.sessionId !== params.sessionId &&
         association.sessionKey !== params.sessionId) ||
@@ -1486,6 +1491,12 @@ export function createHookHandlers(deps: HookDeps) {
           ),
           intentProjection: params.classification.intentProjection,
           conversation: params.conversation,
+        });
+      }
+      if (params.routing.association) {
+        const promptAssociation = params.routing.association;
+        setImmediate(() => {
+          void maybeScheduleCuration(promptAssociation, params.refreshedConfig);
         });
       }
       return toPromptBuildResult(
@@ -2471,15 +2482,24 @@ export function createHookHandlers(deps: HookDeps) {
       return;
     }
 
-    const acceptedEventIds = statsAggregator.listProcessedEventIds();
+    const processedEventIds = statsAggregator.listProcessedEventIds();
     const allTurns = [...(session.history ?? []), session.current];
-    const acceptedTurns = allTurns.filter((turn) => {
+    const acceptedEventIds = new Set(processedEventIds);
+    for (const turn of allTurns) {
       const eventId = resolveTurnEventId(identity.sessionId, turn);
-      return eventId !== undefined && acceptedEventIds.has(eventId);
-    });
+      if (eventId) acceptedEventIds.add(eventId);
+    }
+    const acceptedTurns = qualifyingTurns(expected, allTurns);
     const schedulingIndex = acceptedTurns.findIndex(
       (turn) => turn.turnKey === identity.schedulingTurnKey,
     );
+    logger.info("runQueuedCuration executing", {
+      sessionId: identity.sessionId,
+      schedulingTurnKey: identity.schedulingTurnKey,
+      schedulingIndex,
+      qualifyingTurnCount: acceptedTurns.length,
+      allTurnCount: allTurns.length,
+    });
     if (schedulingIndex < 0) {
       await tracker.finishCurationSchedule({
         sessionId: identity.sessionId,
@@ -2565,6 +2585,10 @@ export function createHookHandlers(deps: HookDeps) {
     const activeExperienceCatalog =
       experienceCatalog ?? SkillExperienceCatalog.create(deps.dataRoot);
 
+    logger.info("runQueuedCuration calling curator subagent", {
+      seedSkillsCount: seedSkills.length,
+      conversationTurnsCount: conversationTurns.length,
+    });
     let proposal;
     try {
       proposal = await curator({
@@ -2585,6 +2609,10 @@ export function createHookHandlers(deps: HookDeps) {
       logger.warn("curation subagent failed", { error });
       proposal = undefined;
     }
+    logger.info("runQueuedCuration curator proposal result", {
+      hasProposal: Boolean(proposal),
+      proposal,
+    });
 
     if (!proposal) {
       await tracker.finishCurationSchedule({
@@ -2598,7 +2626,7 @@ export function createHookHandlers(deps: HookDeps) {
       return;
     }
 
-    await validateAndCommitCuration({
+    const curationCommitResult = await validateAndCommitCuration({
       schedule: pending,
       expected,
       proposal,
@@ -2612,6 +2640,9 @@ export function createHookHandlers(deps: HookDeps) {
       commit: tracker.commitCurationSchedule.bind(tracker),
       finish: tracker.finishCurationSchedule.bind(tracker),
     });
+    logger.info("runQueuedCuration validateAndCommitCuration outcome", {
+      curationCommitResult,
+    });
   }
 
   async function maybeScheduleCuration(
@@ -2619,23 +2650,32 @@ export function createHookHandlers(deps: HookDeps) {
     resolvedConfig: ResolvedSkillHarnessPluginConfig,
   ): Promise<void> {
     const curationQueue = deps.curationQueue;
+    logger.info("maybeScheduleCuration called", {
+      sessionId: association.sessionId,
+      turnKey: association.turnKey,
+      enabled: resolvedConfig.curation.enabled,
+    });
     if (!curationQueue || !resolvedConfig.curation.enabled) return;
-
-    const current = tracker.getTurnState(
-      association.sessionId,
-      association.turnKey,
-    );
-    if (!current?.intent?.recommendationState) return;
 
     try {
       const session = tracker
         .listRetainedSessions()
         .find((candidate) => candidate.sessionId === association.sessionId);
       const curation = session?.curation;
+      logger.info("maybeScheduleCuration session found", {
+        sessionId: association.sessionId,
+        hasCuration: Boolean(curation),
+        topicEpoch: curation?.topicEpoch,
+        cursor: curation?.completedTurnCursor,
+      });
       if (!curation) return;
       const cadence = evaluateCurationCadence({
         curation,
         finalizedTurns: [...(session.history ?? []), session.current],
+      });
+      logger.info("maybeScheduleCuration cadence evaluated", {
+        eligible: cadence.eligible,
+        schedulingTurnKey: cadence.schedulingTurnKey,
       });
       if (!cadence.eligible || !cadence.schedulingTurnKey) return;
 
@@ -2646,6 +2686,7 @@ export function createHookHandlers(deps: HookDeps) {
         expectedRevision: curation.revision,
         now: clock().toISOString(),
       });
+      logger.info("maybeScheduleCuration reservation result", { reserved });
       if (reserved !== "reserved") return;
 
       const key = `curation:${association.sessionId}:${cadence.schedulingTurnKey}:${curation.topicEpoch}:${curation.revision}`;
@@ -2655,6 +2696,7 @@ export function createHookHandlers(deps: HookDeps) {
         expectedTopicEpoch: curation.topicEpoch,
         expectedRevision: curation.revision,
       });
+      logger.info("maybeScheduleCuration subagent enqueued", { key });
     } catch (error) {
       logger.warn("failed to schedule curation", { error });
     }
@@ -2932,6 +2974,46 @@ export function createHookHandlers(deps: HookDeps) {
     return;
   }
 
+  async function onMessageSending(
+    event: PluginHookMessageSendingEvent,
+    ctx: PluginHookAgentContext,
+  ): Promise<void> {
+    logger.info("onMessageSending hook triggered", {
+      ctxSessionId: ctx.sessionId,
+      ctxSessionKey: ctx.sessionKey,
+      ctxRunId: ctx.runId,
+    });
+    const association = resolveAssociatedTurn({
+      contextRunId: ctx.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+    });
+    logger.info("onMessageSending association resolved", { association });
+    if (!association) return;
+    const stagedEntries = toolFallbacks.listForAssociation(association);
+    const stagedToolFallbacks = stagedEntries.map(
+      ([, staged]) => staged.fallback,
+    );
+    const finalized = await tracker.finalizeTurnFromAgentEnd({
+      sessionId: association.sessionId,
+      expectedTurnKey: association.turnKey,
+      stagedToolFallbacks,
+      result: typeof event?.content === "string" ? event.content : undefined,
+      endedAt: new Date().toISOString(),
+    });
+    logger.info("onMessageSending turn finalization result", { finalized });
+    if (finalized === "applied" || finalized === "already-finalized") {
+      turnAssociations.markAssociationTerminal(association);
+      toolFallbacks.markAssociationTerminal(association);
+      for (const [toolCallId] of stagedEntries) {
+        toolFallbacks.delete(toolCallId);
+        pendingToolCalls.delete(toolCallId);
+        recordedToolCalls.add(toolCallId);
+      }
+      await finalizeTrackedTurn(association, ctx);
+    }
+  }
+
   async function onSessionEnd(
     event: PluginHookSessionEndEvent,
     ctx: PluginHookSessionContext,
@@ -2956,6 +3038,7 @@ export function createHookHandlers(deps: HookDeps) {
     onAfterToolCall,
     onToolResultPersist,
     onBeforeAgentFinalize,
+    onMessageSending,
     onAgentEnd,
     onSessionEnd,
     recoverCurationSchedules,

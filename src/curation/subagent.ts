@@ -138,6 +138,13 @@ function parseUniqueStrings(
   return result;
 }
 
+function stripCodeFence(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+}
+
 export function parseCuratorProposal(
   raw: string,
   expected: { topicEpoch: number; expectedRevision: number },
@@ -146,7 +153,7 @@ export function parseCuratorProposal(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripCodeFence(raw));
   } catch {
     return;
   }
@@ -230,7 +237,7 @@ export function buildCuratorPrompt(params: {
   );
 
   return [
-    `You are a bounded skill curator. Review the conversation and candidate skills. If the provided skill_candidates are not optimal for the ongoing conversation, you are encouraged to search for and inspect more relevant available skills using skill_list, skill_search, and skill_view. Return JSON only with exactly topicEpoch, expectedRevision, candidates, recommendedExperienceRefs, and reason. Return zero to six unique candidate names, zero to three unique experience identities, and a reason of at most 500 Unicode code points. Select recommendedExperienceRefs only from experience candidates and only when they are highly relevant to this sustained topic; selected records will be expanded as possibly relevant reference on the next main-agent turn. Return an empty recommendedExperienceRefs array otherwise. You must echo topicEpoch ${params.curation.topicEpoch} and expectedRevision ${params.curation.revision} exactly. Do not output experience bodies or any other key.`,
+    `You are a bounded skill curator. Review the conversation and candidate skills. If the provided skill_candidates are not optimal for the ongoing conversation, you are encouraged to search for and inspect more relevant available skills using skill_list, skill_search, and skill_view. Return JSON only with exactly topicEpoch, expectedRevision, candidates, recommendedExperienceRefs, and reason. Return zero to six unique candidate names, zero to three unique experience identities, and a reason of at most 500 Unicode code points. Select candidate names ONLY from actual installed skills that exist in skill_candidates or are verified via skill_list/skill_search; do not invent or guess uninstalled skill names. Select recommendedExperienceRefs only from experience candidates and only when they are highly relevant to this sustained topic; selected records will be expanded as possibly relevant reference on the next main-agent turn. Return an empty recommendedExperienceRefs array otherwise. You must echo topicEpoch ${params.curation.topicEpoch} and expectedRevision ${params.curation.revision} exactly. Do not output experience bodies or any other key.`,
     xmlBlock(
       "curation_request",
       [

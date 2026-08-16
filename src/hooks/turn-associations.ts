@@ -184,6 +184,38 @@ export class TurnAssociationRegistry {
     return { ...entry.association };
   }
 
+  resolveAnonymousSession(
+    sessionIdentity: string | undefined,
+  ): TurnAssociation | undefined {
+    const normalizedSessionIdentity = sessionIdentity?.trim();
+    if (!normalizedSessionIdentity) return;
+    const distinct = new Map<string, TurnAssociation>();
+    for (const [key, entry] of this.entries) {
+      if (!key.startsWith("anonymous:")) continue;
+      const association = entry.association;
+      if (
+        entry.state !== "active" ||
+        !association ||
+        (association.sessionId !== normalizedSessionIdentity &&
+          association.sessionKey !== normalizedSessionIdentity)
+      ) {
+        continue;
+      }
+      distinct.set(
+        `${association.sessionId}\u0000${association.turnKey}`,
+        association,
+      );
+    }
+    if (distinct.size !== 1) return;
+    const association = [...distinct.values()][0];
+    for (const entry of this.entries.values()) {
+      if (sameAssociation(entry.association, association)) {
+        entry.touchedAt = this.now();
+      }
+    }
+    return { ...association };
+  }
+
   resolveSession(
     sessionIdentity: string | undefined,
   ): TurnAssociation | undefined {

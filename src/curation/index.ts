@@ -7,6 +7,7 @@ export { createCurationQueue } from "./queue.js";
 export type { CurationQueue } from "./queue.js";
 export {
   evaluateCurationCadence,
+  qualifyingTurns,
   reconcileCurationSchedules,
   validateAndCommitCuration,
 } from "./scheduler.js";

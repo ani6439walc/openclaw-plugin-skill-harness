@@ -329,6 +329,7 @@ export function createPlugin(
       api.on("after_tool_call", handlers.onAfterToolCall);
       api.on("tool_result_persist", handlers.onToolResultPersist);
       api.on("before_agent_finalize", handlers.onBeforeAgentFinalize);
+      api.on("message_sending", handlers.onMessageSending);
       api.on("agent_end", handlers.onAgentEnd);
       api.on("session_end", handlers.onSessionEnd);
       registerSkillTools(api, {
