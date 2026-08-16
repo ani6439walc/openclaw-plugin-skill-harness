@@ -348,26 +348,28 @@ export function isInternalUserTurn(params: {
 
 export function sanitizeConversationText(text: string): string {
   // Header split must run before tag matching: the header mentions the tag inline.
-  return text
-    .split(UNTRUSTED_CONTEXT_HEADER)
-    .join(" ")
-    .split(LEGACY_UNTRUSTED_CONTEXT_HEADERS[0])
-    .join(" ")
-    .split(LEGACY_UNTRUSTED_CONTEXT_HEADERS[1])
-    .join(" ")
-    .split(LEGACY_UNTRUSTED_CONTEXT_HEADERS[2])
-    .join(" ")
-    // Consume the trailing injected boundary marker with the routing block.
-    .replace(routingBlockWithOptionalBoundary(), " ")
-    .replace(/<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>/gi, " ")
-    .replace(
-      /Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi,
-      " ",
-    )
-    .replace(/Sender \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi, " ")
-    .replace(/^\s*System:\s*\[[^\]]+\]\s*Model switched to .*$/gim, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    text
+      .split(UNTRUSTED_CONTEXT_HEADER)
+      .join(" ")
+      .split(LEGACY_UNTRUSTED_CONTEXT_HEADERS[0])
+      .join(" ")
+      .split(LEGACY_UNTRUSTED_CONTEXT_HEADERS[1])
+      .join(" ")
+      .split(LEGACY_UNTRUSTED_CONTEXT_HEADERS[2])
+      .join(" ")
+      // Consume the trailing injected boundary marker with the routing block.
+      .replace(routingBlockWithOptionalBoundary(), " ")
+      .replace(/<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>/gi, " ")
+      .replace(
+        /Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi,
+        " ",
+      )
+      .replace(/Sender \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi, " ")
+      .replace(/^\s*System:\s*\[[^\]]+\]\s*Model switched to .*$/gim, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 /**
