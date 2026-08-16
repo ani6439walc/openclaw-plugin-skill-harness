@@ -142,7 +142,8 @@ function stripCodeFence(raw: string): string {
   return raw
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
+    .replace(/\s*```$/, "")
+    .trim();
 }
 
 export function parseCuratorProposal(
@@ -188,9 +189,9 @@ export function parseCuratorProposal(
   ) {
     return;
   }
-  if (Array.from(parsed.reason).length > 500) return;
-  const reason = parsed.reason.trim();
-  if (!reason) return;
+  const trimmed = parsed.reason.trim();
+  if (!trimmed) return;
+  const reason = Array.from(trimmed).slice(0, 500).join("");
 
   return {
     topicEpoch,

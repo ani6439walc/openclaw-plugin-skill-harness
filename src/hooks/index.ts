@@ -726,12 +726,12 @@ export function createHookHandlers(deps: HookDeps) {
     const contextRunId = params.contextRunId?.trim();
     if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
     const runId = eventRunId || contextRunId;
-    const association = runId
-      ? (turnAssociations.resolve(runId) ??
-        turnAssociations.resolveAnonymousSession(
-          params.sessionId ?? params.sessionKey,
-        ))
-      : turnAssociations.resolveSession(params.sessionId ?? params.sessionKey);
+    const association =
+      (runId ? turnAssociations.resolve(runId) : undefined) ??
+      turnAssociations.resolveSession(params.sessionId ?? params.sessionKey) ??
+      turnAssociations.resolveAnonymousSession(
+        params.sessionId ?? params.sessionKey,
+      );
     if (!association) return;
     if (
       (params.sessionId &&
@@ -1435,6 +1435,12 @@ export function createHookHandlers(deps: HookDeps) {
         conversation: params.conversation,
       });
     }
+    if (params.routing.association) {
+      const promptAssociation = params.routing.association;
+      setImmediate(() => {
+        void maybeScheduleCuration(promptAssociation, params.refreshedConfig);
+      });
+    }
     return toPromptBuildResult(
       buildRoutingContext({
         result,
@@ -1637,6 +1643,12 @@ export function createHookHandlers(deps: HookDeps) {
         logger.debug(
           "low-effort fastpath-only routing mode found no exact keyword match; skipping LLM-based intent analysis.",
         );
+        if (routing.association) {
+          const promptAssociation = routing.association;
+          setImmediate(() => {
+            void maybeScheduleCuration(promptAssociation, refreshedConfig);
+          });
+        }
         return toPromptBuildResult(undefined, configuredSkillsXml);
       }
 
@@ -1649,7 +1661,15 @@ export function createHookHandlers(deps: HookDeps) {
           modelId: ctx.modelId,
         },
       );
-      if (!modelRef) return toPromptBuildResult(undefined, configuredSkillsXml);
+      if (!modelRef) {
+        if (routing.association) {
+          const promptAssociation = routing.association;
+          setImmediate(() => {
+            void maybeScheduleCuration(promptAssociation, refreshedConfig);
+          });
+        }
+        return toPromptBuildResult(undefined, configuredSkillsXml);
+      }
 
       return await runPromptBuildPipeline(
         ctx,
@@ -1672,6 +1692,12 @@ export function createHookHandlers(deps: HookDeps) {
             logger.debug(
               "intention subagent failed; skipping routing context injection.",
             );
+            if (routing.association) {
+              const promptAssociation = routing.association;
+              setImmediate(() => {
+                void maybeScheduleCuration(promptAssociation, refreshedConfig);
+              });
+            }
             return toPromptBuildResult(undefined, configuredSkillsXml);
           }
 

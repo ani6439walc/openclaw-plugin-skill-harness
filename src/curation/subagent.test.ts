@@ -127,13 +127,13 @@ describe("parseCuratorProposal", () => {
     ).toBeUndefined();
   });
 
-  it("enforces reason and raw-output Unicode code-point limits", () => {
+  it("enforces reason trimming and raw-output Unicode code-point limits", () => {
     expect(
       parseCuratorProposal(proposal({ reason: "😀".repeat(500) }), expected),
     ).toBeDefined();
     expect(
       parseCuratorProposal(proposal({ reason: "😀".repeat(501) }), expected),
-    ).toBeUndefined();
+    ).toMatchObject({ reason: "😀".repeat(500) });
     expect(
       parseCuratorProposal(proposal({ reason: "   " }), expected),
     ).toBeUndefined();
@@ -148,7 +148,7 @@ describe("parseCuratorProposal", () => {
         proposal({ reason: `${" ".repeat(500)}x` }),
         expected,
       ),
-    ).toBeUndefined();
+    ).toMatchObject({ reason: "x" });
 
     const emptyCandidate = proposal({ candidates: [""] });
     const atLimit = proposal({
