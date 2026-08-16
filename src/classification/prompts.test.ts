@@ -13,7 +13,7 @@ import type {
   IntentionResult,
   RecentTurn,
 } from "../types.js";
-import { FALLBACK_INTENT_ID } from "../constants.js";
+import { FALLBACK_INTENT_ID, USER_MESSAGE_BOUNDARY } from "../constants.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
 
 function conversationContextFrom(prompt: string): string {
@@ -149,6 +149,10 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("<body>");
     expect(result).not.toContain("/private/SKILL.md");
     expect(result).not.toContain("/private/experience.md");
+    expect(result).toContain(
+      `</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}`,
+    );
+    expect(result.endsWith(USER_MESSAGE_BOUNDARY)).toBe(true);
   });
 
   it("omits empty optional blocks and renders candidate-scoped experiences only within their matching skill", () => {

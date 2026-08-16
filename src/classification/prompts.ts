@@ -2,6 +2,8 @@ import {
   FALLBACK_INTENT,
   isIntentComplexity,
   SKILL_HARNESS_PLUGIN_TAG,
+  UNTRUSTED_CONTEXT_HEADER,
+  USER_MESSAGE_BOUNDARY,
 } from "../constants.js";
 import { indentXmlLines } from "../xml-format.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
@@ -611,7 +613,11 @@ export function buildRoutingContext(params: {
       : undefined,
   ].filter((block): block is string => Boolean(block));
 
-  return taggedBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
+  const taggedContent = taggedBlock(
+    SKILL_HARNESS_PLUGIN_TAG,
+    blocks.join("\n"),
+  );
+  return `${UNTRUSTED_CONTEXT_HEADER}\n${taggedContent}\n\n${USER_MESSAGE_BOUNDARY}`;
 }
 
 function escapeXmlText(value: string | null | undefined): string {
