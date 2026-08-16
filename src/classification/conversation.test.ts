@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { UNTRUSTED_CONTEXT_HEADER } from "../constants.js";
 import {
   attachHistoricalIntents,
   extractLatestUserMessage,
@@ -43,6 +44,20 @@ describe("sanitizeConversationText", () => {
         `${UNTRUSTED_METADATA}\n\n進入 inventory 模式先 scan吧`,
       ),
     ).toBe("進入 inventory 模式先 scan吧");
+  });
+
+  it("strips the routing block and its trailing user-message boundary marker", () => {
+    expect(
+      sanitizeConversationText(
+        `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>\n<selected_intent>other</selected_intent>\n</skill_harness_plugin>\n\nUser Message:\n\n進入 inventory 模式先 scan吧`,
+      ),
+    ).toBe("進入 inventory 模式先 scan吧");
+  });
+
+  it("preserves standalone User Message: text not attached to the routing block", () => {
+    expect(sanitizeConversationText("請解釋 User Message: 這個詞")).toBe(
+      "請解釋 User Message: 這個詞",
+    );
   });
 });
 

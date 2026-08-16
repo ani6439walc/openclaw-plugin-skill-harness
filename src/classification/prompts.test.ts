@@ -149,6 +149,8 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("<body>");
     expect(result).not.toContain("/private/SKILL.md");
     expect(result).not.toContain("/private/experience.md");
+    expect(result).toContain("</skill_harness_plugin>\n\nUser Message:");
+    expect(result.endsWith("User Message:")).toBe(true);
   });
 
   it("omits empty optional blocks and renders candidate-scoped experiences only within their matching skill", () => {
