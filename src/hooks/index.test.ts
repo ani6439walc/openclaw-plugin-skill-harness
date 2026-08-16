@@ -23,6 +23,7 @@ import { resolvePackageRoot } from "../file-utils.js";
 import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness";
 import { TurnAssociationRegistry } from "./turn-associations.js";
 import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
+import { USER_MESSAGE_BOUNDARY } from "../constants.js";
 
 vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
   emitAgentEvent: vi.fn(),
@@ -2662,9 +2663,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       "<intent_guidance>Reply warmly.</intent_guidance>",
     );
     expect(result?.prependContext).toContain(
-      "</skill_harness_plugin>\n\nUser Message:",
+      `</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}`,
     );
-    expect(result?.prependContext?.endsWith("User Message:")).toBe(true);
+    expect(result?.prependContext?.endsWith(USER_MESSAGE_BOUNDARY)).toBe(true);
     expect(result?.prependContext).not.toContain("<task_complexity>");
     expect(result?.prependContext).not.toContain("## Guidelines");
     expect(result?.prependContext).not.toContain("## Instruction Hint");
