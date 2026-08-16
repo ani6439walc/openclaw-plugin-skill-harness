@@ -205,4 +205,26 @@ describe("TurnAssociationRegistry", () => {
     registry.removeSession("session-a");
     expect(registry.resolveSession("session-a")).toBeUndefined();
   });
+
+  it("resolves consecutive turns in the same session without interference from terminal entries", () => {
+    const registry = new TurnAssociationRegistry();
+    const firstReservation = registry.reserveAnonymous();
+    if (firstReservation.status !== "reserved")
+      throw new Error("expected reservation");
+    const turnA = { sessionId: "session-a", turnKey: "turn-1" };
+    expect(registry.bindAnonymous(firstReservation.token, turnA)).toBe("bound");
+    expect(registry.resolveSession("session-a")).toEqual(turnA);
+
+    registry.markAssociationTerminal(turnA);
+    expect(registry.resolveSession("session-a")).toBeUndefined();
+
+    const secondReservation = registry.reserveAnonymous();
+    if (secondReservation.status !== "reserved")
+      throw new Error("expected reservation");
+    const turnB = { sessionId: "session-a", turnKey: "turn-2" };
+    expect(registry.bindAnonymous(secondReservation.token, turnB)).toBe(
+      "bound",
+    );
+    expect(registry.resolveSession("session-a")).toEqual(turnB);
+  });
 });

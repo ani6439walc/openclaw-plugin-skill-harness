@@ -90,6 +90,7 @@ import {
   runCurationSubagent,
   sampleWithoutReplacement,
   selectColdStartCandidates,
+  selectExplorationCandidates,
   validateAndCommitCuration,
   type CuratedSkillCandidate,
 } from "../curation/index.js";
@@ -2513,18 +2514,40 @@ export function createHookHandlers(deps: HookDeps) {
       api,
       agentId: session.agentId,
       bundledSkillsDir,
-      usageStats: {},
+      intents: catalog.get(),
     });
     const matchedIntent = findIntentDefinition(catalog, expected.intentId);
-    const directSkills = matchedIntent
-      ? await resolveAvailableSkills({
-          api,
-          agentId: session.agentId,
-          bundledSkillsDir,
-          skillNames: matchedIntent.definition.skills ?? [],
-        })
-      : [];
-    if (directSkills.length === 0) {
+    const directSkillNames = new Set(
+      (matchedIntent?.definition.skills ?? [])
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const directSkills =
+      directSkillNames.size > 0
+        ? visibleSkills.filter((skill) =>
+            directSkillNames.has(skill.name.toLowerCase()),
+          )
+        : [];
+
+    const currentDomain = matchedIntent?.definition.domain
+      ?.trim()
+      .toLowerCase();
+    const allDomainSkills =
+      currentDomain && directSkills.length === 0
+        ? visibleSkills.filter((skill) =>
+            skill.domains?.some((d) => d.toLowerCase() === currentDomain),
+          )
+        : [];
+    const domainSkills = selectExplorationCandidates(allDomainSkills, 15);
+
+    const seedSkills =
+      directSkills.length > 0
+        ? directSkills
+        : domainSkills.length > 0
+          ? domainSkills
+          : selectExplorationCandidates(visibleSkills, 10);
+
+    if (seedSkills.length === 0) {
       await tracker.finishCurationSchedule({
         sessionId: identity.sessionId,
         turnKey: identity.schedulingTurnKey,
@@ -2548,10 +2571,10 @@ export function createHookHandlers(deps: HookDeps) {
         dataRoot: deps.dataRoot,
         curation: expected,
         conversation: conversationTurns,
-        candidates: directSkills,
+        candidates: seedSkills,
         experienceIdentities: expected.recommendedExperienceRefs,
         experienceCandidates: activeExperienceCatalog
-          .listForSkills(directSkills.map((skill) => skill.name))
+          .listForSkills(seedSkills.map((skill) => skill.name))
           .map(({ identity, keywords }) => ({ identity, keywords })),
       });
     } catch (error) {

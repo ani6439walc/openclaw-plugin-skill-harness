@@ -60,7 +60,10 @@ export function evaluateCurationCadence(input: {
   if (hasPending) return { eligible: false };
 
   for (
-    let boundary = input.curation.completedTurnCursor + 3;
+    let boundary =
+      input.curation.completedTurnCursor === 0
+        ? 1
+        : input.curation.completedTurnCursor + 3;
     boundary <= turns.length;
     boundary += 3
   ) {
@@ -207,7 +210,7 @@ export async function validateAndCommitCuration(params: {
     Array.from(params.proposal.reason).length > 500 ||
     !Number.isInteger(params.completedTurnCursor) ||
     params.completedTurnCursor <= params.expected.completedTurnCursor ||
-    params.completedTurnCursor % 3 !== 0 ||
+    params.completedTurnCursor % 3 !== 1 ||
     verifiedCompletedTurnCursor !== params.completedTurnCursor ||
     !candidates ||
     !recommendedExperienceRefs
@@ -224,15 +227,11 @@ export async function validateAndCommitCuration(params: {
       ambiguousVisibleIdentities.add(canonical);
     else visibleByIdentity.set(canonical, skill);
   }
-  const directIdentities = new Set(
-    params.directSkills.map((skill) => canonicalIdentity(skill.name)),
-  );
   if (
     candidates.some(
       (candidate) =>
         !visibleByIdentity.has(candidate) ||
-        ambiguousVisibleIdentities.has(candidate) ||
-        !directIdentities.has(candidate),
+        ambiguousVisibleIdentities.has(candidate),
     )
   ) {
     return finish("failed");

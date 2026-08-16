@@ -100,13 +100,13 @@ function accepted(...turnKeys: string[]): ReadonlySet<string> {
 
 describe("evaluateCurationCadence", () => {
   it.each([
-    { count: 2, eligible: false, schedulingTurnKey: undefined },
-    { count: 3, eligible: true, schedulingTurnKey: "turn-3" },
-    { count: 4, eligible: true, schedulingTurnKey: "turn-3" },
-    { count: 5, eligible: true, schedulingTurnKey: "turn-3" },
-    { count: 6, eligible: true, schedulingTurnKey: "turn-3" },
+    { count: 0, eligible: false, schedulingTurnKey: undefined },
+    { count: 1, eligible: true, schedulingTurnKey: "turn-1" },
+    { count: 2, eligible: true, schedulingTurnKey: "turn-1" },
+    { count: 3, eligible: true, schedulingTurnKey: "turn-1" },
+    { count: 4, eligible: true, schedulingTurnKey: "turn-1" },
   ])(
-    "selects the earliest unattempted three-turn boundary at count $count",
+    "selects the earliest unattempted boundary starting at turn 1 at count $count",
     (fixture) => {
       const finalizedTurns = Array.from({ length: fixture.count }, (_, index) =>
         turn(index + 1),
@@ -125,24 +125,22 @@ describe("evaluateCurationCadence", () => {
 
   it("excludes errored, unfinished, prior-epoch, and legacy turns", () => {
     const finalizedTurns = [
-      turn(1),
-      turn(2, { error: "failed" }),
-      turn(3, { topicEpoch: 0 }),
-      turn(4, { finalized: false }),
-      turn(5, { legacy: true }),
-      turn(6),
-      turn(7),
+      turn(1, { error: "failed" }),
+      turn(2, { topicEpoch: 0 }),
+      turn(3, { finalized: false }),
+      turn(4, { legacy: true }),
+      turn(5),
     ];
 
     expect(
       evaluateCurationCadence({ curation: CURATION, finalizedTurns }),
-    ).toEqual({ eligible: true, schedulingTurnKey: "turn-7" });
+    ).toEqual({ eligible: true, schedulingTurnKey: "turn-5" });
   });
 
   it("defers later boundaries while one schedule is pending", () => {
     const finalizedTurns = Array.from({ length: 6 }, (_, index) =>
       turn(index + 1, {
-        schedule: index === 2 ? schedule("turn-3", "pending") : undefined,
+        schedule: index === 0 ? schedule("turn-1", "pending") : undefined,
       }),
     );
 
@@ -152,34 +150,32 @@ describe("evaluateCurationCadence", () => {
   });
 
   it.each(["failed", "obsolete"] as const)(
-    "moves to turn six after turn three is %s",
+    "moves to turn four after turn one is %s",
     (status) => {
       const finalizedTurns = Array.from({ length: 6 }, (_, index) =>
         turn(index + 1, {
-          schedule: index === 2 ? schedule("turn-3", status) : undefined,
+          schedule: index === 0 ? schedule("turn-1", status) : undefined,
         }),
       );
 
       expect(
         evaluateCurationCadence({ curation: CURATION, finalizedTurns }),
-      ).toEqual({ eligible: true, schedulingTurnKey: "turn-6" });
+      ).toEqual({ eligible: true, schedulingTurnKey: "turn-4" });
     },
   );
 
   it("starts after the completed cursor and requires the current revision", () => {
-    const curation = { ...CURATION, revision: 1, completedTurnCursor: 3 };
+    const curation = { ...CURATION, revision: 1, completedTurnCursor: 1 };
     const finalizedTurns = [
-      turn(1),
-      turn(2),
-      turn(3, { schedule: schedule("turn-3", "completed") }),
+      turn(1, { schedule: schedule("turn-1", "completed") }),
+      turn(2, { revision: 1 }),
+      turn(3, { revision: 1 }),
       turn(4, { revision: 1 }),
-      turn(5, { revision: 1 }),
-      turn(6, { revision: 1 }),
     ];
 
     expect(evaluateCurationCadence({ curation, finalizedTurns })).toEqual({
       eligible: true,
-      schedulingTurnKey: "turn-6",
+      schedulingTurnKey: "turn-4",
     });
   });
 });
@@ -203,7 +199,7 @@ describe("reconcileCurationSchedules", () => {
     ).toEqual([
       {
         sessionId: "session-a",
-        turnKey: "turn-3",
+        turnKey: "turn-1",
         expectedTopicEpoch: 1,
         expectedRevision: 0,
       },
@@ -211,44 +207,36 @@ describe("reconcileCurationSchedules", () => {
   });
 
   it("does not count a terminal turn that Stats never accepted", () => {
-    const turns = [turn(1), turn(2), turn(3), turn(4)];
+    const turns = [turn(1), turn(2)];
 
     expect(
       reconcileCurationSchedules({
         sessions: [session(turns)],
-        acceptedEventIds: accepted("turn-1", "turn-2", "turn-4"),
+        acceptedEventIds: accepted("turn-2"),
       }),
-    ).toEqual([expect.objectContaining({ turnKey: "turn-4" })]);
+    ).toEqual([expect.objectContaining({ turnKey: "turn-2" })]);
   });
 
   it("still defers reconciliation for a pending schedule outside the accepted set", () => {
     const turns = [
-      turn(1),
+      turn(1, { schedule: schedule("turn-1", "pending") }),
       turn(2),
-      turn(3, { schedule: schedule("turn-3", "pending") }),
+      turn(3),
       turn(4),
-      turn(5),
-      turn(6),
     ];
 
     expect(
       reconcileCurationSchedules({
         sessions: [session(turns)],
-        acceptedEventIds: accepted(
-          "turn-1",
-          "turn-2",
-          "turn-4",
-          "turn-5",
-          "turn-6",
-        ),
+        acceptedEventIds: accepted("turn-2", "turn-3", "turn-4"),
       }),
     ).toEqual([]);
   });
 
-  it("reconciles turn six after a terminal failed turn-three schedule", () => {
+  it("reconciles turn four after a terminal failed turn-one schedule", () => {
     const turns = Array.from({ length: 6 }, (_, index) =>
       turn(index + 1, {
-        schedule: index === 2 ? schedule("turn-3", "failed") : undefined,
+        schedule: index === 0 ? schedule("turn-1", "failed") : undefined,
       }),
     );
 
@@ -266,14 +254,14 @@ describe("reconcileCurationSchedules", () => {
       }),
     ).toEqual([
       expect.objectContaining({
-        turnKey: "turn-6",
+        turnKey: "turn-4",
         expectedRevision: 0,
       }),
     ]);
   });
 
   it("uses each session identity and preserves input session order", () => {
-    const turns = [turn(1), turn(2), turn(3)];
+    const turns = [turn(1)];
 
     expect(
       reconcileCurationSchedules({
@@ -283,16 +271,12 @@ describe("reconcileCurationSchedules", () => {
         ],
         acceptedEventIds: new Set([
           "session-b:turn:turn-1",
-          "session-b:turn:turn-2",
-          "session-b:turn:turn-3",
           "session-a:turn:turn-1",
-          "session-a:turn:turn-2",
-          "session-a:turn:turn-3",
         ]),
       }),
     ).toEqual([
-      expect.objectContaining({ sessionId: "session-b", turnKey: "turn-3" }),
-      expect.objectContaining({ sessionId: "session-a", turnKey: "turn-3" }),
+      expect.objectContaining({ sessionId: "session-b", turnKey: "turn-1" }),
+      expect.objectContaining({ sessionId: "session-a", turnKey: "turn-1" }),
     ]);
   });
 });
@@ -325,7 +309,7 @@ describe("validateAndCommitCuration", () => {
   };
   const reservation = {
     sessionId: "session-a",
-    schedule: schedule("turn-3", "pending"),
+    schedule: schedule("turn-1", "pending"),
   } as const;
   const proposal: CuratorProposal = {
     topicEpoch: 1,
@@ -373,8 +357,8 @@ describe("validateAndCommitCuration", () => {
 
   function evidence() {
     return {
-      finalizedTurns: [turn(1), turn(2), turn(3)],
-      acceptedEventIds: accepted("turn-1", "turn-2", "turn-3"),
+      finalizedTurns: [turn(1)],
+      acceptedEventIds: accepted("turn-1"),
     };
   }
 
@@ -411,7 +395,7 @@ describe("validateAndCommitCuration", () => {
         proposal,
         visibleSkills,
         experienceCatalog: experienceCatalog(),
-        completedTurnCursor: 3,
+        completedTurnCursor: 1,
         now: "2026-08-13T00:02:00.000Z",
         commit,
         finish,
@@ -420,7 +404,7 @@ describe("validateAndCommitCuration", () => {
 
     expect(commit).toHaveBeenCalledWith({
       sessionId: "session-a",
-      schedulingTurnKey: "turn-3",
+      schedulingTurnKey: "turn-1",
       expectedTopicEpoch: 1,
       expectedRevision: 0,
       expectedIntentId: "coding",
@@ -429,13 +413,13 @@ describe("validateAndCommitCuration", () => {
         { name: "Gamma", provenance: "curator-added" },
       ],
       recommendedExperienceRefs: ["beta/verify"],
-      completedTurnCursor: 3,
+      completedTurnCursor: 1,
       now: "2026-08-13T00:02:00.000Z",
     });
     expect(finish).not.toHaveBeenCalled();
   });
 
-  it("rejects a visible candidate that is not a direct skill of the matched intent", async () => {
+  it("accepts a visible candidate discovered by curator even if absent from direct skills", async () => {
     const { commit, finish } = deps();
 
     await expect(
@@ -446,17 +430,22 @@ describe("validateAndCommitCuration", () => {
         visibleSkills,
         directSkills: visibleSkills.slice(0, 2),
         experienceCatalog: experienceCatalog(),
-        completedTurnCursor: 3,
+        completedTurnCursor: 1,
         now: "2026-08-13T00:02:00.000Z",
         commit,
         finish,
       }),
-    ).resolves.toMatchObject({ status: "stale" });
+    ).resolves.toMatchObject({ status: "applied" });
 
-    expect(commit).not.toHaveBeenCalled();
-    expect(finish).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "failed" }),
+    expect(commit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidates: [
+          { name: "Beta", provenance: "curator-kept" },
+          { name: "Gamma", provenance: "curator-added" },
+        ],
+      }),
     );
+    expect(finish).not.toHaveBeenCalled();
   });
 
   it("rejects a completed cursor that does not identify the accepted scheduling turn", async () => {
@@ -469,9 +458,9 @@ describe("validateAndCommitCuration", () => {
         proposal,
         visibleSkills,
         experienceCatalog: experienceCatalog(),
-        completedTurnCursor: 6,
-        finalizedTurns: [turn(1), turn(2), turn(3)],
-        acceptedEventIds: accepted("turn-1", "turn-2", "turn-3"),
+        completedTurnCursor: 4,
+        finalizedTurns: [turn(1)],
+        acceptedEventIds: accepted("turn-1"),
         now: "2026-08-13T00:02:00.000Z",
         commit,
         finish,
@@ -484,11 +473,11 @@ describe("validateAndCommitCuration", () => {
     );
   });
 
-  it("accepts the verified turn-six cursor after an earlier boundary finished", async () => {
+  it("accepts the verified turn-four cursor after an earlier boundary finished", async () => {
     const { commit, finish } = deps();
-    const finalizedTurns = Array.from({ length: 6 }, (_, index) =>
+    const finalizedTurns = Array.from({ length: 4 }, (_, index) =>
       turn(index + 1, {
-        schedule: index === 2 ? schedule("turn-3", "failed") : undefined,
+        schedule: index === 0 ? schedule("turn-1", "failed") : undefined,
       }),
     );
 
@@ -496,22 +485,15 @@ describe("validateAndCommitCuration", () => {
       validateAndCommitCuration({
         schedule: {
           sessionId: "session-a",
-          schedule: schedule("turn-6", "pending"),
+          schedule: schedule("turn-4", "pending"),
         },
         expected,
         proposal,
         visibleSkills,
         experienceCatalog: experienceCatalog(),
-        completedTurnCursor: 6,
+        completedTurnCursor: 4,
         finalizedTurns,
-        acceptedEventIds: accepted(
-          "turn-1",
-          "turn-2",
-          "turn-3",
-          "turn-4",
-          "turn-5",
-          "turn-6",
-        ),
+        acceptedEventIds: accepted("turn-1", "turn-2", "turn-3", "turn-4"),
         now: "2026-08-13T00:02:00.000Z",
         commit,
         finish,
@@ -520,8 +502,8 @@ describe("validateAndCommitCuration", () => {
 
     expect(commit).toHaveBeenCalledWith(
       expect.objectContaining({
-        schedulingTurnKey: "turn-6",
-        completedTurnCursor: 6,
+        schedulingTurnKey: "turn-4",
+        completedTurnCursor: 4,
       }),
     );
     expect(finish).not.toHaveBeenCalled();
@@ -540,7 +522,7 @@ describe("validateAndCommitCuration", () => {
       },
       visibleSkills,
       experienceCatalog: experienceCatalog(),
-      completedTurnCursor: 3,
+      completedTurnCursor: 1,
       now: "2026-08-13T00:02:00.000Z",
       commit,
       finish,
@@ -552,7 +534,7 @@ describe("validateAndCommitCuration", () => {
           { name: "Alpha", provenance: "curator-kept" },
           { name: "Beta", provenance: "curator-kept" },
         ],
-        completedTurnCursor: 3,
+        completedTurnCursor: 1,
       }),
     );
   });
@@ -573,7 +555,7 @@ describe("validateAndCommitCuration", () => {
       },
       visibleSkills,
       experienceCatalog: experienceCatalog(),
-      completedTurnCursor: 3,
+      completedTurnCursor: 1,
       now: "2026-08-13T00:02:00.000Z",
       commit,
       finish,
@@ -586,13 +568,13 @@ describe("validateAndCommitCuration", () => {
     );
   });
 
-  it.each([0, 3, 4, 3.5])(
+  it.each([0, 1, 2, 3, 1.5])(
     "rejects invalid completed cursor %s before CAS",
     async (completedTurnCursor) => {
       const { commit, finish } = deps();
       const current =
-        completedTurnCursor === 3
-          ? { ...expected, completedTurnCursor: 3 }
+        completedTurnCursor === 1
+          ? { ...expected, completedTurnCursor: 1 }
           : expected;
 
       await expect(
@@ -653,7 +635,7 @@ describe("validateAndCommitCuration", () => {
         proposal: fixture.proposal,
         visibleSkills,
         experienceCatalog: experienceCatalog(),
-        completedTurnCursor: 3,
+        completedTurnCursor: 1,
         now: "2026-08-13T00:02:00.000Z",
         commit,
         finish,
@@ -663,7 +645,7 @@ describe("validateAndCommitCuration", () => {
     expect(commit).not.toHaveBeenCalled();
     expect(finish).toHaveBeenCalledWith({
       sessionId: "session-a",
-      turnKey: "turn-3",
+      turnKey: "turn-1",
       expectedTopicEpoch: 1,
       expectedRevision: 0,
       outcome: "failed",
@@ -681,7 +663,7 @@ describe("validateAndCommitCuration", () => {
         proposal,
         visibleSkills,
         experienceCatalog: experienceCatalog(),
-        completedTurnCursor: 3,
+        completedTurnCursor: 1,
         now: "2026-08-13T00:02:00.000Z",
         commit,
         finish,
@@ -705,7 +687,7 @@ describe("validateAndCommitCuration", () => {
         proposal,
         visibleSkills,
         experienceCatalog: experienceCatalog(),
-        completedTurnCursor: 3,
+        completedTurnCursor: 1,
         now: "2026-08-13T00:02:00.000Z",
         commit,
         finish,
@@ -725,7 +707,7 @@ describe("validateAndCommitCuration", () => {
         proposal,
         visibleSkills,
         experienceCatalog: experienceCatalog(),
-        completedTurnCursor: 3,
+        completedTurnCursor: 1,
         now: "2026-08-13T00:02:00.000Z",
         commit,
         finish,
@@ -748,7 +730,7 @@ describe("validateAndCommitCuration", () => {
         proposal,
         visibleSkills,
         experienceCatalog: experienceCatalog(),
-        completedTurnCursor: 3,
+        completedTurnCursor: 1,
         now: "2026-08-13T00:02:00.000Z",
         commit,
         finish,

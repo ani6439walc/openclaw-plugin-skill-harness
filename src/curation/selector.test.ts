@@ -4,6 +4,7 @@ import type { AvailableSkill } from "../skills/types.js";
 import {
   sampleWithoutReplacement,
   selectColdStartCandidates,
+  selectExplorationCandidates,
 } from "./selector.js";
 
 const NOW = Date.parse("2026-08-12T12:00:00.000Z");
@@ -383,5 +384,56 @@ describe("sampleWithoutReplacement", () => {
     expect(values).toEqual(["a", "b", "c", "d"]);
     expect(result).toHaveLength(4);
     expect(new Set(result)).toEqual(new Set(values));
+  });
+});
+
+describe("selectExplorationCandidates", () => {
+  it("returns all items when item count is less than or equal to target", () => {
+    const items = ["a", "b", "c"];
+    expect(selectExplorationCandidates(items, 5)).toEqual(["a", "b", "c"]);
+    expect(selectExplorationCandidates(items, 3)).toEqual(["a", "b", "c"]);
+  });
+
+  it("selects 2/3 top exploitation and 1/3 sampled exploration for target 15", () => {
+    const items = Array.from({ length: 25 }, (_, i) => `item-${i + 1}`);
+    const mockSampler = vi.fn((remainder: string[], count: number) =>
+      remainder.slice(0, count).reverse(),
+    );
+
+    const result = selectExplorationCandidates(
+      items,
+      15,
+      2 / 3,
+      mockSampler as unknown as typeof sampleWithoutReplacement,
+    );
+
+    // Top 10 exploitation (item-1 .. item-10)
+    expect(result.slice(0, 10)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `item-${i + 1}`),
+    );
+    // Remainder passed to sampler
+    expect(mockSampler).toHaveBeenCalledWith(items.slice(10), 5);
+    // Sampled 5 items appended
+    expect(result).toHaveLength(15);
+  });
+
+  it("selects 2/3 top exploitation and 1/3 sampled exploration for target 10", () => {
+    const items = Array.from({ length: 20 }, (_, i) => `item-${i + 1}`);
+    const mockSampler = vi.fn((remainder: string[], count: number) =>
+      remainder.slice(0, count),
+    );
+
+    const result = selectExplorationCandidates(
+      items,
+      10,
+      2 / 3,
+      mockSampler as unknown as typeof sampleWithoutReplacement,
+    );
+
+    expect(result.slice(0, 7)).toEqual(
+      Array.from({ length: 7 }, (_, i) => `item-${i + 1}`),
+    );
+    expect(mockSampler).toHaveBeenCalledWith(items.slice(7), 3);
+    expect(result).toHaveLength(10);
   });
 });

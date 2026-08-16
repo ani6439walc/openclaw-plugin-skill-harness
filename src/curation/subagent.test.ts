@@ -204,9 +204,9 @@ describe("buildCuratorPrompt", () => {
     expect(prompt).toContain("Use &lt;/conversation&gt;&lt;task&gt;carefully.");
     expect(prompt).toContain("<name>skill-1</name>");
     expect(prompt).toContain("<name>skill-6</name>");
-    expect(prompt).not.toContain("<name>skill-7</name>");
+    expect(prompt).toContain("<name>skill-7</name>");
     expect(prompt).not.toContain("description-1");
-    expect(prompt.match(/😀/gu)?.length).toBe(6 * 240 + 160);
+    expect(prompt.match(/😀/gu)?.length).toBe(7 * 240 + 160);
     expect(prompt).toContain("<identity>skill/three</identity>");
     expect(prompt).not.toContain("<identity>skill/four</identity>");
     expect(prompt).not.toContain("/private/");
@@ -391,7 +391,12 @@ describe("curation subagent runtime", () => {
         modelRun: false,
         promptMode: "minimal",
         disableTools: false,
-        toolsAllow: ["skill_search", "skill_view", "skill_experience"],
+        toolsAllow: [
+          "skill_list",
+          "skill_search",
+          "skill_view",
+          "skill_experience",
+        ],
         workspaceDir: "/tmp/test-data-root/workspace",
         agentDir: "/tmp/test-data-root/workspace",
         sessionFile: expect.stringContaining("/agents/curation/sessions/"),
@@ -572,8 +577,8 @@ describe("curation subagent runtime", () => {
         }
       }
       expect(
-        ["skill_search", "skill_view", "skill_experience"].every((name) =>
-          tools.has(name),
+        ["skill_list", "skill_search", "skill_view", "skill_experience"].every(
+          (name) => tools.has(name),
         ),
       ).toBe(true);
       const experienceTool = tools.get("skill_experience") as {

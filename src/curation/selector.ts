@@ -159,3 +159,18 @@ export function selectColdStartCandidates(params: {
     selected: [...exploitation, ...exploration],
   };
 }
+
+export function selectExplorationCandidates<T>(
+  items: readonly T[],
+  targetCount: number,
+  ratio = 2 / 3,
+  sampler: SampleWithoutReplacement = sampleWithoutReplacement,
+): T[] {
+  if (items.length <= targetCount) return [...items];
+  const exploitationCount = Math.round(targetCount * ratio);
+  const explorationCount = targetCount - exploitationCount;
+  const top = items.slice(0, exploitationCount);
+  const remainder = items.slice(exploitationCount);
+  const sampled = sampler(remainder, explorationCount);
+  return [...top, ...sampled];
+}

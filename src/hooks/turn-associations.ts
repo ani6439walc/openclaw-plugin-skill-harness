@@ -193,7 +193,7 @@ export class TurnAssociationRegistry {
     for (const entry of this.entries.values()) {
       const association = entry.association;
       if (
-        (entry.state !== "active" && entry.state !== "terminal") ||
+        entry.state !== "active" ||
         !association ||
         (association.sessionId !== normalizedSessionIdentity &&
           association.sessionKey !== normalizedSessionIdentity)
