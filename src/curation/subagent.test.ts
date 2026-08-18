@@ -193,6 +193,8 @@ describe("buildCuratorPrompt", () => {
       "echo topicEpoch 3 and expectedRevision 7 exactly",
     );
     expect(prompt).toContain("Do not output experience bodies");
+    expect(prompt).toContain("Start with `{` and end with `}`");
+    expect(prompt).toContain("Do not output code fences");
   });
 
   it("escapes bounded candidate metadata and experience identities without paths", () => {

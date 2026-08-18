@@ -587,6 +587,7 @@ describe("skill catalog", () => {
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
     const bundled = path.join(tmp, "bundled");
+    const homeDir = path.join(tmp, "home");
 
     writeSkill(
       path.join(workspace, "skills"),
@@ -614,6 +615,7 @@ describe("skill catalog", () => {
         agentId: "main",
         bundledSkillsDir: bundled,
         domain: "coding",
+        homeDir,
         intents: [
           {
             id: "diagram",

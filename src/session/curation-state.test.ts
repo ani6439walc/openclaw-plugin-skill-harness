@@ -68,13 +68,13 @@ describe("SessionTracker curation state", () => {
       status: "reused",
     },
     {
-      name: "missing or untrusted topic evidence",
+      name: "same intent when topic evidence flags are false",
       nextIntent: "coding",
       reason: undefined,
       sameTopic: false,
       trustworthy: false,
-      epoch: 2,
-      status: "applied",
+      epoch: 1,
+      status: "reused",
     },
   ])("resolves monotonic epoch for $name", async (fixture) => {
     await prepare("epoch-session", "run-a");

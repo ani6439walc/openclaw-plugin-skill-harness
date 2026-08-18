@@ -600,6 +600,7 @@ export async function resolveDomainSkills(params: {
   bundledSkillsDir?: string;
   cacheTtlMs?: number;
   nowMs?: number;
+  homeDir?: string;
 }): Promise<AvailableSkill[]> {
   const domain = (params.domain ?? "").trim().toLowerCase();
   if (!domain) return [];
@@ -620,6 +621,7 @@ export async function resolveDomainSkills(params: {
     bundledSkillsDir: params.bundledSkillsDir,
     cacheTtlMs: params.cacheTtlMs,
     nowMs: params.nowMs,
+    homeDir: params.homeDir,
   });
   if (skills.length === 0) return [];
 

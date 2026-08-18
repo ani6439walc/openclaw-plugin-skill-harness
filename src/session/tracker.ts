@@ -1119,12 +1119,7 @@ export class SessionTracker {
           const recognizedChange =
             params.topicChangeReason !== undefined &&
             TOPIC_CHANGE_REASONS.has(params.topicChangeReason);
-          if (
-            existing &&
-            existing.intentId === intentId &&
-            !recognizedChange &&
-            (params.trustworthySameTopic || params.trustworthyTopicEvidence)
-          ) {
+          if (existing && existing.intentId === intentId && !recognizedChange) {
             return {
               result: {
                 status: "reused" as const,
