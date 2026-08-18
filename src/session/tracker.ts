@@ -14,6 +14,7 @@ import type {
   CurationScheduleReservation,
   CurationWriteResult,
   SessionCurationRecord,
+  TurnCurationResult,
   TurnRecommendationState,
 } from "../curation/types.js";
 import matter from "gray-matter";
@@ -98,6 +99,7 @@ export interface SessionState {
   turnKey?: string;
   input?: string;
   intent?: IntentState;
+  curationResult?: TurnCurationResult;
   skillsUsed?: SkillRecord[];
   toolCalls?: Array<{
     toolCallId?: string;
@@ -536,6 +538,9 @@ function mergeSessionState(
   if (data.skillsUsed) {
     current.skillsUsed = mergeUniqueSkills(current.skillsUsed, data.skillsUsed);
   }
+  if (data.curationResult !== undefined) {
+    current.curationResult = structuredClone(data.curationResult);
+  }
 }
 
 export class SessionTracker {
@@ -937,6 +942,7 @@ export class SessionTracker {
     candidates: readonly CuratedSkillCandidate[];
     recommendedExperienceRefs: readonly string[];
     completedTurnCursor: number;
+    reason?: string;
     now: string;
   }): Promise<CurationWriteResult> {
     try {
@@ -1006,6 +1012,15 @@ export class SessionTracker {
           curation.completedTurnCursor = params.completedTurnCursor;
           schedule.status = "completed";
           schedule.finishedAt = params.now;
+          matches[0].curationResult = {
+            status: "applied",
+            topicEpoch: curation.topicEpoch,
+            revision: curation.revision,
+            candidates: structuredClone([...params.candidates]),
+            recommendedExperienceRefs: [...params.recommendedExperienceRefs],
+            reason: params.reason ?? "",
+            finishedAt: params.now,
+          };
           return {
             result: {
               status: "applied" as const,

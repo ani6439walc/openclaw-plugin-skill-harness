@@ -45,3 +45,13 @@ export type CurationWriteResult =
   | { status: "reused"; curation: SessionCurationRecord }
   | { status: "stale"; curation?: SessionCurationRecord }
   | { status: "retryable-failure" };
+
+export interface TurnCurationResult {
+  status: "applied";
+  topicEpoch: number;
+  revision: number;
+  candidates: CuratedSkillCandidate[];
+  recommendedExperienceRefs: string[];
+  reason: string;
+  finishedAt: string;
+}

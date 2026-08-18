@@ -23,6 +23,7 @@ export type {
   CuratedSkillCandidate,
   PendingCurationSchedule,
   SessionCurationRecord,
+  TurnCurationResult,
   TurnRecommendationState,
 } from "./types.js";
 export { getCurationModelRef, runCurationSubagent } from "./subagent.js";

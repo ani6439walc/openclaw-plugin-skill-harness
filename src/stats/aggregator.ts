@@ -3,6 +3,7 @@ import path from "node:path";
 import { logger } from "../../api.js";
 import { resolveTurnEventId } from "../session/index.js";
 import type { SessionState } from "../session/index.js";
+import type { TurnCurationResult } from "../curation/types.js";
 import type { IntentCatalogEntry } from "../types.js";
 import {
   pluginRoot,
@@ -94,7 +95,22 @@ type DailyBucket = DailyBucketV3 & {
   intentRouting: Record<string, DailyRoutingCounts>;
   skillRouting: Record<string, DailySkillRouting>;
   toolErrors: CountMap;
+  curation?: DailyCurationStats;
 };
+
+export interface DailyCurationStats {
+  appliedRevisions: number;
+  candidatesKept: number;
+  candidatesAdded: number;
+}
+
+export interface CurationStats {
+  appliedRevisions: number;
+  candidatesKept: number;
+  candidatesAdded: number;
+  recommendedExperiencesSelected: number;
+  lastAppliedAt?: string;
+}
 
 type ProjectionStats = DailyProjectionCounts & {
   projectedRate: number;
@@ -164,6 +180,7 @@ type Stats = {
     averageConfidence: number;
     otherTurns: number;
     otherRate: number;
+    curationAppliedCount?: number;
   };
   intents: Record<
     string,
@@ -208,6 +225,7 @@ type Stats = {
   >;
   projection: ProjectionStats;
   skillInventory: SkillInventoryStats;
+  curation?: CurationStats;
   daily: Record<string, DailyBucket>;
   processedEvents: Record<string, string>;
 };
@@ -293,6 +311,15 @@ function emptyProjectionStats(): ProjectionStats {
   };
 }
 
+function emptyCurationStats(): CurationStats {
+  return {
+    appliedRevisions: 0,
+    candidatesKept: 0,
+    candidatesAdded: 0,
+    recommendedExperiencesSelected: 0,
+  };
+}
+
 function createStats(nowIso: string): Stats {
   return {
     schemaVersion: 4,
@@ -310,6 +337,7 @@ function createStats(nowIso: string): Stats {
       averageConfidence: 0,
       otherTurns: 0,
       otherRate: 0,
+      curationAppliedCount: 0,
     },
     intents: {},
     skills: {},
@@ -317,6 +345,7 @@ function createStats(nowIso: string): Stats {
     tools: {},
     projection: emptyProjectionStats(),
     skillInventory: { startedAt: nowIso, agents: {} },
+    curation: emptyCurationStats(),
     daily: {},
     processedEvents: {},
   };
@@ -356,6 +385,11 @@ function createDailyBucket(): DailyBucket {
     intentRouting: {},
     skillRouting: {},
     toolErrors: {},
+    curation: {
+      appliedRevisions: 0,
+      candidatesKept: 0,
+      candidatesAdded: 0,
+    },
   };
 }
 
@@ -674,6 +708,17 @@ function isLatencyHistogram(value: unknown): value is LatencyHistogram {
   );
 }
 
+function isDailyCurationStats(value: unknown): value is DailyCurationStats {
+  return (
+    isRecord(value) &&
+    hasNonNegativeIntegers(value, [
+      "appliedRevisions",
+      "candidatesKept",
+      "candidatesAdded",
+    ])
+  );
+}
+
 function isDailyBucket(value: unknown): value is DailyBucket {
   if (!isDailyBucketV3(value) || !isRecord(value)) return false;
   const record = value as Record<string, unknown>;
@@ -686,7 +731,8 @@ function isDailyBucket(value: unknown): value is DailyBucket {
       hasNonNegativeIntegers(entry, DAILY_ROUTING_FIELDS),
     ) &&
     isBoundedDailyAttributionMap(record.skillRouting, isDailySkillRouting) &&
-    isBoundedDailyAttributionMap(record.toolErrors, isNonNegativeInteger)
+    isBoundedDailyAttributionMap(record.toolErrors, isNonNegativeInteger) &&
+    (record.curation === undefined || isDailyCurationStats(record.curation))
   );
 }
 
@@ -1791,6 +1837,79 @@ export class StatsAggregator {
       return written;
     } catch (err) {
       logger.warn("failed to update stats file", {
+        error: err,
+        path: statsFilePath,
+      });
+      return false;
+    }
+  }
+
+  recordCuration(
+    sessionId: string | undefined,
+    curationResult: TurnCurationResult,
+    turnKey: string,
+    options: StatsRecordOptions = {},
+  ): boolean {
+    const finishedAt = curationResult.finishedAt;
+    if (!sessionId || !finishedAt || curationResult.status !== "applied") {
+      return false;
+    }
+
+    const statsFilePath = statsPath(this.pluginRoot);
+    try {
+      const nowMs = options.nowMs ?? Date.now();
+      const eventTime =
+        curationResult.finishedAt || new Date(nowMs).toISOString();
+      const eventId = `curation:${sessionId}:${turnKey}:${curationResult.topicEpoch}:${curationResult.revision}`;
+      const stats = loadStats(statsFilePath, eventTime);
+      if (stats.processedEvents[eventId]) return false;
+
+      const date = eventTime.slice(0, 10);
+      stats.updatedAt = eventTime;
+      stats.processedEvents[eventId] = eventTime;
+
+      if (stats.summary.curationAppliedCount === undefined) {
+        stats.summary.curationAppliedCount = 0;
+      }
+      stats.summary.curationAppliedCount += 1;
+
+      if (!stats.curation) {
+        stats.curation = emptyCurationStats();
+      }
+      stats.curation.appliedRevisions += 1;
+      stats.curation.lastAppliedAt = eventTime;
+      const kept = curationResult.candidates.filter(
+        (c) => c.provenance === "curator-kept",
+      ).length;
+      const added = curationResult.candidates.filter(
+        (c) => c.provenance === "curator-added",
+      ).length;
+      stats.curation.candidatesKept += kept;
+      stats.curation.candidatesAdded += added;
+      stats.curation.recommendedExperiencesSelected +=
+        curationResult.recommendedExperienceRefs.length;
+
+      const bucket = getOrCreateOwnRecordValue(
+        stats.daily,
+        date,
+        createDailyBucket,
+      );
+      if (!bucket.curation) {
+        bucket.curation = {
+          appliedRevisions: 0,
+          candidatesKept: 0,
+          candidatesAdded: 0,
+        };
+      }
+      bucket.curation.appliedRevisions += 1;
+      bucket.curation.candidatesKept += kept;
+      bucket.curation.candidatesAdded += added;
+
+      pruneRollingData(stats, nowMs);
+      recomputeDerivedStats(stats, nowMs);
+      return safeWriteJson(statsFilePath, stats, "failed to write stats file");
+    } catch (err) {
+      logger.warn("failed to update stats file for curation", {
         error: err,
         path: statsFilePath,
       });

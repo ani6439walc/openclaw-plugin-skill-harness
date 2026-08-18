@@ -413,6 +413,7 @@ describe("validateAndCommitCuration", () => {
       ],
       recommendedExperienceRefs: ["beta/verify"],
       completedTurnCursor: 1,
+      reason: "Keep beta and add gamma.",
       now: "2026-08-13T00:02:00.000Z",
     });
     expect(finish).not.toHaveBeenCalled();

@@ -186,6 +186,15 @@ describe("SessionTracker curation schedule CAS", () => {
       status: "completed",
       finishedAt: "2026-08-12T00:00:05.000Z",
     });
+    expect(tracker.getTurnState("session-a", "run-a")?.curationResult).toEqual({
+      status: "applied",
+      topicEpoch: 1,
+      revision: 1,
+      candidates: REVISED,
+      recommendedExperienceRefs: ["alpha/verify"],
+      reason: "",
+      finishedAt: "2026-08-12T00:00:05.000Z",
+    });
     await expect(tracker.listPendingCurationSchedules()).resolves.toEqual([]);
   });
 

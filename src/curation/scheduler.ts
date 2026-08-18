@@ -273,6 +273,7 @@ export async function validateAndCommitCuration(params: {
     candidates: finalCandidates,
     recommendedExperienceRefs: resolvedExperienceRefs,
     completedTurnCursor: params.completedTurnCursor,
+    reason: params.proposal.reason,
     now: params.now,
   });
   return result.status === "stale" ? finish("obsolete") : result;

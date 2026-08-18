@@ -2566,11 +2566,16 @@ export function createHookHandlers(deps: HookDeps) {
       bundledSkillsDir,
       intents: catalog.get(),
     });
+    const schedulingTurn = acceptedTurns[schedulingIndex];
+    const previousInjectedCandidateNames =
+      expected.candidates.length > 0
+        ? expected.candidates.map((c) => c.name)
+        : (schedulingTurn?.intent?.recommendedSkills ?? []);
+
     const matchedIntent = findIntentDefinition(catalog, expected.intentId);
+    const directDeclaredSkills = matchedIntent?.definition.skills ?? [];
     const directSkillNames = new Set(
-      (matchedIntent?.definition.skills ?? [])
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean),
+      directDeclaredSkills.map((s) => s.trim().toLowerCase()).filter(Boolean),
     );
     const directSkills =
       directSkillNames.size > 0
@@ -2579,23 +2584,39 @@ export function createHookHandlers(deps: HookDeps) {
           )
         : [];
 
+    const primarySkillNames = new Set(
+      [...previousInjectedCandidateNames, ...directDeclaredSkills]
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const primarySkills =
+      primarySkillNames.size > 0
+        ? visibleSkills.filter((skill) =>
+            primarySkillNames.has(skill.name.toLowerCase()),
+          )
+        : [];
+
+    const neededDomainSkillsCount = Math.max(0, 15 - primarySkills.length);
     const currentDomain = matchedIntent?.definition.domain
       ?.trim()
       .toLowerCase();
     const allDomainSkills =
-      currentDomain && directSkills.length === 0
-        ? visibleSkills.filter((skill) =>
-            skill.domains?.some((d) => d.toLowerCase() === currentDomain),
+      currentDomain && neededDomainSkillsCount > 0
+        ? visibleSkills.filter(
+            (skill) =>
+              !primarySkillNames.has(skill.name.toLowerCase()) &&
+              skill.domains?.some((d) => d.toLowerCase() === currentDomain),
           )
         : [];
-    const domainSkills = selectExplorationCandidates(allDomainSkills, 15);
+    const domainSkills =
+      allDomainSkills.length > 0
+        ? selectExplorationCandidates(allDomainSkills, neededDomainSkillsCount)
+        : [];
 
-    const seedSkills =
-      directSkills.length > 0
-        ? directSkills
-        : domainSkills.length > 0
-          ? domainSkills
-          : selectExplorationCandidates(visibleSkills, 10);
+    let seedSkills = [...primarySkills, ...domainSkills];
+    if (seedSkills.length === 0) {
+      seedSkills = selectExplorationCandidates(visibleSkills, 10);
+    }
 
     if (seedSkills.length === 0) {
       await tracker.finishCurationSchedule({
@@ -2669,6 +2690,23 @@ export function createHookHandlers(deps: HookDeps) {
     logger.info("runQueuedCuration validateAndCommitCuration outcome", {
       curationCommitResult,
     });
+
+    if (curationCommitResult.status === "applied") {
+      statsAggregator.recordCuration(
+        identity.sessionId,
+        {
+          status: "applied",
+          topicEpoch: curationCommitResult.curation.topicEpoch,
+          revision: curationCommitResult.curation.revision,
+          candidates: curationCommitResult.curation.candidates,
+          recommendedExperienceRefs:
+            curationCommitResult.curation.recommendedExperienceRefs,
+          reason: proposal.reason,
+          finishedAt: clock().toISOString(),
+        },
+        identity.schedulingTurnKey,
+      );
+    }
   }
 
   async function maybeScheduleCuration(

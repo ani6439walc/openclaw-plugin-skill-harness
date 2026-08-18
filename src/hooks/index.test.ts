@@ -1920,6 +1920,7 @@ description: Navigate Tokyo.
     );
     vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
     vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+    vi.spyOn(defaultStatsAggregator, "recordCuration").mockReturnValue(true);
 
     const { handlers } = createFinalizedTurnHarness(current, {
       turnKey: "turn-3",
@@ -1939,6 +1940,345 @@ description: Navigate Tokyo.
     expect(enqueue).toHaveBeenCalledOnce();
     expect(curator).not.toHaveBeenCalled();
     expect(commitCurationSchedule).not.toHaveBeenCalled();
+  });
+
+  it("invokes the curator with previously injected candidates merged into candidates", async () => {
+    const current: SessionState = {
+      turnKey: "turn-1",
+      input: "first accepted turn",
+      timestamps: {
+        start: "2026-08-13T00:00:01.000Z",
+        end: "2026-08-13T00:01:01.000Z",
+      },
+      intent: {
+        recommendationState: {
+          topicEpoch: 1,
+          curationRevision: 0,
+          candidates: [
+            {
+              name: "previous-injected-skill",
+              provenance: "historical-top",
+            },
+          ],
+        },
+      },
+    };
+    const session = {
+      sessionId: "session-1",
+      agentId: "tracked-agent",
+      history: [],
+      current,
+      curation: {
+        topicEpoch: 1,
+        intentId: "coding",
+        revision: 0,
+        createdAt: "2026-08-13T00:00:00.000Z",
+        updatedAt: "2026-08-13T00:00:00.000Z",
+        startedByTurnKey: "turn-1",
+        candidates: [
+          {
+            name: "previous-injected-skill",
+            provenance: "historical-top" as const,
+          },
+        ],
+        recommendedExperienceRefs: [],
+        completedTurnCursor: 0,
+      },
+    };
+    let queuedTask: Promise<void> | undefined;
+    const enqueue = vi.fn((_key: string, task: () => Promise<void>) => {
+      queuedTask = task();
+      return true;
+    });
+    const curator = vi.fn().mockResolvedValue({
+      topicEpoch: 1,
+      expectedRevision: 0,
+      candidates: ["previous-injected-skill"],
+      recommendedExperienceRefs: [],
+      reason: "Keep previous skill.",
+    });
+    const commitCurationSchedule = vi
+      .fn()
+      .mockResolvedValue({ status: "applied", curation: session.curation });
+    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("tracked-agent");
+    vi.spyOn(defaultTracker, "listRetainedSessions").mockReturnValue([session]);
+    vi.spyOn(defaultTracker, "reserveCurationSchedule").mockResolvedValue(
+      "reserved",
+    );
+    vi.spyOn(defaultTracker, "listPendingCurationSchedules").mockResolvedValue([
+      {
+        sessionId: "session-1",
+        schedule: {
+          agentId: "tracked-agent",
+          schedulingTurnKey: "turn-1",
+          expectedTopicEpoch: 1,
+          expectedRevision: 0,
+          status: "pending",
+          reservedAt: "2026-08-13T00:01:01.000Z",
+        },
+      },
+    ]);
+    vi.spyOn(defaultTracker, "commitCurationSchedule").mockImplementation(
+      commitCurationSchedule,
+    );
+    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+    const recordCuration = vi
+      .spyOn(defaultStatsAggregator, "recordCuration")
+      .mockReturnValue(true);
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curation-test-"));
+    const workspace = path.join(tmp, "workspace");
+    const writeSkillLocal = (dir: string, name: string, desc: string) => {
+      const skillDir = path.join(dir, name);
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, "SKILL.md"),
+        `---\nname: ${name}\ndescription: ${desc}\n---\n`,
+      );
+    };
+    writeSkillLocal(
+      path.join(workspace, "skills"),
+      "previous-injected-skill",
+      "Previously injected skill description.",
+    );
+    writeSkillLocal(
+      path.join(workspace, "skills"),
+      "direct-skill",
+      "Direct intent skill.",
+    );
+
+    const { handlers } = createFinalizedTurnHarness(current, {
+      turnKey: "turn-1",
+      deps: {
+        config: () => resolveConfig({ curation: { enabled: true } }),
+        curationQueue: { enqueue, has: vi.fn() },
+        curator,
+        dataRoot: tmp,
+        catalog: {
+          get: () => [
+            {
+              id: "coding",
+              definition: {
+                triggers: ["code"],
+                examples: [],
+                domain: "coding",
+                skills: ["direct-skill"],
+                fastpath: { keywords: [] },
+                guidance: "Write code.",
+              },
+            },
+          ],
+        },
+        api: {
+          config: {},
+          runtime: {
+            state: { resolveStateDir: () => tmp },
+            agent: { resolveAgentWorkspaceDir: () => workspace },
+          },
+        } as unknown as OpenClawPluginApi,
+      },
+    });
+
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "session-1",
+    });
+    await queuedTask!;
+
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(curator).toHaveBeenCalledOnce();
+    expect(curator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ name: "previous-injected-skill" }),
+          expect.objectContaining({ name: "direct-skill" }),
+        ]),
+      }),
+    );
+    const passedCandidates = curator.mock.calls[0][0].candidates;
+    expect(passedCandidates[0].name).toBe("direct-skill");
+    expect(passedCandidates[1].name).toBe("previous-injected-skill");
+    expect(recordCuration).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        status: "applied",
+        topicEpoch: 1,
+        revision: 0,
+        reason: "Keep previous skill.",
+      }),
+      "turn-1",
+    );
+  });
+
+  it("fills up to 15 candidates with domain exploration skills when primary skills are fewer than 15", async () => {
+    const current: SessionState = {
+      turnKey: "turn-1",
+      input: "first accepted turn",
+      timestamps: {
+        start: "2026-08-13T00:00:01.000Z",
+        end: "2026-08-13T00:01:01.000Z",
+      },
+      intent: {
+        recommendationState: {
+          topicEpoch: 1,
+          curationRevision: 0,
+          candidates: [
+            {
+              name: "prev-skill",
+              provenance: "historical-top",
+            },
+          ],
+        },
+      },
+    };
+    const session = {
+      sessionId: "session-1",
+      agentId: "tracked-agent",
+      history: [],
+      current,
+      curation: {
+        topicEpoch: 1,
+        intentId: "coding",
+        revision: 0,
+        createdAt: "2026-08-13T00:00:00.000Z",
+        updatedAt: "2026-08-13T00:00:00.000Z",
+        startedByTurnKey: "turn-1",
+        candidates: [
+          {
+            name: "prev-skill",
+            provenance: "historical-top" as const,
+          },
+        ],
+        recommendedExperienceRefs: [],
+        completedTurnCursor: 0,
+      },
+    };
+    let queuedTask: Promise<void> | undefined;
+    const enqueue = vi.fn((_key: string, task: () => Promise<void>) => {
+      queuedTask = task();
+      return true;
+    });
+    const curator = vi.fn().mockResolvedValue({
+      topicEpoch: 1,
+      expectedRevision: 0,
+      candidates: ["prev-skill"],
+      recommendedExperienceRefs: [],
+      reason: "Keep skill.",
+    });
+    const commitCurationSchedule = vi
+      .fn()
+      .mockResolvedValue({ status: "applied", curation: session.curation });
+    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("tracked-agent");
+    vi.spyOn(defaultTracker, "listRetainedSessions").mockReturnValue([session]);
+    vi.spyOn(defaultTracker, "reserveCurationSchedule").mockResolvedValue(
+      "reserved",
+    );
+    vi.spyOn(defaultTracker, "listPendingCurationSchedules").mockResolvedValue([
+      {
+        sessionId: "session-1",
+        schedule: {
+          agentId: "tracked-agent",
+          schedulingTurnKey: "turn-1",
+          expectedTopicEpoch: 1,
+          expectedRevision: 0,
+          status: "pending",
+          reservedAt: "2026-08-13T00:01:01.000Z",
+        },
+      },
+    ]);
+    vi.spyOn(defaultTracker, "commitCurationSchedule").mockImplementation(
+      commitCurationSchedule,
+    );
+    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+    vi.spyOn(defaultStatsAggregator, "recordCuration").mockReturnValue(true);
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curation-test-fill-"));
+    const workspace = path.join(tmp, "workspace");
+    const writeSkillLocal = (dir: string, name: string, desc: string) => {
+      const skillDir = path.join(dir, name);
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, "SKILL.md"),
+        `---\nname: ${name}\ndescription: ${desc}\n---\n`,
+      );
+    };
+    writeSkillLocal(
+      path.join(workspace, "skills"),
+      "prev-skill",
+      "Prev skill.",
+    );
+    writeSkillLocal(
+      path.join(workspace, "skills"),
+      "direct-skill",
+      "Direct skill.",
+    );
+    const domainSkillNames: string[] = [];
+    for (let i = 1; i <= 20; i++) {
+      const name = `domain-skill-${i.toString().padStart(2, "0")}`;
+      domainSkillNames.push(name);
+      writeSkillLocal(
+        path.join(workspace, "skills"),
+        name,
+        `Domain skill ${i}.`,
+      );
+    }
+
+    const { handlers } = createFinalizedTurnHarness(current, {
+      turnKey: "turn-1",
+      deps: {
+        config: () => resolveConfig({ curation: { enabled: true } }),
+        curationQueue: { enqueue, has: vi.fn() },
+        curator,
+        dataRoot: tmp,
+        catalog: {
+          get: () => [
+            {
+              id: "coding",
+              definition: {
+                triggers: ["code"],
+                examples: [],
+                domain: "coding",
+                skills: ["direct-skill"],
+                fastpath: { keywords: [] },
+                guidance: "Write code.",
+              },
+            },
+            {
+              id: "coding-other",
+              definition: {
+                triggers: ["code-other"],
+                examples: [],
+                domain: "coding",
+                skills: domainSkillNames,
+                fastpath: { keywords: [] },
+                guidance: "Other coding.",
+              },
+            },
+          ],
+        },
+        api: {
+          config: {},
+          runtime: {
+            state: { resolveStateDir: () => tmp },
+            agent: { resolveAgentWorkspaceDir: () => workspace },
+          },
+        } as unknown as OpenClawPluginApi,
+      },
+    });
+
+    await handlers.onAgentEnd({ messages: [] } as never, {
+      sessionId: "session-1",
+    });
+    await queuedTask!;
+
+    expect(curator).toHaveBeenCalledOnce();
+    const passedCandidates = curator.mock.calls[0][0].candidates;
+    // 2 primary skills (direct-skill, prev-skill) + 13 domain skills = 15 total
+    expect(passedCandidates.length).toBe(15);
+    expect(
+      passedCandidates.slice(0, 2).map((s: { name: string }) => s.name),
+    ).toEqual(["direct-skill", "prev-skill"]);
   });
 });
 
