@@ -402,7 +402,30 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
                 "averageConfidence",
                 "otherTurns",
                 "otherRate",
+                "curationAppliedCount",
             )
+        },
+        "curation": {
+            "status": (
+                "unavailable"
+                if stats["schemaVersion"] == 3 and "curation" not in stats
+                else "available"
+            ),
+            "appliedRevisions": number(
+                object_or_empty(stats.get("curation")).get("appliedRevisions")
+            ),
+            "candidatesKept": number(
+                object_or_empty(stats.get("curation")).get("candidatesKept")
+            ),
+            "candidatesAdded": number(
+                object_or_empty(stats.get("curation")).get("candidatesAdded")
+            ),
+            "recommendedExperiencesSelected": number(
+                object_or_empty(stats.get("curation")).get(
+                    "recommendedExperiencesSelected"
+                )
+            ),
+            "lastAppliedAt": object_or_empty(stats.get("curation")).get("lastAppliedAt"),
         },
         "routing": {
             key: routing.get(key)

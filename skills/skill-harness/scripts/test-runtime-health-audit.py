@@ -249,6 +249,18 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(set(report["provenance"]["stateSha256"]), {"review.json", "keyword-coverage.json", "stats.json"})
         stats = report["runtime"]["stats"]
         self.assertEqual(stats["attribution"]["status"], "insufficient-historical-attribution")
+        self.assertEqual(stats["summary"]["curationAppliedCount"], None)
+        self.assertEqual(
+            stats["curation"],
+            {
+                "status": "unavailable",
+                "appliedRevisions": 0,
+                "candidatesKept": 0,
+                "candidatesAdded": 0,
+                "recommendedExperiencesSelected": 0,
+                "lastAppliedAt": None,
+            },
+        )
         self.assertEqual(stats["routingEffectiveness"]["turnAdoptionRate"], 0.5)
         self.assertEqual(stats["routingEffectiveness"]["skillAdoptionRate"], 0.5)
         self.assertEqual(stats["projectionEfficiency"]["projectedRate"], 1)
@@ -284,12 +296,32 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                 "toolErrors": {"value:exec": 1, "__other__": 2},
             }
         )
+        stats["summary"]["curationAppliedCount"] = 3
+        stats["curation"] = {
+            "appliedRevisions": 3,
+            "candidatesKept": 5,
+            "candidatesAdded": 2,
+            "recommendedExperiencesSelected": 1,
+            "lastAppliedAt": "2026-08-01T00:02:00.000Z",
+        }
         stats_path.write_text(json.dumps(stats), encoding="utf-8")
 
         report = self.run_audit()
         runtime_stats = report["runtime"]["stats"]
         self.assertEqual(runtime_stats["attribution"]["status"], "post-v4-window-only")
         self.assertEqual(runtime_stats["attribution"]["startedAt"], "2026-08-01T00:02:00.000Z")
+        self.assertEqual(runtime_stats["summary"]["curationAppliedCount"], 3)
+        self.assertEqual(
+            runtime_stats["curation"],
+            {
+                "status": "available",
+                "appliedRevisions": 3,
+                "candidatesKept": 5,
+                "candidatesAdded": 2,
+                "recommendedExperiencesSelected": 1,
+                "lastAppliedAt": "2026-08-01T00:02:00.000Z",
+            },
+        )
         self.assertEqual(runtime_stats["attribution"]["dailyBucketsBeforeAttribution"], 0)
         self.assertEqual(runtime_stats["toolReliability"]["latencyHistogram"], {
             "status": "post-v4-window-only",

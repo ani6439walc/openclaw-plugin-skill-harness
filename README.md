@@ -47,7 +47,7 @@ Skill Harness addresses both:
 
 1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and candidate-scoped `<skill_experience>` metadata (identity and keywords only) nested under the matching `<skill>`. The fixed system context does not include the runtime skill inventory.
 2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption and can refine runtime intent Markdown and selected review trigger keywords. It does not train the base model or rewrite skill files.
-3. **Session-local recommendation curation.** The enabled-by-default background curator refines a topic epoch's direct skill candidates and may select up to three high-relevance experience references for the next turn's expanded reference context, without changing intent definitions, skill files, or Review state.
+3. **Session-local recommendation curation.** The enabled-by-default background curator refines a topic epoch's direct skill candidates and may select up to three high-relevance experience references for the next turn's expanded reference context, without changing intent definitions, skill files, or Review state. The curator prompt receives both user and assistant conversation history, prioritizes the union of previously injected candidates and direct intent skills ranked by usage statistics, and supplements with same-domain exploration skills up to 15 candidates. Applied curation outcomes persist under the triggering turn's `turn.curationResult` and aggregate into global `stats.json` curation metrics.
 
 ## How it works
 
@@ -267,7 +267,7 @@ turn is not excluded by the configured low-effort mode. Every eligible normal
 agent still receives the fixed skill-discovery context even when dynamic intent
 routing is skipped or fails.
 
-Session-local curation is enabled by default and is queued in the background.
+Session-local curation is enabled by default and is queued in the background; applied revisions are written to per-turn `turn.curationResult` state and aggregated into schema-v4 `stats.json` curation metrics.
 Intent Review is disabled by default; when enabled, its runtime edits and
 keyword-coverage writes are serialized so concurrent reviews cannot race on the
 runtime catalog.
