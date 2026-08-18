@@ -1,4 +1,4 @@
-import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
+import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import type {
   PluginHookBeforePromptBuildEvent,
   PluginHookAgentContext,
@@ -52,6 +52,7 @@ import {
   extractToolText,
   isInternalUserTurn,
   attachHistoricalIntents,
+  sanitizeConversationText,
   sanitizeHistoricalIntentInput,
   projectIntentCandidates,
   measureIntentCatalogCodePoints,
@@ -2541,11 +2542,11 @@ export function createHookHandlers(deps: HookDeps) {
     const conversationTurns = acceptedTurns
       .slice(0, schedulingIndex + 1)
       .flatMap((turn) => {
-        if (!turn.input) return [];
-        return [
-          {
+        const turns: RecentTurn[] = [];
+        if (turn.input?.trim()) {
+          turns.push({
             role: "user",
-            text: turn.input,
+            text: sanitizeHistoricalIntentInput(turn.input),
             ...(turn.intent?.result
               ? {
                   historicalIntent: {
@@ -2556,8 +2557,18 @@ export function createHookHandlers(deps: HookDeps) {
                   },
                 }
               : {}),
-          },
-        ];
+          });
+        }
+        if (turn.result?.trim()) {
+          const assistantText = sanitizeConversationText(turn.result);
+          if (assistantText) {
+            turns.push({
+              role: "assistant",
+              text: assistantText,
+            });
+          }
+        }
+        return turns;
       });
 
     const visibleSkills = await listAvailableSkills({

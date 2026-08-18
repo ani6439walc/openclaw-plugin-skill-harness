@@ -1946,6 +1946,7 @@ description: Navigate Tokyo.
     const current: SessionState = {
       turnKey: "turn-1",
       input: "first accepted turn",
+      result: "first assistant reply",
       timestamps: {
         start: "2026-08-13T00:00:01.000Z",
         end: "2026-08-13T00:01:01.000Z",
@@ -2089,6 +2090,16 @@ description: Navigate Tokyo.
     expect(curator).toHaveBeenCalledOnce();
     expect(curator).toHaveBeenCalledWith(
       expect.objectContaining({
+        conversation: [
+          expect.objectContaining({
+            role: "user",
+            text: "first accepted turn",
+          }),
+          expect.objectContaining({
+            role: "assistant",
+            text: "first assistant reply",
+          }),
+        ],
         candidates: expect.arrayContaining([
           expect.objectContaining({ name: "previous-injected-skill" }),
           expect.objectContaining({ name: "direct-skill" }),
