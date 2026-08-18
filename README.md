@@ -72,18 +72,6 @@ Every non-excluded normal agent turn receives static skill-discovery context, re
 
 For lifecycle contracts, projection rules, helper subagents, dynamic prompt shape, and fail-open behavior, read [Architecture](docs/architecture.md).
 
-## Observed local results
-
-One local deployment recorded these operational measurements between 2026-07-08 and 2026-07-19. They are not a synthetic benchmark and should not be treated as a provider-token estimate. They predate the session-curation cutover, so they are a historical baseline rather than a measured before/after comparison for the current curation behavior.
-
-- **840 routed turns:** 96.8% mapped to a named intent rather than the `other` fallback, with 91.0% average classification confidence.
-- **193 skill-assisted turns:** 331 recorded skill usages, tracked separately from recommendation telemetry.
-- **63.0% measured recommendation adoption:** 17 of 27 recommended-skill opportunities were followed by actual use.
-- **Smaller classifier catalog:** on 21 classifier-bound turns, the candidate set fell from 66.0 to 6.1 intents on average, a 90.7% reduction.
-- **Smaller rendered catalog:** average catalog size fell from 48,948 to 4,044 Unicode code points, a 91.7% reduction; average local projection time was 1.14 ms.
-
-See [Metrics](docs/metrics.md) for definitions, runtime files, and interpretation limits.
-
 ## Basic configuration
 
 Configure Skill Harness in `openclaw.json`:
