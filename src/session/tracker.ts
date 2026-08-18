@@ -657,6 +657,7 @@ export class SessionTracker {
     runId?: string;
     input: string;
     startedAt: string;
+    recentTurns?: readonly RecentTurn[];
   }): Promise<PromptTurnPrepareResult> {
     const requestedRunId = params.runId?.trim();
     try {
@@ -666,6 +667,40 @@ export class SessionTracker {
           maxWaitMs: 0,
           mutate: (session) => {
             const current = session.current;
+            if (params.recentTurns?.length) {
+              const pairs: Array<{ user: string; assistant?: string }> = [];
+              for (let i = 0; i < params.recentTurns.length; i++) {
+                const turn = params.recentTurns[i];
+                if (turn.role === "user") {
+                  const next = params.recentTurns[i + 1];
+                  const assistant =
+                    next?.role === "assistant" ? next.text : undefined;
+                  pairs.push({
+                    user: turn.text.trim(),
+                    assistant: assistant?.trim(),
+                  });
+                }
+              }
+              const history = session.history ?? [];
+              for (const state of [...history, current]) {
+                if (!state.result && state.input) {
+                  const matched = pairs.find(
+                    (p) =>
+                      p.user === state.input?.trim() && Boolean(p.assistant),
+                  );
+                  if (matched?.assistant) {
+                    state.result = matched.assistant;
+                    if (!state.timestamps?.end) {
+                      state.timestamps = {
+                        ...(state.timestamps ?? {}),
+                        end: params.startedAt,
+                      };
+                    }
+                  }
+                }
+              }
+            }
+
             const reusableWithoutRunId =
               !requestedRunId &&
               !current.timestamps?.end &&
@@ -781,21 +816,48 @@ export class SessionTracker {
           }
           const target = matches[0];
           if (target.timestamps?.end) {
-            const sameTerminalPayload =
-              target.result === params.result && target.error === params.error;
-            const fallbackAlreadyPresent = (
-              params.stagedToolFallbacks ?? []
-            ).every((fallback) =>
-              target.toolCalls?.some(
-                (call) => call.toolCallId === fallback.toolCallId,
-              ),
+            const resultConflict =
+              target.result !== undefined &&
+              params.result !== undefined &&
+              target.result !== params.result;
+            const errorConflict =
+              target.error !== undefined &&
+              params.error !== undefined &&
+              target.error !== params.error;
+            if (resultConflict || errorConflict) {
+              return { result: "stale" as const, changed: false };
+            }
+            let updated = false;
+            if (!target.result && params.result) {
+              target.result = params.result;
+              updated = true;
+            }
+            if (!target.error && params.error) {
+              target.error = params.error;
+              updated = true;
+            }
+            const missingFallbackIds = new Set<string>();
+            const missingFallbacks = (params.stagedToolFallbacks ?? []).filter(
+              (fallback) => {
+                if (
+                  missingFallbackIds.has(fallback.toolCallId) ||
+                  target.toolCalls?.some(
+                    (call) => call.toolCallId === fallback.toolCallId,
+                  )
+                ) {
+                  return false;
+                }
+                missingFallbackIds.add(fallback.toolCallId);
+                return true;
+              },
             );
+            if (missingFallbacks.length > 0) {
+              appendToolCalls(target, structuredClone(missingFallbacks));
+              updated = true;
+            }
             return {
-              result:
-                sameTerminalPayload && fallbackAlreadyPresent
-                  ? ("already-finalized" as const)
-                  : ("stale" as const),
-              changed: false,
+              result: "already-finalized" as const,
+              changed: updated,
             };
           }
 

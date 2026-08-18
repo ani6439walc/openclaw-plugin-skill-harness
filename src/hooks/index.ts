@@ -663,6 +663,7 @@ export function createHookHandlers(deps: HookDeps) {
     ctx: PluginHookAgentContext;
     routing: PromptBuildIdentity;
     latestUserMessage: string;
+    recentTurns?: readonly RecentTurn[];
   }): Promise<TurnAssociation | undefined> {
     const sessionId =
       params.ctx.sessionId ??
@@ -696,6 +697,7 @@ export function createHookHandlers(deps: HookDeps) {
       runId,
       input: params.latestUserMessage,
       startedAt: new Date().toISOString(),
+      recentTurns: params.recentTurns,
     });
     if (prepared.status === "retryable-failure") {
       if (reservation.status === "reserved") {
@@ -1601,6 +1603,7 @@ export function createHookHandlers(deps: HookDeps) {
         ctx,
         routing,
         latestUserMessage,
+        recentTurns: extractRecentTurns(event.messages),
       });
       if (!routing.association) {
         return toPromptBuildResult(undefined, configuredSkillsXml);
@@ -1872,13 +1875,17 @@ export function createHookHandlers(deps: HookDeps) {
           message !== null &&
           (message as { role?: unknown }).role === "assistant",
       );
+    const assistantObj = lastAssistantMessage as
+      Record<string, unknown> | undefined;
     const content = lastAssistantMessage?.content;
     const result =
       typeof content === "string"
         ? content.trim()
         : content !== undefined
           ? resolveToolResultText({ content })
-          : undefined;
+          : typeof assistantObj?.text === "string"
+            ? assistantObj.text.trim()
+            : undefined;
 
     return {
       result: result || params.lastAssistantMessage,
@@ -3069,11 +3076,18 @@ export function createHookHandlers(deps: HookDeps) {
     const stagedToolFallbacks = stagedEntries.map(
       ([, staged]) => staged.fallback,
     );
+    const messageContent = (event as { content?: unknown })?.content;
+    const resultText =
+      typeof messageContent === "string"
+        ? messageContent.trim()
+        : event !== undefined
+          ? resolveToolResultText(event)
+          : undefined;
     const finalized = await tracker.finalizeTurnFromAgentEnd({
       sessionId: association.sessionId,
       expectedTurnKey: association.turnKey,
       stagedToolFallbacks,
-      result: typeof event?.content === "string" ? event.content : undefined,
+      result: resultText || undefined,
       endedAt: new Date().toISOString(),
     });
     logger.info("onMessageSending turn finalization result", { finalized });
