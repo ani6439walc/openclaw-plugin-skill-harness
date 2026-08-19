@@ -18,4 +18,22 @@ describe("getOrCache", () => {
     expect(onRetrieve).toHaveBeenNthCalledWith(1, first);
     expect(onRetrieve).toHaveBeenNthCalledWith(2, first);
   });
+
+  it("removes a newly cached instance when its retrieval hook fails", () => {
+    const cache = new Map<string, { key: string }>();
+    const normalizedKey = path.resolve(".");
+
+    expect(() =>
+      getOrCache(
+        cache,
+        ".",
+        (key) => ({ key }),
+        () => {
+          throw new Error("initialization failed");
+        },
+      ),
+    ).toThrow("initialization failed");
+
+    expect(cache.has(normalizedKey)).toBe(false);
+  });
 });

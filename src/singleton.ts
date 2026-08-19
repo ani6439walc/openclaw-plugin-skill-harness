@@ -8,7 +8,7 @@ export function getOrCache<T>(
   cache: Map<string, T>,
   key: string,
   create: (normalizedKey: string) => T,
-  onRetrieve?: (instance: T) => void
+  onRetrieve?: (instance: T) => void,
 ): T {
   const normalizedKey = path.resolve(key);
   const existing = cache.get(normalizedKey);
@@ -18,6 +18,13 @@ export function getOrCache<T>(
   }
   const instance = create(normalizedKey);
   cache.set(normalizedKey, instance);
-  onRetrieve?.(instance);
+  try {
+    onRetrieve?.(instance);
+  } catch (error) {
+    if (cache.get(normalizedKey) === instance) {
+      cache.delete(normalizedKey);
+    }
+    throw error;
+  }
   return instance;
 }
