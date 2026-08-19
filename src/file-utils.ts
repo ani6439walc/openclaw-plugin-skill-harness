@@ -42,6 +42,8 @@ export function resolvePackageRoot(
 }
 
 export const packageRoot = resolvePackageRoot();
+// Backward-compatible alias for integrations that imported the previous name.
+export const pluginRoot = packageRoot;
 
 
 export function resolvePluginDataRoot(
@@ -86,7 +88,7 @@ export function agentSessionsPath(dataRoot: string, agentName: string): string {
 /**
  * Resolve a path under the sessions directory.
  */
-export function sessionsPath(filename: string, dataRoot: string): string {
+export function sessionsPath(filename: string, dataRoot = packageRoot): string {
   return path.join(sessionsDirPath(dataRoot), filename);
 }
 
