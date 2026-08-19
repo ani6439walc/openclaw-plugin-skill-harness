@@ -227,7 +227,9 @@ function scoreDocument(
     matchedFields.push("name");
   }
 
-  const normalizedDescription = normalizeForComparison(document.skill.description);
+  const normalizedDescription = normalizeForComparison(
+    document.skill.description,
+  );
   const descriptionPhraseMatch = Boolean(
     criteria.phrase && normalizedDescription.includes(criteria.phrase),
   );

@@ -539,7 +539,6 @@ function formatExperienceXml(
   return xmlBlock("skill_experience", lines.join("\n"));
 }
 
-
 function truncateCodePoints(value: string, limit: number): string {
   return Array.from(value).slice(0, limit).join("");
 }
@@ -548,15 +547,11 @@ function formatCandidateExperiences(
   experiences: readonly SkillExperienceEntry[],
   recommendedExperienceIds: readonly string[],
 ): ReadonlyMap<string, readonly string[]> {
-  const recommended = new Set(
-    recommendedExperienceIds.map(canonicalIdentity),
-  );
+  const recommended = new Set(recommendedExperienceIds.map(canonicalIdentity));
   let remainingRecommendedBodyCodePoints = 3_000;
   const bySkill = new Map<string, string[]>();
   for (const experience of experiences) {
-    const selected = recommended.has(
-      canonicalIdentity(experience.identity),
-    );
+    const selected = recommended.has(canonicalIdentity(experience.identity));
     const body = selected
       ? truncateCodePoints(
           experience.body,
@@ -603,10 +598,7 @@ export function buildRoutingContext(params: {
       : undefined,
   ].filter((block): block is string => Boolean(block));
 
-  const taggedContent = xmlBlock(
-    SKILL_HARNESS_PLUGIN_TAG,
-    blocks.join("\n"),
-  );
+  const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
   return `${UNTRUSTED_CONTEXT_HEADER}\n${taggedContent}\n\n${USER_MESSAGE_BOUNDARY}`;
 }
 

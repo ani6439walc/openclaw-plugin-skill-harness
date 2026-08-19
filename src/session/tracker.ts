@@ -557,7 +557,7 @@ export class SessionTracker {
       trackerCache,
       pluginRoot,
       (normalizedRoot) => new SessionTracker(normalizedRoot),
-      (tracker) => tracker.loadSessionsFromDisk()
+      (tracker) => tracker.loadSessionsFromDisk(),
     );
   }
 

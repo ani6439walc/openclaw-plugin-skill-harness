@@ -70,7 +70,6 @@ function boundedXmlElement(tag: string, value: string, budget: number): string {
   return `<${tag}>${escapeXmlTextWithinBudget(value, budget)}</${tag}>`;
 }
 
-
 function codePointLength(value: string): number {
   return Array.from(value).length;
 }
@@ -106,7 +105,6 @@ function formatConversation(turns: readonly RecentTurn[]): string | undefined {
   });
   return xmlBlock("conversation", renderedTurns.join("\n"));
 }
-
 
 function extractRawPayloadText(result: { payloads?: unknown[] }): string {
   return (result.payloads ?? [])

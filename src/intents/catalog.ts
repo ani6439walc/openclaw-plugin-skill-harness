@@ -16,8 +16,10 @@ export class IntentCatalog {
   }
 
   static create(pluginRoot: string): IntentCatalog {
-    return getOrCache(catalogCache, pluginRoot, (normalizedRoot) =>
-      new IntentCatalog(normalizedRoot)
+    return getOrCache(
+      catalogCache,
+      pluginRoot,
+      (normalizedRoot) => new IntentCatalog(normalizedRoot),
     );
   }
 

@@ -80,8 +80,6 @@ function compareCatalogEntries(
   );
 }
 
-
-
 function fullCatalog(
   intentCatalog: readonly CatalogEntry[],
   fallbackReason?: CatalogProjectionFallbackReason,

@@ -57,7 +57,6 @@ const SELECTION_REASON_ORDER: readonly IntentProjectionSelectionReason[] = [
   "intent-id",
 ];
 
-
 function resolveIntentId(value: string | undefined): string | undefined {
   return value?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
 }
@@ -117,7 +116,8 @@ function topicKeywordsContainPhrase(
   return (
     normalizedPhrase.length > 0 &&
     topicKeywords.some(
-      (topicKeyword) => normalizeForComparison(topicKeyword) === normalizedPhrase,
+      (topicKeyword) =>
+        normalizeForComparison(topicKeyword) === normalizedPhrase,
     )
   );
 }

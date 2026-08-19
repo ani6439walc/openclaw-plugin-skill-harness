@@ -478,7 +478,11 @@ export async function listAvailableSkills(
       skills.push({
         ...stripIndexOnlyFields(skill),
         ...(domainsBySkill
-          ? { domains: [...(domainsBySkill.get(canonicalIdentity(skill.name)) ?? [])] }
+          ? {
+              domains: [
+                ...(domainsBySkill.get(canonicalIdentity(skill.name)) ?? []),
+              ],
+            }
           : {}),
       });
     }
@@ -509,7 +513,11 @@ export async function findAvailableSkill(
       return {
         ...stripIndexOnlyFields(skill),
         ...(domainsBySkill
-          ? { domains: [...(domainsBySkill.get(canonicalIdentity(skill.name)) ?? [])] }
+          ? {
+              domains: [
+                ...(domainsBySkill.get(canonicalIdentity(skill.name)) ?? []),
+              ],
+            }
           : {}),
       };
     }

@@ -14,7 +14,6 @@ export function buildEmbeddedSubagentRunDefaults() {
   };
 }
 
-
 export function formatEmbeddedError(error: unknown): string | undefined {
   if (typeof error === "string") return error.trim() || undefined;
   if (typeof error !== "object" || error === null || Array.isArray(error)) {

@@ -483,7 +483,6 @@ function pruneRollingData(stats: Stats, nowMs: number): void {
   }
 }
 
-
 function hasNumbers(
   value: unknown,
   keys: readonly string[],
@@ -1056,7 +1055,6 @@ function recordIntentStats(params: {
   intent.erroredTurns += errored ? 1 : 0;
 }
 
-
 function canonicalizeCountMap(counts: CountMap): CountMap {
   const canonical: CountMap = {};
   for (const [name, count] of Object.entries(counts)) {
@@ -1578,7 +1576,7 @@ export class StatsAggregator {
     return getOrCache(
       statsAggregatorCache,
       pluginRoot,
-      (normalizedRoot) => new StatsAggregator(normalizedRoot)
+      (normalizedRoot) => new StatsAggregator(normalizedRoot),
     );
   }
 

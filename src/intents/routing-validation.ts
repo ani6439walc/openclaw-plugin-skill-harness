@@ -144,7 +144,6 @@ export interface RoutingIntentValidationResult {
   }>;
 }
 
-
 function normalizedStringArray(value: unknown): string[] | undefined {
   if (
     !Array.isArray(value) ||

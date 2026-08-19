@@ -45,7 +45,6 @@ export const packageRoot = resolvePackageRoot();
 // Backward-compatible alias for integrations that imported the previous name.
 export const pluginRoot = packageRoot;
 
-
 export function resolvePluginDataRoot(
   stateDir: string,
   pluginId: string,

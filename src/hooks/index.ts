@@ -410,7 +410,6 @@ function findIntentDomain(
   );
 }
 
-
 const normalizedFastpathKeywords = new WeakMap<
   IntentCatalogEntry,
   Array<{ normalized: string; keyword: string }>

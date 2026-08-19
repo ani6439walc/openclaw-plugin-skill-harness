@@ -38,7 +38,6 @@ function codePointLength(value: string): number {
   return Array.from(value).length;
 }
 
-
 function normalizeSegment(value: string): string | undefined {
   const normalized = normalizeForComparison(value);
   if (

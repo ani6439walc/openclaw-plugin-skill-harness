@@ -18,11 +18,7 @@ export function canonicalIdentity(value: string): string {
  * Pattern: NFKC → trim → lowercase → collapse whitespace
  */
 export function normalizeForComparison(value: string): string {
-  return value
-    .normalize("NFKC")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/gu, " ");
+  return value.normalize("NFKC").trim().toLowerCase().replace(/\s+/gu, " ");
 }
 
 /**

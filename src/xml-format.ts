@@ -8,6 +8,10 @@ export function indentXmlLines(value: string, levels = 1): string {
     .join("\n");
 }
 
-export function xmlBlock(tag: string, content: string, attributes = ""): string {
+export function xmlBlock(
+  tag: string,
+  content: string,
+  attributes = "",
+): string {
   return `<${tag}${attributes}>\n${indentXmlLines(content)}\n</${tag}>`;
 }
