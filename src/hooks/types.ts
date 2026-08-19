@@ -24,16 +24,12 @@ import type { ReviewTriggerKeywords } from "../review/trigger-keywords.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
 import type { SampleWithoutReplacement } from "../curation/index.js";
+import type { CurationQueue } from "../curation/queue.js";
 import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import type {
   TurnAssociation,
   TurnAssociationRegistry,
 } from "./turn-associations.js";
-
-interface CurationQueue {
-  enqueue(key: string, task: () => Promise<void>): boolean;
-  has(key: string): boolean;
-}
 
 export interface PendingToolCall {
   name: string;

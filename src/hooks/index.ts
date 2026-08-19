@@ -41,6 +41,7 @@ import {
 } from "../review/trigger-keywords.js";
 import {
   discoverKeywordCoverageCandidates,
+  enqueueReview,
   runKeywordCoverageReview,
 } from "../review/index.js";
 import { createHash } from "node:crypto";
@@ -122,14 +123,6 @@ import {
   SKILL_HARNESS_SYSTEM_CONTEXT,
 } from "./system-context.js";
 export type { HookDeps } from "./types.js";
-
-// Inline review queue - serializes background review tasks
-let pendingReview = Promise.resolve();
-function enqueueReview(task: () => Promise<void>): void {
-  pendingReview = pendingReview
-    .then(task)
-    .catch((error) => logger.warn("background review failed", { error }));
-}
 
 function sanitizeHistoricalIntentRecords(
   records: HistoricalIntentRecord[],

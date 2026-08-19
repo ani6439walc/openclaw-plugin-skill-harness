@@ -8,6 +8,7 @@ import {
 import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { resolveConfig } from "./config.js";
 import { IntentCatalog } from "./intents/index.js";
+import { createCurationQueue } from "./curation/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
@@ -39,35 +40,6 @@ const EXAMPLE_INTENT_ASSETS_DIR = path.join(
   "skill-harness",
   "assets",
 );
-
-interface CurationQueue {
-  enqueue(key: string, task: () => Promise<void>): boolean;
-  has(key: string): boolean;
-}
-
-function createCurationQueue(): CurationQueue {
-  const pendingKeys = new Set<string>();
-  let tail = Promise.resolve();
-
-  return {
-    enqueue(key, task) {
-      if (pendingKeys.has(key)) return false;
-      pendingKeys.add(key);
-
-      tail = tail
-        .then(task)
-        .catch(() => {})
-        .finally(() => {
-          pendingKeys.delete(key);
-        });
-      return true;
-    },
-
-    has(key) {
-      return pendingKeys.has(key);
-    },
-  };
-}
 
 function readKeywordCoverageKeywordsFailOpen(
   writer: KeywordCoverageWriter,
