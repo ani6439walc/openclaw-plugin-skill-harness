@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   resolveAvailableSkills,
   resolveDomainSkills,
-} from "../skills/indexer.js";
+} from "./skill-references.js";
 import type { OpenClawPluginApi } from "../../api.js";
 
 function writeSkill(root: string, name: string, description: string): void {
