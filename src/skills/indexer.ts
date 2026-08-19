@@ -5,6 +5,7 @@ import path from "node:path";
 import matter from "gray-matter";
 import { logger, type OpenClawPluginApi } from "../../api.js";
 import { resolveStateDirFromApi } from "../file-utils.js";
+import { canonicalIdentity } from "../normalize.js";
 import type { IntentCatalogEntry } from "../types.js";
 import { buildSkillDomainMap } from "./domains.js";
 import {
@@ -477,7 +478,7 @@ export async function listAvailableSkills(
       skills.push({
         ...stripIndexOnlyFields(skill),
         ...(domainsBySkill
-          ? { domains: [...(domainsBySkill.get(skill.name.trim().toLowerCase()) ?? [])] }
+          ? { domains: [...(domainsBySkill.get(canonicalIdentity(skill.name)) ?? [])] }
           : {}),
       });
     }
@@ -508,7 +509,7 @@ export async function findAvailableSkill(
       return {
         ...stripIndexOnlyFields(skill),
         ...(domainsBySkill
-          ? { domains: [...(domainsBySkill.get(skill.name.trim().toLowerCase()) ?? [])] }
+          ? { domains: [...(domainsBySkill.get(canonicalIdentity(skill.name)) ?? [])] }
           : {}),
       };
     }

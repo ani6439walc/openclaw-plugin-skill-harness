@@ -22,7 +22,7 @@ export function normalizeForComparison(value: string): string {
     .normalize("NFKC")
     .trim()
     .toLowerCase()
-    .replace(/\s+/gu, " ");
+    .replace(/\s+/g, " ");
 }
 
 /**
@@ -31,5 +31,5 @@ export function normalizeForComparison(value: string): string {
  * Pattern: NFKC → remove all whitespace → lowercase
  */
 export function normalizeForKeyword(value: string): string {
-  return value.normalize("NFKC").replace(/\s+/gu, "").toLowerCase();
+  return value.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
 }
