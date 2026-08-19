@@ -25,6 +25,17 @@ describe("formatEmbeddedError", () => {
 });
 
 describe("extractEmbeddedRunError", () => {
+  it("reads error payloads only from plain records", () => {
+    expect(
+      extractEmbeddedRunError({
+        payloads: [{ isError: true, text: "  request failed  " }],
+      }),
+    ).toBe("request failed");
+    expect(extractEmbeddedRunError({ payloads: [new Error("failure")] })).toBe(
+      undefined,
+    );
+  });
+
   it("preserves an Error instance supplied through metadata", () => {
     expect(
       extractEmbeddedRunError({ meta: { error: new Error("timeout") } }),
