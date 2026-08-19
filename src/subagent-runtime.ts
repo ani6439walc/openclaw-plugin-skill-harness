@@ -17,7 +17,9 @@ export function buildEmbeddedSubagentRunDefaults() {
 
 export function formatEmbeddedError(error: unknown): string | undefined {
   if (typeof error === "string") return error.trim() || undefined;
-  if (!isRecord(error)) return;
+  if (typeof error !== "object" || error === null || Array.isArray(error)) {
+    return;
+  }
 
   const message =
     typeof error.message === "string" ? error.message.trim() : undefined;
