@@ -29,7 +29,7 @@ import {
   type SchemaRejectionReasonCounts,
 } from "./log.js";
 import { normalizeKeywordList } from "./trigger-keywords.js";
-import { validateIntentDirectory } from "../intents/index.js";
+import { validateRoutingIntentDirectory } from "../intents/index.js";
 import { validateExperienceDirectory } from "../experiences/index.js";
 import {
   buildEmbeddedSubagentRunDefaults,
@@ -1697,7 +1697,7 @@ export async function runReviewSubagent(params: {
       };
     }
     if (changedIds.length > 0) {
-      const validation = validateIntentDirectory(
+      const validation = validateRoutingIntentDirectory(
         workspaceDir,
         existingIntentValidationTargets(
           changedIds,

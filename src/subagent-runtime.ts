@@ -1,3 +1,5 @@
+import { isRecord } from "./guards.js";
+
 export function buildEmbeddedSubagentRunDefaults() {
   return {
     trigger: "manual" as const,
@@ -12,17 +14,20 @@ export function buildEmbeddedSubagentRunDefaults() {
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 export function formatEmbeddedError(error: unknown): string | undefined {
   if (typeof error === "string") return error.trim() || undefined;
-  if (!isRecord(error)) return;
+  if (typeof error !== "object" || error === null || Array.isArray(error)) {
+    return;
+  }
+  const errorFields = error as { message?: unknown; kind?: unknown };
 
   const message =
-    typeof error.message === "string" ? error.message.trim() : undefined;
-  const kind = typeof error.kind === "string" ? error.kind.trim() : undefined;
+    typeof errorFields.message === "string"
+      ? errorFields.message.trim()
+      : undefined;
+  const kind =
+    typeof errorFields.kind === "string" ? errorFields.kind.trim() : undefined;
   if (kind && message) return `${kind}: ${message}`;
   return message || kind || undefined;
 }

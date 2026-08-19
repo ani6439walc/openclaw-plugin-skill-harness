@@ -7,3 +7,7 @@ export function indentXmlLines(value: string, levels = 1): string {
     .map((line) => (line.trim() ? `${prefix}${line}` : ""))
     .join("\n");
 }
+
+export function xmlBlock(tag: string, content: string, attributes = ""): string {
+  return `<${tag}${attributes}>\n${indentXmlLines(content)}\n</${tag}>`;
+}

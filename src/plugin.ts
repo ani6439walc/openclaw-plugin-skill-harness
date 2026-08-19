@@ -8,6 +8,7 @@ import {
 import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { resolveConfig } from "./config.js";
 import { IntentCatalog } from "./intents/index.js";
+import { createCurationQueue } from "./curation/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
@@ -18,7 +19,6 @@ import {
   type ReviewTriggerKeywords,
 } from "./review/trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
-import { createCurationQueue } from "./curation/index.js";
 import { registerSkillTools } from "./skills/index.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
 import * as fs from "node:fs";

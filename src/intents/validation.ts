@@ -6,6 +6,7 @@ export type IntentValidationResult = {
   intents: Array<{ id: string; file: string }>;
 };
 
+// Preserve the pre-routing-validation public contract for downstream callers.
 export function validateIntentDirectory(
   intentDirectory: string,
   targetIntentIds: readonly string[] = [],

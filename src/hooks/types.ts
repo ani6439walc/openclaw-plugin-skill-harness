@@ -23,13 +23,13 @@ import type {
 import type { ReviewTriggerKeywords } from "../review/trigger-keywords.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
-import type { CurationQueue } from "../curation/index.js";
 import type { SampleWithoutReplacement } from "../curation/index.js";
+import type { CurationQueue } from "../curation/queue.js";
+import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import type {
   TurnAssociation,
   TurnAssociationRegistry,
 } from "./turn-associations.js";
-import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 
 export interface PendingToolCall {
   name: string;
@@ -54,8 +54,8 @@ export type HookDeps = {
   skillInventoryResolver?: typeof resolveSkillInventory;
   clock?: () => Date;
   sampleWithoutReplacement?: SampleWithoutReplacement;
-  experienceCatalog?: SkillExperienceCatalog;
   curationQueue?: CurationQueue;
+  experienceCatalog?: SkillExperienceCatalog;
   reviewQueue?: { enqueue(task: () => Promise<void>): void };
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],

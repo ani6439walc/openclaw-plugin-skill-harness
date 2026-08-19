@@ -15,6 +15,8 @@ import {
   agentWorkspacePath,
   agentSessionsPath,
   keywordCoverageLogPath,
+  packageRoot,
+  pluginRoot,
 } from "./file-utils.js";
 
 describe("FileLock", () => {
@@ -81,6 +83,13 @@ describe("plugin data paths", () => {
     );
     expect(agentSessionsPath(dataRoot, "review")).toBe(
       path.join(dataRoot, "agents", "review", "sessions"),
+    );
+  });
+
+  it("preserves package-root aliases and the legacy sessions-path default", () => {
+    expect(pluginRoot).toBe(packageRoot);
+    expect(sessionsPath("legacy-session.json")).toBe(
+      path.join(packageRoot, "sessions", "legacy-session.json"),
     );
   });
 

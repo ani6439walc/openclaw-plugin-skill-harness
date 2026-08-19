@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
+import type { SkillExperienceEntry } from "../experiences/types.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import type { RecentTurn } from "../types.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { limitConversationTurns } from "../classification/conversation.js";
 import type { AvailableSkill } from "../skills/types.js";
-import type { SkillExperienceEntry } from "../experiences/types.js";
-import { indentXmlLines } from "../xml-format.js";
+import { indentXmlLines, xmlBlock } from "../xml-format.js";
 import type { SessionCurationRecord } from "./types.js";
 import { getModelRef } from "../classification/subagent.js";
 import { agentSessionsPath, agentWorkspacePath } from "../file-utils.js";
@@ -15,6 +15,8 @@ import {
   extractEmbeddedRunError,
   formatEmbeddedError,
 } from "../subagent-runtime.js";
+import { canonicalIdentity } from "../normalize.js";
+import { isRecord } from "../guards.js";
 
 export interface CuratorProposal {
   topicEpoch: number;
@@ -68,9 +70,6 @@ function boundedXmlElement(tag: string, value: string, budget: number): string {
   return `<${tag}>${escapeXmlTextWithinBudget(value, budget)}</${tag}>`;
 }
 
-function xmlBlock(tag: string, content: string): string {
-  return `<${tag}>\n${indentXmlLines(content)}\n</${tag}>`;
-}
 
 function codePointLength(value: string): number {
   return Array.from(value).length;
@@ -108,9 +107,6 @@ function formatConversation(turns: readonly RecentTurn[]): string | undefined {
   return xmlBlock("conversation", renderedTurns.join("\n"));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function extractRawPayloadText(result: { payloads?: unknown[] }): string {
   return (result.payloads ?? [])
@@ -130,7 +126,7 @@ function parseUniqueStrings(
   for (const item of value) {
     if (typeof item !== "string") return;
     const trimmed = item.trim();
-    const canonical = trimmed.normalize("NFKC").toLowerCase();
+    const canonical = canonicalIdentity(trimmed);
     if (!canonical || seen.has(canonical)) return;
     seen.add(canonical);
     result.push(trimmed);

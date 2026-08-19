@@ -1,8 +1,9 @@
 import path from "node:path";
 import type { IntentCatalogEntry } from "../types.js";
 import { logger } from "../../api.js";
-import { pluginRoot } from "../file-utils.js";
+import { packageRoot } from "../file-utils.js";
 import { validateRoutingIntentDirectory } from "./routing-validation.js";
+import { getOrCache } from "../singleton.js";
 
 const catalogCache = new Map<string, IntentCatalog>();
 
@@ -15,13 +16,9 @@ export class IntentCatalog {
   }
 
   static create(pluginRoot: string): IntentCatalog {
-    const normalizedPluginRoot = path.resolve(pluginRoot);
-    const existing = catalogCache.get(normalizedPluginRoot);
-    if (existing) return existing;
-
-    const catalog = new IntentCatalog(normalizedPluginRoot);
-    catalogCache.set(normalizedPluginRoot, catalog);
-    return catalog;
+    return getOrCache(catalogCache, pluginRoot, (normalizedRoot) =>
+      new IntentCatalog(normalizedRoot)
+    );
   }
 
   load(intentDirectory: string, options: { silent?: boolean } = {}): number {
@@ -68,4 +65,4 @@ export class IntentCatalog {
   }
 }
 
-export const defaultCatalog = IntentCatalog.create(pluginRoot);
+export const defaultCatalog = IntentCatalog.create(packageRoot);

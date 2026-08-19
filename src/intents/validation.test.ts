@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { validateIntentDirectory } from "./validation.js";
+import { validateRoutingIntentDirectory } from "./routing-validation.js";
+import { validateIntentDirectory } from "./index.js";
 import { packageRoot } from "../file-utils.js";
 
-describe("validateIntentDirectory", () => {
+describe("validateRoutingIntentDirectory", () => {
   let dir: string;
 
   beforeEach(() => {
@@ -29,9 +30,19 @@ Handle the test request.
   it("accepts guidance-only intents and requested targets", () => {
     fs.writeFileSync(path.join(dir, "one.md"), valid());
 
+    expect(validateRoutingIntentDirectory(dir, ["one"])).toMatchObject({
+      valid: true,
+      errors: [],
+    });
+  });
+
+  it("preserves the legacy validation export", () => {
+    fs.writeFileSync(path.join(dir, "one.md"), valid());
+
     expect(validateIntentDirectory(dir, ["one"])).toMatchObject({
       valid: true,
       errors: [],
+      intents: [{ id: "one", file: "one.md" }],
     });
   });
 
@@ -52,7 +63,7 @@ Handle the test request.
 `,
     );
 
-    const result = validateIntentDirectory(dir);
+    const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
       "one.md: guidance must not start with a Markdown list, heading, or fence",
@@ -68,7 +79,7 @@ Handle the test request.
       ),
     );
 
-    expect(validateIntentDirectory(dir)).toMatchObject({
+    expect(validateRoutingIntentDirectory(dir)).toMatchObject({
       valid: true,
       errors: [],
     });
@@ -83,7 +94,7 @@ Handle the test request.
       ),
     );
 
-    expect(validateIntentDirectory(dir)).toMatchObject({
+    expect(validateRoutingIntentDirectory(dir)).toMatchObject({
       valid: true,
       errors: [],
     });
@@ -119,7 +130,7 @@ Handle the test request.
       ),
     );
 
-    const result = validateIntentDirectory(dir);
+    const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
       "bad-scope.md: candidate.scope must be cross-flow when provided",
@@ -144,7 +155,7 @@ Handle the test request.
       ),
     );
 
-    const result = validateIntentDirectory(dir);
+    const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
       "invalid-skills.md: skills must be an array containing only non-empty strings",
@@ -160,7 +171,7 @@ Handle the test request.
       ),
     );
 
-    const result = validateIntentDirectory(dir);
+    const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("one.md: unsupported top-level field id");
     expect(result.errors).toContain("one.md: unsupported top-level field name");
@@ -181,7 +192,7 @@ Handle the test request.
       ),
     );
 
-    const result = validateIntentDirectory(dir);
+    const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("one.md: fastpath.hint is not supported");
     expect(result.errors).toContain(
@@ -206,7 +217,7 @@ Handle the test request.
       valid().replace('domain: "test"', 'domain: ""'),
     );
 
-    const result = validateIntentDirectory(dir);
+    const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
       "missing.md: domain must be a non-empty string",
@@ -233,7 +244,7 @@ Handle the test request.
       valid().replace("Handle the test request.", "Handle the test request"),
     );
 
-    const result = validateIntentDirectory(dir);
+    const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
       "missing.md: guidance must be a non-empty string",
@@ -250,14 +261,14 @@ Handle the test request.
     fs.writeFileSync(path.join(dir, "one.md"), valid());
     fs.writeFileSync(path.join(dir, "ONE.md"), valid());
 
-    const result = validateIntentDirectory(dir, ["MISSING"]);
+    const result = validateRoutingIntentDirectory(dir, ["MISSING"]);
     expect(result.valid).toBe(false);
     expect(result.errors.join("\n")).toContain("duplicate intent id one");
     expect(result.errors).toContain("target intent not found: MISSING");
   });
 
   it("accepts bundled skill asset examples", () => {
-    const result = validateIntentDirectory(
+    const result = validateRoutingIntentDirectory(
       path.join(packageRoot, "skills", "skill-harness", "assets"),
     );
 

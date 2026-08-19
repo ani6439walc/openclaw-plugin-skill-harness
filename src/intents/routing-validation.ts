@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import matter from "gray-matter";
+import { isRecord } from "../guards.js";
 
 const TOP_LEVEL_FIELDS = new Set([
   "triggers",
@@ -143,13 +144,6 @@ export interface RoutingIntentValidationResult {
   }>;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
 
 function normalizedStringArray(value: unknown): string[] | undefined {
   if (

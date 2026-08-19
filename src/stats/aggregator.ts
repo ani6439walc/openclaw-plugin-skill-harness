@@ -6,7 +6,7 @@ import type { SessionState } from "../session/index.js";
 import type { TurnCurationResult } from "../curation/types.js";
 import type { IntentCatalogEntry } from "../types.js";
 import {
-  pluginRoot,
+  packageRoot,
   statsPath,
   fileExists,
   readJsonFile,
@@ -15,6 +15,9 @@ import {
 import { FALLBACK_INTENT_ID, isIntentComplexity } from "../constants.js";
 import type { SkillInventoryItem, SkillSource } from "../skills/types.js";
 import { SKILL_SOURCE_ORDER } from "../skills/types.js";
+import { canonicalIdentity } from "../normalize.js";
+import { isRecord } from "../guards.js";
+import { getOrCache } from "../singleton.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_RETENTION_MS = 90 * DAY_MS;
@@ -480,9 +483,6 @@ function pruneRollingData(stats: Stats, nowMs: number): void {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function hasNumbers(
   value: unknown,
@@ -1056,14 +1056,11 @@ function recordIntentStats(params: {
   intent.erroredTurns += errored ? 1 : 0;
 }
 
-function canonicalSkillName(name: string): string {
-  return name.trim().toLowerCase();
-}
 
 function canonicalizeCountMap(counts: CountMap): CountMap {
   const canonical: CountMap = {};
   for (const [name, count] of Object.entries(counts)) {
-    const key = canonicalSkillName(name);
+    const key = canonicalIdentity(name);
     setOwnRecordValue(
       canonical,
       key,
@@ -1076,7 +1073,7 @@ function canonicalizeCountMap(counts: CountMap): CountMap {
 function canonicalizeSkillStats(stats: Stats, eventTime: string): Stats {
   const canonical: Stats["skills"] = {};
   for (const [name, skill] of Object.entries(stats.skills)) {
-    const key = canonicalSkillName(name);
+    const key = canonicalIdentity(name);
     const existing = ownRecordValue(canonical, key);
     const lastUsedAt =
       !existing?.lastUsedAt ||
@@ -1102,8 +1099,8 @@ function canonicalizeSkillStats(stats: Stats, eventTime: string): Stats {
 }
 
 function compareCanonicalSkillNames(left: string, right: string): number {
-  const leftKey = canonicalSkillName(left);
-  const rightKey = canonicalSkillName(right);
+  const leftKey = canonicalIdentity(left);
+  const rightKey = canonicalIdentity(right);
   return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
 }
 
@@ -1489,7 +1486,7 @@ function skillPlacementEpochKey(params: {
       JSON.stringify([
         params.inventoryStartedAt,
         params.agentId,
-        canonicalSkillName(params.skill.name),
+        canonicalIdentity(params.skill.name),
         params.skill.source,
         params.skill.winnerFingerprint,
         params.skill.fingerprint,
@@ -1578,13 +1575,11 @@ export class StatsAggregator {
   private constructor(private readonly pluginRoot: string) {}
 
   static create(pluginRoot: string): StatsAggregator {
-    const normalizedPluginRoot = path.resolve(pluginRoot);
-    const existing = statsAggregatorCache.get(normalizedPluginRoot);
-    if (existing) return existing;
-
-    const aggregator = new StatsAggregator(normalizedPluginRoot);
-    statsAggregatorCache.set(normalizedPluginRoot, aggregator);
-    return aggregator;
+    return getOrCache(
+      statsAggregatorCache,
+      pluginRoot,
+      (normalizedRoot) => new StatsAggregator(normalizedRoot)
+    );
   }
 
   listProcessedEventIds(): Set<string> {
@@ -1623,7 +1618,7 @@ export class StatsAggregator {
         .flatMap((skill): SkillPlacementCandidate[] => {
           const globalSkill = ownRecordValue(
             stats.skills,
-            canonicalSkillName(skill.name),
+            canonicalIdentity(skill.name),
           );
           const reason: SkillPlacementReason | undefined =
             globalSkill?.needsReview
@@ -1730,7 +1725,7 @@ export class StatsAggregator {
         ? [
             ...new Set(
               (state.skillsUsed ?? []).map((skill) =>
-                canonicalSkillName(skill.name),
+                canonicalIdentity(skill.name),
               ),
             ),
           ]
@@ -1738,7 +1733,7 @@ export class StatsAggregator {
       const recommendedSkills = result
         ? [
             ...new Set(
-              (state.intent?.recommendedSkills ?? []).map(canonicalSkillName),
+              (state.intent?.recommendedSkills ?? []).map(canonicalIdentity),
             ),
           ]
         : [];
@@ -1933,4 +1928,4 @@ export class StatsAggregator {
   }
 }
 
-export const defaultStatsAggregator = StatsAggregator.create(pluginRoot);
+export const defaultStatsAggregator = StatsAggregator.create(packageRoot);

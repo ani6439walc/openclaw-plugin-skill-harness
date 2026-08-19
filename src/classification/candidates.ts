@@ -5,6 +5,7 @@ import type {
   IntentProjectionSupportReason,
 } from "../types.js";
 import type { TopicSwitchResult } from "./prompts.js";
+import { normalizeForComparison } from "../normalize.js";
 
 export type {
   IntentProjectionSelectionReason,
@@ -56,9 +57,6 @@ const SELECTION_REASON_ORDER: readonly IntentProjectionSelectionReason[] = [
   "intent-id",
 ];
 
-function normalizePhrase(value: string): string {
-  return value.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
-}
 
 function resolveIntentId(value: string | undefined): string | undefined {
   return value?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
@@ -99,8 +97,8 @@ function latestContainsBoundaryPhrase(latest: string, phrase: string): boolean {
 }
 
 function latestContainsPhrase(latest: string, phrase: string): boolean {
-  const normalizedLatest = normalizePhrase(latest);
-  const normalizedPhrase = normalizePhrase(phrase);
+  const normalizedLatest = normalizeForComparison(latest);
+  const normalizedPhrase = normalizeForComparison(phrase);
   if (!normalizedLatest || !normalizedPhrase) return false;
   if (Array.from(normalizedPhrase).length === 1) {
     return normalizedLatest === normalizedPhrase;
@@ -115,11 +113,11 @@ function topicKeywordsContainPhrase(
   topicKeywords: readonly string[],
   phrase: string,
 ): boolean {
-  const normalizedPhrase = normalizePhrase(phrase);
+  const normalizedPhrase = normalizeForComparison(phrase);
   return (
     normalizedPhrase.length > 0 &&
     topicKeywords.some(
-      (topicKeyword) => normalizePhrase(topicKeyword) === normalizedPhrase,
+      (topicKeyword) => normalizeForComparison(topicKeyword) === normalizedPhrase,
     )
   );
 }
@@ -190,7 +188,7 @@ export function projectIntentCandidates(
 
     const normalizedCandidateKeywords = new Set<string>();
     for (const keyword of intent.definition.candidate?.keywords ?? []) {
-      const normalizedKeyword = normalizePhrase(keyword);
+      const normalizedKeyword = normalizeForComparison(keyword);
       if (
         !normalizedKeyword ||
         normalizedCandidateKeywords.has(normalizedKeyword)

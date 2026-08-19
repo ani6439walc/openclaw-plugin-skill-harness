@@ -24,7 +24,7 @@ Use this routing table for common tasks:
 | Prompt output, parsing, compact-model contracts        | `src/classification/prompts.ts`, `src/classification/subagent.ts`                                                          | `src/classification/prompts.test.ts`, `src/classification/subagent.test.ts`, README if behavior changes        | `pnpm run typecheck`, `pnpm run test`                                                             |
 | Config or manifest-visible option                      | `src/config.ts`, `src/types.ts`, `openclaw.plugin.json`                                                                    | `src/config.test.ts`, README configuration table                                                               | `pnpm run typecheck`, `pnpm run test`                                                             |
 | Runtime data layout or first-install seeding           | `src/plugin.ts`, `src/file-utils.ts`, `src/intents/catalog.ts`                                                             | `src/plugin.test.ts`, `src/file-utils.test.ts`, README/AGENTS path docs                                        | `pnpm run typecheck`, `pnpm run test`, `pnpm run build` if CLI/package output depends on it       |
-| Stats or skill recommendation accounting               | `src/stats/aggregator.ts`, `src/intents/skill-references.ts`                                                               | `src/stats/aggregator.test.ts`, `src/intents/skill-references.test.ts`, README stats docs                      | `pnpm run typecheck`, `pnpm run test`                                                             |
+| Stats or skill recommendation accounting               | `src/stats/aggregator.ts`, `src/skills/indexer.ts`                                                                         | `src/stats/aggregator.test.ts`, `src/skills/indexer.test.ts`, README stats docs                                | `pnpm run typecheck`, `pnpm run test`                                                             |
 | Skill tool registration, inventory, or search behavior | `src/skills/tools.ts`, `src/skills/indexer.ts`, `src/skills/search.ts`                                                     | `src/skills/tools.test.ts`, `src/skills/indexer.test.ts`, `src/skills/search.test.ts`, README skill-tools docs | `pnpm run typecheck`, `pnpm run test`                                                             |
 | Intent Review trigger/log behavior                     | `src/review/triggers.ts`, `src/review/subagent.ts`, `src/review/log-writer.ts`, `src/review/log.ts`, `src/review/queue.ts` | Matching `*.test.ts`, README Intent Review docs                                                                | `pnpm run typecheck`, `pnpm run test`, `pnpm run build` for CLI changes                           |
 | Human intent maintenance skill or keyword audit        | `skills/skill-harness/SKILL.md`, its linked references, scripts, templates, and assets                                     | `src/review/mode.test.ts`, README human-maintenance and Intent Review sections                                 | `pnpm run format`, `pnpm test src/review/mode.test.ts`, bundled Python script tests when changed  |
@@ -123,8 +123,8 @@ Use the existing module boundaries:
 - `src/constants.ts`: shared runtime constants — timeouts, retention periods, `USER_MESSAGE_BOUNDARY`, `FALLBACK_INTENT`, `SKILL_HARNESS_PLUGIN_TAG`, and intent complexity guard.
 - `src/xml-format.ts`: XML prompt formatting helpers (`xmlElement`, `xmlBlock`, `boundedXmlElement`) used by classification, curation, and review prompt builders.
 - `src/intents/catalog.ts`: runtime intent catalog loading.
-- `src/intents/validation.ts`: runtime intent frontmatter and body validation — YAML metadata, guidance sentence, `candidate.scope`, and `skills[]` dependency checks.
-- `src/intents/routing-validation.ts`: routing guidance validation for intent body content.
+- `src/intents/routing-validation.ts`: runtime intent frontmatter, body, and routing-guidance validation — YAML metadata, guidance sentence, `candidate.scope`, and `skills[]` dependency checks.
+- `src/intents/validation.ts`: backwards-compatible validation export that projects routing validation results into the legacy public shape.
 - `src/experiences/catalog.ts`: runtime skill-experience catalog validation and bounded lookup.
 - `src/skills/tools.ts`: registers `skill_list`, `skill_search`, `skill_view`, `skill_manage`, and `skill_experience` tools through `registerSkillTools()`.
 - `src/skills/indexer.ts`: skill inventory indexing with watch-debounce cache TTL and source precedence.
@@ -149,7 +149,8 @@ Use the existing module boundaries:
 - `src/subagent-runtime.ts`: shared embedded subagent run defaults and error-payload extraction helpers used by classification and review subagents.
 - `src/classification/prompts.ts`, `src/classification/subagent.ts`, `src/classification/conversation.ts`, `src/classification/candidates.ts`, `src/review/subagent.ts`, `src/review/triggers.ts`: classification, conservative candidate projection, and review logic.
 - `src/review/snapshot-formatter.ts`: task-oriented Review snapshot serialization, host-owned manifest metadata, semantic evidence wrappers, and final-boundary escaping.
-- `src/intents/skill-references.ts`: resolves frontmatter `skills[]` dependencies into available `SKILL.md` metadata for Intent Review. Intent prompt/body text is not scanned for skill references.
+- `src/skills/indexer.ts`: resolves frontmatter `skills[]` dependencies into available `SKILL.md` metadata for Intent Review. Intent prompt/body text is not scanned for skill references.
+- `src/intents/skill-references.ts`: backwards-compatible skill-resolution re-export for existing direct consumers.
 - `src/review/queue.ts`: serializes background Intent Review work so hook handling stays fail-open.
 - `src/review/trigger-keywords.ts`: default and normalized runtime keyword sets for `successful-pattern`, `behavior-fix`, and `entity-context` triggers.
 - `src/session/guards.ts`: session eligibility guards.
@@ -215,7 +216,7 @@ Typical mapping:
 - Config schema changes: `src/config.test.ts`.
 - Runtime data paths or startup seeding: `src/file-utils.test.ts` and `src/plugin.test.ts`.
 - Hook behavior: `src/hooks/index.test.ts`.
-- Intent loading or validation: `src/intents/catalog.ts` consumers and `src/intents/validation.test.ts`.
+- Intent loading or validation: `src/intents/catalog.ts` consumers, `src/intents/routing-validation.test.ts`, and the compatibility coverage in `src/intents/validation.test.ts`.
 - Prompt/parser behavior: `src/classification/prompts.test.ts`.
 - Conversation extraction/history matching: `src/classification/conversation.test.ts`.
 - Session persistence and cleanup: `src/session/tracker.test.ts`.

@@ -1,3 +1,4 @@
+import { getOrCache } from "../singleton.js";
 import path from "node:path";
 import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -21,7 +22,7 @@ import matter from "gray-matter";
 import { logger } from "../../api.js";
 import {
   agentSessionsPath,
-  pluginRoot,
+  packageRoot,
   sessionsDirPath,
   sessionsPath,
   fileExists,
@@ -552,17 +553,12 @@ export class SessionTracker {
   }
 
   static create(pluginRoot: string): SessionTracker {
-    const normalizedPluginRoot = path.resolve(pluginRoot);
-    const existing = trackerCache.get(normalizedPluginRoot);
-    if (existing) {
-      existing.loadSessionsFromDisk();
-      return existing;
-    }
-
-    const tracker = new SessionTracker(normalizedPluginRoot);
-    tracker.loadSessionsFromDisk();
-    trackerCache.set(normalizedPluginRoot, tracker);
-    return tracker;
+    return getOrCache(
+      trackerCache,
+      pluginRoot,
+      (normalizedRoot) => new SessionTracker(normalizedRoot),
+      (tracker) => tracker.loadSessionsFromDisk()
+    );
   }
 
   private loadSessionsFromDisk(): void {
@@ -1602,4 +1598,4 @@ const legacyMutationsArePrivate: [LegacyPublicMutation] extends [never]
   : false = true;
 void legacyMutationsArePrivate;
 
-export const defaultTracker = SessionTracker.create(pluginRoot);
+export const defaultTracker = SessionTracker.create(packageRoot);

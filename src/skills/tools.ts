@@ -9,6 +9,7 @@ import { SKILL_SOURCE_ORDER, type SkillSource } from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 import type { IntentCatalogEntry } from "../types.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
+import { canonicalIdentity } from "../normalize.js";
 
 const DEFAULT_SKILL_LIST_LIMIT = 150;
 const MAX_SKILL_LIST_LIMIT = 500;
@@ -102,7 +103,7 @@ function canonicalSkillNames(values: readonly string[]): string[] {
   const seen = new Set<string>();
   const names: string[] = [];
   for (const value of values) {
-    const name = value.normalize("NFKC").trim().toLowerCase();
+    const name = canonicalIdentity(value);
     if (!name || seen.has(name)) continue;
     seen.add(name);
     names.push(name);

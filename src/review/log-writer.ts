@@ -1,6 +1,6 @@
 import { logger } from "../../api.js";
 import {
-  pluginRoot,
+  packageRoot,
   reviewLogPath,
   fileExists,
   readJsonFile,
@@ -112,7 +112,7 @@ function applyKeywordChange(
 
 export class ReviewLogWriter {
   private constructor(
-    private readonly pluginRoot: string,
+    private readonly packageRoot: string,
     private readonly options: {
       triggerKeywordSeed?: () => Partial<ReviewTriggerKeywords> | undefined;
       onAfterWrite?: () => void;
@@ -120,17 +120,17 @@ export class ReviewLogWriter {
   ) {}
 
   static create(
-    pluginRoot: string,
+    packageRoot: string,
     options: {
       triggerKeywordSeed?: () => Partial<ReviewTriggerKeywords> | undefined;
       onAfterWrite?: () => void;
     } = {},
   ): ReviewLogWriter {
-    return new ReviewLogWriter(pluginRoot, options);
+    return new ReviewLogWriter(packageRoot, options);
   }
 
   completedSkillEpochKeys(): ReadonlySet<string> | undefined {
-    const logPath = reviewLogPath(this.pluginRoot);
+    const logPath = reviewLogPath(this.packageRoot);
     if (!fileExists(logPath)) return new Set();
     try {
       return new Set(Object.keys(readReviewLog(logPath).reviewedSkillEpochs));
@@ -160,7 +160,7 @@ export class ReviewLogWriter {
     } = {},
   ): Promise<boolean> {
     if (!eventId) return false;
-    const logPath = reviewLogPath(this.pluginRoot);
+    const logPath = reviewLogPath(this.packageRoot);
 
     const result = await withFileLock(logPath, async () => {
       try {
@@ -497,4 +497,4 @@ export class IntentReviewLogWriter {
   }
 }
 
-export const defaultReviewLogWriter = ReviewLogWriter.create(pluginRoot);
+export const defaultReviewLogWriter = ReviewLogWriter.create(packageRoot);

@@ -10,6 +10,7 @@ import type {
   SkillUsageStats,
 } from "./types.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
+import { normalizeForComparison } from "../normalize.js";
 
 const DEFAULT_SEARCH_LIMIT = 20;
 const MAX_SEARCH_LIMIT = 100;
@@ -99,13 +100,13 @@ interface ScoredDocument {
 }
 
 export function normalizeSearchText(value: string): string {
-  return value.normalize("NFKC").toLowerCase().trim().replace(/\s+/gu, " ");
+  return normalizeForComparison(value);
 }
 
 function normalizedStrings(values: readonly string[] | undefined): string[] {
   const seen = new Set<string>();
   for (const value of values ?? []) {
-    const normalized = normalizeSearchText(value);
+    const normalized = normalizeForComparison(value);
     if (normalized) seen.add(normalized);
   }
   return [...seen];
@@ -124,7 +125,7 @@ function searchTokens(query: string, keywords: readonly string[]): string[] {
 function buildSearchCriteria(
   params: SkillSearchParams,
 ): SearchCriteria | undefined {
-  const phrase = normalizeSearchText(params.query ?? "");
+  const phrase = normalizeForComparison(params.query ?? "");
   const keywords = normalizedStrings(params.keywords);
   const domains = normalizedStrings(params.domains);
   const tokens = searchTokens(phrase, keywords);
@@ -146,7 +147,7 @@ function textMatches(
   phrase: string,
   tokens: readonly string[],
 ): boolean {
-  const normalized = normalizeSearchText(value);
+  const normalized = normalizeForComparison(value);
   return Boolean(
     (phrase && normalized.includes(phrase)) ||
     tokens.some((token) => normalized.includes(token)),
@@ -154,7 +155,7 @@ function textMatches(
 }
 
 function nameTokens(name: string): string[] {
-  return normalizeSearchText(name).match(/[\p{L}\p{N}]+/gu) ?? [];
+  return normalizeForComparison(name).match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
 function nameScore(
@@ -162,7 +163,7 @@ function nameScore(
   phrase: string,
   tokens: readonly string[],
 ): number {
-  const normalized = normalizeSearchText(name);
+  const normalized = normalizeForComparison(name);
   const terms = [...new Set([phrase, ...tokens].filter(Boolean))];
   if (terms.some((term) => normalized === term)) return 100;
   if (terms.some((term) => normalized.startsWith(term))) return 70;
@@ -226,7 +227,7 @@ function scoreDocument(
     matchedFields.push("name");
   }
 
-  const normalizedDescription = normalizeSearchText(document.skill.description);
+  const normalizedDescription = normalizeForComparison(document.skill.description);
   const descriptionPhraseMatch = Boolean(
     criteria.phrase && normalizedDescription.includes(criteria.phrase),
   );
@@ -403,7 +404,7 @@ export function buildSkillIntentReferenceMap(
     };
     const names = new Set(
       frontmatterSkillNames(intent)
-        .map((name) => normalizeSearchText(name))
+        .map((name) => normalizeForComparison(name))
         .filter(Boolean),
     );
     for (const name of names) {
@@ -431,7 +432,7 @@ export async function searchAvailableSkills(
       skill,
       relatedSkills: relatedSkills.get(skill.name.toLowerCase()) ?? [],
       intentReferences:
-        intentReferences.get(normalizeSearchText(skill.name)) ?? [],
+        intentReferences.get(normalizeForComparison(skill.name)) ?? [],
       usageTurns: stats.usage_turns,
       usageStats: stats,
     };
