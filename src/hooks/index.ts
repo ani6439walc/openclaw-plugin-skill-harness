@@ -1,3 +1,4 @@
+import { normalizeForKeyword } from "../normalize.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import type {
   PluginHookBeforePromptBuildEvent,
@@ -25,7 +26,6 @@ import {
 } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { defaultReviewLogWriter } from "../review/log-writer.js";
-import { enqueueReview } from "../review/queue.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { runReviewSubagent } from "../review/subagent.js";
 import type {
@@ -122,6 +122,14 @@ import {
   SKILL_HARNESS_SYSTEM_CONTEXT,
 } from "./system-context.js";
 export type { HookDeps } from "./types.js";
+
+// Inline review queue - serializes background review tasks
+let pendingReview = Promise.resolve();
+function enqueueReview(task: () => Promise<void>): void {
+  pendingReview = pendingReview
+    .then(task)
+    .catch((error) => logger.warn("background review failed", { error }));
+}
 
 function sanitizeHistoricalIntentRecords(
   records: HistoricalIntentRecord[],
@@ -409,9 +417,6 @@ function findIntentDomain(
   );
 }
 
-function normalizeKeywordForMatching(value: string): string {
-  return value.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
-}
 
 const normalizedFastpathKeywords = new WeakMap<
   IntentCatalogEntry,
@@ -427,7 +432,7 @@ function getNormalizedFastpathKeywords(
   if (cached) return cached;
 
   const keywords = intent.definition.fastpath.keywords.map((keyword) => ({
-    normalized: normalizeKeywordForMatching(keyword),
+    normalized: normalizeForKeyword(keyword),
     keyword: keyword.trim(),
   }));
   normalizedFastpathKeywords.set(intent, keywords);
@@ -438,7 +443,7 @@ function findExactKeywordIntent(
   latest: string,
   intents: readonly IntentCatalogEntry[],
 ): { intent: IntentCatalogEntry; keyword: string } | undefined {
-  const normalizedLatest = normalizeKeywordForMatching(latest);
+  const normalizedLatest = normalizeForKeyword(latest);
   if (!normalizedLatest) return;
 
   for (const intent of intents) {
@@ -473,8 +478,8 @@ function scoreTopicKeywordSimilarity(
   topicKeyword: string,
   intentKeyword: string,
 ) {
-  const topic = normalizeKeywordForMatching(topicKeyword);
-  const intent = normalizeKeywordForMatching(intentKeyword);
+  const topic = normalizeForKeyword(topicKeyword);
+  const intent = normalizeForKeyword(intentKeyword);
   if (!topic || !intent) return 0;
   if (topic === intent) return 1;
 

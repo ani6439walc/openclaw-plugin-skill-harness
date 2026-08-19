@@ -14,6 +14,7 @@ import type {
   PendingCurationSchedule,
   SessionCurationRecord,
 } from "./types.js";
+import { canonicalIdentity } from "../normalize.js";
 
 export interface CurationScheduleCandidate {
   sessionId: string;
@@ -121,9 +122,6 @@ export function reconcileCurationSchedules(input: {
   return candidates;
 }
 
-function canonicalIdentity(value: string): string {
-  return value.trim().normalize("NFKC").toLowerCase();
-}
 
 function uniqueCanonicalStrings(
   values: unknown,

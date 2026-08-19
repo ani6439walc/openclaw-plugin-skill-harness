@@ -6,7 +6,7 @@ import matter from "gray-matter";
 import { logger, type OpenClawPluginApi } from "../../api.js";
 import { resolveStateDirFromApi } from "../file-utils.js";
 import type { IntentCatalogEntry } from "../types.js";
-import { buildSkillDomainMap, domainsForSkill } from "./domains.js";
+import { buildSkillDomainMap } from "./domains.js";
 import {
   DEFAULT_SKILL_INDEX_CACHE_TTL_MS,
   resolveSkillIndexCacheTtlMs,
@@ -477,7 +477,7 @@ export async function listAvailableSkills(
       skills.push({
         ...stripIndexOnlyFields(skill),
         ...(domainsBySkill
-          ? { domains: domainsForSkill(domainsBySkill, skill.name) }
+          ? { domains: [...(domainsBySkill.get(skill.name.trim().toLowerCase()) ?? [])] }
           : {}),
       });
     }
@@ -508,7 +508,7 @@ export async function findAvailableSkill(
       return {
         ...stripIndexOnlyFields(skill),
         ...(domainsBySkill
-          ? { domains: domainsForSkill(domainsBySkill, skill.name) }
+          ? { domains: [...(domainsBySkill.get(skill.name.trim().toLowerCase()) ?? [])] }
           : {}),
       };
     }

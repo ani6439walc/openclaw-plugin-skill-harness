@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import type { SessionData, SessionState } from "../session/tracker.js";
 import type { AvailableSkill } from "../skills/types.js";
 import type { CuratedSkillCandidate } from "./types.js";
+import { isRecord } from "../guards.js";
 
 export interface ColdStartSelection {
   ranked: CuratedSkillCandidate[];
@@ -20,9 +21,6 @@ interface RankedPoolEntry {
   lastUsedAt: number;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function normalizeIdentity(value: unknown): string {
   return typeof value === "string" ? value.trim().toLowerCase() : "";

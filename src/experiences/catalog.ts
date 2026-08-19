@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import matter from "gray-matter";
 import { experiencesPath } from "../file-utils.js";
+import { normalizeForComparison } from "../normalize.js";
 import type {
   ExperienceDirectoryValidationError,
   ExperienceDirectoryValidationResult,
@@ -37,12 +38,9 @@ function codePointLength(value: string): number {
   return Array.from(value).length;
 }
 
-function normalizeText(value: string): string {
-  return value.normalize("NFKC").trim().toLowerCase().replace(/\s+/gu, " ");
-}
 
 function normalizeSegment(value: string): string | undefined {
-  const normalized = normalizeText(value);
+  const normalized = normalizeForComparison(value);
   if (
     !normalized ||
     codePointLength(normalized) > MAX_SEGMENT_CODE_POINTS ||
@@ -313,7 +311,7 @@ function parseExperienceFile(
           `each keyword must contain at most ${MAX_KEYWORD_CODE_POINTS} Unicode code points`,
         );
       }
-      const normalized = normalizeText(trimmed);
+      const normalized = normalizeForComparison(trimmed);
       if (seen.has(normalized)) {
         messages.push(`duplicate keyword ${normalized}`);
       } else {
@@ -507,13 +505,13 @@ function scoreEntry(
   entry: SkillExperienceEntry,
   query: string,
 ): ExperienceScore {
-  const identity = normalizeText(entry.identity);
-  const keywords = entry.keywords.map(normalizeText);
+  const identity = normalizeForComparison(entry.identity);
+  const keywords = entry.keywords.map(normalizeForComparison);
   return [
     identity === query ? 1 : 0,
     keywords.filter((keyword) => keyword === query).length,
-    phraseCount(normalizeText(entry.summary), query),
-    phraseCount(normalizeText(entry.body), query),
+    phraseCount(normalizeForComparison(entry.summary), query),
+    phraseCount(normalizeForComparison(entry.body), query),
   ];
 }
 
@@ -549,7 +547,7 @@ export class SkillExperienceCatalog {
   }
 
   resolve(identity: string): SkillExperienceEntry | undefined {
-    const segments = normalizeText(identity).split("/");
+    const segments = normalizeForComparison(identity).split("/");
     if (segments.length !== 2) return;
     const skill = normalizeSegment(segments[0] ?? "");
     const entryId = normalizeSegment(segments[1] ?? "");
@@ -562,7 +560,7 @@ export class SkillExperienceCatalog {
 
   search(params: ExperienceSearchParams): SkillExperienceEntry[] {
     const entries = this.listForSkills(params.skillNames);
-    const query = normalizeText(params.query ?? "");
+    const query = normalizeForComparison(params.query ?? "");
     const limit =
       params.limit === undefined
         ? entries.length

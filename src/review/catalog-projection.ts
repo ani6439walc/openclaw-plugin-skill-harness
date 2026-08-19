@@ -1,3 +1,4 @@
+import { canonicalIdentity, normalizeForKeyword } from "../normalize.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { ReviewSnapshot } from "./types.js";
 
@@ -79,13 +80,7 @@ function compareCatalogEntries(
   );
 }
 
-function normalizeDomain(value: string | undefined): string {
-  return value?.normalize("NFKC").trim().toLowerCase() ?? "";
-}
 
-function normalizeKeyword(value: string): string {
-  return value.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
-}
 
 function fullCatalog(
   intentCatalog: readonly CatalogEntry[],
@@ -128,10 +123,10 @@ export function projectIntentCatalog(
     const intent = state.intent;
     if (!intent) continue;
     if (intent.intent) observedIntentIds.add(intent.intent);
-    const domain = normalizeDomain(intent.domain);
+    const domain = canonicalIdentity(intent.domain ?? "");
     if (domain) observedDomains.add(domain);
     for (const keyword of intent.keywords ?? []) {
-      const normalized = normalizeKeyword(keyword);
+      const normalized = normalizeForKeyword(keyword);
       if (normalized) observedKeywords.add(normalized);
     }
   }
@@ -154,13 +149,13 @@ export function projectIntentCatalog(
     if (entry.id === matchedIntentId) addReason(entry.id, "matched-intent");
     if (observedIntentIds.has(entry.id)) addReason(entry.id, "observed-intent");
 
-    const domain = normalizeDomain(entry.domain);
+    const domain = canonicalIdentity(entry.domain ?? "");
     if (domain && observedDomains.has(domain)) {
       addReason(entry.id, "observed-domain");
     }
 
     const hasExactKeywordOverlap = (entry.fastpath?.keywords ?? []).some(
-      (keyword) => observedKeywords.has(normalizeKeyword(keyword)),
+      (keyword) => observedKeywords.has(normalizeForKeyword(keyword)),
     );
     if (hasExactKeywordOverlap) {
       addReason(entry.id, "exact-fastpath-keyword-overlap");
@@ -184,7 +179,7 @@ export function projectIntentCatalog(
   }
 
   const hasSameDomainNeighbor = selectedEntries.some((candidate) => {
-    const domain = normalizeDomain(candidate.entry.domain);
+    const domain = canonicalIdentity(candidate.entry.domain ?? "");
     return (
       candidate.entry.id !== matchedIntentId &&
       Boolean(domain) &&
@@ -196,7 +191,7 @@ export function projectIntentCatalog(
   }
 
   const hasCrossDomainKeywordNeighbor = selectedEntries.some((candidate) => {
-    const domain = normalizeDomain(candidate.entry.domain);
+    const domain = canonicalIdentity(candidate.entry.domain ?? "");
     return (
       candidate.entry.id !== matchedIntentId &&
       Boolean(domain) &&

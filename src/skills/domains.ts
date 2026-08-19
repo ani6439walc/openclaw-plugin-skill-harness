@@ -36,9 +36,3 @@ export function buildSkillDomainMap(
   );
 }
 
-export function domainsForSkill(
-  domainsBySkill: ReadonlyMap<string, readonly string[]>,
-  skillName: string,
-): string[] {
-  return [...(domainsBySkill.get(skillName.trim().toLowerCase()) ?? [])];
-}

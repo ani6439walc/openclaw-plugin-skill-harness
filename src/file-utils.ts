@@ -43,8 +43,6 @@ export function resolvePackageRoot(
 
 export const packageRoot = resolvePackageRoot();
 
-// Backward-compatible alias for existing tests and singleton defaults.
-export const pluginRoot = packageRoot;
 
 export function resolvePluginDataRoot(
   stateDir: string,
@@ -88,7 +86,7 @@ export function agentSessionsPath(dataRoot: string, agentName: string): string {
 /**
  * Resolve a path under the sessions directory.
  */
-export function sessionsPath(filename: string, dataRoot = pluginRoot): string {
+export function sessionsPath(filename: string, dataRoot: string): string {
   return path.join(sessionsDirPath(dataRoot), filename);
 }
 

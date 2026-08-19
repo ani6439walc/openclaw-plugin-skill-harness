@@ -3,8 +3,6 @@ export {
   selectColdStartCandidates,
   selectExplorationCandidates,
 } from "./selector.js";
-export { createCurationQueue } from "./queue.js";
-export type { CurationQueue } from "./queue.js";
 export {
   evaluateCurationCadence,
   qualifyingTurns,

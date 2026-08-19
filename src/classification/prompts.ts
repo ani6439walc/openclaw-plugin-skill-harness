@@ -5,7 +5,8 @@ import {
   UNTRUSTED_CONTEXT_HEADER,
   USER_MESSAGE_BOUNDARY,
 } from "../constants.js";
-import { indentXmlLines } from "../xml-format.js";
+import { indentXmlLines, xmlBlock } from "../xml-format.js";
+import { canonicalIdentity } from "../normalize.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
 import type {
   AvailableSkill,
@@ -46,7 +47,7 @@ const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
 - Do not abbreviate technical names into unclear shorthand.
 - Do not omit required schema fields, safety constraints, ordering, or key qualifiers to make text shorter.`;
 
-const ROUTING_CONTEXT_POLICY = taggedBlock(
+const ROUTING_CONTEXT_POLICY = xmlBlock(
   "context_policy",
   `- \`selected_intent\` and \`intent_guidance\` describe the current routing decision; treat low-confidence routing as tentative.
 - \`task_complexity\`, when present, is the classifier's current scope estimate; use it to calibrate planning and verification, not to broaden the requested work.
@@ -75,7 +76,7 @@ function buildIntentCatalog(intents: readonly IntentCatalogEntry[]): string {
           ),
         );
       }
-      return taggedBlock(
+      return xmlBlock(
         "intent",
         lines.join("\n"),
         ` domain="${escapeXmlAttribute(entry.definition.domain)}" id="${escapeXmlAttribute(entry.id)}"`,
@@ -83,7 +84,7 @@ function buildIntentCatalog(intents: readonly IntentCatalogEntry[]): string {
     })
     .join("\n");
 
-  return taggedBlock("intent_catalog", intentBlocks);
+  return xmlBlock("intent_catalog", intentBlocks);
 }
 
 export function measureIntentCatalogCodePoints(
@@ -108,7 +109,7 @@ function buildConversationContext(
   const closeSegment = () => {
     if (segmentLines.length === 0) return;
     lines.push(
-      taggedBlock(
+      xmlBlock(
         "topic_segment",
         segmentLines.join("\n"),
         ` index="${segmentIndex}"`,
@@ -136,7 +137,7 @@ function buildConversationContext(
   }
 
   closeSegment();
-  return taggedBlock("conversation_context", lines.join("\n"));
+  return xmlBlock("conversation_context", lines.join("\n"));
 }
 
 function formatTopicBoundary(
@@ -216,12 +217,8 @@ function joinPromptSections(
     .join("\n\n");
 }
 
-function taggedBlock(tag: string, content: string, attributes = ""): string {
-  return `<${tag}${attributes}>\n${indentXmlLines(content)}\n</${tag}>`;
-}
-
 function untrustedBlock(tag: string, content: string): string {
-  return taggedBlock(tag, escapeXmlText(content));
+  return xmlBlock(tag, escapeXmlText(content));
 }
 
 function normalizePromptEvidenceText(value: string): string {
@@ -479,11 +476,11 @@ function formatSkillXmlBlock(
       formatSkillXml(
         skill,
         includeDetails,
-        experiencesBySkill?.get(canonicalSkillName(skill.name)),
+        experiencesBySkill?.get(canonicalIdentity(skill.name)),
       ),
     )
     .join("\n");
-  return taggedBlock(tag, body ?? "", attributes);
+  return xmlBlock(tag, body ?? "", attributes);
 }
 
 function formatSkillXml(
@@ -501,11 +498,11 @@ function formatSkillXml(
     const relatedSkills = skill.resolvedRelatedSkills ?? [];
     if (relatedSkills.length > 0) {
       lines.push(
-        taggedBlock(
+        xmlBlock(
           "related_skills",
           relatedSkills
             .map((related) =>
-              taggedBlock(
+              xmlBlock(
                 "related_skill",
                 [
                   formatXmlTextElement("name", related.name),
@@ -519,7 +516,7 @@ function formatSkillXml(
       );
     }
   }
-  return taggedBlock("skill", lines.join("\n"));
+  return xmlBlock("skill", lines.join("\n"));
 }
 
 function formatExperienceXml(
@@ -539,16 +536,9 @@ function formatExperienceXml(
       formatXmlTextElement("body", recommendedBody),
     );
   }
-  return taggedBlock("skill_experience", lines.join("\n"));
+  return xmlBlock("skill_experience", lines.join("\n"));
 }
 
-function canonicalExperienceIdentity(identity: string): string {
-  return identity.normalize("NFKC").trim().toLowerCase();
-}
-
-function canonicalSkillName(name: string): string {
-  return name.normalize("NFKC").trim().toLowerCase();
-}
 
 function truncateCodePoints(value: string, limit: number): string {
   return Array.from(value).slice(0, limit).join("");
@@ -559,13 +549,13 @@ function formatCandidateExperiences(
   recommendedExperienceIds: readonly string[],
 ): ReadonlyMap<string, readonly string[]> {
   const recommended = new Set(
-    recommendedExperienceIds.map(canonicalExperienceIdentity),
+    recommendedExperienceIds.map(canonicalIdentity),
   );
   let remainingRecommendedBodyCodePoints = 3_000;
   const bySkill = new Map<string, string[]>();
   for (const experience of experiences) {
     const selected = recommended.has(
-      canonicalExperienceIdentity(experience.identity),
+      canonicalIdentity(experience.identity),
     );
     const body = selected
       ? truncateCodePoints(
@@ -576,7 +566,7 @@ function formatCandidateExperiences(
     if (body !== undefined) {
       remainingRecommendedBodyCodePoints -= Array.from(body).length;
     }
-    const key = canonicalSkillName(experience.skill);
+    const key = canonicalIdentity(experience.skill);
     const entries = bySkill.get(key) ?? [];
     entries.push(formatExperienceXml(experience, body));
     bySkill.set(key, entries);
@@ -613,7 +603,7 @@ export function buildRoutingContext(params: {
       : undefined,
   ].filter((block): block is string => Boolean(block));
 
-  const taggedContent = taggedBlock(
+  const taggedContent = xmlBlock(
     SKILL_HARNESS_PLUGIN_TAG,
     blocks.join("\n"),
   );
@@ -630,7 +620,7 @@ function escapeXmlText(value: string | null | undefined): string {
 function formatXmlTextElement(tag: string, value: string): string {
   const content = escapeXmlText(value).replaceAll("\r", "&#xD;");
   return content.includes("\n")
-    ? taggedBlock(tag, content)
+    ? xmlBlock(tag, content)
     : `<${tag}>${content}</${tag}>`;
 }
 
