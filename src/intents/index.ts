@@ -1,4 +1,6 @@
 export { IntentCatalog, defaultCatalog } from "./catalog.js";
+export type { IntentValidationResult } from "./validation.js";
+export { validateIntentDirectory } from "./validation.js";
 export type {
   RoutingIntentDefinition,
   RoutingIntentValidationResult,
