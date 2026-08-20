@@ -238,6 +238,29 @@ pnpm pack --dry-run
 | `pnpm run build`      | Compile the plugin to `dist/`.                            |
 | `pnpm pack --dry-run` | Inspect package contents before publishing or installing. |
 
+### Navigate the codebase
+
+The implementation is organized by responsibility—plugin assembly, turn
+pipeline, intent/prompt contracts, skills and experiences, durable session and
+statistics state, and asynchronous Intent Review. The exact symbol and test
+locations are intentionally not maintained as a static file list: they move as
+the design evolves.
+
+For development work, start from the relevant domain in
+[AGENTS.md](AGENTS.md), then use CodeGraph to establish the current source,
+call paths, impact radius, and colocated tests:
+
+```bash
+codegraph status .
+codegraph explore --path . 'before_prompt_build classification intent routing'
+```
+
+If the first query is too broad or misses, narrow it with `codegraph query` and
+`codegraph node`, then trace relationships with `codegraph callers`, `callees`,
+or `impact`. Use `affected` only as a file-level backstop; it cannot prove
+test-case coverage. Do not run index-changing commands such as `init`, `index`,
+or `sync` without explicit authorization.
+
 ## Current implementation status
 
 The current plugin registers the complete runtime lifecycle: prompt construction,

@@ -11,26 +11,22 @@ Treat this file as the source of truth for repository operations, not as product
 Work in this order:
 
 1. Identify the change type: hook behavior, prompt/parser behavior, config/schema, runtime data path, intent asset, Intent Review/logging, docs-only, or package/SDK integration.
-2. Read the source map below and inspect the owning module plus its colocated tests before changing anything.
+2. Use the architecture map below to frame the change, then use CodeGraph to locate the owning symbols, call paths, and colocated tests before changing anything.
 3. Make the smallest change that satisfies the request. Do not refactor adjacent modules unless the current change requires it.
 4. Update the focused tests and synchronized docs/manifest entries in the same change.
 5. Run the verification tier that matches the change, then inspect `git diff` before handoff.
 
-Use this routing table for common tasks:
+Use this change-routing matrix to choose the initial CodeGraph query and verification tier. It identifies domains, not files; let the graph establish the current implementation and test owners.
 
-| Task type                                              | Start with                                                                                                                 | Usually update                                                                                                 | Minimum verification                                                                              |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Hook routing, fast paths, session lifecycle            | `src/hooks/index.ts`, `src/session/guards.ts`, `src/classification/conversation.ts`                                        | `src/hooks/index.test.ts`, `src/classification/conversation.test.ts`                                           | `pnpm run typecheck`, `pnpm run test`                                                             |
-| Prompt output, parsing, compact-model contracts        | `src/classification/prompts.ts`, `src/classification/subagent.ts`                                                          | `src/classification/prompts.test.ts`, `src/classification/subagent.test.ts`, README if behavior changes        | `pnpm run typecheck`, `pnpm run test`                                                             |
-| Config or manifest-visible option                      | `src/config.ts`, `src/types.ts`, `openclaw.plugin.json`                                                                    | `src/config.test.ts`, README configuration table                                                               | `pnpm run typecheck`, `pnpm run test`                                                             |
-| Runtime data layout or first-install seeding           | `src/plugin.ts`, `src/file-utils.ts`, `src/intents/catalog.ts`                                                             | `src/plugin.test.ts`, `src/file-utils.test.ts`, README/AGENTS path docs                                        | `pnpm run typecheck`, `pnpm run test`, `pnpm run build` if CLI/package output depends on it       |
-| Stats or skill recommendation accounting               | `src/stats/aggregator.ts`, `src/skills/indexer.ts`                                                                         | `src/stats/aggregator.test.ts`, `src/skills/indexer.test.ts`, README stats docs                                | `pnpm run typecheck`, `pnpm run test`                                                             |
-| Skill tool registration, inventory, or search behavior | `src/skills/tools.ts`, `src/skills/indexer.ts`, `src/skills/search.ts`                                                     | `src/skills/tools.test.ts`, `src/skills/indexer.test.ts`, `src/skills/search.test.ts`, README skill-tools docs | `pnpm run typecheck`, `pnpm run test`                                                             |
-| Intent Review trigger/log behavior                     | `src/review/triggers.ts`, `src/review/subagent.ts`, `src/review/log-writer.ts`, `src/review/log.ts`, `src/review/queue.ts` | Matching `*.test.ts`, README Intent Review docs                                                                | `pnpm run typecheck`, `pnpm run test`, `pnpm run build` for CLI changes                           |
-| Human intent maintenance skill or keyword audit        | `skills/skill-harness/SKILL.md`, its linked references, scripts, templates, and assets                                     | `src/review/mode.test.ts`, README human-maintenance and Intent Review sections                                 | `pnpm run format`, `pnpm test src/review/mode.test.ts`, bundled Python script tests when changed  |
-| Package/build output hygiene                           | `package.json`, `tsconfig.json`, `dist/` after build                                                                       | README Current Status / package notes when publish contents change                                             | `pnpm run build`, `pnpm pack --dry-run`, `pnpm run typecheck`, `pnpm run test`                    |
-| Bundled first-install intent examples                  | `skills/skill-harness/assets/*.md`                                                                                         | `src/intents/validation.test.ts` fixtures/expectations if needed                                               | `pnpm run test`                                                                                   |
-| Documentation-only sync                                | Source files that prove the claim                                                                                          | `README.md`, `AGENTS.md`, or `skills/skill-harness/**`                                                         | `pnpm run format`; run `pnpm run typecheck` and `pnpm run test` when docs assert current behavior |
+| Change area                                           | Explore first                                                           | Minimum verification                                                         |
+| ----------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Turn pipeline, classification, or session lifecycle   | Prompt-build flow, guards, and turn persistence                         | `pnpm run typecheck`, `pnpm run test`                                        |
+| Prompt contract or intent behavior                    | Prompt builder, parser, classifier, and intent catalog                  | `pnpm run typecheck`, `pnpm run test`                                        |
+| Configuration, runtime layout, or package integration | Plugin assembly, configuration, and persistence helpers                 | `pnpm run typecheck`, `pnpm run test`; build when emitted output is affected |
+| Skills, curation, or statistics                       | Skill tools/inventory, curation, and accounting paths                   | `pnpm run typecheck`, `pnpm run test`                                        |
+| Intent Review or keyword coverage                     | Trigger evaluation, snapshotting, review execution, and log persistence | `pnpm run typecheck`, `pnpm run test`; build for package-facing changes      |
+| Bundled human-maintenance assets                      | Human-maintenance workflow and its runtime boundary                     | Formatting plus the focused TypeScript/Python checks identified by the graph |
+| Documentation only                                    | Source symbols that support each claim                                  | `pnpm run format`; typecheck and tests when documenting behavior             |
 
 ## First Checks
 
@@ -107,56 +103,29 @@ The indexer uses `skills.load.watchDebounceMs` as its cache TTL only when `skill
 
 Stats schema v4 observes the resolved inventory per tracked agent on existing accepted stats events and adds attribution only from new accepted turns. Resolve the agent ID from persisted tracker state, never from a finalize-context fallback. Inventory identity consists of normalized skill name, source, a SHA-256 of the resolved winning `SKILL.md` path, and a SHA-256 of the raw file bytes. Canonicalize top-level recommendation and usage aggregate keys with trimmed locale-independent lowercase identity so `needsReview` joins the inventory's normalized key even when display casing differs. At the load boundary, merge valid existing mixed-case aggregate and daily-count collisions into the canonical key and recompute derived fields. Dynamic aggregate and count-map keys must use own-property-safe reads and writes so accepted reserved names such as `__proto__` cannot mutate `Object.prototype`. Keep both fingerprints internal to stats; public skill list/search/view results must not expose them. A source, winner, content, or visibility-continuity change starts a new per-skill epoch. If the disabled bundled-skill policy or inventory cannot be resolved trustworthily, preserve the existing stats event but skip the observation update. A valid v1/v2/v3 migration must retain historical aggregates, initialize `attribution.startedAt` at the migration event, and never fabricate pre-boundary daily intent outcomes/routing, skill routing, tool errors, or latency samples. New v4 daily attribution maps (`intentOutcomes`, `intentRouting`, `skillRouting`, `toolErrors`) store named keys as `value:<trimmed-name>`, are capped at 64 keys per UTC date, and reserve host-owned `__other__` overflow; top-level tool histograms use fixed latency buckets. Review outcomes remain owned only by `review.json`.
 
-## Source Map
+## Architecture Map and CodeGraph Workflow
 
-Use the existing module boundaries:
+This is deliberately a domain map, not a per-file inventory. The code changes over time; CodeGraph is the authority for the current symbol location, call path, impact radius, and colocated tests.
 
-- `src/plugin.ts`: assembly layer. Resolve config and runtime data root, initialize runtime directories, seed a missing or Markdown-empty runtime intent catalog from skill assets, instantiate runtime-scoped services, and register OpenClaw hooks.
-- `src/hooks/index.ts`: hook behavior for prompt building, tracking, stats updates, review queueing, and cleanup. Keep OpenClaw event logic here, not in `plugin.ts`.
-- `src/hooks/system-context.ts`: fixed `appendSystemContext` skill-discovery contract. Keep runtime skill names, paths, intent results, and generated hints out of this string.
-- `src/hooks/pipeline-events.ts`: `pipeline:started`, `pipeline:completed`, and `pipeline:failed` event emission through `emitHostAgentEvent`.
-- `src/hooks/tool-tracking.ts`: tool call key resolution, structured result tool name set (`skill_list`, `skill_search`, `skill_view`), and tool result error detection.
-- `src/hooks/tool-fallback-registry.ts`: tool fallback registration and lookup for tool-result association.
-- `src/hooks/turn-associations.ts`: turn association registry for binding run IDs and tool calls to prompt-build turns.
-- `src/config.ts`: Zod-backed config parsing, defaults, and clamps.
-- `src/file-utils.ts`: shared path helpers and atomic filesystem primitives.
-- `src/constants.ts`: shared runtime constants — timeouts, retention periods, `USER_MESSAGE_BOUNDARY`, `FALLBACK_INTENT`, `SKILL_HARNESS_PLUGIN_TAG`, and intent complexity guard.
-- `src/xml-format.ts`: XML prompt formatting helpers (`xmlElement`, `xmlBlock`, `boundedXmlElement`) used by classification, curation, and review prompt builders.
-- `src/intents/catalog.ts`: runtime intent catalog loading.
-- `src/intents/routing-validation.ts`: runtime intent frontmatter, body, and routing-guidance validation — YAML metadata, guidance sentence, `candidate.scope`, and `skills[]` dependency checks.
-- `src/intents/validation.ts`: backwards-compatible validation export that projects routing validation results into the legacy public shape.
-- `src/experiences/catalog.ts`: runtime skill-experience catalog validation and bounded lookup.
-- `src/skills/tools.ts`: registers `skill_list`, `skill_search`, `skill_view`, `skill_manage`, and `skill_experience` tools through `registerSkillTools()`.
-- `src/skills/indexer.ts`: skill inventory indexing with watch-debounce cache TTL and source precedence.
-- `src/skills/search.ts`: deterministic lexical ranking across skill metadata, derived domains, intent references, and related skill names.
-- `src/skills/manage.ts`: authorized skill CRUD operations (create, edit, patch, delete, write/remove support files).
-- `src/skills/files.ts`: skill file reading (SKILL.md content and linked support files under references, templates, scripts, assets, examples).
-- `src/skills/roots.ts`: agent workspace root resolution for skill inventory visibility.
-- `src/skills/related.ts`: related skill resolution from skill frontmatter declarations.
-- `src/skills/domains.ts`: domain derivation from skill metadata and intent references.
-- `src/skills/usage-stats.ts`: per-skill usage stats reading from `stats.json` for tool output enrichment.
-- `src/session/tracker.ts`: session JSON state under `dataRoot/sessions`, including per-turn `turn.curationResult`, `timestamps.end`, and assistant turn result synchronization from prompt-build messages and agent-end payloads.
-- `src/curation/selector.ts`, `src/curation/scheduler.ts`, `src/curation/subagent.ts`: session-local direct-skill cold-start selection, three-turn curator cadence, candidate selection prioritization (union of previous injected candidates and direct intent skills ranked by stats, backfilled with same-domain skills up to 15), and validated curation revisions recorded to `turn.curationResult` and global stats. Keep this independent from Intent Review.
-- `src/curation/queue.ts`: in-memory curation work queue for serializing background curator runs.
-- `src/stats/aggregator.ts`: usage, candidate-projection, agent-scoped resolved-skill inventory, curation counters (`appliedRevisions`, `candidatesKept`, `candidatesAdded`, `recommendedExperiencesSelected`), and post-boundary daily attribution aggregation into schema-v4 `dataRoot/stats.json`, including explicit valid-v1/v2/v3 migration without historical attribution backfill.
-- `src/review/log-writer.ts`: direct Intent Review outcomes into `dataRoot/review.json`.
-- `src/review/keyword-coverage-writer.ts`: independent trigger-keyword state, coverage epochs, and keyword mutations in `dataRoot/keyword-coverage.json`.
-- `src/review/keyword-coverage.ts`: keyword coverage epoch management, cursor tracking, and review orchestration logic.
-- `src/review/keyword-coverage-log.ts`: schema-v1 keyword coverage log persistence — `triggerKeywords`, `processedKeywordEvents`, `targets`, and `coverageEpochs`.
-- `src/review/keyword-coverage-subagent.ts`: two-stage keyword coverage reviewer subagent — discovery pass scans retained sessions, adjudication pass produces bounded addition/removal decisions.
-- `src/review/catalog-projection.ts`: deterministic review catalog projection — decides whether to include the full intent catalog or a projected candidate subset based on trigger type.
-- `src/review/log.ts`: strict current-only review log schema-v7 validation for ordinary Review outcomes, host-validated experience writes, and completed skill-placement epochs. There is no legacy migration, recovery, or tool/command action surface; schema-v6 and older review state is unsupported.
-- `src/subagent-runtime.ts`: shared embedded subagent run defaults and error-payload extraction helpers used by classification and review subagents.
-- `src/classification/prompts.ts`, `src/classification/subagent.ts`, `src/classification/conversation.ts`, `src/classification/candidates.ts`, `src/review/subagent.ts`, `src/review/triggers.ts`: classification, conservative candidate projection, and review logic.
-- `src/review/snapshot-formatter.ts`: task-oriented Review snapshot serialization, host-owned manifest metadata, semantic evidence wrappers, and final-boundary escaping.
-- `src/skills/indexer.ts`: resolves frontmatter `skills[]` dependencies into available `SKILL.md` metadata for Intent Review. Intent prompt/body text is not scanned for skill references.
-- `src/intents/skill-references.ts`: backwards-compatible skill-resolution re-export for existing direct consumers.
-- `src/review/queue.ts`: serializes background Intent Review work so hook handling stays fail-open.
-- `src/review/trigger-keywords.ts`: default and normalized runtime keyword sets for `successful-pattern`, `behavior-fix`, and `entity-context` triggers.
-- `src/session/guards.ts`: session eligibility guards.
-- `src/*.test.ts`: tests are colocated with the module they protect.
-- `skills/skill-harness/SKILL.md`: human-owned inventory, single-intent design, complexity/extraction, and report-only Review keyword-audit workflows. It must not instruct agents to repeat production-owned routing, session-local curation, seeding, experience maintenance, Review persistence, skill-placement, stats, or cleanup.
-- `skills/skill-harness/scripts/review-keyword-audit.py`: private report-only replay and cross-session evidence analysis for Review trigger keywords. It is an approximate structural replay, not a production matcher or runtime writer.
+Before changing code, confirm the repository index is healthy with `codegraph status .`, then start with one focused query such as:
+
+```bash
+codegraph explore --path . 'before_prompt_build classification intent routing'
+```
+
+If that misses, use `codegraph query` to locate the symbol, `codegraph node` to read its exact source, and `codegraph callers`, `callees`, or `impact` to establish the change boundary. Use `affected` only as a file-level backstop, not proof of test-case coverage. Do not run `init`, `index`, `sync`, `unlock`, or `uninit` without explicit authorization because they modify the local graph.
+
+The major domains are:
+
+- **Assembly and configuration:** plugin registration creates runtime-scoped services, resolves live configuration and data paths, and registers host hooks and skill tools. Keep assembly thin; behavior belongs in its owning domain.
+- **Turn pipeline:** host events add fixed context, decide dynamic-routing eligibility, classify eligible messages, inject bounded routing context, associate tool calls with turns, and finalize session/statistics/review work. Static context and dynamic routing have separate gates.
+- **Intent and prompt contracts:** runtime intent Markdown is validated and loaded into a catalog. Classifier, topic-checker, curation, and Review prompts use structural XML-like formatting and strict compact-model output contracts.
+- **Skills and experiences:** inventory resolution, deterministic search, safe skill-file access, authorized skill management, and bounded experience lookup are separate concerns. Tool visibility and prompt-time auto-injection intentionally have different scopes.
+- **Session, curation, and statistics:** durable session state preserves turn evidence and curation decisions; curation is session-local and independent from Review. Statistics aggregate accepted turns, inventory observations, recommendation adoption, and attribution without fabricating history.
+- **Intent Review and keyword coverage:** background work is serialized and fail-open. Review runs in an isolated workspace, validates proposed runtime changes, handles conflicts atomically, and records outcomes separately from trigger-keyword coverage state.
+- **Human-maintenance assets:** bundled skills, example intents, and report-only audit scripts document human workflows. They must not duplicate production-owned routing, persistence, curation, or Review behavior.
+
+The graph should also identify the focused tests: tests are colocated with the domain they protect, with integration coverage around plugin registration and hook orchestration.
 
 Conversation prompts are intentionally structured as XML-like blocks. Keep recent-turn context inside `<conversation_context>` and split historical topics with `<topic_segment>` and `<topic_boundary>`. Curator subagent prompts receive recent `<conversation>` with `<role>user</role>` and `<role>assistant</role>` turns bounded by recent context limits. Prompt-facing topic checker output requires bounded `basis`, `reason`, joint `confidence`, keywords, topic, and domain; confidence measures the combined correctness of reason, domain, and keywords, and the prompt must not ask the model for `changed` or complexity. Host parsing derives `changed` exclusively from `reason`. Same-topic inheritance requires confidence at or above `0.8` plus historical intent data, keeps the prior intent and intent confidence, and refreshes topic, domain, and keywords from the latest topic check, but never inherits complexity. Exact fastpaths and topic-keyword similarity also leave complexity absent; uncertain results reach the classifier path instead. The intent classifier is the only result producer that owns required final complexity. Dynamic routing renders selected intent metadata, an optional classifier-produced `task_complexity`, the routing `guidance` derived from the complete plain-text body, direct matched-intent skill candidates, and immediate candidate-scoped experience metadata nested inside the matching `<skill>`. Render every matching experience identity and keywords, never its summary; session curation does not gate metadata but may select at most three high-relevance `recommendedExperienceRefs`. On the next turn, only those selected records add a bounded body with a `session_curation_recommendation` marker that says it is possibly relevant. The main agent uses `skill_experience` with the matching skill and identity query to read an unexpanded record or the full body. Stats still record the turn but increment complexity buckets only for known values. Persisted intent results may still store `topicChangeReason`; do not reintroduce separate `intentChange` state.
 
@@ -209,33 +178,9 @@ Rules:
 
 ## Testing Expectations
 
-Add or update focused tests with the code change.
+Add or update focused tests with every behavior change. Locate them from the symbols you change: begin with `codegraph callers` or `impact`, then use `codegraph affected` only to catch file-level omissions. Do not claim test-case coverage from `affected` alone.
 
-Typical mapping:
-
-- Config schema changes: `src/config.test.ts`.
-- Runtime data paths or startup seeding: `src/file-utils.test.ts` and `src/plugin.test.ts`.
-- Hook behavior: `src/hooks/index.test.ts`.
-- Intent loading or validation: `src/intents/catalog.ts` consumers, `src/intents/routing-validation.test.ts`, and the compatibility coverage in `src/intents/validation.test.ts`.
-- Prompt/parser behavior: `src/classification/prompts.test.ts`.
-- Conversation extraction/history matching: `src/classification/conversation.test.ts`.
-- Session persistence and cleanup: `src/session/tracker.test.ts`.
-- Stats behavior: `src/stats/aggregator.test.ts`.
-- Intent skill-reference resolution: `src/intents/skill-references.test.ts`.
-- Skill tool registration, search ranking, or inventory indexing: `src/skills/tools.test.ts`, `src/skills/search.test.ts`, and `src/skills/indexer.test.ts`.
-- Skill manage CRUD operations: `src/skills/manage.test.ts`.
-- Curation scheduler or selector: `src/curation/scheduler.test.ts` and `src/curation/selector.test.ts`.
-- Curation subagent prompt and proposal parsing: `src/curation/subagent.test.ts`.
-- Keyword coverage reviewer or log: `src/review/keyword-coverage-subagent.test.ts`, `src/review/keyword-coverage-writer.test.ts`, and `src/review/keyword-coverage-log.test.ts`.
-- Review catalog projection: `src/review/catalog-projection.test.ts`.
-- XML prompt formatting: `src/xml-format.test.ts`.
-- Review trigger keyword normalization: `src/review/trigger-keywords.test.ts`.
-- Intent Review writes and strict current-log validation: `src/review/log-writer.test.ts` and `src/review/log.test.ts`.
-- Review tool/command removal behavior: `src/plugin.test.ts` and `manifest.test.ts`.
-- Human-maintenance/production-ownership separation: `src/review/mode.test.ts`.
-- Bundled keyword-audit script behavior: `python3 skills/skill-harness/scripts/test-review-keyword-audit.py`.
-
-When changing runtime paths, include tests for both the desired new location and non-overwrite startup behavior.
+Tests are colocated by domain. Follow the changed behavior through its nearest unit tests and the relevant integration boundary: hook/registration changes need pipeline coverage, persistence changes need runtime-layout and non-overwrite coverage, and prompt/Review changes need parser and validation coverage. Changes to bundled human-maintenance scripts also require their focused Python checks.
 
 ## Intent Files
 
