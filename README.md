@@ -70,7 +70,25 @@ graph TD
 
 Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. The plugin `agents` option and chat scope limit dynamic intent routing only. The routing pipeline uses cheap deterministic evidence before helper-model calls. Exact fast paths, high-confidence same-topic continuations, and clear changed-topic matches can avoid classification. Uncertain cases use a conservative candidate projection when evidence supports it; otherwise they fail open to the full eligible catalog.
 
-For lifecycle contracts, projection rules, helper subagents, dynamic prompt shape, and fail-open behavior, read [Architecture](docs/architecture.md).
+### Architecture and routing contract
+
+Eligible dynamic routing emits `plugin:skill-harness` parent lifecycle events: `pipeline:started` before deterministic or model-backed work begins, then exactly one `pipeline:completed` or `pipeline:failed` after no further phase can run. Terminal events carry the producer-measured `durationMs`; individual phase events are progress details, not the pipeline result.
+
+The routing stages are:
+
+1. Resolve canonical agent and session identity, then exclude helper, generic subagent, Review, dreaming, and active-memory sessions from all injection.
+2. Append fixed skill-discovery guidance and enriched configured skills to every remaining agent turn.
+3. Gate dynamic routing by configured agent, chat scope, external-user turn, and interactive-session status.
+4. Load live configuration and runtime intents; use exact evidence first, then high-confidence topic continuity or candidate projection, and finally one classifier call against the full eligible catalog when projection is not justified.
+5. Inject the selected intent, its one guidance sentence, direct candidates, and candidate-scoped experience metadata; then record the completed turn and run configured background work.
+
+Exact `fastpath.keywords` bypass helper models. Same-topic inheritance requires available history and at least `0.8` joint confidence; uncertain or unsupported evidence proceeds to classification. Candidate projection preserves canonical catalog order and may use the predicted domain, `candidate.scope: cross-flow`, authorized history, and exact manual candidate evidence. It never reintroduces denied or removed intents, and its matching normalizes NFKC text with collapsed whitespace without treating hyphens and underscores as aliases.
+
+Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains only the selected intent, optional classifier-produced complexity, guidance, direct candidates, and nested experience metadata. The plugin is fail-open: configuration, classification, statistics, curation, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
+
+### Session-local recommendation curation
+
+After routing chooses an intent, the host creates a revision-0 curation record for that topic epoch. Cold start ranks only the intent's visible direct skills from successful same-agent, same-intent observations retained for 14 days: four exploitation candidates plus up to two randomly sampled exploration candidates. An independent background curator runs after each three additional successful turns in the same epoch and can persist at most six visible direct candidates and three high-relevance experience identities. It never edits intents, skills, Review state, or trigger-keyword state, and it does not gate immediate experience metadata injection—only the bounded body expansion on the following turn.
 
 ## Basic configuration
 
@@ -187,7 +205,11 @@ This skill does not manually repeat production-owned work: per-turn classificati
 | `skill_manage`     | Authorized write-capable maintenance through the resolved catalog. |
 | `skill_experience` | Searches bounded runtime experiences for currently visible skills. |
 
-See [Skill tools](docs/skill-tools.md) for visibility, filtering, cache, and search behavior.
+`skill_experience` accepts an optional query of at most 500 Unicode code points. It searches at most six visible skills, returns at most three entries, caps each body at 2,000 code points, and caps all returned bodies at 5,000 code points. It reports unavailable requested skills separately and does not expose a catalog-wide experience inventory.
+
+`skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. This intentionally does not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists: visibility follows root precedence and disabled bundled-skill entries only. Prompt-time automatic configured-skill injection is narrower and includes explicit configured names plus workspace skills.
+
+`skill_list` omits usage and related-skill data unless `show_stats: true` or `show_related: true` is supplied; `skill_view` always includes visible related skills. `skill_search` requires a non-empty query, source, domains, or keywords filter; it defaults to 20 results, caps the limit at 100, uses Unicode-normalized case-insensitive matching, treats domains as an OR filter, and returns match evidence unless `show_matches: false` is supplied. The index cache polls at `skills.load.watchDebounceMs` only when `skills.load.watch` is true; otherwise it uses a 60-second TTL.
 
 ## Intent Review
 
@@ -215,9 +237,41 @@ The `successful-pattern`, `behavior-fix`, and `entity-context` triggers may also
 
 This automatic keyword learning is event-driven, not a corpus audit. Each keyword-capable trigger must first pass its structural gates **and match an existing keyword** before it can request a keyword finding. Separately, opt-in keyword coverage runs every configured accepted-turn cadence, scans retained sessions for bounded target-specific addition gaps or complete cross-session removal evidence, and uses a tool-free two-stage reviewer. Failed epochs retry every five accepted turns without blocking the main agent. The bundled `keyword-audit` mode covers that evidence gap as a private report-and-proposal workflow, but it does not persist approved changes manually.
 
-The `skill-placement` trigger consumes current per-agent resolved-inventory observations. It selects at most one skill per accepted turn, prioritizes an existing low-adoption `needsReview` signal, and otherwise requires 20 continuous observations with zero recommendations and zero usage. The host resolves and supplies only the selected skill's bounded content plus the complete intent catalog; the placement reviewer may refine exactly one existing runtime intent and cannot inspect, create, or modify skills. `applied` and `nofinding` outcomes atomically record the skill epoch; failed or invalid review runs release it for retry.
+### Review safeguards and skill placement
 
-See [Intent Review](docs/intent-review.md) for safeguards and decision rules.
+A trigger starts an investigation; it is not evidence by itself. The reviewer evaluates trigger-specific evidence, durability, scope, and existing coverage, then makes the smallest valid change or records a no-finding result. Validated intent changes may create, refine, split, or merge runtime intent files, but standalone deletion is unsupported. Review can create at most one new skill experience for a successfully observed, still-visible skill; existing experiences are never refined or deleted by Review.
+
+Every requested trigger needs a valid positive or no-finding decision. Missing or malformed decisions are recorded as `schema-rejected` with sanitized `missing-trigger-decision` counts. The staged workspace is authoritative for current intent content; the queued snapshot is historical evidence only. The reviewer cannot write source files, bundled skills, OpenClaw configuration, memory files, or arbitrary paths.
+
+`skill-placement` is narrower than ordinary Review. After an accepted stats event, the host selects at most one currently visible skill: an existing `needsReview` candidate first, otherwise one with 20 continuous inventory observations and both recommendation and usage counts at zero. The epoch identity is internal and includes the telemetry era, canonical agent and skill name, source, winner/content fingerprints, and first-seen turn. Only `applied` and `nofinding` complete an epoch; all preparation, queue, reviewer, validation, and persistence failures release its reservation for retry.
+
+For a placement run, the reviewer receives the complete intent catalog plus one bounded, host-resolved skill snapshot. It may refine exactly one existing intent's `skills[]` frontmatter and, only when necessary, its one-sentence guidance. It cannot create, delete, merge, rename, or modify skills. The host re-resolves the selected skill for the same tracked agent before enqueueing, validates the staged change and current runtime state under the intent lock, and writes the Review event and completed epoch atomically to schema-v7 `review.json`.
+
+## Runtime files and metrics
+
+Skill Harness keeps package files and runtime state separate. The paths below use the default local state directory.
+
+| Path                                                      | Purpose                                                                                    |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `~/.openclaw/plugins/skill-harness/intents/`              | Editable runtime intent catalog.                                                           |
+| `~/.openclaw/plugins/skill-harness/experiences/`          | Skill-scoped runtime experiences; current candidates expose identity/keyword metadata.     |
+| `~/.openclaw/plugins/skill-harness/sessions/`             | Per-session JSON snapshots for audit and Review context.                                   |
+| `~/.openclaw/plugins/skill-harness/agents/*/sessions/`    | Embedded-agent session artifacts.                                                          |
+| `~/.openclaw/plugins/skill-harness/stats.json`            | Schema-v4 intent, skill, tool, routing, projection, inventory, and daily telemetry.        |
+| `~/.openclaw/plugins/skill-harness/review.json`           | Schema-v7 current-only Review outcomes, experience writes, and completed placement epochs. |
+| `~/.openclaw/plugins/skill-harness/keyword-coverage.json` | Schema-v1 trigger-keyword coverage state and epochs.                                       |
+
+Session cleanup preserves the ended main-session record and removes only expired session JSON plus embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json` artifacts. It does not delete root-level runtime state, intents, skills, unrelated transcripts, or package files. Retired intent-state fields such as `instructionText` are stripped when retained sessions are loaded; this cleanup never controls routing.
+
+### Interpreting observations
+
+Local observations are operational measurements, not synthetic benchmarks. A recommendation opportunity is a top-level skill injected into the final direct candidate block, and adoption is that candidate's same-turn use. Related-skill metadata and routing-guidance prose do not count as recommendations. Rendered catalog size is Unicode code points rather than provider-billed tokens; provider tokenization and other plugins' context are outside this measurement scope. A projection can be eligible even if later classifier execution or parsing fails, and ordinary Review outcomes remain owned by `review.json`, never synthesized in `stats.json`.
+
+### Schema-v4 statistics and attribution boundary
+
+Schema v4 retains prior aggregates and adds attribution only from newly accepted turns. `attribution.startedAt` marks the exact UTC boundary. Per-day maps record intent outcomes, intent routing, skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
+
+Valid schema-v1, v2, and v3 files migrate atomically on the next recorded turn without backfilling historical attribution. Windows starting before `attribution.startedAt` therefore cannot support historical attribution comparisons. Inventory observations are agent-scoped: source, winning-path and content fingerprints, observation times and counts, same-turn usage, and recommendations form an epoch. Source, winner, content, or visibility-continuity changes begin a new epoch; the fingerprints remain internal and are never exposed by skill tools.
 
 ## Development
 
@@ -312,12 +366,9 @@ ls ~/.openclaw/plugins/skill-harness/intents
 
 If the directory exists but is empty, check file permissions and plugin startup logs.
 
-## Further reading
+## Documentation scope
 
-- [Architecture](docs/architecture.md)
-- [Metrics](docs/metrics.md)
-- [Skill tools](docs/skill-tools.md)
-- [Intent Review](docs/intent-review.md)
+This README is the canonical project documentation. Implementation and operating constraints for coding agents remain in [AGENTS.md](AGENTS.md); the bundled `skill-harness` skill contains the human-maintenance workflows.
 
 ## License
 

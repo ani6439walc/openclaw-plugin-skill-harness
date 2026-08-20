@@ -35,7 +35,6 @@ const routingOnlyReferencePaths = [
   "skills/skill-harness/references/closing.md",
   "skills/skill-harness/references/inventory.md",
   "README.md",
-  "docs/skill-placement-review.md",
 ].map((file) => path.resolve(file));
 
 describe("skill-harness review mode", () => {
