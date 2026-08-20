@@ -13,9 +13,10 @@ import {
   replayKeywordPhrase,
   type CoverageCandidateDocument,
 } from "./keyword-coverage.js";
-import type {
-  ReviewTriggerKeywords,
-  TriggerKeywordTarget,
+import {
+  TRIGGER_KEYWORD_TARGETS,
+  type ReviewTriggerKeywords,
+  type TriggerKeywordTarget,
 } from "./trigger-keywords.js";
 
 export interface KeywordCoverageReviewParams {
@@ -61,12 +62,6 @@ export interface KeywordCoverageDecision {
 export interface KeywordCoverageReviewerResult {
   decisions: KeywordCoverageDecision[];
 }
-
-const TRIGGER_KEYWORD_TARGETS = [
-  "successful-pattern",
-  "behavior-fix",
-  "entity-context",
-] as const satisfies readonly TriggerKeywordTarget[];
 
 const MAX_ADDITIONS_PER_TARGET = 1;
 const MAX_REMOVALS_PER_TARGET = 1;
@@ -144,18 +139,25 @@ function formatCurrentKeywords(triggerKeywords: ReviewTriggerKeywords): string {
   ].join("\n");
 }
 
+function formatCandidateBlock(
+  documents: readonly CoverageCandidateDocument[],
+): string {
+  if (documents.length === 0) {
+    return "  <candidates />";
+  }
+
+  return [
+    "  <candidates>",
+    ...documents.map((document) => indentBlock(formatDocument(document), 4)),
+    "  </candidates>",
+  ].join("\n");
+}
+
 export function buildKeywordCoverageDiscoveryPrompt(
   documents: CoverageCandidateDocument[],
   triggerKeywords: ReviewTriggerKeywords,
 ): string {
-  const candidateBlock =
-    documents.length === 0
-      ? "  <candidates />"
-      : [
-          "  <candidates>",
-          ...documents.map((doc) => indentBlock(formatDocument(doc), 4)),
-          "  </candidates>",
-        ].join("\n");
+  const candidateBlock = formatCandidateBlock(documents);
 
   return [
     "<keyword_coverage_discovery>",
@@ -195,14 +197,7 @@ export function buildKeywordCoverageAdjudicationPrompt(params: {
     matchedRefs: string[];
   }>;
 }): string {
-  const candidateBlock =
-    params.documents.length === 0
-      ? "  <candidates />"
-      : [
-          "  <candidates>",
-          ...params.documents.map((doc) => indentBlock(formatDocument(doc), 4)),
-          "  </candidates>",
-        ].join("\n");
+  const candidateBlock = formatCandidateBlock(params.documents);
 
   const discoveryJson = escapeXmlContent(
     JSON.stringify({ decisions: params.discoveryDecisions }),
@@ -657,12 +652,7 @@ async function runCoverageModelPass(params: {
   thinking: ThinkLevel;
   timeoutMs: number;
   pluginConfig?: ResolvedSkillHarnessPluginConfig;
-  injectedResponse?: string;
 }): Promise<string | undefined> {
-  if (params.injectedResponse !== undefined) {
-    return params.injectedResponse;
-  }
-
   const identity = createCoverageSessionIdentity({
     agentId: params.agentId,
     sessionId: params.sessionId,
@@ -717,6 +707,32 @@ export async function runKeywordCoverageReview(
 ): Promise<KeywordCoverageReviewerResult | undefined> {
   const { documents, triggerKeywords } = params;
 
+  const runPass = async (
+    prompt: string,
+    stagedResponse: string | undefined,
+    missingExecutionMessage: string,
+  ): Promise<string | undefined> => {
+    if (stagedResponse !== undefined) return stagedResponse;
+    if (!params.api || !params.modelRef) {
+      logger.warn(missingExecutionMessage);
+      return undefined;
+    }
+
+    return runCoverageModelPass({
+      api: params.api,
+      agentId: params.agentId,
+      dataRoot: params.dataRoot,
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+      messageProvider: params.messageProvider,
+      modelRef: params.modelRef,
+      prompt,
+      thinking: params.config.thinking,
+      timeoutMs: params.config.timeoutMs,
+      pluginConfig: params.pluginConfig,
+    });
+  };
+
   // Preserve pure parse path used by focused unit tests.
   if (params.modelResponse !== undefined || params.error || params.toolCalls) {
     return parseKeywordCoverageModelResponse(params.modelResponse, documents, {
@@ -731,27 +747,11 @@ export async function runKeywordCoverageReview(
     triggerKeywords,
   );
 
-  let discoveryRaw: string | undefined;
-  if (params.stagedModelResponses?.discovery !== undefined) {
-    discoveryRaw = params.stagedModelResponses.discovery;
-  } else if (params.api && params.modelRef) {
-    discoveryRaw = await runCoverageModelPass({
-      api: params.api,
-      agentId: params.agentId,
-      dataRoot: params.dataRoot,
-      sessionId: params.sessionId,
-      sessionKey: params.sessionKey,
-      messageProvider: params.messageProvider,
-      modelRef: params.modelRef,
-      prompt: discoveryPrompt,
-      thinking: params.config.thinking,
-      timeoutMs: params.config.timeoutMs,
-      pluginConfig: params.pluginConfig,
-    });
-  } else {
-    logger.warn("keyword coverage review failed: missing model execution path");
-    return undefined;
-  }
+  const discoveryRaw = await runPass(
+    discoveryPrompt,
+    params.stagedModelResponses?.discovery,
+    "keyword coverage review failed: missing model execution path",
+  );
 
   const discovery = parseKeywordCoverageModelResponse(discoveryRaw, documents, {
     triggerKeywords,
@@ -776,29 +776,11 @@ export async function runKeywordCoverageReview(
     replayEvidence,
   });
 
-  let adjudicationRaw: string | undefined;
-  if (params.stagedModelResponses?.adjudication !== undefined) {
-    adjudicationRaw = params.stagedModelResponses.adjudication;
-  } else if (params.api && params.modelRef) {
-    adjudicationRaw = await runCoverageModelPass({
-      api: params.api,
-      agentId: params.agentId,
-      dataRoot: params.dataRoot,
-      sessionId: params.sessionId,
-      sessionKey: params.sessionKey,
-      messageProvider: params.messageProvider,
-      modelRef: params.modelRef,
-      prompt: adjudicationPrompt,
-      thinking: params.config.thinking,
-      timeoutMs: params.config.timeoutMs,
-      pluginConfig: params.pluginConfig,
-    });
-  } else {
-    logger.warn(
-      "keyword coverage adjudication failed: missing model execution path",
-    );
-    return undefined;
-  }
+  const adjudicationRaw = await runPass(
+    adjudicationPrompt,
+    params.stagedModelResponses?.adjudication,
+    "keyword coverage adjudication failed: missing model execution path",
+  );
 
   const adjudicated = parseKeywordCoverageModelResponse(
     adjudicationRaw,

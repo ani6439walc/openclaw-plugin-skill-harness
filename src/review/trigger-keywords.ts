@@ -1,5 +1,10 @@
-export type TriggerKeywordTarget =
-  "successful-pattern" | "behavior-fix" | "entity-context";
+export const TRIGGER_KEYWORD_TARGETS = [
+  "successful-pattern",
+  "behavior-fix",
+  "entity-context",
+] as const;
+
+export type TriggerKeywordTarget = (typeof TRIGGER_KEYWORD_TARGETS)[number];
 
 export type ReviewTriggerKeywords = {
   successfulPattern: string[];
@@ -65,11 +70,7 @@ export function normalizeKeywordList(
   if (values === undefined || values === null) return [...fallback];
   if (!Array.isArray(values) && typeof values !== "string")
     return [...fallback];
-  const rawValues = Array.isArray(values)
-    ? values
-    : typeof values === "string"
-      ? [values]
-      : [];
+  const rawValues = Array.isArray(values) ? values : [values];
   const normalized = [
     ...new Map(
       rawValues

@@ -20,12 +20,14 @@ type ReservationResult =
   | { status: "invalid" }
   | { status: "ambiguous" };
 
-function normalizeKey(value: string | undefined): string | undefined {
+export function normalizeTurnAssociationKey(
+  value: string | undefined,
+): string | undefined {
   const normalized = value?.trim();
   return normalized || undefined;
 }
 
-function sameAssociation(
+export function sameTurnAssociation(
   left: TurnAssociation | undefined,
   right: TurnAssociation,
 ): boolean {
@@ -51,7 +53,7 @@ export class TurnAssociationRegistry {
   }
 
   reserve(runId: string | undefined): ReservationResult {
-    const key = normalizeKey(runId);
+    const key = normalizeTurnAssociationKey(runId);
     if (!key) return { status: "invalid" };
     const now = this.now();
     this.prune(now);
@@ -107,7 +109,7 @@ export class TurnAssociationRegistry {
     runId: string | undefined,
     association: TurnAssociation,
   ): "bound" | "ambiguous" | "stale" {
-    const key = normalizeKey(runId);
+    const key = normalizeTurnAssociationKey(runId);
     if (!key) return "stale";
     const entry = this.entries.get(key);
     if (!entry || entry.state !== "reserved" || entry.token !== token) {
@@ -133,7 +135,7 @@ export class TurnAssociationRegistry {
       ([candidateKey, candidate]) =>
         candidateKey !== key &&
         (candidate.state === "active" || candidate.state === "terminal") &&
-        sameAssociation(candidate.association, association),
+        sameTurnAssociation(candidate.association, association),
     );
     if (duplicate) {
       duplicate[1].touchedAt = this.now();
@@ -151,11 +153,11 @@ export class TurnAssociationRegistry {
     runId: string | undefined,
     association: TurnAssociation,
   ): "bound" | "ambiguous" | "stale" {
-    const key = normalizeKey(runId);
+    const key = normalizeTurnAssociationKey(runId);
     if (!key) return "stale";
     const entry = this.entries.get(key);
     if (!entry) return "stale";
-    if (sameAssociation(entry.association, association)) {
+    if (sameTurnAssociation(entry.association, association)) {
       entry.touchedAt = this.now();
       return "bound";
     }
@@ -176,7 +178,7 @@ export class TurnAssociationRegistry {
   }
 
   resolve(runId: string | undefined): TurnAssociation | undefined {
-    const key = normalizeKey(runId);
+    const key = normalizeTurnAssociationKey(runId);
     if (!key) return;
     const entry = this.entries.get(key);
     if (entry?.state !== "active" || !entry.association) return;
@@ -209,7 +211,7 @@ export class TurnAssociationRegistry {
     if (distinct.size !== 1) return;
     const association = [...distinct.values()][0];
     for (const entry of this.entries.values()) {
-      if (sameAssociation(entry.association, association)) {
+      if (sameTurnAssociation(entry.association, association)) {
         entry.touchedAt = this.now();
       }
     }
@@ -240,7 +242,7 @@ export class TurnAssociationRegistry {
     if (distinct.size !== 1) return;
     const association = [...distinct.values()][0];
     for (const entry of this.entries.values()) {
-      if (sameAssociation(entry.association, association)) {
+      if (sameTurnAssociation(entry.association, association)) {
         entry.touchedAt = this.now();
       }
     }
@@ -248,17 +250,17 @@ export class TurnAssociationRegistry {
   }
 
   markTerminal(runId: string | undefined, association: TurnAssociation): void {
-    const key = normalizeKey(runId);
+    const key = normalizeTurnAssociationKey(runId);
     if (!key) return;
     const entry = this.entries.get(key);
-    if (!entry || !sameAssociation(entry.association, association)) return;
+    if (!entry || !sameTurnAssociation(entry.association, association)) return;
     entry.state = "terminal";
     entry.touchedAt = this.now();
   }
 
   markAssociationTerminal(association: TurnAssociation): void {
     for (const entry of this.entries.values()) {
-      if (sameAssociation(entry.association, association)) {
+      if (sameTurnAssociation(entry.association, association)) {
         entry.state = "terminal";
         entry.touchedAt = this.now();
       }

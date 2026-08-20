@@ -1,6 +1,10 @@
 import type { ToolResultFallback } from "../session/index.js";
 import type { SkillRecord } from "../session/tracker.js";
-import type { TurnAssociation } from "./turn-associations.js";
+import {
+  normalizeTurnAssociationKey,
+  sameTurnAssociation,
+  type TurnAssociation,
+} from "./turn-associations.js";
 
 export interface StagedToolFallback {
   association: TurnAssociation;
@@ -17,18 +21,6 @@ interface FallbackEntry {
 
 export type StageToolFallbackResult =
   "staged" | "ambiguous" | "full" | "invalid";
-
-function normalizeKey(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  return normalized || undefined;
-}
-
-function sameAssociation(
-  left: TurnAssociation | undefined,
-  right: TurnAssociation,
-): boolean {
-  return left?.sessionId === right.sessionId && left.turnKey === right.turnKey;
-}
 
 export class ToolFallbackRegistry {
   private readonly entries = new Map<string, FallbackEntry>();
@@ -52,7 +44,7 @@ export class ToolFallbackRegistry {
     toolCallId: string | undefined,
     payload: StagedToolFallback,
   ): StageToolFallbackResult {
-    const key = normalizeKey(toolCallId);
+    const key = normalizeTurnAssociationKey(toolCallId);
     if (!key) return "invalid";
     const now = this.now();
     this.prune(now);
@@ -63,7 +55,7 @@ export class ToolFallbackRegistry {
       existing.ownerSessionIds.add(payload.association.sessionId);
       if (
         existing.state !== "ambiguous" &&
-        sameAssociation(existing.payload?.association, payload.association)
+        sameTurnAssociation(existing.payload?.association, payload.association)
       ) {
         existing.payload = {
           ...payload,
@@ -92,7 +84,7 @@ export class ToolFallbackRegistry {
   }
 
   get(toolCallId: string | undefined): StagedToolFallback | undefined {
-    const key = normalizeKey(toolCallId);
+    const key = normalizeTurnAssociationKey(toolCallId);
     if (!key) return;
     const entry = this.entries.get(key);
     if (!entry?.payload || entry.state === "ambiguous") return;
@@ -111,7 +103,7 @@ export class ToolFallbackRegistry {
       if (
         entry.state === "ambiguous" ||
         !entry.payload ||
-        !sameAssociation(entry.payload.association, association)
+        !sameTurnAssociation(entry.payload.association, association)
       ) {
         continue;
       }
@@ -128,14 +120,14 @@ export class ToolFallbackRegistry {
   }
 
   delete(toolCallId: string | undefined): void {
-    const key = normalizeKey(toolCallId);
+    const key = normalizeTurnAssociationKey(toolCallId);
     if (key) this.entries.delete(key);
   }
 
   markAssociationTerminal(association: TurnAssociation): void {
     const now = this.now();
     for (const entry of this.entries.values()) {
-      if (sameAssociation(entry.payload?.association, association)) {
+      if (sameTurnAssociation(entry.payload?.association, association)) {
         entry.state = "terminal";
         entry.touchedAt = now;
       }

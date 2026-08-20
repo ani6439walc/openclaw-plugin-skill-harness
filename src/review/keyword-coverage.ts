@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import type { ResolvedReviewConfig } from "../types.js";
 import type { SessionData, SessionState } from "../session/tracker.js";
-import type { TriggerKeywordTarget } from "./trigger-keywords.js";
-import type { ReviewTriggerKeywords } from "./trigger-keywords.js";
+import {
+  TRIGGER_KEYWORD_TARGETS,
+  type ReviewTriggerKeywords,
+  type TriggerKeywordTarget,
+} from "./trigger-keywords.js";
 import {
   checkStructuralEligibility,
   findMatchedKeywords,
@@ -167,12 +170,7 @@ export function discoverKeywordCoverageCandidates(
   const allStates = collectStatesFromSessions(sessions);
   if (allStates.length === 0) return { additions, removals, nextCursor };
 
-  const targets: TriggerKeywordTarget[] = [
-    "successful-pattern",
-    "behavior-fix",
-    "entity-context",
-  ];
-  for (const target of targets) {
+  for (const target of TRIGGER_KEYWORD_TARGETS) {
     const additionCandidates: CandidateWithSession[] = [];
     const removalCandidates = new Map<string, CandidateWithSession[]>();
     const existingKeywords = triggerKeywords[keywordProperty(target)];
