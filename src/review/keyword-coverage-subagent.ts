@@ -236,14 +236,6 @@ export function buildKeywordCoverageAdjudicationPrompt(params: {
   ].join("\n");
 }
 
-/** @deprecated Use buildKeywordCoverageDiscoveryPrompt */
-export function buildKeywordCoveragePrompt(
-  documents: CoverageCandidateDocument[],
-  triggerKeywords: ReviewTriggerKeywords,
-): string {
-  return buildKeywordCoverageDiscoveryPrompt(documents, triggerKeywords);
-}
-
 function validateRefs(
   refs: string[],
   target: TriggerKeywordTarget,

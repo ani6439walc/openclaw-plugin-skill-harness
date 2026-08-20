@@ -495,26 +495,6 @@ function formatSkillXml(
   ];
   if (includeDetails) {
     lines.push(formatXmlTextElement("path", skill.location));
-    const relatedSkills = skill.resolvedRelatedSkills ?? [];
-    if (relatedSkills.length > 0) {
-      lines.push(
-        xmlBlock(
-          "related_skills",
-          relatedSkills
-            .map((related) =>
-              xmlBlock(
-                "related_skill",
-                [
-                  formatXmlTextElement("name", related.name),
-                  formatXmlTextElement("reason", related.reason),
-                  formatXmlTextElement("direction", related.direction),
-                ].join("\n"),
-              ),
-            )
-            .join("\n"),
-        ),
-      );
-    }
   }
   return xmlBlock("skill", lines.join("\n"));
 }

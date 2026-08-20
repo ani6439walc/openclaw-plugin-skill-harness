@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { fileExists, readJsonFile, writeJsonAtomic } from "../file-utils.js";
+import { fileExists, readJsonFile } from "../file-utils.js";
 import type { ReviewFinding, ReviewSource } from "./types.js";
 import { REVIEW_TRIGGER_TYPES, type ReviewTrigger } from "./triggers.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
@@ -449,11 +449,6 @@ export function readReviewTriggerKeywords(
     return normalizeReviewTriggerKeywords(triggerKeywordSeed);
   }
   return readReviewLog(logPath).triggerKeywords;
-}
-
-export function writeReviewLogAtomic(logPath: string, log: ReviewLog): void {
-  const parsed = ReviewLogSchema.parse(log);
-  writeJsonAtomic(logPath, parsed);
 }
 
 export function pruneProcessedEvents(

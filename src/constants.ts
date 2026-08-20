@@ -3,7 +3,6 @@ import type { IntentComplexity, IntentDefinition } from "./types.js";
 export const DEFAULT_TIMEOUT_MS = 5_000;
 export const PROCESSED_EVENTS_RETENTION_DAYS = 90;
 export const KEYWORD_COVERAGE_RETENTION_DAYS = 30;
-export const LOCK_STALE_THRESHOLD_MS = 60_000;
 export const LOCK_MAX_WAIT_MS = 10_000;
 export const LOCK_INITIAL_BACKOFF_MS = 10;
 export const LOCK_MAX_BACKOFF_MS = 500;

@@ -9,7 +9,5 @@ export { validateRoutingIntentDirectory } from "./routing-validation.js";
 export {
   listAvailableSkills,
   resolveAvailableSkills,
-  resolveAvailableSkillsWithRelated,
-  resolveDomainSkills,
   resolveSkillInventory,
 } from "../skills/indexer.js";
