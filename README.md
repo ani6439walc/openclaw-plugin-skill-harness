@@ -15,7 +15,10 @@ Install from a source checkout for local development and testing:
 git clone https://github.com/ani6439walc/openclaw-plugin-skill-harness.git
 cd openclaw-plugin-skill-harness
 pnpm install
+pnpm run typecheck
+pnpm run test
 pnpm run build
+pnpm pack --dry-run
 openclaw plugins install --link .
 openclaw plugins enable skill-harness
 openclaw plugins doctor
@@ -124,23 +127,24 @@ Configure Skill Harness in `openclaw.json`:
 
 ### Important options
 
-| Option                                 | Default           | Purpose                                                                                             |
-| -------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------- |
-| `agents`                               | `["main"]`        | OpenClaw agent IDs eligible for scanning.                                                           |
-| `allowedChatTypes`                     | `["direct"]`      | Chat types that may run the scanner.                                                                |
-| `allowedChatIds` / `deniedChatIds`     | `[]`              | Optional chat allow-list and deny-list.                                                             |
-| `model` / `modelFallback`              | unset             | Scanner model and last-resort resolution fallback.                                                  |
-| `thinking`                             | `"medium"`        | Intent-classifier thinking level.                                                                   |
-| `lowEffortRoutingMode`                 | `"fastpath-only"` | Routing behavior when the main agent uses off, minimal, or low reasoning effort.                    |
-| `queryMode` / `contextWindow`          | `"recent"`        | Scanner context and its limits.                                                                     |
-| `timeoutMs`                            | `5000`            | Topic-checker and intent-classifier time budget.                                                    |
-| `curation.enabled`                     | `true`            | Enables session-local direct-skill and experience recommendation curation, independently of Review. |
-| `curation.model` / `modelFallback`     | unset             | Optional dedicated curator model and resolution fallback.                                           |
-| `curation.thinking` / `timeoutSeconds` | `"medium"` / `30` | Curator thinking level and time budget in seconds.                                                  |
-
-| `review.enabled` | `false` | Enables post-turn Intent Review. |
-| `review.timeoutSeconds` | `300` | Intent Review time budget in seconds. |
-| `review.triggers.skillPlacement.enabled` | `true` | Reviews one eligible resolved skill for placement in a runtime intent when Review is enabled. |
+| Option                                      | Default            | Purpose                                                                                             |
+| ------------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------- |
+| `agents`                                    | `["main"]`         | OpenClaw agent IDs eligible for dynamic intent routing.                                             |
+| `allowedChatTypes`                          | `["direct"]`       | Chat types that may run dynamic routing.                                                            |
+| `allowedChatIds` / `deniedChatIds`          | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                         |
+| `model` / `modelFallback`                   | unset              | Scanner model and last-resort resolution fallback.                                                  |
+| `thinking`                                  | `"medium"`         | Intent-classifier thinking level.                                                                   |
+| `lowEffortRoutingMode`                      | `"fastpath-only"`  | Routing behavior when the main agent uses off, minimal, or low reasoning effort.                    |
+| `queryMode` / `contextWindow`               | `"recent"`         | Scanner context and its limits.                                                                     |
+| `timeoutMs`                                 | `5000`             | Topic-checker and intent-classifier time budget.                                                    |
+| `curation.enabled`                          | `true`             | Enables session-local direct-skill and experience recommendation curation, independently of Review. |
+| `curation.model` / `modelFallback`          | unset              | Optional dedicated curator model and resolution fallback.                                           |
+| `curation.thinking` / `timeoutSeconds`      | `"medium"` / `30`  | Curator thinking level and time budget in seconds.                                                  |
+| `review.enabled`                            | `false`            | Enables post-turn Intent Review.                                                                    |
+| `review.thinking` / `timeoutSeconds`        | `"medium"` / `300` | Intent Review thinking level and time budget in seconds.                                            |
+| `review.keywordCoverage.everyAcceptedTurns` | `50`               | Cadence for automatic cross-session keyword-coverage review.                                        |
+| `review.triggers.skillPlacement.enabled`    | `true`             | Enables bounded placement review for one eligible resolved skill.                                   |
+| `review.triggers.*.enabled`                 | `true`             | Enables the individual ordinary Review trigger; thresholds remain in the plugin manifest.           |
 
 Topic Checker, Intent Classifier, background Curator, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
@@ -209,7 +213,7 @@ This skill does not manually repeat production-owned work: per-turn classificati
 
 `skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. This intentionally does not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists: visibility follows root precedence and disabled bundled-skill entries only. Prompt-time automatic configured-skill injection is narrower and includes explicit configured names plus workspace skills.
 
-`skill_list` omits usage and related-skill data unless `show_stats: true` or `show_related: true` is supplied; `skill_view` always includes visible related skills. `skill_search` requires a non-empty query, source, domains, or keywords filter; it defaults to 20 results, caps the limit at 100, uses Unicode-normalized case-insensitive matching, treats domains as an OR filter, and returns match evidence unless `show_matches: false` is supplied. The index cache polls at `skills.load.watchDebounceMs` only when `skills.load.watch` is true; otherwise it uses a 60-second TTL.
+`skill_list` omits usage and related-skill data unless `show_stats: true` or `show_related: true` is supplied; `skill_view` always includes visible related skills. Related-skill declarations are discovery metadata for the skill tools only: they do not expand the dynamic routing candidate list. `skill_search` requires a non-empty query, source, domains, or keywords filter; it defaults to 20 results, caps the limit at 100, uses Unicode-normalized case-insensitive matching, treats domains as an OR filter, and returns match evidence unless `show_matches: false` is supplied. The index cache polls at `skills.load.watchDebounceMs` only when `skills.load.watch` is true; otherwise it uses a 60-second TTL.
 
 ## Intent Review
 
@@ -284,13 +288,17 @@ pnpm run build
 pnpm pack --dry-run
 ```
 
-| Command               | Purpose                                                   |
-| --------------------- | --------------------------------------------------------- |
-| `pnpm run format`     | Format Markdown, JSON, and TypeScript with Prettier.      |
-| `pnpm run typecheck`  | TypeScript check without emitting files.                  |
-| `pnpm run test`       | Run the Vitest suite.                                     |
-| `pnpm run build`      | Compile the plugin to `dist/`.                            |
-| `pnpm pack --dry-run` | Inspect package contents before publishing or installing. |
+| Command               | Purpose                                                       |
+| --------------------- | ------------------------------------------------------------- |
+| `pnpm run format`     | Format Markdown, JSON, and TypeScript with Prettier.          |
+| `pnpm run typecheck`  | TypeScript check without emitting files.                      |
+| `pnpm run test`       | Run the Vitest suite.                                         |
+| `pnpm run build`      | Compile the plugin to `dist/`; it does not delete old output. |
+| `pnpm pack --dry-run` | Inspect package contents before publishing or installing.     |
+
+Because the current build command invokes `tsc` directly, it does not prune
+stale files already present in `dist/`. Always inspect `pnpm pack --dry-run`
+after a build before publishing or linking a changed package.
 
 ### Navigate the codebase
 

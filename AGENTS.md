@@ -56,11 +56,11 @@ resolved plugin data root.
 ```bash
 pnpm run typecheck          # TypeScript, no emit
 pnpm run test               # Full Vitest suite
-pnpm run build              # Clean and compile dist/
+pnpm run build              # Compile dist/ (does not clean old output)
 pnpm run format             # Prettier for md/json/ts files
 ```
 
-Run `pnpm run typecheck` and `pnpm run test` before handing off code changes. Run `pnpm run build` when changing package metadata, SDK imports, or anything that depends on emitted `dist/` output. The build script must remove `dist/` before `tsc`; package hygiene checks should verify `pnpm pack --dry-run` does not include stale renamed artifacts such as `dist/src/classification/embedded-agent.*` or root tooling output such as `dist/vitest.config.*`.
+Run `pnpm run typecheck` and `pnpm run test` before handing off code changes. Run `pnpm run build` when changing package metadata, SDK imports, or anything that depends on emitted `dist/` output. The current build script invokes `tsc` directly and does not remove stale `dist/` files, so package-facing work must also inspect `pnpm pack --dry-run` for stale renamed artifacts such as `dist/src/classification/embedded-agent.*` or root tooling output such as `dist/vitest.config.*`.
 
 Root `scripts/` are intentionally not a workflow surface. The sealed runtime-data cutover toolchain was retired after its completed authorized application; do not treat its historical plan records or retained runtime evidence as a routine maintenance workflow. Package hygiene uses the direct `pnpm run build` and `pnpm pack --dry-run` gates. Day-to-day runtime intent changes follow the applicable validator, full test, and build rules below.
 
@@ -80,6 +80,7 @@ Runtime data root:
 - With OpenClaw's default local state directory, the normal path is `~/.openclaw/plugins/skill-harness`.
 - Active runtime files live here:
   - `intents/*.md`
+  - `experiences/<skill>/<entry>.md`
   - `sessions/<sessionId>.json`
   - `stats.json`
   - `review.json`
@@ -98,6 +99,8 @@ Rules:
 `skill_list`, `skill_search`, and `skill_view` deliberately inventory every skill in the invoking agent's resolved roots. The invoking agent ID selects its workspace roots, but the indexer must not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists. This is an intentional product boundary: these tools expose the root inventory, subject only to source precedence and disabled bundled skill entries. Do not add `resolveAgentSkillsFilter()` or equivalent filtering unless Baby explicitly changes this policy; that change requires focused tests plus README and migration documentation.
 
 Prompt-time workspace auto-injection is narrower than tool visibility: `<configured_skills>` unions explicit configured names with `listAvailableSkills({ source: "workspace" })` for the invoking agent only. Do not expand that automatic inventory to project-agent, personal-agent, managed, plugin, bundled, or extra sources; explicit names may still resolve from those roots. Skill tools continue to expose the full resolved inventory described above.
+
+Related-skill declarations are a tool-discovery concern only. Dynamic routing must use the selected intent's direct skills and must not resolve or inject `relatedSkills` as additional candidates.
 
 The indexer uses `skills.load.watchDebounceMs` as its cache TTL only when `skills.load.watch` is `true`; otherwise it retains the 60-second default. This is polling, not a filesystem watcher. Keep the TTL in the cache key so live configuration changes cannot reuse indexes created under a different refresh interval.
 
