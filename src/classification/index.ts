@@ -13,7 +13,10 @@ export {
   formatConfiguredSkills,
   measureIntentCatalogCodePoints,
 } from "./prompts.js";
-export { projectIntentCandidates } from "./candidates.js";
+export {
+  getQmdCandidateLimits,
+  projectQmdIntentCandidates,
+} from "./candidates.js";
 export type {
   IntentProjection,
   IntentProjectionFallbackReason,
