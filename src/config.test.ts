@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { resolveConfig, clampInt } from "./config.js";
 import {
@@ -67,6 +68,96 @@ describe("resolveConfig", () => {
         expect(result.queryMode).toBe(DEFAULT_QUERY_MODE);
         expect(result.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
       }
+    });
+  });
+
+  describe("QMD routing", () => {
+    it("documents mandatory QMD configuration before Quick Start enables the plugin", () => {
+      const manifest = JSON.parse(
+        readFileSync(
+          new URL("../openclaw.plugin.json", import.meta.url),
+          "utf8",
+        ),
+      ) as {
+        configSchema: {
+          required?: string[];
+          properties: {
+            qmd: {
+              required?: string[];
+              properties: Record<string, { required?: string[] }>;
+            };
+          };
+        };
+      };
+      const readme = readFileSync(
+        new URL("../README.md", import.meta.url),
+        "utf8",
+      );
+      const quickStartEnd = readme.indexOf("\n## What it solves");
+      const quickStart = readme.slice(0, quickStartEnd);
+
+      expect(manifest.configSchema.required).toContain("qmd");
+      expect(manifest.configSchema.properties.qmd.required).toEqual([
+        "embedding",
+        "expansion",
+        "rerank",
+      ]);
+      for (const endpoint of ["embedding", "expansion", "rerank"]) {
+        expect(
+          manifest.configSchema.properties.qmd.properties[endpoint]?.required,
+        ).toEqual(["baseUrl", "model"]);
+      }
+      expect(quickStart).toContain("qmd: {");
+      expect(quickStart.indexOf("qmd: {")).toBeLessThan(
+        quickStart.indexOf("openclaw plugins doctor"),
+      );
+      expect(readme).toContain(
+        "### Upgrade from the removed instruction writer to mandatory QMD routing",
+      );
+    });
+
+    it("uses the scanner timeout by default and accepts inline remote credentials", () => {
+      const result = resolveConfig({
+        timeoutMs: 8_000,
+        qmd: {
+          embedding: {
+            baseUrl: "https://embedding.example.test/v1",
+            model: "embedding-model",
+            apiKey: "embedding-key",
+            dimension: 768,
+          },
+          expansion: {
+            baseUrl: "https://llm.example.test/v1",
+            model: "expand-model",
+            apiKey: "expand-key",
+          },
+          rerank: {
+            baseUrl: "https://llm.example.test/v1",
+            model: "rerank-model",
+            apiKey: "rerank-key",
+          },
+        },
+      });
+
+      expect(result.qmd).toEqual({
+        timeoutMs: 8_000,
+        embedding: {
+          baseUrl: "https://embedding.example.test/v1",
+          model: "embedding-model",
+          apiKey: "embedding-key",
+          dimension: 768,
+        },
+        expansion: {
+          baseUrl: "https://llm.example.test/v1",
+          model: "expand-model",
+          apiKey: "expand-key",
+        },
+        rerank: {
+          baseUrl: "https://llm.example.test/v1",
+          model: "rerank-model",
+          apiKey: "rerank-key",
+        },
+      });
     });
   });
 

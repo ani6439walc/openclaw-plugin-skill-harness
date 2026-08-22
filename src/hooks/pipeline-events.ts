@@ -5,7 +5,8 @@ import { logger } from "../../api.js";
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
-export type PipelinePhase = "pipeline" | "topic-triage" | "intent-classify";
+export type PipelinePhase =
+  "pipeline" | "topic-triage" | "qmd-search" | "intent-classify";
 
 export type PipelineState = "started" | "completed" | "failed";
 
@@ -19,6 +20,8 @@ export type PipelineMetadata = {
   intent?: string;
   reason?: string;
   confidence?: number;
+  score?: number;
+  collection?: string;
   result?: string;
   error?: string;
   durationMs?: number;

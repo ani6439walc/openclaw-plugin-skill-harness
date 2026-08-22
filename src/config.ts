@@ -9,6 +9,7 @@ import {
 } from "./constants.js";
 import type {
   ContextWindow,
+  ResolvedQmdConfig,
   ResolvedSkillHarnessPluginConfig,
 } from "./types.js";
 
@@ -64,6 +65,13 @@ const DEFAULT_REVIEW = {
   },
 } as const;
 
+const DEFAULT_QMD: ResolvedQmdConfig = {
+  timeoutMs: DEFAULT_TIMEOUT_MS,
+  embedding: { baseUrl: "", model: "" },
+  expansion: { baseUrl: "", model: "" },
+  rerank: { baseUrl: "", model: "" },
+};
+
 const DEFAULT_CONFIG = {
   agents: ["main"],
   model: undefined,
@@ -76,6 +84,7 @@ const DEFAULT_CONFIG = {
   queryMode: DEFAULT_QUERY_MODE,
   contextWindow: DEFAULT_CONTEXT_WINDOW,
   timeoutMs: DEFAULT_TIMEOUT_MS,
+  qmd: DEFAULT_QMD,
   curation: DEFAULT_CURATION,
   review: DEFAULT_REVIEW,
 } satisfies ResolvedSkillHarnessPluginConfig;
@@ -205,6 +214,27 @@ const ReviewSchema = z
   })
   .catch(DEFAULT_REVIEW);
 
+const QmdEndpointObjectSchema = z.object({
+  baseUrl: z.string().trim().catch(""),
+  model: z.string().trim().catch(""),
+  apiKey: z.string().trim().optional().catch(undefined),
+});
+const QmdEndpointSchema = QmdEndpointObjectSchema.catch({
+  baseUrl: "",
+  model: "",
+});
+const QmdEmbeddingSchema = QmdEndpointObjectSchema.extend({
+  dimension: z.number().int().positive().optional().catch(undefined),
+}).catch({ baseUrl: "", model: "" });
+const QmdSchema = z
+  .object({
+    timeoutMs: z.number().optional().catch(undefined),
+    embedding: QmdEmbeddingSchema,
+    expansion: QmdEndpointSchema,
+    rerank: QmdEndpointSchema,
+  })
+  .catch(DEFAULT_QMD);
+
 const SkillHarnessConfigSchema = z
   .object({
     agents: stringListWithDefault(["main"]),
@@ -218,13 +248,29 @@ const SkillHarnessConfigSchema = z
     queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
     contextWindow: ContextWindowSchema,
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
+    qmd: QmdSchema,
     curation: CurationSchema,
     review: ReviewSchema,
   })
   .catch(DEFAULT_CONFIG);
 
 export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
-  return SkillHarnessConfigSchema.parse(
-    raw,
-  ) as ResolvedSkillHarnessPluginConfig;
+  const resolved = SkillHarnessConfigSchema.parse(raw) as Omit<
+    ResolvedSkillHarnessPluginConfig,
+    "qmd"
+  > & {
+    qmd: Omit<ResolvedQmdConfig, "timeoutMs"> & { timeoutMs?: number };
+  };
+  return {
+    ...resolved,
+    qmd: {
+      ...resolved.qmd,
+      timeoutMs: clampInt(
+        resolved.qmd.timeoutMs,
+        resolved.timeoutMs,
+        1_000,
+        60_000,
+      ),
+    },
+  };
 }

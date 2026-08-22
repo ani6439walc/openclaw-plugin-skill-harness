@@ -4,8 +4,7 @@ import type {
   IntentProjectionSelectionReason,
   IntentProjectionSupportReason,
 } from "../types.js";
-import type { TopicSwitchResult } from "./prompts.js";
-import { normalizeForComparison } from "../normalize.js";
+import type { QmdIntentHit } from "../qmd/intent-index.js";
 
 export type {
   IntentProjectionSelectionReason,
@@ -14,11 +13,8 @@ export type {
 
 export type IntentProjectionFallbackReason =
   | "empty-catalog"
-  | "missing-topic-context"
-  | "unknown-domain"
-  | "historical-intent-missing"
-  | "historical-intent-unavailable"
-  | "insufficient-evidence"
+  | "qmd-unavailable"
+  | "qmd-no-trusted-recall"
   | "empty-projection"
   | "no-reduction"
   | "selector-error";
@@ -41,85 +37,14 @@ export interface IntentProjection {
   fallbackReason?: IntentProjectionFallbackReason;
 }
 
-interface ProjectIntentCandidatesParams {
-  intents: readonly IntentCatalogEntry[];
-  latest: string;
-  topicContext?: TopicSwitchResult;
-  latestHistoricalIntent?: HistoricalIntentRecord;
-}
-
-const HIGH_OVERALL_CONFIDENCE = 0.8;
 const SELECTION_REASON_ORDER: readonly IntentProjectionSelectionReason[] = [
+  "qmd-hit",
   "cross-flow",
-  "predicted-domain",
-  "authorized-history",
-  "candidate-keyword",
-  "intent-id",
+  "recent-history",
 ];
 
 function resolveIntentId(value: string | undefined): string | undefined {
   return value?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
-}
-
-function containsCjk(value: string): boolean {
-  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
-    value,
-  );
-}
-
-function isWordCodePoint(value: string): boolean {
-  return /[\p{L}\p{M}\p{N}]/u.test(value);
-}
-
-function isSymbolPhraseBoundary(value: string | undefined): boolean {
-  return value === undefined || /[\s\p{P}]/u.test(value);
-}
-
-function latestContainsBoundaryPhrase(latest: string, phrase: string): boolean {
-  const phraseCodePoints = Array.from(phrase);
-  const firstPhraseCodePoint = phraseCodePoints[0]!;
-  const lastPhraseCodePoint = phraseCodePoints.at(-1)!;
-  let index = latest.indexOf(phrase);
-  while (index >= 0) {
-    const before = Array.from(latest.slice(0, index)).at(-1);
-    const after = Array.from(latest.slice(index + phrase.length))[0];
-    const leftBoundary = isWordCodePoint(firstPhraseCodePoint)
-      ? before === undefined || !isWordCodePoint(before)
-      : isSymbolPhraseBoundary(before);
-    const rightBoundary = isWordCodePoint(lastPhraseCodePoint)
-      ? after === undefined || !isWordCodePoint(after)
-      : isSymbolPhraseBoundary(after);
-    if (leftBoundary && rightBoundary) return true;
-    index = latest.indexOf(phrase, index + 1);
-  }
-  return false;
-}
-
-function latestContainsPhrase(latest: string, phrase: string): boolean {
-  const normalizedLatest = normalizeForComparison(latest);
-  const normalizedPhrase = normalizeForComparison(phrase);
-  if (!normalizedLatest || !normalizedPhrase) return false;
-  if (Array.from(normalizedPhrase).length === 1) {
-    return normalizedLatest === normalizedPhrase;
-  }
-  if (containsCjk(normalizedPhrase)) {
-    return normalizedLatest.includes(normalizedPhrase);
-  }
-  return latestContainsBoundaryPhrase(normalizedLatest, normalizedPhrase);
-}
-
-function topicKeywordsContainPhrase(
-  topicKeywords: readonly string[],
-  phrase: string,
-): boolean {
-  const normalizedPhrase = normalizeForComparison(phrase);
-  return (
-    normalizedPhrase.length > 0 &&
-    topicKeywords.some(
-      (topicKeyword) =>
-        normalizeForComparison(topicKeyword) === normalizedPhrase,
-    )
-  );
 }
 
 function fullCatalogResult(
@@ -127,7 +52,6 @@ function fullCatalogResult(
   fallbackReason: IntentProjectionFallbackReason,
   candidateIntents: Iterable<IntentCatalogEntry> = intents,
   selectionReasons: Iterable<IntentProjectionSelectionReason> = [],
-  matchedKeywords: Iterable<string> = [],
   candidateSelections: IntentProjection["candidateSelections"] = [],
   supportReasons: Iterable<IntentProjectionSupportReason> = [],
 ): IntentProjection {
@@ -142,169 +66,87 @@ function fullCatalogResult(
     supportReasons: [...supportReasons],
     selectionReasons: [...selectionReasons],
     candidateSelections,
-    matchedKeywords: [...matchedKeywords],
+    matchedKeywords: [],
     fallbackReason,
   };
 }
 
-export function projectIntentCandidates(
-  params: ProjectIntentCandidatesParams,
-): IntentProjection {
+export function getQmdCandidateLimits(intentCount: number): {
+  smallK: number;
+  largeK: number;
+  rawLimit: number;
+} {
+  const baseK = Math.max(
+    6,
+    Math.min(12, Math.ceil(Math.log2(intentCount)) + 2),
+  );
+  const smallK = Math.min(intentCount, baseK);
+  const largeK = Math.min(intentCount, Math.min(baseK * 2, 24));
+  return { smallK, largeK, rawLimit: largeK * 2 };
+}
+
+export function projectQmdIntentCandidates(params: {
+  intents: readonly IntentCatalogEntry[];
+  qmdHits: readonly QmdIntentHit[] | undefined;
+  histories: readonly HistoricalIntentRecord[];
+}): IntentProjection {
   const intents = [...params.intents];
   if (intents.length === 0) return fullCatalogResult(intents, "empty-catalog");
-  if (!params.topicContext) {
-    return fullCatalogResult(intents, "missing-topic-context");
+  if (!params.qmdHits) return fullCatalogResult(intents, "qmd-unavailable");
+  const trustedHits = params.qmdHits.filter((hit) => hit.score >= 0.35);
+  if (trustedHits.length === 0) {
+    return fullCatalogResult(intents, "qmd-no-trusted-recall");
   }
 
-  const validDomain = intents.some(
-    (intent) => intent.definition.domain === params.topicContext?.domain,
+  const intentById = new Map(
+    intents.map((intent) => [intent.id.toLowerCase(), intent]),
   );
-  if (!validDomain) return fullCatalogResult(intents, "unknown-domain");
-
-  const reasonsByIntent = new Map<
-    IntentCatalogEntry,
-    Set<IntentProjectionSelectionReason>
-  >();
-  const matchedKeywords = new Set<string>();
-  const matchedKeywordsByIntent = new Map<IntentCatalogEntry, string[]>();
-  const topicKeywords = params.topicContext.keywords;
-
-  function addReason(
-    intent: IntentCatalogEntry,
-    reason: IntentProjectionSelectionReason,
-  ): void {
-    const reasons = reasonsByIntent.get(intent) ?? new Set();
+  const reasonsById = new Map<string, Set<IntentProjectionSelectionReason>>();
+  const add = (intentId: string, reason: IntentProjectionSelectionReason) => {
+    const normalized = resolveIntentId(intentId);
+    if (!normalized || !intentById.has(normalized)) return;
+    const reasons = reasonsById.get(normalized) ?? new Set();
     reasons.add(reason);
-    reasonsByIntent.set(intent, reasons);
-  }
+    reasonsById.set(normalized, reasons);
+  };
 
+  for (const hit of trustedHits) add(hit.intentId, "qmd-hit");
   for (const intent of intents) {
     if (intent.definition.candidate?.scope === "cross-flow") {
-      addReason(intent, "cross-flow");
-    }
-    if (intent.definition.domain === params.topicContext.domain) {
-      addReason(intent, "predicted-domain");
-    }
-
-    const normalizedCandidateKeywords = new Set<string>();
-    for (const keyword of intent.definition.candidate?.keywords ?? []) {
-      const normalizedKeyword = normalizeForComparison(keyword);
-      if (
-        !normalizedKeyword ||
-        normalizedCandidateKeywords.has(normalizedKeyword)
-      ) {
-        continue;
-      }
-      normalizedCandidateKeywords.add(normalizedKeyword);
-      if (
-        latestContainsPhrase(params.latest, keyword) ||
-        topicKeywordsContainPhrase(topicKeywords, keyword)
-      ) {
-        addReason(intent, "candidate-keyword");
-        matchedKeywords.add(keyword);
-        const intentMatches = matchedKeywordsByIntent.get(intent) ?? [];
-        intentMatches.push(keyword);
-        matchedKeywordsByIntent.set(intent, intentMatches);
-      }
-    }
-
-    if (
-      latestContainsPhrase(params.latest, intent.id) ||
-      topicKeywordsContainPhrase(topicKeywords, intent.id)
-    ) {
-      addReason(intent, "intent-id");
+      add(intent.id, "cross-flow");
     }
   }
-
-  const lowConfidenceSameTopic =
-    params.topicContext.reason === "same-topic" &&
-    params.topicContext.confidence < HIGH_OVERALL_CONFIDENCE;
-  let historicalIntentAvailable = false;
-  if (lowConfidenceSameTopic && params.latestHistoricalIntent) {
-    const historicalIntentId = resolveIntentId(
-      params.latestHistoricalIntent.intent,
-    );
-    const historicalIntent = intents.find(
-      (intent) => intent.id.toLowerCase() === historicalIntentId,
-    );
-    if (historicalIntent) {
-      historicalIntentAvailable = true;
-      addReason(historicalIntent, "authorized-history");
-    }
+  for (const historicalIntent of params.histories.slice(-2)) {
+    add(historicalIntent.intent, "recent-history");
   }
 
   const candidateIntents = intents.filter((intent) =>
-    reasonsByIntent.has(intent),
+    reasonsById.has(intent.id.toLowerCase()),
   );
   const selectionReasons = SELECTION_REASON_ORDER.filter((reason) =>
-    [...reasonsByIntent.values()].some((reasons) => reasons.has(reason)),
+    [...reasonsById.values()].some((reasons) => reasons.has(reason)),
   );
   const candidateSelections = candidateIntents.map((intent) => ({
     intentId: intent.id,
     selectionReasons: SELECTION_REASON_ORDER.filter((reason) =>
-      reasonsByIntent.get(intent)?.has(reason),
+      reasonsById.get(intent.id.toLowerCase())?.has(reason),
     ),
-    matchedKeywords: [...(matchedKeywordsByIntent.get(intent) ?? [])],
+    matchedKeywords: [],
   }));
-  const supportReasons: IntentProjectionSupportReason[] = [];
-  if (params.topicContext.confidence >= HIGH_OVERALL_CONFIDENCE) {
-    supportReasons.push("high-overall-confidence");
-  }
-  if (lowConfidenceSameTopic && historicalIntentAvailable) {
-    supportReasons.push("authorized-history");
-  }
+
   if (
-    selectionReasons.includes("candidate-keyword") ||
-    selectionReasons.includes("intent-id")
+    candidateIntents.length === 0 ||
+    candidateIntents.length >= intents.length
   ) {
-    supportReasons.push("exact-evidence");
-  }
-
-  if (supportReasons.length === 0) {
-    if (lowConfidenceSameTopic && !params.latestHistoricalIntent) {
-      return fullCatalogResult(
-        intents,
-        "historical-intent-missing",
-        candidateIntents,
-        selectionReasons,
-        matchedKeywords,
-        candidateSelections,
-      );
-    }
-    if (lowConfidenceSameTopic && !historicalIntentAvailable) {
-      return fullCatalogResult(
-        intents,
-        "historical-intent-unavailable",
-        candidateIntents,
-        selectionReasons,
-        matchedKeywords,
-        candidateSelections,
-      );
-    }
     return fullCatalogResult(
       intents,
-      "insufficient-evidence",
+      candidateIntents.length === 0 ? "empty-projection" : "no-reduction",
       candidateIntents,
       selectionReasons,
-      matchedKeywords,
       candidateSelections,
+      ["qmd-retrieval"],
     );
   }
-  if (candidateIntents.length === 0) {
-    return fullCatalogResult(intents, "empty-projection");
-  }
-  if (candidateIntents.length >= intents.length) {
-    return fullCatalogResult(
-      intents,
-      "no-reduction",
-      candidateIntents,
-      selectionReasons,
-      matchedKeywords,
-      candidateSelections,
-      supportReasons,
-    );
-  }
-
   return {
     decision: "projected",
     originalIntentCount: intents.length,
@@ -312,9 +154,9 @@ export function projectIntentCandidates(
     effectiveIntents: candidateIntents,
     candidateIntents,
     projected: true,
-    supportReasons,
+    supportReasons: ["qmd-retrieval"],
     selectionReasons,
     candidateSelections,
-    matchedKeywords: [...matchedKeywords],
+    matchedKeywords: [],
   };
 }

@@ -50,6 +50,7 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@tobilu/qmd": "git+https://github.com/wei840222/qmd.git#af285ca74186d4f1e5479e2c6e6db22ceb735fca",
     "gray-matter": "4.0.3",
     "typebox": "1.3.3",
     "zod": "4.4.3"

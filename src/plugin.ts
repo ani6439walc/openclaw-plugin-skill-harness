@@ -21,6 +21,7 @@ import {
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { registerSkillTools } from "./skills/index.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
+import { createIntentQmdIndex } from "./qmd/intent-index.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -275,6 +276,10 @@ export function createPlugin(
 
       const catalog = IntentCatalog.create(dataRoot);
       const experienceCatalog = SkillExperienceCatalog.create(dataRoot);
+      const qmdIntentIndex = createIntentQmdIndex({
+        dataRoot,
+        config: () => config.qmd,
+      });
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const curationQueue = createCurationQueue();
@@ -295,6 +300,7 @@ export function createPlugin(
 
       const refreshRuntimeIntents = () => {
         catalog.load("intents");
+        qmdIntentIndex.schedule(catalog.get());
       };
 
       const deps: HookDeps = {
@@ -311,6 +317,7 @@ export function createPlugin(
         triggerKeywords: () => triggerKeywordCache,
         refreshTriggerKeywords: refreshTriggerKeywordCache,
         getConfiguredAgentSkills,
+        qmdIntentIndex,
 
         bundledSkillsDir: path.join(defaultPackageRoot, "skills"),
         dataRoot,

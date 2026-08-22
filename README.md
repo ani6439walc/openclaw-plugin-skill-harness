@@ -20,15 +20,50 @@ pnpm run test
 pnpm run build
 pnpm pack --dry-run
 openclaw plugins install --link .
-openclaw plugins enable skill-harness
-openclaw plugins doctor
 ```
 
 `--link` keeps OpenClaw pointed at the checkout, so future local changes can be rebuilt and tested without reinstalling.
 
+Before enabling the plugin, add its mandatory QMD services to `openclaw.json`. Replace every placeholder with a reachable OpenAI-compatible endpoint and model:
+
+```json5
+{
+  plugins: {
+    entries: {
+      "skill-harness": {
+        enabled: false,
+        config: {
+          qmd: {
+            embedding: {
+              baseUrl: "https://your-embedding-endpoint/v1",
+              model: "your-embedding-model",
+            },
+            expansion: {
+              baseUrl: "https://your-openai-compatible-endpoint/v1",
+              model: "your-expansion-model",
+            },
+            rerank: {
+              baseUrl: "https://your-rerank-endpoint/v1",
+              model: "your-rerank-model",
+            },
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+Then enable and inspect the plugin:
+
+```bash
+openclaw plugins enable skill-harness
+openclaw plugins doctor
+```
+
 Direct `git:` installation is not supported by this repository layout. The compiled `dist/` entry is not tracked in Git, and OpenClaw's Git installer does not run this development build.
 
-If the Gateway is unmanaged or automatic config reload is disabled, restart it after installing or enabling the plugin:
+If the Gateway is unmanaged or automatic config reload is disabled, restart it after configuring or enabling the plugin:
 
 ```bash
 openclaw gateway restart
@@ -71,7 +106,7 @@ graph TD
   M --> N[Record stats and optionally review the completed turn]
 ```
 
-Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. The plugin `agents` option and chat scope limit dynamic intent routing only. The routing pipeline uses cheap deterministic evidence before helper-model calls. Exact fast paths, high-confidence same-topic continuations, and clear changed-topic matches can avoid classification. Uncertain cases use a conservative candidate projection when evidence supports it; otherwise they fail open to the full eligible catalog.
+Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. The plugin `agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing: local exact matching remains the cheapest shortcut, while QMD owns hybrid retrieval, expansion, reranking, and final ranking.
 
 ### Architecture and routing contract
 
@@ -82,10 +117,12 @@ The routing stages are:
 1. Resolve canonical agent and session identity, then exclude helper, generic subagent, Review, dreaming, and active-memory sessions from all injection.
 2. Append fixed skill-discovery guidance and enriched configured skills to every remaining agent turn.
 3. Gate dynamic routing by configured agent, chat scope, external-user turn, and interactive-session status.
-4. Load live configuration and runtime intents; use exact evidence first, then high-confidence topic continuity or candidate projection, and finally one classifier call against the full eligible catalog when projection is not justified.
-5. Inject the selected intent, its one guidance sentence, direct candidates, and candidate-scoped experience metadata; then record the completed turn and run configured background work.
+4. Load live configuration and runtime intents. Route in this order: normalized whole-message `fastpath.keywords` equality, topic triage, valid same-topic inheritance, domain-restricted QMD topic-keyword retrieval, then one QMD hybrid trigger/example search.
+5. A QMD top result over `0.85` routes directly. Scores from `0.65` through `0.85` give the classifier a small candidate set; scores from `0.35` through under `0.65` give it a larger set. Empty, stale, failed, or under-`0.35` retrieval runs one full-catalog classifier call.
+6. Classifier candidates preserve canonical catalog order and consist only of QMD-ranked hits, `candidate.scope: cross-flow` intents, and valid intents from the last two session turns.
+7. Inject the selected intent, its one guidance sentence, direct candidates, and candidate-scoped experience metadata; then record the completed turn and run configured background work.
 
-Exact `fastpath.keywords` bypass helper models. Same-topic inheritance requires available history and at least `0.8` joint confidence; uncertain or unsupported evidence proceeds to classification. Candidate projection preserves canonical catalog order and may use the predicted domain, `candidate.scope: cross-flow`, authorized history, and exact manual candidate evidence. It never reintroduces denied or removed intents, and its matching normalizes NFKC text with collapsed whitespace without treating hyphens and underscores as aliases.
+Exact `fastpath.keywords` uses host-local NFKC/lowercase/whitespace-normalized whole-message equality; it does not invoke QMD. Same-topic inheritance requires history, at least `0.8` joint confidence, and a topic-triage domain equal to the current catalog domain of the historical intent. Topic-keyword retrieval indexes only `fastpath.keywords` in one QMD collection per domain. QMD snapshot files live under `qmd/intents/` and its SQLite database under `qmd/intent-routing.sqlite`; they refresh in the background, so a cold or unhealthy index fails open to the classifier.
 
 Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains only the selected intent, optional classifier-produced complexity, guidance, direct candidates, and nested experience metadata. The plugin is fail-open: configuration, classification, statistics, curation, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
 
@@ -112,6 +149,23 @@ Configure Skill Harness in `openclaw.json`:
           lowEffortRoutingMode: "fastpath-only",
           queryMode: "recent",
           timeoutMs: 5000,
+          qmd: {
+            embedding: {
+              baseUrl: "https://your-embedding-endpoint/v1",
+              model: "your-embedding-model",
+              apiKey: "${QMD_EMBEDDING_API_KEY}",
+            },
+            expansion: {
+              baseUrl: "https://your-openai-compatible-endpoint/v1",
+              model: "your-expansion-model",
+              apiKey: "${QMD_EXPANSION_API_KEY}",
+            },
+            rerank: {
+              baseUrl: "https://your-openai-compatible-endpoint/v1",
+              model: "your-rerank-model",
+              apiKey: "${QMD_RERANK_API_KEY}",
+            },
+          },
           curation: {
             enabled: true,
           },
@@ -127,32 +181,36 @@ Configure Skill Harness in `openclaw.json`:
 
 ### Important options
 
-| Option                                      | Default            | Purpose                                                                                             |
-| ------------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------- |
-| `agents`                                    | `["main"]`         | OpenClaw agent IDs eligible for dynamic intent routing.                                             |
-| `allowedChatTypes`                          | `["direct"]`       | Chat types that may run dynamic routing.                                                            |
-| `allowedChatIds` / `deniedChatIds`          | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                         |
-| `model` / `modelFallback`                   | unset              | Scanner model and last-resort resolution fallback.                                                  |
-| `thinking`                                  | `"medium"`         | Intent-classifier thinking level.                                                                   |
-| `lowEffortRoutingMode`                      | `"fastpath-only"`  | Routing behavior when the main agent uses off, minimal, or low reasoning effort.                    |
-| `queryMode` / `contextWindow`               | `"recent"`         | Scanner context and its limits.                                                                     |
-| `timeoutMs`                                 | `5000`             | Topic-checker and intent-classifier time budget.                                                    |
-| `curation.enabled`                          | `true`             | Enables session-local direct-skill and experience recommendation curation, independently of Review. |
-| `curation.model` / `modelFallback`          | unset              | Optional dedicated curator model and resolution fallback.                                           |
-| `curation.thinking` / `timeoutSeconds`      | `"medium"` / `30`  | Curator thinking level and time budget in seconds.                                                  |
-| `review.enabled`                            | `false`            | Enables post-turn Intent Review.                                                                    |
-| `review.thinking` / `timeoutSeconds`        | `"medium"` / `300` | Intent Review thinking level and time budget in seconds.                                            |
-| `review.keywordCoverage.everyAcceptedTurns` | `50`               | Cadence for automatic cross-session keyword-coverage review.                                        |
-| `review.triggers.skillPlacement.enabled`    | `true`             | Enables bounded placement review for one eligible resolved skill.                                   |
-| `review.triggers.*.enabled`                 | `true`             | Enables the individual ordinary Review trigger; thresholds remain in the plugin manifest.           |
+| Option                                      | Default            | Purpose                                                                                               |
+| ------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `agents`                                    | `["main"]`         | OpenClaw agent IDs eligible for dynamic intent routing.                                               |
+| `allowedChatTypes`                          | `["direct"]`       | Chat types that may run dynamic routing.                                                              |
+| `allowedChatIds` / `deniedChatIds`          | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                           |
+| `model` / `modelFallback`                   | unset              | Scanner model and last-resort resolution fallback.                                                    |
+| `thinking`                                  | `"medium"`         | Intent-classifier thinking level.                                                                     |
+| `lowEffortRoutingMode`                      | `"fastpath-only"`  | Routing behavior when the main agent uses off, minimal, or low reasoning effort.                      |
+| `queryMode` / `contextWindow`               | `"recent"`         | Scanner context and its limits.                                                                       |
+| `timeoutMs`                                 | `5000`             | Topic-checker and intent-classifier time budget.                                                      |
+| `qmd.embedding` / `expansion` / `rerank`    | required           | Remote endpoint and model for mandatory QMD hybrid routing; `apiKey` is optional for keyless proxies. |
+| `qmd.timeoutMs`                             | `timeoutMs`        | Per-request QMD embedding, expansion, and rerank timeout.                                             |
+| `curation.enabled`                          | `true`             | Enables session-local direct-skill and experience recommendation curation, independently of Review.   |
+| `curation.model` / `modelFallback`          | unset              | Optional dedicated curator model and resolution fallback.                                             |
+| `curation.thinking` / `timeoutSeconds`      | `"medium"` / `30`  | Curator thinking level and time budget in seconds.                                                    |
+| `review.enabled`                            | `false`            | Enables post-turn Intent Review.                                                                      |
+| `review.thinking` / `timeoutSeconds`        | `"medium"` / `300` | Intent Review thinking level and time budget in seconds.                                              |
+| `review.keywordCoverage.everyAcceptedTurns` | `50`               | Cadence for automatic cross-session keyword-coverage review.                                          |
+| `review.triggers.skillPlacement.enabled`    | `true`             | Enables bounded placement review for one eligible resolved skill.                                     |
+| `review.triggers.*.enabled`                 | `true`             | Enables the individual ordinary Review trigger; thresholds remain in the plugin manifest.             |
 
 Topic Checker, Intent Classifier, background Curator, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
-### Upgrade from the removed instruction writer
+### Upgrade from the removed instruction writer to mandatory QMD routing
 
-This release intentionally removes `plugins.entries.skill-harness.config.instruction`. OpenClaw validates the strict plugin config schema before the plugin runtime loads, so a retained `instruction` block prevents the upgraded plugin from loading.
+This release requires `plugins.entries.skill-harness.config.qmd` before OpenClaw loads the plugin. Before upgrading, add `embedding`, `expansion`, and `rerank`; each endpoint requires a reachable `baseUrl` and `model`. There is no classifier-only compatibility mode, and a missing or incomplete `qmd` block fails strict schema validation before the plugin runtime starts.
 
-Before upgrading, remove the entire legacy `instruction: { ... }` block from `plugins.entries.skill-harness.config`. There is no automatic migration or compatibility parser. Do not copy its writer model, thinking, timeout, or trigger settings into `curation`: curation is a separate session-local recommendation feature with different behavior.
+This release also removes `plugins.entries.skill-harness.config.instruction`. OpenClaw validates the strict plugin config schema before the plugin runtime loads, so a retained `instruction` block prevents the upgraded plugin from loading.
+
+After adding QMD, remove the entire legacy `instruction: { ... }` block from `plugins.entries.skill-harness.config`. There is no automatic migration or compatibility parser. Do not copy its writer model, thinking, timeout, or trigger settings into `curation`: curation is a separate session-local recommendation feature with different behavior.
 
 ## Runtime intents
 
@@ -335,7 +393,8 @@ intent catalog, and seeds bundled example intents only when the runtime catalog
 has no Markdown files. Existing runtime intents are not overwritten.
 
 Routing is fail-open. Eligible turns first use deterministic exact-keyword
-routing; the classifier path runs only when a scanner model resolves and the
+routing, then QMD retrieval after topic triage. The classifier runs only when
+no high-confidence QMD route is available, a scanner model resolves, and the
 turn is not excluded by the configured low-effort mode. Every eligible normal
 agent still receives the fixed skill-discovery context even when dynamic intent
 routing is skipped or fails.
