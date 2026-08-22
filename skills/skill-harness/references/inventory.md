@@ -51,7 +51,7 @@ Use simple format checks instead of command-specific validation steps:
 - Frontmatter exists and required fields have the right shape.
 - Frontmatter contains classification metadata; the complete plain-text body contains one routing `guidance` sentence.
 - Triggers/examples are concrete and non-duplicative.
-- Optional `candidate.scope` and `candidate.keywords` are justified by durable cross-domain evidence and collision checks rather than inferred from one session.
+- Optional `fastpath.keywords` are durable exact whole-message evidence and must also be appropriate for domain-scoped lexical QMD topic-keyword retrieval. Optional `candidate.scope` is justified only for durable cross-domain coverage; do not add compatibility-only `candidate.keywords`.
 - New intents do not collide with existing runtime intent boundaries.
 - Domain-intent consistency criteria pass for every changed or newly proposed domain/intent relationship.
 - Skill dependencies use direct frontmatter `skills[]`; the body remains only the one plain-text guidance sentence.

@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import sqlite3
 import stat
 import sys
 import tempfile
@@ -107,6 +108,65 @@ def count_files(root: Path) -> tuple[int, int]:
             file_count += 1
             total_bytes += path.stat().st_size
     return file_count, total_bytes
+
+
+def qmd_health(qmd_root: Path) -> dict[str, Any]:
+    snapshot_root = qmd_root / "intents"
+    snapshot_markdown_files = (
+        sum(1 for _ in snapshot_root.rglob("*.md"))
+        if snapshot_root.is_dir()
+        else 0
+    )
+    database_path = qmd_root / "intent-routing.sqlite"
+    unavailable = {
+        "databaseStatus": "unavailable",
+        "integrityCheck": None,
+        "generation": None,
+        "leaseActive": None,
+        "snapshotMarkdownFiles": snapshot_markdown_files,
+        "indexedDocuments": None,
+        "indexedVectors": None,
+        "documentsMatchVectors": None,
+        "snapshotMatchesIndexedDocuments": None,
+    }
+    if not database_path.is_file():
+        return unavailable
+
+    try:
+        with sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro", uri=True) as database:
+            integrity_check = database.execute("PRAGMA integrity_check").fetchone()[0]
+            state = database.execute(
+                """
+                SELECT status, generation, lease_expires_at
+                FROM embedding_index_state
+                WHERE singleton = 1
+                """
+            ).fetchone()
+            indexed_documents = database.execute(
+                "SELECT COUNT(*) FROM documents WHERE active = 1"
+            ).fetchone()[0]
+            indexed_vectors = database.execute(
+                "SELECT COUNT(*) FROM content_vectors"
+            ).fetchone()[0]
+    except sqlite3.Error:
+        return unavailable
+
+    status, generation, lease_expires_at = state if state else ("unknown", None, None)
+    lease_active = (
+        isinstance(lease_expires_at, (int, float))
+        and lease_expires_at > time.time() * 1000
+    )
+    return {
+        "databaseStatus": status,
+        "integrityCheck": integrity_check,
+        "generation": generation,
+        "leaseActive": lease_active,
+        "snapshotMarkdownFiles": snapshot_markdown_files,
+        "indexedDocuments": indexed_documents,
+        "indexedVectors": indexed_vectors,
+        "documentsMatchVectors": indexed_documents == indexed_vectors,
+        "snapshotMatchesIndexedDocuments": snapshot_markdown_files == indexed_documents,
+    }
 
 
 def iso_timestamp(value: Any) -> float | None:
@@ -580,6 +640,7 @@ def build_report(data_root: Path) -> dict[str, Any]:
             "stats": stats_summary(stats),
             "sessions": session_health(data_root / "sessions", data_root / "agents"),
             "intents": {"markdownFiles": intent_files, "bytes": intent_bytes},
+            "qmd": qmd_health(data_root / "qmd"),
         },
         "privacy": {
             "sessionTextIncluded": False,

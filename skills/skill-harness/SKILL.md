@@ -164,7 +164,7 @@ User wants to measure, analyze, or propose changes to Intent Review trigger keyw
 
 Keywords: "Review keywords", "trigger keywords", "keyword hit rate", "keyword misses", "keyword collisions", "分析關鍵字", "統計關鍵字", "更新關鍵字", "successful-pattern", "behavior-fix", "entity-context"
 
-Do not use this mode for intent `fastpath.keywords` or `candidate.keywords`; route those through design or inventory with the labeled-fixture rules in `references/format.md`.
+Do not use this mode for intent `fastpath.keywords`; route that through design or inventory with the labeled-fixture rules in `references/format.md`. Do not propose new `candidate.keywords`: the schema retains them for compatibility, but current QMD candidate projection does not consume them.
 
 ### Workflow
 
@@ -208,7 +208,7 @@ Keywords: "skill harness health", "runtime health", "review 統計", "review 建
 Read and follow `references/runtime-health-audit.md`. Keep these checkpoints visible:
 
 1. **Generate a report-only snapshot** — run `scripts/runtime-health-audit.py` with local mode-`0600` output. Do not expose session text, tool payloads, Review suggestion text, or evidence.
-2. **Check structural state first** — current schema-v7 `review.json`, schema-v1 `keyword-coverage.json`, schema-v3 or schema-v4 `stats.json`, session shape counts, and retention metadata must be interpreted before quality trends. Read the report attribution boundary before interpreting v4 daily maps.
+2. **Check structural state first** — current schema-v7 `review.json`, schema-v1 `keyword-coverage.json`, schema-v3 or schema-v4 `stats.json`, QMD database state, session shape counts, and retention metadata must be interpreted before quality trends. Read the report attribution boundary before interpreting v4 daily maps.
 3. **Explain applied changes, not proposals** — use `processedEvents.changes.total`, `byTrigger`, `byOperation`, and target concentration. Keep ordinary Review separate from historical keyword audits.
 4. **Apply scheduler context** — empty coverage epochs can be normal after a restart or before the next eligible finalized turn; verify config, stats writes, model availability, and cadence before calling it a failure.
 5. **Report a bounded next observation** — state the provenance, actual counts, disk/retention state, and a next threshold. Do not modify runtime data from audit findings.
@@ -242,7 +242,8 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 - Frontmatter is the complete intent file and has required fields with the right shapes.
 - The complete plain-text intent body is one durable routing-guidance sentence.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
-- `candidate.scope: cross-flow` is used only for durable domain-independent coverage; manual `candidate.keywords` have labeled positive and collision evidence and are never inferred from one session.
+- `fastpath.keywords` must be durable exact whole-message evidence; the same values also form the domain-scoped lexical QMD topic-keyword collection.
+- `candidate.scope: cross-flow` is used only for durable domain-independent coverage. Do not add `candidate.keywords`: it is compatibility metadata and is not a current QMD projection input.
 - Review trigger keywords are a separate runtime surface. Analyze them with `references/keyword-audit.md` and `scripts/review-keyword-audit.py`; never infer a write from phrase frequency alone.
 - Skill dependencies use direct frontmatter `skills[]`; tools, workflows, commands, and lessons stay in referenced skills.
 - Intent metadata does not cross-reference other intent ids.

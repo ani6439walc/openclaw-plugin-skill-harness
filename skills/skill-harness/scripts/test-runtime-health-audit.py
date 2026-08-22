@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -20,6 +21,33 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         (self.root / "agents" / "review" / "sessions").mkdir(parents=True)
         (self.root / "intents").mkdir()
         (self.root / "intents" / "example.md").write_text("---\ntriggers: [example]\n---\n", encoding="utf-8")
+        qmd_root = self.root / "qmd"
+        (qmd_root / "intents" / "triggers").mkdir(parents=True)
+        (qmd_root / "intents" / "examples").mkdir()
+        (qmd_root / "intents" / "triggers" / "example.md").write_text(
+            "# trigger\n", encoding="utf-8"
+        )
+        (qmd_root / "intents" / "examples" / "example.md").write_text(
+            "# example\n", encoding="utf-8"
+        )
+        qmd_database = sqlite3.connect(qmd_root / "intent-routing.sqlite")
+        qmd_database.executescript(
+            """
+            CREATE TABLE embedding_index_state (
+              singleton INTEGER PRIMARY KEY,
+              status TEXT NOT NULL,
+              generation INTEGER NOT NULL,
+              lease_expires_at INTEGER,
+              updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE documents (active INTEGER NOT NULL);
+            CREATE TABLE content_vectors (id INTEGER PRIMARY KEY);
+            INSERT INTO embedding_index_state VALUES (1, 'ready', 2, NULL, 1234567890);
+            INSERT INTO documents VALUES (1), (1);
+            INSERT INTO content_vectors VALUES (1), (2);
+            """
+        )
+        qmd_database.close()
         (self.root / "review.json").write_text(
             json.dumps(
                 {
@@ -246,6 +274,20 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(report["runtime"]["sessions"]["sessionFiles"], 1)
         self.assertEqual(report["runtime"]["sessions"]["agentArtifactFiles"], 1)
         self.assertEqual(report["runtime"]["intents"]["markdownFiles"], 1)
+        self.assertEqual(
+            report["runtime"]["qmd"],
+            {
+                "databaseStatus": "ready",
+                "integrityCheck": "ok",
+                "generation": 2,
+                "leaseActive": False,
+                "snapshotMarkdownFiles": 2,
+                "indexedDocuments": 2,
+                "indexedVectors": 2,
+                "documentsMatchVectors": True,
+                "snapshotMatchesIndexedDocuments": True,
+            },
+        )
         self.assertEqual(set(report["provenance"]["stateSha256"]), {"review.json", "keyword-coverage.json", "stats.json"})
         stats = report["runtime"]["stats"]
         self.assertEqual(stats["attribution"]["status"], "insufficient-historical-attribution")
@@ -274,6 +316,26 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(stats["dataHealth"]["dailyBucketCount"], 1)
         self.assertEqual(stats["dataHealth"]["statsUpdatedAt"], "2026-08-01T00:02:00.000Z")
         self.assertEqual(stats["dataHealth"]["dailyDynamicKeyCardinality"]["maxIntents"], 1)
+
+    def test_reports_unavailable_qmd_without_failing_the_audit(self) -> None:
+        (self.root / "qmd" / "intent-routing.sqlite").unlink()
+
+        report = self.run_audit()
+
+        self.assertEqual(
+            report["runtime"]["qmd"],
+            {
+                "databaseStatus": "unavailable",
+                "integrityCheck": None,
+                "generation": None,
+                "leaseActive": None,
+                "snapshotMarkdownFiles": 2,
+                "indexedDocuments": None,
+                "indexedVectors": None,
+                "documentsMatchVectors": None,
+                "snapshotMatchesIndexedDocuments": None,
+            },
+        )
 
     def test_reports_v4_attribution_boundary_and_bounded_daily_maps(self) -> None:
         stats_path = self.root / "stats.json"

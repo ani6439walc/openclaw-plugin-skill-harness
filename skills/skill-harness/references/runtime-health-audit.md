@@ -4,7 +4,7 @@ Use this workflow to inspect current Skill Harness runtime health and summarize 
 
 ## Safety boundary
 
-The bundled script is report-only. It reads `review.json`, `keyword-coverage.json`, `stats.json`, session metadata, agent-artifact metadata, and intent filenames. It never writes runtime state and never emits:
+The bundled script is report-only. It reads `review.json`, `keyword-coverage.json`, `stats.json`, QMD SQLite metadata and snapshot file counts, session metadata, agent-artifact metadata, and intent filenames. It never writes runtime state and never emits:
 
 - user / assistant session text;
 - tool parameters or tool results;
@@ -26,18 +26,19 @@ python3 skills/skill-harness/scripts/runtime-health-audit.py \
 
 The script resolves the standard data root automatically. Use `--data-root` only for an intentionally nonstandard layout.
 
-It reads and validates current schema-v7 `review.json`, schema-v1 `keyword-coverage.json`, and schema-v3 or schema-v4 `stats.json`. It records SHA-256 values for all three before loading, rereads them afterward, and refuses to produce a mixed-state report if any changed. Session files are intentionally not hashed or snapshotted; treat the report as an observed window, not an immutable whole-runtime snapshot.
+It reads and validates current schema-v7 `review.json`, schema-v1 `keyword-coverage.json`, and schema-v3 or schema-v4 `stats.json`. It records SHA-256 values for all three before loading, rereads them afterward, and refuses to produce a mixed-state report if any changed. QMD is read once through a read-only SQLite connection and is reported as an observed point-in-time state; its active background build is not pinned or hashed. Session files are intentionally not hashed or snapshotted; treat the report as an observed window, not an immutable whole-runtime snapshot.
 
-Completion criterion: report `reportOnly` is true, all privacy flags are false, and `provenance.stateSha256` contains all three runtime logs.
+Completion criterion: report `reportOnly` is true, all privacy flags are false, `provenance.stateSha256` contains all three runtime logs, and `runtime.qmd` reports the database state without exposing indexed document text.
 
 ## Step 2 — Check structural health before interpreting trends
 
 Read `runtime` in this order:
 
-1. `review` and `keywordCoverage` schema versions must be 6 and 1. `stats` must be schema-v3 or schema-v4. Stop on another version; do not migrate or invent defaults.
+1. `review` and `keywordCoverage` schema versions must be 7 and 1. `stats` must be schema-v3 or schema-v4. Stop on another version; do not migrate or invent defaults.
 2. `sessions.invalidSessionFiles`, `sessions.sessionsMissingCurrent`, and `sessions.sessionsWithInvalidHistory` must be zero. A nonzero value is a persistence/shape issue, not a routing-quality signal.
 3. `intents.markdownFiles` is only a file count. It is not proof that intent frontmatter is valid. When the repository build output is available, run the compiled validator separately against the active runtime catalog.
-4. Compare `sessions.agentArtifactFiles` and `sessions.agentArtifactBytes` over time. Artifacts older than `sessions.retentionDays` are a cleanup signal only after a retention sweep opportunity; do not delete them manually during an audit.
+4. `qmd.databaseStatus` should be `ready`, `integrityCheck` should be `ok`, and `leaseActive` should be false before treating QMD direct routes or candidate projection as healthy. `indexedDocuments` and `indexedVectors` should match. `snapshotMatchesIndexedDocuments` can be transiently false while the background snapshot is rebuilt; retry after the build rather than declaring corruption. `unavailable` is fail-open to classifier, so inspect configuration and plugin warnings before treating it as a routing outage.
+5. Compare `sessions.agentArtifactFiles` and `sessions.agentArtifactBytes` over time. Artifacts older than `sessions.retentionDays` are a cleanup signal only after a retention sweep opportunity; do not delete them manually during an audit.
 
 For `stats` interpretation, read `runtime.stats.attribution` before any per-intent, per-skill, or per-tool trend:
 
@@ -88,19 +89,22 @@ Report only:
 2. schema/structural pass or failure;
 3. ordinary Review outcome and applied-change distribution;
 4. coverage epoch state with its scheduler caveat;
-5. session/agent retention and disk-growth trend;
-6. a concrete next observation threshold, such as 50 new Review events or the next coverage retry boundary.
+5. QMD state, integrity, lease, and document/vector consistency;
+6. session/agent retention and disk-growth trend;
+7. a concrete next observation threshold, such as 50 new Review events or the next coverage retry boundary.
 
 Do not include raw retained conversations, Review suggestion text, or a claim that a historical aggregate proves a current regression.
 
 ## Failure modes
 
-| Signal                                    | First interpretation                    | Correct response                                                                         |
-| ----------------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Runtime JSON schema mismatch              | State is unsupported or malformed       | Stop; do not migrate or hand-edit during audit                                           |
-| JSON changes while read                   | Report would mix runtime moments        | Retry later or use a quiescent copied data root                                          |
-| Invalid session shape                     | Persistence data issue                  | Record counts and investigate the writer/retention path separately                       |
-| High `already-covered` nofinding count    | Conservative duplicate prevention       | Retain it; inspect only if user reports missed coverage                                  |
-| Repeated parse/schema/validation failures | Reviewer-output contract issue          | Compare a fresh bounded window and inspect reason counts before prompt/model changes     |
-| Empty coverage state                      | Could be pre-eligibility or post-reload | Verify cadence, stats writes, model availability, and the next eligible boundary         |
-| Agent artifact disk growth                | Retention window may not have swept yet | Track bytes/files through a full retention period; do not manually delete audit evidence |
+| Signal                                     | First interpretation                    | Correct response                                                                         |
+| ------------------------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Runtime JSON schema mismatch               | State is unsupported or malformed       | Stop; do not migrate or hand-edit during audit                                           |
+| JSON changes while read                    | Report would mix runtime moments        | Retry later or use a quiescent copied data root                                          |
+| Invalid session shape                      | Persistence data issue                  | Record counts and investigate the writer/retention path separately                       |
+| High `already-covered` nofinding count     | Conservative duplicate prevention       | Retain it; inspect only if user reports missed coverage                                  |
+| Repeated parse/schema/validation failures  | Reviewer-output contract issue          | Compare a fresh bounded window and inspect reason counts before prompt/model changes     |
+| Empty coverage state                       | Could be pre-eligibility or post-reload | Verify cadence, stats writes, model availability, and the next eligible boundary         |
+| QMD `databaseStatus` is `unavailable`      | Cold, failed, or inaccessible index     | Verify QMD endpoint configuration and plugin warnings; classifier remains fail-open      |
+| QMD lease is active or snapshot mismatches | Background refresh may be in progress   | Wait for the build to settle, rerun once, then investigate repeated lease contention     |
+| Agent artifact disk growth                 | Retention window may not have swept yet | Track bytes/files through a full retention period; do not manually delete audit evidence |

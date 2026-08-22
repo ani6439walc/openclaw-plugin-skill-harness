@@ -24,8 +24,6 @@ fastpath:
     - "optional exact keyword"
 candidate:
   scope: "cross-flow"
-  keywords:
-    - "optional manual exact projection phrase"
 skills:
   - "optional-skill-name"
 ---
@@ -35,9 +33,9 @@ Route this request to the declared skills and follow the bounded routing context
 - `domain` is required and must be one string.
 - `skills` is optional and must be a list of exact skill names. Use it only for skills the intent should load or strongly prefer.
 - The complete plain-text body is required guidance, one durable routing-behavior sentence shared by exact, inherited, and classified routes.
-- `fastpath.keywords` is optional exact-match evidence. It does not contain a hint or workflow body.
+- `fastpath.keywords` is optional whole-message exact-match evidence. The same values also populate the domain-scoped lexical QMD topic-keyword collection, so use only durable short phrases appropriate for both routes; never place a hint or workflow body here.
 - `candidate` is optional classifier-projection metadata. `candidate.scope`, when present, must be `cross-flow`; use it only when the intent must remain available across unrelated domains.
-- `candidate.keywords` are manual exact projection evidence, not fastpaths and not body guidance. Normalize/deduplicate for matching with NFKC, locale-independent lowercasing, and collapsed whitespace without rewriting source text or treating hyphens and underscores as aliases. Require durable telemetry or labeled evidence plus positive-match and collision fixtures; never infer them from one session.
+- The schema still accepts `candidate.keywords` for catalog compatibility, but current QMD candidate projection does not consume it. Do not add new `candidate.keywords` entries.
 
 ## Skills metadata rule
 

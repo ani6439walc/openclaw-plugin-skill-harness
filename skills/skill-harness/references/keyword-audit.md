@@ -10,7 +10,7 @@ This mode reads current trigger keywords from schema-v1 `keyword-coverage.json`:
 
 It reads ordinary Review outcome counts from schema-v7 `review.json.processedEvents`, historical keyword-triggered audit counts from `review.json.historicalKeywordAudits`, and keyword mutation / coverage epoch history from `keyword-coverage.json`.
 
-It does **not** analyze intent `fastpath.keywords` or `candidate.keywords`. For those, use design or inventory mode and require labeled positive and collision fixtures under `references/format.md`.
+It does **not** analyze intent `fastpath.keywords`. For those, use design or inventory mode and require labeled positive and collision fixtures under `references/format.md`. Do not use this audit to propose `candidate.keywords`, because current QMD candidate projection does not consume them.
 
 ## Safety boundary
 
@@ -194,13 +194,13 @@ Completion criterion: the report is reproducible, the bounded proposal is explic
 
 ## Common mistakes
 
-| Mistake                                      | Why it fails                                           | Correct action                                             |
-| -------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
-| Add the top phrase automatically             | Frequency is not semantic evidence                     | Label positives and collisions first                       |
-| Call unmatched eligible turns "misses"       | Structural eligibility is not an expected label        | Use `--labels` before reporting TP/FP/FN                   |
-| Replay old events against current keywords   | Events lack matched-keyword and keyword-set provenance | Use them only for outcome/history counts                   |
-| Include snippets by default                  | Runtime sessions may contain private content           | Keep snippets off; inspect locally only as needed          |
-| Remove a zero-hit keyword                    | Retention creates false absence                        | Require repeated labeled false positives                   |
-| Treat all session turns as eligible          | Production uses trigger-specific structural gates      | Use the bundled audit script and matching config threshold |
-| Update `candidate.keywords` from this report | It is a different routing surface                      | Use design/inventory labeled fixtures                      |
-| Hand-edit `review.json` after approval       | Approval does not provide the missing host lock        | Stop with an approved delta when no host writer is exposed |
+| Mistake                                              | Why it fails                                               | Correct action                                             |
+| ---------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| Add the top phrase automatically                     | Frequency is not semantic evidence                         | Label positives and collisions first                       |
+| Call unmatched eligible turns "misses"               | Structural eligibility is not an expected label            | Use `--labels` before reporting TP/FP/FN                   |
+| Replay old events against current keywords           | Events lack matched-keyword and keyword-set provenance     | Use them only for outcome/history counts                   |
+| Include snippets by default                          | Runtime sessions may contain private content               | Keep snippets off; inspect locally only as needed          |
+| Remove a zero-hit keyword                            | Retention creates false absence                            | Require repeated labeled false positives                   |
+| Treat all session turns as eligible                  | Production uses trigger-specific structural gates          | Use the bundled audit script and matching config threshold |
+| Update `fastpath.keywords` directly from this report | Fastpath values need exact-route and domain-topic evidence | Use design/inventory labeled fixtures                      |
+| Hand-edit `review.json` after approval               | Approval does not provide the missing host lock            | Stop with an approved delta when no host writer is exposed |
