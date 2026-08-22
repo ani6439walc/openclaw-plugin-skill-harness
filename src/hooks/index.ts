@@ -860,7 +860,7 @@ export function createHookHandlers(deps: HookDeps) {
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
-        "qmd-search",
+        "qmd-keyword",
         "started",
       );
       const topicHits = await qmdIntentIndex.searchTopicKeywords({
@@ -882,7 +882,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
-          "qmd-search",
+          "qmd-keyword",
           "completed",
           {
             intent: result.intent,
@@ -894,7 +894,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
-          "qmd-search",
+          "qmd-keyword",
           topicHits === undefined ? "failed" : "completed",
           topicHits === undefined
             ? { error: "QMD topic-keyword index unavailable" }
@@ -912,7 +912,7 @@ export function createHookHandlers(deps: HookDeps) {
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
-        "qmd-search",
+        "qmd-trigger-example",
         "started",
       );
       const qmdHits = qmdIntentIndex
@@ -941,7 +941,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
-          "qmd-search",
+          "qmd-trigger-example",
           "completed",
           {
             intent: result.intent,
@@ -953,7 +953,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
-          "qmd-search",
+          "qmd-trigger-example",
           qmdHits === undefined ? "failed" : "completed",
           qmdHits === undefined
             ? { error: "QMD intent trigger index unavailable" }

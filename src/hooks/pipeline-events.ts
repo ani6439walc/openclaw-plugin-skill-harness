@@ -6,7 +6,11 @@ const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
 export type PipelinePhase =
-  "pipeline" | "topic-triage" | "qmd-search" | "intent-classify";
+  | "pipeline"
+  | "topic-triage"
+  | "qmd-keyword"
+  | "qmd-trigger-example"
+  | "intent-classify";
 
 export type PipelineState = "started" | "completed" | "failed";
 

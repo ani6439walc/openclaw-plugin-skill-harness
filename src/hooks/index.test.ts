@@ -3758,12 +3758,12 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       expect(entry.data).not.toHaveProperty("complexity");
     }
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "qmd-search:completed",
+      "qmd-keyword:completed",
     );
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          phase: "qmd-search",
+          phase: "qmd-keyword",
           state: "completed",
           intent: "version-control",
           score: 0.91,
@@ -3794,7 +3794,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     ).not.toHaveProperty("complexity");
     const completedQmdEvents = emittedPipelineEvents(emitAgentEvent).filter(
       (entry) =>
-        entry.data.phase === "qmd-search" && entry.data.state === "completed",
+        entry.data.phase === "qmd-keyword" && entry.data.state === "completed",
     );
     expect(completedQmdEvents.length).toBeGreaterThan(0);
     for (const entry of completedQmdEvents) {
@@ -3835,12 +3835,22 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
 
     expect(classifier).toHaveBeenCalledOnce();
-    const completedQmdEvents = emittedPipelineEvents(emitAgentEvent).filter(
+    const qmdEvents = emittedPipelineEvents(emitAgentEvent).filter(
       (entry) =>
-        entry.data.phase === "qmd-search" && entry.data.state === "completed",
+        entry.data.phase === "qmd-keyword" ||
+        entry.data.phase === "qmd-trigger-example",
     );
-    expect(completedQmdEvents).toHaveLength(2);
-    for (const event of completedQmdEvents) {
+    expect(
+      qmdEvents.map((event) => `${event.data.phase}:${event.data.state}`),
+    ).toEqual([
+      "qmd-keyword:started",
+      "qmd-keyword:completed",
+      "qmd-trigger-example:started",
+      "qmd-trigger-example:completed",
+    ]);
+    for (const event of qmdEvents.filter(
+      (event) => event.data.state === "completed",
+    )) {
       expect(event.data).not.toHaveProperty("error");
     }
   });
