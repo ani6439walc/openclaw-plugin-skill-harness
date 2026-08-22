@@ -8,6 +8,8 @@ import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
 
 const TRIGGERS_COLLECTION = "intent-triggers";
 const EXAMPLES_COLLECTION = "intent-examples";
+const INITIAL_RETRY_DELAY_MS = 5_000;
+const MAX_RETRY_DELAY_MS = 60_000;
 
 type QmdCreateStore = typeof createStore;
 
@@ -179,6 +181,9 @@ export function createIntentQmdIndex(params: {
   let store: QMDStore | undefined;
   let status: QmdIntentIndexStatus = "idle";
   let running: Promise<void> | undefined;
+  let failedFingerprint: string | undefined;
+  let consecutiveFailures = 0;
+  let nextRetryAtMs = 0;
 
   async function writeSnapshot(
     intents: readonly IntentCatalogEntry[],
@@ -224,75 +229,104 @@ export function createIntentQmdIndex(params: {
     return { collections };
   }
 
-  async function build(): Promise<void> {
-    while (desired) {
-      const target = desired;
-      desired = undefined;
-      status = "building";
-      let nextStore: QMDStore | undefined;
-      try {
-        const qmd = params.config();
-        if (
-          !qmd.embedding.baseUrl ||
-          !qmd.embedding.model ||
-          !qmd.expansion.baseUrl ||
-          !qmd.expansion.model ||
-          !qmd.rerank.baseUrl ||
-          !qmd.rerank.model
-        ) {
-          throw new Error(
-            "QMD embedding, expansion, and rerank endpoints must be configured.",
-          );
-        }
-        const { collections } = await writeSnapshot(target.intents);
-        nextStore = await createQmdStore({
-          dbPath: databasePath,
-          config: {
-            collections,
-            models: {
-              embed_api_url: qmd.embedding.baseUrl,
-              embed_api_model: qmd.embedding.model,
-              ...(qmd.embedding.apiKey
-                ? { embed_api_key: qmd.embedding.apiKey }
-                : {}),
-              ...(qmd.embedding.dimension
-                ? { embed_dimension: qmd.embedding.dimension }
-                : {}),
-              generate_api_url: qmd.expansion.baseUrl,
-              generate_api_model: qmd.expansion.model,
-              ...(qmd.expansion.apiKey
-                ? { generate_api_key: qmd.expansion.apiKey }
-                : {}),
-              rerank_api_url: qmd.rerank.baseUrl,
-              rerank_api_model: qmd.rerank.model,
-              ...(qmd.rerank.apiKey
-                ? { rerank_api_key: qmd.rerank.apiKey }
-                : {}),
-            },
-          },
-          remoteRequestTimeoutMs: qmd.timeoutMs,
-        });
-        await nextStore.update();
-        await nextStore.embed();
+  function resetRetryState(): void {
+    failedFingerprint = undefined;
+    consecutiveFailures = 0;
+    nextRetryAtMs = 0;
+  }
 
-        const newerRequest = desired as
-          | { fingerprint: string; intents: readonly IntentCatalogEntry[] }
-          | undefined;
-        if (newerRequest?.fingerprint === target.fingerprint) {
-          await nextStore.close();
-          continue;
-        }
-        const previousStore = store;
-        store = nextStore;
-        currentFingerprint = target.fingerprint;
-        status = "ready";
-        if (previousStore) await previousStore.close();
-      } catch (error) {
-        if (nextStore) await nextStore.close().catch(() => undefined);
-        currentFingerprint = undefined;
-        status = "failed";
-        logger.warn("failed to refresh QMD intent index", { error });
+  function recordBuildFailure(fingerprint: string, error: unknown): void {
+    consecutiveFailures =
+      failedFingerprint === fingerprint ? consecutiveFailures + 1 : 1;
+    failedFingerprint = fingerprint;
+    const delayMs = Math.min(
+      INITIAL_RETRY_DELAY_MS * 2 ** (consecutiveFailures - 1),
+      MAX_RETRY_DELAY_MS,
+    );
+    nextRetryAtMs = Date.now() + delayMs;
+    currentFingerprint = undefined;
+    status = "failed";
+    logger.warn("failed to refresh QMD intent index", { error, delayMs });
+  }
+
+  async function build(target: {
+    fingerprint: string;
+    intents: readonly IntentCatalogEntry[];
+  }): Promise<void> {
+    status = "building";
+    let nextStore: QMDStore | undefined;
+    try {
+      const qmd = params.config();
+      if (
+        !qmd.embedding.baseUrl ||
+        !qmd.embedding.model ||
+        !qmd.expansion.baseUrl ||
+        !qmd.expansion.model ||
+        !qmd.rerank.baseUrl ||
+        !qmd.rerank.model
+      ) {
+        throw new Error(
+          "QMD embedding, expansion, and rerank endpoints must be configured.",
+        );
       }
+      const { collections } = await writeSnapshot(target.intents);
+      nextStore = await createQmdStore({
+        dbPath: databasePath,
+        config: {
+          collections,
+          models: {
+            embed_api_url: qmd.embedding.baseUrl,
+            embed_api_model: qmd.embedding.model,
+            ...(qmd.embedding.apiKey
+              ? { embed_api_key: qmd.embedding.apiKey }
+              : {}),
+            ...(qmd.embedding.dimension
+              ? { embed_dimension: qmd.embedding.dimension }
+              : {}),
+            generate_api_url: qmd.expansion.baseUrl,
+            generate_api_model: qmd.expansion.model,
+            ...(qmd.expansion.apiKey
+              ? { generate_api_key: qmd.expansion.apiKey }
+              : {}),
+            rerank_api_url: qmd.rerank.baseUrl,
+            rerank_api_model: qmd.rerank.model,
+            ...(qmd.rerank.apiKey ? { rerank_api_key: qmd.rerank.apiKey } : {}),
+          },
+        },
+        remoteRequestTimeoutMs: qmd.timeoutMs,
+      });
+      await nextStore.update();
+      await nextStore.embed();
+
+      if (desired?.fingerprint === target.fingerprint) {
+        await nextStore.close();
+        return;
+      }
+      const previousStore = store;
+      store = nextStore;
+      currentFingerprint = target.fingerprint;
+      status = "ready";
+      resetRetryState();
+      if (previousStore) {
+        await previousStore.close().catch((error: unknown) => {
+          logger.warn("failed to close previous QMD intent index", { error });
+        });
+      }
+    } catch (error) {
+      if (nextStore) await nextStore.close().catch(() => undefined);
+      recordBuildFailure(target.fingerprint, error);
+    }
+  }
+
+  async function runWorker(): Promise<void> {
+    try {
+      while (desired) {
+        const target = desired;
+        desired = undefined;
+        await build(target);
+      }
+    } finally {
+      running = undefined;
     }
   }
 
@@ -310,16 +344,12 @@ export function createIntentQmdIndex(params: {
       const fingerprint = snapshotFingerprint(intents, params.config());
       if (fingerprint === currentFingerprint && !desired) return;
       expectedFingerprint = fingerprint;
+      if (failedFingerprint === fingerprint && Date.now() < nextRetryAtMs) {
+        return;
+      }
       desired = { fingerprint, intents: [...intents] };
       if (!running) {
-        running = build().finally(() => {
-          running = undefined;
-          if (desired) {
-            running = build().finally(() => {
-              running = undefined;
-            });
-          }
-        });
+        running = runWorker();
       }
     },
     async searchIntentTriggers({ query, rawLimit }) {
@@ -367,6 +397,7 @@ export function createIntentQmdIndex(params: {
       store = undefined;
       currentFingerprint = undefined;
       expectedFingerprint = undefined;
+      resetRetryState();
       status = "idle";
       if (activeStore) await activeStore.close();
     },
