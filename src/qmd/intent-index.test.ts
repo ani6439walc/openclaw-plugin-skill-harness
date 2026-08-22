@@ -57,7 +57,7 @@ async function waitForReady(
 }
 
 describe("createIntentQmdIndex", () => {
-  it("builds a managed snapshot and searches trigger/example collections in one QMD request", async () => {
+  it("builds a managed snapshot and uses the configured QMD search modes", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
     roots.push(root);
     const search = vi.fn().mockResolvedValue([
@@ -67,10 +67,17 @@ describe("createIntentQmdIndex", () => {
         explain: { rerankScore: 0.91 },
       },
     ]);
+    const searchLex = vi.fn().mockResolvedValue([
+      {
+        filepath: "/snapshot/topic-keywords/implementation-0.md",
+        score: 0.91,
+      },
+    ]);
     const createStore = vi.fn().mockResolvedValue({
       update: vi.fn().mockResolvedValue({}),
       embed: vi.fn().mockResolvedValue({}),
       search,
+      searchLex,
       close: vi.fn().mockResolvedValue(undefined),
     } as unknown as QMDStore);
     const index = createIntentQmdIndex({
@@ -113,6 +120,23 @@ describe("createIntentQmdIndex", () => {
       candidateLimit: 12,
       minScore: 0,
       explain: true,
+    });
+
+    await expect(
+      index.searchTopicKeywords({
+        query: "implement feature",
+        domain: "development",
+      }),
+    ).resolves.toEqual([
+      {
+        intentId: "implementation",
+        score: 0.91,
+        collection: expect.stringMatching(/^intent-topic-keywords-/),
+      },
+    ]);
+    expect(searchLex).toHaveBeenCalledWith("implement feature", {
+      collection: expect.stringMatching(/^intent-topic-keywords-/),
+      limit: 1,
     });
   });
 });

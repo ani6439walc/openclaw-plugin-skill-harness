@@ -17,6 +17,11 @@ type QmdResult = {
   explain?: unknown;
 };
 
+type QmdLexResult = {
+  filepath: string;
+  score: number;
+};
+
 export type QmdIntentHit = {
   intentId: string;
   score: number;
@@ -132,6 +137,25 @@ function parseHits(
       collection,
       ...(result.explain === undefined ? {} : { explain: result.explain }),
     });
+  }
+  return hits;
+}
+
+function parseLexHits(
+  results: readonly QmdLexResult[],
+  collection: string,
+): QmdIntentHit[] {
+  const hits: QmdIntentHit[] = [];
+  const seen = new Set<string>();
+  for (const result of results) {
+    if (!Number.isFinite(result.score)) continue;
+    const match = /^(.+)-\d+\.md$/u.exec(path.basename(result.filepath));
+    const intentId = match?.[1];
+    if (!intentId) continue;
+    const normalizedId = intentId.toLowerCase();
+    if (seen.has(normalizedId)) continue;
+    seen.add(normalizedId);
+    hits.push({ intentId, score: result.score, collection });
   }
   return hits;
 }
@@ -325,17 +349,11 @@ export function createIntentQmdIndex(params: {
       if (!activeStore) return;
       try {
         const collection = topicCollectionName(domain);
-        const results = (await activeStore.search({
-          query,
-          collections: [collection],
-          expansion: "force",
-          rerank: true,
+        const results = (await activeStore.searchLex(query, {
+          collection,
           limit: 1,
-          candidateLimit: 1,
-          minScore: 0,
-          explain: true,
-        })) as QmdResult[];
-        return parseHits(results, collection);
+        })) as QmdLexResult[];
+        return parseLexHits(results, collection);
       } catch (error) {
         logger.warn("QMD topic-keyword search failed", { error, domain });
         return;
