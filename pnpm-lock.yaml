@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@tobilu/qmd':
-        specifier: git+https://github.com/wei840222/qmd.git#5d7c6bec5ad059741a3840eedd7fb2f7865bf1e2
-        version: https://codeload.github.com/wei840222/qmd/tar.gz/5d7c6bec5ad059741a3840eedd7fb2f7865bf1e2(typescript@6.0.3)
+        specifier: git+https://github.com/wei840222/qmd.git#af285ca74186d4f1e5479e2c6e6db22ceb735fca
+        version: https://codeload.github.com/wei840222/qmd/tar.gz/af285ca74186d4f1e5479e2c6e6db22ceb735fca(typescript@6.0.3)
       gray-matter:
         specifier: 4.0.3
         version: 4.0.3
@@ -619,8 +619,8 @@ packages:
     resolution: {integrity: sha512-5Kc5CM2Ysn3vTTArBs2vESUt0AQiWZA86yc1TI3B+lxXmtEq133C1nxXNOgnzhrivdPZIh3zLj5gDnZjoLL5GA==}
     engines: {node: '>=12.17.0'}
 
-  '@tobilu/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/5d7c6bec5ad059741a3840eedd7fb2f7865bf1e2':
-    resolution: {gitHosted: true, integrity: sha512-AffHKZNwYsb3KDrgMLpYZzjem7fRtV5eXu/slwahZ+UTA2nrfKpIzwgOFBji+H/kzsJVbulN4TAEFaL2yHItDg==, tarball: https://codeload.github.com/wei840222/qmd/tar.gz/5d7c6bec5ad059741a3840eedd7fb2f7865bf1e2}
+  '@tobilu/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/af285ca74186d4f1e5479e2c6e6db22ceb735fca':
+    resolution: {gitHosted: true, integrity: sha512-NuFi7XLTr+0LsOJLjIXlfnjUQpVta9Uz0mWdebhUZG09XOja1f1vOtPeJhhGpzSZnh5dJ+Jv4Idal1SInOCwug==, tarball: https://codeload.github.com/wei840222/qmd/tar.gz/af285ca74186d4f1e5479e2c6e6db22ceb735fca}
     version: 2.8.3
     engines: {node: '>=22.0.0'}
     hasBin: true
@@ -2833,7 +2833,7 @@ snapshots:
 
   '@tinyhttp/content-disposition@2.2.4': {}
 
-  '@tobilu/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/5d7c6bec5ad059741a3840eedd7fb2f7865bf1e2(typescript@6.0.3)':
+  '@tobilu/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/af285ca74186d4f1e5479e2c6e6db22ceb735fca(typescript@6.0.3)':
     dependencies:
       '@modelcontextprotocol/server': 2.0.0
       '@node-rs/jieba': 2.0.1
