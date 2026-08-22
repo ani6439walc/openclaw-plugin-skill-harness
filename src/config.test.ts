@@ -70,6 +70,52 @@ describe("resolveConfig", () => {
     });
   });
 
+  describe("QMD routing", () => {
+    it("uses the scanner timeout by default and accepts inline remote credentials", () => {
+      const result = resolveConfig({
+        timeoutMs: 8_000,
+        qmd: {
+          embedding: {
+            baseUrl: "https://embedding.example.test/v1",
+            model: "embedding-model",
+            apiKey: "embedding-key",
+            dimension: 768,
+          },
+          expansion: {
+            baseUrl: "https://llm.example.test/v1",
+            model: "expand-model",
+            apiKey: "expand-key",
+          },
+          rerank: {
+            baseUrl: "https://llm.example.test/v1",
+            model: "rerank-model",
+            apiKey: "rerank-key",
+          },
+        },
+      });
+
+      expect(result.qmd).toEqual({
+        timeoutMs: 8_000,
+        embedding: {
+          baseUrl: "https://embedding.example.test/v1",
+          model: "embedding-model",
+          apiKey: "embedding-key",
+          dimension: 768,
+        },
+        expansion: {
+          baseUrl: "https://llm.example.test/v1",
+          model: "expand-model",
+          apiKey: "expand-key",
+        },
+        rerank: {
+          baseUrl: "https://llm.example.test/v1",
+          model: "rerank-model",
+          apiKey: "rerank-key",
+        },
+      });
+    });
+  });
+
   describe("review", () => {
     it("parses and clamps review and trigger settings", () => {
       const result = resolveConfig({

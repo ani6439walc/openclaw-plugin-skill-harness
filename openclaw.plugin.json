@@ -18,6 +18,7 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
+    "required": ["qmd"],
     "properties": {
       "allowedChatTypes": {
         "type": "array",
@@ -81,6 +82,51 @@
         "maximum": 60000,
         "description": "Budget in milliseconds for each intention scanner sub-agent run.",
         "default": 5000
+      },
+      "qmd": {
+        "type": "object",
+        "description": "Required QMD remote services for mandatory hybrid intent routing. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
+        "additionalProperties": false,
+        "properties": {
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 60000,
+            "description": "QMD remote embedding, query-expansion, and rerank request budget in milliseconds. Defaults to timeoutMs."
+          },
+          "embedding": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["baseUrl", "model"],
+            "properties": {
+              "baseUrl": { "type": "string" },
+              "model": { "type": "string" },
+              "apiKey": { "type": "string" },
+              "dimension": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "expansion": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["baseUrl", "model"],
+            "properties": {
+              "baseUrl": { "type": "string" },
+              "model": { "type": "string" },
+              "apiKey": { "type": "string" }
+            }
+          },
+          "rerank": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["baseUrl", "model"],
+            "properties": {
+              "baseUrl": { "type": "string" },
+              "model": { "type": "string" },
+              "apiKey": { "type": "string" }
+            }
+          }
+        },
+        "required": ["embedding", "expansion", "rerank"]
       },
       "queryMode": {
         "type": "string",

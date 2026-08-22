@@ -71,6 +71,33 @@ export type ResolvedCurationConfig = Required<
   modelFallback?: string;
 };
 
+export type QmdEndpointConfig = {
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+};
+
+export type QmdEmbeddingConfig = QmdEndpointConfig & {
+  dimension?: number;
+};
+
+export type QmdConfig = {
+  timeoutMs?: number;
+  embedding?: QmdEmbeddingConfig;
+  expansion?: QmdEndpointConfig;
+  rerank?: QmdEndpointConfig;
+};
+
+export type ResolvedQmdConfig = {
+  timeoutMs: number;
+  embedding: Required<Pick<QmdEmbeddingConfig, "baseUrl" | "model">> &
+    Omit<QmdEmbeddingConfig, "baseUrl" | "model">;
+  expansion: Required<Pick<QmdEndpointConfig, "baseUrl" | "model">> &
+    Omit<QmdEndpointConfig, "baseUrl" | "model">;
+  rerank: Required<Pick<QmdEndpointConfig, "baseUrl" | "model">> &
+    Omit<QmdEndpointConfig, "baseUrl" | "model">;
+};
+
 export type SkillHarnessPluginConfig = {
   agents?: string[];
   model?: string;
@@ -83,6 +110,7 @@ export type SkillHarnessPluginConfig = {
   queryMode?: string;
   contextWindow?: ContextWindow;
   timeoutMs?: number;
+  qmd?: QmdConfig;
   curation?: CurationConfig;
   review?: ReviewConfig;
 };
@@ -99,6 +127,7 @@ export type ResolvedSkillHarnessPluginConfig = {
   queryMode: "message" | "recent" | "full";
   contextWindow: ContextWindow;
   timeoutMs: number;
+  qmd: ResolvedQmdConfig;
   curation: ResolvedCurationConfig;
   review: ResolvedReviewConfig;
 };
@@ -128,10 +157,15 @@ export type IntentProjectionSelectionReason =
   | "predicted-domain"
   | "authorized-history"
   | "candidate-keyword"
-  | "intent-id";
+  | "intent-id"
+  | "qmd-hit"
+  | "recent-history";
 
 export type IntentProjectionSupportReason =
-  "high-overall-confidence" | "authorized-history" | "exact-evidence";
+  | "high-overall-confidence"
+  | "authorized-history"
+  | "exact-evidence"
+  | "qmd-retrieval";
 
 export type IntentProjectionTelemetry = {
   decision: "projected" | "full-fallback";
@@ -173,7 +207,11 @@ export type ClassifiedIntentionResult = IntentionResult & {
 };
 
 export type IntentTrigger =
-  "exact-keyword" | "same-topic" | "topic-keyword-similarity" | "classifier";
+  | "exact-keyword"
+  | "same-topic"
+  | "qmd-topic-keyword"
+  | "qmd-trigger"
+  | "classifier";
 
 export type AvailableSkill = {
   name: string;
