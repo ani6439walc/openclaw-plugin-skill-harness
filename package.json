@@ -47,7 +47,8 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'",
     "test": "vitest run",
-    "build": "tsc"
+    "build": "tsc",
+    "test:plugin-loader": "node --input-type=module --eval \"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); require('./dist/index.js');\""
   },
   "dependencies": {
     "@tobilu/qmd": "git+https://github.com/wei840222/qmd.git#af285ca74186d4f1e5479e2c6e6db22ceb735fca",

@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QMDStore } from "@tobilu/qmd";
 import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
 import { createIntentQmdIndex } from "./intent-index.js";

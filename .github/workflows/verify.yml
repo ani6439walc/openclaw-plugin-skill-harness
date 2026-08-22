@@ -45,5 +45,8 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      - name: Verify native plugin loader
+        run: pnpm run test:plugin-loader
+
       - name: Inspect package contents
         run: pnpm pack --dry-run

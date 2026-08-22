@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { createStore, type QMDStore } from "@tobilu/qmd";
+import type { QMDStore } from "@tobilu/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
 import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
@@ -11,7 +11,7 @@ const EXAMPLES_COLLECTION = "intent-examples";
 const INITIAL_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
-type QmdCreateStore = typeof createStore;
+type QmdCreateStore = (typeof import("@tobilu/qmd"))["createStore"];
 
 type QmdResult = {
   body: string;
@@ -173,7 +173,6 @@ export function createIntentQmdIndex(params: {
     "intent-routing.sqlite",
   );
   const snapshotRoot = path.join(params.dataRoot, "qmd", "intents");
-  const createQmdStore = params.createStore ?? createStore;
   let currentFingerprint: string | undefined;
   let expectedFingerprint: string | undefined;
   let desired:
@@ -269,6 +268,8 @@ export function createIntentQmdIndex(params: {
           "QMD embedding, expansion, and rerank endpoints must be configured.",
         );
       }
+      const createQmdStore =
+        params.createStore ?? (await import("@tobilu/qmd")).createStore;
       const { collections } = await writeSnapshot(target.intents);
       nextStore = await createQmdStore({
         dbPath: databasePath,
