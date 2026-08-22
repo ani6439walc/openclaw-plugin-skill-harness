@@ -1,7 +1,15 @@
 allowBuilds:
   "@google/genai": true
+  "@tobilu/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/5d7c6bec5ad059741a3840eedd7fb2f7865bf1e2": true
+  better-sqlite3: true
   koffi: true
+  node-llama-cpp: true
   openclaw: true
   protobufjs: true
   sharp: true
   tree-sitter-bash: true
+  tree-sitter-go: true
+  tree-sitter-javascript: true
+  tree-sitter-python: true
+  tree-sitter-rust: true
+  tree-sitter-typescript: true
