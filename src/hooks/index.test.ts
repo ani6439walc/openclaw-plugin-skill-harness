@@ -2744,6 +2744,10 @@ describe("createHookHandlers topic switch flow", () => {
       agentId: string,
     ) => string[] | Promise<string[]>;
     experienceCatalog?: { listForSkills: ReturnType<typeof vi.fn> };
+    qmdIntentIndex?: {
+      searchIntentTriggers: ReturnType<typeof vi.fn>;
+      searchTopicKeywords: ReturnType<typeof vi.fn>;
+    };
     turnAssociations?: TurnAssociationRegistry;
     ensureColdStart?: ReturnType<typeof vi.fn>;
     commitPromptRecommendation?: ReturnType<typeof vi.fn>;
@@ -2831,6 +2835,7 @@ describe("createHookHandlers topic switch flow", () => {
       bundledSkillsDir: params.bundledSkillsDir,
       getConfiguredAgentSkills: params.getConfiguredAgentSkills,
       experienceCatalog: params.experienceCatalog,
+      qmdIntentIndex: params.qmdIntentIndex as never,
     });
 
     return {
@@ -2873,6 +2878,26 @@ describe("createHookHandlers topic switch flow", () => {
     return emittedPipelineEvents(emitAgentEvent).map(
       (event) => `${event.data.phase}:${event.data.state}`,
     );
+  }
+
+  function qmdIndex(
+    params: {
+      topicHits?: Array<{
+        intentId: string;
+        score: number;
+        collection: string;
+      }>;
+      triggerHits?: Array<{
+        intentId: string;
+        score: number;
+        collection: string;
+      }>;
+    } = {},
+  ) {
+    return {
+      searchTopicKeywords: vi.fn().mockResolvedValue(params.topicHits),
+      searchIntentTriggers: vi.fn().mockResolvedValue(params.triggerHits),
+    };
   }
 
   const metadataPrefix = `Conversation info (untrusted metadata):
@@ -3560,7 +3585,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
             trigger: "classifier",
             intentProjection: expect.objectContaining({
               decision: "full-fallback",
-              fallbackReason: "missing-topic-context",
+              fallbackReason: "qmd-unavailable",
             }),
           }),
         }),
@@ -3663,7 +3688,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(topicChecker).not.toHaveBeenCalled();
   });
 
-  it("uses topic keyword similarity to skip the intent classifier", async () => {
+  it("uses a high-score QMD topic-keyword match to skip the intent classifier", async () => {
     const topicContext = {
       basis: "Latest asks for a git commit and matches the git domain.",
       keywords: ["comit"],
@@ -3678,6 +3703,15 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         historicalIntents: [],
         intents: [intent, versionControlIntent],
         topicChecker: vi.fn().mockResolvedValue(topicContext),
+        qmdIntentIndex: qmdIndex({
+          topicHits: [
+            {
+              intentId: "version-control",
+              score: 0.91,
+              collection: "intent-topic-keywords-git",
+            },
+          ],
+        }),
       });
 
     const result = await handlers.onBeforePromptBuild(
@@ -3724,16 +3758,15 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       expect(entry.data).not.toHaveProperty("complexity");
     }
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "intent-classify:completed",
+      "qmd-search:completed",
     );
     expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          phase: "intent-classify",
+          phase: "qmd-search",
           state: "completed",
           intent: "version-control",
-          reason: "Topic keyword similarity match: comit -> commit",
-          confidence: expect.closeTo(0.833, 0.01),
+          score: 0.91,
         }),
       }),
     );
@@ -3742,14 +3775,14 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       expect.objectContaining({
         current: expect.objectContaining({
           intent: expect.objectContaining({
-            trigger: "topic-keyword-similarity",
+            trigger: "qmd-topic-keyword",
             result: expect.objectContaining({
               intent: "version-control",
-              reason: "Topic keyword similarity match: comit -> commit",
-              keywords: ["comit", "commit"],
+              reason: "QMD intent-topic-keywords-git match",
+              keywords: ["comit"],
               topic: "User wants a git commit.",
               domain: "git",
-              confidence: expect.closeTo(0.833, 0.01),
+              confidence: 0.91,
               topicChangeReason: undefined,
             }),
           }),
@@ -3759,15 +3792,12 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(
       record.mock.calls[0]?.[1].current?.intent?.result,
     ).not.toHaveProperty("complexity");
-    const completedIntentClassifyEvents = emittedPipelineEvents(
-      emitAgentEvent,
-    ).filter(
+    const completedQmdEvents = emittedPipelineEvents(emitAgentEvent).filter(
       (entry) =>
-        entry.data.phase === "intent-classify" &&
-        entry.data.state === "completed",
+        entry.data.phase === "qmd-search" && entry.data.state === "completed",
     );
-    expect(completedIntentClassifyEvents.length).toBeGreaterThan(0);
-    for (const entry of completedIntentClassifyEvents) {
+    expect(completedQmdEvents.length).toBeGreaterThan(0);
+    for (const entry of completedQmdEvents) {
       expect(entry.data).not.toHaveProperty("complexity");
     }
   });
@@ -3806,7 +3836,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(classifier).toHaveBeenCalledOnce();
   });
 
-  it("sends only projected candidates to the classifier and records its manifest", async () => {
+  it("uses QMD-ranked candidates for the classifier and records its manifest", async () => {
     const operationsIntent: IntentCatalogEntry = {
       id: "deployment",
       definition: {
@@ -3838,6 +3868,16 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         confidence: 0.9,
         complexity: "medium" as const,
       }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        triggerHits: [
+          {
+            intentId: "version-control",
+            score: 0.72,
+            collection: "intent-triggers-and-examples",
+          },
+        ],
+      }),
     });
 
     await handlers.onBeforePromptBuild(
@@ -3865,11 +3905,11 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
               candidateSelections: [
                 {
                   intentId: "version-control",
-                  selectionReasons: ["predicted-domain"],
+                  selectionReasons: ["qmd-hit"],
                   matchedKeywords: [],
                 },
               ],
-              selectionReasons: ["predicted-domain"],
+              selectionReasons: ["qmd-hit"],
               matchedKeywords: [],
               originalCatalogCodePoints: expect.any(Number),
               candidateCatalogCodePoints: expect.any(Number),
@@ -3881,7 +3921,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
-  it("uses topic keyword similarity to inject deterministic guidance on changed topics", async () => {
+  it("uses QMD topic-keyword routing to inject deterministic guidance on changed topics", async () => {
     const { handlers, classifier, record } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [intent, versionControlIntent],
@@ -3893,6 +3933,15 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         reason: "start" as const,
         confidence: 0.9,
         complexity: "low" as const,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [
+          {
+            intentId: "version-control",
+            score: 0.91,
+            collection: "intent-topic-keywords-git",
+          },
+        ],
       }),
     });
 
@@ -4056,7 +4105,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
-  it("uses topic keyword similarity when a retired intentDeny setting is supplied", async () => {
+  it("uses QMD topic-keyword routing when a retired intentDeny setting is supplied", async () => {
     const { handlers, classifier } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [versionControlIntent],
@@ -4072,6 +4121,15 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         reason: "start" as const,
         confidence: 0.9,
         complexity: "low" as const,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [
+          {
+            intentId: "version-control",
+            score: 0.91,
+            collection: "intent-topic-keywords-git",
+          },
+        ],
       }),
     });
 
@@ -4968,7 +5026,7 @@ Current user request: fresh clean request
             intentProjection: expect.objectContaining({
               decision: "full-fallback",
               effectiveInput: "full-fallback",
-              fallbackReason: "missing-topic-context",
+              fallbackReason: "qmd-unavailable",
             }),
           }),
         }),
@@ -4981,7 +5039,7 @@ Current user request: fresh clean request
       basis: "Latest message continues the topic checker implementation.",
       keywords: ["topic", "checker"],
       topic: "User is continuing work on the topic checker.",
-      domain: "coding",
+      domain: "chat",
       changed: false,
       reason: "same-topic" as const,
       confidence: 0.9,
@@ -5140,6 +5198,51 @@ Current user request: fresh clean request
         stream: "plugin:skill-harness",
       }),
     );
+  });
+
+  it("does not inherit a same-topic intent when topic triage changes its domain", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "The request is now about version control.",
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [
+        {
+          input: "plan topic checker",
+          intent: "social-casual",
+          domain: "chat",
+          topic: "topic / checker",
+          confidence: 0.9,
+        },
+      ],
+      intents: [intent, versionControlIntent],
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The workflow is now version-control work.",
+        keywords: ["commit"],
+        topic: "User wants a git commit.",
+        domain: "git",
+        changed: false,
+        reason: "same-topic" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        triggerHits: [
+          {
+            intentId: "version-control",
+            score: 0.7,
+            collection: "intent-triggers-and-examples",
+          },
+        ],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(classifier).toHaveBeenCalledOnce();
   });
 
   it("appends full XML details of configured skills into appendSystemContext on prompt build turns", async () => {

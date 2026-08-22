@@ -23,6 +23,7 @@ import type {
 import type { ReviewTriggerKeywords } from "../review/trigger-keywords.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
+import type { IntentQmdIndex } from "../qmd/intent-index.js";
 import type { SampleWithoutReplacement } from "../curation/index.js";
 import type { CurationQueue } from "../curation/queue.js";
 import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
@@ -56,6 +57,7 @@ export type HookDeps = {
   sampleWithoutReplacement?: SampleWithoutReplacement;
   curationQueue?: CurationQueue;
   experienceCatalog?: SkillExperienceCatalog;
+  qmdIntentIndex?: IntentQmdIndex;
   reviewQueue?: { enqueue(task: () => Promise<void>): void };
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],
