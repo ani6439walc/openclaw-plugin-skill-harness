@@ -20,15 +20,50 @@ pnpm run test
 pnpm run build
 pnpm pack --dry-run
 openclaw plugins install --link .
-openclaw plugins enable skill-harness
-openclaw plugins doctor
 ```
 
 `--link` keeps OpenClaw pointed at the checkout, so future local changes can be rebuilt and tested without reinstalling.
 
+Before enabling the plugin, add its mandatory QMD services to `openclaw.json`. Replace every placeholder with a reachable OpenAI-compatible endpoint and model:
+
+```json5
+{
+  plugins: {
+    entries: {
+      "skill-harness": {
+        enabled: false,
+        config: {
+          qmd: {
+            embedding: {
+              baseUrl: "https://your-embedding-endpoint/v1",
+              model: "your-embedding-model",
+            },
+            expansion: {
+              baseUrl: "https://your-openai-compatible-endpoint/v1",
+              model: "your-expansion-model",
+            },
+            rerank: {
+              baseUrl: "https://your-rerank-endpoint/v1",
+              model: "your-rerank-model",
+            },
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+Then enable and inspect the plugin:
+
+```bash
+openclaw plugins enable skill-harness
+openclaw plugins doctor
+```
+
 Direct `git:` installation is not supported by this repository layout. The compiled `dist/` entry is not tracked in Git, and OpenClaw's Git installer does not run this development build.
 
-If the Gateway is unmanaged or automatic config reload is disabled, restart it after installing or enabling the plugin:
+If the Gateway is unmanaged or automatic config reload is disabled, restart it after configuring or enabling the plugin:
 
 ```bash
 openclaw gateway restart
@@ -169,11 +204,13 @@ Configure Skill Harness in `openclaw.json`:
 
 Topic Checker, Intent Classifier, background Curator, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
-### Upgrade from the removed instruction writer
+### Upgrade to mandatory QMD routing
 
-This release intentionally removes `plugins.entries.skill-harness.config.instruction`. OpenClaw validates the strict plugin config schema before the plugin runtime loads, so a retained `instruction` block prevents the upgraded plugin from loading.
+This release requires `plugins.entries.skill-harness.config.qmd` before OpenClaw loads the plugin. Before upgrading, add `embedding`, `expansion`, and `rerank`; each endpoint requires a reachable `baseUrl` and `model`. There is no classifier-only compatibility mode, and a missing or incomplete `qmd` block fails strict schema validation before the plugin runtime starts.
 
-Before upgrading, remove the entire legacy `instruction: { ... }` block from `plugins.entries.skill-harness.config`. There is no automatic migration or compatibility parser. Do not copy its writer model, thinking, timeout, or trigger settings into `curation`: curation is a separate session-local recommendation feature with different behavior.
+This release also removes `plugins.entries.skill-harness.config.instruction`. OpenClaw validates the strict plugin config schema before the plugin runtime loads, so a retained `instruction` block prevents the upgraded plugin from loading.
+
+After adding QMD, remove the entire legacy `instruction: { ... }` block from `plugins.entries.skill-harness.config`. There is no automatic migration or compatibility parser. Do not copy its writer model, thinking, timeout, or trigger settings into `curation`: curation is a separate session-local recommendation feature with different behavior.
 
 ## Runtime intents
 
