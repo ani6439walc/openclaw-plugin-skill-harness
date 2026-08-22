@@ -895,10 +895,12 @@ export function createHookHandlers(deps: HookDeps) {
           params.ctx,
           params.resolvedSessionKey,
           "qmd-search",
-          topicHits ? "completed" : "failed",
-          topHit
-            ? { score: topHit.score, collection: topHit.collection }
-            : { error: "QMD topic-keyword index unavailable" },
+          topicHits === undefined ? "failed" : "completed",
+          topicHits === undefined
+            ? { error: "QMD topic-keyword index unavailable" }
+            : topHit
+              ? { score: topHit.score, collection: topHit.collection }
+              : {},
         );
       }
     }
@@ -952,10 +954,12 @@ export function createHookHandlers(deps: HookDeps) {
           params.ctx,
           params.resolvedSessionKey,
           "qmd-search",
-          qmdHits ? "completed" : "failed",
-          topHit
-            ? { score: topHit.score, collection: topHit.collection }
-            : { error: "QMD intent trigger index unavailable" },
+          qmdHits === undefined ? "failed" : "completed",
+          qmdHits === undefined
+            ? { error: "QMD intent trigger index unavailable" }
+            : topHit
+              ? { score: topHit.score, collection: topHit.collection }
+              : {},
         );
       }
       if (!result) {

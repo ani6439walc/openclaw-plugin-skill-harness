@@ -3802,6 +3802,49 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     }
   });
 
+  it("records empty QMD results as completed searches without index errors", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "User wants repository maintenance",
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis:
+          "The latest request is repository maintenance in the git domain.",
+        keywords: ["repository", "maintenance"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({ topicHits: [], triggerHits: [] }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "maintain this repository",
+        messages: [{ role: "user", content: "maintain this repository" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
+    const completedQmdEvents = emittedPipelineEvents(emitAgentEvent).filter(
+      (entry) =>
+        entry.data.phase === "qmd-search" && entry.data.state === "completed",
+    );
+    expect(completedQmdEvents).toHaveLength(2);
+    for (const event of completedQmdEvents) {
+      expect(event.data).not.toHaveProperty("error");
+    }
+  });
+
   it("requires high overall topic confidence for the keyword-similarity bypass", async () => {
     const classifier = vi.fn().mockResolvedValue({
       intent: "version-control",
