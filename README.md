@@ -204,7 +204,7 @@ Configure Skill Harness in `openclaw.json`:
 
 Topic Checker, Intent Classifier, background Curator, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
-### Upgrade to mandatory QMD routing
+### Upgrade from the removed instruction writer to mandatory QMD routing
 
 This release requires `plugins.entries.skill-harness.config.qmd` before OpenClaw loads the plugin. Before upgrading, add `embedding`, `expansion`, and `rerank`; each endpoint requires a reachable `baseUrl` and `model`. There is no classifier-only compatibility mode, and a missing or incomplete `qmd` block fails strict schema validation before the plugin runtime starts.
 

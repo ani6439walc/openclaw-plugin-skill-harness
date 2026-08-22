@@ -111,7 +111,9 @@ describe("resolveConfig", () => {
       expect(quickStart.indexOf("qmd: {")).toBeLessThan(
         quickStart.indexOf("openclaw plugins doctor"),
       );
-      expect(readme).toContain("### Upgrade to mandatory QMD routing");
+      expect(readme).toContain(
+        "### Upgrade from the removed instruction writer to mandatory QMD routing",
+      );
     });
 
     it("uses the scanner timeout by default and accepts inline remote credentials", () => {
