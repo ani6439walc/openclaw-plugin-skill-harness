@@ -137,7 +137,6 @@ function sanitizeHistoricalIntentRecords(
 
 const LOW_EFFORT_LEVELS = new Set(["off", "minimal", "low"]);
 
-const TOPIC_PROJECTION_CONFIDENCE = 0.8;
 const MAX_PROJECTION_CANDIDATE_IDS = 128;
 const MAX_PROJECTION_MATCHED_KEYWORDS = 32;
 const MAX_PROJECTION_KEYWORD_CHARS = 200;
@@ -846,7 +845,8 @@ export function createHookHandlers(deps: HookDeps) {
       : undefined;
     if (
       isSameTopic &&
-      topicContext.confidence >= TOPIC_CONTINUITY_INHERIT_CONFIDENCE &&
+      topicContext.confidence >=
+        params.refreshedConfig.routing.sameTopic.minConfidence &&
       latestHistoricalIntent &&
       topicContext.domain === latestHistoricalDomain
     ) {
@@ -869,7 +869,8 @@ export function createHookHandlers(deps: HookDeps) {
       Extract<IntentTrigger, "qmd-topic-keyword" | "qmd-trigger"> | undefined;
     if (
       topicContext &&
-      topicContext.confidence >= TOPIC_PROJECTION_CONFIDENCE &&
+      topicContext.confidence >=
+        params.refreshedConfig.routing.qmd.minTopicConfidence &&
       qmdIntentIndex
     ) {
       emitPipelineEvent(
@@ -886,7 +887,11 @@ export function createHookHandlers(deps: HookDeps) {
       const matchedIntent = topHit
         ? findIntentEntry(params.availableIntents, topHit.intentId)
         : undefined;
-      if (topHit && matchedIntent && topHit.score > 0.85) {
+      if (
+        topHit &&
+        matchedIntent &&
+        topHit.score > params.refreshedConfig.routing.qmd.directRouteMinScore
+      ) {
         result = buildQmdIntentResult({
           hit: topHit,
           intent: matchedIntent,
@@ -931,12 +936,15 @@ export function createHookHandlers(deps: HookDeps) {
         "started",
       );
       const expansionContext =
-        topicContext && topicContext.confidence >= TOPIC_PROJECTION_CONFIDENCE
+        topicContext &&
+        topicContext.confidence >=
+          params.refreshedConfig.routing.qmd.minTopicConfidence
           ? formatQmdTriggerExpansionContext(topicContext)
           : undefined;
       const rerankContext =
         topicContext &&
-        topicContext.confidence >= TOPIC_PROJECTION_CONFIDENCE &&
+        topicContext.confidence >=
+          params.refreshedConfig.routing.qmd.minTopicConfidence &&
         topicContext.domain
           ? `domain=${topicContext.domain}`
           : undefined;
@@ -957,7 +965,11 @@ export function createHookHandlers(deps: HookDeps) {
           intentId: topHit.intentId,
         });
       }
-      if (topHit && topIntent && topHit.score > 0.85) {
+      if (
+        topHit &&
+        topIntent &&
+        topHit.score > params.refreshedConfig.routing.qmd.directRouteMinScore
+      ) {
         result = buildQmdIntentResult({
           hit: topHit,
           intent: topIntent,
@@ -992,16 +1004,23 @@ export function createHookHandlers(deps: HookDeps) {
       if (!result) {
         try {
           const projectedHits =
-            qmdHits && topHit && topHit.score >= 0.35
+            qmdHits &&
+            topHit &&
+            topHit.score >= params.refreshedConfig.routing.qmd.minCandidateScore
               ? qmdHits.slice(
                   0,
-                  topHit.score >= 0.65 ? limits.smallK : limits.largeK,
+                  topHit.score >=
+                    params.refreshedConfig.routing.qmd.smallCandidateMinScore
+                    ? limits.smallK
+                    : limits.largeK,
                 )
               : qmdHits;
           projection = projectQmdIntentCandidates({
             intents: params.availableIntents,
             qmdHits: projectedHits,
             histories: params.historicalIntents,
+            minCandidateScore:
+              params.refreshedConfig.routing.qmd.minCandidateScore,
           });
         } catch (error) {
           logger.warn(

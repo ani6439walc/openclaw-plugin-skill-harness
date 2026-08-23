@@ -10,6 +10,7 @@ import {
 import type {
   ContextWindow,
   ResolvedQmdConfig,
+  ResolvedRoutingConfig,
   ResolvedSkillHarnessPluginConfig,
 } from "./types.js";
 
@@ -72,6 +73,16 @@ const DEFAULT_QMD: ResolvedQmdConfig = {
   rerank: { baseUrl: "", model: "" },
 };
 
+const DEFAULT_ROUTING: ResolvedRoutingConfig = {
+  sameTopic: { minConfidence: 0.8 },
+  qmd: {
+    minTopicConfidence: 0.8,
+    directRouteMinScore: 0.85,
+    smallCandidateMinScore: 0.65,
+    minCandidateScore: 0.35,
+  },
+};
+
 const DEFAULT_CONFIG = {
   agents: ["main"],
   model: undefined,
@@ -85,6 +96,7 @@ const DEFAULT_CONFIG = {
   contextWindow: DEFAULT_CONTEXT_WINDOW,
   timeoutMs: DEFAULT_TIMEOUT_MS,
   qmd: DEFAULT_QMD,
+  routing: DEFAULT_ROUTING,
   curation: DEFAULT_CURATION,
   review: DEFAULT_REVIEW,
 } satisfies ResolvedSkillHarnessPluginConfig;
@@ -235,6 +247,63 @@ const QmdSchema = z
   })
   .catch(DEFAULT_QMD);
 
+const RoutingScoreSchema = (fallback: number) =>
+  z.number().min(0).max(1).optional().default(fallback);
+const RoutingSchema = z
+  .object({
+    sameTopic: z
+      .object({
+        minConfidence: RoutingScoreSchema(
+          DEFAULT_ROUTING.sameTopic.minConfidence,
+        ),
+      })
+      .strict()
+      .optional()
+      .default(DEFAULT_ROUTING.sameTopic),
+    qmd: z
+      .object({
+        minTopicConfidence: RoutingScoreSchema(
+          DEFAULT_ROUTING.qmd.minTopicConfidence,
+        ),
+        directRouteMinScore: RoutingScoreSchema(
+          DEFAULT_ROUTING.qmd.directRouteMinScore,
+        ),
+        smallCandidateMinScore: RoutingScoreSchema(
+          DEFAULT_ROUTING.qmd.smallCandidateMinScore,
+        ),
+        minCandidateScore: RoutingScoreSchema(
+          DEFAULT_ROUTING.qmd.minCandidateScore,
+        ),
+      })
+      .strict()
+      .optional()
+      .default(DEFAULT_ROUTING.qmd),
+  })
+  .strict()
+  .superRefine((routing, context) => {
+    const { directRouteMinScore, smallCandidateMinScore, minCandidateScore } =
+      routing.qmd;
+    if (
+      minCandidateScore > smallCandidateMinScore ||
+      smallCandidateMinScore > directRouteMinScore
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["qmd"],
+        message:
+          "minCandidateScore must be less than or equal to smallCandidateMinScore, which must be less than or equal to directRouteMinScore",
+      });
+    }
+  });
+
+function resolveRoutingConfig(raw: unknown): ResolvedRoutingConfig {
+  const routing =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>).routing
+      : undefined;
+  return RoutingSchema.parse(routing === undefined ? {} : routing);
+}
+
 const SkillHarnessConfigSchema = z
   .object({
     agents: stringListWithDefault(["main"]),
@@ -249,6 +318,7 @@ const SkillHarnessConfigSchema = z
     contextWindow: ContextWindowSchema,
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
     qmd: QmdSchema,
+    routing: z.unknown().optional(),
     curation: CurationSchema,
     review: ReviewSchema,
   })
@@ -257,7 +327,7 @@ const SkillHarnessConfigSchema = z
 export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
   const resolved = SkillHarnessConfigSchema.parse(raw) as Omit<
     ResolvedSkillHarnessPluginConfig,
-    "qmd"
+    "qmd" | "routing"
   > & {
     qmd: Omit<ResolvedQmdConfig, "timeoutMs"> & { timeoutMs?: number };
   };
@@ -272,5 +342,6 @@ export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
         60_000,
       ),
     },
+    routing: resolveRoutingConfig(raw),
   };
 }

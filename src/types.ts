@@ -88,6 +88,26 @@ export type QmdConfig = {
   rerank?: QmdEndpointConfig;
 };
 
+export type RoutingConfig = {
+  sameTopic?: { minConfidence?: number };
+  qmd?: {
+    minTopicConfidence?: number;
+    directRouteMinScore?: number;
+    smallCandidateMinScore?: number;
+    minCandidateScore?: number;
+  };
+};
+
+export type ResolvedRoutingConfig = {
+  sameTopic: { minConfidence: number };
+  qmd: {
+    minTopicConfidence: number;
+    directRouteMinScore: number;
+    smallCandidateMinScore: number;
+    minCandidateScore: number;
+  };
+};
+
 export type ResolvedQmdConfig = {
   timeoutMs: number;
   embedding: Required<Pick<QmdEmbeddingConfig, "baseUrl" | "model">> &
@@ -111,6 +131,7 @@ export type SkillHarnessPluginConfig = {
   contextWindow?: ContextWindow;
   timeoutMs?: number;
   qmd?: QmdConfig;
+  routing?: RoutingConfig;
   curation?: CurationConfig;
   review?: ReviewConfig;
 };
@@ -128,6 +149,7 @@ export type ResolvedSkillHarnessPluginConfig = {
   contextWindow: ContextWindow;
   timeoutMs: number;
   qmd: ResolvedQmdConfig;
+  routing: ResolvedRoutingConfig;
   curation: ResolvedCurationConfig;
   review: ResolvedReviewConfig;
 };

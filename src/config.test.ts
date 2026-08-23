@@ -72,6 +72,59 @@ describe("resolveConfig", () => {
   });
 
   describe("QMD routing", () => {
+    it("resolves default routing thresholds when routing is omitted", () => {
+      expect(resolveConfig({}).routing).toEqual({
+        sameTopic: { minConfidence: 0.8 },
+        qmd: {
+          minTopicConfidence: 0.8,
+          directRouteMinScore: 0.85,
+          smallCandidateMinScore: 0.65,
+          minCandidateScore: 0.35,
+        },
+      });
+    });
+
+    it("accepts independent same-topic and QMD routing thresholds", () => {
+      expect(
+        resolveConfig({
+          routing: {
+            sameTopic: { minConfidence: 0.9 },
+            qmd: {
+              minTopicConfidence: 0.7,
+              directRouteMinScore: 0.9,
+              smallCandidateMinScore: 0.6,
+              minCandidateScore: 0.2,
+            },
+          },
+        }).routing,
+      ).toEqual({
+        sameTopic: { minConfidence: 0.9 },
+        qmd: {
+          minTopicConfidence: 0.7,
+          directRouteMinScore: 0.9,
+          smallCandidateMinScore: 0.6,
+          minCandidateScore: 0.2,
+        },
+      });
+    });
+
+    it("rejects out-of-range and non-monotonic routing thresholds", () => {
+      expect(() =>
+        resolveConfig({ routing: { sameTopic: { minConfidence: 1.1 } } }),
+      ).toThrow();
+      expect(() => resolveConfig({ routing: null })).toThrow();
+      expect(() =>
+        resolveConfig({
+          routing: {
+            qmd: {
+              directRouteMinScore: 0.6,
+              smallCandidateMinScore: 0.7,
+            },
+          },
+        }),
+      ).toThrow();
+    });
+
     it("documents mandatory QMD configuration before Quick Start enables the plugin", () => {
       const manifest = JSON.parse(
         readFileSync(
@@ -85,6 +138,18 @@ describe("resolveConfig", () => {
             qmd: {
               required?: string[];
               properties: Record<string, { required?: string[] }>;
+            };
+            routing?: {
+              properties: {
+                sameTopic: {
+                  properties: {
+                    minConfidence: { default?: number };
+                  };
+                };
+                qmd: {
+                  properties: Record<string, { default?: number }>;
+                };
+              };
             };
           };
         };
@@ -102,6 +167,14 @@ describe("resolveConfig", () => {
         "expansion",
         "rerank",
       ]);
+      expect(
+        manifest.configSchema.properties.routing?.properties.sameTopic
+          .properties.minConfidence.default,
+      ).toBe(0.8);
+      expect(
+        manifest.configSchema.properties.routing?.properties.qmd.properties
+          .directRouteMinScore.default,
+      ).toBe(0.85);
       for (const endpoint of ["embedding", "expansion", "rerank"]) {
         expect(
           manifest.configSchema.properties.qmd.properties[endpoint]?.required,

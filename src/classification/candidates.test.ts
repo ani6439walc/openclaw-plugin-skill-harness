@@ -33,6 +33,7 @@ describe("projectQmdIntentCandidates", () => {
   it("uses QMD rank, cross-flow, and the last two valid histories in canonical catalog order", () => {
     const result = projectQmdIntentCandidates({
       intents: catalog,
+      minCandidateScore: 0.35,
       qmdHits: [
         {
           intentId: "version-control",
@@ -60,9 +61,13 @@ describe("projectQmdIntentCandidates", () => {
     ]);
   });
 
-  it("falls back to the complete catalog when QMD is unavailable or below .35", () => {
+  it("falls back to the complete catalog when QMD is unavailable or below the configured minimum score", () => {
     expect(
-      projectQmdIntentCandidates({ intents: catalog, histories: [] }),
+      projectQmdIntentCandidates({
+        intents: catalog,
+        histories: [],
+        minCandidateScore: 0.35,
+      }),
     ).toMatchObject({
       fallbackReason: "qmd-unavailable",
       effectiveIntents: catalog,
@@ -78,11 +83,32 @@ describe("projectQmdIntentCandidates", () => {
           },
         ],
         histories: [],
+        minCandidateScore: 0.35,
       }),
     ).toMatchObject({
       fallbackReason: "qmd-no-trusted-recall",
       effectiveIntents: catalog,
     });
+  });
+
+  it("uses the supplied minimum score inclusively", () => {
+    const result = projectQmdIntentCandidates({
+      intents: catalog,
+      qmdHits: [
+        {
+          intentId: "version-control",
+          score: 0.5,
+          collection: "intent-triggers-and-examples",
+        },
+      ],
+      histories: [],
+      minCandidateScore: 0.5,
+    });
+
+    expect(result.effectiveIntents.map((entry) => entry.id)).toEqual([
+      "approve",
+      "version-control",
+    ]);
   });
 
   it("derives dynamic QMD limits without a fixed catalog-size cutoff", () => {

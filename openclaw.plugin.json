@@ -128,6 +128,60 @@
         },
         "required": ["embedding", "expansion", "rerank"]
       },
+      "routing": {
+        "type": "object",
+        "description": "Optional confidence and QMD-score thresholds for dynamic intent routing. Invalid scores or ordering reject the plugin configuration.",
+        "additionalProperties": false,
+        "properties": {
+          "sameTopic": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "minConfidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.8,
+                "description": "Minimum topic-triage confidence for same-topic intent inheritance."
+              }
+            }
+          },
+          "qmd": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "minTopicConfidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.8,
+                "description": "Minimum topic-triage confidence for topic-keyword QMD and trigger/example QMD context."
+              },
+              "directRouteMinScore": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.85,
+                "description": "Strictly-greater QMD score required for a direct route."
+              },
+              "smallCandidateMinScore": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.65,
+                "description": "Inclusive QMD score that selects the small classifier candidate set."
+              },
+              "minCandidateScore": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.35,
+                "description": "Inclusive minimum QMD score for any classifier candidate projection."
+              }
+            }
+          }
+        }
+      },
       "queryMode": {
         "type": "string",
         "enum": ["message", "recent", "full"],

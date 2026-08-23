@@ -89,11 +89,14 @@ export function projectQmdIntentCandidates(params: {
   intents: readonly IntentCatalogEntry[];
   qmdHits: readonly QmdIntentHit[] | undefined;
   histories: readonly HistoricalIntentRecord[];
+  minCandidateScore: number;
 }): IntentProjection {
   const intents = [...params.intents];
   if (intents.length === 0) return fullCatalogResult(intents, "empty-catalog");
   if (!params.qmdHits) return fullCatalogResult(intents, "qmd-unavailable");
-  const trustedHits = params.qmdHits.filter((hit) => hit.score >= 0.35);
+  const trustedHits = params.qmdHits.filter(
+    (hit) => hit.score >= params.minCandidateScore,
+  );
   if (trustedHits.length === 0) {
     return fullCatalogResult(intents, "qmd-no-trusted-recall");
   }

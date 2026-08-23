@@ -3983,6 +3983,144 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
+  it("uses the configured QMD topic confidence before supplying QMD contexts", async () => {
+    const qmdIntentIndex = qmdIndex({ topicHits: [], triggerHits: [] });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: {
+        routing: {
+          qmd: { minTopicConfidence: 0.95 },
+        },
+      },
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The request is likely repository maintenance.",
+        keywords: ["repository", "maintenance"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex,
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "maintain this repository",
+        messages: [{ role: "user", content: "maintain this repository" }],
+      } as never,
+      ctx,
+    );
+
+    expect(qmdIntentIndex.searchTopicKeywords).not.toHaveBeenCalled();
+    expect(qmdIntentIndex.searchIntentTriggers).toHaveBeenCalledWith({
+      query: "maintain this repository",
+      rawLimit: expect.any(Number),
+    });
+  });
+
+  it("uses the configured direct QMD score threshold for trigger/example routing", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "The request is repository maintenance.",
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      configRaw: {
+        routing: {
+          qmd: { directRouteMinScore: 0.95 },
+        },
+      },
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The request is repository maintenance.",
+        keywords: ["repository"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        triggerHits: [
+          {
+            intentId: "version-control",
+            score: 0.91,
+            collection: "intent-triggers-and-examples",
+          },
+        ],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(classifier).toHaveBeenCalledOnce();
+  });
+
+  it("uses the configured candidate score floor before projecting QMD hits", async () => {
+    const operationsIntent: IntentCatalogEntry = {
+      id: "deployment",
+      definition: {
+        triggers: ["deploy"],
+        examples: ["deploy this"],
+        domain: "operations",
+        fastpath: { keywords: [] },
+        guidance: "Deploy safely.",
+      },
+    };
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "The request is repository maintenance.",
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent, operationsIntent],
+      configRaw: {
+        routing: {
+          qmd: {
+            directRouteMinScore: 0.95,
+            smallCandidateMinScore: 0.8,
+            minCandidateScore: 0.75,
+          },
+        },
+      },
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The request is repository maintenance.",
+        keywords: ["repository"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        triggerHits: [
+          {
+            intentId: "version-control",
+            score: 0.72,
+            collection: "intent-triggers-and-examples",
+          },
+        ],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intents: [intent, versionControlIntent, operationsIntent],
+      }),
+    );
+  });
+
   it("uses QMD topic-keyword routing to inject deterministic guidance on changed topics", async () => {
     const { handlers, classifier, record } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4167,6 +4305,51 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
+  it("uses the configured direct QMD score threshold for topic-keyword routing", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "The request is about version control.",
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [versionControlIntent],
+      configRaw: {
+        routing: { qmd: { directRouteMinScore: 0.92 } },
+      },
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        keywords: ["commit"],
+        topic: "User wants a git commit.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [
+          {
+            intentId: "version-control",
+            score: 0.91,
+            collection: "intent-topic-keywords-git",
+          },
+        ],
+        triggerHits: [],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "commit this",
+        messages: [{ role: "user", content: "commit this" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
+  });
+
   it("uses QMD topic-keyword routing when a retired intentDeny setting is supplied", async () => {
     const { handlers, classifier } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4326,6 +4509,46 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         }),
       }),
     );
+  });
+
+  it("uses the configured same-topic confidence only for intent inheritance", async () => {
+    const topicContext = {
+      basis: "Latest message continues the commit workflow.",
+      keywords: ["commit"],
+      topic: "User is still discussing a git commit.",
+      domain: "git",
+      changed: false,
+      reason: "same-topic" as const,
+      confidence: 0.8,
+    };
+    const { handlers, classifier } = createTopicFlowHarness({
+      historicalIntents: [
+        {
+          input: "commit this",
+          intent: "version-control",
+          keywords: ["commit"],
+          topic: "User wants a git commit.",
+          domain: "git",
+          confidence: 0.9,
+          complexity: "medium",
+        },
+      ],
+      intents: [versionControlIntent],
+      configRaw: {
+        routing: { sameTopic: { minConfidence: 0.85 } },
+      },
+      topicChecker: vi.fn().mockResolvedValue(topicContext),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "commit it",
+        messages: [{ role: "user", content: "commit it" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
   });
 
   it("leaves inherited complexity absent when historical complexity is missing", async () => {
