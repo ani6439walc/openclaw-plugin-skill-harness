@@ -145,7 +145,8 @@ describe("createIntentQmdIndex", () => {
         query: "add qmd",
         rawLimit: 12,
         expansionContext:
-          "Current topic: Add QMD routing\nCurrent domain: development\nTopic keywords: qmd, routing",
+          "domain=development; keywords=qmd,routing; topic=Add QMD routing",
+        rerankContext: "domain=development",
       }),
     ).resolves.toEqual([
       {
@@ -173,7 +174,8 @@ describe("createIntentQmdIndex", () => {
       collections: ["intent-triggers", "intent-examples"],
       expansion: "force",
       expansionContext:
-        "Current topic: Add QMD routing\nCurrent domain: development\nTopic keywords: qmd, routing",
+        "domain=development; keywords=qmd,routing; topic=Add QMD routing",
+      rerankContext: "domain=development",
       rerank: true,
       limit: 12,
       candidateLimit: 12,

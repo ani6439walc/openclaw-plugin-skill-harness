@@ -3949,7 +3949,8 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       expect.objectContaining({
         query: "maintain this repository",
         expansionContext:
-          "Current topic: User wants repository maintenance.\nCurrent domain: git\nTopic keywords: repository, maintenance",
+          "domain=git; keywords=repository,maintenance; topic=User wants repository maintenance.",
+        rerankContext: "domain=git",
       }),
     );
     expect(record).toHaveBeenCalledWith(
