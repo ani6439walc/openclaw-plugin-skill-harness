@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { QMDStore } from "@tobilu/qmd";
+import type { QMDStore } from "@wei840222/qmd";
 import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
 import { createIntentQmdIndex } from "./intent-index.js";
 
@@ -141,7 +141,12 @@ describe("createIntentQmdIndex", () => {
     index.schedule(catalog);
     await waitForReady(index);
     await expect(
-      index.searchIntentTriggers({ query: "add qmd", rawLimit: 12 }),
+      index.searchIntentTriggers({
+        query: "add qmd",
+        rawLimit: 12,
+        expansionContext:
+          "Current topic: Add QMD routing\nCurrent domain: development\nTopic keywords: qmd, routing",
+      }),
     ).resolves.toEqual([
       {
         intentId: "implementation",
@@ -167,6 +172,8 @@ describe("createIntentQmdIndex", () => {
       query: "add qmd",
       collections: ["intent-triggers", "intent-examples"],
       expansion: "force",
+      expansionContext:
+        "Current topic: Add QMD routing\nCurrent domain: development\nTopic keywords: qmd, routing",
       rerank: true,
       limit: 12,
       candidateLimit: 12,

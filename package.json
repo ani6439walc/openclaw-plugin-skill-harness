@@ -51,7 +51,7 @@
     "test:plugin-loader": "node --input-type=module --eval \"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); require('./dist/index.js');\""
   },
   "dependencies": {
-    "@tobilu/qmd": "git+https://github.com/wei840222/qmd.git#af285ca74186d4f1e5479e2c6e6db22ceb735fca",
+    "@wei840222/qmd": "2026.8.24",
     "gray-matter": "4.0.3",
     "typebox": "1.3.3",
     "zod": "4.4.3"
@@ -60,8 +60,8 @@
     "openclaw": "2026.7.1-2"
   },
   "devDependencies": {
+    "prettier": "3.9.6",
     "typescript": "6.0.3",
-    "vitest": "4.1.9",
-    "prettier": "3.9.6"
+    "vitest": "4.1.9"
   }
 }

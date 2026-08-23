@@ -3906,6 +3906,16 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       confidence: 0.9,
       complexity: "medium" as const,
     });
+    const qmdIntentIndex = qmdIndex({
+      topicHits: [],
+      triggerHits: [
+        {
+          intentId: "version-control",
+          score: 0.72,
+          collection: "intent-triggers-and-examples",
+        },
+      ],
+    });
     const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [intent, versionControlIntent, operationsIntent],
@@ -3921,16 +3931,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         confidence: 0.9,
         complexity: "medium" as const,
       }),
-      qmdIntentIndex: qmdIndex({
-        topicHits: [],
-        triggerHits: [
-          {
-            intentId: "version-control",
-            score: 0.72,
-            collection: "intent-triggers-and-examples",
-          },
-        ],
-      }),
+      qmdIntentIndex,
     });
 
     await handlers.onBeforePromptBuild(
@@ -3943,6 +3944,13 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ intents: [versionControlIntent] }),
+    );
+    expect(qmdIntentIndex.searchIntentTriggers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "maintain this repository",
+        expansionContext:
+          "Current topic: User wants repository maintenance.\nCurrent domain: git\nTopic keywords: repository, maintenance",
+      }),
     );
     expect(record).toHaveBeenCalledWith(
       "session-1",

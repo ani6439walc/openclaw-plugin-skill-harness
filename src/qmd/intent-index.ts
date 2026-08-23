@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { QMDStore } from "@tobilu/qmd";
+import type { QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
 import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
@@ -11,7 +11,7 @@ const EXAMPLES_COLLECTION = "intent-examples";
 const INITIAL_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
-type QmdCreateStore = (typeof import("@tobilu/qmd"))["createStore"];
+type QmdCreateStore = (typeof import("@wei840222/qmd"))["createStore"];
 
 type QmdResult = {
   body: string;
@@ -38,6 +38,7 @@ export interface IntentQmdIndex {
   searchIntentTriggers(params: {
     query: string;
     rawLimit: number;
+    expansionContext?: string;
   }): Promise<QmdIntentHit[] | undefined>;
   searchTopicKeywords(params: {
     query: string;
@@ -269,7 +270,7 @@ export function createIntentQmdIndex(params: {
         );
       }
       const createQmdStore =
-        params.createStore ?? (await import("@tobilu/qmd")).createStore;
+        params.createStore ?? (await import("@wei840222/qmd")).createStore;
       const { collections } = await writeSnapshot(target.intents);
       nextStore = await createQmdStore({
         dbPath: databasePath,
@@ -353,7 +354,7 @@ export function createIntentQmdIndex(params: {
         running = runWorker();
       }
     },
-    async searchIntentTriggers({ query, rawLimit }) {
+    async searchIntentTriggers({ query, rawLimit, expansionContext }) {
       if (!isReadyForCurrentCatalog()) return;
       const activeStore = store;
       if (!activeStore) return;
@@ -362,6 +363,7 @@ export function createIntentQmdIndex(params: {
           query,
           collections: [TRIGGERS_COLLECTION, EXAMPLES_COLLECTION],
           expansion: "force",
+          ...(expansionContext ? { expansionContext } : {}),
           rerank: true,
           limit: rawLimit,
           candidateLimit: rawLimit,

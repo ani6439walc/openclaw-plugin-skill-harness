@@ -156,6 +156,21 @@ type CoverageRuntimeTargets = Partial<
   >
 >;
 
+function formatQmdTriggerExpansionContext(params: {
+  topic?: string;
+  domain?: string;
+  keywords?: readonly string[];
+}): string | undefined {
+  const lines = [
+    params.topic ? `Current topic: ${params.topic}` : undefined,
+    params.domain ? `Current domain: ${params.domain}` : undefined,
+    params.keywords?.length
+      ? `Topic keywords: ${params.keywords.join(", ")}`
+      : undefined,
+  ].filter((line): line is string => Boolean(line));
+  return lines.length > 0 ? lines.join("\n") : undefined;
+}
+
 function truncateSelectedPlacementSkillContent(content: string): {
   content: string;
   omittedCodePointCount?: number;
@@ -915,10 +930,15 @@ export function createHookHandlers(deps: HookDeps) {
         "qmd-trigger-example",
         "started",
       );
+      const expansionContext =
+        topicContext && topicContext.confidence >= TOPIC_PROJECTION_CONFIDENCE
+          ? formatQmdTriggerExpansionContext(topicContext)
+          : undefined;
       const qmdHits = qmdIntentIndex
         ? await qmdIntentIndex.searchIntentTriggers({
             query: params.latestUserMessage,
             rawLimit: limits.rawLimit,
+            ...(expansionContext ? { expansionContext } : {}),
           })
         : undefined;
       const topHit = qmdHits?.[0];
