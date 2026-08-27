@@ -227,8 +227,7 @@ describe("createHookHandlers tracking guards", () => {
       defaultTracker,
       "resolveCurrentSessionId",
     );
-    const record = vi.spyOn(defaultTracker, "record");
-    const write = vi.spyOn(defaultTracker, "write");
+    const mergeTurn = vi.spyOn(defaultTracker, "mergeTurnAndPersist");
 
     await createHandlers().onAfterToolCall(
       {
@@ -241,16 +240,14 @@ describe("createHookHandlers tracking guards", () => {
     );
 
     expect(resolveCurrentSessionId).not.toHaveBeenCalled();
-    expect(record).not.toHaveBeenCalled();
-    expect(write).not.toHaveBeenCalled();
+    expect(mergeTurn).not.toHaveBeenCalled();
   });
 
   it("does not record tool calls before intent data exists", async () => {
     vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
       undefined,
     );
-    const record = vi.spyOn(defaultTracker, "record");
-    const write = vi.spyOn(defaultTracker, "write");
+    const mergeTurn = vi.spyOn(defaultTracker, "mergeTurnAndPersist");
 
     await createHandlers().onAfterToolCall(
       {
@@ -263,8 +260,7 @@ describe("createHookHandlers tracking guards", () => {
     );
 
     expect(defaultTracker.resolveCurrentSessionId).not.toHaveBeenCalled();
-    expect(record).not.toHaveBeenCalled();
-    expect(write).not.toHaveBeenCalled();
+    expect(mergeTurn).not.toHaveBeenCalled();
   });
 
   it("attributes a late tool result by canonical session key without reading current state", async () => {
@@ -751,8 +747,7 @@ description: Navigate Tokyo.
       defaultTracker,
       "resolveCurrentSessionId",
     );
-    const record = vi.spyOn(defaultTracker, "record");
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const mergeTurn = vi.spyOn(defaultTracker, "mergeTurnAndPersist");
 
     await createHandlers(api).onAfterToolCall(
       {
@@ -766,7 +761,7 @@ description: Navigate Tokyo.
 
     expect(api.runtime.agent.session.listSessionEntries).not.toHaveBeenCalled();
     expect(resolveCurrentSessionId).not.toHaveBeenCalled();
-    expect(record).not.toHaveBeenCalled();
+    expect(mergeTurn).not.toHaveBeenCalled();
   });
 
   it("aggregates the completed current turn on agent_end", async () => {
@@ -967,8 +962,7 @@ description: Navigate Tokyo.
       },
     };
     vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const mergeTurn = vi.spyOn(defaultTracker, "mergeTurnAndPersist");
     vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
     const recordStats = vi
@@ -986,8 +980,7 @@ description: Navigate Tokyo.
     );
 
     expect(recordStats).not.toHaveBeenCalled();
-    expect(defaultTracker.record).not.toHaveBeenCalled();
-    expect(defaultTracker.write).not.toHaveBeenCalled();
+    expect(mergeTurn).not.toHaveBeenCalled();
   });
 
   it("aggregates agent_end using the prepared turn bound to sessionKey", async () => {
@@ -1181,8 +1174,7 @@ description: Navigate Tokyo.
     vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
       "tracked-session",
     );
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const finalizeTurn = vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd");
     vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
     vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
@@ -1196,6 +1188,7 @@ description: Navigate Tokyo.
 
     expect(resolver).not.toHaveBeenCalled();
     expect(recordStats).not.toHaveBeenCalled();
+    expect(finalizeTurn).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1225,8 +1218,7 @@ description: Navigate Tokyo.
       vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
         "tracked-session",
       );
-      vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-      vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+      const finalizeTurn = vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd");
       vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
       vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
       vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
@@ -1239,6 +1231,7 @@ description: Navigate Tokyo.
 
       expect(resolver).not.toHaveBeenCalled();
       expect(recordStats).not.toHaveBeenCalled();
+      expect(finalizeTurn).not.toHaveBeenCalled();
     },
   );
 
@@ -1286,8 +1279,7 @@ description: Navigate Tokyo.
       defaultTracker,
       "resolveCurrentSessionId",
     );
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const finalizeTurn = vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd");
     vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
     const recordStats = vi
@@ -1302,6 +1294,7 @@ description: Navigate Tokyo.
     expect(api.runtime.agent.session.listSessionEntries).not.toHaveBeenCalled();
     expect(resolveCurrentSessionId).not.toHaveBeenCalled();
     expect(recordStats).not.toHaveBeenCalled();
+    expect(finalizeTurn).not.toHaveBeenCalled();
   });
 
   it("does not aggregate agent_end without a tracked current turn", async () => {
