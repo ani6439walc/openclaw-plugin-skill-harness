@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ReviewFinding, ReviewSource } from "./types.js";
+import type { ReviewSource } from "./types.js";
 import { REVIEW_TRIGGER_TYPES, type ReviewTrigger } from "./triggers.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";

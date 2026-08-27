@@ -27,8 +27,6 @@ import * as path from "node:path";
 import {
   intentsPath,
   experiencesPath,
-  keywordCoverageLogPath,
-  reviewLogPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
   resolveStateDirFromApi,
@@ -283,9 +281,6 @@ export function createPlugin(
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const curationQueue = createCurationQueue();
-      const reviewPath = reviewLogPath(dataRoot);
-      const keywordCoveragePath = keywordCoverageLogPath(dataRoot);
-
       const keywordCoverageWriter = new KeywordCoverageWriter(dataRoot);
       let triggerKeywordCache = readKeywordCoverageKeywordsFailOpen(
         keywordCoverageWriter,

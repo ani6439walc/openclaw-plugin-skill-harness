@@ -22,7 +22,6 @@ import {
   defaultTracker,
   extractSkillInfo,
   resolveTurnEventId,
-  type SessionState,
 } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
@@ -3111,7 +3110,7 @@ export function createHookHandlers(deps: HookDeps) {
   }
 
   async function onSessionEnd(
-    event: PluginHookSessionEndEvent,
+    _event: PluginHookSessionEndEvent,
     ctx: PluginHookSessionContext,
   ): Promise<void> {
     turnAssociations.removeSession(ctx.sessionId);

@@ -216,7 +216,6 @@ export function checkReviewTriggers(
 ): ReviewTrigger[] {
   const matches: ReviewTrigger[] = [];
   const toolCalls = state.toolCalls ?? [];
-  const text = `${state.input ?? ""}\n${state.result ?? ""}`;
   const result =
     state.intent && "intent" in state.intent
       ? state.intent

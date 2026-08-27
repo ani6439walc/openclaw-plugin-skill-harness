@@ -35,11 +35,7 @@ import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
 } from "../subagent-runtime.js";
-import {
-  agentSessionsPath,
-  experiencesPath,
-  withFileLock,
-} from "../file-utils.js";
+import { agentSessionsPath, withFileLock } from "../file-utils.js";
 import { extractPayloadText } from "../classification/index.js";
 
 export interface ReviewSubagentResult {
