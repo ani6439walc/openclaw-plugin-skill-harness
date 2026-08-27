@@ -12,7 +12,7 @@ describe("KeywordCoverageWriter", () => {
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "keyword-coverage-writer-"));
-    writer = KeywordCoverageWriter.create(root);
+    writer = new KeywordCoverageWriter(root);
   });
 
   afterEach(() => {

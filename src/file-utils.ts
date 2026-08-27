@@ -42,8 +42,6 @@ export function resolvePackageRoot(
 }
 
 export const packageRoot = resolvePackageRoot();
-// Backward-compatible alias for integrations that imported the previous name.
-export const pluginRoot = packageRoot;
 
 export function resolvePluginDataRoot(
   stateDir: string,
@@ -92,13 +90,6 @@ export function sessionsPath(filename: string, dataRoot = packageRoot): string {
 }
 
 /**
- * Ensure a directory exists.
- */
-export function ensureDir(dirPath: string): void {
-  fs.mkdirSync(dirPath, { recursive: true });
-}
-
-/**
  * Write JSON data atomically: write to temp file, then rename.
  * This prevents corruption if the process crashes mid-write.
  */
@@ -106,7 +97,7 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
   const dir = path.dirname(filePath);
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   try {
-    ensureDir(dir);
+    fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
     fs.renameSync(tempPath, filePath);
   } catch (error) {

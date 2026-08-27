@@ -1,14 +1,11 @@
 import { z } from "zod";
-import { fileExists, readJsonFile } from "../file-utils.js";
 import type { ReviewFinding, ReviewSource } from "./types.js";
 import { REVIEW_TRIGGER_TYPES, type ReviewTrigger } from "./triggers.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
 import type { SkillPlacementReason } from "../stats/aggregator.js";
 import {
-  normalizeReviewTriggerKeywords,
   normalizeKeywordList,
-  type ReviewTriggerKeywords,
   type TriggerKeywordTarget,
 } from "./trigger-keywords.js";
 
@@ -118,15 +115,6 @@ export type ReviewedSkillEpoch = {
   eventId: string;
 };
 
-export type ReviewLog = {
-  schemaVersion: 5;
-  createdAt: string;
-  updatedAt: string;
-  triggerKeywords: ReviewTriggerKeywords;
-  processedEvents: Record<string, ProcessedEventRecord>;
-  reviewedSkillEpochs: Record<string, ReviewedSkillEpoch>;
-};
-
 export type ReviewLogV7 = {
   schemaVersion: 7;
   createdAt: string;
@@ -154,14 +142,6 @@ const TriggerKeywordTargetSchema = z.enum([
 const KeywordListSchema = z
   .array(z.string())
   .transform((values) => normalizeKeywordList(values, []));
-
-const TriggerKeywordsSchema = z
-  .object({
-    successfulPattern: KeywordListSchema,
-    behaviorFix: KeywordListSchema,
-    entityContext: KeywordListSchema,
-  })
-  .strict();
 
 const ProcessedEventOutcomeSchema = z.enum(PROCESSED_EVENT_OUTCOMES);
 
@@ -255,8 +235,6 @@ const ProcessedEventRecordSchema = z
   .strict()
   .transform((record): ProcessedEventRecord => record);
 
-const ProcessedEventsSchema = z.record(z.string(), ProcessedEventRecordSchema);
-
 const ReviewedSkillEpochSchema = z
   .object({
     agentId: z.string().trim().min(1),
@@ -273,17 +251,6 @@ const ReviewedSkillEpochsSchema = z.record(
   z.string().regex(/^[a-f0-9]{64}$/),
   ReviewedSkillEpochSchema,
 );
-
-export const ReviewLogSchema = z
-  .object({
-    schemaVersion: z.literal(5),
-    createdAt: z.string(),
-    updatedAt: z.string(),
-    triggerKeywords: TriggerKeywordsSchema,
-    processedEvents: ProcessedEventsSchema,
-    reviewedSkillEpochs: ReviewedSkillEpochsSchema,
-  })
-  .strict();
 
 const IntentAppliedReviewChangeSchema = z
   .object({
@@ -400,20 +367,6 @@ export const ReviewLogV7Schema = z
   .strict()
   .transform((log): ReviewLogV7 => log);
 
-export function createReviewLog(
-  nowIso: string,
-  triggerKeywordSeed?: Partial<ReviewTriggerKeywords>,
-): ReviewLog {
-  return {
-    schemaVersion: 5,
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    triggerKeywords: normalizeReviewTriggerKeywords(triggerKeywordSeed),
-    processedEvents: {},
-    reviewedSkillEpochs: {},
-  };
-}
-
 export function createReviewLogV7(nowIso: string): ReviewLogV7 {
   return {
     schemaVersion: 7,
@@ -425,37 +378,8 @@ export function createReviewLogV7(nowIso: string): ReviewLogV7 {
   };
 }
 
-export function parseReviewLog(raw: unknown): ReviewLog {
-  return ReviewLogSchema.parse(raw);
-}
-
-export function parseReviewLogV5ForMigration(raw: unknown): ReviewLog {
-  return ReviewLogSchema.parse(raw);
-}
-
 export function parseReviewLogV7(raw: unknown): ReviewLogV7 {
   return ReviewLogV7Schema.parse(raw);
-}
-
-export function readReviewLog(logPath: string): ReviewLog {
-  return parseReviewLog(readJsonFile<unknown>(logPath));
-}
-
-export function readReviewTriggerKeywords(
-  logPath: string,
-  triggerKeywordSeed?: Partial<ReviewTriggerKeywords>,
-): ReviewTriggerKeywords {
-  if (!fileExists(logPath)) {
-    return normalizeReviewTriggerKeywords(triggerKeywordSeed);
-  }
-  return readReviewLog(logPath).triggerKeywords;
-}
-
-export function pruneProcessedEvents(
-  log: ReviewLog,
-  nowMs: number = Date.now(),
-): void {
-  pruneEventRecords(log.processedEvents, nowMs);
 }
 
 export function pruneReviewLogV7Events(

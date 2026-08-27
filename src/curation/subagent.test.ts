@@ -632,7 +632,7 @@ describe("curation subagent runtime", () => {
       },
     } as unknown as OpenClawPluginApi;
     registerSkillTools(api, {
-      experienceCatalog: SkillExperienceCatalog.create(dataRoot),
+      experienceCatalog: new SkillExperienceCatalog(dataRoot),
     });
 
     await expect(

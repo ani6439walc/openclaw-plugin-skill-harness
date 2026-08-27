@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  limitConversationTurns,
-  projectCurationConversation,
-} from "./conversation.js";
+import { limitConversationTurns } from "./conversation.js";
 
 describe("applyQueryFilters", () => {
   const turns = [
@@ -70,68 +67,5 @@ describe("applyQueryFilters", () => {
 
   it("handles empty turns gracefully", () => {
     expect(limitConversationTurns([], "recent")).toEqual([]);
-  });
-});
-
-describe("projectCurationConversation", () => {
-  const state = (
-    input: string,
-    result: string,
-    topicEpoch: number,
-    overrides: Record<string, unknown> = {},
-  ) => ({
-    input,
-    result,
-    timestamps: { end: "2026-08-13T00:00:00.000Z" },
-    intent: {
-      recommendationState: {
-        topicEpoch,
-        curationRevision: 0,
-        candidates: [],
-      },
-    },
-    ...overrides,
-  });
-
-  it("projects only finalized non-error history from the selected topic epoch", () => {
-    const result = projectCurationConversation(
-      {
-        sessionId: "must-not-render",
-        current: state("current user", "current assistant", 2),
-        history: [
-          state("prior user", "prior assistant", 1),
-          state("kept user", "kept assistant", 2),
-          state("errored user", "errored assistant", 2, { error: "failed" }),
-          state("unfinished user", "unfinished assistant", 2, {
-            timestamps: { start: "2026-08-13T00:00:00.000Z" },
-          }),
-        ],
-      },
-      2,
-    );
-
-    expect(result).toEqual([
-      { role: "user", text: "kept user" },
-      { role: "assistant", text: "kept assistant" },
-    ]);
-  });
-
-  it("reuses recent-mode role and Unicode code-point caps", () => {
-    const history = Array.from({ length: 6 }, (_, index) =>
-      state(`${index}:${"😀".repeat(220)}`, `${index}:${"😀".repeat(180)}`, 4),
-    );
-    const result = projectCurationConversation(
-      { sessionId: "session", current: {}, history },
-      4,
-    );
-
-    expect(result).toHaveLength(10);
-    expect(result[0].text.startsWith("1:")).toBe(true);
-    for (const turn of result) {
-      expect(Array.from(turn.text).length).toBeLessThanOrEqual(
-        turn.role === "user" ? 220 : 180,
-      );
-      expect(turn.text).not.toContain("�");
-    }
   });
 });

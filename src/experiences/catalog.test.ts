@@ -54,7 +54,7 @@ describe("SkillExperienceCatalog", () => {
   }
 
   it("treats an absent root as an empty catalog", () => {
-    const catalog = SkillExperienceCatalog.create(dataRoot);
+    const catalog = new SkillExperienceCatalog(dataRoot);
 
     expect(catalog.listForSkills(["react"])).toEqual([]);
     expect(catalog.resolve("react/forms")).toBeUndefined();
@@ -76,14 +76,14 @@ describe("SkillExperienceCatalog", () => {
         { file: ".", message: "experience root cannot be a symbolic link" },
       ],
     });
-    const catalog = SkillExperienceCatalog.create(dataRoot);
+    const catalog = new SkillExperienceCatalog(dataRoot);
     expect(catalog.listForSkills(["react"])).toEqual([]);
     expect(catalog.resolve("react/forms")).toBeUndefined();
   });
 
   it("loads strict entries with stable skill/entry identity", () => {
     const file = writeEntry("react", "forms");
-    const catalog = SkillExperienceCatalog.create(dataRoot);
+    const catalog = new SkillExperienceCatalog(dataRoot);
 
     expect(catalog.resolve("react/forms")).toEqual({
       identity: "react/forms",
@@ -101,7 +101,7 @@ describe("SkillExperienceCatalog", () => {
   });
 
   it("rescans on every operation so live additions and deletions are visible", () => {
-    const catalog = SkillExperienceCatalog.create(dataRoot);
+    const catalog = new SkillExperienceCatalog(dataRoot);
     expect(catalog.listForSkills(["react"])).toEqual([]);
 
     const file = writeEntry("react", "forms");
@@ -144,7 +144,7 @@ describe("SkillExperienceCatalog", () => {
         body: "forms forms forms forms",
       }),
     );
-    const catalog = SkillExperienceCatalog.create(dataRoot);
+    const catalog = new SkillExperienceCatalog(dataRoot);
 
     expect(
       catalog
@@ -173,7 +173,7 @@ describe("SkillExperienceCatalog", () => {
         keywords: ["ＦＯＲＭＳ"],
       }),
     );
-    const catalog = SkillExperienceCatalog.create(dataRoot);
+    const catalog = new SkillExperienceCatalog(dataRoot);
 
     expect(
       catalog.search({ skillNames: ["ＲＥＡＣＴ"], query: " forms  guide " }),
@@ -310,7 +310,7 @@ describe("SkillExperienceCatalog", () => {
       expect(result.errors.map((error) => error.message).join("\n")).toMatch(
         /symbolic link|confined/,
       );
-      const catalog = SkillExperienceCatalog.create(dataRoot);
+      const catalog = new SkillExperienceCatalog(dataRoot);
       expect(catalog.listForSkills(["react"])).toEqual([
         expect.objectContaining({ identity: "react/forms" }),
       ]);

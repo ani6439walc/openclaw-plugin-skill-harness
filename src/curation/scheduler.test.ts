@@ -341,7 +341,7 @@ describe("validateAndCommitCuration", () => {
         "Verify beta output.",
       ].join("\n"),
     );
-    return SkillExperienceCatalog.create(root);
+    return new SkillExperienceCatalog(root);
   }
 
   function deps() {

@@ -1,4 +1,3 @@
-import type { SessionData } from "../session/tracker.js";
 import type {
   ContextWindow,
   HistoricalIntentRecord,
@@ -109,20 +108,4 @@ export function limitConversationTurns(
   }
 
   return picked;
-}
-
-export function projectCurationConversation(
-  session: SessionData,
-  topicEpoch: number,
-): RecentTurn[] {
-  const turns: RecentTurn[] = [];
-  for (const state of session.history ?? []) {
-    if (!state.timestamps?.end || state.error !== undefined) continue;
-    if (state.intent?.recommendationState?.topicEpoch !== topicEpoch) continue;
-    if (state.input?.trim()) turns.push({ role: "user", text: state.input });
-    if (state.result?.trim()) {
-      turns.push({ role: "assistant", text: state.result });
-    }
-  }
-  return limitConversationTurns(turns, "recent");
 }

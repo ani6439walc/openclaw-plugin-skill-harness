@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { validateRoutingIntentDirectory } from "./routing-validation.js";
-import { validateIntentDirectory } from "./index.js";
 import { packageRoot } from "../file-utils.js";
 
 describe("validateRoutingIntentDirectory", () => {
@@ -33,16 +32,6 @@ Handle the test request.
     expect(validateRoutingIntentDirectory(dir, ["one"])).toMatchObject({
       valid: true,
       errors: [],
-    });
-  });
-
-  it("preserves the legacy validation export", () => {
-    fs.writeFileSync(path.join(dir, "one.md"), valid());
-
-    expect(validateIntentDirectory(dir, ["one"])).toMatchObject({
-      valid: true,
-      errors: [],
-      intents: [{ id: "one", file: "one.md" }],
     });
   });
 

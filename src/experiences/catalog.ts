@@ -525,12 +525,8 @@ function compareScores(left: ExperienceScore, right: ExperienceScore): number {
 export class SkillExperienceCatalog {
   private readonly experienceDirectory: string;
 
-  private constructor(dataRoot: string) {
+  constructor(dataRoot: string) {
     this.experienceDirectory = experiencesPath(path.resolve(dataRoot));
-  }
-
-  static create(dataRoot: string): SkillExperienceCatalog {
-    return new SkillExperienceCatalog(dataRoot);
   }
 
   listForSkills(skillNames: readonly string[]): SkillExperienceEntry[] {

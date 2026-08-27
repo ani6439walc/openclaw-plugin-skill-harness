@@ -118,24 +118,6 @@ export type ResolvedQmdConfig = {
     Omit<QmdEndpointConfig, "baseUrl" | "model">;
 };
 
-export type SkillHarnessPluginConfig = {
-  agents?: string[];
-  model?: string;
-  modelFallback?: string;
-  thinking?: ThinkLevel;
-  lowEffortRoutingMode?: LowEffortRoutingMode;
-  allowedChatTypes?: string[];
-  allowedChatIds?: string[];
-  deniedChatIds?: string[];
-  queryMode?: string;
-  contextWindow?: ContextWindow;
-  timeoutMs?: number;
-  qmd?: QmdConfig;
-  routing?: RoutingConfig;
-  curation?: CurationConfig;
-  review?: ReviewConfig;
-};
-
 export type ResolvedSkillHarnessPluginConfig = {
   agents: string[];
   model: string | undefined;
@@ -255,19 +237,4 @@ export type RecentTurn = {
   role: string;
   text: string;
   historicalIntent?: HistoricalIntent;
-};
-
-export type MessageContentPart = {
-  type?: string;
-  text?: string;
-  content?: string;
-};
-
-export type PromptMessageLike = {
-  role?: string;
-  content?: string | Array<string | MessageContentPart>;
-  provenance?: {
-    kind?: string;
-    sourceTool?: string;
-  };
 };
