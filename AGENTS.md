@@ -6,6 +6,10 @@ This repository packages the `skill-harness` OpenClaw plugin. `index.ts` and `ap
 
 ## Build, Test, and Development Commands
 
+Use the pnpm release declared by `package.json#packageManager`. This field is the
+single version source for local development and `pnpm/action-setup`; update it
+instead of duplicating a version in workflow YAML.
+
 - `pnpm install --frozen-lockfile`: install dependencies.
 - `pnpm run typecheck`: check TypeScript without emitting.
 - `pnpm run test`: run Vitest.
