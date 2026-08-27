@@ -27,8 +27,6 @@ import * as path from "node:path";
 import {
   intentsPath,
   experiencesPath,
-  keywordCoverageLogPath,
-  reviewLogPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
   resolveStateDirFromApi,
@@ -275,7 +273,7 @@ export function createPlugin(
       initializePluginDataRoot({ dataRoot });
 
       const catalog = IntentCatalog.create(dataRoot);
-      const experienceCatalog = SkillExperienceCatalog.create(dataRoot);
+      const experienceCatalog = new SkillExperienceCatalog(dataRoot);
       const qmdIntentIndex = createIntentQmdIndex({
         dataRoot,
         config: () => config.qmd,
@@ -283,10 +281,7 @@ export function createPlugin(
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const curationQueue = createCurationQueue();
-      const reviewPath = reviewLogPath(dataRoot);
-      const keywordCoveragePath = keywordCoverageLogPath(dataRoot);
-
-      const keywordCoverageWriter = KeywordCoverageWriter.create(dataRoot);
+      const keywordCoverageWriter = new KeywordCoverageWriter(dataRoot);
       let triggerKeywordCache = readKeywordCoverageKeywordsFailOpen(
         keywordCoverageWriter,
       );
@@ -296,7 +291,7 @@ export function createPlugin(
         );
       };
 
-      const reviewLogWriter = IntentReviewLogWriter.create(dataRoot);
+      const reviewLogWriter = new IntentReviewLogWriter(dataRoot);
 
       const refreshRuntimeIntents = () => {
         catalog.load("intents");

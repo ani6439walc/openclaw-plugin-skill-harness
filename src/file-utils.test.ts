@@ -16,7 +16,8 @@ import {
   agentSessionsPath,
   keywordCoverageLogPath,
   packageRoot,
-  pluginRoot,
+  readJsonFile,
+  writeJsonAtomic,
 } from "./file-utils.js";
 
 describe("FileLock", () => {
@@ -86,8 +87,7 @@ describe("plugin data paths", () => {
     );
   });
 
-  it("preserves package-root aliases and the legacy sessions-path default", () => {
-    expect(pluginRoot).toBe(packageRoot);
+  it("preserves the package-root sessions-path default", () => {
     expect(sessionsPath("legacy-session.json")).toBe(
       path.join(packageRoot, "sessions", "legacy-session.json"),
     );
@@ -109,5 +109,35 @@ describe("plugin data paths", () => {
     const env = { OPENCLAW_STATE_DIR: "/fallback/state/dir" };
     expect(resolveStateDirFromApi(emptyApi, env)).toBe("/fallback/state/dir");
     expect(resolveStateDirFromApi(undefined, env)).toBe("/fallback/state/dir");
+  });
+});
+
+describe("atomic JSON writes", () => {
+  it("creates a missing parent directory before writing JSON", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-utils-write-"));
+    const filePath = path.join(tempDir, "nested", "session.json");
+
+    try {
+      writeJsonAtomic(filePath, { status: "ready" });
+
+      expect(readJsonFile<{ status: string }>(filePath)).toEqual({
+        status: "ready",
+      });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("removes the temporary file when the final rename fails", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-utils-write-"));
+    const filePath = path.join(tempDir, "session.json");
+    fs.mkdirSync(filePath);
+
+    try {
+      expect(() => writeJsonAtomic(filePath, { status: "ready" })).toThrow();
+      expect(fs.readdirSync(tempDir)).toEqual(["session.json"]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

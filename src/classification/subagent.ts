@@ -15,16 +15,12 @@ import {
   type TopicSwitchResult,
 } from "./prompts.js";
 import { resolveCanonicalSessionKeyFromSessionId } from "../session/index.js";
-import {
-  buildEmbeddedSubagentRunDefaults,
-  extractEmbeddedRunError,
-} from "../subagent-runtime.js";
+import { buildEmbeddedSubagentRunDefaults } from "../subagent-runtime.js";
 import { agentWorkspacePath, agentSessionsPath } from "../file-utils.js";
 import type {
   ClassifiedIntentionResult,
   HistoricalIntentRecord,
   IntentCatalogEntry,
-  IntentionResult,
   RecentTurn,
   ResolvedSkillHarnessPluginConfig,
 } from "../types.js";

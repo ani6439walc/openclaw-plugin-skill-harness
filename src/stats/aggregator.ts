@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import path from "node:path";
 import { logger } from "../../api.js";
 import { resolveTurnEventId } from "../session/index.js";
 import type { SessionState } from "../session/index.js";

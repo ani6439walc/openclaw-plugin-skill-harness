@@ -35,14 +35,6 @@ export class IntentCatalog {
     return loaded.length;
   }
 
-  reset(): void {
-    this.intents = [];
-  }
-
-  setIntents(intents: IntentCatalogEntry[]): void {
-    this.intents = [...intents];
-  }
-
   get(): readonly IntentCatalogEntry[] {
     return this.intents;
   }

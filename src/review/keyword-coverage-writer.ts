@@ -62,11 +62,7 @@ export interface KeywordCoverageRuntimeState {
 }
 
 export class KeywordCoverageWriter {
-  private constructor(private readonly dataRoot: string) {}
-
-  static create(dataRoot: string): KeywordCoverageWriter {
-    return new KeywordCoverageWriter(dataRoot);
-  }
+  constructor(private readonly dataRoot: string) {}
 
   readKeywords(): ReviewTriggerKeywords | undefined {
     return this.readRuntimeState()?.triggerKeywords;

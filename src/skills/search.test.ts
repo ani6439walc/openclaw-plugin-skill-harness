@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { AvailableSkill, RelatedSkillResult } from "./types.js";
 import {
   buildSkillIntentReferenceMap,
-  normalizeSearchText,
   searchSkillDocuments,
   type SkillIntentReference,
   type SkillSearchDocument,
@@ -45,12 +44,6 @@ function intent(
     fastpathKeywords: options.fastpathKeywords ?? [],
   };
 }
-
-describe("normalizeSearchText", () => {
-  it("normalizes Unicode width, case, and whitespace", () => {
-    expect(normalizeSearchText("  ＲＥＡＣＴ   Form  ")).toBe("react form");
-  });
-});
 
 describe("buildSkillIntentReferenceMap", () => {
   it("uses only frontmatter skills and ignores prompt body references", () => {

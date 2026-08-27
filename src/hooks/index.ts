@@ -22,10 +22,9 @@ import {
   defaultTracker,
   extractSkillInfo,
   resolveTurnEventId,
-  type SessionState,
 } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
-import { defaultReviewLogWriter } from "../review/log-writer.js";
+import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { runReviewSubagent } from "../review/subagent.js";
 import type {
@@ -39,11 +38,9 @@ import {
   type ReviewTriggerKeywords,
   type TriggerKeywordTarget,
 } from "../review/trigger-keywords.js";
-import {
-  discoverKeywordCoverageCandidates,
-  enqueueReview,
-  runKeywordCoverageReview,
-} from "../review/index.js";
+import { discoverKeywordCoverageCandidates } from "../review/keyword-coverage.js";
+import { enqueueReview } from "../review/queue.js";
+import { runKeywordCoverageReview } from "../review/keyword-coverage-subagent.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import {
@@ -86,7 +83,7 @@ import {
   resolveSkillInventory,
 } from "../intents/index.js";
 import { FALLBACK_INTENT, isIntentComplexity } from "../constants.js";
-import { experiencesPath, intentsPath } from "../file-utils.js";
+import { experiencesPath, intentsPath, packageRoot } from "../file-utils.js";
 import type { QmdIntentHit } from "../qmd/intent-index.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import {
@@ -555,11 +552,12 @@ export function createHookHandlers(deps: HookDeps) {
     deps.sampleWithoutReplacement ?? sampleWithoutReplacement;
   const experienceCatalog =
     deps.experienceCatalog ??
-    (deps.dataRoot ? SkillExperienceCatalog.create(deps.dataRoot) : undefined);
+    (deps.dataRoot ? new SkillExperienceCatalog(deps.dataRoot) : undefined);
   const qmdIntentIndex = deps.qmdIntentIndex;
 
   const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
-    deps.reviewLogWriter ?? defaultReviewLogWriter;
+    deps.reviewLogWriter ??
+    new IntentReviewLogWriter(deps.dataRoot ?? packageRoot);
   const coverageReviewer = deps.coverageReviewer ?? runKeywordCoverageReview;
   const keywordCoverageWriter = deps.keywordCoverageWriter;
   const bundledSkillsDir = deps.bundledSkillsDir;
@@ -708,24 +706,6 @@ export function createHookHandlers(deps: HookDeps) {
       return false;
     }
     return true;
-  }
-
-  function resolveTrackingContext(ctx: {
-    sessionId?: string;
-    sessionKey?: string;
-    agentId?: string;
-  }): { sessionId?: string; sessionKey?: string } {
-    const sessionKey =
-      ctx.sessionKey?.trim() ||
-      (ctx.agentId
-        ? resolveCanonicalSessionKeyFromSessionId({
-            api,
-            agentId: ctx.agentId,
-            sessionId: ctx.sessionId,
-          })
-        : undefined);
-
-    return { sessionId: ctx.sessionId, sessionKey };
   }
 
   function buildConversationContext(
@@ -2081,7 +2061,6 @@ export function createHookHandlers(deps: HookDeps) {
           if (!reviewResult) return;
           const keywordWriter = deps.keywordCoverageWriter;
           if (!keywordWriter) {
-            // Backward compatibility: v5 path unchanged
             await reviewLogWriter.record(
               params.snapshot.eventId,
               {
@@ -2675,7 +2654,7 @@ export function createHookHandlers(deps: HookDeps) {
       return;
     }
     const activeExperienceCatalog =
-      experienceCatalog ?? SkillExperienceCatalog.create(deps.dataRoot);
+      experienceCatalog ?? new SkillExperienceCatalog(deps.dataRoot);
 
     logger.info("runQueuedCuration calling curator subagent", {
       seedSkillsCount: seedSkills.length,
@@ -3131,7 +3110,7 @@ export function createHookHandlers(deps: HookDeps) {
   }
 
   async function onSessionEnd(
-    event: PluginHookSessionEndEvent,
+    _event: PluginHookSessionEndEvent,
     ctx: PluginHookSessionContext,
   ): Promise<void> {
     turnAssociations.removeSession(ctx.sessionId);

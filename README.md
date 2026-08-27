@@ -11,10 +11,14 @@ It does not replace OpenClaw agents or skills. It provides a routing layer befor
 
 Install from a source checkout for local development and testing:
 
+Development and CI use the pnpm release declared by `packageManager` in
+`package.json`. Keep that field as the single version source for local tooling
+and `pnpm/action-setup`; do not duplicate the version in workflow YAML.
+
 ```bash
 git clone https://github.com/ani6439walc/openclaw-plugin-skill-harness.git
 cd openclaw-plugin-skill-harness
-pnpm install
+pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run test
 pnpm run build
@@ -358,7 +362,7 @@ Valid schema-v1, v2, and v3 files migrate atomically on the next recorded turn w
 ## Development
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm run format
 pnpm run typecheck
 pnpm run test

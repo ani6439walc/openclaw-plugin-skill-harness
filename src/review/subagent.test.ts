@@ -2812,7 +2812,7 @@ describe("runReviewSubagent", () => {
       };
     });
     const applyLock = new FileLock(intentDirectory);
-    expect(applyLock.tryAcquire()).toBe(true);
+    await expect(applyLock.acquire({ maxWaitMs: 0 })).resolves.toBe(true);
 
     try {
       const review = runReviewSubagent({

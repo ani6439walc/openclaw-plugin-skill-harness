@@ -24,6 +24,7 @@ import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness";
 import { TurnAssociationRegistry } from "./turn-associations.js";
 import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import { USER_MESSAGE_BOUNDARY } from "../constants.js";
+import type { IntentReviewLogWriter } from "../review/log-writer.js";
 
 vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
   emitAgentEvent: vi.fn(),
@@ -226,8 +227,7 @@ describe("createHookHandlers tracking guards", () => {
       defaultTracker,
       "resolveCurrentSessionId",
     );
-    const record = vi.spyOn(defaultTracker, "record");
-    const write = vi.spyOn(defaultTracker, "write");
+    const mergeTurn = vi.spyOn(defaultTracker, "mergeTurnAndPersist");
 
     await createHandlers().onAfterToolCall(
       {
@@ -240,16 +240,14 @@ describe("createHookHandlers tracking guards", () => {
     );
 
     expect(resolveCurrentSessionId).not.toHaveBeenCalled();
-    expect(record).not.toHaveBeenCalled();
-    expect(write).not.toHaveBeenCalled();
+    expect(mergeTurn).not.toHaveBeenCalled();
   });
 
   it("does not record tool calls before intent data exists", async () => {
     vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
       undefined,
     );
-    const record = vi.spyOn(defaultTracker, "record");
-    const write = vi.spyOn(defaultTracker, "write");
+    const mergeTurn = vi.spyOn(defaultTracker, "mergeTurnAndPersist");
 
     await createHandlers().onAfterToolCall(
       {
@@ -262,8 +260,7 @@ describe("createHookHandlers tracking guards", () => {
     );
 
     expect(defaultTracker.resolveCurrentSessionId).not.toHaveBeenCalled();
-    expect(record).not.toHaveBeenCalled();
-    expect(write).not.toHaveBeenCalled();
+    expect(mergeTurn).not.toHaveBeenCalled();
   });
 
   it("attributes a late tool result by canonical session key without reading current state", async () => {
@@ -750,8 +747,7 @@ description: Navigate Tokyo.
       defaultTracker,
       "resolveCurrentSessionId",
     );
-    const record = vi.spyOn(defaultTracker, "record");
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const mergeTurn = vi.spyOn(defaultTracker, "mergeTurnAndPersist");
 
     await createHandlers(api).onAfterToolCall(
       {
@@ -765,7 +761,7 @@ description: Navigate Tokyo.
 
     expect(api.runtime.agent.session.listSessionEntries).not.toHaveBeenCalled();
     expect(resolveCurrentSessionId).not.toHaveBeenCalled();
-    expect(record).not.toHaveBeenCalled();
+    expect(mergeTurn).not.toHaveBeenCalled();
   });
 
   it("aggregates the completed current turn on agent_end", async () => {
@@ -966,8 +962,7 @@ description: Navigate Tokyo.
       },
     };
     vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(true);
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const mergeTurn = vi.spyOn(defaultTracker, "mergeTurnAndPersist");
     vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
     const recordStats = vi
@@ -985,8 +980,7 @@ description: Navigate Tokyo.
     );
 
     expect(recordStats).not.toHaveBeenCalled();
-    expect(defaultTracker.record).not.toHaveBeenCalled();
-    expect(defaultTracker.write).not.toHaveBeenCalled();
+    expect(mergeTurn).not.toHaveBeenCalled();
   });
 
   it("aggregates agent_end using the prepared turn bound to sessionKey", async () => {
@@ -1180,8 +1174,7 @@ description: Navigate Tokyo.
     vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
       "tracked-session",
     );
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const finalizeTurn = vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd");
     vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
     vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
@@ -1195,6 +1188,7 @@ description: Navigate Tokyo.
 
     expect(resolver).not.toHaveBeenCalled();
     expect(recordStats).not.toHaveBeenCalled();
+    expect(finalizeTurn).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1224,8 +1218,7 @@ description: Navigate Tokyo.
       vi.spyOn(defaultTracker, "resolveCurrentSessionId").mockReturnValue(
         "tracked-session",
       );
-      vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-      vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+      const finalizeTurn = vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd");
       vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
       vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
       vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
@@ -1238,6 +1231,7 @@ description: Navigate Tokyo.
 
       expect(resolver).not.toHaveBeenCalled();
       expect(recordStats).not.toHaveBeenCalled();
+      expect(finalizeTurn).not.toHaveBeenCalled();
     },
   );
 
@@ -1285,8 +1279,7 @@ description: Navigate Tokyo.
       defaultTracker,
       "resolveCurrentSessionId",
     );
-    vi.spyOn(defaultTracker, "record").mockImplementation(() => undefined);
-    vi.spyOn(defaultTracker, "write").mockImplementation(() => undefined);
+    const finalizeTurn = vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd");
     vi.spyOn(defaultTracker, "getCurrentState").mockReturnValue(state);
     vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
     const recordStats = vi
@@ -1301,6 +1294,7 @@ description: Navigate Tokyo.
     expect(api.runtime.agent.session.listSessionEntries).not.toHaveBeenCalled();
     expect(resolveCurrentSessionId).not.toHaveBeenCalled();
     expect(recordStats).not.toHaveBeenCalled();
+    expect(finalizeTurn).not.toHaveBeenCalled();
   });
 
   it("does not aggregate agent_end without a tracked current turn", async () => {
@@ -1408,6 +1402,7 @@ description: Navigate Tokyo.
       reviewQueue: { enqueue },
       reviewer,
       reviewLogWriter,
+      dataRoot: tmp,
       turnAssociations,
     });
 
@@ -1468,6 +1463,195 @@ description: Navigate Tokyo.
         noFindingReasonCounts: { "wrong-trigger": 1 },
       },
     );
+    expect(fs.existsSync(path.join(tmp, "review.json"))).toBe(false);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("persists v7 review records in distinct per-handler data roots", async () => {
+    const firstRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hook-review-a-"));
+    const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hook-review-b-"));
+    const snapshot = {
+      sessionId: "session-1",
+      agentId: "main",
+      eventId: "session-1:2026-06-11T00:00:00.000Z",
+      turnNumber: 10,
+      current: {
+        input: "不對，應該是別的做法",
+        intent: {
+          intent: "other",
+          reason: "test",
+          confidence: 0.2,
+          complexity: "high" as const,
+        },
+        toolCalls: Array.from({ length: 5 }, () => ({ name: "exec" })),
+        timestamps: { start: "2026-06-11T00:00:00.000Z" },
+      },
+      recent: [],
+      intentCatalog: [],
+    };
+    const state = {
+      input: snapshot.current.input,
+      intent: { result: snapshot.current.intent },
+      toolCalls: snapshot.current.toolCalls.map((call) => ({
+        ...call,
+        params: {},
+      })),
+      timestamps: snapshot.current.timestamps,
+    };
+    vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd").mockResolvedValue(
+      "applied",
+    );
+    vi.spyOn(defaultTracker, "getTurnState").mockReturnValue(state);
+    vi.spyOn(defaultTracker, "getReviewSnapshotForTurn").mockReturnValue(
+      snapshot,
+    );
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([
+      {
+        id: "other",
+        definition: {
+          triggers: ["Unmatched requests"],
+          examples: ["help"],
+          domain: "other",
+          skills: ["analysis"],
+          fastpath: { keywords: [] },
+          guidance: "Ask for context.",
+        },
+      },
+    ]);
+    const reviewer = vi.fn().mockResolvedValue({
+      findings: [
+        {
+          trigger: "skill-candidate" as const,
+          targetKind: "skill-experience" as const,
+          targetExperienceIds: ["analysis/corrected-workflow"],
+          dedupeKey: "analysis-corrected-workflow",
+          summary: "Record the corrected workflow",
+          evidence: ["The user corrected the earlier approach."],
+          correctionGoal: "Preserve the corrected workflow",
+          suggestedChange: "Create the corrected workflow experience.",
+        },
+      ],
+      outcome: "applied" as const,
+      changedExperienceIds: ["analysis/corrected-workflow"],
+    });
+    const queued: Array<Array<() => Promise<void>>> = [[], []];
+
+    try {
+      const roots = [firstRoot, secondRoot];
+      for (const [index, dataRoot] of roots.entries()) {
+        const workspaceDir = path.join(dataRoot, "workspace");
+        const skillDir = path.join(workspaceDir, "skills", "analysis");
+        fs.mkdirSync(skillDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(skillDir, "SKILL.md"),
+          "---\nname: analysis\ndescription: Break down unclear tasks.\n---\n",
+        );
+        const handlers = createHookHandlers({
+          api: {
+            config: {},
+            runtime: {
+              state: { resolveStateDir: () => "/missing-state" },
+              agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+            },
+          } as unknown as OpenClawPluginApi,
+          config: () =>
+            resolveConfig({
+              review: { enabled: true, model: "google/test-review" },
+            }),
+          refreshLiveConfigFromRuntime: vi.fn(),
+          refreshIntents: vi.fn(),
+          reviewQueue: {
+            enqueue: (task) => queued[index]?.push(task),
+          },
+          reviewer,
+          skillInventoryResolver: vi.fn().mockResolvedValue([]),
+          dataRoot,
+          turnAssociations: seedAssociation(),
+        });
+        await handlers.onAgentEnd({ messages: [] } as never, {
+          sessionId: "session-1",
+          agentId: "main",
+        });
+      }
+
+      expect(queued[0]).toHaveLength(1);
+      expect(queued[1]).toHaveLength(1);
+      await queued[0]?.[0]?.();
+      await queued[1]?.[0]?.();
+
+      for (const dataRoot of roots) {
+        const persisted = JSON.parse(
+          fs.readFileSync(path.join(dataRoot, "review.json"), "utf8"),
+        );
+        expect(persisted).toMatchObject({
+          schemaVersion: 7,
+          processedEvents: {
+            [snapshot.eventId]: {
+              changedExperienceIds: ["analysis/corrected-workflow"],
+            },
+          },
+        });
+      }
+    } finally {
+      fs.rmSync(firstRoot, { recursive: true, force: true });
+      fs.rmSync(secondRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("constructs a fresh package-root v7 writer for each handler without a data root", async () => {
+    const actual = await vi.importActual<
+      typeof import("../review/log-writer.js")
+    >("../review/log-writer.js");
+    const constructedRoots: string[] = [];
+    const constructedWriters: IntentReviewLogWriter[] = [];
+
+    class ObservedIntentReviewLogWriter extends actual.IntentReviewLogWriter {
+      constructor(dataRoot: string) {
+        super(dataRoot);
+        constructedRoots.push(dataRoot);
+        constructedWriters.push(this);
+      }
+    }
+
+    vi.doMock("../review/log-writer.js", () => ({
+      ...actual,
+      IntentReviewLogWriter: ObservedIntentReviewLogWriter,
+    }));
+    vi.resetModules();
+
+    try {
+      const packageReviewPath = path.join(resolvePackageRoot(), "review.json");
+      const existingReview = fs.existsSync(packageReviewPath)
+        ? fs.readFileSync(packageReviewPath)
+        : undefined;
+      const { createHookHandlers: createIsolatedHookHandlers } =
+        await import("./index.js");
+      const deps = {
+        api: {} as OpenClawPluginApi,
+        config: () => resolveConfig({}),
+        refreshLiveConfigFromRuntime: vi.fn(),
+        refreshIntents: vi.fn(),
+      };
+
+      createIsolatedHookHandlers(deps);
+      createIsolatedHookHandlers(deps);
+
+      expect(constructedRoots).toEqual([
+        resolvePackageRoot(),
+        resolvePackageRoot(),
+      ]);
+      expect(constructedWriters).toHaveLength(2);
+      expect(constructedWriters[0]).not.toBe(constructedWriters[1]);
+      expect(
+        fs.existsSync(packageReviewPath)
+          ? fs.readFileSync(packageReviewPath)
+          : undefined,
+      ).toEqual(existingReview);
+    } finally {
+      vi.doUnmock("../review/log-writer.js");
+      vi.resetModules();
+    }
   });
 
   it("preserves ordinary review when placement skill re-resolution fails", async () => {

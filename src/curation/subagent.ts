@@ -6,7 +6,7 @@ import type { RecentTurn } from "../types.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { limitConversationTurns } from "../classification/conversation.js";
 import type { AvailableSkill } from "../skills/types.js";
-import { indentXmlLines, xmlBlock } from "../xml-format.js";
+import { xmlBlock } from "../xml-format.js";
 import type { SessionCurationRecord } from "./types.js";
 import { getModelRef } from "../classification/subagent.js";
 import { agentSessionsPath, agentWorkspacePath } from "../file-utils.js";

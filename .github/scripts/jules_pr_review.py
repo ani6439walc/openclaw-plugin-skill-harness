@@ -50,6 +50,8 @@ def request(method, url, headers=None, body=None):
     except urllib.error.HTTPError as exc:
         msg = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"{method} {url} failed: {exc.code} {msg}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError(f"{method} {url} failed (network error): {exc}") from exc
 
 
 def github_headers(accept="application/vnd.github+json"):
@@ -122,7 +124,23 @@ def push_diff_branch(branch_name):
 
 def get_pr_diff(owner, repo, pr_number):
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
-    return request("GET", url, github_headers("application/vnd.github.v3.diff"))
+    try:
+        return request("GET", url, github_headers("application/vnd.github.v3.diff"))
+    except RuntimeError as exc:
+        if "406" in str(exc) or "too_large" in str(exc):
+            log("GitHub API diff returned 406 (diff exceeded limit), falling back to git diff...")
+            base_ref = os.environ.get("BASE_REF", "main")
+            base_sha = os.environ.get("BASE_SHA")
+            subprocess.run(["git", "fetch", "origin", base_ref], check=False, capture_output=True)
+            if base_sha:
+                try:
+                    res = subprocess.run(["git", "diff", f"{base_sha}...HEAD"], capture_output=True, text=True, check=True)
+                    return res.stdout
+                except subprocess.CalledProcessError:
+                    pass
+            res = subprocess.run(["git", "diff", f"origin/{base_ref}...HEAD"], capture_output=True, text=True, check=True)
+            return res.stdout
+        raise
 
 
 def create_diff_branch(pr_number, diff_text):
@@ -136,8 +154,9 @@ def create_diff_branch(pr_number, diff_text):
     )
     original_commit = result.stdout.strip()
     log(f"Current commit: {original_commit}")
-    
-    branch_name = f"temp/pr-{pr_number}-diff-{int(time.time())}"
+
+    run_id = os.environ.get("GITHUB_RUN_ID", str(int(time.time())))
+    branch_name = f"temp/pr-{pr_number}-diff-{run_id}"
     file_name = f"pr-{pr_number}-full.diff"
     
     log(f"Writing full diff to {file_name} ({len(diff_text):,} chars)...")
@@ -417,10 +436,21 @@ def main():
         final_session = session
         state = session.get("state", "UNKNOWN")
         early_exit = False
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 5
+
         for poll_num in range(1, MAX_POLLS + 1):
             time.sleep(POLL_SECONDS)
-            final_session = get_jules_session(session_name)
-            state = final_session.get("state", "UNKNOWN")
+            try:
+                final_session = get_jules_session(session_name)
+                state = final_session.get("state", "UNKNOWN")
+                consecutive_errors = 0
+            except Exception as exc:
+                consecutive_errors += 1
+                log(f"Poll {poll_num}/{MAX_POLLS}: transient error fetching session ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {exc}")
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    raise
+                continue
 
             if poll_num % 4 == 1 or state in FINAL_STATES:
                 log(f"Poll {poll_num}/{MAX_POLLS}: state={state}")
@@ -458,18 +488,29 @@ def main():
             raise SystemExit(1)
 
         state = final_session.get("state")
-        log(f"Fetching activities for session...")
-        activities = get_jules_activities(session_name)
+        log("Fetching activities for session...")
+        activities = None
+        for attempt in range(1, 4):
+            try:
+                activities = get_jules_activities(session_name)
+                break
+            except Exception as exc:
+                log(f"Fetching activities failed (attempt {attempt}/3): {exc}")
+                if attempt == 3:
+                    raise
+                time.sleep(3)
+
         activity_count = len(activities.get("activities", []))
         log(f"Found {activity_count} activities")
 
         if not early_exit and state not in REVIEWABLE_STATES:
             reason = json.dumps(final_session, indent=2, ensure_ascii=False)
+            log(f"Jules session ended with non-reviewable state `{state}`:\n{reason}")
             fail_pr_comment(
                 owner,
                 repo,
                 pr_number,
-                f"Jules session ended with non-reviewable state `{state}`.\n\nSession: {session_url}\n\n```json\n{reason[:4000]}\n```",
+                f"Jules session ended with non-reviewable state `{state}`.\n\nSession: {session_url}\n\nPlease check the GitHub Actions workflow logs for further details.",
             )
             raise SystemExit(1)
 

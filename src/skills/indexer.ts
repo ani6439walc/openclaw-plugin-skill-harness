@@ -3,10 +3,9 @@ import type { Dirent, Stats } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import matter from "gray-matter";
-import { logger, type OpenClawPluginApi } from "../../api.js";
+import { logger } from "../../api.js";
 import { resolveStateDirFromApi } from "../file-utils.js";
 import { canonicalIdentity } from "../normalize.js";
-import type { IntentCatalogEntry } from "../types.js";
 import { buildSkillDomainMap } from "./domains.js";
 import {
   DEFAULT_SKILL_INDEX_CACHE_TTL_MS,

@@ -1,32 +1,18 @@
 import { logger } from "../../api.js";
 import {
-  packageRoot,
   reviewLogPath,
   fileExists,
   readJsonFile,
   safeWriteJson,
   withFileLock,
 } from "../file-utils.js";
-import type {
-  IntentMarkdownReviewFinding,
-  ReviewFinding,
-  ReviewSource,
-} from "./types.js";
+import type { ReviewFinding, ReviewSource } from "./types.js";
 import type { SkillPlacementCandidate } from "../stats/aggregator.js";
-import type { ReviewTriggerKeywords } from "./trigger-keywords.js";
-import { normalizeKeywordList } from "./trigger-keywords.js";
 import {
-  createReviewLog,
   createReviewLogV7,
-  readReviewLog,
-  pruneProcessedEvents,
-  ReviewLogSchema,
   ReviewLogV7Schema,
   parseReviewLogV7,
   pruneReviewLogV7Events,
-  normalizeNoFindingReasonCounts,
-  normalizeSchemaRejectionReasonCounts,
-  type AppliedIntentReviewChange,
   type AppliedReviewChange,
   type NoFindingReasonCounts,
   type ProcessedEventOutcome,
@@ -80,230 +66,8 @@ function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
   };
 }
 
-function appliedIntentChangeFromFinding(
-  finding: IntentMarkdownReviewFinding,
-): AppliedIntentReviewChange {
-  return {
-    trigger: finding.trigger,
-    targetKind: "intent-markdown",
-    operation: finding.operation,
-    targetIntentIds: [...finding.targetIntentIds],
-    dedupeKey: finding.dedupeKey,
-    summary: finding.summary,
-    evidence: [...finding.evidence],
-    correctionGoal: finding.correctionGoal,
-    suggestedChange: finding.suggestedChange,
-  };
-}
-
-function applyKeywordChange(
-  current: string[],
-  change: { add: string[]; remove: string[] },
-): string[] {
-  const remove = new Set(normalizeKeywordList(change.remove, []));
-  const add = normalizeKeywordList(change.add, []).filter(
-    (keyword) => !remove.has(keyword),
-  );
-  return normalizeKeywordList(
-    [...current.filter((keyword) => !remove.has(keyword)), ...add],
-    [],
-  );
-}
-
-export class ReviewLogWriter {
-  private constructor(
-    private readonly packageRoot: string,
-    private readonly options: {
-      triggerKeywordSeed?: () => Partial<ReviewTriggerKeywords> | undefined;
-      onAfterWrite?: () => void;
-    } = {},
-  ) {}
-
-  static create(
-    packageRoot: string,
-    options: {
-      triggerKeywordSeed?: () => Partial<ReviewTriggerKeywords> | undefined;
-      onAfterWrite?: () => void;
-    } = {},
-  ): ReviewLogWriter {
-    return new ReviewLogWriter(packageRoot, options);
-  }
-
-  completedSkillEpochKeys(): ReadonlySet<string> | undefined {
-    const logPath = reviewLogPath(this.packageRoot);
-    if (!fileExists(logPath)) return new Set();
-    try {
-      return new Set(Object.keys(readReviewLog(logPath).reviewedSkillEpochs));
-    } catch (error) {
-      logger.warn("failed to read completed skill epochs", {
-        error,
-        path: logPath,
-      });
-      return undefined;
-    }
-  }
-
-  async record(
-    eventId: string,
-    source: ReviewSource,
-    findings: readonly ReviewFinding[],
-    options: {
-      nowMs?: number;
-      triggers?: readonly ReviewTrigger[];
-      outcome?: ProcessedEventOutcome;
-      changedIntentIds?: readonly string[];
-      changedExperienceIds?: readonly string[];
-      validationErrors?: readonly string[];
-      noFindingReasonCounts?: NoFindingReasonCounts;
-      schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
-      skillPlacementCandidate?: SkillPlacementCandidate;
-    } = {},
-  ): Promise<boolean> {
-    if (!eventId) return false;
-    const logPath = reviewLogPath(this.packageRoot);
-
-    const result = await withFileLock(logPath, async () => {
-      try {
-        const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
-        const triggerKeywordSeed = this.options.triggerKeywordSeed?.();
-        const log = fileExists(logPath)
-          ? readReviewLog(logPath)
-          : createReviewLog(nowIso, triggerKeywordSeed);
-
-        pruneProcessedEvents(log, options.nowMs ?? Date.now());
-
-        if (log.processedEvents[eventId]) return false;
-
-        const changes = findings.map(appliedChangeFromFinding);
-        for (const change of changes) {
-          if (
-            change.targetKind !== "trigger-keywords" ||
-            !change.keywordChange
-          ) {
-            continue;
-          }
-          if (change.targetTrigger === "successful-pattern") {
-            log.triggerKeywords.successfulPattern = applyKeywordChange(
-              log.triggerKeywords.successfulPattern,
-              change.keywordChange,
-            );
-          } else if (change.targetTrigger === "behavior-fix") {
-            log.triggerKeywords.behaviorFix = applyKeywordChange(
-              log.triggerKeywords.behaviorFix,
-              change.keywordChange,
-            );
-          } else if (change.targetTrigger === "entity-context") {
-            log.triggerKeywords.entityContext = applyKeywordChange(
-              log.triggerKeywords.entityContext,
-              change.keywordChange,
-            );
-          }
-        }
-
-        const triggers = [
-          ...new Set(
-            (
-              options.triggers ?? findings.map((finding) => finding.trigger)
-            ).filter(Boolean),
-          ),
-        ];
-        const changedIntentIds = [
-          ...new Set(
-            (options.changedIntentIds ?? [])
-              .map((intentId) => intentId.trim())
-              .filter(Boolean),
-          ),
-        ];
-        const changedExperienceIds = [
-          ...new Set(
-            (options.changedExperienceIds ?? [])
-              .map((identity) => identity.trim())
-              .filter(Boolean),
-          ),
-        ];
-        const validationErrors = [
-          ...new Set(
-            (options.validationErrors ?? [])
-              .map((error) => error.trim())
-              .filter(Boolean),
-          ),
-        ];
-        const noFindingReasonCounts = normalizeNoFindingReasonCounts(
-          options.noFindingReasonCounts,
-        );
-        const schemaRejectionReasonCounts =
-          normalizeSchemaRejectionReasonCounts(
-            options.schemaRejectionReasonCounts,
-          );
-        const outcome =
-          options.outcome ?? (changes.length > 0 ? "applied" : "nofinding");
-
-        const candidate = options.skillPlacementCandidate;
-        if (
-          candidate &&
-          (outcome === "applied" || outcome === "nofinding") &&
-          !Object.hasOwn(log.reviewedSkillEpochs, candidate.epochKey)
-        ) {
-          Object.defineProperty(log.reviewedSkillEpochs, candidate.epochKey, {
-            configurable: true,
-            enumerable: true,
-            value: {
-              agentId: candidate.agentId,
-              skillName: candidate.name,
-              source: candidate.source,
-              reason: candidate.reason,
-              completedAt: nowIso,
-              outcome,
-              eventId,
-            },
-            writable: true,
-          });
-        }
-
-        log.updatedAt = nowIso;
-        log.processedEvents[eventId] = {
-          processedAt: nowIso,
-          source,
-          triggers,
-          changeCount: changes.length,
-          outcome,
-          ...(changes.length > 0 ? { changes } : {}),
-          ...(changedIntentIds.length > 0 ? { changedIntentIds } : {}),
-          ...(changedExperienceIds.length > 0 ? { changedExperienceIds } : {}),
-          ...(validationErrors.length > 0 ? { validationErrors } : {}),
-          ...(noFindingReasonCounts ? { noFindingReasonCounts } : {}),
-          ...(schemaRejectionReasonCounts
-            ? { schemaRejectionReasonCounts }
-            : {}),
-        };
-        const validated = ReviewLogSchema.parse(log);
-        return safeWriteJson(logPath, validated, "failed to write review log");
-      } catch (err) {
-        logger.warn("failed to update review log", {
-          error: err,
-          path: logPath,
-        });
-        return false;
-      }
-    });
-
-    if (result === undefined) {
-      logger.warn("failed to acquire lock for review log", {
-        path: logPath,
-      });
-      return false;
-    }
-    if (result) this.options.onAfterWrite?.();
-    return result;
-  }
-}
-
 export class IntentReviewLogWriter {
-  private constructor(private readonly dataRoot: string) {}
-
-  static create(dataRoot: string): IntentReviewLogWriter {
-    return new IntentReviewLogWriter(dataRoot);
-  }
+  constructor(private readonly dataRoot: string) {}
 
   completedSkillEpochKeys(): ReadonlySet<string> | undefined {
     const logPath = reviewLogPath(this.dataRoot);
@@ -408,6 +172,7 @@ export class IntentReviewLogWriter {
       triggers?: readonly ReviewTrigger[];
       outcome?: ProcessedEventOutcome;
       changedIntentIds?: readonly string[];
+      changedExperienceIds?: readonly string[];
       validationErrors?: readonly string[];
       noFindingReasonCounts?: NoFindingReasonCounts;
       schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
@@ -466,6 +231,9 @@ export class IntentReviewLogWriter {
           ...(options.changedIntentIds?.length
             ? { changedIntentIds: [...options.changedIntentIds] }
             : {}),
+          ...(options.changedExperienceIds?.length
+            ? { changedExperienceIds: [...options.changedExperienceIds] }
+            : {}),
           ...(options.validationErrors?.length
             ? { validationErrors: [...options.validationErrors] }
             : {}),
@@ -496,5 +264,3 @@ export class IntentReviewLogWriter {
     return result ?? false;
   }
 }
-
-export const defaultReviewLogWriter = ReviewLogWriter.create(packageRoot);

@@ -5,7 +5,7 @@ import {
   UNTRUSTED_CONTEXT_HEADER,
   USER_MESSAGE_BOUNDARY,
 } from "../constants.js";
-import { indentXmlLines, xmlBlock } from "../xml-format.js";
+import { xmlBlock } from "../xml-format.js";
 import { canonicalIdentity } from "../normalize.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
 import type {

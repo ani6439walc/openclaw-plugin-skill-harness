@@ -62,10 +62,6 @@ web_modules/
 # Output of 'npm pack'
 *.tgz
 
-# Python bytecode
-__pycache__/
-*.py[cod]
-
 # Yarn Integrity file
 .yarn-integrity
 
@@ -146,10 +142,14 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
-sessions
+# Python bytecode
+__pycache__/
+*.py[cod]
 
-cache
+.agents
 .codegraph
-.omg
-.sisyphus
-.hermes
+.codex
+.omo
+
+sessions
+cache

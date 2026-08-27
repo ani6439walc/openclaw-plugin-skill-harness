@@ -146,7 +146,7 @@ describe("registerSkillTools", () => {
     const api = createApi(stateDir, path.join(tmp, "workspace"));
 
     registerSkillTools(api, {
-      experienceCatalog: SkillExperienceCatalog.create(
+      experienceCatalog: new SkillExperienceCatalog(
         path.join(stateDir, "plugins", "skill-harness"),
       ),
     });
@@ -217,7 +217,7 @@ describe("registerSkillTools", () => {
     const readBefore = fs.readFileSync(experienceFile, "utf8");
 
     registerSkillTools(api, {
-      experienceCatalog: SkillExperienceCatalog.create(dataRoot),
+      experienceCatalog: new SkillExperienceCatalog(dataRoot),
     });
     const tool = toolsForAgent(api, "main").get("skill_experience");
     const result = await runTool(tool, {
@@ -261,7 +261,7 @@ describe("registerSkillTools", () => {
     writeExperience(dataRoot, "vue", "signals", "Use explicit signals.");
 
     registerSkillTools(api, {
-      experienceCatalog: SkillExperienceCatalog.create(dataRoot),
+      experienceCatalog: new SkillExperienceCatalog(dataRoot),
     });
     const result = await runTool(
       toolsForAgent(api, "main").get("skill_experience"),
@@ -283,7 +283,7 @@ describe("registerSkillTools", () => {
     const api = createApi(stateDir, workspace);
     writeSkill(workspace, "react");
     registerSkillTools(api, {
-      experienceCatalog: SkillExperienceCatalog.create(
+      experienceCatalog: new SkillExperienceCatalog(
         path.join(stateDir, "plugins", "skill-harness"),
       ),
     });
@@ -321,7 +321,7 @@ describe("registerSkillTools", () => {
     const api = createApi(stateDir, workspace);
     writeSkill(workspace, "react");
     registerSkillTools(api, {
-      experienceCatalog: SkillExperienceCatalog.create(
+      experienceCatalog: new SkillExperienceCatalog(
         path.join(stateDir, "plugins", "skill-harness"),
       ),
     });

@@ -316,15 +316,6 @@ def object_or_empty(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def top_counts(counts: dict[str, Any], value_field: str) -> list[dict[str, Any]]:
-    rows = [
-        {"name": name, value_field: number(value)}
-        for name, value in counts.items()
-        if isinstance(name, str)
-    ]
-    return sorted(rows, key=lambda row: (-row[value_field], row["name"]))[:TOP_TARGETS]
-
-
 def stats_attribution(stats: dict[str, Any]) -> dict[str, Any]:
     if stats["schemaVersion"] == 3:
         return {

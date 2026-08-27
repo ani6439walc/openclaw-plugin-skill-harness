@@ -99,10 +99,6 @@ interface ScoredDocument {
   matchedIntents: MatchedIntent[];
 }
 
-export function normalizeSearchText(value: string): string {
-  return normalizeForComparison(value);
-}
-
 function normalizedStrings(values: readonly string[] | undefined): string[] {
   const seen = new Set<string>();
   for (const value of values ?? []) {

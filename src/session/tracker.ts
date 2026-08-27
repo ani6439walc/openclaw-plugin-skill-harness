@@ -27,7 +27,6 @@ import {
   sessionsPath,
   fileExists,
   readJsonFile,
-  safeWriteJson,
   withFileLock,
   writeJsonAtomic,
 } from "../file-utils.js";
@@ -1407,63 +1406,6 @@ export class SessionTracker {
       }
       return [record];
     });
-  }
-
-  private rotate(sessionId: string): void {
-    const session = this.sessionData.get(sessionId);
-    if (!session) return;
-    const snapshot = session.current;
-    if (
-      !snapshot.input &&
-      !snapshot.result &&
-      !snapshot.error &&
-      !snapshot.toolCalls?.length
-    ) {
-      return;
-    }
-
-    if (!session.history) {
-      session.history = [];
-    }
-    session.history.push({ ...snapshot });
-    session.current = { intent: {} };
-  }
-
-  private record(sessionId: string, data: Partial<SessionData>): void {
-    if (!sessionId) {
-      return;
-    }
-
-    let session = this.sessionData.get(sessionId);
-    if (!session) {
-      session = { sessionId: sessionId, current: { intent: {} } };
-      this.sessionData.set(sessionId, session);
-    }
-
-    if (data.sessionKey !== undefined) {
-      session.sessionKey = data.sessionKey;
-    }
-    if (data.agentId !== undefined) {
-      session.agentId = data.agentId;
-    }
-
-    const current = session.current;
-
-    if (data.current) mergeSessionState(current, data.current);
-
-    if (data.history) {
-      session.history = data.history;
-    }
-  }
-
-  private write(sessionId: string): void {
-    const session = this.sessionData.get(sessionId);
-    if (!session) return;
-
-    const filename = `${sessionId}.json`;
-    const filePath = sessionsPath(filename, this.pluginRoot);
-
-    safeWriteJson(filePath, session, "failed to write session file");
   }
 
   cleanup(sessionId: string, options: { deleteFile: boolean }): void {

@@ -59,17 +59,6 @@ const BEHAVIOR_FIX_QUOTED_CONTENT_MARKERS = [
   "ingest payload",
 ];
 
-function includesAnyKeyword(
-  text: string | undefined,
-  keywords: readonly string[],
-): boolean {
-  if (!text) return false;
-  const normalizedText = text.toLocaleLowerCase();
-  return keywords.some((keyword) =>
-    normalizedText.includes(keyword.toLocaleLowerCase()),
-  );
-}
-
 function isQuotedContentPrompt(value: string | undefined): boolean {
   if (!value) return false;
   const normalized = value.toLocaleLowerCase();
@@ -227,7 +216,6 @@ export function checkReviewTriggers(
 ): ReviewTrigger[] {
   const matches: ReviewTrigger[] = [];
   const toolCalls = state.toolCalls ?? [];
-  const text = `${state.input ?? ""}\n${state.result ?? ""}`;
   const result =
     state.intent && "intent" in state.intent
       ? state.intent

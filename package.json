@@ -3,6 +3,7 @@
   "displayName": "Skill Harness",
   "description": "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
   "version": "2026.7.1-2",
+  "packageManager": "pnpm@11.22.0",
   "type": "module",
   "license": "MIT",
   "author": "Ani <ani6439walc@gmail.com>",
