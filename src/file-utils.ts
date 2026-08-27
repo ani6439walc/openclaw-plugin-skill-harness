@@ -173,23 +173,6 @@ export class FileLock {
     this.lockPath = `${targetPath}.lock`;
   }
 
-  tryAcquire(): boolean {
-    try {
-      fs.mkdirSync(path.dirname(this.lockPath), { recursive: true });
-      fs.mkdirSync(this.lockPath);
-      return true;
-    } catch (error) {
-      const errno = error as NodeJS.ErrnoException;
-      if (errno.code !== "EEXIST") {
-        logger.warn("failed to acquire file lock", {
-          error,
-          path: this.lockPath,
-        });
-      }
-      return false;
-    }
-  }
-
   /**
    * Acquire the lock with exponential backoff (async, non-blocking).
    * Returns true if acquired, false if timeout.
