@@ -154,8 +154,9 @@ def create_diff_branch(pr_number, diff_text):
     )
     original_commit = result.stdout.strip()
     log(f"Current commit: {original_commit}")
-    
-    branch_name = f"temp/pr-{pr_number}-diff-{int(time.time())}"
+
+    run_id = os.environ.get("GITHUB_RUN_ID", str(int(time.time())))
+    branch_name = f"temp/pr-{pr_number}-diff-{run_id}"
     file_name = f"pr-{pr_number}-full.diff"
     
     log(f"Writing full diff to {file_name} ({len(diff_text):,} chars)...")

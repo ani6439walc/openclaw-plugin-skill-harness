@@ -28,10 +28,29 @@ class JulesPrReviewTest(unittest.TestCase):
         workflow_text = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn('contains(fromJSON(\'["OWNER", "MEMBER", "COLLABORATOR"]\'), github.event.pull_request.author_association)', workflow_text)
 
-    def test_workflow_includes_always_cleanup_step(self):
+    def test_workflow_cleanup_is_scoped_to_the_current_run(self):
         workflow_text = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("name: Cleanup temporary diff branch\n        if: always()", workflow_text)
-        self.assertIn("git push origin --delete", workflow_text)
+        self.assertIn("RUN_ID: ${{ github.run_id }}", workflow_text)
+        self.assertIn('branch="temp/pr-${PR_NUMBER}-diff-${RUN_ID}"', workflow_text)
+        self.assertNotIn("git branch -r | grep", workflow_text)
+
+    def test_diff_branch_uses_the_workflow_run_id(self):
+        run_id = "123456789"
+        with mock.patch.dict(
+            os.environ,
+            {"GITHUB_RUN_ID": run_id},
+        ), mock.patch.object(
+            jules_pr_review.subprocess, "run"
+        ) as run, mock.patch.object(
+            jules_pr_review, "ensure_git_config"
+        ), mock.patch.object(
+            jules_pr_review, "push_diff_branch"
+        ), mock.patch("builtins.open", mock.mock_open()):
+            run.return_value.stdout = "abc123\n"
+            branch = jules_pr_review.create_diff_branch("57", "diff")
+
+        self.assertEqual(branch, f"temp/pr-57-diff-{run_id}")
 
     def test_push_failure_reports_sanitized_git_output(self):
         github_token = "github-token-secret"

@@ -49,10 +49,8 @@ jobs:
         if: always()
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          git fetch origin --prune
-          branches=$(git branch -r | grep -E "origin/temp/pr-${PR_NUMBER}-diff-" | sed 's|^ *origin/||' || true)
-          for b in $branches; do
-            echo "Cleaning up lingering branch: $b"
-            git push origin --delete "$b" || true
-          done
+          branch="temp/pr-${PR_NUMBER}-diff-${RUN_ID}"
+          echo "Cleaning up temporary branch owned by this run: $branch"
+          git push origin --delete "$branch" || true
