@@ -54,4 +54,5 @@ jobs:
       - name: Build and verify package shape
         run: |
           pnpm run build
+          pnpm run test:plugin-loader
           pnpm pack --dry-run
