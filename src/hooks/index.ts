@@ -709,24 +709,6 @@ export function createHookHandlers(deps: HookDeps) {
     return true;
   }
 
-  function resolveTrackingContext(ctx: {
-    sessionId?: string;
-    sessionKey?: string;
-    agentId?: string;
-  }): { sessionId?: string; sessionKey?: string } {
-    const sessionKey =
-      ctx.sessionKey?.trim() ||
-      (ctx.agentId
-        ? resolveCanonicalSessionKeyFromSessionId({
-            api,
-            agentId: ctx.agentId,
-            sessionId: ctx.sessionId,
-          })
-        : undefined);
-
-    return { sessionId: ctx.sessionId, sessionKey };
-  }
-
   function buildConversationContext(
     event: PluginHookBeforePromptBuildEvent,
     ctx: PluginHookAgentContext,

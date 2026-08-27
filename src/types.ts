@@ -8,31 +8,6 @@ export type ThinkLevel =
 
 export type LowEffortRoutingMode = "fastpath-only" | "full" | "off";
 
-export type ReviewTriggersConfig = {
-  skillCandidate?: { enabled?: boolean; toolCalls?: number };
-  skillPlacement?: { enabled?: boolean };
-  processGap?: { enabled?: boolean; toolFailures?: number };
-  successfulPattern?: {
-    enabled?: boolean;
-    toolCalls?: number;
-  };
-  satisfactionCheck?: { enabled?: boolean; everyTurns?: number };
-  missingIntent?: { enabled?: boolean };
-  weakIntent?: { enabled?: boolean; confidenceBelow?: number };
-  behaviorFix?: { enabled?: boolean };
-  entityContext?: { enabled?: boolean };
-};
-
-export type ReviewConfig = {
-  enabled?: boolean;
-  model?: string;
-  modelFallback?: string;
-  thinking?: ThinkLevel;
-  timeoutSeconds?: number;
-  keywordCoverage?: { everyAcceptedTurns?: number };
-  triggers?: ReviewTriggersConfig;
-};
-
 export type ResolvedReviewConfig = {
   enabled: boolean;
   model: string | undefined;
@@ -56,19 +31,12 @@ export type ResolvedReviewConfig = {
   };
 };
 
-export type CurationConfig = {
-  enabled?: boolean;
+export type ResolvedCurationConfig = {
+  enabled: boolean;
   model?: string;
   modelFallback?: string;
-  thinking?: ThinkLevel;
-  timeoutSeconds?: number;
-};
-
-export type ResolvedCurationConfig = Required<
-  Pick<CurationConfig, "enabled" | "thinking" | "timeoutSeconds">
-> & {
-  model?: string;
-  modelFallback?: string;
+  thinking: ThinkLevel;
+  timeoutSeconds: number;
 };
 
 export type QmdEndpointConfig = {
@@ -79,23 +47,6 @@ export type QmdEndpointConfig = {
 
 export type QmdEmbeddingConfig = QmdEndpointConfig & {
   dimension?: number;
-};
-
-export type QmdConfig = {
-  timeoutMs?: number;
-  embedding?: QmdEmbeddingConfig;
-  expansion?: QmdEndpointConfig;
-  rerank?: QmdEndpointConfig;
-};
-
-export type RoutingConfig = {
-  sameTopic?: { minConfidence?: number };
-  qmd?: {
-    minTopicConfidence?: number;
-    directRouteMinScore?: number;
-    smallCandidateMinScore?: number;
-    minCandidateScore?: number;
-  };
 };
 
 export type ResolvedRoutingConfig = {
