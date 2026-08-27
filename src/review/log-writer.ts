@@ -6,18 +6,13 @@ import {
   safeWriteJson,
   withFileLock,
 } from "../file-utils.js";
-import type {
-  IntentMarkdownReviewFinding,
-  ReviewFinding,
-  ReviewSource,
-} from "./types.js";
+import type { ReviewFinding, ReviewSource } from "./types.js";
 import type { SkillPlacementCandidate } from "../stats/aggregator.js";
 import {
   createReviewLogV7,
   ReviewLogV7Schema,
   parseReviewLogV7,
   pruneReviewLogV7Events,
-  type AppliedIntentReviewChange,
   type AppliedReviewChange,
   type NoFindingReasonCounts,
   type ProcessedEventOutcome,
@@ -58,22 +53,6 @@ function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
       suggestedChange: finding.suggestedChange,
     };
   }
-  return {
-    trigger: finding.trigger,
-    targetKind: "intent-markdown",
-    operation: finding.operation,
-    targetIntentIds: [...finding.targetIntentIds],
-    dedupeKey: finding.dedupeKey,
-    summary: finding.summary,
-    evidence: [...finding.evidence],
-    correctionGoal: finding.correctionGoal,
-    suggestedChange: finding.suggestedChange,
-  };
-}
-
-function appliedIntentChangeFromFinding(
-  finding: IntentMarkdownReviewFinding,
-): AppliedIntentReviewChange {
   return {
     trigger: finding.trigger,
     targetKind: "intent-markdown",

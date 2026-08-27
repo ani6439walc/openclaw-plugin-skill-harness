@@ -1,10 +1,5 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseReviewLogV7 } from "./log.js";
-import type {
-  AppliedIntentReviewChange,
-  IntentProcessedEventRecord,
-  ReviewLogV7,
-} from "./log.js";
 
 describe("review log", () => {
   it("keeps a strict v7 audit contract", () => {
@@ -29,12 +24,6 @@ describe("review log", () => {
         triggerKeywords: {},
       }),
     ).toThrow();
-    expectTypeOf<ReviewLogV7["processedEvents"]>().toEqualTypeOf<
-      Record<string, IntentProcessedEventRecord>
-    >();
-    expectTypeOf<IntentProcessedEventRecord["changes"]>().toEqualTypeOf<
-      AppliedIntentReviewChange[] | undefined
-    >();
   });
 
   it("rejects keyword changes from mutable v7 processed events", () => {

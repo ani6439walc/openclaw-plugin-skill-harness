@@ -90,21 +90,6 @@ export type ProcessedEventRecord = {
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
 };
 
-export type AppliedIntentReviewChange = Omit<
-  AppliedReviewChange,
-  "targetKind" | "operation" | "targetTrigger" | "keywordChange"
-> & {
-  targetKind: "intent-markdown";
-  operation: ReviewOperation;
-};
-
-export type IntentProcessedEventRecord = Omit<
-  ProcessedEventRecord,
-  "changes"
-> & {
-  changes?: AppliedIntentReviewChange[];
-};
-
 export type ReviewedSkillEpoch = {
   agentId: string;
   skillName: string;
@@ -165,12 +150,6 @@ export function normalizeNoFindingReasonCounts(
   value: unknown,
 ): NoFindingReasonCounts | undefined {
   return normalizeAllowlistedCounts(value, NO_FINDING_REASON_CODES);
-}
-
-export function normalizeSchemaRejectionReasonCounts(
-  value: unknown,
-): SchemaRejectionReasonCounts | undefined {
-  return normalizeAllowlistedCounts(value, SCHEMA_REJECTION_REASON_CODES);
 }
 
 const KeywordChangeSchema = z
@@ -285,29 +264,6 @@ const RuntimeAppliedReviewChangeSchema = z.union([
   IntentAppliedReviewChangeSchema,
   SkillExperienceAppliedReviewChangeSchema,
 ]);
-
-const IntentProcessedEventRecordSchema = z
-  .object({
-    processedAt: z.string(),
-    source: ReviewSourceSchema.optional(),
-    triggers: z.array(z.enum(REVIEW_TRIGGER_TYPES)),
-    changeCount: z.number().int().nonnegative(),
-    outcome: ProcessedEventOutcomeSchema,
-    changes: z.array(IntentAppliedReviewChangeSchema).optional(),
-    changedIntentIds: z.array(z.string()).optional(),
-    validationErrors: z.array(z.string()).optional(),
-    noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
-    schemaRejectionReasonCounts: SchemaRejectionReasonCountsSchema.optional(),
-  })
-  .strict()
-  .refine((record) =>
-    record.triggers.every(
-      (trigger) =>
-        trigger !== "successful-pattern" &&
-        trigger !== "behavior-fix" &&
-        trigger !== "entity-context",
-    ),
-  );
 
 const RuntimeProcessedEventRecordSchema = z
   .object({
