@@ -109,7 +109,7 @@ async function waitForReady(
 }
 
 describe("createIntentQmdIndex", () => {
-  it("builds a managed snapshot and uses the configured QMD search modes", async () => {
+  it("builds a managed snapshot and uses default QMD expansion", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
     roots.push(root);
     const search = vi.fn().mockResolvedValue([
@@ -171,7 +171,6 @@ describe("createIntentQmdIndex", () => {
     expect(search).toHaveBeenCalledWith({
       query: "add qmd",
       collections: ["intent-triggers", "intent-examples"],
-      expansion: "force",
       includeHyde: false,
       expansionContext:
         "domain=development; keywords=qmd,routing; topic=Add QMD routing",
