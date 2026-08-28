@@ -921,19 +921,11 @@ export function createHookHandlers(deps: HookDeps) {
           params.refreshedConfig.routing.qmd.minTopicConfidence
           ? formatQmdTriggerExpansionContext(topicContext)
           : undefined;
-      const rerankContext =
-        topicContext &&
-        topicContext.confidence >=
-          params.refreshedConfig.routing.qmd.minTopicConfidence &&
-        topicContext.domain
-          ? `domain=${topicContext.domain}`
-          : undefined;
       const qmdHits = qmdIntentIndex
         ? await qmdIntentIndex.searchIntentTriggers({
             query: params.latestUserMessage,
             rawLimit: limits.rawLimit,
             ...(expansionContext ? { expansionContext } : {}),
-            ...(rerankContext ? { rerankContext } : {}),
           })
         : undefined;
       const topHit = qmdHits?.[0];

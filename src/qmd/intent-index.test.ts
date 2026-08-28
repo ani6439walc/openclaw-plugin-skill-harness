@@ -146,7 +146,6 @@ describe("createIntentQmdIndex", () => {
         rawLimit: 12,
         expansionContext:
           "domain=development; keywords=qmd,routing; topic=Add QMD routing",
-        rerankContext: "domain=development",
       }),
     ).resolves.toEqual([
       {
@@ -173,10 +172,10 @@ describe("createIntentQmdIndex", () => {
       query: "add qmd",
       collections: ["intent-triggers", "intent-examples"],
       expansion: "force",
+      includeHyde: false,
       expansionContext:
         "domain=development; keywords=qmd,routing; topic=Add QMD routing",
-      rerankContext: "domain=development",
-      rerank: true,
+      rerank: false,
       limit: 12,
       candidateLimit: 12,
       minScore: 0,

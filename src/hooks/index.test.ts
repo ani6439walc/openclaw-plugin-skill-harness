@@ -4134,7 +4134,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         query: "maintain this repository",
         expansionContext:
           "domain=git; keywords=repository,maintenance; topic=User wants repository maintenance.",
-        rerankContext: "domain=git",
       }),
     );
     expect(record).toHaveBeenCalledWith(

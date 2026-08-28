@@ -39,7 +39,6 @@ export interface IntentQmdIndex {
     query: string;
     rawLimit: number;
     expansionContext?: string;
-    rerankContext?: string;
   }): Promise<QmdIntentHit[] | undefined>;
   searchTopicKeywords(params: {
     query: string;
@@ -359,7 +358,6 @@ export function createIntentQmdIndex(params: {
       query,
       rawLimit,
       expansionContext,
-      rerankContext,
     }) {
       if (!isReadyForCurrentCatalog()) return;
       const activeStore = store;
@@ -369,9 +367,9 @@ export function createIntentQmdIndex(params: {
           query,
           collections: [TRIGGERS_COLLECTION, EXAMPLES_COLLECTION],
           expansion: "force",
+          includeHyde: false,
           ...(expansionContext ? { expansionContext } : {}),
-          ...(rerankContext ? { rerankContext } : {}),
-          rerank: true,
+          rerank: false,
           limit: rawLimit,
           candidateLimit: rawLimit,
           minScore: 0,
