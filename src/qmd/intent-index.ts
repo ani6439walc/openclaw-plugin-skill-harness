@@ -354,11 +354,7 @@ export function createIntentQmdIndex(params: {
         running = runWorker();
       }
     },
-    async searchIntentTriggers({
-      query,
-      rawLimit,
-      expansionContext,
-    }) {
+    async searchIntentTriggers({ query, rawLimit, expansionContext }) {
       if (!isReadyForCurrentCatalog()) return;
       const activeStore = store;
       if (!activeStore) return;
