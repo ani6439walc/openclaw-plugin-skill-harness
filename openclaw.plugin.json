@@ -92,7 +92,7 @@
             "type": "integer",
             "minimum": 1000,
             "maximum": 60000,
-            "description": "QMD remote embedding, query-expansion, and rerank request budget in milliseconds. Defaults to timeoutMs."
+            "description": "QMD remote embedding and query-expansion request budget in milliseconds. Defaults to timeoutMs."
           },
           "embedding": {
             "type": "object",
@@ -114,19 +114,9 @@
               "model": { "type": "string" },
               "apiKey": { "type": "string" }
             }
-          },
-          "rerank": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["baseUrl", "model"],
-            "properties": {
-              "baseUrl": { "type": "string" },
-              "model": { "type": "string" },
-              "apiKey": { "type": "string" }
-            }
           }
         },
-        "required": ["embedding", "expansion", "rerank"]
+        "required": ["embedding", "expansion"]
       },
       "routing": {
         "type": "object",

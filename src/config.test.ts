@@ -165,8 +165,10 @@ describe("resolveConfig", () => {
       expect(manifest.configSchema.properties.qmd.required).toEqual([
         "embedding",
         "expansion",
-        "rerank",
       ]);
+      expect(
+        manifest.configSchema.properties.qmd.properties,
+      ).not.toHaveProperty("rerank");
       expect(
         manifest.configSchema.properties.routing?.properties.sameTopic
           .properties.minConfidence.default,
@@ -175,7 +177,7 @@ describe("resolveConfig", () => {
         manifest.configSchema.properties.routing?.properties.qmd.properties
           .directRouteMinScore.default,
       ).toBe(0.85);
-      for (const endpoint of ["embedding", "expansion", "rerank"]) {
+      for (const endpoint of ["embedding", "expansion"]) {
         expect(
           manifest.configSchema.properties.qmd.properties[endpoint]?.required,
         ).toEqual(["baseUrl", "model"]);
@@ -204,11 +206,6 @@ describe("resolveConfig", () => {
             model: "expand-model",
             apiKey: "expand-key",
           },
-          rerank: {
-            baseUrl: "https://llm.example.test/v1",
-            model: "rerank-model",
-            apiKey: "rerank-key",
-          },
         },
       });
 
@@ -224,11 +221,6 @@ describe("resolveConfig", () => {
           baseUrl: "https://llm.example.test/v1",
           model: "expand-model",
           apiKey: "expand-key",
-        },
-        rerank: {
-          baseUrl: "https://llm.example.test/v1",
-          model: "rerank-model",
-          apiKey: "rerank-key",
         },
       });
     });

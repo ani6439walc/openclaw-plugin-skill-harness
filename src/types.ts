@@ -65,8 +65,6 @@ export type ResolvedQmdConfig = {
     Omit<QmdEmbeddingConfig, "baseUrl" | "model">;
   expansion: Required<Pick<QmdEndpointConfig, "baseUrl" | "model">> &
     Omit<QmdEndpointConfig, "baseUrl" | "model">;
-  rerank: Required<Pick<QmdEndpointConfig, "baseUrl" | "model">> &
-    Omit<QmdEndpointConfig, "baseUrl" | "model">;
 };
 
 export type ResolvedSkillHarnessPluginConfig = {
