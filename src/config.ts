@@ -70,7 +70,6 @@ const DEFAULT_QMD: ResolvedQmdConfig = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   embedding: { baseUrl: "", model: "" },
   expansion: { baseUrl: "", model: "" },
-  rerank: { baseUrl: "", model: "" },
 };
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
@@ -243,7 +242,6 @@ const QmdSchema = z
     timeoutMs: z.number().optional().catch(undefined),
     embedding: QmdEmbeddingSchema,
     expansion: QmdEndpointSchema,
-    rerank: QmdEndpointSchema,
   })
   .catch(DEFAULT_QMD);
 

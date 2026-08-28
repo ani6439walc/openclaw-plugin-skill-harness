@@ -13,4 +13,4 @@ allowBuilds:
   tree-sitter-rust: true
   tree-sitter-typescript: true
 minimumReleaseAgeExclude:
-  - '@wei840222/qmd@2026.8.24'
+  - '@wei840222/qmd@2026.8.24 || 2026.8.28'

@@ -27,11 +27,6 @@ const qmdConfig: ResolvedQmdConfig = {
     model: "expand-model",
     apiKey: "expand-key",
   },
-  rerank: {
-    baseUrl: "https://rerank.example.test/v1",
-    model: "rerank-model",
-    apiKey: "rerank-key",
-  },
 };
 
 const catalog: IntentCatalogEntry[] = [
@@ -109,14 +104,14 @@ async function waitForReady(
 }
 
 describe("createIntentQmdIndex", () => {
-  it("builds a managed snapshot and uses the configured QMD search modes", async () => {
+  it("builds a managed snapshot and uses default QMD expansion", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
     roots.push(root);
     const search = vi.fn().mockResolvedValue([
       {
         body: "---\nintent_id: implementation\n---\nadd a QMD fastpath",
         score: 0.91,
-        explain: { rerankScore: 0.91 },
+        explain: { backend: "rrf" },
       },
     ]);
     const searchLex = vi.fn().mockResolvedValue([
@@ -146,14 +141,13 @@ describe("createIntentQmdIndex", () => {
         rawLimit: 12,
         expansionContext:
           "domain=development; keywords=qmd,routing; topic=Add QMD routing",
-        rerankContext: "domain=development",
       }),
     ).resolves.toEqual([
       {
         intentId: "implementation",
         score: 0.91,
         collection: "intent-triggers-and-examples",
-        explain: { rerankScore: 0.91 },
+        explain: { backend: "rrf" },
       },
     ]);
 
@@ -164,7 +158,6 @@ describe("createIntentQmdIndex", () => {
           models: expect.objectContaining({
             embed_api_key: "embedding-key",
             generate_api_key: "expand-key",
-            rerank_api_key: "rerank-key",
           }),
         }),
       }),
@@ -172,11 +165,10 @@ describe("createIntentQmdIndex", () => {
     expect(search).toHaveBeenCalledWith({
       query: "add qmd",
       collections: ["intent-triggers", "intent-examples"],
-      expansion: "force",
+      includeHyde: false,
       expansionContext:
         "domain=development; keywords=qmd,routing; topic=Add QMD routing",
-      rerankContext: "domain=development",
-      rerank: true,
+      rerank: false,
       limit: 12,
       candidateLimit: 12,
       minScore: 0,

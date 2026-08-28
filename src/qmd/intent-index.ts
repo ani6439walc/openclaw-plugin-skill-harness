@@ -39,7 +39,6 @@ export interface IntentQmdIndex {
     query: string;
     rawLimit: number;
     expansionContext?: string;
-    rerankContext?: string;
   }): Promise<QmdIntentHit[] | undefined>;
   searchTopicKeywords(params: {
     query: string;
@@ -262,12 +261,10 @@ export function createIntentQmdIndex(params: {
         !qmd.embedding.baseUrl ||
         !qmd.embedding.model ||
         !qmd.expansion.baseUrl ||
-        !qmd.expansion.model ||
-        !qmd.rerank.baseUrl ||
-        !qmd.rerank.model
+        !qmd.expansion.model
       ) {
         throw new Error(
-          "QMD embedding, expansion, and rerank endpoints must be configured.",
+          "QMD embedding and expansion endpoints must be configured.",
         );
       }
       const createQmdStore =
@@ -291,9 +288,6 @@ export function createIntentQmdIndex(params: {
             ...(qmd.expansion.apiKey
               ? { generate_api_key: qmd.expansion.apiKey }
               : {}),
-            rerank_api_url: qmd.rerank.baseUrl,
-            rerank_api_model: qmd.rerank.model,
-            ...(qmd.rerank.apiKey ? { rerank_api_key: qmd.rerank.apiKey } : {}),
           },
         },
         remoteRequestTimeoutMs: qmd.timeoutMs,
@@ -355,12 +349,7 @@ export function createIntentQmdIndex(params: {
         running = runWorker();
       }
     },
-    async searchIntentTriggers({
-      query,
-      rawLimit,
-      expansionContext,
-      rerankContext,
-    }) {
+    async searchIntentTriggers({ query, rawLimit, expansionContext }) {
       if (!isReadyForCurrentCatalog()) return;
       const activeStore = store;
       if (!activeStore) return;
@@ -368,10 +357,9 @@ export function createIntentQmdIndex(params: {
         const results = (await activeStore.search({
           query,
           collections: [TRIGGERS_COLLECTION, EXAMPLES_COLLECTION],
-          expansion: "force",
+          includeHyde: false,
           ...(expansionContext ? { expansionContext } : {}),
-          ...(rerankContext ? { rerankContext } : {}),
-          rerank: true,
+          rerank: false,
           limit: rawLimit,
           candidateLimit: rawLimit,
           minScore: 0,
