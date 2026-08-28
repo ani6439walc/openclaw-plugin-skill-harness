@@ -27,11 +27,6 @@ const qmdConfig: ResolvedQmdConfig = {
     model: "expand-model",
     apiKey: "expand-key",
   },
-  rerank: {
-    baseUrl: "https://rerank.example.test/v1",
-    model: "rerank-model",
-    apiKey: "rerank-key",
-  },
 };
 
 const catalog: IntentCatalogEntry[] = [
@@ -116,7 +111,7 @@ describe("createIntentQmdIndex", () => {
       {
         body: "---\nintent_id: implementation\n---\nadd a QMD fastpath",
         score: 0.91,
-        explain: { rerankScore: 0.91 },
+        explain: { backend: "rrf" },
       },
     ]);
     const searchLex = vi.fn().mockResolvedValue([
@@ -152,7 +147,7 @@ describe("createIntentQmdIndex", () => {
         intentId: "implementation",
         score: 0.91,
         collection: "intent-triggers-and-examples",
-        explain: { rerankScore: 0.91 },
+        explain: { backend: "rrf" },
       },
     ]);
 
@@ -163,7 +158,6 @@ describe("createIntentQmdIndex", () => {
           models: expect.objectContaining({
             embed_api_key: "embedding-key",
             generate_api_key: "expand-key",
-            rerank_api_key: "rerank-key",
           }),
         }),
       }),

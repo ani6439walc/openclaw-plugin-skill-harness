@@ -261,12 +261,10 @@ export function createIntentQmdIndex(params: {
         !qmd.embedding.baseUrl ||
         !qmd.embedding.model ||
         !qmd.expansion.baseUrl ||
-        !qmd.expansion.model ||
-        !qmd.rerank.baseUrl ||
-        !qmd.rerank.model
+        !qmd.expansion.model
       ) {
         throw new Error(
-          "QMD embedding, expansion, and rerank endpoints must be configured.",
+          "QMD embedding and expansion endpoints must be configured.",
         );
       }
       const createQmdStore =
@@ -290,9 +288,6 @@ export function createIntentQmdIndex(params: {
             ...(qmd.expansion.apiKey
               ? { generate_api_key: qmd.expansion.apiKey }
               : {}),
-            rerank_api_url: qmd.rerank.baseUrl,
-            rerank_api_model: qmd.rerank.model,
-            ...(qmd.rerank.apiKey ? { rerank_api_key: qmd.rerank.apiKey } : {}),
           },
         },
         remoteRequestTimeoutMs: qmd.timeoutMs,
