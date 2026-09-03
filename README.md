@@ -202,7 +202,7 @@ Configure Skill Harness in `openclaw.json`:
 | `qmd.embedding` / `expansion`               | required           | Remote endpoint and model for mandatory QMD hybrid routing; `apiKey` is optional for keyless proxies. |
 | `qmd.timeoutMs`                             | `timeoutMs`        | Per-request QMD embedding and expansion timeout.                                                      |
 | `qmd.skillSearch.collectionWeights`         | `1/1/1`            | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.    |
-| `qmd.skillSearch.scheduleCooldownMs`        | `5000`             | Minimum delay between background rebuild schedules for the same agent skill-search index.             |
+| `qmd.indexRefreshIntervalSeconds`         | `300`              | Seconds between source checks for QMD intent and skill indexes; `0` disables subsequent automatic checks.              |
 | `routing.sameTopic.minConfidence`           | `0.8`              | Minimum topic-triage confidence for same-topic intent inheritance only.                               |
 | `routing.qmd.minTopicConfidence`            | `0.8`              | Minimum topic-triage confidence for QMD topic-keyword retrieval and trigger/example QMD context.      |
 | `routing.qmd.directRouteMinScore`           | `0.85`             | Strictly-greater QMD score required for either QMD direct route.                                      |

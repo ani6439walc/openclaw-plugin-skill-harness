@@ -115,10 +115,17 @@
               "apiKey": { "type": "string" }
             }
           },
+          "indexRefreshIntervalSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "default": 300,
+            "description": "Seconds between source checks for QMD intent and skill index refreshes; 0 disables subsequent automatic checks."
+          },
           "skillSearch": {
             "type": "object",
             "additionalProperties": false,
-            "description": "Optional skill_search QMD collection weights and rebuild cooldown.",
+            "description": "Optional skill_search QMD collection weights.",
             "properties": {
               "collectionWeights": {
                 "type": "object",
@@ -141,13 +148,6 @@
                     "default": 1
                   }
                 }
-              },
-              "scheduleCooldownMs": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 60000,
-                "default": 5000,
-                "description": "Minimum delay between skill index rebuild schedules in milliseconds."
               }
             }
           }

@@ -69,11 +69,11 @@ const DEFAULT_REVIEW = {
 
 const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
   collectionWeights: { meta: 1, body: 1, references: 1 },
-  scheduleCooldownMs: 5_000,
 };
 
 const DEFAULT_QMD: ResolvedQmdConfig = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
+  indexRefreshIntervalSeconds: 300,
   embedding: { baseUrl: "", model: "" },
   expansion: { baseUrl: "", model: "" },
   skillSearch: DEFAULT_SKILL_SEARCH,
@@ -247,6 +247,7 @@ const QmdEmbeddingSchema = QmdEndpointObjectSchema.extend({
 const QmdSchema = z
   .object({
     timeoutMs: z.number().optional().catch(undefined),
+    indexRefreshIntervalSeconds: boundedInt(300, 0, 86_400),
     embedding: QmdEmbeddingSchema,
     expansion: QmdEndpointSchema,
     skillSearch: z.unknown().optional(),
@@ -271,11 +272,6 @@ const SkillSearchSchema = z
           .default(DEFAULT_SKILL_SEARCH.collectionWeights.references),
       })
       .default(DEFAULT_SKILL_SEARCH.collectionWeights),
-    scheduleCooldownMs: boundedInt(
-      DEFAULT_SKILL_SEARCH.scheduleCooldownMs,
-      0,
-      60_000,
-    ),
   })
   .default(DEFAULT_SKILL_SEARCH);
 
@@ -373,8 +369,9 @@ export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
     ResolvedSkillHarnessPluginConfig,
     "qmd" | "routing"
   > & {
-    qmd: Omit<ResolvedQmdConfig, "timeoutMs" | "skillSearch"> & {
+    qmd: Omit<ResolvedQmdConfig, "timeoutMs" | "indexRefreshIntervalSeconds" | "skillSearch"> & {
       timeoutMs?: number;
+      indexRefreshIntervalSeconds?: number;
       skillSearch?: unknown;
     };
   };
@@ -387,6 +384,12 @@ export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
         resolved.timeoutMs,
         1_000,
         60_000,
+      ),
+      indexRefreshIntervalSeconds: clampInt(
+        resolved.qmd.indexRefreshIntervalSeconds,
+        300,
+        0,
+        86_400,
       ),
       skillSearch: resolveSkillSearchConfig(raw),
     },
