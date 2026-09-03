@@ -7,6 +7,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { promises as fsPromises } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -903,6 +904,50 @@ describe("createSkillQmdIndex", () => {
       "LEASE_BUSY retry did not become ready",
     );
     expect(createStore).toHaveBeenCalledTimes(2);
+
+    await index.close();
+  });
+
+  it("fails the build when generation listing hits a non-ENOENT error", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "permission-denied",
+      description: "Permission denied skill",
+      body: "Body",
+    });
+    const agentDir = path.join(root, "qmd", "skills", safePathSegment("main"));
+    await mkdir(agentDir, { recursive: true });
+
+    const realReaddir = fsPromises.readdir.bind(fsPromises);
+    const readdirSpy = vi
+      .spyOn(fsPromises, "readdir")
+      .mockImplementation(async (dir, options) => {
+        if (path.resolve(String(dir)) === path.resolve(agentDir)) {
+          throw Object.assign(new Error("permission denied"), {
+            code: "EACCES",
+          });
+        }
+        return realReaddir(dir as never, options as never);
+      });
+
+    const createStore = vi.fn(async () => createStoreDouble({}));
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "failed",
+      "non-ENOENT generation listing did not mark failed",
+    );
+    expect(createStore).not.toHaveBeenCalled();
+    expect(readdirSpy).toHaveBeenCalled();
 
     await index.close();
   });

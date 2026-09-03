@@ -646,7 +646,7 @@ export function createSkillQmdIndex(params: {
       ) {
         return 1;
       }
-      return 1;
+      throw error;
     }
     let maxGeneration = 0;
     for (const entry of entries) {
@@ -676,13 +676,13 @@ export function createSkillQmdIndex(params: {
     const locked = await withFileLock(
       root,
       async () => {
-        const generation = await nextGenerationNumber(agentId);
-        state.generation = generation;
-        generationRoot = path.join(
-          root,
-          `gen-${generation}-${target.fingerprint.slice(0, 12)}`,
-        );
         try {
+          const generation = await nextGenerationNumber(agentId);
+          state.generation = generation;
+          generationRoot = path.join(
+            root,
+            `gen-${generation}-${target.fingerprint.slice(0, 12)}`,
+          );
           const qmd = params.config();
           if (
             !qmd.embedding.baseUrl ||
