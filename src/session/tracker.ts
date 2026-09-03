@@ -176,7 +176,7 @@ const SAFE_REVIEW_PARAM_KEYS = new Set([
   "path",
   "pattern",
   "query",
-  "show_matches",
+  "show_evidence",
   "show_related",
   "show_stats",
   "skillName",

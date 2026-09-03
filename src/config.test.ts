@@ -222,7 +222,112 @@ describe("resolveConfig", () => {
           model: "expand-model",
           apiKey: "expand-key",
         },
+        skillSearch: {
+          collectionWeights: { meta: 1, body: 1, references: 1 },
+          scheduleCooldownMs: 5_000,
+        },
       });
+    });
+
+    it("resolves default skillSearch weights and cooldown", () => {
+      const manifest = JSON.parse(
+        readFileSync(
+          new URL("../openclaw.plugin.json", import.meta.url),
+          "utf8",
+        ),
+      ) as {
+        configSchema: {
+          properties: {
+            qmd: {
+              properties: {
+                skillSearch?: {
+                  properties: {
+                    scheduleCooldownMs: { default?: number };
+                    collectionWeights?: {
+                      properties: {
+                        meta: { default?: number };
+                      };
+                    };
+                  };
+                };
+              };
+            };
+          };
+        };
+      };
+      expect(resolveConfig({}).qmd.skillSearch).toEqual({
+        collectionWeights: { meta: 1, body: 1, references: 1 },
+        scheduleCooldownMs: 5_000,
+      });
+      expect(
+        manifest.configSchema.properties.qmd.properties.skillSearch?.properties
+          .scheduleCooldownMs.default,
+      ).toBe(5000);
+      expect(
+        manifest.configSchema.properties.qmd.properties.skillSearch?.properties
+          .collectionWeights?.properties.meta.default,
+      ).toBe(1);
+    });
+
+    it("accepts custom skillSearch collection weights and cooldown", () => {
+      expect(
+        resolveConfig({
+          qmd: {
+            embedding: {
+              baseUrl: "https://embedding.example.test/v1",
+              model: "e",
+            },
+            expansion: {
+              baseUrl: "https://llm.example.test/v1",
+              model: "x",
+            },
+            skillSearch: {
+              collectionWeights: { meta: 2, body: 1.5, references: 0.5 },
+              scheduleCooldownMs: 12_000,
+            },
+          },
+        }).qmd.skillSearch,
+      ).toEqual({
+        collectionWeights: { meta: 2, body: 1.5, references: 0.5 },
+        scheduleCooldownMs: 12_000,
+      });
+    });
+
+    it("rejects non-positive skillSearch collection weights", () => {
+      expect(() =>
+        resolveConfig({
+          qmd: {
+            embedding: {
+              baseUrl: "https://embedding.example.test/v1",
+              model: "e",
+            },
+            expansion: {
+              baseUrl: "https://llm.example.test/v1",
+              model: "x",
+            },
+            skillSearch: {
+              collectionWeights: { meta: 0 },
+            },
+          },
+        }),
+      ).toThrow();
+      expect(() =>
+        resolveConfig({
+          qmd: {
+            embedding: {
+              baseUrl: "https://embedding.example.test/v1",
+              model: "e",
+            },
+            expansion: {
+              baseUrl: "https://llm.example.test/v1",
+              model: "x",
+            },
+            skillSearch: {
+              collectionWeights: { references: -1 },
+            },
+          },
+        }),
+      ).toThrow();
     });
   });
 

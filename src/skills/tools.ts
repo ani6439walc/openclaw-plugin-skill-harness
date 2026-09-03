@@ -4,8 +4,12 @@ import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
 import { manageSkill } from "./manage.js";
 import { relatedSkillsBySkillName } from "./related.js";
-import { searchAvailableSkills } from "./search.js";
-import { SKILL_SOURCE_ORDER, type SkillSource } from "./types.js";
+import {
+  skillSourcePriority,
+  SKILL_SOURCE_ORDER,
+  type SkillSource,
+} from "./types.js";
+import type { SkillQmdIndex } from "../qmd/skill-index.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 import type { IntentCatalogEntry } from "../types.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
@@ -13,6 +17,9 @@ import { canonicalIdentity } from "../normalize.js";
 
 const DEFAULT_SKILL_LIST_LIMIT = 150;
 const MAX_SKILL_LIST_LIMIT = 500;
+const DEFAULT_SKILL_SEARCH_LIMIT = 20;
+const MAX_SKILL_SEARCH_LIMIT = 100;
+const MAX_SKILL_SEARCH_QUERY_CODE_POINTS = 1_000;
 const MAX_EXPERIENCE_SKILLS = 6;
 const MAX_EXPERIENCE_QUERY_CODE_POINTS = 500;
 const MAX_EXPERIENCE_ENTRIES = 3;
@@ -25,6 +32,8 @@ const SKILL_SOURCE_SCHEMA = Type.Union(
 export interface RegisterSkillToolsOptions {
   getIntents?: (agentId: string) => readonly IntentCatalogEntry[];
   experienceCatalog?: SkillExperienceCatalog;
+  qmdSkillIndex?: SkillQmdIndex;
+  scheduleSkillSearchIndex?: (agentId: string) => void;
 }
 
 function jsonToolResult(data: unknown) {
@@ -45,16 +54,6 @@ function optionalStringParam(params: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function optionalStringArrayParam(
-  params: unknown,
-  key: string,
-): string[] | undefined {
-  if (!params || typeof params !== "object") return;
-  const value = (params as Record<string, unknown>)[key];
-  if (!Array.isArray(value)) return;
-  return value.filter((item): item is string => typeof item === "string");
-}
-
 function requiredStringParam(params: unknown, key: string): string {
   return optionalStringParam(params, key) ?? "";
 }
@@ -62,15 +61,6 @@ function requiredStringParam(params: unknown, key: string): string {
 function booleanParam(params: unknown, key: string): boolean {
   if (!params || typeof params !== "object") return false;
   return (params as Record<string, unknown>)[key] === true;
-}
-
-function optionalBooleanParam(
-  params: unknown,
-  key: string,
-): boolean | undefined {
-  if (!params || typeof params !== "object") return;
-  const value = (params as Record<string, unknown>)[key];
-  return typeof value === "boolean" ? value : undefined;
 }
 
 function optionalIntegerParam(
@@ -216,28 +206,11 @@ export function registerSkillTools(
         name: "skill_search",
         label: "Search Skills",
         description:
-          "Search OpenClaw skills visible to the current agent using deterministic lexical ranking across skill metadata, derived domains, intent references, and related skill names. Use focused search when injected candidates do not match the current task. Results are discovery candidates; use skill_view before following a skill workflow.",
+          "Search OpenClaw skills visible to the current agent with QMD hybrid retrieval over skill metadata, SKILL.md bodies, and references. Use focused search when injected candidates do not match the current task. Results are discovery candidates; use skill_view before following a skill workflow.",
         parameters: Type.Object({
-          query: Type.Optional(
-            Type.String({ description: "Natural-language search phrase." }),
-          ),
-          source: Type.Optional(SKILL_SOURCE_SCHEMA),
-          domains: Type.Optional(
-            Type.Array(Type.String(), {
-              description: "Case-insensitive domain filters with OR semantics.",
-            }),
-          ),
-          keywords: Type.Optional(
-            Type.Array(Type.String(), {
-              description: "Additional lexical search tokens.",
-            }),
-          ),
-          offset: Type.Optional(
-            Type.Number({
-              description:
-                "Zero-based result offset for pagination. Defaults to 0.",
-            }),
-          ),
+          query: Type.String({
+            description: "Natural-language search phrase.",
+          }),
           limit: Type.Optional(
             Type.Number({
               description:
@@ -249,36 +222,119 @@ export function registerSkillTools(
               description: "When true, include per-skill usage statistics.",
             }),
           ),
-          show_related: Type.Optional(
-            Type.Boolean({
-              description: "When true, include visible related skills.",
-            }),
-          ),
-          show_matches: Type.Optional(
+          show_evidence: Type.Optional(
             Type.Boolean({
               description:
-                "When false, omit matched_fields and matched_intents. Defaults to true.",
+                "When true, include top matching chunk evidence for each skill.",
             }),
           ),
         }),
         async execute(_toolCallId, params) {
-          return jsonToolResult(
-            await searchAvailableSkills({
-              api,
-              agentId,
-              intents: options.getIntents?.(agentId),
-              query: optionalStringParam(params, "query"),
-              source: optionalStringParam(params, "source") as
-                SkillSource | undefined,
-              domains: optionalStringArrayParam(params, "domains"),
-              keywords: optionalStringArrayParam(params, "keywords"),
-              offset: optionalIntegerParam(params, "offset"),
-              limit: optionalIntegerParam(params, "limit"),
-              showStats: booleanParam(params, "show_stats"),
-              showRelated: booleanParam(params, "show_related"),
-              showMatches: optionalBooleanParam(params, "show_matches") ?? true,
-            }),
+          const query = truncateCodePoints(
+            optionalStringParam(params, "query")?.trim() ?? "",
+            MAX_SKILL_SEARCH_QUERY_CODE_POINTS,
           );
+          if (!query) {
+            return jsonToolResult({
+              success: false,
+              error: "query is required",
+            });
+          }
+
+          const requestedLimit =
+            optionalIntegerParam(params, "limit") ?? DEFAULT_SKILL_SEARCH_LIMIT;
+          const limit = Math.min(
+            MAX_SKILL_SEARCH_LIMIT,
+            Math.max(1, requestedLimit),
+          );
+          const showStats = booleanParam(params, "show_stats");
+          const showEvidence = booleanParam(params, "show_evidence");
+
+          const index = options.qmdSkillIndex;
+          if (!index) {
+            return jsonToolResult({
+              success: false,
+              error: "skill search index is not ready",
+            });
+          }
+
+          options.scheduleSkillSearchIndex?.(agentId);
+
+          const inventory = await listAvailableSkills({
+            api,
+            agentId,
+            intents: options.getIntents?.(agentId),
+          });
+          const hits = await index.search({
+            agentId,
+            query,
+            limit,
+            includeEvidence: showEvidence,
+          });
+          if (!hits) {
+            return jsonToolResult({
+              success: false,
+              error: "skill search index is not ready",
+            });
+          }
+
+          const inventoryByName = new Map(
+            inventory.map((skill) => [skill.name.toLowerCase(), skill]),
+          );
+          const usageStats = showStats
+            ? await readSkillUsageStats({ api, agentId })
+            : undefined;
+
+          const skills = hits
+            .map((hit) => {
+              const skill = inventoryByName.get(hit.name.toLowerCase());
+              if (!skill) return;
+              return {
+                name: skill.name,
+                description: skill.description,
+                source: skill.source,
+                domains: skill.domains ?? [],
+                score: hit.score,
+                ...(usageStats
+                  ? {
+                      usage_stats: skillUsageStatsForName(
+                        usageStats,
+                        skill.name,
+                      ),
+                    }
+                  : {}),
+                ...(showEvidence && hit.evidence
+                  ? { evidence: hit.evidence }
+                  : {}),
+              };
+            })
+            .filter(
+              (skill): skill is NonNullable<typeof skill> =>
+                skill !== undefined,
+            )
+            .sort((left, right) => {
+              if (right.score !== left.score) return right.score - left.score;
+              const sourceComparison =
+                skillSourcePriority(left.source) -
+                skillSourcePriority(right.source);
+              if (sourceComparison !== 0) return sourceComparison;
+              if (usageStats) {
+                const usageComparison =
+                  skillUsageStatsForName(usageStats, right.name).usage_turns -
+                  skillUsageStatsForName(usageStats, left.name).usage_turns;
+                if (usageComparison !== 0) return usageComparison;
+              }
+              return left.name.localeCompare(right.name);
+            });
+
+          return jsonToolResult({
+            success: true,
+            query,
+            total: skills.length,
+            count: skills.length,
+            limit,
+            skills,
+          });
         },
       };
     },
@@ -378,21 +434,24 @@ export function registerSkillTools(
       ),
     }),
     async execute(_toolCallId, params) {
-      return jsonToolResult(
-        await manageSkill({
-          api,
-          agentId: defaultAgentId(),
-          action: requiredStringParam(params, "action"),
-          name: requiredStringParam(params, "name"),
-          content: optionalStringParam(params, "content"),
-          oldString: optionalStringParam(params, "old_string"),
-          newString: optionalStringParam(params, "new_string"),
-          replaceAll: booleanParam(params, "replace_all"),
-          filePath: optionalStringParam(params, "file_path"),
-          fileContent: optionalStringParam(params, "file_content"),
-          absorbedInto: optionalStringParam(params, "absorbed_into"),
-        }),
-      );
+      const agentId = defaultAgentId();
+      const result = await manageSkill({
+        api,
+        agentId,
+        action: requiredStringParam(params, "action"),
+        name: requiredStringParam(params, "name"),
+        content: optionalStringParam(params, "content"),
+        oldString: optionalStringParam(params, "old_string"),
+        newString: optionalStringParam(params, "new_string"),
+        replaceAll: booleanParam(params, "replace_all"),
+        filePath: optionalStringParam(params, "file_path"),
+        fileContent: optionalStringParam(params, "file_content"),
+        absorbedInto: optionalStringParam(params, "absorbed_into"),
+      });
+      if (result.success) {
+        options.scheduleSkillSearchIndex?.(agentId);
+      }
+      return jsonToolResult(result);
     },
   });
 

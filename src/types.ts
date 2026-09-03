@@ -59,12 +59,21 @@ export type ResolvedRoutingConfig = {
   };
 };
 
+export type ResolvedSkillSearchConfig = {
+  collectionWeights: {
+    meta: number;
+    body: number;
+    references: number;
+  };
+  scheduleCooldownMs: number;
+};
 export type ResolvedQmdConfig = {
   timeoutMs: number;
   embedding: Required<Pick<QmdEmbeddingConfig, "baseUrl" | "model">> &
     Omit<QmdEmbeddingConfig, "baseUrl" | "model">;
   expansion: Required<Pick<QmdEndpointConfig, "baseUrl" | "model">> &
     Omit<QmdEndpointConfig, "baseUrl" | "model">;
+  skillSearch: ResolvedSkillSearchConfig;
 };
 
 export type ResolvedSkillHarnessPluginConfig = {

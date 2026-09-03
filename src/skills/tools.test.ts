@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { registerSkillTools } from "./tools.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import type { IntentCatalogEntry } from "../types.js";
+import type { SkillQmdIndex } from "../qmd/skill-index.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 
 function createApi(
@@ -338,144 +339,238 @@ describe("registerSkillTools", () => {
     });
   });
 
-  it("searches with the invoking agent's skill roots and filtered intents", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
-    const stateDir = path.join(tmp, "state");
-    const mainWorkspace = path.join(tmp, "main-workspace");
-    const analystWorkspace = path.join(tmp, "analyst-workspace");
-    const api = createApi(stateDir, {
-      analyst: analystWorkspace,
-      main: mainWorkspace,
-    });
-    writeSkill(mainWorkspace, "main-only", {}, "Main workspace skill.");
-    writeSkill(
-      analystWorkspace,
-      "analyst-only",
-      {},
-      "Analyst workspace skill.",
+  it("searches visible skills through the QMD skill index", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-qmd-"),
     );
-    const getIntents = vi.fn((agentId: string): IntentCatalogEntry[] => [
-      {
-        id: `${agentId}-workflow`,
-        definition: {
-          triggers: [`${agentId}-private-secret`],
-          examples: [],
-          domain: agentId,
-          fastpath: { keywords: [] },
-          skills: [`${agentId}-only`],
-          guidance: "",
-        },
-      },
-    ]);
-    registerSkillTools(api, { getIntents });
-
-    const analystSearch = toolsForAgent(api, "analyst").get("skill_search");
-    await expect(
-      runTool(analystSearch, { query: "analyst-private-secret" }),
-    ).resolves.toMatchObject({
-      success: true,
-      skills: [
+    const stateDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-state-"),
+    );
+    try {
+      writeSkill(workspaceDir, "react", {}, "Build React UIs");
+      writeSkill(workspaceDir, "docs", {}, "Write docs");
+      const api = createApi(stateDir, workspaceDir);
+      const intents: IntentCatalogEntry[] = [
         {
-          name: "analyst-only",
-          matched_intents: [{ id: "analyst-workflow" }],
+          id: "frontend",
+          definition: {
+            domain: "frontend",
+            triggers: ["react"],
+            examples: ["build a react ui"],
+            skills: ["react"],
+            fastpath: { keywords: ["react"] },
+            guidance: "Use the react skill for UI work.",
+          },
         },
-      ],
-    });
-    await expect(
-      runTool(analystSearch, { query: "main-private-secret" }),
-    ).resolves.toMatchObject({ success: true, total: 0, skills: [] });
-    expect(getIntents).toHaveBeenCalledWith("analyst");
-  });
-
-  it("validates search criteria and keeps verbose search fields opt-in", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
-    const workspaceDir = path.join(tmp, "workspace");
-    const api = createApi(path.join(tmp, "state"), workspaceDir);
-    writeSkill(workspaceDir, "react", {}, "React forms and components.");
-    registerSkillTools(api);
-    const search = toolsForAgent(api).get("skill_search");
-
-    await expect(runTool(search, { query: "   " })).resolves.toEqual({
-      success: false,
-      error: "query or at least one filter is required",
-    });
-
-    const defaultResult = await runTool(search, { query: "react" });
-    expect(defaultResult.skills[0]).toMatchObject({
-      name: "react",
-      matched_fields: ["name", "description"],
-    });
-    expect(defaultResult.skills[0]).not.toHaveProperty("usage_stats");
-    expect(defaultResult.skills[0]).not.toHaveProperty("related_skills");
-
-    const compactResult = await runTool(search, {
-      query: "react",
-      show_matches: false,
-      show_stats: true,
-      show_related: true,
-    });
-    expect(compactResult.skills[0]).toHaveProperty("usage_stats");
-    expect(compactResult.skills[0]).toHaveProperty("related_skills");
-    expect(compactResult.skills[0]).not.toHaveProperty("matched_fields");
-    expect(compactResult.skills[0]).not.toHaveProperty("matched_intents");
-  });
-
-  it("builds related search metadata before applying domain filters", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
-    const workspaceDir = path.join(tmp, "workspace");
-    const api = createApi(path.join(tmp, "state"), workspaceDir);
-    writeSkill(workspaceDir, "nextjs", {
-      react: "React fundamentals.",
-    });
-    writeSkill(workspaceDir, "react");
-    const intents: IntentCatalogEntry[] = [
-      {
-        id: "web-framework",
-        definition: {
-          triggers: ["web framework"],
-          examples: [],
-          domain: "web",
-          fastpath: { keywords: [] },
-          skills: ["nextjs"],
-          guidance: "",
-        },
-      },
-      {
-        id: "frontend-library",
-        definition: {
-          triggers: ["frontend library"],
-          examples: [],
-          domain: "frontend",
-          fastpath: { keywords: [] },
-          skills: ["react"],
-          guidance: "",
-        },
-      },
-    ];
-    registerSkillTools(api, { getIntents: () => intents });
-
-    await expect(
-      runTool(toolsForAgent(api).get("skill_search"), {
-        query: "react",
-        domains: ["web"],
-        show_related: true,
-      }),
-    ).resolves.toMatchObject({
-      success: true,
-      skills: [
+      ];
+      const searchHits = [
         {
-          name: "nextjs",
-          score: 15,
-          matched_fields: ["related_skills"],
-          related_skills: [
-            expect.objectContaining({
-              name: "react",
-              direction: "current-to-related",
-            }),
+          name: "react",
+          score: 0.84,
+          evidence: [
+            {
+              collection: "skill-body",
+              path: "SKILL.md",
+              score: 0.84,
+              snippet: "Build React UIs",
+            },
           ],
         },
-      ],
-    });
+      ];
+      const qmdSkillIndex: SkillQmdIndex = {
+        schedule: vi.fn(),
+        search: vi.fn(async () => searchHits),
+        getStatus: vi.fn((_agentId: string) => "ready"),
+        close: vi.fn(async () => {}),
+      };
+      const scheduleSkillSearchIndex = vi.fn();
+      registerSkillTools(api, {
+        getIntents: () => intents,
+        qmdSkillIndex,
+        scheduleSkillSearchIndex,
+      });
+      const tools = toolsForAgent(api, "main");
+      const search = tools.get("skill_search");
+      expect(search).toBeTruthy();
+
+      const result = await runTool(search, { query: "react ui" });
+      expect(result).toMatchObject({
+        success: true,
+        query: "react ui",
+        total: 1,
+        count: 1,
+        limit: 20,
+        skills: [
+          {
+            name: "react",
+            description: "Build React UIs",
+            source: "workspace",
+            domains: ["frontend"],
+            score: 0.84,
+          },
+        ],
+      });
+      expect(result.skills[0]).not.toHaveProperty("usage_stats");
+      expect(result.skills[0]).not.toHaveProperty("evidence");
+      expect(scheduleSkillSearchIndex).toHaveBeenCalledWith("main");
+      expect(qmdSkillIndex.schedule).not.toHaveBeenCalled();
+      expect(qmdSkillIndex.search).toHaveBeenCalledWith({
+        agentId: "main",
+        query: "react ui",
+        limit: 20,
+        includeEvidence: false,
+      });
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("validates search criteria and keeps evidence and stats opt-in", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-qmd-"),
+    );
+    const stateDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-state-"),
+    );
+    try {
+      writeSkill(workspaceDir, "react", {}, "Build React UIs");
+      const api = createApi(stateDir, workspaceDir);
+      const qmdSkillIndex: SkillQmdIndex = {
+        schedule: vi.fn(),
+        search: vi.fn(async () => [
+          {
+            name: "react",
+            score: 0.84,
+            evidence: [
+              {
+                collection: "skill-meta",
+                path: "meta.md",
+                score: 0.84,
+                snippet: "Build React UIs",
+              },
+            ],
+          },
+        ]),
+        getStatus: vi.fn((_agentId: string) => "ready"),
+        close: vi.fn(async () => {}),
+      };
+      registerSkillTools(api, { qmdSkillIndex });
+      const search = toolsForAgent(api, "main").get("skill_search");
+
+      await expect(runTool(search, { query: "   " })).resolves.toEqual({
+        success: false,
+        error: "query is required",
+      });
+
+      const defaultResult = await runTool(search, { query: "react" });
+      expect(defaultResult).toMatchObject({
+        success: true,
+        query: "react",
+        skills: [{ name: "react", score: 0.84 }],
+      });
+      expect(defaultResult.skills[0]).not.toHaveProperty("usage_stats");
+      expect(defaultResult.skills[0]).not.toHaveProperty("evidence");
+      expect(defaultResult.skills[0]).not.toHaveProperty("related_skills");
+
+      const richResult = await runTool(search, {
+        query: "react",
+        show_stats: true,
+        show_evidence: true,
+      });
+      expect(richResult.skills[0]).toHaveProperty("usage_stats");
+      expect(richResult.skills[0]).toMatchObject({
+        evidence: [
+          {
+            collection: "skill-meta",
+            path: "meta.md",
+            score: 0.84,
+          },
+        ],
+      });
+      expect(qmdSkillIndex.search).toHaveBeenLastCalledWith({
+        agentId: "main",
+        query: "react",
+        limit: 20,
+        includeEvidence: true,
+      });
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("schedules skill search index after successful skill_manage", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-manage-qmd-"),
+    );
+    const stateDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-manage-state-"),
+    );
+    try {
+      const api = createApi(stateDir, workspaceDir);
+      const scheduleSkillSearchIndex = vi.fn();
+      const qmdSkillIndex: SkillQmdIndex = {
+        schedule: vi.fn(),
+        search: vi.fn(async () => []),
+        getStatus: vi.fn((_agentId: string) => "ready"),
+        close: vi.fn(async () => {}),
+      };
+      registerSkillTools(api, { qmdSkillIndex, scheduleSkillSearchIndex });
+      const manage = toolsForAgent(api, "main").get("skill_manage");
+      expect(manage).toBeTruthy();
+      const result = await runTool(manage, {
+        action: "create",
+        name: "fresh-skill",
+        content:
+          "---\nname: fresh-skill\ndescription: Fresh skill\n---\n\n# Fresh\n",
+      });
+      expect(result).toMatchObject({ success: true });
+      expect(scheduleSkillSearchIndex).toHaveBeenCalledWith("main");
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a structured error when the skill search index is unavailable", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-qmd-"),
+    );
+    const stateDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-state-"),
+    );
+    try {
+      writeSkill(workspaceDir, "react", {}, "Build React UIs");
+      const api = createApi(stateDir, workspaceDir);
+      registerSkillTools(api);
+      const missing = toolsForAgent(api, "main").get("skill_search");
+      await expect(runTool(missing, { query: "react" })).resolves.toEqual({
+        success: false,
+        error: "skill search index is not ready",
+      });
+
+      const notReady: SkillQmdIndex = {
+        schedule: vi.fn(),
+        search: vi.fn(async () => undefined),
+        getStatus: vi.fn((_agentId: string) => "building"),
+        close: vi.fn(async () => {}),
+      };
+      registerSkillTools(createApi(stateDir, workspaceDir), {
+        qmdSkillIndex: notReady,
+      });
+      // re-register on fresh api
+      const api2 = createApi(stateDir, workspaceDir);
+      registerSkillTools(api2, { qmdSkillIndex: notReady });
+      const search = toolsForAgent(api2, "main").get("skill_search");
+      await expect(runTool(search, { query: "react" })).resolves.toEqual({
+        success: false,
+        error: "skill search index is not ready",
+      });
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("resolves skills for the agent that invokes the tool", async () => {
