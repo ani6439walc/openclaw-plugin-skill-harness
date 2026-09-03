@@ -105,7 +105,7 @@ graph TD
   M --> N[Record stats and optionally review the completed turn]
 ```
 
-Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. The plugin `agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing: local exact matching remains the cheapest shortcut, while QMD owns hybrid retrieval, expansion, and final ranking.
+Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. The plugin `agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid trigger/example retrieval with expansion, and candidate scoring for Step 3 fallback classification.
 
 ### Architecture and routing contract
 
@@ -237,9 +237,28 @@ Keep each intent narrow and concrete:
 - one user outcome per file
 - concrete triggers and examples
 - domain metadata that matches the requested outcome
-- `fastpath.keywords` only for deterministic shortcuts
+- `keywords` (top-level string array) for exact/similarity BM25 routing shortcuts
 - `skills[]` only when the skill genuinely helps
 - one durable plain-text body sentence for routing behavior
+
+Example intent file (`~/.openclaw/plugins/skill-harness/intents/format.md`):
+
+```yaml
+---
+triggers:
+  - "User wants to format code or fix linting layout"
+examples:
+  - "format this file"
+  - "run prettier on src/"
+domain: "development"
+keywords:
+  - "format"
+  - "prettier"
+skills:
+  - "code-formatter"
+---
+Format the specified files following repository style conventions.
+```
 
 ### Human maintenance skill
 
@@ -409,12 +428,14 @@ On startup, the plugin initializes its runtime data root, loads the runtime
 intent catalog, and seeds bundled example intents only when the runtime catalog
 has no Markdown files. Existing runtime intents are not overwritten.
 
-Routing is fail-open. Eligible turns first use deterministic exact-keyword
-routing, then QMD retrieval after topic triage. The classifier runs only when
-no high-confidence QMD route is available, a scanner model resolves, and the
-turn is not excluded by the configured low-effort mode. Every eligible normal
-agent still receives the fixed skill-discovery context even when dynamic intent
-routing is skipped or fails.
+Routing is fail-open. Eligible turns evaluate the 3-stage pipeline: Step 1 checks
+QMD BM25 lexical matches against indexed intent `keywords`; Step 2 performs QMD
+hybrid search over triggers and examples with conversation expansion; Step 3
+projects candidate intents and invokes a single LLM intent classifier call only
+when no direct QMD match reaches the threshold. The low-effort mode
+(`lowEffortRoutingMode: "fastpath-only"`) skips LLM classification when direct routes
+miss. Every eligible normal agent still receives fixed skill-discovery context even
+when dynamic intent routing is skipped or fails.
 
 Intent Review is disabled by default; when enabled, its runtime edits and
 keyword-coverage writes are serialized so concurrent reviews cannot race on the
@@ -437,7 +458,7 @@ pnpm run build
 
 ### No routing context is injected
 
-Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the scanner model can resolve. With low reasoning effort, `lowEffortRoutingMode: "off"` disables the scanner and `"fastpath-only"` requires a matching fast path. A classifier confidence below `0.8` remains conservative and injects only routing context derived from the selected intent's direct skills.
+Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the classifier model can resolve. With low reasoning effort, `lowEffortRoutingMode: "off"` disables model classification and `"fastpath-only"` requires a matching keyword route.
 
 ### Runtime intents are missing
 
