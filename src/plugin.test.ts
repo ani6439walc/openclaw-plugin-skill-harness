@@ -6,6 +6,7 @@ import { logger, type OpenClawPluginApi } from "../api.js";
 import {
   createConfiguredAgentSkillsResolver,
   createPlugin,
+  extractConfiguredAgentIds,
   initializePluginDataRoot,
 } from "./plugin.js";
 import { IntentCatalog } from "./intents/index.js";
@@ -53,6 +54,9 @@ describe("createPlugin", () => {
       config: {},
       pluginConfig: {},
       runtime: {
+        agent: {
+          resolveAgentWorkspaceDir: () => stateDir,
+        },
         config: {
           current: () => ({}),
         },
@@ -273,6 +277,54 @@ describe("createPlugin", () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("extracts configured agent IDs excluding defaults", () => {
+    const config = {
+      agents: {
+        defaults: { skills: ["alpha"] },
+        list: [
+          { id: "main", skills: ["alpha"] },
+          { id: "coder" },
+          { id: "REVIEWER", skills: [] },
+          { id: "defaults" },
+        ],
+      },
+    };
+    expect(extractConfiguredAgentIds(config as never)).toEqual([
+      "main",
+      "coder",
+      "reviewer",
+    ]);
+  });
+
+  it("schedules skill search indexing for all configured agents on refresh", async () => {
+    let scheduleSpy: ReturnType<typeof vi.fn> | undefined;
+    createHookHandlersSpy.mockImplementationOnce(
+      (deps: {
+        qmdSkillIndex?: { schedule: (...args: unknown[]) => void };
+      }) => {
+        if (deps.qmdSkillIndex) {
+          scheduleSpy = vi.spyOn(deps.qmdSkillIndex, "schedule");
+        }
+      },
+    );
+
+    const api = createApi({
+      config: {
+        agents: {
+          list: [{ id: "main" }, { id: "coder" }, { id: "reviewer" }],
+        },
+      },
+      pluginConfig: { qmd: { indexRefreshIntervalSeconds: 300 } },
+    });
+
+    createPlugin(api).register(api);
+    await vi.waitFor(() => {
+      expect(scheduleSpy).toHaveBeenCalledWith("main", expect.any(Array));
+      expect(scheduleSpy).toHaveBeenCalledWith("coder", expect.any(Array));
+      expect(scheduleSpy).toHaveBeenCalledWith("reviewer", expect.any(Array));
+    });
   });
 
   it("registers hooks when keyword coverage keyword cache is corrupt", () => {

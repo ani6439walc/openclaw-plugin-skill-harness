@@ -707,7 +707,12 @@ export function createSkillQmdIndex(params: {
         throw new Error("missing skill generation source store");
       const database = sourceStore.internal?.db as unknown as
         SQLiteBackupDatabase | undefined;
-      if (database) await database.backup(targetDbPath);
+      if (!database || typeof database.backup !== "function") {
+        throw new Error(
+          "underlying SQLite database backup is unavailable for skill generation clone",
+        );
+      }
+      await database.backup(targetDbPath);
       await fs.cp(
         params.source.docsRoot,
         path.join(params.targetRoot, "docs"),
@@ -962,15 +967,24 @@ export function createSkillQmdIndex(params: {
               previous ? [previous.generationRoot] : [],
             );
             if (previous) {
-              await cloneGeneration({
-                source: previous,
-                targetRoot: generationRoot,
-                sourceStore:
-                  previous.generationRoot === state.generationRoot
-                    ? state.store
-                    : undefined,
-                createStore: params.createStore,
-              });
+              try {
+                await cloneGeneration({
+                  source: previous,
+                  targetRoot: generationRoot,
+                  sourceStore:
+                    previous.generationRoot === state.generationRoot
+                      ? state.store
+                      : undefined,
+                  createStore: params.createStore,
+                });
+              } catch (error) {
+                logger.warn(
+                  "failed to clone active skill generation; falling back to clean build",
+                  { error, agentId },
+                );
+                await fs.rm(generationRoot, { recursive: true, force: true });
+                await fs.mkdir(generationRoot, { recursive: true });
+              }
             } else {
               await fs.mkdir(generationRoot, { recursive: true });
             }

@@ -258,6 +258,10 @@ export function registerSkillTools(
             });
           }
 
+          if (index.getStatus(agentId) === "idle") {
+            options.scheduleSkillSearchIndex?.(agentId);
+          }
+
           const inventory = await listAvailableSkills({
             api,
             agentId,

@@ -426,6 +426,43 @@ describe("registerSkillTools", () => {
     }
   });
 
+  it("schedules skill search index when agent index status is idle upon search", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-idle-qmd-"),
+    );
+    const stateDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-idle-state-"),
+    );
+    try {
+      writeSkill(workspaceDir, "react", {}, "Build React UIs");
+      const api = createApi(stateDir, workspaceDir);
+      const scheduleSkillSearchIndex = vi.fn();
+      const qmdSkillIndex: SkillQmdIndex = {
+        schedule: vi.fn(),
+        search: vi.fn(async () => undefined),
+        getStatus: vi.fn((_agentId: string) => "idle"),
+        close: vi.fn(async () => {}),
+      };
+      registerSkillTools(api, {
+        qmdSkillIndex,
+        scheduleSkillSearchIndex,
+      });
+      const tools = toolsForAgent(api, "subagent-1");
+      const search = tools.get("skill_search");
+      expect(search).toBeTruthy();
+
+      const result = await runTool(search, { query: "react ui" });
+      expect(result).toMatchObject({
+        success: false,
+        error: "skill search index is not ready",
+      });
+      expect(scheduleSkillSearchIndex).toHaveBeenCalledWith("subagent-1");
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("validates search criteria and keeps evidence and stats opt-in", async () => {
     const workspaceDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "skill-tools-qmd-"),

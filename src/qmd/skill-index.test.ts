@@ -486,6 +486,55 @@ describe("createSkillQmdIndex", () => {
     await index.close();
   });
 
+  it("falls back to a clean build when active generation cloning fails", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "clone-fallback",
+      description: "Clone fallback skill",
+      body: "first body",
+    });
+    const firstStore = createStoreDouble({
+      internal: {} as QMDStore["internal"],
+    });
+    const secondStore = createStoreDouble({});
+    const createStore = vi
+      .fn()
+      .mockResolvedValueOnce(firstStore)
+      .mockResolvedValueOnce(secondStore);
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "first generation did not become ready",
+    );
+    await writeFile(skill.location, "updated body", "utf8");
+    index.schedule("main", [skill]);
+    await waitFor(
+      () =>
+        index.getStatus("main") === "ready" &&
+        createStore.mock.calls.length === 2,
+      "candidate generation did not publish",
+    );
+
+    const active = JSON.parse(
+      await readFile(
+        path.join(root, "qmd", "skills", "main", "active.json"),
+        "utf8",
+      ),
+    ) as { generation: string };
+    expect(active.generation).toMatch(/^gen-2-/);
+    await index.close();
+  });
+
   it("keeps unchanged snapshot documents untouched", async () => {
     const skill = await createSkillFixture({
       name: "snapshot-diff",
