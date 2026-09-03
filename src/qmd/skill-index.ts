@@ -62,6 +62,7 @@ type AgentState = {
   status: SkillQmdIndexStatus;
   store?: QMDStore;
   generationRoot?: string;
+  docsRoot?: string;
   currentFingerprint?: string;
   expectedFingerprint?: string;
   desired?: {
@@ -81,14 +82,78 @@ function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function findLastPathSegmentIndex(
-  parts: readonly string[],
-  candidates: readonly string[],
-): number {
-  for (let index = parts.length - 1; index >= 0; index -= 1) {
-    if (candidates.includes(parts[index]!)) return index;
+function isPathInside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
+async function resolveConfinedPath(
+  root: string,
+  candidate: string,
+): Promise<string | undefined> {
+  try {
+    const rootReal = await fs.realpath(root);
+    const candidateReal = await fs.realpath(candidate);
+    if (!isPathInside(rootReal, candidateReal)) return;
+    return candidateReal;
+  } catch {
+    return;
   }
-  return -1;
+}
+
+export function skillIdentityFromDocsPath(params: {
+  docsRoot: string;
+  filepath: string;
+  collection: string;
+}): { skillName?: string; relativePath?: string } {
+  const relative = path
+    .relative(params.docsRoot, params.filepath)
+    .split(path.sep)
+    .join("/");
+  if (
+    !relative ||
+    relative === "." ||
+    relative.startsWith("..") ||
+    path.isAbsolute(relative)
+  ) {
+    return {};
+  }
+  const parts = relative.split("/").filter(Boolean);
+  if (parts.length < 2) return {};
+  const [collectionDir, encodedSkill, ...rest] = parts;
+  if (
+    collectionDir !== "meta" &&
+    collectionDir !== "body" &&
+    collectionDir !== "references"
+  ) {
+    return {};
+  }
+  let skillName: string;
+  try {
+    skillName = decodeURIComponent(encodedSkill!);
+  } catch {
+    skillName = encodedSkill!;
+  }
+  const remainder = rest.join("/");
+  if (remainder) {
+    return {
+      skillName,
+      relativePath:
+        params.collection === REFS_COLLECTION
+          ? `references/${remainder}`
+          : remainder,
+    };
+  }
+  if (params.collection === META_COLLECTION) {
+    return { skillName, relativePath: "meta.md" };
+  }
+  if (params.collection === BODY_COLLECTION) {
+    return { skillName, relativePath: "SKILL.md" };
+  }
+  return { skillName, relativePath: "references/unknown" };
 }
 
 export function safePathSegment(value: string): string {
@@ -99,12 +164,16 @@ export function safePathSegment(value: string): string {
     .replaceAll("!", "%21")
     .replaceAll("'", "%27")
     .replaceAll("(", "%28")
-    .replaceAll(")", "%29");
+    .replaceAll(")", "%29")
+    .replaceAll(".", "%2E");
   return encoded.length <= 180 ? encoded : `${hash(trimmed).slice(0, 24)}`;
 }
 
 async function listReferenceFiles(skillDir: string): Promise<string[]> {
   const referencesRoot = path.join(skillDir, "references");
+  const confinedRoot = await resolveConfinedPath(skillDir, referencesRoot);
+  if (!confinedRoot) return [];
+  const rootReal = confinedRoot;
   const files: string[] = [];
 
   async function walk(dir: string): Promise<void> {
@@ -127,8 +196,14 @@ async function listReferenceFiles(skillDir: string): Promise<string[]> {
     )) {
       const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        if (!(await resolveConfinedPath(rootReal, entryPath))) {
+          continue;
+        }
         await walk(entryPath);
       } else if (entry.isFile() || entry.isSymbolicLink()) {
+        if (!(await resolveConfinedPath(rootReal, entryPath))) {
+          continue;
+        }
         files.push(
           path.relative(referencesRoot, entryPath).split(path.sep).join("/"),
         );
@@ -259,11 +334,13 @@ export async function writeSkillSnapshot(params: {
 
     for (const relative of await listReferenceFiles(skillDir)) {
       const sourcePath = path.join(skillDir, "references", relative);
+      const confinedSource = await resolveConfinedPath(skillDir, sourcePath);
+      if (!confinedSource) continue;
       const targetPath = path.join(referencesRoot, skillSegment, relative);
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       let content = "";
       try {
-        content = await fs.readFile(sourcePath, "utf8");
+        content = await fs.readFile(confinedSource, "utf8");
       } catch (error) {
         logger.warn("failed to read skill reference for QMD snapshot", {
           error,
@@ -332,6 +409,7 @@ function parseStoreHits(params: {
     explain?: unknown;
   }[];
   collection: string;
+  docsRoot?: string;
 }): SearchHit[] {
   const hits: SearchHit[] = [];
   for (const result of params.results) {
@@ -340,37 +418,14 @@ function parseStoreHits(params: {
     let skillName = fromBody.skillName;
     let relativePath = fromBody.relativePath;
     const filepath = result.filepath ?? result.file ?? result.displayPath;
-    if ((!skillName || !relativePath) && filepath) {
-      const parts = filepath.split(/[\\/]/u);
-      const skillIdx = findLastPathSegmentIndex(parts, [
-        "meta",
-        "body",
-        "references",
-      ]);
-      if (skillIdx >= 0 && parts[skillIdx + 1]) {
-        const encoded = parts[skillIdx + 1];
-        try {
-          skillName = skillName ?? decodeURIComponent(encoded);
-        } catch {
-          skillName = skillName ?? encoded;
-        }
-        const remainder = parts.slice(skillIdx + 2).join("/");
-        if (!relativePath) {
-          if (remainder) {
-            relativePath =
-              params.collection === REFS_COLLECTION &&
-              !remainder.startsWith("references/")
-                ? `references/${remainder}`
-                : remainder;
-          } else if (params.collection === META_COLLECTION) {
-            relativePath = "meta.md";
-          } else if (params.collection === BODY_COLLECTION) {
-            relativePath = "SKILL.md";
-          } else {
-            relativePath = "references/unknown";
-          }
-        }
-      }
+    if ((!skillName || !relativePath) && filepath && params.docsRoot) {
+      const fromPath = skillIdentityFromDocsPath({
+        docsRoot: params.docsRoot,
+        filepath,
+        collection: params.collection,
+      });
+      skillName = skillName ?? fromPath.skillName;
+      relativePath = relativePath ?? fromPath.relativePath;
     }
     if (!skillName) continue;
     hits.push({
@@ -408,6 +463,39 @@ export function createSkillQmdIndex(params: {
       "qmd",
       "skills",
       safePathSegment(agentId),
+    );
+  }
+
+  async function clearOrphanGenerations(
+    agentId: string,
+    keepRoot?: string,
+  ): Promise<void> {
+    const root = agentRoot(agentId);
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(root, { withFileTypes: true });
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        return;
+      }
+      return;
+    }
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (!entry.isDirectory() || !entry.name.startsWith("gen-")) return;
+        const candidate = path.join(root, entry.name);
+        if (keepRoot && path.resolve(candidate) === path.resolve(keepRoot)) {
+          return;
+        }
+        await fs
+          .rm(candidate, { recursive: true, force: true })
+          .catch(() => undefined);
+      }),
     );
   }
 
@@ -499,9 +587,11 @@ export function createSkillQmdIndex(params: {
           "QMD embedding and expansion endpoints must be configured.",
         );
       }
+      await clearOrphanGenerations(agentId, state.generationRoot);
       await fs.mkdir(generationRoot, { recursive: true });
+      const docsRoot = path.join(generationRoot, "docs");
       const collections = await writeSkillSnapshot({
-        docsRoot: path.join(generationRoot, "docs"),
+        docsRoot,
         skills: target.skills,
       });
       // Dynamic import keeps tests able to inject createStore without loading
@@ -545,6 +635,7 @@ export function createSkillQmdIndex(params: {
       const previousRoot = state.generationRoot;
       state.store = nextStore;
       state.generationRoot = generationRoot;
+      state.docsRoot = docsRoot;
       state.currentFingerprint = target.fingerprint;
       state.status = "ready";
       resetRetryState(state);
@@ -690,6 +781,7 @@ export function createSkillQmdIndex(params: {
                 explain?: unknown;
               }>,
               collection: collection.name,
+              docsRoot: state.docsRoot,
             }).sort((left, right) => {
               if (right.score !== left.score) return right.score - left.score;
               return hitId(left).localeCompare(hitId(right));
@@ -776,6 +868,7 @@ export function createSkillQmdIndex(params: {
       for (const [agentId, state] of agents.entries()) {
         const activeStore = state.store;
         state.store = undefined;
+        state.docsRoot = undefined;
         state.currentFingerprint = undefined;
         state.expectedFingerprint = undefined;
         resetRetryState(state);

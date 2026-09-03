@@ -1,4 +1,12 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +16,7 @@ import type { ResolvedQmdConfig } from "../types.js";
 import {
   createSkillQmdIndex,
   safePathSegment,
+  skillIdentityFromDocsPath,
   writeSkillSnapshot,
 } from "./skill-index.js";
 
@@ -154,6 +163,96 @@ describe("writeSkillSnapshot", () => {
   it("encodes unsafe skill names into path-safe segments", () => {
     expect(safePathSegment("Weird Skill/Name")).toBe("Weird%20Skill%2FName");
     expect(safePathSegment("")).toBe("_");
+    expect(safePathSegment("..")).toBe("%2E%2E");
+    expect(safePathSegment("meta.v2")).toBe("meta%2Ev2");
+  });
+
+  it("skips reference symlinks that escape the references directory", async () => {
+    const skill = await createSkillFixture({
+      name: "escape-refs",
+      description: "Has escaping refs",
+      body: "Body",
+      references: {
+        "safe.md": "inside references",
+      },
+    });
+    const skillDir = path.dirname(skill.location);
+    const outside = await mkdtemp(path.join(tmpdir(), "skill-harness-secret-"));
+    roots.push(outside);
+    const secretPath = path.join(outside, "secret.txt");
+    await writeFile(secretPath, "top-secret-token", "utf8");
+    await symlink(secretPath, path.join(skillDir, "references", "leak.txt"));
+
+    const docsRoot = await mkdtemp(path.join(tmpdir(), "skill-harness-docs-"));
+    roots.push(docsRoot);
+    await writeSkillSnapshot({
+      docsRoot,
+      skills: [skill],
+    });
+
+    const segment = safePathSegment("escape-refs");
+    const refsDir = path.join(docsRoot, "references", segment);
+    const names = await readdir(refsDir);
+    expect(names).toEqual(["safe.md"]);
+    await expect(
+      readFile(path.join(refsDir, "safe.md"), "utf8"),
+    ).resolves.toContain("inside references");
+  });
+
+  it("skips a references directory that is itself an escaping symlink", async () => {
+    const skill = await createSkillFixture({
+      name: "escape-root",
+      description: "Escaping references root",
+      body: "Body",
+    });
+    const skillDir = path.dirname(skill.location);
+    await rm(path.join(skillDir, "references"), {
+      recursive: true,
+      force: true,
+    });
+    const outside = await mkdtemp(path.join(tmpdir(), "skill-harness-secret-"));
+    roots.push(outside);
+    await writeFile(
+      path.join(outside, "secret.txt"),
+      "top-secret-token",
+      "utf8",
+    );
+    await symlink(outside, path.join(skillDir, "references"));
+
+    const docsRoot = await mkdtemp(path.join(tmpdir(), "skill-harness-docs-"));
+    roots.push(docsRoot);
+    await writeSkillSnapshot({
+      docsRoot,
+      skills: [skill],
+    });
+
+    const segment = safePathSegment("escape-root");
+    await expect(
+      readdir(path.join(docsRoot, "references", segment)),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+describe("skillIdentityFromDocsPath", () => {
+  it("parses identity from docsRoot-relative paths even with nested keywords", () => {
+    const docsRoot = "/tmp/docs";
+    expect(
+      skillIdentityFromDocsPath({
+        docsRoot,
+        filepath: path.join(
+          docsRoot,
+          "references",
+          safePathSegment("travel"),
+          "references",
+          "body",
+          "api.md",
+        ),
+        collection: "skill-references",
+      }),
+    ).toEqual({
+      skillName: "travel",
+      relativePath: "references/references/body/api.md",
+    });
   });
 });
 
@@ -457,6 +556,143 @@ describe("createSkillQmdIndex", () => {
       () => createStore.mock.calls.length >= 2,
       "body-only change did not rebuild skill index",
     );
+
+    await index.close();
+  });
+
+  it("clears orphan generation directories before building", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "orphan-cleanup",
+      description: "Cleanup orphans",
+      body: "Body",
+    });
+    const agentDir = path.join(root, "qmd", "skills", safePathSegment("main"));
+    const orphan = path.join(agentDir, "gen-1-deadbeefdead");
+    await mkdir(path.join(orphan, "docs"), { recursive: true });
+    await writeFile(path.join(orphan, "docs", "stale.txt"), "stale", "utf8");
+
+    const createStore = vi.fn(async () =>
+      createStoreDouble({
+        search: vi.fn().mockResolvedValue([
+          {
+            filepath: path.join(
+              "docs",
+              "meta",
+              safePathSegment("orphan-cleanup"),
+              "meta.md",
+            ),
+            body: "---\nskill: orphan-cleanup\npath: meta.md\n---\n",
+            score: 0.9,
+          },
+        ]),
+      }),
+    );
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => ({
+        ...qmdConfig,
+        skillSearch: {
+          ...qmdConfig.skillSearch,
+          scheduleCooldownMs: 0,
+        },
+      }),
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "orphan cleanup index did not become ready",
+    );
+
+    const generations = (await readdir(agentDir)).filter((name) =>
+      name.startsWith("gen-"),
+    );
+    expect(generations).toHaveLength(1);
+    expect(generations[0]).not.toBe("gen-1-deadbeefdead");
+
+    await index.close();
+  });
+
+  it("recovers skill identity from docsRoot when frontmatter is missing", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "path-fallback",
+      description: "Path fallback",
+      body: "Body",
+      references: {
+        "references/body/api.md": "nested keyword path",
+      },
+    });
+
+    const createStore = vi.fn(async (options: { dbPath: string }) => {
+      const docsRoot = path.join(path.dirname(options.dbPath), "docs");
+      const nestedPath = path.join(
+        docsRoot,
+        "references",
+        safePathSegment("path-fallback"),
+        "references",
+        "body",
+        "api.md",
+      );
+      return createStoreDouble({
+        search: vi.fn(async (searchOptions?: { collection?: string }) => {
+          if (searchOptions?.collection !== "skill-references") return [];
+          return [
+            {
+              filepath: nestedPath,
+              body: "chunk without identity frontmatter",
+              score: 0.8,
+            },
+          ];
+        }),
+      });
+    });
+
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => ({
+        ...qmdConfig,
+        skillSearch: {
+          ...qmdConfig.skillSearch,
+          scheduleCooldownMs: 0,
+        },
+      }),
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "path fallback index did not become ready",
+    );
+
+    const results = await index.search({
+      agentId: "main",
+      query: "nested",
+      limit: 5,
+      includeEvidence: true,
+    });
+    expect(results).toEqual([
+      expect.objectContaining({
+        name: "path-fallback",
+        evidence: [
+          expect.objectContaining({
+            collection: "skill-references",
+            path: "references/references/body/api.md",
+          }),
+        ],
+      }),
+    ]);
 
     await index.close();
   });
