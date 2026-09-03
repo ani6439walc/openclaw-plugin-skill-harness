@@ -418,6 +418,7 @@ export function createPlugin(
         experienceCatalog,
         qmdSkillIndex,
         scheduleSkillSearchIndex,
+        bundledSkillsDir: deps.bundledSkillsDir,
       });
 
       setImmediate(() => {

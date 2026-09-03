@@ -6,13 +6,7 @@
     "onStartup": true
   },
   "contracts": {
-    "tools": [
-      "skill_list",
-      "skill_search",
-      "skill_view",
-      "skill_manage",
-      "skill_experience"
-    ]
+    "tools": ["skill_list", "skill_search", "skill_view", "skill_experience"]
   },
   "skills": ["./skills"],
   "configSchema": {

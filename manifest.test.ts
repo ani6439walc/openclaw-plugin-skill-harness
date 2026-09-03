@@ -18,7 +18,6 @@ describe("skill-harness manifest", () => {
       "skill_list",
       "skill_search",
       "skill_view",
-      "skill_manage",
       "skill_experience",
     ]);
     expect(manifest).not.toHaveProperty("commandAliases");

@@ -281,14 +281,11 @@ This skill does not manually repeat production-owned work: per-turn classificati
 | `skill_list`       | Broad inventory fallback for broad or uncertain tasks.             |
 | `skill_search`     | QMD hybrid discovery when injected candidates do not fit.          |
 | `skill_view`       | Reads a visible skill or allowed support file before use.          |
-| `skill_manage`     | Authorized write-capable maintenance through the resolved catalog. |
 | `skill_experience` | Searches bounded runtime experiences for currently visible skills. |
 
 `skill_experience` accepts an optional query of at most 500 Unicode code points. It searches at most six visible skills, returns at most three entries, caps each body at 2,000 code points, and caps all returned bodies at 5,000 code points. It reports unavailable requested skills separately and does not expose a catalog-wide experience inventory.
 
 `skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. This intentionally does not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists: visibility follows root precedence and disabled bundled-skill entries only. Prompt-time automatic configured-skill injection is narrower and includes explicit configured names plus workspace skills.
-
-`skill_list` omits usage and related-skill data unless `show_stats: true` or `show_related: true` is supplied; `skill_view` always includes visible related skills. Related-skill declarations are discovery metadata for the skill tools only: they do not expand the dynamic routing candidate list. `skill_search` requires a non-empty natural-language `query`, defaults to 20 results, caps the limit at 100, and retrieves visible skills through the managed QMD skill index over three content-only collections: skill metadata (`name` + `description`), `SKILL.md` body text with YAML frontmatter stripped, and `references/` file bodies with YAML frontmatter stripped. Synthetic identity sidecars stay beside those docs for provenance and rebuild fingerprinting, but are not indexed. Usage statistics and chunk evidence are omitted unless `show_stats: true` or `show_evidence: true` is supplied. If the index is still building or unavailable, the tool returns a structured `skill search index is not ready` error instead of falling back to lexical search.
 
 ## Intent Review
 
@@ -403,7 +400,7 @@ or `sync` without explicit authorization.
 The current plugin registers the complete runtime lifecycle: prompt construction,
 tool-call tracking, persisted tool results, agent finalization/end, and session
 cleanup. It also registers `skill_list`, `skill_search`, `skill_view`,
-`skill_manage`, and `skill_experience`.
+and `skill_experience`.
 
 On startup, the plugin initializes its runtime data root, loads the runtime
 intent catalog, and seeds bundled example intents only when the runtime catalog

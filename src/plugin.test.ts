@@ -138,7 +138,7 @@ describe("createPlugin", () => {
 
     createPlugin(api).register(api);
 
-    expect(api.registerTool).toHaveBeenCalledTimes(5);
+    expect(api.registerTool).toHaveBeenCalledTimes(4);
     expect(api.on).toHaveBeenCalledWith("session_end", expect.any(Function));
     expect(listProcessedEventIds).not.toHaveBeenCalled();
     expect(listRetainedSessions).not.toHaveBeenCalled();
@@ -178,13 +178,7 @@ describe("createPlugin", () => {
       api.registerTool.mock.calls.map(([tool, options]) =>
         typeof tool === "function" ? options?.name : tool.name,
       ),
-    ).toEqual([
-      "skill_list",
-      "skill_search",
-      "skill_view",
-      "skill_manage",
-      "skill_experience",
-    ]);
+    ).toEqual(["skill_list", "skill_search", "skill_view", "skill_experience"]);
     expect(api.registerCommand).not.toHaveBeenCalled();
   });
 
