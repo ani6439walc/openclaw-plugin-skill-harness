@@ -19,6 +19,17 @@ const DEFAULT_CANDIDATE_LIMIT = 40;
 const MAX_EVIDENCE_PER_SKILL = 3;
 const BUILD_LOCK_BUSY = "BUILD_LOCK_BUSY";
 
+class IncompleteEmbeddingBuildError extends Error {
+  readonly preserveGeneration = true;
+
+  constructor(params: { errors: number; needsEmbedding: number }) {
+    super(
+      `QMD skill index embedding is incomplete (errors=${params.errors}, needsEmbedding=${params.needsEmbedding}).`,
+    );
+    this.name = "IncompleteEmbeddingBuildError";
+  }
+}
+
 type QmdCreateStore = typeof createStore;
 
 type CollectionKind = "meta" | "body" | "reference";
@@ -318,6 +329,26 @@ async function writeIndexedDocument(params: {
   );
 }
 
+function skillSnapshotCollections(
+  docsRoot: string,
+): Record<string, { path: string; pattern: string; ignore?: string[] }> {
+  return {
+    [META_COLLECTION]: {
+      path: path.join(docsRoot, "meta"),
+      pattern: "**/meta.md",
+    },
+    [BODY_COLLECTION]: {
+      path: path.join(docsRoot, "body"),
+      pattern: "**/SKILL.md",
+    },
+    [REFS_COLLECTION]: {
+      path: path.join(docsRoot, "references"),
+      pattern: "**/*",
+      ignore: ["**/*.identity.yml"],
+    },
+  };
+}
+
 export async function writeSkillSnapshot(params: {
   docsRoot: string;
   skills: readonly AvailableSkill[];
@@ -391,15 +422,7 @@ export async function writeSkillSnapshot(params: {
     }
   }
 
-  return {
-    [META_COLLECTION]: { path: metaRoot, pattern: "**/meta.md" },
-    [BODY_COLLECTION]: { path: bodyRoot, pattern: "**/SKILL.md" },
-    [REFS_COLLECTION]: {
-      path: referencesRoot,
-      pattern: "**/*",
-      ignore: ["**/*.identity.yml"],
-    },
-  };
+  return skillSnapshotCollections(params.docsRoot);
 }
 
 function parseFrontmatterIdentity(raw: string | undefined): {
@@ -501,9 +524,12 @@ export function createSkillQmdIndex(params: {
 
   async function clearOrphanGenerations(
     agentId: string,
-    keepRoot?: string,
+    keepRoots: readonly string[] = [],
   ): Promise<void> {
     const root = agentRoot(agentId);
+    const resolvedKeepRoots = new Set(
+      keepRoots.map((entry) => path.resolve(entry)),
+    );
     let entries: Dirent[];
     try {
       entries = await fs.readdir(root, { withFileTypes: true });
@@ -522,7 +548,7 @@ export function createSkillQmdIndex(params: {
       entries.map(async (entry) => {
         if (!entry.isDirectory() || !entry.name.startsWith("gen-")) return;
         const candidate = path.join(root, entry.name);
-        if (keepRoot && path.resolve(candidate) === path.resolve(keepRoot)) {
+        if (resolvedKeepRoots.has(path.resolve(candidate))) {
           return;
         }
         await fs
@@ -530,6 +556,45 @@ export function createSkillQmdIndex(params: {
           .catch(() => undefined);
       }),
     );
+  }
+
+  async function findReusableGeneration(
+    agentId: string,
+    fingerprint: string,
+  ): Promise<{ generationRoot: string; docsRoot: string } | undefined> {
+    const root = agentRoot(agentId);
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(root, { withFileTypes: true });
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        return;
+      }
+      throw error;
+    }
+
+    const suffix = `-${fingerprint.slice(0, 12)}`;
+    const candidates = entries
+      .filter((entry) => entry.isDirectory() && entry.name.endsWith(suffix))
+      .sort((left, right) => right.name.localeCompare(left.name));
+    for (const entry of candidates) {
+      const generationRoot = path.join(root, entry.name);
+      const docsRoot = path.join(generationRoot, "docs");
+      try {
+        await Promise.all([
+          fs.access(path.join(generationRoot, "skill-search.sqlite")),
+          fs.access(docsRoot),
+        ]);
+        return { generationRoot, docsRoot };
+      } catch {
+        // A stale directory will be removed by the fresh-build path below.
+      }
+    }
   }
 
   function getState(agentId: string): AgentState {
@@ -590,6 +655,16 @@ export function createSkillQmdIndex(params: {
     if (code === "LEASE_BUSY" || code === BUILD_LOCK_BUSY) return true;
     const message = error instanceof Error ? error.message : String(error);
     return message.includes("LEASE_BUSY") || message.includes(BUILD_LOCK_BUSY);
+  }
+
+  function preservesGeneration(error: unknown): boolean {
+    return (
+      error instanceof IncompleteEmbeddingBuildError ||
+      (typeof error === "object" &&
+        error !== null &&
+        "preserveGeneration" in error &&
+        error.preserveGeneration === true)
+    );
   }
 
   function armRetryResume(
@@ -677,12 +752,6 @@ export function createSkillQmdIndex(params: {
       root,
       async () => {
         try {
-          const generation = await nextGenerationNumber(agentId);
-          state.generation = generation;
-          generationRoot = path.join(
-            root,
-            `gen-${generation}-${target.fingerprint.slice(0, 12)}`,
-          );
           const qmd = params.config();
           if (
             !qmd.embedding.baseUrl ||
@@ -694,13 +763,33 @@ export function createSkillQmdIndex(params: {
               "QMD embedding and expansion endpoints must be configured.",
             );
           }
-          await clearOrphanGenerations(agentId, state.generationRoot);
-          await fs.mkdir(generationRoot, { recursive: true });
-          const docsRoot = path.join(generationRoot, "docs");
-          const collections = await writeSkillSnapshot({
-            docsRoot,
-            skills: target.skills,
-          });
+          const reusable = await findReusableGeneration(
+            agentId,
+            target.fingerprint,
+          );
+          if (reusable) {
+            generationRoot = reusable.generationRoot;
+          } else {
+            const generation = await nextGenerationNumber(agentId);
+            state.generation = generation;
+            generationRoot = path.join(
+              root,
+              `gen-${generation}-${target.fingerprint.slice(0, 12)}`,
+            );
+            await clearOrphanGenerations(
+              agentId,
+              state.generationRoot ? [state.generationRoot] : [],
+            );
+            await fs.mkdir(generationRoot, { recursive: true });
+          }
+          const docsRoot =
+            reusable?.docsRoot ?? path.join(generationRoot, "docs");
+          const collections = reusable
+            ? skillSnapshotCollections(docsRoot)
+            : await writeSkillSnapshot({
+                docsRoot,
+                skills: target.skills,
+              });
           // Dynamic import keeps tests able to inject createStore without loading
           // the native QMD package at module evaluation time.
           const createQmdStore =
@@ -728,7 +817,14 @@ export function createSkillQmdIndex(params: {
             remoteRequestTimeoutMs: qmd.timeoutMs,
           });
           await nextStore.update();
-          await nextStore.embed();
+          const embedResult = await nextStore.embed();
+          const status = await nextStore.getStatus();
+          if (embedResult.errors > 0 || status.needsEmbedding > 0) {
+            throw new IncompleteEmbeddingBuildError({
+              errors: embedResult.errors,
+              needsEmbedding: status.needsEmbedding,
+            });
+          }
 
           if (
             state.desired &&
@@ -766,13 +862,16 @@ export function createSkillQmdIndex(params: {
         } catch (error) {
           if (nextStore) await nextStore.close().catch(() => undefined);
           nextStore = undefined;
-          if (generationRoot) {
+          if (
+            !(generationRoot && preservesGeneration(error)) &&
+            generationRoot
+          ) {
             await fs
               .rm(generationRoot, { recursive: true, force: true })
               .catch(() => undefined);
           }
           recordBuildFailure(state, target.fingerprint, error);
-          if (isRetryableBuildError(error)) {
+          if (preservesGeneration(error) || isRetryableBuildError(error)) {
             armRetryResume(agentId, state, target);
           }
           return true;

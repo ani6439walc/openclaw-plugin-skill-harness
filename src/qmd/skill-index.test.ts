@@ -85,10 +85,14 @@ function createStoreDouble(params: {
   close?: ReturnType<typeof vi.fn>;
   update?: ReturnType<typeof vi.fn>;
   embed?: ReturnType<typeof vi.fn>;
+  getStatus?: ReturnType<typeof vi.fn>;
 }) {
   return {
     update: params.update ?? vi.fn().mockResolvedValue({}),
-    embed: params.embed ?? vi.fn().mockResolvedValue({}),
+    embed: params.embed ?? vi.fn().mockResolvedValue({ errors: 0 }),
+    getStatus:
+      params.getStatus ??
+      vi.fn().mockResolvedValue({ needsEmbedding: 0, totalDocuments: 1 }),
     search: params.search ?? vi.fn().mockResolvedValue([]),
     searchLex: vi.fn().mockResolvedValue([]),
     searchVector: vi.fn().mockResolvedValue([]),
@@ -538,6 +542,99 @@ describe("createSkillQmdIndex", () => {
       () => createStore.mock.calls.length >= 3,
       "cooldown schedule did not auto-resume rebuild",
     );
+
+    await index.close();
+  });
+
+  it("preserves an incomplete generation and resumes embedding after backoff", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "resume-partial",
+      description: "Resume partial embeddings",
+      body: "body",
+    });
+    const pendingTimers: Array<{ delayMs: number; callback: () => void }> = [];
+    const firstStore = createStoreDouble({
+      embed: vi.fn().mockResolvedValue({ errors: 3 }),
+      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 7 }),
+    });
+    const resumedStore = createStoreDouble({
+      embed: vi.fn().mockResolvedValue({ errors: 0 }),
+      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
+    });
+    const createStore = vi
+      .fn()
+      .mockImplementationOnce(async (options: { dbPath: string }) => {
+        await writeFile(options.dbPath, "partial index", "utf8");
+        return firstStore;
+      })
+      .mockResolvedValueOnce(resumedStore);
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+      setTimer: (callback, delayMs) => {
+        const timer = { delayMs, callback };
+        pendingTimers.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => {
+        const indexOfTimer = pendingTimers.indexOf(
+          timer as (typeof pendingTimers)[number],
+        );
+        if (indexOfTimer >= 0) pendingTimers.splice(indexOfTimer, 1);
+      },
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "failed",
+      "partial build did not mark failed",
+    );
+    expect(
+      await index.search({ agentId: "main", query: "resume", limit: 5 }),
+    ).toBeUndefined();
+    expect(firstStore.close).toHaveBeenCalledTimes(1);
+    await waitFor(
+      () => pendingTimers.length === 1,
+      "partial build retry timer was not armed",
+    );
+
+    const agentRoot = path.join(root, "qmd", "skills", safePathSegment("main"));
+    const generations = (await readdir(agentRoot)).filter((name) =>
+      name.startsWith("gen-"),
+    );
+    expect(generations).toHaveLength(1);
+    const dbPath = path.join(agentRoot, generations[0]!, "skill-search.sqlite");
+    expect(
+      await fsPromises.stat(path.join(agentRoot, generations[0]!, "docs")),
+    ).toBeDefined();
+
+    nowMs += pendingTimers[0]!.delayMs;
+    pendingTimers.shift()!.callback();
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "partial generation did not resume to ready",
+    );
+    expect(createStore).toHaveBeenCalledTimes(2);
+    expect(createStore.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        dbPath,
+        config: expect.objectContaining({
+          collections: expect.objectContaining({
+            "skill-body": expect.objectContaining({
+              path: path.join(path.dirname(dbPath), "docs", "body"),
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(resumedStore.update).toHaveBeenCalledTimes(1);
+    expect(resumedStore.embed).toHaveBeenCalledTimes(1);
 
     await index.close();
   });
