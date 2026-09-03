@@ -413,7 +413,7 @@ describe("registerSkillTools", () => {
       expect(result.skills[0]).not.toHaveProperty("usage_stats");
       expect(result.skills[0]).not.toHaveProperty("evidence");
       expect(scheduleSkillSearchIndex).toHaveBeenCalledWith("main");
-      expect(qmdSkillIndex.schedule).toHaveBeenCalled();
+      expect(qmdSkillIndex.schedule).not.toHaveBeenCalled();
       expect(qmdSkillIndex.search).toHaveBeenCalledWith({
         agentId: "main",
         query: "react ui",

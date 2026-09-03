@@ -19,6 +19,7 @@ const DEFAULT_SKILL_LIST_LIMIT = 150;
 const MAX_SKILL_LIST_LIMIT = 500;
 const DEFAULT_SKILL_SEARCH_LIMIT = 20;
 const MAX_SKILL_SEARCH_LIMIT = 100;
+const MAX_SKILL_SEARCH_QUERY_CODE_POINTS = 1_000;
 const MAX_EXPERIENCE_SKILLS = 6;
 const MAX_EXPERIENCE_QUERY_CODE_POINTS = 500;
 const MAX_EXPERIENCE_ENTRIES = 3;
@@ -229,7 +230,10 @@ export function registerSkillTools(
           ),
         }),
         async execute(_toolCallId, params) {
-          const query = optionalStringParam(params, "query")?.trim() ?? "";
+          const query = truncateCodePoints(
+            optionalStringParam(params, "query")?.trim() ?? "",
+            MAX_SKILL_SEARCH_QUERY_CODE_POINTS,
+          );
           if (!query) {
             return jsonToolResult({
               success: false,
@@ -261,8 +265,6 @@ export function registerSkillTools(
             agentId,
             intents: options.getIntents?.(agentId),
           });
-          index.schedule(agentId, inventory);
-
           const hits = await index.search({
             agentId,
             query,
