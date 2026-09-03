@@ -40,7 +40,7 @@ const catalog: IntentCatalogEntry[] = [
       triggers: ["implement the requested feature"],
       examples: ["add a QMD fastpath"],
       domain: "development",
-      fastpath: { keywords: ["implement", "feature"] },
+      keywords: ["implement", "feature"],
       guidance: "Implement the requested feature carefully.",
     },
   },
@@ -118,7 +118,7 @@ describe("createIntentQmdIndex", () => {
     ]);
     const searchLex = vi.fn().mockResolvedValue([
       {
-        filepath: "/snapshot/topic-keywords/implementation-0.md",
+        filepath: "/snapshot/keywords/implementation-0.md",
         score: 0.91,
       },
     ]);
@@ -178,19 +178,18 @@ describe("createIntentQmdIndex", () => {
     });
 
     await expect(
-      index.searchTopicKeywords({
+      index.searchKeywords({
         query: "implement feature",
-        domain: "development",
       }),
     ).resolves.toEqual([
       {
         intentId: "implementation",
         score: 0.91,
-        collection: expect.stringMatching(/^intent-topic-keywords-/),
+        collection: "intent-keywords",
       },
     ]);
     expect(searchLex).toHaveBeenCalledWith("implement feature", {
-      collection: expect.stringMatching(/^intent-topic-keywords-/),
+      collection: "intent-keywords",
       limit: 1,
     });
   });

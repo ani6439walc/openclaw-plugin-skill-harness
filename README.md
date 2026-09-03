@@ -116,15 +116,15 @@ The routing stages are:
 1. Resolve canonical agent and session identity, then exclude helper, generic subagent, Review, dreaming, and active-memory sessions from all injection.
 2. Append fixed skill-discovery guidance and enriched configured skills to every remaining agent turn.
 3. Gate dynamic routing by configured agent, chat scope, external-user turn, and interactive-session status.
-4. Load live configuration and runtime intents. Route in this order: normalized whole-message `fastpath.keywords` equality, topic triage, valid same-topic inheritance, domain-restricted QMD topic-keyword retrieval, then one QMD hybrid trigger/example search. A topic change prevents only same-topic inheritance; it does not skip either QMD stage or force classifier use.
-5. Domain-restricted QMD topic-keyword retrieval runs only when topic-triage confidence meets `routing.qmd.minTopicConfidence` (default `0.8`) and uses lexical `fastpath.keywords` matches only. A top result strictly over `routing.qmd.directRouteMinScore` (default `0.85`) routes directly; otherwise it falls through to hybrid retrieval and never supplies classifier candidates itself.
-6. Hybrid trigger/example QMD uses its default query-expansion policy without HyDE and does not rerank results. When topic triage meets `routing.qmd.minTopicConfidence`, its expansion context is compact and ordered as `domain=…; keywords=…; topic=…`. Raw conversation, history, intent candidates, and intent bodies are not passed to QMD. Its top result strictly over `routing.qmd.directRouteMinScore` routes directly. Scores from `routing.qmd.smallCandidateMinScore` through that direct threshold give the classifier a small candidate set; scores from `routing.qmd.minCandidateScore` through under the small threshold give it a larger set. Empty, stale, failed, or below the inclusive candidate floor runs one full-catalog classifier call.
-7. Hybrid-QMD classifier candidates preserve canonical catalog order and consist only of QMD-ranked hits, `candidate.scope: cross-flow` intents, and valid intents from the last two session turns.
-8. Inject the selected intent, its one guidance sentence, direct candidates, and candidate-scoped experience metadata; then record the completed turn and run configured background work.
+4. Route via the 3-stage pipeline:
+   - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{directRouteMinScore}$ (default `0.85`) routes directly as `keyword`, bypassing LLM classification.
+   - **Step 2 (QMD Hybrid Trigger/Example Search)**: If Step 1 misses, performs hybrid semantic/BM25 retrieval over intent triggers and examples with conversation context expansion. A top score $\ge \text{directRouteMinScore}$ (default `0.85`) routes directly as `qmd-trigger`, bypassing LLM classification.
+   - **Step 3 (Fallback Intent Classifier)**: If neither direct route matches, projects candidate intents meeting $\ge \text{minCandidateScore}$ (default `0.35`) into a focused candidate manifest (falling back to full catalog if insufficient trusted hits), and invokes a single LLM intent classifier call with prompt context.
+5. Inject the selected intent, its one guidance sentence, direct candidates, and candidate-scoped experience metadata; then record the completed turn and run configured background work.
 
-Exact `fastpath.keywords` uses host-local NFKC/lowercase/whitespace-normalized whole-message equality; it does not invoke QMD. Same-topic inheritance requires history, `routing.sameTopic.minConfidence` joint confidence (default `0.8`), and a topic-triage domain equal to the current catalog domain of the historical intent. Topic-keyword retrieval indexes only `fastpath.keywords` in one QMD collection per domain. QMD snapshot files live under `qmd/intents/` and its SQLite database under `qmd/intent-routing.sqlite`; they refresh in the background, so a cold or unhealthy index fails open to the classifier.
+QMD snapshot files live under `qmd/intents/` and its SQLite database under `qmd/intent-routing.sqlite`; they refresh in the background, so a cold or unhealthy index fails open to the classifier.
 
-Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains only the selected intent, optional classifier-produced complexity, guidance, direct candidates, and nested experience metadata. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
+Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains only the selected intent, guidance, direct candidates, and nested experience metadata. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
 
 ## Basic configuration
 
@@ -159,13 +159,8 @@ Configure Skill Harness in `openclaw.json`:
           },
           // Optional. Omit this entire block to keep these defaults.
           routing: {
-            sameTopic: {
-              minConfidence: 0.8,
-            },
             qmd: {
-              minTopicConfidence: 0.8,
               directRouteMinScore: 0.85,
-              smallCandidateMinScore: 0.65,
               minCandidateScore: 0.35,
             },
           },
@@ -190,25 +185,20 @@ Configure Skill Harness in `openclaw.json`:
 | `thinking`                                  | `"medium"`         | Intent-classifier thinking level.                                                                         |
 | `lowEffortRoutingMode`                      | `"fastpath-only"`  | Routing behavior when the main agent uses off, minimal, or low reasoning effort.                          |
 | `queryMode` / `contextWindow`               | `"recent"`         | Scanner context and its limits.                                                                           |
-| `timeoutMs`                                 | `5000`             | Topic-checker and intent-classifier time budget.                                                          |
+| `timeoutMs`                                 | `5000`             | Intent-classifier time budget.                                                                            |
 | `qmd.embedding` / `expansion`               | required           | Remote endpoint and model for mandatory QMD hybrid routing; `apiKey` is optional for keyless proxies.     |
 | `qmd.timeoutMs`                             | `timeoutMs`        | Per-request QMD embedding and expansion timeout.                                                          |
 | `qmd.skillSearch.collectionWeights`         | `1/1/1`            | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.        |
 | `qmd.indexRefreshIntervalSeconds`           | `300`              | Seconds between source checks for QMD intent and skill indexes; `0` disables subsequent automatic checks. |
-| `routing.sameTopic.minConfidence`           | `0.8`              | Minimum topic-triage confidence for same-topic intent inheritance only.                                   |
-| `routing.qmd.minTopicConfidence`            | `0.8`              | Minimum topic-triage confidence for QMD topic-keyword retrieval and trigger/example QMD context.          |
-| `routing.qmd.directRouteMinScore`           | `0.85`             | Strictly-greater QMD score required for either QMD direct route.                                          |
-| `routing.qmd.smallCandidateMinScore`        | `0.65`             | Inclusive QMD score that selects the small classifier candidate set.                                      |
-| `routing.qmd.minCandidateScore`             | `0.35`             | Inclusive QMD score floor for any QMD classifier candidate projection.                                    |
+| `routing.qmd.directRouteMinScore`           | `0.85`             | Inclusive QMD score required for direct routing bypass in Step 1 and Step 2.                              |
+| `routing.qmd.minCandidateScore`             | `0.35`             | Inclusive QMD score floor for classifier candidate projection in Step 3.                                  |
 | `review.enabled`                            | `false`            | Enables post-turn Intent Review.                                                                          |
 | `review.thinking` / `timeoutSeconds`        | `"medium"` / `300` | Intent Review thinking level and time budget in seconds.                                                  |
 | `review.keywordCoverage.everyAcceptedTurns` | `50`               | Cadence for automatic cross-session keyword-coverage review.                                              |
 | `review.triggers.skillPlacement.enabled`    | `true`             | Enables bounded placement review for one eligible resolved skill.                                         |
 | `review.triggers.*.enabled`                 | `true`             | Enables the individual ordinary Review trigger; thresholds remain in the plugin manifest.                 |
 
-Topic Checker, Intent Classifier, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
-
-Every `routing` score must be between `0` and `1`, and `minCandidateScore ≤ smallCandidateMinScore ≤ directRouteMinScore`. Invalid routing settings reject plugin configuration rather than being silently changed or ignored.
+Intent Classifier and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
 ### Upgrade from the removed instruction writer to mandatory QMD routing
 

@@ -113,10 +113,10 @@ const REVIEW_INSTRUCTIONS: Record<
   },
   "weak-intent": {
     focus:
-      "Explain the classification ambiguity, likely matched intent, neighboring collision, and missing or misleading trigger/example/domain/fastpath/candidate coverage.",
-    goal: "Refine the matched intent Markdown frontmatter triggers/examples/domain/fastpath/candidate metadata and clarify its boundary without adding unrelated guidance.",
+      "Explain the classification ambiguity, likely matched intent, neighboring collision, and missing or misleading trigger/example/domain/fastpath coverage.",
+    goal: "Refine the matched intent Markdown frontmatter triggers/examples/domain/fastpath metadata and clarify its boundary without adding unrelated guidance.",
     workflow:
-      "weak-intent: focus on frontmatter triggers, examples, domain, fastpath, candidate metadata, and boundary clarity; prefer refine and do not change guidance for classification-only ambiguity. Use split or merge only when concrete neighboring-collision evidence proves refinement cannot preserve a clear class-level boundary.",
+      "weak-intent: focus on frontmatter triggers, examples, domain, fastpath metadata, and boundary clarity; prefer refine and do not change guidance for classification-only ambiguity. Use split or merge only when concrete neighboring-collision evidence proves refinement cannot preserve a clear class-level boundary.",
   },
   "behavior-fix": {
     focus:
@@ -181,18 +181,16 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - The target library shape is class-level routing definitions: strict classification frontmatter plus one plain-text guidance body. Do not create one-intent-per-session artifacts.
 
 ### Target preference order
-- Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, fastpath, candidate, domain, or direct-skill improvements.
+- Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, fastpath, domain, or direct-skill improvements.
 - If the matched intent is absent or clearly wrong, prefer updating an existing class-level/umbrella intent from the Intent Catalog when catalog context is available and one intent already covers the broader task class.
 - Use only operations justified by the requested trigger's workflow. Prefer refine; create, split, or merge only when that trigger's concrete evidence establishes the corresponding class-level boundary change.
 - Do not create support files or propose references/templates/scripts. Preserve conversation-specific but reusable details only as concise routing metadata or guidance changes in the relevant intent Markdown.
 
 ### Intent shape and boundaries
 - Prefer the smallest maintainable boundary and the least disruptive operation allowed by the requested trigger workflow.
-- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional fastpath metadata, optional candidate metadata, and optional skills[].
+- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional keywords metadata, and optional skills[].
 - Triggers describe the user goal and boundary; examples are realistic user messages; domain is the broad routing bucket.
-- fastpath.keywords are exact/similarity routing phrases. Add or change them only when evidence shows a stable short phrase or a fastpath misroute.
-- candidate.scope="cross-flow" keeps a durable domain-independent intent in conservative classifier projections. Add it only when the intent must remain available across unrelated domains.
-- candidate.keywords are manual exact projection evidence, not fastpaths or body guidance. Do not infer candidate.keywords from one review snapshot; require telemetry or labeled evidence plus positive-match and collision fixtures.
+- keywords are exact/similarity routing phrases. Add or change them only when evidence shows a stable short phrase or a keyword misroute.
 - Do not create one-session intent boundaries; prefer the smallest durable class-level boundary that can help future turns.
 ### Routing metadata and guidance
 - The complete Markdown body is the required host-owned guidance string. Keep it concise, task-class scoped, and limited to behavior that should apply whenever this intent routes.

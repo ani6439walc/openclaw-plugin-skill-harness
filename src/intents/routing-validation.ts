@@ -8,11 +8,8 @@ const TOP_LEVEL_FIELDS = new Set([
   "examples",
   "domain",
   "skills",
-  "candidate",
-  "fastpath",
+  "keywords",
 ]);
-const CANDIDATE_FIELDS = new Set(["scope", "keywords"]);
-const FASTPATH_FIELDS = new Set(["keywords"]);
 const TERMINAL_DELIMITERS = new Set([".", "!", "?", "。", "！", "？"]);
 const MARKDOWN_PREFIX_PATTERN =
   /^\s*(?:#{1,6}(?:\s|$)|```|~~~|[-+*]\s+|\d+[.)]\s+)/;
@@ -129,8 +126,7 @@ export interface RoutingIntentDefinition {
   examples: string[];
   domain: string;
   skills?: string[];
-  candidate?: { scope?: "cross-flow"; keywords?: string[] };
-  fastpath: { keywords: string[] };
+  keywords: string[];
   guidance: string;
 }
 
@@ -435,68 +431,15 @@ export function validateRoutingIntentDirectory(
         }
       }
 
-      let candidate: RoutingIntentDefinition["candidate"];
-      if (data.candidate !== undefined) {
-        if (!isRecord(data.candidate)) {
-          fileErrors.push(`${file}: candidate must be an object`);
+      let keywords: string[] = [];
+      if (data.keywords !== undefined) {
+        const parsedKeywords = normalizedStringArray(data.keywords);
+        if (!parsedKeywords) {
+          fileErrors.push(
+            `${file}: keywords must be an array containing only non-empty strings`,
+          );
         } else {
-          const rawCandidate = data.candidate;
-          for (const field of Object.keys(rawCandidate).sort()) {
-            if (!CANDIDATE_FIELDS.has(field)) {
-              fileErrors.push(
-                `${file}: candidate contains unsupported field ${field}`,
-              );
-            }
-          }
-          const scope = rawCandidate.scope;
-          if (scope !== undefined && scope !== "cross-flow") {
-            fileErrors.push(
-              `${file}: candidate.scope must be cross-flow when provided`,
-            );
-          }
-          const keywords =
-            rawCandidate.keywords === undefined
-              ? undefined
-              : normalizedStringArray(rawCandidate.keywords);
-          if (rawCandidate.keywords !== undefined && !keywords) {
-            fileErrors.push(
-              `${file}: candidate.keywords must be an array containing only non-empty strings`,
-            );
-          }
-          if (scope === "cross-flow" || keywords !== undefined) {
-            candidate = {
-              ...(scope === "cross-flow" ? { scope } : {}),
-              ...(keywords !== undefined ? { keywords } : {}),
-            };
-          }
-        }
-      }
-
-      let fastpathKeywords: string[] = [];
-      if (data.fastpath !== undefined) {
-        if (!isRecord(data.fastpath)) {
-          fileErrors.push(`${file}: fastpath must be an object`);
-        } else {
-          const rawFastpath = data.fastpath;
-          for (const field of Object.keys(rawFastpath).sort()) {
-            if (field === "hint") {
-              fileErrors.push(`${file}: fastpath.hint is not supported`);
-            } else if (!FASTPATH_FIELDS.has(field)) {
-              fileErrors.push(
-                `${file}: fastpath contains unsupported field ${field}`,
-              );
-            }
-          }
-          if (rawFastpath.keywords !== undefined) {
-            const keywords = normalizedStringArray(rawFastpath.keywords);
-            if (!keywords) {
-              fileErrors.push(
-                `${file}: fastpath.keywords must be an array containing only non-empty strings`,
-              );
-            } else {
-              fastpathKeywords = keywords;
-            }
-          }
+          keywords = parsedKeywords;
         }
       }
 
@@ -517,8 +460,7 @@ export function validateRoutingIntentDirectory(
             examples,
             domain,
             ...(skills && skills.length > 0 ? { skills } : {}),
-            ...(candidate ? { candidate } : {}),
-            fastpath: { keywords: fastpathKeywords },
+            keywords,
             guidance,
           },
         });

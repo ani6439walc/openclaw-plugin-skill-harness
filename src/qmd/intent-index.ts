@@ -9,6 +9,7 @@ import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
 
 const TRIGGERS_COLLECTION = "intent-triggers";
 const EXAMPLES_COLLECTION = "intent-examples";
+const KEYWORDS_COLLECTION = "intent-keywords";
 const INITIAL_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
@@ -41,9 +42,9 @@ export interface IntentQmdIndex {
     rawLimit: number;
     expansionContext?: string;
   }): Promise<QmdIntentHit[] | undefined>;
-  searchTopicKeywords(params: {
+  searchKeywords(params: {
     query: string;
-    domain: string;
+    limit?: number;
   }): Promise<QmdIntentHit[] | undefined>;
   getStatus(): QmdIntentIndexStatus;
   close(): Promise<void>;
@@ -64,7 +65,7 @@ function snapshotFingerprint(
         triggers: intent.definition.triggers,
         examples: intent.definition.examples,
         domain: intent.definition.domain,
-        fastpathKeywords: intent.definition.fastpath.keywords,
+        keywords: intent.definition.keywords,
       })),
       embedding: {
         model: config.embedding.model,
@@ -72,10 +73,6 @@ function snapshotFingerprint(
       },
     }),
   );
-}
-
-function topicCollectionName(domain: string): string {
-  return `intent-topic-keywords-${hash(domain).slice(0, 12)}`;
 }
 
 function documentPath(
@@ -88,7 +85,7 @@ function documentPath(
 
 function documentBody(params: {
   intent: IntentCatalogEntry;
-  kind: "trigger" | "example" | "topic-keyword";
+  kind: "trigger" | "example" | "keyword";
   text: string;
 }): string {
   return matter.stringify(params.text.trim(), {
@@ -148,7 +145,7 @@ function snapshotDocuments(intents: readonly IntentCatalogEntry[]): {
   const append = (params: {
     root: string;
     intents: readonly IntentCatalogEntry[];
-    kind: "trigger" | "example" | "topic-keyword";
+    kind: "trigger" | "example" | "keyword";
     texts: (intent: IntentCatalogEntry) => readonly string[];
   }) => {
     for (const intent of params.intents) {
@@ -172,23 +169,17 @@ function snapshotDocuments(intents: readonly IntentCatalogEntry[]): {
     kind: "example",
     texts: (intent) => intent.definition.examples,
   });
+  append({
+    root: "keywords",
+    intents,
+    kind: "keyword",
+    texts: (intent) => intent.definition.keywords,
+  });
   const collections: Record<string, { path: string; pattern: string }> = {
     [TRIGGERS_COLLECTION]: { path: "triggers", pattern: "**/*.md" },
     [EXAMPLES_COLLECTION]: { path: "examples", pattern: "**/*.md" },
+    [KEYWORDS_COLLECTION]: { path: "keywords", pattern: "**/*.md" },
   };
-  for (const domain of new Set(
-    intents.map((intent) => intent.definition.domain),
-  )) {
-    const collectionName = topicCollectionName(domain);
-    const root = path.join("topic-keywords", collectionName);
-    append({
-      root,
-      intents: intents.filter((intent) => intent.definition.domain === domain),
-      kind: "topic-keyword",
-      texts: (intent) => intent.definition.fastpath.keywords,
-    });
-    collections[collectionName] = { path: root, pattern: "**/*.md" };
-  }
   return { documents, collections };
 }
 
@@ -434,19 +425,17 @@ export function createIntentQmdIndex(params: {
         return;
       }
     },
-    async searchTopicKeywords({ query, domain }) {
+    async searchKeywords({ query, limit = 1 }) {
       if (!isReadyForCurrentCatalog()) return;
       const activeStore = store;
       if (!activeStore) return;
       try {
-        const collection = topicCollectionName(domain);
         const results = (await activeStore.searchLex(query, {
-          collection,
-          limit: 1,
+          collection: KEYWORDS_COLLECTION,
+          limit,
         })) as QmdLexResult[];
-        return parseLexHits(results, collection);
+        return parseLexHits(results, KEYWORDS_COLLECTION);
       } catch (error) {
-        logger.warn("QMD topic-keyword search failed", { error, domain });
         return;
       }
     },

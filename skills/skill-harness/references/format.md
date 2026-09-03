@@ -19,11 +19,8 @@ triggers:
   - "The user asks to compare two previously recorded trips."
 examples:
   - "How did my recorded Japan trip compare with my Chiayi trip?"
-fastpath:
-  keywords:
-    - "optional exact keyword"
-candidate:
-  scope: "cross-flow"
+keywords:
+  - "optional exact keyword"
 skills:
   - "optional-skill-name"
 ---
@@ -33,9 +30,7 @@ Route this request to the declared skills and follow the bounded routing context
 - `domain` is required and must be one string.
 - `skills` is optional and must be a list of exact skill names. Use it only for skills the intent should load or strongly prefer.
 - The complete plain-text body is required guidance, one durable routing-behavior sentence shared by exact, inherited, and classified routes.
-- `fastpath.keywords` is optional whole-message exact-match evidence. The same values also populate the domain-scoped lexical QMD topic-keyword collection, so use only durable short phrases appropriate for both routes; never place a hint or workflow body here.
-- `candidate` is optional classifier-projection metadata. `candidate.scope`, when present, must be `cross-flow`; use it only when the intent must remain available across unrelated domains.
-- The schema still accepts `candidate.keywords` for catalog compatibility, but current QMD candidate projection does not consume it. Do not add new `candidate.keywords` entries.
+- `keywords` is optional whole-message exact-match evidence. The same values also populate the lexical QMD keyword collection, so use only durable short phrases appropriate for both routes; never place a hint or workflow body here.
 
 ## Skills metadata rule
 

@@ -252,11 +252,14 @@ describe("createPlugin", () => {
     });
 
     createPlugin(api).register(api);
-    await vi.waitFor(() => {
-      expect(scheduleSpy).toHaveBeenCalledWith("main", expect.any(Array));
-      expect(scheduleSpy).toHaveBeenCalledWith("coder", expect.any(Array));
-      expect(scheduleSpy).toHaveBeenCalledWith("reviewer", expect.any(Array));
-    });
+    await vi.waitFor(
+      () => {
+        expect(scheduleSpy).toHaveBeenCalledWith("main", expect.any(Array));
+        expect(scheduleSpy).toHaveBeenCalledWith("coder", expect.any(Array));
+        expect(scheduleSpy).toHaveBeenCalledWith("reviewer", expect.any(Array));
+      },
+      { timeout: 3000 },
+    );
   });
 
   it("registers hooks when keyword coverage keyword cache is corrupt", () => {

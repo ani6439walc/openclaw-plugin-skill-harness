@@ -71,7 +71,6 @@ import {
   getModelRef,
   getReviewModelRef,
   runIntentionSubagent,
-  runTopicSwitchSubagent,
 } from "../classification/index.js";
 import {
   buildRoutingContext,
@@ -82,7 +81,7 @@ import {
   resolveAvailableSkills,
   resolveSkillInventory,
 } from "../intents/index.js";
-import { FALLBACK_INTENT, isIntentComplexity } from "../constants.js";
+import { FALLBACK_INTENT, FALLBACK_INTENT_ID } from "../constants.js";
 import { experiencesPath, intentsPath, packageRoot } from "../file-utils.js";
 import type { QmdIntentHit } from "../qmd/intent-index.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
@@ -141,19 +140,25 @@ type CoverageRuntimeTargets = Partial<
   >
 >;
 
-function formatQmdTriggerExpansionContext(params: {
-  topic?: string;
-  domain?: string;
-  keywords?: readonly string[];
+function formatConversationExpansionContext(params: {
+  conversation?: readonly RecentTurn[];
+  latestHistoricalIntent?: HistoricalIntentRecord;
 }): string | undefined {
-  const fields = [
-    params.domain ? `domain=${params.domain}` : undefined,
-    params.keywords?.length
-      ? `keywords=${params.keywords.join(",")}`
-      : undefined,
-    params.topic ? `topic=${params.topic}` : undefined,
-  ].filter((field): field is string => Boolean(field));
-  return fields.length > 0 ? fields.join("; ") : undefined;
+  const parts: string[] = [];
+  if (params.latestHistoricalIntent) {
+    parts.push(`previous_intent=${params.latestHistoricalIntent.intent}`);
+    if (params.latestHistoricalIntent.topic) {
+      parts.push(`previous_topic=${params.latestHistoricalIntent.topic}`);
+    }
+  }
+  if (params.conversation?.length) {
+    const recent = params.conversation
+      .slice(-3)
+      .map((t) => `[${t.role}] ${t.text.trim().slice(0, 120)}`)
+      .join(" ");
+    parts.push(`recent_dialog=${recent}`);
+  }
+  return parts.length > 0 ? parts.join("; ") : undefined;
 }
 
 function truncateSelectedPlacementSkillContent(content: string): {
@@ -380,23 +385,6 @@ function findIntentEntry<
   );
 }
 
-function buildInheritedIntentResult(
-  latest: HistoricalIntentRecord,
-  topicContext: NonNullable<Awaited<ReturnType<typeof runTopicSwitchSubagent>>>,
-  domain: string,
-): IntentionResult {
-  return {
-    intent: latest.intent,
-    reason: "Topic unchanged; inherited previous intent",
-    keywords: [...topicContext.keywords],
-    domain,
-    topic: topicContext.topic,
-    confidence: latest.confidence ?? 0.8,
-  };
-}
-
-const TOPIC_CONTINUITY_INHERIT_CONFIDENCE = 0.8;
-
 function resolveIntentId(intent: string | undefined): string | undefined {
   return intent?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
 }
@@ -415,114 +403,62 @@ function findIntentDomain(
 function buildQmdIntentResult(params: {
   hit: QmdIntentHit;
   intent: IntentCatalogEntry;
-  topicContext: Awaited<ReturnType<typeof runTopicSwitchSubagent>>;
-  latestHistoricalIntent: HistoricalIntentRecord | undefined;
+  latestHistoricalIntent?: HistoricalIntentRecord;
 }): IntentionResult {
-  const topicChangeReason = params.topicContext
-    ? resolveTopicChangeReason(params.topicContext)
-    : undefined;
+  const sameIntent =
+    resolveIntentId(params.latestHistoricalIntent?.intent) ===
+    params.intent.id.toLowerCase();
   return {
     intent: params.intent.id,
     reason: `QMD ${params.hit.collection} match`,
-    keywords: params.topicContext
-      ? [...params.topicContext.keywords]
-      : undefined,
+    keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
-    topic: params.topicContext?.topic,
-    topicChangeReason,
-    previousTopic: topicChangeReason
-      ? params.latestHistoricalIntent?.topic
-      : undefined,
+    topic: `QMD match for ${params.intent.id}.`,
+    previousTopic:
+      params.latestHistoricalIntent && !sameIntent
+        ? params.latestHistoricalIntent.topic
+        : undefined,
+    topicChangeReason: !params.latestHistoricalIntent
+      ? "start"
+      : sameIntent
+        ? undefined
+        : "match",
     confidence: params.hit.score,
   };
 }
 
-const normalizedFastpathKeywords = new WeakMap<
-  IntentCatalogEntry,
-  Array<{ normalized: string; keyword: string }>
->();
-
-function getNormalizedFastpathKeywords(
-  intent: IntentCatalogEntry,
-): Array<{ normalized: string; keyword: string }> {
-  const cached = normalizedFastpathKeywords.get(intent);
-  if (cached) return cached;
-
-  const keywords = intent.definition.fastpath.keywords.map((keyword) => ({
-    normalized: normalizeForKeyword(keyword),
-    keyword: keyword.trim(),
-  }));
-  normalizedFastpathKeywords.set(intent, keywords);
-  return keywords;
+function buildKeywordIntentResult(params: {
+  hit: QmdIntentHit;
+  intent: IntentCatalogEntry;
+  latestHistoricalIntent?: HistoricalIntentRecord;
+}): IntentionResult {
+  const sameIntent =
+    resolveIntentId(params.latestHistoricalIntent?.intent) ===
+    params.intent.id.toLowerCase();
+  return {
+    intent: params.intent.id,
+    reason: `Keyword match: ${params.intent.id}`,
+    keywords: params.intent.definition.keywords.slice(0, 5),
+    domain: params.intent.definition.domain,
+    topic: `Keyword match for ${params.intent.id}.`,
+    previousTopic:
+      params.latestHistoricalIntent && !sameIntent
+        ? params.latestHistoricalIntent.topic
+        : undefined,
+    topicChangeReason: !params.latestHistoricalIntent
+      ? "start"
+      : sameIntent
+        ? undefined
+        : "match",
+    confidence: params.hit.score,
+  };
 }
 
-function findExactKeywordIntent(
-  latest: string,
-  intents: readonly IntentCatalogEntry[],
-): { intent: IntentCatalogEntry; keyword: string } | undefined {
-  const normalizedLatest = normalizeForKeyword(latest);
-  if (!normalizedLatest) return;
-
-  for (const intent of intents) {
-    for (const keyword of getNormalizedFastpathKeywords(intent)) {
-      if (keyword.normalized === normalizedLatest) {
-        return { intent, keyword: keyword.keyword };
-      }
-    }
-  }
-}
-
-function collectIntentDomains(
-  intents: readonly IntentCatalogEntry[],
-): string[] {
-  return [...new Set(intents.map((intent) => intent.definition.domain))].sort();
-}
-
-function getTopicContextReason(
-  topicContext: NonNullable<Awaited<ReturnType<typeof runTopicSwitchSubagent>>>,
-): IntentionResult["topicChangeReason"] | "same-topic" | undefined {
-  return (
-    topicContext.reason ??
-    (
-      topicContext as {
-        topicChangeReason?: IntentionResult["topicChangeReason"] | "same-topic";
-      }
-    ).topicChangeReason
-  );
-}
-
-function isTopicContextChanged(
-  topicContext: NonNullable<Awaited<ReturnType<typeof runTopicSwitchSubagent>>>,
-): boolean {
-  return (
-    topicContext.changed ??
-    (topicContext as { topicChanged?: boolean }).topicChanged ??
-    false
-  );
-}
-
-function resolveTopicChangeReason(
-  topicContext: NonNullable<Awaited<ReturnType<typeof runTopicSwitchSubagent>>>,
-): IntentionResult["topicChangeReason"] {
-  const reason = getTopicContextReason(topicContext);
-  return isTopicContextChanged(topicContext) && reason !== "same-topic"
-    ? reason
-    : undefined;
-}
-
-type PromptBuildClassification =
-  | {
-      kind: "same-topic";
-      trigger: IntentTrigger;
-      result: IntentionResult;
-      intentProjection?: undefined;
-    }
-  | {
-      kind: "classified";
-      trigger: IntentTrigger;
-      result: IntentionResult;
-      intentProjection?: IntentProjectionTelemetry;
-    };
+type PromptBuildClassification = {
+  trigger: IntentTrigger;
+  result: IntentionResult;
+  intentProjection?: IntentProjectionTelemetry;
+};
 
 export function createHookHandlers(deps: HookDeps) {
   const { api, config, refreshLiveConfigFromRuntime, refreshIntents } = deps;
@@ -534,7 +470,6 @@ export function createHookHandlers(deps: HookDeps) {
   const enqueueReviewTask = deps.reviewQueue?.enqueue ?? enqueueReview;
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier ?? runIntentionSubagent;
-  const topicChecker = deps.topicChecker ?? runTopicSwitchSubagent;
   const clock = deps.clock ?? (() => new Date());
   const experienceCatalog =
     deps.experienceCatalog ??
@@ -724,33 +659,7 @@ export function createHookHandlers(deps: HookDeps) {
     return { latestUserMessage, historicalIntents, conversation };
   }
 
-  function applyTopicContextToResult(
-    result: IntentionResult,
-    topicContext: Awaited<ReturnType<typeof runTopicSwitchSubagent>>,
-    latestHistoricalIntent: HistoricalIntentRecord | undefined,
-  ): void {
-    if (topicContext) {
-      const topicChangeReason = resolveTopicChangeReason(topicContext);
-      // Intent Classifier may override keywords; only use topicContext as fallback
-      const classifierKeywords = Array.isArray(result.keywords)
-        ? result.keywords
-        : undefined;
-      result.keywords = classifierKeywords?.length
-        ? classifierKeywords
-        : [...topicContext.keywords];
-      // Intent Classifier may override domain; only use topicContext as fallback
-      const classifierDomain = result.domain?.trim();
-      result.domain =
-        classifierDomain || topicContext.domain || FALLBACK_INTENT.domain;
-      result.topic = topicContext.topic;
-      result.topicChangeReason = topicChangeReason;
-      result.previousTopic = topicChangeReason
-        ? latestHistoricalIntent?.topic
-        : undefined;
-    }
-  }
-
-  async function classifyPromptBuild(params: {
+  async function resolvePromptBuildClassification(params: {
     ctx: PluginHookAgentContext;
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
     effectiveAgentId: string;
@@ -759,322 +668,249 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
-    modelRef: { provider: string; model: string };
+    modelRef: { provider: string; model: string } | undefined;
     availableIntents: readonly IntentCatalogEntry[];
   }): Promise<PromptBuildClassification | undefined> {
-    emitPipelineEvent(
-      params.ctx,
-      params.resolvedSessionKey,
-      "topic-triage",
-      "started",
-    );
-    const topicContext = await topicChecker({
-      api,
-      config: params.refreshedConfig,
-      agentId: params.effectiveAgentId,
-      sessionKey: params.resolvedSessionKey,
-      sessionId: params.ctx.sessionId,
-      conversation: params.conversation,
-      latest: params.latestUserMessage,
-      domains: collectIntentDomains(params.availableIntents),
-      history: params.historicalIntents,
-      messageProvider: params.ctx.messageProvider,
-      modelRef: params.modelRef,
-      dataRoot: deps.dataRoot,
-    });
-    emitPipelineEvent(
-      params.ctx,
-      params.resolvedSessionKey,
-      "topic-triage",
-      topicContext ? "completed" : "failed",
-      topicContext
-        ? {
-            basis: topicContext.basis,
-            domain: topicContext.domain,
-            keywords: topicContext.keywords,
-            topic: topicContext.topic,
-            changed: isTopicContextChanged(topicContext),
-            reason: resolveTopicChangeReason(topicContext),
-            confidence: topicContext.confidence,
-          }
-        : { error: "topic checker returned no context" },
-    );
-
     const latestHistoricalIntent =
       params.historicalIntents[params.historicalIntents.length - 1];
-    const isSameTopic =
-      topicContext !== undefined &&
-      !isTopicContextChanged(topicContext) &&
-      getTopicContextReason(topicContext) === "same-topic";
-    const latestHistoricalDomain = latestHistoricalIntent
-      ? findIntentDomain(params.availableIntents, latestHistoricalIntent.intent)
-      : undefined;
-    if (
-      isSameTopic &&
-      topicContext.confidence >=
-        params.refreshedConfig.routing.sameTopic.minConfidence &&
-      latestHistoricalIntent &&
-      topicContext.domain === latestHistoricalDomain
-    ) {
-      return {
-        kind: "same-topic",
-        trigger: "same-topic",
-        result: buildInheritedIntentResult(
-          latestHistoricalIntent,
-          topicContext,
-          findIntentDomain(
-            params.availableIntents,
-            latestHistoricalIntent.intent,
-          ),
-        ),
-      };
-    }
 
-    let result: IntentionResult | undefined;
-    let qmdTrigger:
-      Extract<IntentTrigger, "qmd-topic-keyword" | "qmd-trigger"> | undefined;
-    if (
-      topicContext &&
-      topicContext.confidence >=
-        params.refreshedConfig.routing.qmd.minTopicConfidence &&
-      qmdIntentIndex
-    ) {
+    // Step 1: QMD Keyword Search (BM25 searchLex)
+    let keywordHits: QmdIntentHit[] | undefined;
+    if (qmdIntentIndex) {
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
         "qmd-keyword",
         "started",
       );
-      const topicHits = await qmdIntentIndex.searchTopicKeywords({
-        query: topicContext.keywords.join(" "),
-        domain: topicContext.domain,
+      keywordHits = await qmdIntentIndex.searchKeywords({
+        query: params.latestUserMessage,
       });
-      const topHit = topicHits?.[0];
-      const matchedIntent = topHit
-        ? findIntentEntry(params.availableIntents, topHit.intentId)
+      const topKeywordHit = keywordHits?.[0];
+      const matchedKeywordIntent = topKeywordHit
+        ? findIntentEntry(params.availableIntents, topKeywordHit.intentId)
         : undefined;
       if (
-        topHit &&
-        matchedIntent &&
-        topHit.score > params.refreshedConfig.routing.qmd.directRouteMinScore
+        topKeywordHit &&
+        matchedKeywordIntent &&
+        topKeywordHit.score >=
+          params.refreshedConfig.routing.qmd.directRouteMinScore
       ) {
-        result = buildQmdIntentResult({
-          hit: topHit,
-          intent: matchedIntent,
-          topicContext,
-          latestHistoricalIntent,
-        });
-        qmdTrigger = "qmd-topic-keyword";
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
           "qmd-keyword",
           "completed",
           {
-            intent: result.intent,
-            score: topHit.score,
-            collection: topHit.collection,
+            intent: matchedKeywordIntent.id,
+            score: topKeywordHit.score,
+            collection: topKeywordHit.collection,
           },
         );
-      } else {
-        emitPipelineEvent(
-          params.ctx,
-          params.resolvedSessionKey,
-          "qmd-keyword",
-          topicHits === undefined ? "failed" : "completed",
-          topicHits === undefined
-            ? { error: "QMD topic-keyword index unavailable" }
-            : topHit
-              ? { score: topHit.score, collection: topHit.collection }
-              : {},
-        );
+        const result = buildKeywordIntentResult({
+          hit: topKeywordHit,
+          intent: matchedKeywordIntent,
+          latestHistoricalIntent,
+        });
+        return {
+          trigger: "keyword",
+          result,
+        };
       }
+      emitPipelineEvent(
+        params.ctx,
+        params.resolvedSessionKey,
+        "qmd-keyword",
+        keywordHits === undefined ? "failed" : "completed",
+        keywordHits === undefined
+          ? { error: "QMD keyword index unavailable" }
+          : topKeywordHit
+            ? {
+                score: topKeywordHit.score,
+                collection: topKeywordHit.collection,
+              }
+            : {},
+      );
     }
-    let intentProjection: IntentProjectionTelemetry | undefined;
-    if (!result) {
-      const projectionStartedAtMs = Date.now();
-      let projection: IntentProjection;
-      const limits = getQmdCandidateLimits(params.availableIntents.length);
+
+    // Low-effort fastpath check
+    if (
+      shouldUseDeterministicLowEffortRoutingMode(
+        params.ctx,
+        params.refreshedConfig,
+      )
+    ) {
+      logger.debug(
+        "low-effort fastpath-only routing mode found no keyword match; skipping LLM-based intent analysis.",
+      );
+      return;
+    }
+
+    // Step 2: QMD Hybrid Search (Triggers & Examples) with Context Expansion
+    let qmdHits: QmdIntentHit[] | undefined;
+    let topHit: QmdIntentHit | undefined;
+    if (qmdIntentIndex) {
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
         "qmd-trigger-example",
         "started",
       );
-      const expansionContext =
-        topicContext &&
-        topicContext.confidence >=
-          params.refreshedConfig.routing.qmd.minTopicConfidence
-          ? formatQmdTriggerExpansionContext(topicContext)
-          : undefined;
-      const qmdHits = qmdIntentIndex
-        ? await qmdIntentIndex.searchIntentTriggers({
-            query: params.latestUserMessage,
-            rawLimit: limits.rawLimit,
-            ...(expansionContext ? { expansionContext } : {}),
-          })
-        : undefined;
-      const topHit = qmdHits?.[0];
+      const limits = getQmdCandidateLimits(params.availableIntents.length);
+      const expansionContext = formatConversationExpansionContext({
+        conversation: params.conversation,
+        latestHistoricalIntent,
+      });
+      qmdHits = await qmdIntentIndex.searchIntentTriggers({
+        query: params.latestUserMessage,
+        rawLimit: limits.rawLimit,
+        ...(expansionContext ? { expansionContext } : {}),
+      });
+      topHit = qmdHits?.[0];
       const topIntent = topHit
         ? findIntentEntry(params.availableIntents, topHit.intentId)
         : undefined;
-      if (topHit && !topIntent) {
-        logger.warn("QMD intent hit was not present in the active catalog", {
-          intentId: topHit.intentId,
-        });
-      }
       if (
         topHit &&
         topIntent &&
-        topHit.score > params.refreshedConfig.routing.qmd.directRouteMinScore
+        topHit.score >= params.refreshedConfig.routing.qmd.directRouteMinScore
       ) {
-        result = buildQmdIntentResult({
-          hit: topHit,
-          intent: topIntent,
-          topicContext,
-          latestHistoricalIntent,
-        });
-        qmdTrigger = "qmd-trigger";
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
           "qmd-trigger-example",
           "completed",
           {
-            intent: result.intent,
+            intent: topIntent.id,
             score: topHit.score,
             collection: topHit.collection,
           },
         );
-      } else {
-        emitPipelineEvent(
-          params.ctx,
-          params.resolvedSessionKey,
-          "qmd-trigger-example",
-          qmdHits === undefined ? "failed" : "completed",
-          qmdHits === undefined
-            ? { error: "QMD intent trigger index unavailable" }
-            : topHit
-              ? { score: topHit.score, collection: topHit.collection }
-              : {},
-        );
-      }
-      if (!result) {
-        try {
-          const projectedHits =
-            qmdHits &&
-            topHit &&
-            topHit.score >= params.refreshedConfig.routing.qmd.minCandidateScore
-              ? qmdHits.slice(
-                  0,
-                  topHit.score >=
-                    params.refreshedConfig.routing.qmd.smallCandidateMinScore
-                    ? limits.smallK
-                    : limits.largeK,
-                )
-              : qmdHits;
-          projection = projectQmdIntentCandidates({
-            intents: params.availableIntents,
-            qmdHits: projectedHits,
-            histories: params.historicalIntents,
-            minCandidateScore:
-              params.refreshedConfig.routing.qmd.minCandidateScore,
-          });
-        } catch (error) {
-          logger.warn(
-            "intent candidate projection failed; using full catalog",
-            {
-              error,
-            },
-          );
-          projection = {
-            decision: "full-fallback",
-            originalIntentCount: params.availableIntents.length,
-            candidateIntentCount: params.availableIntents.length,
-            effectiveIntents: [...params.availableIntents],
-            candidateIntents: [...params.availableIntents],
-            projected: false,
-            supportReasons: [],
-            selectionReasons: [],
-            candidateSelections: [],
-            matchedKeywords: [],
-            fallbackReason: "selector-error",
-          };
-        }
-        intentProjection = toIntentProjectionTelemetry({
-          projection,
-          originalIntents: params.availableIntents,
-          durationMs: Math.max(0, Date.now() - projectionStartedAtMs),
+        const result = buildQmdIntentResult({
+          hit: topHit,
+          intent: topIntent,
+          latestHistoricalIntent,
         });
-        emitPipelineEvent(
-          params.ctx,
-          params.resolvedSessionKey,
-          "intent-classify",
-          "started",
-        );
-        try {
-          result = await classifier({
-            api,
-            config: params.refreshedConfig,
-            agentId: params.effectiveAgentId,
-            sessionKey: params.resolvedSessionKey,
-            sessionId: params.ctx.sessionId,
-            conversation: params.conversation,
-            latest: params.latestUserMessage,
-            messageProvider: params.ctx.messageProvider,
-            channelId: params.ctx.channelId,
-            modelRef: params.modelRef,
-            intents: projection.effectiveIntents,
-            topicContext: topicContext ?? undefined,
-            dataRoot: deps.dataRoot,
-          });
-        } catch (error) {
-          await recordPromptBuildSession({
-            association: params.association,
-            latestUserMessage: params.latestUserMessage,
-            trigger: "classifier",
-            intentProjection,
-            conversation: params.conversation,
-          });
-          throw error;
-        }
-        emitPipelineEvent(
-          params.ctx,
-          params.resolvedSessionKey,
-          "intent-classify",
-          result ? "completed" : "failed",
-          result
-            ? {
-                intent: result.intent,
-                reason: result.reason,
-                ...(isIntentComplexity(result.complexity)
-                  ? { complexity: result.complexity }
-                  : {}),
-                confidence: result.confidence,
-              }
-            : { error: "classifier returned no result" },
-        );
-        if (!result) {
-          await recordPromptBuildSession({
-            association: params.association,
-            latestUserMessage: params.latestUserMessage,
-            trigger: "classifier",
-            intentProjection,
-            conversation: params.conversation,
-          });
-        }
+        return {
+          trigger: "qmd-trigger",
+          result,
+        };
       }
+      emitPipelineEvent(
+        params.ctx,
+        params.resolvedSessionKey,
+        "qmd-trigger-example",
+        qmdHits === undefined ? "failed" : "completed",
+        qmdHits === undefined
+          ? { error: "QMD intent trigger index unavailable" }
+          : topHit
+            ? { score: topHit.score, collection: topHit.collection }
+            : {},
+      );
     }
 
-    if (result) {
-      const trigger: IntentTrigger = qmdTrigger ?? "classifier";
-      if (!qmdTrigger) {
-        applyTopicContextToResult(result, topicContext, latestHistoricalIntent);
-      }
-      result.domain = findIntentDomain(params.availableIntents, result.intent);
-      return { kind: "classified", trigger, result, intentProjection };
+    // Step 3: Fallback Intent Classifier
+    if (!params.modelRef) {
+      return;
     }
-    return;
+
+    const projectionStartedAtMs = Date.now();
+    let projection: IntentProjection;
+    try {
+      projection = projectQmdIntentCandidates({
+        intents: params.availableIntents,
+        qmdHits,
+        histories: params.historicalIntents,
+        minCandidateScore: params.refreshedConfig.routing.qmd.minCandidateScore,
+      });
+    } catch (error) {
+      logger.warn("intent candidate projection failed; using full catalog", {
+        error,
+      });
+      projection = {
+        decision: "full-fallback",
+        originalIntentCount: params.availableIntents.length,
+        candidateIntentCount: params.availableIntents.length,
+        effectiveIntents: [...params.availableIntents],
+        candidateIntents: [...params.availableIntents],
+        projected: false,
+        supportReasons: [],
+        selectionReasons: [],
+        candidateSelections: [],
+        matchedKeywords: [],
+        fallbackReason: "selector-error",
+      };
+    }
+    const intentProjection = toIntentProjectionTelemetry({
+      projection,
+      originalIntents: params.availableIntents,
+      durationMs: Math.max(0, Date.now() - projectionStartedAtMs),
+    });
+
+    emitPipelineEvent(
+      params.ctx,
+      params.resolvedSessionKey,
+      "intent-classify",
+      "started",
+    );
+    let result: IntentionResult | undefined;
+    try {
+      result = await classifier({
+        api,
+        config: params.refreshedConfig,
+        agentId: params.effectiveAgentId,
+        sessionKey: params.resolvedSessionKey,
+        sessionId: params.ctx.sessionId,
+        conversation: params.conversation,
+        latest: params.latestUserMessage,
+        messageProvider: params.ctx.messageProvider,
+        channelId: params.ctx.channelId,
+        modelRef: params.modelRef,
+        intents: projection.effectiveIntents,
+        dataRoot: deps.dataRoot,
+      });
+    } catch (error) {
+      await recordPromptBuildSession({
+        association: params.association,
+        latestUserMessage: params.latestUserMessage,
+        trigger: "classifier",
+        intentProjection,
+        conversation: params.conversation,
+      });
+      throw error;
+    }
+
+    emitPipelineEvent(
+      params.ctx,
+      params.resolvedSessionKey,
+      "intent-classify",
+      result ? "completed" : "failed",
+      result
+        ? {
+            intent: result.intent,
+            reason: result.reason,
+            confidence: result.confidence,
+          }
+        : { error: "classifier returned no result" },
+    );
+
+    if (!result) {
+      await recordPromptBuildSession({
+        association: params.association,
+        latestUserMessage: params.latestUserMessage,
+        trigger: "classifier",
+        intentProjection,
+        conversation: params.conversation,
+      });
+      return;
+    }
+
+    result.domain = findIntentDomain(params.availableIntents, result.intent);
+    return {
+      trigger: "classifier",
+      result,
+      intentProjection,
+    };
   }
 
   async function recordPromptBuildSession(params: {
@@ -1152,33 +988,6 @@ export function createHookHandlers(deps: HookDeps) {
     return {
       candidates,
       experiences,
-    };
-  }
-
-  function buildExactKeywordIntentResult(params: {
-    exactKeywordMatch: NonNullable<ReturnType<typeof findExactKeywordIntent>>;
-    latestHistoricalIntent?: HistoricalIntentRecord;
-  }): IntentionResult {
-    const sameIntent =
-      resolveIntentId(params.latestHistoricalIntent?.intent) ===
-      params.exactKeywordMatch.intent.id.toLowerCase();
-
-    return {
-      intent: params.exactKeywordMatch.intent.id,
-      reason: `Exact keyword match: ${params.exactKeywordMatch.keyword}`,
-      keywords: [params.exactKeywordMatch.keyword],
-      domain: params.exactKeywordMatch.intent.definition.domain,
-      topic: `Exact keyword match for ${params.exactKeywordMatch.intent.id}.`,
-      previousTopic:
-        params.latestHistoricalIntent && !sameIntent
-          ? params.latestHistoricalIntent.topic
-          : undefined,
-      topicChangeReason: !params.latestHistoricalIntent
-        ? "start"
-        : sameIntent
-          ? undefined
-          : "match",
-      confidence: 1,
     };
   }
 
@@ -1267,71 +1076,7 @@ export function createHookHandlers(deps: HookDeps) {
     }
   }
 
-  async function handleExactKeywordPromptBuild(params: {
-    ctx: PluginHookAgentContext;
-    routing: PromptBuildIdentity;
-    refreshedConfig: ResolvedSkillHarnessPluginConfig;
-    latestUserMessage: string;
-    historicalIntents: HistoricalIntentRecord[];
-    conversation: ReturnType<typeof limitConversationTurns>;
-    availableIntents: readonly IntentCatalogEntry[];
-    exactKeywordMatch: NonNullable<ReturnType<typeof findExactKeywordIntent>>;
-    configuredSkillsXml?: string;
-  }): Promise<PluginHookBeforePromptBuildResult | undefined> {
-    const latestHistoricalIntent =
-      params.historicalIntents[params.historicalIntents.length - 1];
-    const result = buildExactKeywordIntentResult({
-      exactKeywordMatch: params.exactKeywordMatch,
-      latestHistoricalIntent,
-    });
-
-    emitPipelineEvent(
-      params.ctx,
-      params.routing.resolvedSessionKey,
-      "topic-triage",
-      "completed",
-      {
-        domain: result.domain,
-        keywords: result.keywords,
-        topic: result.topic,
-        changed: result.topicChangeReason !== undefined,
-        reason: result.topicChangeReason,
-      },
-    );
-    await recordPromptBuildResult({
-      ctx: params.ctx,
-      routing: params.routing,
-      latestUserMessage: params.latestUserMessage,
-      trigger: "exact-keyword",
-      result,
-      conversation: params.conversation,
-    });
-    const routingContext = await resolveRoutingContext({
-      routing: params.routing,
-      result,
-      intent: params.exactKeywordMatch.intent,
-    });
-    await recordPromptBuildResult({
-      ctx: params.ctx,
-      routing: params.routing,
-      latestUserMessage: params.latestUserMessage,
-      trigger: "exact-keyword",
-      result,
-      recommendedSkills: routingContext.candidates.map((skill) => skill.name),
-      conversation: params.conversation,
-    });
-    return toPromptBuildResult(
-      buildRoutingContext({
-        result,
-        guidance: params.exactKeywordMatch.intent.definition.guidance,
-        candidates: routingContext.candidates,
-        experiences: routingContext.experiences,
-      }),
-      params.configuredSkillsXml,
-    );
-  }
-
-  async function handleClassifiedPromptBuild(params: {
+  async function handleResolvedIntentPromptBuild(params: {
     ctx: PluginHookAgentContext;
     routing: PromptBuildIdentity;
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
@@ -1339,52 +1084,48 @@ export function createHookHandlers(deps: HookDeps) {
     conversation: ReturnType<typeof limitConversationTurns>;
     availableIntents: readonly IntentCatalogEntry[];
     classification: PromptBuildClassification;
-    modelRef: NonNullable<ReturnType<typeof getModelRef>>;
     configuredSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
-    const result = params.classification.result;
-    logger.debug(`intention subagent result: ${JSON.stringify(result)}`);
+    const { trigger, result, intentProjection } = params.classification;
+    logger.debug(`intention result (${trigger}): ${JSON.stringify(result)}`);
 
-    const recordAndReturnRoutingContext = async () => {
-      await recordPromptBuildResult({
-        ctx: params.ctx,
-        routing: params.routing,
-        latestUserMessage: params.latestUserMessage,
-        trigger: params.classification.trigger,
+    await recordPromptBuildResult({
+      ctx: params.ctx,
+      routing: params.routing,
+      latestUserMessage: params.latestUserMessage,
+      trigger,
+      result,
+      intentProjection,
+      conversation: params.conversation,
+    });
+    const intent = findIntentEntry(params.availableIntents, result.intent);
+    if (!intent) {
+      return toPromptBuildResult(undefined, params.configuredSkillsXml);
+    }
+    const routingContext = await resolveRoutingContext({
+      routing: params.routing,
+      result,
+      intent,
+    });
+    await recordPromptBuildResult({
+      ctx: params.ctx,
+      routing: params.routing,
+      latestUserMessage: params.latestUserMessage,
+      trigger,
+      result,
+      recommendedSkills: routingContext.candidates.map((skill) => skill.name),
+      intentProjection,
+      conversation: params.conversation,
+    });
+    return toPromptBuildResult(
+      buildRoutingContext({
         result,
-        intentProjection: params.classification.intentProjection,
-        conversation: params.conversation,
-      });
-      const intent = findIntentEntry(params.availableIntents, result.intent);
-      if (!intent)
-        return toPromptBuildResult(undefined, params.configuredSkillsXml);
-      const routingContext = await resolveRoutingContext({
-        routing: params.routing,
-        result,
-        intent,
-      });
-      await recordPromptBuildResult({
-        ctx: params.ctx,
-        routing: params.routing,
-        latestUserMessage: params.latestUserMessage,
-        trigger: params.classification.trigger,
-        result,
-        recommendedSkills: routingContext.candidates.map((skill) => skill.name),
-        intentProjection: params.classification.intentProjection,
-        conversation: params.conversation,
-      });
-      return toPromptBuildResult(
-        buildRoutingContext({
-          result,
-          guidance: intent.definition.guidance,
-          candidates: routingContext.candidates,
-          experiences: routingContext.experiences,
-        }),
-        params.configuredSkillsXml,
-      );
-    };
-
-    return await recordAndReturnRoutingContext();
+        guidance: intent.definition.guidance,
+        candidates: routingContext.candidates,
+        experiences: routingContext.experiences,
+      }),
+      params.configuredSkillsXml,
+    );
   }
 
   async function runPromptBuildPipeline<T>(
@@ -1484,35 +1225,6 @@ export function createHookHandlers(deps: HookDeps) {
       );
 
       const availableIntents = catalog.get();
-      const exactKeywordMatch = findExactKeywordIntent(
-        latestUserMessage,
-        availableIntents,
-      );
-      if (exactKeywordMatch) {
-        return await runPromptBuildPipeline(
-          ctx,
-          routing.resolvedSessionKey,
-          () =>
-            handleExactKeywordPromptBuild({
-              ctx,
-              routing,
-              refreshedConfig,
-              latestUserMessage,
-              historicalIntents,
-              conversation,
-              availableIntents,
-              exactKeywordMatch,
-              configuredSkillsXml,
-            }),
-        );
-      }
-
-      if (shouldUseDeterministicLowEffortRoutingMode(ctx, refreshedConfig)) {
-        logger.debug(
-          "low-effort fastpath-only routing mode found no exact keyword match; skipping LLM-based intent analysis.",
-        );
-        return toPromptBuildResult(undefined, configuredSkillsXml);
-      }
 
       const modelRef = getModelRef(
         api,
@@ -1523,15 +1235,12 @@ export function createHookHandlers(deps: HookDeps) {
           modelId: ctx.modelId,
         },
       );
-      if (!modelRef) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
-      }
 
       return await runPromptBuildPipeline(
         ctx,
         routing.resolvedSessionKey,
         async () => {
-          const classification = await classifyPromptBuild({
+          const classification = await resolvePromptBuildClassification({
             ctx,
             refreshedConfig,
             effectiveAgentId: routing.effectiveAgentId,
@@ -1546,12 +1255,12 @@ export function createHookHandlers(deps: HookDeps) {
 
           if (!classification) {
             logger.debug(
-              "intention subagent failed; skipping routing context injection.",
+              "intent resolution yielded no result; skipping routing context injection.",
             );
             return toPromptBuildResult(undefined, configuredSkillsXml);
           }
 
-          return await handleClassifiedPromptBuild({
+          return await handleResolvedIntentPromptBuild({
             ctx,
             routing,
             refreshedConfig,
@@ -1559,7 +1268,6 @@ export function createHookHandlers(deps: HookDeps) {
             conversation,
             availableIntents,
             classification,
-            modelRef,
             configuredSkillsXml,
           });
         },
@@ -1834,19 +1542,7 @@ export function createHookHandlers(deps: HookDeps) {
         domain: entry.definition.domain,
         guidance: entry.definition.guidance,
         skills: [...(entry.definition.skills ?? [])],
-        fastpath: {
-          keywords: [...(entry.definition.fastpath?.keywords ?? [])],
-        },
-        ...(entry.definition.candidate
-          ? {
-              candidate: {
-                ...entry.definition.candidate,
-                ...(entry.definition.candidate.keywords
-                  ? { keywords: [...entry.definition.candidate.keywords] }
-                  : {}),
-              },
-            }
-          : {}),
+        keywords: [...entry.definition.keywords],
       })),
     };
   }

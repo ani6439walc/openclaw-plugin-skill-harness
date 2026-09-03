@@ -26,7 +26,7 @@ describe("StatsAggregator", () => {
       examples: [],
       domain: "development",
       skills: ["git-master", "dev-lifecycle"],
-      fastpath: { keywords: [] },
+      keywords: [],
       guidance: "Follow the version-control workflow.",
     },
   };
@@ -1629,7 +1629,7 @@ describe("StatsAggregator", () => {
         triggers: ["prompt"],
         examples: [],
         domain: "development",
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: [
           "Candidate skills:",
           "  skill: prompt-engineering-expert",
@@ -1741,7 +1741,7 @@ describe("StatsAggregator", () => {
         triggers: ["chat"],
         examples: [],
         domain: "chat",
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Just chat.",
       },
     };

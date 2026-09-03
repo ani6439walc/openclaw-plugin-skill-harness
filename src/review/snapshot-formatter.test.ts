@@ -57,13 +57,7 @@ const fullSnapshot: ReviewSnapshot = {
       domain: "development",
       triggers: ["review intent behavior"],
       examples: ["Check whether an intent covers the workflow."],
-      fastpath: {
-        keywords: ["intent", "review"],
-      },
-      candidate: {
-        scope: "cross-flow",
-        keywords: ["approval", "confirm"],
-      },
+      keywords: ["intent", "review"],
       guidance:
         "Use current workspace intent files as canonical content and propose only durable intent-level corrections supported by review evidence.",
     },
@@ -115,20 +109,14 @@ const fullSnapshot: ReviewSnapshot = {
       domain: "development",
       triggers: ["review intent behavior"],
       examples: ["Check whether an intent covers the workflow."],
-      fastpath: {
-        keywords: ["intent", "review"],
-      },
-      candidate: {
-        scope: "cross-flow",
-        keywords: ["approval", "confirm"],
-      },
+      keywords: ["intent", "review"],
     },
     {
       id: "debugging",
       domain: "development",
       triggers: [],
       examples: [],
-      fastpath: { keywords: ["debug", "failure"] },
+      keywords: ["debug", "failure"],
     },
   ],
 };
@@ -154,35 +142,35 @@ function projectionReadySnapshot(): ReviewSnapshot {
         domain: "research",
         triggers: ["research evidence"],
         examples: [],
-        fastpath: { keywords: [] },
+        keywords: [],
       },
       {
         id: "cross-operations",
         domain: "operations",
         triggers: ["operational review"],
         examples: [],
-        fastpath: { keywords: ["Ｒｅｖｉｅｗ"] },
+        keywords: ["Ｒｅｖｉｅｗ"],
       },
       {
         id: "writing",
         domain: "writing",
         triggers: [],
         examples: [],
-        fastpath: { keywords: [] },
+        keywords: [],
       },
       {
         id: "health",
         domain: "health",
         triggers: [],
         examples: [],
-        fastpath: { keywords: [] },
+        keywords: [],
       },
       {
         id: "finance",
         domain: "finance",
         triggers: [],
         examples: [],
-        fastpath: { keywords: [] },
+        keywords: [],
       },
     ],
   };
@@ -226,7 +214,7 @@ const expectedFullSnapshot = `<review_snapshot>
 
   <matched_intent>
     <intent_metadata>
-      {"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"guidance":"Use current workspace intent files as canonical content and propose only durable intent-level corrections supported by review evidence.","fastpath":{"keywords":["intent","review"]},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}
+      {"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"guidance":"Use current workspace intent files as canonical content and propose only durable intent-level corrections supported by review evidence.","keywords":["intent","review"]}
     </intent_metadata>
   </matched_intent>
 
@@ -268,8 +256,8 @@ const expectedFullSnapshot = `<review_snapshot>
   </available_skills>
 
   <intent_catalog>
-    <intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"]},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]}}</intent>
-    <intent>{"id":"debugging","domain":"development","triggers":[],"examples":[],"fastpath":{"keywords":["debug","failure"]}}</intent>
+    <intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"keywords":["intent","review"]}</intent>
+    <intent>{"id":"debugging","domain":"development","triggers":[],"examples":[],"keywords":["debug","failure"]}</intent>
   </intent_catalog>
 </review_snapshot>`;
 
@@ -513,10 +501,10 @@ describe("formatReviewSnapshot", () => {
       '"intentCatalog":{"mode":"projected","originalCount":7,"includedCount":4,"omittedCount":3}',
     );
     expect(output).toContain(
-      '<intent>{"id":"cross-operations","domain":"operations","triggers":["operational review"],"examples":[],"fastpath":{"keywords":["Ｒｅｖｉｅｗ"]},"selectionReasons":["exact-fastpath-keyword-overlap"]}</intent>',
+      '<intent>{"id":"cross-operations","domain":"operations","triggers":["operational review"],"examples":[],"keywords":["Ｒｅｖｉｅｗ"],"selectionReasons":["exact-fastpath-keyword-overlap"]}</intent>',
     );
     expect(output).toContain(
-      '<intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"fastpath":{"keywords":["intent","review"]},"candidate":{"scope":"cross-flow","keywords":["approval","confirm"]},"selectionReasons":["matched-intent","observed-intent","observed-domain","exact-fastpath-keyword-overlap"]}</intent>',
+      '<intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"keywords":["intent","review"],"selectionReasons":["matched-intent","observed-intent","observed-domain","exact-fastpath-keyword-overlap"]}</intent>',
     );
     expect(catalog.indexOf('"id":"cross-operations"')).toBeLessThan(
       catalog.indexOf('"id":"debugging"'),

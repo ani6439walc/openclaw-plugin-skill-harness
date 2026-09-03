@@ -380,21 +380,11 @@ function formatIntentEntryMetadata(
   if (definition.skills !== undefined) {
     metadata.skills = [...definition.skills];
   }
-  if ("guidance" in definition) metadata.guidance = definition.guidance;
-  const fastpath = definition.fastpath;
-  if (fastpath) {
-    metadata.fastpath = {
-      keywords: [...fastpath.keywords],
-    };
+  if ("guidance" in definition && definition.guidance !== undefined) {
+    metadata.guidance = definition.guidance;
   }
-  const candidate = definition.candidate;
-  if (candidate) {
-    metadata.candidate = {
-      ...(candidate.scope !== undefined ? { scope: candidate.scope } : {}),
-      ...(candidate.keywords !== undefined
-        ? { keywords: [...candidate.keywords] }
-        : {}),
-    };
+  if ("keywords" in definition && definition.keywords !== undefined) {
+    metadata.keywords = [...definition.keywords];
   }
   if (selectionReasons) metadata.selectionReasons = [...selectionReasons];
   return metadata;

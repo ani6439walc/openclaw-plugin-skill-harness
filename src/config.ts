@@ -72,11 +72,8 @@ const DEFAULT_QMD: ResolvedQmdConfig = {
 };
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
-  sameTopic: { minConfidence: 0.8 },
   qmd: {
-    minTopicConfidence: 0.8,
     directRouteMinScore: 0.85,
-    smallCandidateMinScore: 0.65,
     minCandidateScore: 0.35,
   },
 };
@@ -273,25 +270,10 @@ const RoutingScoreSchema = (fallback: number) =>
   z.number().min(0).max(1).optional().default(fallback);
 const RoutingSchema = z
   .object({
-    sameTopic: z
-      .object({
-        minConfidence: RoutingScoreSchema(
-          DEFAULT_ROUTING.sameTopic.minConfidence,
-        ),
-      })
-      .strict()
-      .optional()
-      .default(DEFAULT_ROUTING.sameTopic),
     qmd: z
       .object({
-        minTopicConfidence: RoutingScoreSchema(
-          DEFAULT_ROUTING.qmd.minTopicConfidence,
-        ),
         directRouteMinScore: RoutingScoreSchema(
           DEFAULT_ROUTING.qmd.directRouteMinScore,
-        ),
-        smallCandidateMinScore: RoutingScoreSchema(
-          DEFAULT_ROUTING.qmd.smallCandidateMinScore,
         ),
         minCandidateScore: RoutingScoreSchema(
           DEFAULT_ROUTING.qmd.minCandidateScore,
@@ -303,17 +285,13 @@ const RoutingSchema = z
   })
   .strict()
   .superRefine((routing, context) => {
-    const { directRouteMinScore, smallCandidateMinScore, minCandidateScore } =
-      routing.qmd;
-    if (
-      minCandidateScore > smallCandidateMinScore ||
-      smallCandidateMinScore > directRouteMinScore
-    ) {
+    const { directRouteMinScore, minCandidateScore } = routing.qmd;
+    if (minCandidateScore > directRouteMinScore) {
       context.addIssue({
         code: "custom",
         path: ["qmd"],
         message:
-          "minCandidateScore must be less than or equal to smallCandidateMinScore, which must be less than or equal to directRouteMinScore",
+          "minCandidateScore must be less than or equal to directRouteMinScore",
       });
     }
   });

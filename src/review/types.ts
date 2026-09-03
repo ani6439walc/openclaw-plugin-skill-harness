@@ -62,10 +62,7 @@ export type ReviewSnapshot = {
   intentCatalog: Array<
     { id: string } & Pick<IntentDefinition, "triggers" | "examples"> &
       Partial<
-        Pick<
-          IntentDefinition,
-          "domain" | "fastpath" | "candidate" | "skills" | "guidance"
-        >
+        Pick<IntentDefinition, "domain" | "keywords" | "skills" | "guidance">
       >
   >;
 };

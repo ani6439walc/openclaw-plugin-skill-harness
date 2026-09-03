@@ -42,11 +42,8 @@ export type QmdEmbeddingConfig = QmdEndpointConfig & {
 };
 
 export type ResolvedRoutingConfig = {
-  sameTopic: { minConfidence: number };
   qmd: {
-    minTopicConfidence: number;
     directRouteMinScore: number;
-    smallCandidateMinScore: number;
     minCandidateScore: number;
   };
 };
@@ -90,13 +87,7 @@ export type IntentDefinition = {
   examples: string[];
   domain: string;
   skills?: string[];
-  candidate?: {
-    scope?: "cross-flow";
-    keywords?: string[];
-  };
-  fastpath: {
-    keywords: string[];
-  };
+  keywords: string[];
   guidance: string;
 };
 
@@ -106,7 +97,6 @@ export type IntentCatalogEntry = {
 };
 
 export type IntentProjectionSelectionReason =
-  | "cross-flow"
   | "predicted-domain"
   | "authorized-history"
   | "candidate-keyword"
@@ -155,11 +145,10 @@ export type IntentionResult = {
   complexity?: IntentComplexity;
 };
 
-export type ClassifiedIntentionResult = IntentionResult & {
-  complexity: IntentComplexity;
-};
+export type ClassifiedIntentionResult = IntentionResult;
 
 export type IntentTrigger =
+  | "keyword"
   | "exact-keyword"
   | "same-topic"
   | "qmd-topic-keyword"

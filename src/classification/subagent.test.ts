@@ -7,7 +7,6 @@ import {
   getModelRef,
   getReviewModelRef,
   runIntentionSubagent,
-  runTopicSwitchSubagent,
 } from "./subagent.js";
 
 describe("model resolution", () => {
@@ -159,7 +158,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
     );
   });
 
-  it("uses topic-switch agent name in session path", () => {
+  it("uses intention agent name in session path", () => {
     const dataRoot = "/tmp/test-data-root";
     const result = buildIntentionEmbeddedRunParams({
       params: {
@@ -171,12 +170,11 @@ describe("buildIntentionEmbeddedRunParams", () => {
       },
       subagentSessionId: "skill-harness-test-run",
       subagentSessionKey: "agent:main:skill-harness:test",
-      prompt: "topic switch",
-      agentName: "topic-switch",
+      prompt: "intent classification",
     });
 
     expect(result.sessionFile).toBe(
-      `${dataRoot}/agents/topic-switch/sessions/skill-harness-test-run.session.jsonl`,
+      `${dataRoot}/agents/intention/sessions/skill-harness-test-run.session.jsonl`,
     );
   });
 });
@@ -239,139 +237,6 @@ describe("runIntentionSubagent", () => {
 
     expect(result?.intent).toBe("other");
     expect(runEmbeddedAgent).toHaveBeenCalledOnce();
-  });
-});
-
-describe("runTopicSwitchSubagent", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("runs a tool-free topic checker with classifier config", async () => {
-    const runEmbeddedAgent = vi.fn().mockResolvedValue({
-      payloads: [
-        {
-          text: JSON.stringify({
-            basis: "Latest message continues the topic checker implementation.",
-            keywords: [" Topic ", "Checker"],
-            topic: "User is continuing work on the topic checker.",
-            domain: "coding",
-            reason: "same-topic",
-            confidence: 0.92,
-          }),
-        },
-      ],
-    });
-    const api = {
-      config: {},
-      runtime: { agent: { runEmbeddedAgent } },
-    } as unknown as OpenClawPluginApi;
-
-    const result = await runTopicSwitchSubagent({
-      api,
-      config: resolveConfig({
-        model: "google/test-intent",
-        thinking: "low",
-        timeoutMs: 4321,
-      }),
-      agentId: "main",
-      conversation: [
-        {
-          role: "user",
-          text: "continue previous implementation",
-          historicalIntent: {
-            intent: "coding",
-            domain: "coding",
-            topic: "topic checker",
-          },
-        },
-      ],
-      latest: "continue topic checker",
-      domains: ["coding", "chat"],
-      history: [
-        {
-          input: "plan topic checker",
-          intent: "coding",
-          domain: "coding",
-          keywords: ["topic", "checker"],
-          topic: "topic / checker",
-        },
-      ],
-      modelRef: { provider: "google", model: "test-intent" },
-    });
-
-    expect(result).toEqual({
-      basis: "Latest message continues the topic checker implementation.",
-      keywords: ["topic", "checker"],
-      topic: "User is continuing work on the topic checker.",
-      domain: "coding",
-      changed: false,
-      reason: "same-topic",
-      confidence: 0.92,
-    });
-    expect(runEmbeddedAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "google",
-        model: "test-intent",
-        timeoutMs: 4321,
-        thinkLevel: "low",
-        disableTools: true,
-        prompt: expect.stringContaining(
-          "You are a topic and routing-continuity checker.",
-        ),
-      }),
-    );
-    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
-      "<conversation_context>",
-    );
-    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
-      '<historical_intent>{"intent":"coding","domain":"coding","topic":"topic checker"}</historical_intent>',
-    );
-  });
-
-  it("includes the configured user timezone offset in the prompt", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-06-10T18:06:00.000Z"));
-
-    const runEmbeddedAgent = vi.fn().mockResolvedValue({
-      payloads: [
-        {
-          text: JSON.stringify({
-            basis: "Latest message asks about timezone context.",
-            keywords: ["timezone"],
-            topic: "User is checking timezone context.",
-            domain: "coding",
-            reason: "shift",
-            confidence: 0.9,
-          }),
-        },
-      ],
-    });
-    const api = {
-      config: {},
-      runtime: {
-        agent: { runEmbeddedAgent },
-        config: {
-          current: () => ({
-            agents: { defaults: { userTimezone: "Asia/Kolkata" } },
-          }),
-        },
-      },
-    } as unknown as OpenClawPluginApi;
-
-    await runTopicSwitchSubagent({
-      api,
-      config: resolveConfig({}),
-      agentId: "main",
-      latest: "continue timezone work",
-      domains: ["coding"],
-      history: [],
-      modelRef: { provider: "google", model: "test-intent" },
-    });
-
-    expect(runEmbeddedAgent.mock.calls[0][0].prompt).toContain(
-      "[Wed 2026-06-10 23:36 GMT+5:30]",
-    );
   });
 });
 

@@ -13,10 +13,7 @@ import type {
   KeywordCoverageReviewParams,
   KeywordCoverageReviewerResult,
 } from "../review/keyword-coverage-subagent.js";
-import type {
-  runIntentionSubagent,
-  runTopicSwitchSubagent,
-} from "../classification/index.js";
+import type { runIntentionSubagent } from "../classification/index.js";
 import type { ReviewTriggerKeywords } from "../review/trigger-keywords.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
@@ -61,7 +58,6 @@ export type HookDeps = {
     params: KeywordCoverageReviewParams,
   ) => Promise<KeywordCoverageReviewerResult | undefined>;
   classifier?: typeof runIntentionSubagent;
-  topicChecker?: typeof runTopicSwitchSubagent;
   reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
     Partial<
       Pick<

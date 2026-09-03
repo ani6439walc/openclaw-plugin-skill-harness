@@ -7,19 +7,12 @@ import {
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { FALLBACK_INTENT_ID } from "../constants.js";
-import {
-  buildIntentionPrompt,
-  buildTopicSwitchPrompt,
-  parseIntentionResult,
-  parseTopicSwitchResult,
-  type TopicSwitchResult,
-} from "./prompts.js";
+import { buildIntentionPrompt, parseIntentionResult } from "./prompts.js";
 import { resolveCanonicalSessionKeyFromSessionId } from "../session/index.js";
 import { buildEmbeddedSubagentRunDefaults } from "../subagent-runtime.js";
 import { agentWorkspacePath, agentSessionsPath } from "../file-utils.js";
 import type {
   ClassifiedIntentionResult,
-  HistoricalIntentRecord,
   IntentCatalogEntry,
   RecentTurn,
   ResolvedSkillHarnessPluginConfig,
@@ -147,7 +140,6 @@ export async function runIntentionSubagent(params: {
   channelId?: string;
   modelRef: { provider: string; model: string };
   intents: readonly IntentCatalogEntry[];
-  topicContext?: TopicSwitchResult;
   dataRoot?: string;
 }): Promise<ClassifiedIntentionResult | undefined> {
   const { subagentSessionId, subagentSessionKey } =
@@ -161,7 +153,6 @@ export async function runIntentionSubagent(params: {
     conversation: params.conversation,
     latest: params.latest,
     intents: params.intents,
-    topicContext: params.topicContext,
     currentTime: resolveCurrentTime(params.api),
   });
   const embeddedRunParams = buildIntentionEmbeddedRunParams({
@@ -169,7 +160,6 @@ export async function runIntentionSubagent(params: {
     subagentSessionId,
     subagentSessionKey,
     prompt,
-    agentName: "intention",
   });
 
   try {
@@ -180,11 +170,7 @@ export async function runIntentionSubagent(params: {
 
     const validIds = [...params.intents.map((i) => i.id), FALLBACK_INTENT_ID];
 
-    const parsed = parseIntentionResult(
-      rawReply,
-      validIds,
-      params.topicContext,
-    );
+    const parsed = parseIntentionResult(rawReply, validIds);
     if (!parsed) {
       logger.warn("Intention result parse failed", {
         rawReply,
@@ -198,70 +184,17 @@ export async function runIntentionSubagent(params: {
   }
 }
 
-export async function runTopicSwitchSubagent(params: {
-  api: OpenClawPluginApi;
-  config: ResolvedSkillHarnessPluginConfig;
-  agentId: string;
-  sessionKey?: string;
-  sessionId?: string;
-  conversation?: RecentTurn[];
-  latest: string;
-  domains: readonly string[];
-  history: readonly HistoricalIntentRecord[];
-  messageProvider?: string;
-  modelRef: { provider: string; model: string };
-  dataRoot?: string;
-}): Promise<TopicSwitchResult | undefined> {
-  const { subagentSessionId, subagentSessionKey } =
-    createSubagentSessionIdentity(params, {
-      runPrefix: "skill-harness",
-      keyPrefix: "skill-harness",
-      hashInput: params.latest,
-    });
-
-  const prompt = buildTopicSwitchPrompt({
-    latest: params.latest,
-    history: params.history,
-    domains: params.domains,
-    conversation: params.conversation,
-    currentTime: resolveCurrentTime(params.api),
-  });
-
-  try {
-    const result = await params.api.runtime.agent.runEmbeddedAgent(
-      buildIntentionEmbeddedRunParams({
-        params,
-        subagentSessionId,
-        subagentSessionKey,
-        prompt,
-        agentName: "topic-switch",
-      }),
-    );
-    const rawReply = extractPayloadText(result);
-    const parsed = parseTopicSwitchResult(rawReply, {
-      domains: params.domains,
-    });
-    if (!parsed) {
-      logger.warn("Topic switch result parse failed", { rawReply });
-    }
-    return parsed;
-  } catch (err) {
-    logger.warn("Topic switch subagent error", { error: err });
-    return;
-  }
-}
-
 export function buildIntentionEmbeddedRunParams(params: {
   params: EmbeddedSubagentBaseParams;
   subagentSessionId: string;
   subagentSessionKey: string;
   prompt: string;
-  agentName?: "topic-switch" | "intention";
 }) {
   const dataRoot = params.params.dataRoot;
-  const agentName = params.agentName ?? "intention";
   const workspaceDir = dataRoot ? agentWorkspacePath(dataRoot) : "/tmp";
-  const sessionDir = dataRoot ? agentSessionsPath(dataRoot, agentName) : "/tmp";
+  const sessionDir = dataRoot
+    ? agentSessionsPath(dataRoot, "intention")
+    : "/tmp";
   return {
     sessionId: params.subagentSessionId,
     sessionKey: params.subagentSessionKey,

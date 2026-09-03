@@ -39,7 +39,6 @@ export interface IntentProjection {
 
 const SELECTION_REASON_ORDER: readonly IntentProjectionSelectionReason[] = [
   "qmd-hit",
-  "cross-flow",
   "recent-history",
 ];
 
@@ -90,13 +89,14 @@ export function projectQmdIntentCandidates(params: {
   qmdHits: readonly QmdIntentHit[] | undefined;
   histories: readonly HistoricalIntentRecord[];
   minCandidateScore: number;
+  maxCandidates?: number;
 }): IntentProjection {
   const intents = [...params.intents];
   if (intents.length === 0) return fullCatalogResult(intents, "empty-catalog");
   if (!params.qmdHits) return fullCatalogResult(intents, "qmd-unavailable");
-  const trustedHits = params.qmdHits.filter(
-    (hit) => hit.score >= params.minCandidateScore,
-  );
+  const trustedHits = params.qmdHits
+    .filter((hit) => hit.score >= params.minCandidateScore)
+    .sort((a, b) => b.score - a.score);
   if (trustedHits.length === 0) {
     return fullCatalogResult(intents, "qmd-no-trusted-recall");
   }
@@ -113,11 +113,9 @@ export function projectQmdIntentCandidates(params: {
     reasonsById.set(normalized, reasons);
   };
 
-  for (const hit of trustedHits) add(hit.intentId, "qmd-hit");
-  for (const intent of intents) {
-    if (intent.definition.candidate?.scope === "cross-flow") {
-      add(intent.id, "cross-flow");
-    }
+  const limit = params.maxCandidates ?? trustedHits.length;
+  for (const hit of trustedHits.slice(0, limit)) {
+    add(hit.intentId, "qmd-hit");
   }
   for (const historicalIntent of params.histories.slice(-2)) {
     add(historicalIntent.intent, "recent-history");

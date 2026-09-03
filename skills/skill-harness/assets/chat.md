@@ -13,22 +13,21 @@ examples:
   - Nice weather today
   - Feeling a bit tired today
   - hi
-fastpath:
-  keywords:
-    - hi
-    - hello
-    - hey
-    - good morning
-    - good night
-    - thanks
-    - thank you
-    - thx
-    - appreciate it
-    - nice work
-    - I'm tired
-    - so tired
-    - sleepy
-    - hug
+keywords:
+  - hi
+  - hello
+  - hey
+  - good morning
+  - good night
+  - thanks
+  - thank you
+  - thx
+  - appreciate it
+  - nice work
+  - I'm tired
+  - so tired
+  - sleepy
+  - exhaustion
 ---
 
 Route purely social messages with no concrete request here and answer briefly, warmly, and in the user's tone, while routing any embedded task by its actual intent.

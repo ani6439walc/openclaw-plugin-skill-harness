@@ -14,7 +14,7 @@ function catalogEntry(
     domain,
     triggers: [`trigger ${id}`],
     examples: [`example ${id}`],
-    fastpath: { keywords },
+    keywords,
   };
 }
 
@@ -64,7 +64,7 @@ function snapshot(
         domain: "development",
         triggers: [],
         examples: [],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Matched routing guidance.",
       },
     },
@@ -143,7 +143,7 @@ describe("projectIntentCatalog", () => {
     const duplicate = {
       ...projectionCatalog[2]!,
       triggers: ["z duplicate metadata"],
-      fastpath: { keywords: ["review"] },
+      keywords: ["review"],
     };
     const forwardSnapshot = snapshot([...projectionCatalog, duplicate]);
     const reverseSnapshot = snapshot(
@@ -165,30 +165,6 @@ describe("projectIntentCatalog", () => {
         ?.selectionReasons,
     ).toEqual(["observed-domain"]);
     expect(reversed).toEqual(forward);
-  });
-
-  it("uses candidate metadata in duplicate-ID deterministic tie-breaking", () => {
-    const withoutCandidate = catalogEntry("same-domain", "development");
-    const withCandidate = {
-      ...withoutCandidate,
-      candidate: { scope: "cross-flow" as const, keywords: ["z"] },
-    };
-    const baseCatalog = projectionCatalog.filter(
-      (entry) => entry.id !== "same-domain",
-    );
-    const forward = projectIntentCatalog(
-      snapshot([...baseCatalog, withCandidate, withoutCandidate]),
-      ["behavior-fix"],
-    );
-    const reversed = projectIntentCatalog(
-      snapshot([...baseCatalog, withoutCandidate, withCandidate]),
-      ["behavior-fix"],
-    );
-
-    expect(reversed).toEqual(forward);
-    expect(
-      forward.entries.find((entry) => entry.entry.id === "same-domain")?.entry,
-    ).toEqual(withCandidate);
   });
 
   it("uses routing guidance and direct skills in duplicate-ID deterministic tie-breaking", () => {
@@ -244,7 +220,7 @@ describe("projectIntentCatalog", () => {
       mutate: (value: ReviewSnapshot) => {
         value.intentCatalog = value.intentCatalog.map((entry) =>
           entry.id === "cross-keyword"
-            ? { ...entry, fastpath: { keywords: ["different"] } }
+            ? { ...entry, keywords: ["different"] }
             : entry,
         );
       },

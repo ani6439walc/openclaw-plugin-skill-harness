@@ -242,8 +242,7 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 - Frontmatter is the complete intent file and has required fields with the right shapes.
 - The complete plain-text intent body is one durable routing-guidance sentence.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
-- `fastpath.keywords` must be durable exact whole-message evidence; the same values also form the domain-scoped lexical QMD topic-keyword collection.
-- `candidate.scope: cross-flow` is used only for durable domain-independent coverage. Do not add `candidate.keywords`: it is compatibility metadata and is not a current QMD projection input.
+- `keywords` must be durable exact whole-message evidence; the same values also form the lexical QMD keyword collection.
 - Review trigger keywords are a separate runtime surface. Analyze them with `references/keyword-audit.md` and `scripts/review-keyword-audit.py`; never infer a write from phrase frequency alone.
 - Skill dependencies use direct frontmatter `skills[]`; tools, workflows, commands, and lessons stay in referenced skills.
 - Intent metadata does not cross-reference other intent ids.

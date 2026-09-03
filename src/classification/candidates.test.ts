@@ -5,32 +5,27 @@ import {
   projectQmdIntentCandidates,
 } from "./candidates.js";
 
-function intent(
-  id: string,
-  domain: string,
-  candidate?: IntentCatalogEntry["definition"]["candidate"],
-): IntentCatalogEntry {
+function intent(id: string, domain: string): IntentCatalogEntry {
   const definition: IntentCatalogEntry["definition"] = {
     triggers: [`trigger ${id}`],
     examples: [`example ${id}`],
     domain,
-    fastpath: { keywords: [] },
+    keywords: [],
     guidance: `prompt ${id}`,
   };
-  if (candidate) definition.candidate = candidate;
   return { id, definition };
 }
 
 const catalog = [
   intent("chat", "chat"),
-  intent("approve", "conversation", { scope: "cross-flow" }),
+  intent("approve", "conversation"),
   intent("typescript", "development"),
   intent("version-control", "development"),
   intent("deploy", "operations"),
 ];
 
 describe("projectQmdIntentCandidates", () => {
-  it("uses QMD rank, cross-flow, and the last two valid histories in canonical catalog order", () => {
+  it("uses QMD rank and the last two valid histories in canonical catalog order", () => {
     const result = projectQmdIntentCandidates({
       intents: catalog,
       minCandidateScore: 0.35,
@@ -49,16 +44,11 @@ describe("projectQmdIntentCandidates", () => {
 
     expect(result.projected).toBe(true);
     expect(result.effectiveIntents.map((entry) => entry.id)).toEqual([
-      "approve",
       "typescript",
       "version-control",
       "deploy",
     ]);
-    expect(result.selectionReasons).toEqual([
-      "qmd-hit",
-      "cross-flow",
-      "recent-history",
-    ]);
+    expect(result.selectionReasons).toEqual(["qmd-hit", "recent-history"]);
   });
 
   it("falls back to the complete catalog when QMD is unavailable or below the configured minimum score", () => {
@@ -106,7 +96,6 @@ describe("projectQmdIntentCandidates", () => {
     });
 
     expect(result.effectiveIntents.map((entry) => entry.id)).toEqual([
-      "approve",
       "version-control",
     ]);
   });

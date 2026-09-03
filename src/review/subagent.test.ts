@@ -28,9 +28,8 @@ triggers:
 examples:
   - help with this
 domain: other
-fastpath:
-  keywords:
-    - help
+keywords:
+  - help
 ---
 Ask for context and keep the response short.
 `,
@@ -99,9 +98,7 @@ const snapshot: ReviewSnapshot = {
       triggers: ["Requests that do not match a defined intent"],
       examples: ["help with this"],
       domain: "other",
-      fastpath: {
-        keywords: ["help"],
-      },
+      keywords: ["help"],
       guidance: "Ask for context.",
     },
   },
@@ -118,9 +115,7 @@ const snapshot: ReviewSnapshot = {
       triggers: ["Requests that do not match a defined intent"],
       examples: ["help with this"],
       domain: "other",
-      fastpath: {
-        keywords: ["help"],
-      },
+      keywords: ["help"],
     },
   ],
 };
@@ -151,9 +146,8 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "### Recordability filter",
   "### Target and mutation boundaries",
   "Intent ids come from Markdown filenames without the .md suffix",
-  "Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional fastpath metadata, optional candidate metadata, and optional skills[]",
-  "Do not infer candidate.keywords from one review snapshot",
-  "fastpath.keywords are exact/similarity routing phrases",
+  "Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional keywords metadata, and optional skills[]",
+  "keywords are exact/similarity routing phrases",
   "complete Markdown body is the required host-owned guidance string",
   "### Routing metadata and guidance",
   "Skill dependencies belong in frontmatter skills[]",
@@ -758,35 +752,35 @@ describe("buildReviewPrompt", () => {
           domain: "other",
           triggers: [],
           examples: [],
-          fastpath: { keywords: [] },
+          keywords: [],
         },
         {
           id: "cross-keyword",
           domain: "development",
           triggers: [],
           examples: [],
-          fastpath: { keywords: ["ＨＥＬＰ"] },
+          keywords: ["ＨＥＬＰ"],
         },
         {
           id: "writing",
           domain: "writing",
           triggers: [],
           examples: [],
-          fastpath: { keywords: [] },
+          keywords: [],
         },
         {
           id: "health",
           domain: "health",
           triggers: [],
           examples: [],
-          fastpath: { keywords: [] },
+          keywords: [],
         },
         {
           id: "finance",
           domain: "finance",
           triggers: [],
           examples: [],
-          fastpath: { keywords: [] },
+          keywords: [],
         },
       ],
     };
@@ -1114,7 +1108,7 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("<matched_intent>");
     expect(prompt).toContain('"id":"other"');
     expect(prompt).toContain('"domain":"other"');
-    expect(prompt).toContain('"fastpath":{"keywords":["help"]}');
+    expect(prompt).toContain('"keywords":["help"]');
     expect(prompt).toContain('"guidance":"Ask for context."');
     expect(prompt).not.toContain("<intent_body>");
     expect(prompt).not.toContain("<recent_turns");
@@ -1134,7 +1128,7 @@ describe("buildReviewPrompt", () => {
     expect(prompt).not.toContain('"current"');
   });
 
-  it("formats routing metadata without domain or fastpath metadata", () => {
+  it("formats routing metadata without domain or keywords metadata", () => {
     const legacySnapshot = {
       ...snapshot,
       matchedIntent: {
@@ -1160,7 +1154,7 @@ describe("buildReviewPrompt", () => {
       '    <intent_metadata>\n      {"id":"legacy","domain":null,"triggers":["legacy trigger"],"examples":["legacy example"],"guidance":"Legacy guidance."}\n    </intent_metadata>',
     );
     expect(prompt).toContain('"domain":null');
-    expect(prompt).not.toContain('"fastpath":');
+    expect(prompt).not.toContain('"keywords":');
   });
 });
 
@@ -2074,14 +2068,6 @@ describe("runReviewSubagent", () => {
         content.replace("- Casual social chat", "- Privileged production work"),
     },
     {
-      name: "candidate",
-      mutate: (content: string) =>
-        content.replace(
-          "domain: social",
-          "domain: social\ncandidate:\n  scope: cross-flow",
-        ),
-    },
-    {
       name: "fastpath keywords",
       mutate: (content: string) =>
         content.replace("- hi", "- deploy production"),
@@ -2985,7 +2971,7 @@ describe("runReviewSubagent", () => {
           "domain: social",
           "domain: social\nfastpath:\n  hint: Legacy routing prose\n  keywords: []",
         ),
-      validationError: "social-casual.md: fastpath.hint is not supported",
+      validationError: "social-casual.md: unsupported top-level field fastpath",
     },
   ])(
     "rejects review refinements that introduce $name",
