@@ -209,11 +209,20 @@ describe("createIntentQmdIndex", () => {
 
     index.schedule(catalog);
     await waitForReady(index);
-    const examplePath = path.join(root, "qmd", "intents", "examples", "implementation-0.md");
+    const examplePath = path.join(
+      root,
+      "qmd",
+      "intents",
+      "examples",
+      "implementation-0.md",
+    );
     const before = await stat(examplePath);
     await new Promise((resolve) => setTimeout(resolve, 10));
     index.schedule(refreshedCatalog);
-    await waitFor(() => createStore.mock.calls.length === 2, "refreshed intent index did not build");
+    await waitFor(
+      () => createStore.mock.calls.length === 2,
+      "refreshed intent index did not build",
+    );
     expect((await stat(examplePath)).mtimeMs).toBe(before.mtimeMs);
     await index.close();
   });
@@ -234,7 +243,10 @@ describe("createIntentQmdIndex", () => {
     config = {
       ...qmdConfig,
       timeoutMs: 9_999,
-      embedding: { ...qmdConfig.embedding, baseUrl: "https://other.example.test/v1" },
+      embedding: {
+        ...qmdConfig.embedding,
+        baseUrl: "https://other.example.test/v1",
+      },
       expansion: { ...qmdConfig.expansion, model: "other-expand-model" },
     };
     index.schedule(catalog);

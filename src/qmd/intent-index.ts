@@ -118,9 +118,9 @@ async function writeSnapshotDiff(params: {
     await fs.writeFile(target, content, "utf8");
   }
   async function visit(directory: string): Promise<void> {
-    const entries = await fs.readdir(directory, { withFileTypes: true }).catch(
-      () => [],
-    );
+    const entries = await fs
+      .readdir(directory, { withFileTypes: true })
+      .catch(() => []);
     for (const entry of entries) {
       const target = path.join(directory, entry.name);
       if (entry.isDirectory()) {
@@ -130,16 +130,20 @@ async function writeSnapshotDiff(params: {
         }
         continue;
       }
-      const relative = path.relative(params.root, target).split(path.sep).join("/");
+      const relative = path
+        .relative(params.root, target)
+        .split(path.sep)
+        .join("/");
       if (!expected.has(relative)) await fs.rm(target, { force: true });
     }
   }
   await visit(params.root);
 }
 
-function snapshotDocuments(
-  intents: readonly IntentCatalogEntry[],
-): { documents: SnapshotDocument[]; collections: Record<string, { path: string; pattern: string }> } {
+function snapshotDocuments(intents: readonly IntentCatalogEntry[]): {
+  documents: SnapshotDocument[];
+  collections: Record<string, { path: string; pattern: string }>;
+} {
   const documents: SnapshotDocument[] = [];
   const append = (params: {
     root: string;
@@ -156,16 +160,33 @@ function snapshotDocuments(
       });
     }
   };
-  append({ root: "triggers", intents, kind: "trigger", texts: (intent) => intent.definition.triggers });
-  append({ root: "examples", intents, kind: "example", texts: (intent) => intent.definition.examples });
+  append({
+    root: "triggers",
+    intents,
+    kind: "trigger",
+    texts: (intent) => intent.definition.triggers,
+  });
+  append({
+    root: "examples",
+    intents,
+    kind: "example",
+    texts: (intent) => intent.definition.examples,
+  });
   const collections: Record<string, { path: string; pattern: string }> = {
     [TRIGGERS_COLLECTION]: { path: "triggers", pattern: "**/*.md" },
     [EXAMPLES_COLLECTION]: { path: "examples", pattern: "**/*.md" },
   };
-  for (const domain of new Set(intents.map((intent) => intent.definition.domain))) {
+  for (const domain of new Set(
+    intents.map((intent) => intent.definition.domain),
+  )) {
     const collectionName = topicCollectionName(domain);
     const root = path.join("topic-keywords", collectionName);
-    append({ root, intents: intents.filter((intent) => intent.definition.domain === domain), kind: "topic-keyword", texts: (intent) => intent.definition.fastpath.keywords });
+    append({
+      root,
+      intents: intents.filter((intent) => intent.definition.domain === domain),
+      kind: "topic-keyword",
+      texts: (intent) => intent.definition.fastpath.keywords,
+    });
     collections[collectionName] = { path: root, pattern: "**/*.md" };
   }
   return { documents, collections };
@@ -246,7 +267,10 @@ export function createIntentQmdIndex(params: {
     collections: Record<string, { path: string; pattern: string }>;
   }> {
     const snapshot = snapshotDocuments(intents);
-    await writeSnapshotDiff({ root: snapshotRoot, documents: snapshot.documents });
+    await writeSnapshotDiff({
+      root: snapshotRoot,
+      documents: snapshot.documents,
+    });
     return {
       collections: Object.fromEntries(
         Object.entries(snapshot.collections).map(([name, collection]) => [
@@ -284,63 +308,70 @@ export function createIntentQmdIndex(params: {
     status = "building";
     let nextStore: QMDStore | undefined;
     try {
-      const locked = await withFileLock(databasePath, async () => {
-      const qmd = params.config();
-      if (
-        !qmd.embedding.baseUrl ||
-        !qmd.embedding.model ||
-        !qmd.expansion.baseUrl ||
-        !qmd.expansion.model
-      ) {
-        throw new Error(
-          "QMD embedding and expansion endpoints must be configured.",
-        );
-      }
-      const createQmdStore =
-        params.createStore ?? (await import("@wei840222/qmd")).createStore;
-      const { collections } = await writeSnapshot(target.intents);
-      nextStore = await createQmdStore({
-        dbPath: databasePath,
-        config: {
-          collections,
-          models: {
-            embed_api_url: qmd.embedding.baseUrl,
-            embed_api_model: qmd.embedding.model,
-            ...(qmd.embedding.apiKey
-              ? { embed_api_key: qmd.embedding.apiKey }
-              : {}),
-            ...(qmd.embedding.dimension
-              ? { embed_dimension: qmd.embedding.dimension }
-              : {}),
-            generate_api_url: qmd.expansion.baseUrl,
-            generate_api_model: qmd.expansion.model,
-            ...(qmd.expansion.apiKey
-              ? { generate_api_key: qmd.expansion.apiKey }
-              : {}),
-          },
-        },
-        remoteRequestTimeoutMs: qmd.timeoutMs,
-      });
-      await nextStore.update();
-      await nextStore.embed();
+      const locked = await withFileLock(
+        databasePath,
+        async () => {
+          const qmd = params.config();
+          if (
+            !qmd.embedding.baseUrl ||
+            !qmd.embedding.model ||
+            !qmd.expansion.baseUrl ||
+            !qmd.expansion.model
+          ) {
+            throw new Error(
+              "QMD embedding and expansion endpoints must be configured.",
+            );
+          }
+          const createQmdStore =
+            params.createStore ?? (await import("@wei840222/qmd")).createStore;
+          const { collections } = await writeSnapshot(target.intents);
+          nextStore = await createQmdStore({
+            dbPath: databasePath,
+            config: {
+              collections,
+              models: {
+                embed_api_url: qmd.embedding.baseUrl,
+                embed_api_model: qmd.embedding.model,
+                ...(qmd.embedding.apiKey
+                  ? { embed_api_key: qmd.embedding.apiKey }
+                  : {}),
+                ...(qmd.embedding.dimension
+                  ? { embed_dimension: qmd.embedding.dimension }
+                  : {}),
+                generate_api_url: qmd.expansion.baseUrl,
+                generate_api_model: qmd.expansion.model,
+                ...(qmd.expansion.apiKey
+                  ? { generate_api_key: qmd.expansion.apiKey }
+                  : {}),
+              },
+            },
+            remoteRequestTimeoutMs: qmd.timeoutMs,
+          });
+          await nextStore.update();
+          await nextStore.embed();
 
-      if (desired?.fingerprint === target.fingerprint) {
-        await nextStore.close();
-        return;
-      }
-      const previousStore = store;
-      store = nextStore;
-      currentFingerprint = target.fingerprint;
-      status = "ready";
-      resetRetryState();
-      if (previousStore) {
-        await previousStore.close().catch((error: unknown) => {
-          logger.warn("failed to close previous QMD intent index", { error });
-        });
-      }
-      return true;
-      }, { maxWaitMs: 30 * 60 * 1000 });
-      if (locked === undefined) throw new Error("intent index build lock is busy");
+          if (desired?.fingerprint === target.fingerprint) {
+            await nextStore.close();
+            return;
+          }
+          const previousStore = store;
+          store = nextStore;
+          currentFingerprint = target.fingerprint;
+          status = "ready";
+          resetRetryState();
+          if (previousStore) {
+            await previousStore.close().catch((error: unknown) => {
+              logger.warn("failed to close previous QMD intent index", {
+                error,
+              });
+            });
+          }
+          return true;
+        },
+        { maxWaitMs: 30 * 60 * 1000 },
+      );
+      if (locked === undefined)
+        throw new Error("intent index build lock is busy");
     } catch (error) {
       if (nextStore) await nextStore.close().catch(() => undefined);
       recordBuildFailure(target.fingerprint, error);
