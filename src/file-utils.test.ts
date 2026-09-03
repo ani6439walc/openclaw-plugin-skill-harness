@@ -50,7 +50,10 @@ describe("FileLock", () => {
       expect(fs.existsSync(`${targetPath}.lock`)).toBe(true);
       expect(
         JSON.parse(
-          fs.readFileSync(path.join(`${targetPath}.lock`, "owner.json"), "utf8"),
+          fs.readFileSync(
+            path.join(`${targetPath}.lock`, "owner.json"),
+            "utf8",
+          ),
         ).pid,
       ).toBe(process.pid);
     } finally {
@@ -74,7 +77,8 @@ describe("FileLock", () => {
       const contender = new FileLock(targetPath);
       expect(await contender.acquire({ maxWaitMs: 50 })).toBe(true);
       expect(
-        JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8")).pid,
+        JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"))
+          .pid,
       ).toBe(process.pid);
       contender.release();
       expect(fs.existsSync(lockPath)).toBe(false);

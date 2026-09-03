@@ -209,7 +209,11 @@ function writeLockOwner(lockPath: string): void {
     pid: process.pid,
     createdAtMs: Date.now(),
   };
-  fs.writeFileSync(lockOwnerPath(lockPath), `${JSON.stringify(owner)}\n`, "utf8");
+  fs.writeFileSync(
+    lockOwnerPath(lockPath),
+    `${JSON.stringify(owner)}\n`,
+    "utf8",
+  );
 }
 
 /**
