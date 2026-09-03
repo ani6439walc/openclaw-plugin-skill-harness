@@ -107,13 +107,13 @@ async function waitFor(
 }
 
 describe("writeSkillSnapshot", () => {
-  it("materializes meta, body, and references with identity frontmatter", async () => {
+  it("materializes pure content docs and sidecar identity files", async () => {
     const skill = await createSkillFixture({
       name: "travel-planning",
       description: "Plan trips",
       body: "Use the travel checklist.",
       references: {
-        "airports.md": "Major airports list",
+        "airports.md": "---\ntitle: Airports\n---\n\nMajor airports list",
         "nested/hotels.md": "Hotel notes",
       },
     });
@@ -125,11 +125,21 @@ describe("writeSkillSnapshot", () => {
       skills: [skill],
     });
 
-    expect(Object.keys(collections).sort()).toEqual([
-      "skill-body",
-      "skill-meta",
-      "skill-references",
-    ]);
+    expect(collections).toEqual({
+      "skill-meta": {
+        path: path.join(docsRoot, "meta"),
+        pattern: "**/meta.md",
+      },
+      "skill-body": {
+        path: path.join(docsRoot, "body"),
+        pattern: "**/SKILL.md",
+      },
+      "skill-references": {
+        path: path.join(docsRoot, "references"),
+        pattern: "**/*",
+        ignore: ["**/*.identity.yml"],
+      },
+    });
 
     const segment = safePathSegment("travel-planning");
     const meta = await readFile(
@@ -148,16 +158,36 @@ describe("writeSkillSnapshot", () => {
       path.join(docsRoot, "references", segment, "nested", "hotels.md"),
       "utf8",
     );
+    const metaIdentity = await readFile(
+      path.join(docsRoot, "meta", segment, "meta.md.identity.yml"),
+      "utf8",
+    );
+    const bodyIdentity = await readFile(
+      path.join(docsRoot, "body", segment, "SKILL.md.identity.yml"),
+      "utf8",
+    );
+    const referenceIdentity = await readFile(
+      path.join(docsRoot, "references", segment, "airports.md.identity.yml"),
+      "utf8",
+    );
 
-    expect(meta).toContain("skill: travel-planning");
-    expect(meta).toContain("kind: meta");
-    expect(meta).toContain("path: meta.md");
-    expect(meta).toContain("Plan trips");
-    expect(body).toContain("kind: body");
-    expect(body).toContain("Use the travel checklist.");
-    expect(reference).toContain("kind: reference");
-    expect(reference).toContain("path: references/airports.md");
-    expect(nested).toContain("path: references/nested/hotels.md");
+    expect(meta).toBe("# travel-planning\n\nPlan trips\n");
+    expect(meta).not.toContain("skill:");
+    expect(meta).not.toContain("---");
+    expect(body).toBe("Use the travel checklist.\n");
+    expect(body).not.toContain("name: travel-planning");
+    expect(body).not.toContain("---");
+    expect(reference).toBe("Major airports list\n");
+    expect(reference).not.toContain("title: Airports");
+    expect(reference).not.toContain("---");
+    expect(nested).toBe("Hotel notes\n");
+    expect(metaIdentity).toContain("skill: travel-planning");
+    expect(metaIdentity).toContain("kind: meta");
+    expect(metaIdentity).toContain("path: meta.md");
+    expect(bodyIdentity).toContain("kind: body");
+    expect(bodyIdentity).toContain("path: SKILL.md");
+    expect(referenceIdentity).toContain("kind: reference");
+    expect(referenceIdentity).toContain("path: references/airports.md");
   });
 
   it("encodes unsafe skill names into path-safe segments", () => {
@@ -192,11 +222,13 @@ describe("writeSkillSnapshot", () => {
 
     const segment = safePathSegment("escape-refs");
     const refsDir = path.join(docsRoot, "references", segment);
-    const names = await readdir(refsDir);
+    const names = (await readdir(refsDir)).filter(
+      (name) => !name.endsWith(".identity.yml"),
+    );
     expect(names).toEqual(["safe.md"]);
-    await expect(
-      readFile(path.join(refsDir, "safe.md"), "utf8"),
-    ).resolves.toContain("inside references");
+    await expect(readFile(path.join(refsDir, "safe.md"), "utf8")).resolves.toBe(
+      "inside references\n",
+    );
   });
 
   it("skips a references directory that is itself an escaping symlink", async () => {
@@ -693,6 +725,184 @@ describe("createSkillQmdIndex", () => {
         ],
       }),
     ]);
+
+    await index.close();
+  });
+
+  it("serializes builds across index instances so orphans are not cleared mid-build", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "lock-safe",
+      description: "Lock safe skill",
+      body: "body",
+    });
+
+    let releaseFirst: (() => void) | undefined;
+    let firstGenerationRoot: string | undefined;
+    let secondCreateStarted = false;
+
+    const createStoreA = vi.fn(async (options: { dbPath: string }) => {
+      firstGenerationRoot = path.dirname(options.dbPath);
+      const { promise, resolve } =
+        Promise.withResolvers<Record<string, never>>();
+      releaseFirst = () => resolve({});
+      return createStoreDouble({
+        embed: vi.fn(() => promise),
+        search: vi.fn().mockResolvedValue([
+          {
+            body: `---\nskill: lock-safe\nkind: meta\npath: meta.md\n---\nLock safe skill`,
+            score: 0.8,
+          },
+        ]),
+      });
+    });
+    const createStoreB = vi.fn(async () => {
+      secondCreateStarted = true;
+      return createStoreDouble({
+        search: vi.fn().mockResolvedValue([
+          {
+            body: `---\nskill: lock-safe\nkind: meta\npath: meta.md\n---\nLock safe skill`,
+            score: 0.8,
+          },
+        ]),
+      });
+    });
+
+    const indexA = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => ({
+        ...qmdConfig,
+        skillSearch: {
+          ...qmdConfig.skillSearch,
+          scheduleCooldownMs: 0,
+        },
+      }),
+      createStore: createStoreA as never,
+      nowMs: () => nowMs,
+    });
+    const indexB = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => ({
+        ...qmdConfig,
+        skillSearch: {
+          ...qmdConfig.skillSearch,
+          scheduleCooldownMs: 0,
+        },
+      }),
+      createStore: createStoreB as never,
+      nowMs: () => nowMs,
+    });
+
+    indexA.schedule("main", [skill]);
+    await waitFor(
+      () => firstGenerationRoot !== undefined,
+      "first build did not create a generation root",
+    );
+    expect(firstGenerationRoot).toBeDefined();
+
+    indexB.schedule("main", [skill]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(secondCreateStarted).toBe(false);
+    expect(await readdir(firstGenerationRoot!)).toContain("docs");
+
+    releaseFirst?.();
+    await waitFor(
+      () => indexA.getStatus("main") === "ready",
+      "first build did not become ready",
+    );
+    await waitFor(
+      () => createStoreB.mock.calls.length >= 1,
+      "second build did not start after lock release",
+    );
+    await waitFor(
+      () => indexB.getStatus("main") === "ready",
+      "second build did not become ready",
+    );
+
+    await indexA.close();
+    await indexB.close();
+  });
+
+  it("retries LEASE_BUSY build failures after the backoff window", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "lease-busy",
+      description: "Lease busy skill",
+      body: "body",
+    });
+
+    class EmbeddingIdentityStateError extends Error {
+      code: string;
+      constructor(code: string, message: string) {
+        super(message);
+        this.name = "EmbeddingIdentityStateError";
+        this.code = code;
+      }
+    }
+
+    const createStore = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new EmbeddingIdentityStateError(
+          "LEASE_BUSY",
+          "Embedding build lease is owned by other-owner.",
+        ),
+      )
+      .mockResolvedValue(
+        createStoreDouble({
+          search: vi.fn().mockResolvedValue([
+            {
+              body: `---\nskill: lease-busy\nkind: meta\npath: meta.md\n---\nLease busy skill`,
+              score: 0.7,
+            },
+          ]),
+        }),
+      );
+
+    const pendingTimers: Array<{ delayMs: number; callback: () => void }> = [];
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+      setTimer: (callback, delayMs) => {
+        const timer = { delayMs, callback };
+        pendingTimers.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => {
+        const indexOfTimer = pendingTimers.indexOf(
+          timer as (typeof pendingTimers)[number],
+        );
+        if (indexOfTimer >= 0) pendingTimers.splice(indexOfTimer, 1);
+      },
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "failed",
+      "LEASE_BUSY build did not mark failed",
+    );
+    expect(createStore).toHaveBeenCalledTimes(1);
+    await waitFor(
+      () => pendingTimers.length === 1,
+      "LEASE_BUSY retry timer was not armed",
+    );
+
+    nowMs += pendingTimers[0]!.delayMs;
+    pendingTimers.shift()!.callback();
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "LEASE_BUSY retry did not become ready",
+    );
+    expect(createStore).toHaveBeenCalledTimes(2);
 
     await index.close();
   });
