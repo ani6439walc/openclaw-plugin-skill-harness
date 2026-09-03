@@ -38,7 +38,7 @@ Confirm these fields in order:
 - If two intents are colliding, recommend the smallest clean split.
 - Gather only direct `skills[]` dependencies. Candidate discovery and runtime experience references are host-owned; do not interview for or add experience records.
 - Do not write the final intent file until the boundary is clear.
-- **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, fastpath metadata, and guidance. (See `references/format.md` for full spec.)
+- **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, keywords, and guidance. (See `references/format.md` for full spec.)
 
 ## User-specified flow override
 

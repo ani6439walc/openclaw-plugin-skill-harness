@@ -34,7 +34,7 @@ If ambiguous, ask one routing question: "Are you working on one intent, auditing
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
 - Treat runtime session text as private. Keyword-audit and runtime-health reports stay local; never send raw retained conversations, tool payloads, Review suggestions, or Review evidence to external tools or artifacts.
 - Do not hand-edit `review.json`, `keyword-coverage.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, startup seeding, Review persistence, skill-placement, stats, or cleanup workflows in this skill.
-- Check changed intent files for canonical routing-only format: complete valid classification frontmatter, one plain-text body `guidance` sentence, concrete triggers/examples, conservative optional `candidate` metadata, direct frontmatter `skills[]` when skill loading is needed, and no cross-references to other intent ids. The entire body is guidance; do not add sections, lists, fences, commands, paths, or other Markdown formatting.
+- Check changed intent files for canonical routing-only format: complete valid classification frontmatter, one plain-text body `guidance` sentence, concrete triggers/examples, optional `keywords`, direct frontmatter `skills[]` when skill loading is needed, and no cross-references to other intent ids. The entire body is guidance; do not add sections, lists, fences, commands, paths, or other Markdown formatting.
 - Keep concrete shell commands, MCP documentation calls, workflows, and durable lessons in referenced skills; do not add them to intent definitions.
 - When reviewing, creating, splitting, merging, or extracting intents, validate domain-intent consistency using `references/clustering.md`.
 
@@ -111,7 +111,7 @@ Read and follow `references/design.md`. Keep these checkpoints visible:
 | #   | Anti-pattern                                    | Why not                                   | Do instead                                                                     |
 | --- | ----------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
 | 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality  | Interview one question at a time                                               |
-| 2   | **Cross-reference other intents in metadata**   | Classifier only sees routing metadata     | Express boundaries via triggers, examples, domain, fastpath, and body guidance |
+| 2   | **Cross-reference other intents in metadata**   | Classifier only sees routing metadata     | Express boundaries via triggers, examples, domain, keywords, and body guidance |
 | 3   | **Skip format rules before writing**            | Inconsistent format breaks plugin parsing | Read `references/format.md` first                                              |
 | 4   | **Create a new intent when one already exists** | Causes duplication and collision          | Check existing intents during interview                                        |
 | 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately    | Use concrete phrases or keywords                                               |
@@ -164,7 +164,7 @@ User wants to measure, analyze, or propose changes to Intent Review trigger keyw
 
 Keywords: "Review keywords", "trigger keywords", "keyword hit rate", "keyword misses", "keyword collisions", "分析關鍵字", "統計關鍵字", "更新關鍵字", "successful-pattern", "behavior-fix", "entity-context"
 
-Do not use this mode for intent `fastpath.keywords`; route that through design or inventory with the labeled-fixture rules in `references/format.md`. Do not propose new `candidate.keywords`: the schema retains them for compatibility, but current QMD candidate projection does not consume them.
+Do not use this mode for intent `keywords`; route that through design or inventory with the labeled-fixture rules in `references/format.md`.
 
 ### Workflow
 

@@ -23,7 +23,7 @@ Minimum information before drafting:
 1. Purpose and boundary.
 2. Required `domain`.
 3. Concrete triggers and examples.
-4. Optional exact fastpath keywords.
+4. Optional exact `keywords`.
 5. One durable plain-text body guidance sentence and direct skills worth listing in frontmatter.
 6. Neighboring or colliding intents.
 
@@ -43,7 +43,7 @@ Do not rely on shell-only listing/search examples when the host provides structu
 Follow `references/format.md` exactly:
 
 - Required frontmatter: `triggers[]`, `examples[]`, and `domain`; the complete body is one `guidance` sentence.
-- Optional frontmatter: `fastpath.keywords`, `candidate`, and direct `skills[]`.
+- Optional frontmatter: `keywords` and direct `skills[]`.
 - Do not include Markdown body sections, tool instructions, workflows, or experiences; the body is only the plain-text guidance sentence.
 - No intent-metadata cross-references to other intent ids.
 
