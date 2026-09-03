@@ -64,8 +64,16 @@ def github_headers(accept="application/vnd.github+json"):
 
 
 def jules_headers():
+    api_key = os.environ.get("JULES_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "JULES_API_KEY is missing or empty. "
+            "For fork PRs, GitHub does not expose repository secrets to the "
+            "pull_request event; open the PR from a same-repo branch or "
+            "configure a trusted pull_request_target workflow."
+        )
     return {
-        "X-Goog-Api-Key": os.environ["JULES_API_KEY"],
+        "X-Goog-Api-Key": api_key,
         "Content-Type": "application/json",
         "User-Agent": "jules-pr-review-action",
     }

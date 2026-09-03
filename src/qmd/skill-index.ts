@@ -5,6 +5,7 @@ import path from "node:path";
 import type { createStore, QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
+import { withFileLock } from "../file-utils.js";
 import type { AvailableSkill } from "../skills/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
 import { weightedReciprocalRankFusion } from "./rrf.js";
@@ -16,6 +17,7 @@ const INITIAL_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 const DEFAULT_CANDIDATE_LIMIT = 40;
 const MAX_EVIDENCE_PER_SKILL = 3;
+const BUILD_LOCK_BUSY = "BUILD_LOCK_BUSY";
 
 type QmdCreateStore = typeof createStore;
 
@@ -76,6 +78,7 @@ type AgentState = {
   lastScheduleStartedAtMs: number;
   generation: number;
   cooldownTimer?: unknown;
+  retryTimer?: unknown;
 };
 
 function hash(value: string): string {
@@ -265,13 +268,25 @@ async function snapshotFingerprint(
   );
 }
 
-function documentBody(params: {
+function stripMarkdownFrontmatter(raw: string): string {
+  try {
+    return matter(raw).content.trim();
+  } catch {
+    return raw.trim();
+  }
+}
+
+function normalizeIndexedContent(content: string): string {
+  const trimmed = content.trimEnd();
+  return trimmed ? `${trimmed}\n` : "";
+}
+
+function identitySidecarBody(params: {
   skill: AvailableSkill;
   kind: CollectionKind;
   relativePath: string;
-  content: string;
 }): string {
-  return matter.stringify(`${params.content.trimEnd()}\n`, {
+  return matter.stringify("", {
     skill: params.skill.name,
     source: params.skill.source ?? "extra",
     kind: params.kind,
@@ -279,10 +294,36 @@ function documentBody(params: {
   });
 }
 
+async function writeIndexedDocument(params: {
+  contentPath: string;
+  skill: AvailableSkill;
+  kind: CollectionKind;
+  relativePath: string;
+  content: string;
+}): Promise<void> {
+  await fs.mkdir(path.dirname(params.contentPath), { recursive: true });
+  await fs.writeFile(
+    params.contentPath,
+    normalizeIndexedContent(params.content),
+    "utf8",
+  );
+  await fs.writeFile(
+    `${params.contentPath}.identity.yml`,
+    identitySidecarBody({
+      skill: params.skill,
+      kind: params.kind,
+      relativePath: params.relativePath,
+    }),
+    "utf8",
+  );
+}
+
 export async function writeSkillSnapshot(params: {
   docsRoot: string;
   skills: readonly AvailableSkill[];
-}): Promise<Record<string, { path: string; pattern: string }>> {
+}): Promise<
+  Record<string, { path: string; pattern: string; ignore?: string[] }>
+> {
   const metaRoot = path.join(params.docsRoot, "meta");
   const bodyRoot = path.join(params.docsRoot, "body");
   const referencesRoot = path.join(params.docsRoot, "references");
@@ -297,18 +338,13 @@ export async function writeSkillSnapshot(params: {
     const skillDir = path.dirname(skill.location);
     const metaPath = path.join(metaRoot, skillSegment, "meta.md");
     const bodyPath = path.join(bodyRoot, skillSegment, "SKILL.md");
-    await fs.mkdir(path.dirname(metaPath), { recursive: true });
-    await fs.mkdir(path.dirname(bodyPath), { recursive: true });
-    await fs.writeFile(
-      metaPath,
-      documentBody({
-        skill,
-        kind: "meta",
-        relativePath: "meta.md",
-        content: `# ${skill.name}\n\n${skill.description}`.trim(),
-      }),
-      "utf8",
-    );
+    await writeIndexedDocument({
+      contentPath: metaPath,
+      skill,
+      kind: "meta",
+      relativePath: "meta.md",
+      content: `# ${skill.name}\n\n${skill.description}`.trim(),
+    });
 
     let bodyContent = "";
     try {
@@ -321,23 +357,19 @@ export async function writeSkillSnapshot(params: {
       });
       bodyContent = skill.description;
     }
-    await fs.writeFile(
-      bodyPath,
-      documentBody({
-        skill,
-        kind: "body",
-        relativePath: "SKILL.md",
-        content: bodyContent,
-      }),
-      "utf8",
-    );
+    await writeIndexedDocument({
+      contentPath: bodyPath,
+      skill,
+      kind: "body",
+      relativePath: "SKILL.md",
+      content: stripMarkdownFrontmatter(bodyContent),
+    });
 
     for (const relative of await listReferenceFiles(skillDir)) {
       const sourcePath = path.join(skillDir, "references", relative);
       const confinedSource = await resolveConfinedPath(skillDir, sourcePath);
       if (!confinedSource) continue;
       const targetPath = path.join(referencesRoot, skillSegment, relative);
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
       let content = "";
       try {
         content = await fs.readFile(confinedSource, "utf8");
@@ -349,23 +381,24 @@ export async function writeSkillSnapshot(params: {
         });
         continue;
       }
-      await fs.writeFile(
-        targetPath,
-        documentBody({
-          skill,
-          kind: "reference",
-          relativePath: `references/${relative}`,
-          content,
-        }),
-        "utf8",
-      );
+      await writeIndexedDocument({
+        contentPath: targetPath,
+        skill,
+        kind: "reference",
+        relativePath: `references/${relative}`,
+        content: stripMarkdownFrontmatter(content),
+      });
     }
   }
 
   return {
-    [META_COLLECTION]: { path: metaRoot, pattern: "**/*.md" },
-    [BODY_COLLECTION]: { path: bodyRoot, pattern: "**/*.md" },
-    [REFS_COLLECTION]: { path: referencesRoot, pattern: "**/*" },
+    [META_COLLECTION]: { path: metaRoot, pattern: "**/meta.md" },
+    [BODY_COLLECTION]: { path: bodyRoot, pattern: "**/SKILL.md" },
+    [REFS_COLLECTION]: {
+      path: referencesRoot,
+      pattern: "**/*",
+      ignore: ["**/*.identity.yml"],
+    },
   };
 }
 
@@ -519,6 +552,12 @@ export function createSkillQmdIndex(params: {
     state.cooldownTimer = undefined;
   }
 
+  function clearRetryTimer(state: AgentState): void {
+    if (state.retryTimer === undefined) return;
+    clearTimer(state.retryTimer);
+    state.retryTimer = undefined;
+  }
+
   function armCooldownResume(agentId: string, state: AgentState): void {
     if (state.cooldownTimer !== undefined || state.running || !state.desired) {
       return;
@@ -538,9 +577,40 @@ export function createSkillQmdIndex(params: {
   }
 
   function resetRetryState(state: AgentState): void {
+    clearRetryTimer(state);
     state.failedFingerprint = undefined;
     state.consecutiveFailures = 0;
     state.nextRetryAtMs = 0;
+  }
+
+  function isRetryableBuildError(error: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+    const code =
+      "code" in error && error.code !== undefined ? String(error.code) : "";
+    if (code === "LEASE_BUSY" || code === BUILD_LOCK_BUSY) return true;
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("LEASE_BUSY") || message.includes(BUILD_LOCK_BUSY);
+  }
+
+  function armRetryResume(
+    agentId: string,
+    state: AgentState,
+    target: { fingerprint: string; skills: readonly AvailableSkill[] },
+  ): void {
+    if (state.retryTimer !== undefined) return;
+    const delayMs = Math.max(0, state.nextRetryAtMs - now());
+    state.retryTimer = setTimer(() => {
+      state.retryTimer = undefined;
+      if (state.desired && state.desired.fingerprint !== target.fingerprint) {
+        maybeStart(agentId, state);
+        return;
+      }
+      state.desired = {
+        fingerprint: target.fingerprint,
+        skills: [...target.skills],
+      };
+      maybeStart(agentId, state);
+    }, delayMs);
   }
 
   function recordBuildFailure(
@@ -562,99 +632,163 @@ export function createSkillQmdIndex(params: {
     logger.warn("failed to refresh QMD skill index", { error, delayMs });
   }
 
+  async function nextGenerationNumber(agentId: string): Promise<number> {
+    const root = agentRoot(agentId);
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(root, { withFileTypes: true });
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        return 1;
+      }
+      throw error;
+    }
+    let maxGeneration = 0;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith("gen-")) continue;
+      const match = /^gen-(\d+)-/.exec(entry.name);
+      if (!match) continue;
+      const value = Number(match[1]);
+      if (Number.isFinite(value) && value > maxGeneration) {
+        maxGeneration = value;
+      }
+    }
+    return maxGeneration + 1;
+  }
+
   async function build(
     agentId: string,
     state: AgentState,
     target: { fingerprint: string; skills: readonly AvailableSkill[] },
   ): Promise<void> {
+    clearRetryTimer(state);
     state.status = "building";
     state.lastScheduleStartedAtMs = now();
-    state.generation += 1;
-    const generationRoot = path.join(
-      agentRoot(agentId),
-      `gen-${state.generation}-${target.fingerprint.slice(0, 12)}`,
-    );
+    const root = agentRoot(agentId);
+    let generationRoot = "";
     let nextStore: QMDStore | undefined;
-    try {
-      const qmd = params.config();
-      if (
-        !qmd.embedding.baseUrl ||
-        !qmd.embedding.model ||
-        !qmd.expansion.baseUrl ||
-        !qmd.expansion.model
-      ) {
-        throw new Error(
-          "QMD embedding and expansion endpoints must be configured.",
-        );
-      }
-      await clearOrphanGenerations(agentId, state.generationRoot);
-      await fs.mkdir(generationRoot, { recursive: true });
-      const docsRoot = path.join(generationRoot, "docs");
-      const collections = await writeSkillSnapshot({
-        docsRoot,
-        skills: target.skills,
-      });
-      // Dynamic import keeps tests able to inject createStore without loading
-      // the native QMD package at module evaluation time.
-      const createQmdStore =
-        params.createStore ?? (await import("@wei840222/qmd")).createStore;
-      nextStore = await createQmdStore({
-        dbPath: path.join(generationRoot, "skill-search.sqlite"),
-        config: {
-          collections,
-          models: {
-            embed_api_url: qmd.embedding.baseUrl,
-            embed_api_model: qmd.embedding.model,
-            ...(qmd.embedding.apiKey
-              ? { embed_api_key: qmd.embedding.apiKey }
-              : {}),
-            ...(qmd.embedding.dimension
-              ? { embed_dimension: qmd.embedding.dimension }
-              : {}),
-            generate_api_url: qmd.expansion.baseUrl,
-            generate_api_model: qmd.expansion.model,
-            ...(qmd.expansion.apiKey
-              ? { generate_api_key: qmd.expansion.apiKey }
-              : {}),
-          },
-        },
-        remoteRequestTimeoutMs: qmd.timeoutMs,
-      });
-      await nextStore.update();
-      await nextStore.embed();
 
-      if (state.desired && state.desired.fingerprint !== target.fingerprint) {
-        await nextStore.close();
-        await fs
-          .rm(generationRoot, { recursive: true, force: true })
-          .catch(() => undefined);
-        return;
-      }
+    const locked = await withFileLock(
+      root,
+      async () => {
+        try {
+          const generation = await nextGenerationNumber(agentId);
+          state.generation = generation;
+          generationRoot = path.join(
+            root,
+            `gen-${generation}-${target.fingerprint.slice(0, 12)}`,
+          );
+          const qmd = params.config();
+          if (
+            !qmd.embedding.baseUrl ||
+            !qmd.embedding.model ||
+            !qmd.expansion.baseUrl ||
+            !qmd.expansion.model
+          ) {
+            throw new Error(
+              "QMD embedding and expansion endpoints must be configured.",
+            );
+          }
+          await clearOrphanGenerations(agentId, state.generationRoot);
+          await fs.mkdir(generationRoot, { recursive: true });
+          const docsRoot = path.join(generationRoot, "docs");
+          const collections = await writeSkillSnapshot({
+            docsRoot,
+            skills: target.skills,
+          });
+          // Dynamic import keeps tests able to inject createStore without loading
+          // the native QMD package at module evaluation time.
+          const createQmdStore =
+            params.createStore ?? (await import("@wei840222/qmd")).createStore;
+          nextStore = await createQmdStore({
+            dbPath: path.join(generationRoot, "skill-search.sqlite"),
+            config: {
+              collections,
+              models: {
+                embed_api_url: qmd.embedding.baseUrl,
+                embed_api_model: qmd.embedding.model,
+                ...(qmd.embedding.apiKey
+                  ? { embed_api_key: qmd.embedding.apiKey }
+                  : {}),
+                ...(qmd.embedding.dimension
+                  ? { embed_dimension: qmd.embedding.dimension }
+                  : {}),
+                generate_api_url: qmd.expansion.baseUrl,
+                generate_api_model: qmd.expansion.model,
+                ...(qmd.expansion.apiKey
+                  ? { generate_api_key: qmd.expansion.apiKey }
+                  : {}),
+              },
+            },
+            remoteRequestTimeoutMs: qmd.timeoutMs,
+          });
+          await nextStore.update();
+          await nextStore.embed();
 
-      const previousStore = state.store;
-      const previousRoot = state.generationRoot;
-      state.store = nextStore;
-      state.generationRoot = generationRoot;
-      state.docsRoot = docsRoot;
-      state.currentFingerprint = target.fingerprint;
-      state.status = "ready";
-      resetRetryState(state);
-      if (previousStore) {
-        await previousStore.close().catch((error: unknown) => {
-          logger.warn("failed to close previous QMD skill index", { error });
-        });
-      }
-      if (previousRoot && previousRoot !== generationRoot) {
-        await fs
-          .rm(previousRoot, { recursive: true, force: true })
-          .catch(() => undefined);
-      }
-    } catch (error) {
-      if (nextStore) await nextStore.close().catch(() => undefined);
-      await fs
-        .rm(generationRoot, { recursive: true, force: true })
-        .catch(() => undefined);
+          if (
+            state.desired &&
+            state.desired.fingerprint !== target.fingerprint
+          ) {
+            await nextStore.close();
+            await fs
+              .rm(generationRoot, { recursive: true, force: true })
+              .catch(() => undefined);
+            return true;
+          }
+
+          const previousStore = state.store;
+          const previousRoot = state.generationRoot;
+          state.store = nextStore;
+          state.generationRoot = generationRoot;
+          state.docsRoot = docsRoot;
+          state.currentFingerprint = target.fingerprint;
+          state.status = "ready";
+          resetRetryState(state);
+          if (previousStore) {
+            await previousStore.close().catch((error: unknown) => {
+              logger.warn("failed to close previous QMD skill index", {
+                error,
+              });
+            });
+          }
+          if (previousRoot && previousRoot !== generationRoot) {
+            await fs
+              .rm(previousRoot, { recursive: true, force: true })
+              .catch(() => undefined);
+          }
+          nextStore = undefined;
+          return true;
+        } catch (error) {
+          if (nextStore) await nextStore.close().catch(() => undefined);
+          nextStore = undefined;
+          if (generationRoot) {
+            await fs
+              .rm(generationRoot, { recursive: true, force: true })
+              .catch(() => undefined);
+          }
+          recordBuildFailure(state, target.fingerprint, error);
+          if (isRetryableBuildError(error)) {
+            armRetryResume(agentId, state, target);
+          }
+          return true;
+        }
+      },
+      // Embedding a full skill corpus can take minutes; wait for the peer build
+      // instead of racing clearOrphanGenerations against its generation root.
+      { maxWaitMs: 30 * 60 * 1000 },
+    );
+
+    if (locked === undefined) {
+      const error = Object.assign(new Error("skill index build lock is busy"), {
+        code: BUILD_LOCK_BUSY,
+      });
       recordBuildFailure(state, target.fingerprint, error);
+      armRetryResume(agentId, state, target);
     }
   }
 
@@ -859,6 +993,7 @@ export function createSkillQmdIndex(params: {
       for (const state of agents.values()) {
         state.desired = undefined;
         clearCooldownTimer(state);
+        clearRetryTimer(state);
       }
       await Promise.all(
         [...agents.values()]

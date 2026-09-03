@@ -80,6 +80,22 @@ class JulesPrReviewTest(unittest.TestCase):
         self.assertNotIn(github_token, message)
         self.assertNotIn(jules_api_key, message)
 
+    def test_jules_headers_require_nonempty_api_key(self):
+        with mock.patch.dict(os.environ, {"JULES_API_KEY": ""}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "JULES_API_KEY is missing"):
+                jules_pr_review.jules_headers()
+
+        env_without_key = {
+            key: value for key, value in os.environ.items() if key != "JULES_API_KEY"
+        }
+        with mock.patch.dict(os.environ, env_without_key, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "JULES_API_KEY is missing"):
+                jules_pr_review.jules_headers()
+
+        with mock.patch.dict(os.environ, {"JULES_API_KEY": " real-key "}, clear=False):
+            headers = jules_pr_review.jules_headers()
+        self.assertEqual(headers["X-Goog-Api-Key"], "real-key")
+
     def test_request_wraps_network_error(self):
         import urllib.error
         with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
