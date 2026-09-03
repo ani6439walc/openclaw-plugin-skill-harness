@@ -189,33 +189,33 @@ Configure Skill Harness in `openclaw.json`:
 
 ### Important options
 
-| Option                                      | Default            | Purpose                                                                                               |
-| ------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
-| `agents`                                    | `["main"]`         | OpenClaw agent IDs eligible for dynamic intent routing.                                               |
-| `allowedChatTypes`                          | `["direct"]`       | Chat types that may run dynamic routing.                                                              |
-| `allowedChatIds` / `deniedChatIds`          | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                           |
-| `model` / `modelFallback`                   | unset              | Scanner model and last-resort resolution fallback.                                                    |
-| `thinking`                                  | `"medium"`         | Intent-classifier thinking level.                                                                     |
-| `lowEffortRoutingMode`                      | `"fastpath-only"`  | Routing behavior when the main agent uses off, minimal, or low reasoning effort.                      |
-| `queryMode` / `contextWindow`               | `"recent"`         | Scanner context and its limits.                                                                       |
-| `timeoutMs`                                 | `5000`             | Topic-checker and intent-classifier time budget.                                                      |
-| `qmd.embedding` / `expansion`               | required           | Remote endpoint and model for mandatory QMD hybrid routing; `apiKey` is optional for keyless proxies. |
-| `qmd.timeoutMs`                             | `timeoutMs`        | Per-request QMD embedding and expansion timeout.                                                      |
-| `qmd.skillSearch.collectionWeights`         | `1/1/1`            | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.    |
-| `qmd.indexRefreshIntervalSeconds`         | `300`              | Seconds between source checks for QMD intent and skill indexes; `0` disables subsequent automatic checks.              |
-| `routing.sameTopic.minConfidence`           | `0.8`              | Minimum topic-triage confidence for same-topic intent inheritance only.                               |
-| `routing.qmd.minTopicConfidence`            | `0.8`              | Minimum topic-triage confidence for QMD topic-keyword retrieval and trigger/example QMD context.      |
-| `routing.qmd.directRouteMinScore`           | `0.85`             | Strictly-greater QMD score required for either QMD direct route.                                      |
-| `routing.qmd.smallCandidateMinScore`        | `0.65`             | Inclusive QMD score that selects the small classifier candidate set.                                  |
-| `routing.qmd.minCandidateScore`             | `0.35`             | Inclusive QMD score floor for any QMD classifier candidate projection.                                |
-| `curation.enabled`                          | `true`             | Enables session-local direct-skill and experience recommendation curation, independently of Review.   |
-| `curation.model` / `modelFallback`          | unset              | Optional dedicated curator model and resolution fallback.                                             |
-| `curation.thinking` / `timeoutSeconds`      | `"medium"` / `30`  | Curator thinking level and time budget in seconds.                                                    |
-| `review.enabled`                            | `false`            | Enables post-turn Intent Review.                                                                      |
-| `review.thinking` / `timeoutSeconds`        | `"medium"` / `300` | Intent Review thinking level and time budget in seconds.                                              |
-| `review.keywordCoverage.everyAcceptedTurns` | `50`               | Cadence for automatic cross-session keyword-coverage review.                                          |
-| `review.triggers.skillPlacement.enabled`    | `true`             | Enables bounded placement review for one eligible resolved skill.                                     |
-| `review.triggers.*.enabled`                 | `true`             | Enables the individual ordinary Review trigger; thresholds remain in the plugin manifest.             |
+| Option                                      | Default            | Purpose                                                                                                   |
+| ------------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------- |
+| `agents`                                    | `["main"]`         | OpenClaw agent IDs eligible for dynamic intent routing.                                                   |
+| `allowedChatTypes`                          | `["direct"]`       | Chat types that may run dynamic routing.                                                                  |
+| `allowedChatIds` / `deniedChatIds`          | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                               |
+| `model` / `modelFallback`                   | unset              | Scanner model and last-resort resolution fallback.                                                        |
+| `thinking`                                  | `"medium"`         | Intent-classifier thinking level.                                                                         |
+| `lowEffortRoutingMode`                      | `"fastpath-only"`  | Routing behavior when the main agent uses off, minimal, or low reasoning effort.                          |
+| `queryMode` / `contextWindow`               | `"recent"`         | Scanner context and its limits.                                                                           |
+| `timeoutMs`                                 | `5000`             | Topic-checker and intent-classifier time budget.                                                          |
+| `qmd.embedding` / `expansion`               | required           | Remote endpoint and model for mandatory QMD hybrid routing; `apiKey` is optional for keyless proxies.     |
+| `qmd.timeoutMs`                             | `timeoutMs`        | Per-request QMD embedding and expansion timeout.                                                          |
+| `qmd.skillSearch.collectionWeights`         | `1/1/1`            | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.        |
+| `qmd.indexRefreshIntervalSeconds`           | `300`              | Seconds between source checks for QMD intent and skill indexes; `0` disables subsequent automatic checks. |
+| `routing.sameTopic.minConfidence`           | `0.8`              | Minimum topic-triage confidence for same-topic intent inheritance only.                                   |
+| `routing.qmd.minTopicConfidence`            | `0.8`              | Minimum topic-triage confidence for QMD topic-keyword retrieval and trigger/example QMD context.          |
+| `routing.qmd.directRouteMinScore`           | `0.85`             | Strictly-greater QMD score required for either QMD direct route.                                          |
+| `routing.qmd.smallCandidateMinScore`        | `0.65`             | Inclusive QMD score that selects the small classifier candidate set.                                      |
+| `routing.qmd.minCandidateScore`             | `0.35`             | Inclusive QMD score floor for any QMD classifier candidate projection.                                    |
+| `curation.enabled`                          | `true`             | Enables session-local direct-skill and experience recommendation curation, independently of Review.       |
+| `curation.model` / `modelFallback`          | unset              | Optional dedicated curator model and resolution fallback.                                                 |
+| `curation.thinking` / `timeoutSeconds`      | `"medium"` / `30`  | Curator thinking level and time budget in seconds.                                                        |
+| `review.enabled`                            | `false`            | Enables post-turn Intent Review.                                                                          |
+| `review.thinking` / `timeoutSeconds`        | `"medium"` / `300` | Intent Review thinking level and time budget in seconds.                                                  |
+| `review.keywordCoverage.everyAcceptedTurns` | `50`               | Cadence for automatic cross-session keyword-coverage review.                                              |
+| `review.triggers.skillPlacement.enabled`    | `true`             | Enables bounded placement review for one eligible resolved skill.                                         |
+| `review.triggers.*.enabled`                 | `true`             | Enables the individual ordinary Review trigger; thresholds remain in the plugin manifest.                 |
 
 Topic Checker, Intent Classifier, background Curator, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 

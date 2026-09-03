@@ -369,7 +369,10 @@ export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
     ResolvedSkillHarnessPluginConfig,
     "qmd" | "routing"
   > & {
-    qmd: Omit<ResolvedQmdConfig, "timeoutMs" | "indexRefreshIntervalSeconds" | "skillSearch"> & {
+    qmd: Omit<
+      ResolvedQmdConfig,
+      "timeoutMs" | "indexRefreshIntervalSeconds" | "skillSearch"
+    > & {
       timeoutMs?: number;
       indexRefreshIntervalSeconds?: number;
       skillSearch?: unknown;

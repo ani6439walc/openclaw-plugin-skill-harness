@@ -48,13 +48,13 @@ Replace destructive QMD rebuilds with periodic source polling and incremental up
 
 ## Risks and Mitigations
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Different model with a compatible dimension | Retrieval quality degradation | Embedding model remains part of the invalidation fingerprint. |
-| SQLite WAL copied as ordinary files | Corrupt or stale candidate generation | Use SQLite Online Backup API from the active QMD database. |
-| Gateway reload overlaps a build | SQLite/snapshot race | Hold `withFileLock()` across the complete candidate lifecycle. |
-| Polling delays new content | Temporary stale QMD candidates | Bounded by the configured 300-second interval; primary catalog reload remains immediate. |
-| Partial embedding failure | Candidate is incomplete | Keep active store, retain/retry candidate according to existing recovery policy. |
+| Risk                                        | Impact                                | Mitigation                                                                               |
+| ------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Different model with a compatible dimension | Retrieval quality degradation         | Embedding model remains part of the invalidation fingerprint.                            |
+| SQLite WAL copied as ordinary files         | Corrupt or stale candidate generation | Use SQLite Online Backup API from the active QMD database.                               |
+| Gateway reload overlaps a build             | SQLite/snapshot race                  | Hold `withFileLock()` across the complete candidate lifecycle.                           |
+| Polling delays new content                  | Temporary stale QMD candidates        | Bounded by the configured 300-second interval; primary catalog reload remains immediate. |
+| Partial embedding failure                   | Candidate is incomplete               | Keep active store, retain/retry candidate according to existing recovery policy.         |
 
 ## Verification Checkpoints
 
