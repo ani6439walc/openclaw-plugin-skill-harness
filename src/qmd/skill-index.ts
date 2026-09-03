@@ -265,13 +265,25 @@ async function snapshotFingerprint(
   );
 }
 
-function documentBody(params: {
+function stripMarkdownFrontmatter(raw: string): string {
+  try {
+    return matter(raw).content.trim();
+  } catch {
+    return raw.trim();
+  }
+}
+
+function normalizeIndexedContent(content: string): string {
+  const trimmed = content.trimEnd();
+  return trimmed ? `${trimmed}\n` : "";
+}
+
+function identitySidecarBody(params: {
   skill: AvailableSkill;
   kind: CollectionKind;
   relativePath: string;
-  content: string;
 }): string {
-  return matter.stringify(`${params.content.trimEnd()}\n`, {
+  return matter.stringify("", {
     skill: params.skill.name,
     source: params.skill.source ?? "extra",
     kind: params.kind,
@@ -279,10 +291,36 @@ function documentBody(params: {
   });
 }
 
+async function writeIndexedDocument(params: {
+  contentPath: string;
+  skill: AvailableSkill;
+  kind: CollectionKind;
+  relativePath: string;
+  content: string;
+}): Promise<void> {
+  await fs.mkdir(path.dirname(params.contentPath), { recursive: true });
+  await fs.writeFile(
+    params.contentPath,
+    normalizeIndexedContent(params.content),
+    "utf8",
+  );
+  await fs.writeFile(
+    `${params.contentPath}.identity.yml`,
+    identitySidecarBody({
+      skill: params.skill,
+      kind: params.kind,
+      relativePath: params.relativePath,
+    }),
+    "utf8",
+  );
+}
+
 export async function writeSkillSnapshot(params: {
   docsRoot: string;
   skills: readonly AvailableSkill[];
-}): Promise<Record<string, { path: string; pattern: string }>> {
+}): Promise<
+  Record<string, { path: string; pattern: string; ignore?: string[] }>
+> {
   const metaRoot = path.join(params.docsRoot, "meta");
   const bodyRoot = path.join(params.docsRoot, "body");
   const referencesRoot = path.join(params.docsRoot, "references");
@@ -297,18 +335,13 @@ export async function writeSkillSnapshot(params: {
     const skillDir = path.dirname(skill.location);
     const metaPath = path.join(metaRoot, skillSegment, "meta.md");
     const bodyPath = path.join(bodyRoot, skillSegment, "SKILL.md");
-    await fs.mkdir(path.dirname(metaPath), { recursive: true });
-    await fs.mkdir(path.dirname(bodyPath), { recursive: true });
-    await fs.writeFile(
-      metaPath,
-      documentBody({
-        skill,
-        kind: "meta",
-        relativePath: "meta.md",
-        content: `# ${skill.name}\n\n${skill.description}`.trim(),
-      }),
-      "utf8",
-    );
+    await writeIndexedDocument({
+      contentPath: metaPath,
+      skill,
+      kind: "meta",
+      relativePath: "meta.md",
+      content: `# ${skill.name}\n\n${skill.description}`.trim(),
+    });
 
     let bodyContent = "";
     try {
@@ -321,23 +354,19 @@ export async function writeSkillSnapshot(params: {
       });
       bodyContent = skill.description;
     }
-    await fs.writeFile(
-      bodyPath,
-      documentBody({
-        skill,
-        kind: "body",
-        relativePath: "SKILL.md",
-        content: bodyContent,
-      }),
-      "utf8",
-    );
+    await writeIndexedDocument({
+      contentPath: bodyPath,
+      skill,
+      kind: "body",
+      relativePath: "SKILL.md",
+      content: stripMarkdownFrontmatter(bodyContent),
+    });
 
     for (const relative of await listReferenceFiles(skillDir)) {
       const sourcePath = path.join(skillDir, "references", relative);
       const confinedSource = await resolveConfinedPath(skillDir, sourcePath);
       if (!confinedSource) continue;
       const targetPath = path.join(referencesRoot, skillSegment, relative);
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
       let content = "";
       try {
         content = await fs.readFile(confinedSource, "utf8");
@@ -349,23 +378,24 @@ export async function writeSkillSnapshot(params: {
         });
         continue;
       }
-      await fs.writeFile(
-        targetPath,
-        documentBody({
-          skill,
-          kind: "reference",
-          relativePath: `references/${relative}`,
-          content,
-        }),
-        "utf8",
-      );
+      await writeIndexedDocument({
+        contentPath: targetPath,
+        skill,
+        kind: "reference",
+        relativePath: `references/${relative}`,
+        content: stripMarkdownFrontmatter(content),
+      });
     }
   }
 
   return {
-    [META_COLLECTION]: { path: metaRoot, pattern: "**/*.md" },
-    [BODY_COLLECTION]: { path: bodyRoot, pattern: "**/*.md" },
-    [REFS_COLLECTION]: { path: referencesRoot, pattern: "**/*" },
+    [META_COLLECTION]: { path: metaRoot, pattern: "**/meta.md" },
+    [BODY_COLLECTION]: { path: bodyRoot, pattern: "**/SKILL.md" },
+    [REFS_COLLECTION]: {
+      path: referencesRoot,
+      pattern: "**/*",
+      ignore: ["**/*.identity.yml"],
+    },
   };
 }
 

@@ -107,13 +107,13 @@ async function waitFor(
 }
 
 describe("writeSkillSnapshot", () => {
-  it("materializes meta, body, and references with identity frontmatter", async () => {
+  it("materializes pure content docs and sidecar identity files", async () => {
     const skill = await createSkillFixture({
       name: "travel-planning",
       description: "Plan trips",
       body: "Use the travel checklist.",
       references: {
-        "airports.md": "Major airports list",
+        "airports.md": "---\ntitle: Airports\n---\n\nMajor airports list",
         "nested/hotels.md": "Hotel notes",
       },
     });
@@ -125,11 +125,21 @@ describe("writeSkillSnapshot", () => {
       skills: [skill],
     });
 
-    expect(Object.keys(collections).sort()).toEqual([
-      "skill-body",
-      "skill-meta",
-      "skill-references",
-    ]);
+    expect(collections).toEqual({
+      "skill-meta": {
+        path: path.join(docsRoot, "meta"),
+        pattern: "**/meta.md",
+      },
+      "skill-body": {
+        path: path.join(docsRoot, "body"),
+        pattern: "**/SKILL.md",
+      },
+      "skill-references": {
+        path: path.join(docsRoot, "references"),
+        pattern: "**/*",
+        ignore: ["**/*.identity.yml"],
+      },
+    });
 
     const segment = safePathSegment("travel-planning");
     const meta = await readFile(
@@ -148,16 +158,36 @@ describe("writeSkillSnapshot", () => {
       path.join(docsRoot, "references", segment, "nested", "hotels.md"),
       "utf8",
     );
+    const metaIdentity = await readFile(
+      path.join(docsRoot, "meta", segment, "meta.md.identity.yml"),
+      "utf8",
+    );
+    const bodyIdentity = await readFile(
+      path.join(docsRoot, "body", segment, "SKILL.md.identity.yml"),
+      "utf8",
+    );
+    const referenceIdentity = await readFile(
+      path.join(docsRoot, "references", segment, "airports.md.identity.yml"),
+      "utf8",
+    );
 
-    expect(meta).toContain("skill: travel-planning");
-    expect(meta).toContain("kind: meta");
-    expect(meta).toContain("path: meta.md");
-    expect(meta).toContain("Plan trips");
-    expect(body).toContain("kind: body");
-    expect(body).toContain("Use the travel checklist.");
-    expect(reference).toContain("kind: reference");
-    expect(reference).toContain("path: references/airports.md");
-    expect(nested).toContain("path: references/nested/hotels.md");
+    expect(meta).toBe("# travel-planning\n\nPlan trips\n");
+    expect(meta).not.toContain("skill:");
+    expect(meta).not.toContain("---");
+    expect(body).toBe("Use the travel checklist.\n");
+    expect(body).not.toContain("name: travel-planning");
+    expect(body).not.toContain("---");
+    expect(reference).toBe("Major airports list\n");
+    expect(reference).not.toContain("title: Airports");
+    expect(reference).not.toContain("---");
+    expect(nested).toBe("Hotel notes\n");
+    expect(metaIdentity).toContain("skill: travel-planning");
+    expect(metaIdentity).toContain("kind: meta");
+    expect(metaIdentity).toContain("path: meta.md");
+    expect(bodyIdentity).toContain("kind: body");
+    expect(bodyIdentity).toContain("path: SKILL.md");
+    expect(referenceIdentity).toContain("kind: reference");
+    expect(referenceIdentity).toContain("path: references/airports.md");
   });
 
   it("encodes unsafe skill names into path-safe segments", () => {
@@ -192,11 +222,13 @@ describe("writeSkillSnapshot", () => {
 
     const segment = safePathSegment("escape-refs");
     const refsDir = path.join(docsRoot, "references", segment);
-    const names = await readdir(refsDir);
+    const names = (await readdir(refsDir)).filter(
+      (name) => !name.endsWith(".identity.yml"),
+    );
     expect(names).toEqual(["safe.md"]);
     await expect(
       readFile(path.join(refsDir, "safe.md"), "utf8"),
-    ).resolves.toContain("inside references");
+    ).resolves.toBe("inside references\n");
   });
 
   it("skips a references directory that is itself an escaping symlink", async () => {
