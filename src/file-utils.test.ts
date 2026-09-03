@@ -48,8 +48,53 @@ describe("FileLock", () => {
       const contender = new FileLock(targetPath);
       expect(await contender.acquire({ maxWaitMs: 20 })).toBe(false);
       expect(fs.existsSync(`${targetPath}.lock`)).toBe(true);
+      expect(
+        JSON.parse(
+          fs.readFileSync(path.join(`${targetPath}.lock`, "owner.json"), "utf8"),
+        ).pid,
+      ).toBe(process.pid);
     } finally {
       holder.release();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reclaims an orphaned lock whose owner pid is dead", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-lock-test-"));
+    const targetPath = path.join(tempDir, "session.json");
+    const lockPath = `${targetPath}.lock`;
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(
+      path.join(lockPath, "owner.json"),
+      `${JSON.stringify({ pid: 2_147_483_647, createdAtMs: Date.now() - 60_000 })}\n`,
+      "utf8",
+    );
+
+    try {
+      const contender = new FileLock(targetPath);
+      expect(await contender.acquire({ maxWaitMs: 50 })).toBe(true);
+      expect(
+        JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8")).pid,
+      ).toBe(process.pid);
+      contender.release();
+      expect(fs.existsSync(lockPath)).toBe(false);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not reclaim a legacy empty lock directory without owner metadata", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-lock-test-"));
+    const targetPath = path.join(tempDir, "session.json");
+    const lockPath = `${targetPath}.lock`;
+    fs.mkdirSync(lockPath);
+
+    try {
+      const contender = new FileLock(targetPath);
+      expect(await contender.acquire({ maxWaitMs: 50 })).toBe(false);
+      expect(fs.existsSync(lockPath)).toBe(true);
+      expect(fs.existsSync(path.join(lockPath, "owner.json"))).toBe(false);
+    } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });

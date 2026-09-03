@@ -160,11 +160,88 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+type FileLockOwner = {
+  pid: number;
+  createdAtMs: number;
+};
+
+function lockOwnerPath(lockPath: string): string {
+  return path.join(lockPath, "owner.json");
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: unknown) {
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? String((err as NodeJS.ErrnoException).code)
+        : "";
+    // EPERM means the process exists but we cannot signal it.
+    return code === "EPERM";
+  }
+}
+
+function readLockOwner(lockPath: string): FileLockOwner | undefined {
+  try {
+    const raw = fs.readFileSync(lockOwnerPath(lockPath), "utf8");
+    const parsed = JSON.parse(raw) as Partial<FileLockOwner>;
+    if (typeof parsed.pid !== "number" || !Number.isFinite(parsed.pid)) {
+      return undefined;
+    }
+    return {
+      pid: parsed.pid,
+      createdAtMs:
+        typeof parsed.createdAtMs === "number" &&
+        Number.isFinite(parsed.createdAtMs)
+          ? parsed.createdAtMs
+          : 0,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function writeLockOwner(lockPath: string): void {
+  const owner: FileLockOwner = {
+    pid: process.pid,
+    createdAtMs: Date.now(),
+  };
+  fs.writeFileSync(lockOwnerPath(lockPath), `${JSON.stringify(owner)}\n`, "utf8");
+}
+
+/**
+ * Reclaim a lock directory only when owner.json names a dead pid.
+ * Legacy empty lock dirs (no owner metadata) are left alone so a live
+ * holder from an older build is never stolen mid-critical section.
+ * Never reclaim solely because mtime is old.
+ */
+function tryReclaimOrphanedLock(lockPath: string): boolean {
+  const owner = readLockOwner(lockPath);
+  if (!owner || isProcessAlive(owner.pid)) {
+    return false;
+  }
+  try {
+    fs.rmSync(lockPath, { recursive: true, force: true });
+    return true;
+  } catch (err: unknown) {
+    logger.warn("failed to reclaim orphaned file lock", {
+      error: err,
+      path: lockPath,
+      owner,
+    });
+    return false;
+  }
+}
+
 /**
  * Cross-process file lock using directory creation (atomic on POSIX).
  *
  * Uses `mkdirSync` which is atomic — if the directory already exists,
- * another process holds the lock.
+ * another process holds the lock. Owners write `owner.json` so a later
+ * process can reclaim the directory after a crash leaves it behind.
  */
 export class FileLock {
   private readonly lockPath: string;
@@ -193,6 +270,22 @@ export class FileLock {
       // Try to acquire the lock
       try {
         fs.mkdirSync(this.lockPath);
+        try {
+          writeLockOwner(this.lockPath);
+        } catch (err: unknown) {
+          // If we cannot publish ownership, release immediately so peers
+          // do not treat this as an unowned legacy lock.
+          try {
+            fs.rmSync(this.lockPath, { recursive: true, force: true });
+          } catch {
+            // ignore
+          }
+          logger.warn("failed to write file lock owner", {
+            error: err,
+            path: this.lockPath,
+          });
+          return false;
+        }
         return true;
       } catch (err: unknown) {
         const e = err as NodeJS.ErrnoException;
@@ -203,6 +296,10 @@ export class FileLock {
             path: this.lockPath,
           });
           return false;
+        }
+        // Crash leftovers or legacy empty lock dirs can block rebuilds forever.
+        if (tryReclaimOrphanedLock(this.lockPath)) {
+          continue;
         }
       }
 
