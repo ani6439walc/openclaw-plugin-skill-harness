@@ -71,8 +71,7 @@ async function createSkillFixture(params: {
 }
 
 function createStoreDouble(params: {
-  searchLex?: ReturnType<typeof vi.fn>;
-  searchVector?: ReturnType<typeof vi.fn>;
+  search?: ReturnType<typeof vi.fn>;
   close?: ReturnType<typeof vi.fn>;
   update?: ReturnType<typeof vi.fn>;
   embed?: ReturnType<typeof vi.fn>;
@@ -80,9 +79,9 @@ function createStoreDouble(params: {
   return {
     update: params.update ?? vi.fn().mockResolvedValue({}),
     embed: params.embed ?? vi.fn().mockResolvedValue({}),
-    search: vi.fn().mockResolvedValue([]),
-    searchLex: params.searchLex ?? vi.fn().mockResolvedValue([]),
-    searchVector: params.searchVector ?? vi.fn().mockResolvedValue([]),
+    search: params.search ?? vi.fn().mockResolvedValue([]),
+    searchLex: vi.fn().mockResolvedValue([]),
+    searchVector: vi.fn().mockResolvedValue([]),
     close: params.close ?? vi.fn().mockResolvedValue(undefined),
   } as unknown as QMDStore;
 }
@@ -176,35 +175,32 @@ describe("createSkillQmdIndex", () => {
       body: "Check diffs carefully.",
     });
 
-    const searchLex = vi.fn(
-      async (_query: string, options?: { collection?: string }) => {
-        if (options?.collection === "skill-meta") {
+    const search = vi.fn(
+      async (options?: { collection?: string; collections?: string[] }) => {
+        const collection =
+          options?.collection ??
+          (Array.isArray(options?.collections)
+            ? options.collections[0]
+            : undefined);
+        if (collection === "skill-meta") {
           return [
             {
-              filepath: `/docs/meta/${safePathSegment("travel-planning")}/meta.md`,
               body: `---\nskill: travel-planning\nkind: meta\npath: meta.md\n---\nPlan trips`,
               score: 0.4,
             },
           ];
         }
-        return [];
-      },
-    );
-    const searchVector = vi.fn(
-      async (_query: string, options?: { collection?: string }) => {
-        if (options?.collection === "skill-body") {
+        if (collection === "skill-body") {
           return [
             {
-              filepath: `/docs/body/${safePathSegment("code-review")}/SKILL.md`,
               body: `---\nskill: code-review\nkind: body\npath: SKILL.md\n---\nCheck diffs carefully.`,
               score: 0.9,
             },
           ];
         }
-        if (options?.collection === "skill-references") {
+        if (collection === "skill-references") {
           return [
             {
-              filepath: `/docs/references/${safePathSegment("travel-planning")}/airports.md`,
               body: `---\nskill: travel-planning\nkind: reference\npath: references/airports.md\n---\nAirport codes`,
               score: 0.95,
             },
@@ -214,9 +210,7 @@ describe("createSkillQmdIndex", () => {
       },
     );
 
-    const createStore = vi.fn(async () =>
-      createStoreDouble({ searchLex, searchVector }),
-    );
+    const createStore = vi.fn(async () => createStoreDouble({ search }));
     const index = createSkillQmdIndex({
       dataRoot: root,
       config: () => qmdConfig,
@@ -238,6 +232,15 @@ describe("createSkillQmdIndex", () => {
     });
 
     expect(createStore).toHaveBeenCalled();
+    expect(search).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "airport trip planning",
+        collection: "skill-meta",
+        rerank: false,
+        includeHyde: false,
+        minScore: 0,
+      }),
+    );
     expect(hits?.[0]?.name).toBe("travel-planning");
     expect(hits?.[0]?.evidence?.length).toBeGreaterThan(0);
     expect(hits?.some((hit) => hit.name === "code-review")).toBe(true);
@@ -266,14 +269,12 @@ describe("createSkillQmdIndex", () => {
     let secondEmbedStarted = false;
     const createStore = vi.fn(async () =>
       createStoreDouble({
-        searchLex: vi.fn().mockResolvedValue([
+        search: vi.fn().mockResolvedValue([
           {
-            filepath: `/docs/meta/${safePathSegment("alpha")}/meta.md`,
             body: `---\nskill: alpha\nkind: meta\npath: meta.md\n---\nFirst skill`,
             score: 0.8,
           },
         ]),
-        searchVector: vi.fn().mockResolvedValue([]),
         embed: vi.fn(() => {
           embedCount += 1;
           if (embedCount === 1) return Promise.resolve({});
@@ -326,7 +327,7 @@ describe("createSkillQmdIndex", () => {
     await index.close();
   });
 
-  it("returns undefined on failed-empty builds and coalesces cooldown schedules", async () => {
+  it("returns undefined on failed-empty builds and auto-resumes cooldown schedules", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-qmd-skills-"),
     );
@@ -337,19 +338,18 @@ describe("createSkillQmdIndex", () => {
       body: "gamma body",
     });
 
+    const pendingTimers: Array<{ delayMs: number; callback: () => void }> = [];
     const createStore = vi
       .fn()
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValue(
         createStoreDouble({
-          searchLex: vi.fn().mockResolvedValue([
+          search: vi.fn().mockResolvedValue([
             {
-              filepath: `/docs/meta/${safePathSegment("gamma")}/meta.md`,
               body: `---\nskill: gamma\nkind: meta\npath: meta.md\n---\nGamma skill`,
               score: 0.7,
             },
           ]),
-          searchVector: vi.fn().mockResolvedValue([]),
         }),
       );
 
@@ -358,6 +358,17 @@ describe("createSkillQmdIndex", () => {
       config: () => qmdConfig,
       createStore: createStore as never,
       nowMs: () => nowMs,
+      setTimer: (callback, delayMs) => {
+        const timer = { delayMs, callback };
+        pendingTimers.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => {
+        const indexOfTimer = pendingTimers.indexOf(
+          timer as (typeof pendingTimers)[number],
+        );
+        if (indexOfTimer >= 0) pendingTimers.splice(indexOfTimer, 1);
+      },
     });
 
     index.schedule("main", [skill]);
@@ -383,16 +394,68 @@ describe("createSkillQmdIndex", () => {
     });
     index.schedule("main", [changed]);
     await waitFor(
-      () => index.getStatus("main") === "ready",
-      "ready status should remain while cooldown defers rebuild",
+      () => pendingTimers.length === 1,
+      "cooldown resume timer was not armed",
     );
     expect(createStore).toHaveBeenCalledTimes(2);
+    expect(index.getStatus("main")).toBe("ready");
 
-    nowMs += 5_000;
-    index.schedule("main", [changed]);
+    nowMs += pendingTimers[0]!.delayMs;
+    pendingTimers.shift()!.callback();
     await waitFor(
       () => createStore.mock.calls.length >= 3,
-      "cooldown schedule did not rebuild",
+      "cooldown schedule did not auto-resume rebuild",
+    );
+
+    await index.close();
+  });
+
+  it("rebuilds when only the SKILL.md body changes", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "delta",
+      description: "Stable description",
+      body: "original body",
+    });
+
+    const createStore = vi.fn(async () =>
+      createStoreDouble({
+        search: vi.fn().mockResolvedValue([
+          {
+            body: `---\nskill: delta\nkind: body\npath: SKILL.md\n---\nbody`,
+            score: 0.5,
+          },
+        ]),
+      }),
+    );
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => ({
+        ...qmdConfig,
+        skillSearch: {
+          ...qmdConfig.skillSearch,
+          scheduleCooldownMs: 0,
+        },
+      }),
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "initial body index did not become ready",
+    );
+    expect(createStore).toHaveBeenCalledTimes(1);
+
+    await writeFile(skill.location, "updated body only", "utf8");
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => createStore.mock.calls.length >= 2,
+      "body-only change did not rebuild skill index",
     );
 
     await index.close();

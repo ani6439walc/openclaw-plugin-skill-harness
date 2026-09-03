@@ -74,10 +74,21 @@ type AgentState = {
   nextRetryAtMs: number;
   lastScheduleStartedAtMs: number;
   generation: number;
+  cooldownTimer?: unknown;
 };
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function findLastPathSegmentIndex(
+  parts: readonly string[],
+  candidates: readonly string[],
+): number {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    if (candidates.includes(parts[index]!)) return index;
+  }
+  return -1;
 }
 
 export function safePathSegment(value: string): string {
@@ -153,13 +164,22 @@ async function snapshotFingerprint(
     left.name.localeCompare(right.name),
   );
   const skillEntries = await Promise.all(
-    ordered.map(async (skill) => ({
-      name: skill.name,
-      source: skill.source ?? null,
-      location: skill.location,
-      description: skill.description,
-      references: await referenceFingerprint(path.dirname(skill.location)),
-    })),
+    ordered.map(async (skill) => {
+      let bodyHash = "missing";
+      try {
+        bodyHash = hash(await fs.readFile(skill.location, "utf8"));
+      } catch {
+        bodyHash = "missing";
+      }
+      return {
+        name: skill.name,
+        source: skill.source ?? null,
+        location: skill.location,
+        description: skill.description,
+        bodyHash,
+        references: await referenceFingerprint(path.dirname(skill.location)),
+      };
+    }),
   );
   return hash(
     JSON.stringify({
@@ -176,7 +196,7 @@ function documentBody(params: {
   relativePath: string;
   content: string;
 }): string {
-  return matter.stringify(`${params.content.replace(/\s+$/u, "")}\n`, {
+  return matter.stringify(`${params.content.trimEnd()}\n`, {
     skill: params.skill.name,
     source: params.skill.source ?? "extra",
     kind: params.kind,
@@ -306,6 +326,8 @@ function parseStoreHits(params: {
   results: readonly {
     body?: string;
     filepath?: string;
+    file?: string;
+    displayPath?: string;
     score: number;
     explain?: unknown;
   }[];
@@ -317,11 +339,14 @@ function parseStoreHits(params: {
     const fromBody = parseFrontmatterIdentity(result.body);
     let skillName = fromBody.skillName;
     let relativePath = fromBody.relativePath;
-    if ((!skillName || !relativePath) && result.filepath) {
-      const parts = result.filepath.split(/[\\/]/u);
-      const skillIdx = parts.findIndex((part) =>
-        ["meta", "body", "references"].includes(part),
-      );
+    const filepath = result.filepath ?? result.file ?? result.displayPath;
+    if ((!skillName || !relativePath) && filepath) {
+      const parts = filepath.split(/[\\/]/u);
+      const skillIdx = findLastPathSegmentIndex(parts, [
+        "meta",
+        "body",
+        "references",
+      ]);
       if (skillIdx >= 0 && parts[skillIdx + 1]) {
         const encoded = parts[skillIdx + 1];
         try {
@@ -365,9 +390,17 @@ export function createSkillQmdIndex(params: {
   config: () => ResolvedQmdConfig;
   createStore?: QmdCreateStore;
   nowMs?: () => number;
+  setTimer?: (callback: () => void, delayMs: number) => unknown;
+  clearTimer?: (timer: unknown) => void;
 }): SkillQmdIndex {
   const agents = new Map<string, AgentState>();
   const now = () => params.nowMs?.() ?? Date.now();
+  const setTimer =
+    params.setTimer ??
+    ((callback: () => void, delayMs: number) => setTimeout(callback, delayMs));
+  const clearTimer =
+    params.clearTimer ??
+    ((timer: unknown) => clearTimeout(timer as NodeJS.Timeout));
 
   function agentRoot(agentId: string): string {
     return path.join(
@@ -390,6 +423,30 @@ export function createSkillQmdIndex(params: {
     };
     agents.set(agentId, created);
     return created;
+  }
+
+  function clearCooldownTimer(state: AgentState): void {
+    if (state.cooldownTimer === undefined) return;
+    clearTimer(state.cooldownTimer);
+    state.cooldownTimer = undefined;
+  }
+
+  function armCooldownResume(agentId: string, state: AgentState): void {
+    if (state.cooldownTimer !== undefined || state.running || !state.desired) {
+      return;
+    }
+    const cooldownMs = params.config().skillSearch.scheduleCooldownMs;
+    if (cooldownMs <= 0 || !state.store || state.lastScheduleStartedAtMs <= 0) {
+      return;
+    }
+    const remainingMs = Math.max(
+      0,
+      cooldownMs - (now() - state.lastScheduleStartedAtMs),
+    );
+    state.cooldownTimer = setTimer(() => {
+      state.cooldownTimer = undefined;
+      maybeStart(agentId, state);
+    }, remainingMs);
   }
 
   function resetRetryState(state: AgentState): void {
@@ -523,12 +580,14 @@ export function createSkillQmdIndex(params: {
         ) {
           break;
         }
+        clearCooldownTimer(state);
         const target = state.desired;
         state.desired = undefined;
         await build(agentId, state, target);
       }
     } finally {
       state.running = undefined;
+      armCooldownResume(agentId, state);
     }
   }
 
@@ -542,8 +601,10 @@ export function createSkillQmdIndex(params: {
       state.lastScheduleStartedAtMs > 0 &&
       sinceLastStart < cooldownMs
     ) {
+      armCooldownResume(agentId, state);
       return;
     }
+    clearCooldownTimer(state);
     state.running = runWorker(agentId, state);
   }
 
@@ -610,43 +671,26 @@ export function createSkillQmdIndex(params: {
       try {
         const collectionHits = await Promise.all(
           collections.map(async (collection) => {
-            const [lexResults, vectorResults] = await Promise.all([
-              activeStore.searchLex(query, {
-                collection: collection.name,
-                limit: candidateLimit,
-              }),
-              activeStore.searchVector(query, {
-                collection: collection.name,
-                limit: candidateLimit,
-              }),
-            ]);
-            const hits = [
-              ...parseStoreHits({
-                results: lexResults as Array<{
-                  filepath?: string;
-                  body?: string;
-                  score: number;
-                }>,
-                collection: collection.name,
-              }),
-              ...parseStoreHits({
-                results: vectorResults as Array<{
-                  filepath?: string;
-                  body?: string;
-                  score: number;
-                }>,
-                collection: collection.name,
-              }),
-            ];
-            const bestByChunk = new Map<string, SearchHit>();
-            for (const hit of hits) {
-              const key = hitId(hit);
-              const existing = bestByChunk.get(key);
-              if (!existing || hit.score > existing.score) {
-                bestByChunk.set(key, hit);
-              }
-            }
-            const ranked = [...bestByChunk.values()].sort((left, right) => {
+            const results = await activeStore.search({
+              query,
+              collection: collection.name,
+              limit: candidateLimit,
+              candidateLimit,
+              rerank: false,
+              includeHyde: false,
+              minScore: 0,
+            });
+            const ranked = parseStoreHits({
+              results: results as Array<{
+                filepath?: string;
+                file?: string;
+                displayPath?: string;
+                body?: string;
+                score: number;
+                explain?: unknown;
+              }>,
+              collection: collection.name,
+            }).sort((left, right) => {
               if (right.score !== left.score) return right.score - left.score;
               return hitId(left).localeCompare(hitId(right));
             });
@@ -722,6 +766,7 @@ export function createSkillQmdIndex(params: {
     async close() {
       for (const state of agents.values()) {
         state.desired = undefined;
+        clearCooldownTimer(state);
       }
       await Promise.all(
         [...agents.values()]
