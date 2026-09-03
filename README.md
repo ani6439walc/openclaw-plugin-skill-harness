@@ -201,6 +201,8 @@ Configure Skill Harness in `openclaw.json`:
 | `timeoutMs`                                 | `5000`             | Topic-checker and intent-classifier time budget.                                                      |
 | `qmd.embedding` / `expansion`               | required           | Remote endpoint and model for mandatory QMD hybrid routing; `apiKey` is optional for keyless proxies. |
 | `qmd.timeoutMs`                             | `timeoutMs`        | Per-request QMD embedding and expansion timeout.                                                      |
+| `qmd.skillSearch.collectionWeights`         | `1/1/1`            | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.    |
+| `qmd.skillSearch.scheduleCooldownMs`        | `5000`             | Minimum delay between background rebuild schedules for the same agent skill-search index.             |
 | `routing.sameTopic.minConfidence`           | `0.8`              | Minimum topic-triage confidence for same-topic intent inheritance only.                               |
 | `routing.qmd.minTopicConfidence`            | `0.8`              | Minimum topic-triage confidence for QMD topic-keyword retrieval and trigger/example QMD context.      |
 | `routing.qmd.directRouteMinScore`           | `0.85`             | Strictly-greater QMD score required for either QMD direct route.                                      |
@@ -277,7 +279,7 @@ This skill does not manually repeat production-owned work: per-turn classificati
 | Tool               | Purpose                                                            |
 | ------------------ | ------------------------------------------------------------------ |
 | `skill_list`       | Broad inventory fallback for broad or uncertain tasks.             |
-| `skill_search`     | Focused discovery when injected candidates do not fit.             |
+| `skill_search`     | QMD hybrid discovery when injected candidates do not fit.          |
 | `skill_view`       | Reads a visible skill or allowed support file before use.          |
 | `skill_manage`     | Authorized write-capable maintenance through the resolved catalog. |
 | `skill_experience` | Searches bounded runtime experiences for currently visible skills. |
@@ -286,7 +288,7 @@ This skill does not manually repeat production-owned work: per-turn classificati
 
 `skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. This intentionally does not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists: visibility follows root precedence and disabled bundled-skill entries only. Prompt-time automatic configured-skill injection is narrower and includes explicit configured names plus workspace skills.
 
-`skill_list` omits usage and related-skill data unless `show_stats: true` or `show_related: true` is supplied; `skill_view` always includes visible related skills. Related-skill declarations are discovery metadata for the skill tools only: they do not expand the dynamic routing candidate list. `skill_search` requires a non-empty query, source, domains, or keywords filter; it defaults to 20 results, caps the limit at 100, uses Unicode-normalized case-insensitive matching, treats domains as an OR filter, and returns match evidence unless `show_matches: false` is supplied. The index cache polls at `skills.load.watchDebounceMs` only when `skills.load.watch` is true; otherwise it uses a 60-second TTL.
+`skill_list` omits usage and related-skill data unless `show_stats: true` or `show_related: true` is supplied; `skill_view` always includes visible related skills. Related-skill declarations are discovery metadata for the skill tools only: they do not expand the dynamic routing candidate list. `skill_search` requires a non-empty natural-language `query`, defaults to 20 results, caps the limit at 100, and retrieves visible skills through the managed QMD skill index over skill metadata, `SKILL.md` bodies, and references. Usage statistics and chunk evidence are omitted unless `show_stats: true` or `show_evidence: true` is supplied. If the index is still building or unavailable, the tool returns a structured `skill search index is not ready` error instead of falling back to lexical ranking. Successful `skill_manage` writes schedule a refresh of the same agent-scoped index.
 
 ## Intent Review
 
