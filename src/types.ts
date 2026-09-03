@@ -31,14 +31,6 @@ export type ResolvedReviewConfig = {
   };
 };
 
-export type ResolvedCurationConfig = {
-  enabled: boolean;
-  model?: string;
-  modelFallback?: string;
-  thinking: ThinkLevel;
-  timeoutSeconds: number;
-};
-
 export type QmdEndpointConfig = {
   baseUrl?: string;
   model?: string;
@@ -90,7 +82,6 @@ export type ResolvedSkillHarnessPluginConfig = {
   timeoutMs: number;
   qmd: ResolvedQmdConfig;
   routing: ResolvedRoutingConfig;
-  curation: ResolvedCurationConfig;
   review: ResolvedReviewConfig;
 };
 

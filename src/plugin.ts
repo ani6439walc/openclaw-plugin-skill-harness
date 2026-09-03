@@ -8,7 +8,6 @@ import {
 import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { resolveConfig } from "./config.js";
 import { IntentCatalog } from "./intents/index.js";
-import { createCurationQueue } from "./curation/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
@@ -50,14 +49,6 @@ function readKeywordCoverageKeywordsFailOpen(
     logger.warn("failed to read keyword coverage keywords", { error: err });
     return normalizeReviewTriggerKeywords({});
   }
-}
-
-function recoverCurationSchedulesFailOpen(params: {
-  recover: () => Promise<void>;
-}): void {
-  void params.recover().catch((error) => {
-    logger.warn("failed to recover curation schedules", { error });
-  });
 }
 
 function copyFileIfMissing(sourcePath: string, targetPath: string): void {
@@ -298,7 +289,6 @@ export function createPlugin(
       });
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
-      const curationQueue = createCurationQueue();
       const keywordCoverageWriter = new KeywordCoverageWriter(dataRoot);
       let triggerKeywordCache = readKeywordCoverageKeywordsFailOpen(
         keywordCoverageWriter,
@@ -383,7 +373,6 @@ export function createPlugin(
         catalog,
         tracker,
         statsAggregator,
-        curationQueue,
         reviewLogWriter,
         keywordCoverageWriter,
         triggerKeywords: () => triggerKeywordCache,
@@ -419,12 +408,6 @@ export function createPlugin(
         qmdSkillIndex,
         scheduleSkillSearchIndex,
         bundledSkillsDir: deps.bundledSkillsDir,
-      });
-
-      setImmediate(() => {
-        recoverCurationSchedulesFailOpen({
-          recover: handlers.recoverCurationSchedules,
-        });
       });
     },
   });

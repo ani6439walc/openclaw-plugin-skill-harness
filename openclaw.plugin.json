@@ -252,48 +252,6 @@
         },
         "default": {}
       },
-      "curation": {
-        "type": "object",
-        "description": "Enabled-by-default background curator settings. Curation is independent of Intent Review and does not depend on review.enabled.",
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "model": {
-            "type": "string",
-            "description": "Explicit dedicated model for the background curator. If unset, inherits the top-level model before current-session and agent-primary resolution."
-          },
-          "modelFallback": {
-            "type": "string",
-            "description": "Last-resort background curator model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
-          },
-          "thinking": {
-            "type": "string",
-            "enum": [
-              "off",
-              "minimal",
-              "low",
-              "medium",
-              "high",
-              "xhigh",
-              "adaptive",
-              "max"
-            ],
-            "description": "Thinking level for the background curator sub-agent.",
-            "default": "medium"
-          },
-          "timeoutSeconds": {
-            "type": "integer",
-            "minimum": 10,
-            "maximum": 600,
-            "default": 30,
-            "description": "Budget in seconds for each background curator sub-agent run."
-          }
-        },
-        "default": {}
-      },
       "review": {
         "type": "object",
         "description": "Optional post-turn Intent Review runs that validate and apply bounded runtime intent improvements.",

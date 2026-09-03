@@ -22,8 +22,6 @@ import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
 import type { IntentQmdIndex } from "../qmd/intent-index.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
-import type { SampleWithoutReplacement } from "../curation/index.js";
-import type { CurationQueue } from "../curation/queue.js";
 import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import type {
   TurnAssociation,
@@ -52,8 +50,6 @@ export type HookDeps = {
   statsAggregator?: typeof defaultStatsAggregator;
   skillInventoryResolver?: typeof resolveSkillInventory;
   clock?: () => Date;
-  sampleWithoutReplacement?: SampleWithoutReplacement;
-  curationQueue?: CurationQueue;
   experienceCatalog?: SkillExperienceCatalog;
   qmdIntentIndex?: IntentQmdIndex;
   qmdSkillIndex?: SkillQmdIndex;
@@ -66,7 +62,6 @@ export type HookDeps = {
   ) => Promise<KeywordCoverageReviewerResult | undefined>;
   classifier?: typeof runIntentionSubagent;
   topicChecker?: typeof runTopicSwitchSubagent;
-  curator?: typeof import("../curation/subagent.js").runCurationSubagent;
   reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
     Partial<
       Pick<

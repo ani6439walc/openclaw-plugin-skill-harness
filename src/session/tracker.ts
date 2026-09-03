@@ -10,14 +10,6 @@ import type {
   HistoricalIntentRecord,
 } from "../types.js";
 import type { ReviewSnapshot, ReviewState } from "../review/types.js";
-import type {
-  CuratedSkillCandidate,
-  CurationScheduleReservation,
-  CurationWriteResult,
-  SessionCurationRecord,
-  TurnCurationResult,
-  TurnRecommendationState,
-} from "../curation/types.js";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
 import {
@@ -91,7 +83,6 @@ export interface IntentState {
   trigger?: IntentTrigger;
   result?: IntentionResult;
   recommendedSkills?: string[];
-  recommendationState?: TurnRecommendationState;
   intentProjection?: IntentProjectionTelemetry;
 }
 
@@ -99,7 +90,6 @@ export interface SessionState {
   turnKey?: string;
   input?: string;
   intent?: IntentState;
-  curationResult?: TurnCurationResult;
   skillsUsed?: SkillRecord[];
   toolCalls?: Array<{
     toolCallId?: string;
@@ -124,7 +114,6 @@ export interface SessionData {
   agentId?: string;
   current: SessionState;
   history?: SessionState[];
-  curation?: SessionCurationRecord;
 }
 
 export interface PromptTurnIdentity {
@@ -240,15 +229,6 @@ function createReviewState(
   return {
     input: sanitizeReviewInput(state.input),
     intent: state.intent?.result ? { ...state.intent.result } : undefined,
-    ...(options?.includeRecommendationCandidates
-      ? {
-          recommendationCandidates:
-            state.intent?.recommendationState?.candidates.map((candidate) => ({
-              name: candidate.name,
-              provenance: candidate.provenance,
-            })),
-        }
-      : {}),
     skillsUsed: state.skillsUsed?.map((skill) => ({ ...skill })),
     toolCalls: state.toolCalls?.map((call) => ({
       name: call.name,
@@ -305,7 +285,6 @@ const PERSISTED_INTENT_STATE_FIELDS = new Set<keyof IntentState>([
   "trigger",
   "result",
   "recommendedSkills",
-  "recommendationState",
   "intentProjection",
 ]);
 
@@ -326,23 +305,6 @@ function stripUnknownIntentStateFields(state: SessionState): boolean {
 
 function migrateSessionData(sessionData: SessionData): boolean {
   let changed = false;
-  const curation = sessionData.curation as
-    (SessionCurationRecord & Record<string, unknown>) | undefined;
-  if (curation) {
-    const legacyRefs = curation.experienceRefs;
-    if (!Array.isArray(curation.recommendedExperienceRefs)) {
-      curation.recommendedExperienceRefs = Array.isArray(legacyRefs)
-        ? legacyRefs.filter(
-            (value): value is string => typeof value === "string",
-          )
-        : [];
-      changed = true;
-    }
-    if (Object.hasOwn(curation, "experienceRefs")) {
-      delete curation.experienceRefs;
-      changed = true;
-    }
-  }
   for (const state of [sessionData.current, ...(sessionData.history ?? [])]) {
     if (stripUnknownIntentStateFields(state)) changed = true;
     const result = state.intent?.result;
@@ -520,11 +482,6 @@ function mergeSessionState(
     if (data.intent.recommendedSkills !== undefined) {
       current.intent.recommendedSkills = [...data.intent.recommendedSkills];
     }
-    if (data.intent.recommendationState !== undefined) {
-      current.intent.recommendationState = structuredClone(
-        data.intent.recommendationState,
-      );
-    }
     if (data.intent.intentProjection !== undefined) {
       current.intent.intentProjection = data.intent.intentProjection;
     }
@@ -537,9 +494,6 @@ function mergeSessionState(
   if (data.toolCalls) appendToolCalls(current, data.toolCalls);
   if (data.skillsUsed) {
     current.skillsUsed = mergeUniqueSkills(current.skillsUsed, data.skillsUsed);
-  }
-  if (data.curationResult !== undefined) {
-    current.curationResult = structuredClone(data.curationResult);
   }
 }
 
@@ -604,11 +558,6 @@ export class SessionTracker {
       (state) => state.turnKey === turnKey,
     );
     return matches.length === 1 ? structuredClone(matches[0]) : undefined;
-  }
-
-  getCuration(sessionId: string): SessionCurationRecord | undefined {
-    const curation = this.sessionData.get(sessionId)?.curation;
-    return curation ? structuredClone(curation) : undefined;
   }
 
   private async mutateSession<T>(params: {
@@ -886,392 +835,6 @@ export class SessionTracker {
       return outcome.acquired ? outcome.result : "retryable-failure";
     } catch (error) {
       logger.warn("failed to finalize exact turn", {
-        error,
-        sessionId: params.sessionId,
-      });
-      return "retryable-failure";
-    }
-  }
-
-  async reserveCurationSchedule(params: {
-    sessionId: string;
-    turnKey: string;
-    expectedTopicEpoch: number;
-    expectedRevision: number;
-    now: string;
-  }): Promise<
-    | "reserved"
-    | "already-pending"
-    | "already-finished"
-    | "stale"
-    | "retryable-failure"
-  > {
-    try {
-      const outcome = await this.mutateSession<
-        "reserved" | "already-pending" | "already-finished" | "stale"
-      >({
-        sessionId: params.sessionId,
-        mutate: (session) => {
-          const matches = [session.current, ...(session.history ?? [])].filter(
-            (state) => state.turnKey === params.turnKey,
-          );
-          if (matches.length !== 1 || !session.agentId) {
-            return { result: "stale" as const, changed: false };
-          }
-          const target = matches[0];
-          const recommendation = target.intent?.recommendationState;
-          if (
-            target.error !== undefined ||
-            recommendation?.topicEpoch !== params.expectedTopicEpoch ||
-            recommendation.curationRevision !== params.expectedRevision
-          ) {
-            return { result: "stale" as const, changed: false };
-          }
-          const existing = recommendation.curationSchedule;
-          if (existing) {
-            return {
-              result:
-                existing.status === "pending"
-                  ? ("already-pending" as const)
-                  : ("already-finished" as const),
-              changed: false,
-            };
-          }
-          const anotherPending = [
-            session.current,
-            ...(session.history ?? []),
-          ].some((state) => {
-            const schedule =
-              state.intent?.recommendationState?.curationSchedule;
-            return (
-              schedule?.status === "pending" &&
-              schedule.expectedTopicEpoch === params.expectedTopicEpoch
-            );
-          });
-          if (anotherPending) {
-            return { result: "already-pending" as const, changed: false };
-          }
-          recommendation.curationSchedule = {
-            agentId: session.agentId,
-            schedulingTurnKey: params.turnKey,
-            expectedTopicEpoch: params.expectedTopicEpoch,
-            expectedRevision: params.expectedRevision,
-            status: "pending",
-            reservedAt: params.now,
-          };
-          return { result: "reserved" as const, changed: true };
-        },
-      });
-      return outcome.acquired ? outcome.result : "retryable-failure";
-    } catch (error) {
-      logger.warn("failed to reserve curation schedule", {
-        error,
-        sessionId: params.sessionId,
-      });
-      return "retryable-failure";
-    }
-  }
-
-  async listPendingCurationSchedules(): Promise<
-    readonly CurationScheduleReservation[]
-  > {
-    const reservations: CurationScheduleReservation[] = [];
-    for (const [sessionId, session] of this.sessionData) {
-      for (const state of [session.current, ...(session.history ?? [])]) {
-        const schedule = state.intent?.recommendationState?.curationSchedule;
-        if (schedule?.status === "pending") {
-          reservations.push({
-            sessionId,
-            schedule: structuredClone(schedule),
-          });
-        }
-      }
-    }
-    return reservations;
-  }
-
-  async commitCurationSchedule(params: {
-    sessionId: string;
-    schedulingTurnKey: string;
-    expectedTopicEpoch: number;
-    expectedRevision: number;
-    expectedIntentId: string;
-    candidates: readonly CuratedSkillCandidate[];
-    recommendedExperienceRefs: readonly string[];
-    completedTurnCursor: number;
-    reason?: string;
-    now: string;
-  }): Promise<CurationWriteResult> {
-    try {
-      const outcome = await this.mutateSession<
-        Exclude<CurationWriteResult, { status: "retryable-failure" }>
-      >({
-        sessionId: params.sessionId,
-        mutate: (session) => {
-          const matches = [session.current, ...(session.history ?? [])].filter(
-            (state) => state.turnKey === params.schedulingTurnKey,
-          );
-          const curation = session.curation;
-          if (matches.length !== 1 || !curation) {
-            return {
-              result: {
-                status: "stale" as const,
-                curation: curation ? structuredClone(curation) : undefined,
-              },
-              changed: false,
-            };
-          }
-          const schedule =
-            matches[0].intent?.recommendationState?.curationSchedule;
-          const scheduleMatches =
-            schedule?.schedulingTurnKey === params.schedulingTurnKey &&
-            schedule.expectedTopicEpoch === params.expectedTopicEpoch &&
-            schedule.expectedRevision === params.expectedRevision;
-          if (
-            scheduleMatches &&
-            schedule.status === "completed" &&
-            curation.topicEpoch === params.expectedTopicEpoch &&
-            curation.revision === params.expectedRevision + 1 &&
-            curation.intentId === params.expectedIntentId.trim().toLowerCase()
-          ) {
-            return {
-              result: {
-                status: "reused" as const,
-                curation: structuredClone(curation),
-              },
-              changed: false,
-            };
-          }
-          if (
-            !scheduleMatches ||
-            schedule.status !== "pending" ||
-            curation.topicEpoch !== params.expectedTopicEpoch ||
-            curation.revision !== params.expectedRevision ||
-            curation.intentId !==
-              params.expectedIntentId.trim().toLowerCase() ||
-            params.completedTurnCursor < curation.completedTurnCursor
-          ) {
-            return {
-              result: {
-                status: "stale" as const,
-                curation: structuredClone(curation),
-              },
-              changed: false,
-            };
-          }
-
-          curation.revision += 1;
-          curation.updatedAt = params.now;
-          curation.candidates = structuredClone([...params.candidates]);
-          curation.recommendedExperienceRefs = [
-            ...params.recommendedExperienceRefs,
-          ];
-          curation.completedTurnCursor = params.completedTurnCursor;
-          schedule.status = "completed";
-          schedule.finishedAt = params.now;
-          matches[0].curationResult = {
-            status: "applied",
-            topicEpoch: curation.topicEpoch,
-            revision: curation.revision,
-            candidates: structuredClone([...params.candidates]),
-            recommendedExperienceRefs: [...params.recommendedExperienceRefs],
-            reason: params.reason ?? "",
-            finishedAt: params.now,
-          };
-          return {
-            result: {
-              status: "applied" as const,
-              curation: structuredClone(curation),
-            },
-            changed: true,
-          };
-        },
-      });
-      return outcome.acquired
-        ? outcome.result
-        : { status: "retryable-failure" };
-    } catch (error) {
-      logger.warn("failed to commit curation schedule", {
-        error,
-        sessionId: params.sessionId,
-      });
-      return { status: "retryable-failure" };
-    }
-  }
-
-  async finishCurationSchedule(params: {
-    sessionId: string;
-    turnKey: string;
-    expectedTopicEpoch: number;
-    expectedRevision: number;
-    outcome: "failed" | "obsolete";
-    now: string;
-  }): Promise<"applied" | "already-finished" | "stale" | "retryable-failure"> {
-    try {
-      const result = await this.mutateSession<
-        "applied" | "already-finished" | "stale"
-      >({
-        sessionId: params.sessionId,
-        mutate: (session) => {
-          const matches = [session.current, ...(session.history ?? [])].filter(
-            (state) => state.turnKey === params.turnKey,
-          );
-          if (matches.length !== 1) {
-            return { result: "stale" as const, changed: false };
-          }
-          const schedule =
-            matches[0].intent?.recommendationState?.curationSchedule;
-          if (
-            !schedule ||
-            schedule.expectedTopicEpoch !== params.expectedTopicEpoch ||
-            schedule.expectedRevision !== params.expectedRevision ||
-            schedule.schedulingTurnKey !== params.turnKey
-          ) {
-            return { result: "stale" as const, changed: false };
-          }
-          if (schedule.status !== "pending") {
-            return { result: "already-finished" as const, changed: false };
-          }
-          schedule.status = params.outcome;
-          schedule.finishedAt = params.now;
-          return { result: "applied" as const, changed: true };
-        },
-      });
-      return result.acquired ? result.result : "retryable-failure";
-    } catch (error) {
-      logger.warn("failed to finish curation schedule", {
-        error,
-        sessionId: params.sessionId,
-      });
-      return "retryable-failure";
-    }
-  }
-
-  async ensureColdStart(params: {
-    sessionId: string;
-    turnKey: string;
-    intentId: string;
-    topicChangeReason?: IntentionResult["topicChangeReason"];
-    trustworthySameTopic: boolean;
-    trustworthyTopicEvidence: boolean;
-    draftCandidates: readonly CuratedSkillCandidate[];
-    now: string;
-  }): Promise<CurationWriteResult> {
-    try {
-      const outcome = await this.mutateSession<
-        Exclude<CurationWriteResult, { status: "retryable-failure" }>
-      >({
-        sessionId: params.sessionId,
-        maxWaitMs: 0,
-        mutate: (session) => {
-          const current = session.current;
-          const existing = session.curation;
-          const stale = () => ({
-            result: {
-              status: "stale" as const,
-              curation: existing ? structuredClone(existing) : undefined,
-            },
-            changed: false,
-          });
-          if (current.turnKey !== params.turnKey || current.timestamps?.end) {
-            return stale();
-          }
-          if (existing?.startedByTurnKey === params.turnKey) {
-            return {
-              result: {
-                status: "reused" as const,
-                curation: structuredClone(existing),
-              },
-              changed: false,
-            };
-          }
-
-          const intentId = params.intentId.trim().toLowerCase();
-          if (!intentId) return stale();
-          const recognizedChange =
-            params.topicChangeReason !== undefined &&
-            TOPIC_CHANGE_REASONS.has(params.topicChangeReason);
-          if (existing && existing.intentId === intentId && !recognizedChange) {
-            return {
-              result: {
-                status: "reused" as const,
-                curation: structuredClone(existing),
-              },
-              changed: false,
-            };
-          }
-
-          const curation: SessionCurationRecord = {
-            topicEpoch: existing ? existing.topicEpoch + 1 : 1,
-            intentId,
-            revision: 0,
-            createdAt: params.now,
-            updatedAt: params.now,
-            startedByTurnKey: params.turnKey,
-            candidates: structuredClone([...params.draftCandidates]),
-            recommendedExperienceRefs: [],
-            completedTurnCursor: 0,
-          };
-          session.curation = curation;
-          return {
-            result: {
-              status: "applied" as const,
-              curation: structuredClone(curation),
-            },
-            changed: true,
-          };
-        },
-      });
-      return outcome.acquired
-        ? outcome.result
-        : { status: "retryable-failure" };
-    } catch (error) {
-      logger.warn("failed to ensure cold-start curation", {
-        error,
-        sessionId: params.sessionId,
-      });
-      return { status: "retryable-failure" };
-    }
-  }
-
-  async commitPromptRecommendation(params: {
-    sessionId: string;
-    turnKey: string;
-    expectedTopicEpoch: number;
-    expectedRevision: number;
-    recommendedSkills: readonly string[];
-    recommendationState: TurnRecommendationState;
-  }): Promise<"applied" | "stale" | "retryable-failure"> {
-    try {
-      const outcome = await this.mutateSession<"applied" | "stale">({
-        sessionId: params.sessionId,
-        maxWaitMs: 0,
-        mutate: (session) => {
-          const current = session.current;
-          const curation = session.curation;
-          if (
-            current.turnKey !== params.turnKey ||
-            current.timestamps?.end ||
-            curation?.topicEpoch !== params.expectedTopicEpoch ||
-            curation.revision !== params.expectedRevision ||
-            params.recommendationState.topicEpoch !==
-              params.expectedTopicEpoch ||
-            params.recommendationState.curationRevision !==
-              params.expectedRevision
-          ) {
-            return { result: "stale" as const, changed: false };
-          }
-          current.intent ??= {};
-          current.intent.recommendedSkills = [...params.recommendedSkills];
-          current.intent.recommendationState = structuredClone(
-            params.recommendationState,
-          );
-          return { result: "applied" as const, changed: true };
-        },
-      });
-      return outcome.acquired ? outcome.result : "retryable-failure";
-    } catch (error) {
-      logger.warn("failed to commit prompt recommendation", {
         error,
         sessionId: params.sessionId,
       });

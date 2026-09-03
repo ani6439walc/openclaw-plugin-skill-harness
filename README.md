@@ -85,7 +85,6 @@ Skill Harness addresses both:
 
 1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and candidate-scoped `<skill_experience>` metadata (identity and keywords only) nested under the matching `<skill>`. The fixed system context does not include the runtime skill inventory.
 2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption and can refine runtime intent Markdown and selected review trigger keywords. It does not train the base model or rewrite skill files.
-3. **Session-local recommendation curation.** The enabled-by-default background curator refines a topic epoch's direct skill candidates and may select up to three high-relevance experience references for the next turn's expanded reference context, without changing intent definitions, skill files, or Review state. The curator prompt receives both user and assistant conversation history, prioritizes the union of previously injected candidates and direct intent skills ranked by usage statistics, and supplements with same-domain exploration skills up to 15 candidates. Applied curation outcomes persist under the triggering turn's `turn.curationResult` and aggregate into global `stats.json` curation metrics.
 
 ## How it works
 
@@ -125,11 +124,7 @@ The routing stages are:
 
 Exact `fastpath.keywords` uses host-local NFKC/lowercase/whitespace-normalized whole-message equality; it does not invoke QMD. Same-topic inheritance requires history, `routing.sameTopic.minConfidence` joint confidence (default `0.8`), and a topic-triage domain equal to the current catalog domain of the historical intent. Topic-keyword retrieval indexes only `fastpath.keywords` in one QMD collection per domain. QMD snapshot files live under `qmd/intents/` and its SQLite database under `qmd/intent-routing.sqlite`; they refresh in the background, so a cold or unhealthy index fails open to the classifier.
 
-Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains only the selected intent, optional classifier-produced complexity, guidance, direct candidates, and nested experience metadata. The plugin is fail-open: configuration, classification, statistics, curation, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
-
-### Session-local recommendation curation
-
-After routing chooses an intent, the host creates a revision-0 curation record for that topic epoch. Cold start ranks only the intent's visible direct skills from successful same-agent, same-intent observations retained for 14 days: four exploitation candidates plus up to two randomly sampled exploration candidates. An independent background curator runs after each three additional successful turns in the same epoch and can persist at most six visible direct candidates and three high-relevance experience identities. It never edits intents, skills, Review state, or trigger-keyword state, and it does not gate immediate experience metadata injection—only the bounded body expansion on the following turn.
+Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains only the selected intent, optional classifier-produced complexity, guidance, direct candidates, and nested experience metadata. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
 
 ## Basic configuration
 
@@ -174,9 +169,6 @@ Configure Skill Harness in `openclaw.json`:
               minCandidateScore: 0.35,
             },
           },
-          curation: {
-            enabled: true,
-          },
           review: {
             enabled: false,
           },
@@ -208,16 +200,13 @@ Configure Skill Harness in `openclaw.json`:
 | `routing.qmd.directRouteMinScore`           | `0.85`             | Strictly-greater QMD score required for either QMD direct route.                                          |
 | `routing.qmd.smallCandidateMinScore`        | `0.65`             | Inclusive QMD score that selects the small classifier candidate set.                                      |
 | `routing.qmd.minCandidateScore`             | `0.35`             | Inclusive QMD score floor for any QMD classifier candidate projection.                                    |
-| `curation.enabled`                          | `true`             | Enables session-local direct-skill and experience recommendation curation, independently of Review.       |
-| `curation.model` / `modelFallback`          | unset              | Optional dedicated curator model and resolution fallback.                                                 |
-| `curation.thinking` / `timeoutSeconds`      | `"medium"` / `30`  | Curator thinking level and time budget in seconds.                                                        |
 | `review.enabled`                            | `false`            | Enables post-turn Intent Review.                                                                          |
 | `review.thinking` / `timeoutSeconds`        | `"medium"` / `300` | Intent Review thinking level and time budget in seconds.                                                  |
 | `review.keywordCoverage.everyAcceptedTurns` | `50`               | Cadence for automatic cross-session keyword-coverage review.                                              |
 | `review.triggers.skillPlacement.enabled`    | `true`             | Enables bounded placement review for one eligible resolved skill.                                         |
 | `review.triggers.*.enabled`                 | `true`             | Enables the individual ordinary Review trigger; thresholds remain in the plugin manifest.                 |
 
-Topic Checker, Intent Classifier, background Curator, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
+Topic Checker, Intent Classifier, and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
 Every `routing` score must be between `0` and `1`, and `minCandidateScore ≤ smallCandidateMinScore ≤ directRouteMinScore`. Invalid routing settings reject plugin configuration rather than being silently changed or ignored.
 
@@ -227,7 +216,7 @@ This release requires `plugins.entries.skill-harness.config.qmd` before OpenClaw
 
 This release also removes `plugins.entries.skill-harness.config.instruction`. OpenClaw validates the strict plugin config schema before the plugin runtime loads, so a retained `instruction` block prevents the upgraded plugin from loading.
 
-After adding QMD, remove the entire legacy `instruction: { ... }` block from `plugins.entries.skill-harness.config`. There is no automatic migration or compatibility parser. Do not copy its writer model, thinking, timeout, or trigger settings into `curation`: curation is a separate session-local recommendation feature with different behavior.
+After adding QMD, remove the entire legacy `instruction: { ... }` block from `plugins.entries.skill-harness.config`. There is no automatic migration or compatibility parser.
 
 ## Runtime intents
 
@@ -240,7 +229,7 @@ Runtime intents live under the OpenClaw state directory. With the default local 
 
 On first startup, the plugin seeds bundled examples only when this directory is absent or has no Markdown intent files. Existing runtime intents are never overwritten.
 
-Intent files use YAML frontmatter only for routing metadata; their complete plain-text Markdown body is the one routing `guidance` sentence. Experience files are separate, skill-scoped Markdown records with `skill`, `summary`, and `keywords` frontmatter. Every record whose skill is a current direct candidate is injected immediately as identity-and-keyword metadata. Session curation may select at most three high-relevance records; on the next turn their bounded bodies are added with a `session_curation_recommendation` marker that says they are only possibly relevant. The main agent reads any unexpanded record, or a selected record's full body, through `skill_experience`, passing the matching skill and identity as the query.
+Intent files use YAML frontmatter only for routing metadata; their complete plain-text Markdown body is the one routing `guidance` sentence. Experience files are separate, skill-scoped Markdown records with `skill`, `summary`, and `keywords` frontmatter. Every record whose skill is a current direct candidate is injected immediately as identity-and-keyword metadata. The main agent reads any record's full body through `skill_experience`, passing the matching skill and identity as the query.
 
 ### Runtime Review state
 
@@ -270,7 +259,7 @@ The bundled `skill-harness` skill is the explicit human-maintenance surface for 
 - `design` — create, refine, rename, split, or merge one intent through a staged preview and confirmation workflow;
 - `extract` — score intent complexity, identify independent responsibilities, and draft skill blueprints plus a slimmed intent after approval;
 - `keyword-audit` — generate a private, report-only cross-session analysis of Review keyword matches, misses, and collisions, then propose a bounded delta without writing runtime state.
-- `runtime-health` — generate a private, report-only aggregate snapshot of Review outcomes, coverage state, v3/v4 stats, session retention, curation state, and agent-artifact growth without exposing retained text or modifying runtime state.
+- `runtime-health` — generate a private, report-only aggregate snapshot of Review outcomes, coverage state, v3/v4 stats, session retention, and agent-artifact growth without exposing retained text or modifying runtime state.
 
 This skill does not manually repeat production-owned work: per-turn classification and routing injection, startup seeding, trigger-driven intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, or session cleanup. Broad routing changes and skill extraction remain human-owned because they require semantic calibration and explicit write approval.
 
@@ -413,7 +402,6 @@ turn is not excluded by the configured low-effort mode. Every eligible normal
 agent still receives the fixed skill-discovery context even when dynamic intent
 routing is skipped or fails.
 
-Session-local curation is enabled by default and is queued in the background; applied revisions are written to per-turn `turn.curationResult` state and aggregated into schema-v4 `stats.json` curation metrics.
 Intent Review is disabled by default; when enabled, its runtime edits and
 keyword-coverage writes are serialized so concurrent reviews cannot race on the
 runtime catalog.

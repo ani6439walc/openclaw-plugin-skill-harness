@@ -199,7 +199,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - Skill dependencies belong in frontmatter skills[]. Add only exact skill names that the intent should load or strongly prefer.
 - Keep the body as one plain-text guidance sentence: no headings, lists, fences, commands, paths, or extra sections. Keep durable tool, workflow, parameter, recovery, and pitfall lessons within that sentence only when they are truly intent-wide.
 - Automatic experience writes are unavailable in this release. Do not propose, create, or edit experience records.
-- If two existing intents appear to overlap, mention the overlap in the finding summary or suggestedChange so the background curator can consider larger consolidation. Do not perform broad consolidation unless the requested trigger and evidence justify a concrete class-level routing edit.
+- If two existing intents appear to overlap, mention the overlap in the finding summary or suggestedChange. Do not perform broad consolidation unless the requested trigger and evidence justify a concrete class-level routing edit.
 
 ### Recordability filter
 - The core question is whether the lesson will save future time.

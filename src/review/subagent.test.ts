@@ -159,7 +159,6 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "Skill dependencies belong in frontmatter skills[]",
   "two existing intents appear to overlap",
   "mention the overlap in the finding summary or suggestedChange",
-  "background curator can consider larger consolidation",
   "Recordability filter",
   "requested trigger's own criteria establish a concrete, reusable lesson",
   "direct improvement to allowed routing metadata or guidance in the matched intent",
@@ -199,6 +198,7 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
 ];
 
 const FORBIDDEN_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
+  "background curator",
   "You are an Intent Review reviewer.",
   "{{TARGET_RULES}}",
   "{{NO_FINDING_RULE}}",

@@ -36,14 +36,6 @@ const DEFAULT_CONTEXT_WINDOW: ContextWindow = {
   },
 };
 
-const DEFAULT_CURATION = {
-  enabled: true,
-  model: undefined,
-  modelFallback: undefined,
-  thinking: "medium",
-  timeoutSeconds: 30,
-} as const;
-
 const DEFAULT_REVIEW = {
   enabled: false,
   model: undefined,
@@ -103,7 +95,6 @@ const DEFAULT_CONFIG = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   qmd: DEFAULT_QMD,
   routing: DEFAULT_ROUTING,
-  curation: DEFAULT_CURATION,
   review: DEFAULT_REVIEW,
 } satisfies ResolvedSkillHarnessPluginConfig;
 
@@ -161,15 +152,6 @@ const ThinkLevelSchema = z
 const LowEffortRoutingModeSchema = z
   .enum(["fastpath-only", "full", "off"])
   .catch("fastpath-only");
-const CurationSchema = z
-  .object({
-    enabled: z.boolean().catch(true),
-    model: z.string().optional().catch(undefined),
-    modelFallback: z.string().optional().catch(undefined),
-    thinking: ThinkLevelSchema,
-    timeoutSeconds: boundedInt(30, 10, 600),
-  })
-  .catch(DEFAULT_CURATION);
 const ReviewSchema = z
   .object({
     enabled: z.boolean().catch(false),
@@ -359,7 +341,6 @@ const SkillHarnessConfigSchema = z
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
     qmd: QmdSchema,
     routing: z.unknown().optional(),
-    curation: CurationSchema,
     review: ReviewSchema,
   })
   .catch(DEFAULT_CONFIG);

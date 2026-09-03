@@ -107,68 +107,6 @@ describe("createPlugin", () => {
     );
   });
 
-  it("injects a curation queue scoped to each plugin registration", () => {
-    const firstApi = createApi();
-    const secondApi = createApi();
-
-    createPlugin(firstApi).register(firstApi);
-    createPlugin(secondApi).register(secondApi);
-
-    const firstQueue = createHookHandlersSpy.mock.calls[0][0].curationQueue;
-    const secondQueue = createHookHandlersSpy.mock.calls[1][0].curationQueue;
-    expect(firstQueue).toEqual({
-      enqueue: expect.any(Function),
-      has: expect.any(Function),
-    });
-    expect(secondQueue).not.toBe(firstQueue);
-  });
-
-  it("defers curation recovery independently of review enablement", async () => {
-    vi.useFakeTimers();
-    const api = createApi({ pluginConfig: { review: { enabled: false } } });
-    const listProcessedEventIds = vi
-      .spyOn(StatsAggregator.prototype, "listProcessedEventIds")
-      .mockReturnValue(new Set());
-    const listRetainedSessions = vi
-      .spyOn(SessionTracker.prototype, "listRetainedSessions")
-      .mockReturnValue([]);
-    const listPendingCurationSchedules = vi
-      .spyOn(SessionTracker.prototype, "listPendingCurationSchedules")
-      .mockResolvedValue([]);
-
-    createPlugin(api).register(api);
-
-    expect(api.registerTool).toHaveBeenCalledTimes(4);
-    expect(api.on).toHaveBeenCalledWith("session_end", expect.any(Function));
-    expect(listProcessedEventIds).not.toHaveBeenCalled();
-    expect(listRetainedSessions).not.toHaveBeenCalled();
-    expect(listPendingCurationSchedules).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(listProcessedEventIds).toHaveBeenCalled();
-    expect(listRetainedSessions).toHaveBeenCalled();
-    expect(listPendingCurationSchedules).toHaveBeenCalled();
-  });
-
-  it("fails open when deferred curation recovery fails", async () => {
-    vi.useFakeTimers();
-    const api = createApi();
-    const error = new Error("pending schedules unavailable");
-    vi.spyOn(
-      SessionTracker.prototype,
-      "listPendingCurationSchedules",
-    ).mockRejectedValue(error);
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
-
-    expect(() => createPlugin(api).register(api)).not.toThrow();
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(warn).toHaveBeenCalledWith("failed to recover curation schedules", {
-      error,
-    });
-  });
-
   it("registers skill tools without legacy review command surfaces", () => {
     const api = createApi();
 

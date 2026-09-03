@@ -227,54 +227,6 @@ describe("buildRoutingContext", () => {
     expect(unmatched).not.toContain("<skill_experience>");
     expect(unmatched).not.toContain("skill/unmatched");
   });
-
-  it("expands only session-curated experiences with a possibly-relevant marker", () => {
-    const result = buildRoutingContext({
-      result: {
-        intent: "other",
-        reason: "No exact match.",
-        domain: "other",
-        confidence: 0.5,
-      },
-      guidance: "Use only verified context.",
-      candidates: [
-        {
-          name: "skill",
-          location: "/private/SKILL.md",
-          description: "Matching skill.",
-        },
-      ],
-      experiences: [
-        {
-          identity: "skill/recommended",
-          skill: "skill",
-          entryId: "recommended",
-          summary: "Hidden summary.",
-          keywords: ["selected"],
-          body: "Curated body.",
-          path: "/private/recommended.md",
-        },
-        {
-          identity: "skill/metadata-only",
-          skill: "skill",
-          entryId: "metadata-only",
-          summary: "Hidden summary.",
-          keywords: ["unselected"],
-          body: "Unselected body.",
-          path: "/private/metadata-only.md",
-        },
-      ],
-      recommendedExperienceIds: [" SKILL/RECOMMENDED "],
-    });
-
-    expect(result).toContain(
-      "<session_curation_recommendation>Possibly relevant experience selected by session curation; verify it fits the current request.</session_curation_recommendation>",
-    );
-    expect(result).toContain("<body>Curated body.</body>");
-    expect(result).not.toContain("Unselected body.");
-    expect(result).toContain('<keywords>["selected"]</keywords>');
-    expect(result).toContain('<keywords>["unselected"]</keywords>');
-  });
 });
 
 describe("buildIntentionPrompt", () => {

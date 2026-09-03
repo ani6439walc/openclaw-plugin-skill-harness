@@ -480,41 +480,10 @@ describe("resolveConfig", () => {
   });
 
   describe("curation", () => {
-    it("defaults to an enabled independent curator configuration", () => {
-      expect(resolveConfig({}).curation).toEqual({
-        enabled: true,
-        model: undefined,
-        modelFallback: undefined,
-        thinking: "medium",
-        timeoutSeconds: 30,
-      });
-      expect(
-        resolveConfig({ review: { enabled: false } }).curation.enabled,
-      ).toBe(true);
-    });
-
-    it("parses curator model settings and clamps its timeout", () => {
-      expect(
-        resolveConfig({
-          curation: {
-            enabled: false,
-            model: "google/curator",
-            modelFallback: "openai/fallback",
-            thinking: "high",
-            timeoutSeconds: 0,
-          },
-        }).curation,
-      ).toEqual({
-        enabled: false,
-        model: "google/curator",
-        modelFallback: "openai/fallback",
-        thinking: "high",
-        timeoutSeconds: 10,
-      });
-      expect(
-        resolveConfig({ curation: { timeoutSeconds: 700 } }).curation
-          .timeoutSeconds,
-      ).toBe(600);
+    it("ignores removed curation settings", () => {
+      expect(resolveConfig({ curation: { enabled: true } })).not.toHaveProperty(
+        "curation",
+      );
     });
   });
 
@@ -550,11 +519,9 @@ describe("resolveConfig", () => {
 
     it("ignores nested timeoutMs settings", () => {
       const result = resolveConfig({
-        curation: { timeoutMs: 1 },
         review: { timeoutMs: 1 },
       });
 
-      expect(result.curation.timeoutSeconds).toBe(30);
       expect(result.review.timeoutSeconds).toBe(300);
     });
   });

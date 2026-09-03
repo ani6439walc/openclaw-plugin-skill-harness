@@ -86,17 +86,6 @@ import { FALLBACK_INTENT, isIntentComplexity } from "../constants.js";
 import { experiencesPath, intentsPath, packageRoot } from "../file-utils.js";
 import type { QmdIntentHit } from "../qmd/intent-index.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
-import {
-  evaluateCurationCadence,
-  qualifyingTurns,
-  reconcileCurationSchedules,
-  runCurationSubagent,
-  sampleWithoutReplacement,
-  selectColdStartCandidates,
-  selectExplorationCandidates,
-  validateAndCommitCuration,
-  type CuratedSkillCandidate,
-} from "../curation/index.js";
 import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
 import type {
   HistoricalIntentRecord,
@@ -546,10 +535,7 @@ export function createHookHandlers(deps: HookDeps) {
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier ?? runIntentionSubagent;
   const topicChecker = deps.topicChecker ?? runTopicSwitchSubagent;
-  const curator = deps.curator ?? runCurationSubagent;
   const clock = deps.clock ?? (() => new Date());
-  const chooseWithoutReplacement =
-    deps.sampleWithoutReplacement ?? sampleWithoutReplacement;
   const experienceCatalog =
     deps.experienceCatalog ??
     (deps.dataRoot ? new SkillExperienceCatalog(deps.dataRoot) : undefined);
@@ -1149,10 +1135,7 @@ export function createHookHandlers(deps: HookDeps) {
     intent: IntentCatalogEntry;
   }): Promise<{
     candidates: AvailableSkill[];
-    provenance: CuratedSkillCandidate[];
     experiences: ReturnType<SkillExperienceCatalog["listForSkills"]>;
-    recommendedExperienceIds: string[];
-    durable: boolean;
   }> {
     const directSkills = await resolveAvailableSkills({
       api,
@@ -1160,113 +1143,15 @@ export function createHookHandlers(deps: HookDeps) {
       bundledSkillsDir,
       skillNames: params.intent.definition.skills ?? [],
     });
-    const selection = selectColdStartCandidates({
-      agentId: params.routing.effectiveAgentId,
-      intentId: params.intent.id,
-      declaredSkillNames: params.intent.definition.skills ?? [],
-      inventory: directSkills,
-      sessions: tracker.listRetainedSessions(),
-      nowMs: clock().getTime(),
-      retentionMs: 14 * 24 * 60 * 60 * 1_000,
-      sampleWithoutReplacement: chooseWithoutReplacement,
-    });
-    const fallback = selection.ranked.slice(0, 4);
-    const resolveCandidates = async (
-      candidates: readonly CuratedSkillCandidate[],
-    ): Promise<AvailableSkill[]> => {
-      const resolved = await resolveAvailableSkills({
-        api,
-        agentId: params.routing.effectiveAgentId,
-        bundledSkillsDir,
-        skillNames: candidates.map((candidate) => candidate.name),
-      });
-      const byIdentity = new Map(
-        resolved.map((skill) => [skill.name.trim().toLowerCase(), skill]),
-      );
-      return candidates.flatMap((candidate) => {
-        const skill = byIdentity.get(candidate.name.trim().toLowerCase());
-        return skill ? [skill] : [];
-      });
-    };
-    const resolveExperienceReferences = (
-      candidates: readonly AvailableSkill[],
-    ): ReturnType<SkillExperienceCatalog["listForSkills"]> =>
-      experienceCatalog
-        ? experienceCatalog.listForSkills(
-            candidates.map((candidate) => candidate.name),
-          )
-        : [];
-    const fallbackCandidates = await resolveCandidates(fallback);
-    const association = params.routing.association;
-    if (!association) {
-      return {
-        candidates: fallbackCandidates,
-        provenance: fallback,
-        experiences: resolveExperienceReferences(fallbackCandidates),
-        recommendedExperienceIds: [],
-        durable: false,
-      };
-    }
-    const coldStart = await tracker.ensureColdStart({
-      sessionId: association.sessionId,
-      turnKey: association.turnKey,
-      intentId: params.intent.id,
-      topicChangeReason: params.result.topicChangeReason,
-      trustworthySameTopic:
-        params.result.topicChangeReason === undefined &&
-        (params.result.confidence ?? 0) >= TOPIC_CONTINUITY_INHERIT_CONFIDENCE,
-      trustworthyTopicEvidence:
-        (params.result.confidence ?? 0) >= TOPIC_CONTINUITY_INHERIT_CONFIDENCE,
-      draftCandidates: selection.selected,
-      now: clock().toISOString(),
-    });
-    if (coldStart.status !== "applied" && coldStart.status !== "reused") {
-      return {
-        candidates: fallbackCandidates,
-        provenance: fallback,
-        experiences: resolveExperienceReferences(fallbackCandidates),
-        recommendedExperienceIds: [],
-        durable: false,
-      };
-    }
-    const provenance = coldStart.curation.candidates;
-    const candidates = await resolveCandidates(provenance);
-    const candidateNames = candidates.map((candidate) => candidate.name);
-    const experiences = resolveExperienceReferences(candidates);
-    const experienceIdentities = new Set(
-      experiences.map((experience) => experience.identity),
-    );
-    const recommendedExperienceIds =
-      coldStart.curation.recommendedExperienceRefs.filter((identity) =>
-        experienceIdentities.has(identity),
-      );
-    const committed = await tracker.commitPromptRecommendation({
-      sessionId: association.sessionId,
-      turnKey: association.turnKey,
-      expectedTopicEpoch: coldStart.curation.topicEpoch,
-      expectedRevision: coldStart.curation.revision,
-      recommendedSkills: candidateNames,
-      recommendationState: {
-        topicEpoch: coldStart.curation.topicEpoch,
-        curationRevision: coldStart.curation.revision,
-        candidates: provenance,
-      },
-    });
-    if (committed !== "applied") {
-      return {
-        candidates: fallbackCandidates,
-        provenance: fallback,
-        experiences: resolveExperienceReferences(fallbackCandidates),
-        recommendedExperienceIds: [],
-        durable: false,
-      };
-    }
+    const candidates = directSkills.slice(0, 4);
+    const experiences = experienceCatalog
+      ? experienceCatalog.listForSkills(
+          candidates.map((candidate) => candidate.name),
+        )
+      : [];
     return {
       candidates,
-      provenance,
       experiences,
-      recommendedExperienceIds,
-      durable: true,
     };
   }
 
@@ -1426,30 +1311,21 @@ export function createHookHandlers(deps: HookDeps) {
       result,
       intent: params.exactKeywordMatch.intent,
     });
-    if (!routingContext.durable) {
-      await recordPromptBuildResult({
-        ctx: params.ctx,
-        routing: params.routing,
-        latestUserMessage: params.latestUserMessage,
-        trigger: "exact-keyword",
-        result,
-        recommendedSkills: routingContext.candidates.map((skill) => skill.name),
-        conversation: params.conversation,
-      });
-    }
-    if (params.routing.association) {
-      const promptAssociation = params.routing.association;
-      setImmediate(() => {
-        void maybeScheduleCuration(promptAssociation, params.refreshedConfig);
-      });
-    }
+    await recordPromptBuildResult({
+      ctx: params.ctx,
+      routing: params.routing,
+      latestUserMessage: params.latestUserMessage,
+      trigger: "exact-keyword",
+      result,
+      recommendedSkills: routingContext.candidates.map((skill) => skill.name),
+      conversation: params.conversation,
+    });
     return toPromptBuildResult(
       buildRoutingContext({
         result,
         guidance: params.exactKeywordMatch.intent.definition.guidance,
         candidates: routingContext.candidates,
         experiences: routingContext.experiences,
-        recommendedExperienceIds: routingContext.recommendedExperienceIds,
       }),
       params.configuredSkillsXml,
     );
@@ -1487,33 +1363,22 @@ export function createHookHandlers(deps: HookDeps) {
         result,
         intent,
       });
-      if (!routingContext.durable) {
-        await recordPromptBuildResult({
-          ctx: params.ctx,
-          routing: params.routing,
-          latestUserMessage: params.latestUserMessage,
-          trigger: params.classification.trigger,
-          result,
-          recommendedSkills: routingContext.candidates.map(
-            (skill) => skill.name,
-          ),
-          intentProjection: params.classification.intentProjection,
-          conversation: params.conversation,
-        });
-      }
-      if (params.routing.association) {
-        const promptAssociation = params.routing.association;
-        setImmediate(() => {
-          void maybeScheduleCuration(promptAssociation, params.refreshedConfig);
-        });
-      }
+      await recordPromptBuildResult({
+        ctx: params.ctx,
+        routing: params.routing,
+        latestUserMessage: params.latestUserMessage,
+        trigger: params.classification.trigger,
+        result,
+        recommendedSkills: routingContext.candidates.map((skill) => skill.name),
+        intentProjection: params.classification.intentProjection,
+        conversation: params.conversation,
+      });
       return toPromptBuildResult(
         buildRoutingContext({
           result,
           guidance: intent.definition.guidance,
           candidates: routingContext.candidates,
           experiences: routingContext.experiences,
-          recommendedExperienceIds: routingContext.recommendedExperienceIds,
         }),
         params.configuredSkillsXml,
       );
@@ -1646,12 +1511,6 @@ export function createHookHandlers(deps: HookDeps) {
         logger.debug(
           "low-effort fastpath-only routing mode found no exact keyword match; skipping LLM-based intent analysis.",
         );
-        if (routing.association) {
-          const promptAssociation = routing.association;
-          setImmediate(() => {
-            void maybeScheduleCuration(promptAssociation, refreshedConfig);
-          });
-        }
         return toPromptBuildResult(undefined, configuredSkillsXml);
       }
 
@@ -1665,12 +1524,6 @@ export function createHookHandlers(deps: HookDeps) {
         },
       );
       if (!modelRef) {
-        if (routing.association) {
-          const promptAssociation = routing.association;
-          setImmediate(() => {
-            void maybeScheduleCuration(promptAssociation, refreshedConfig);
-          });
-        }
         return toPromptBuildResult(undefined, configuredSkillsXml);
       }
 
@@ -1695,12 +1548,6 @@ export function createHookHandlers(deps: HookDeps) {
             logger.debug(
               "intention subagent failed; skipping routing context injection.",
             );
-            if (routing.association) {
-              const promptAssociation = routing.association;
-              setImmediate(() => {
-                void maybeScheduleCuration(promptAssociation, refreshedConfig);
-              });
-            }
             return toPromptBuildResult(undefined, configuredSkillsXml);
           }
 
@@ -2448,385 +2295,6 @@ export function createHookHandlers(deps: HookDeps) {
     }
   }
 
-  function enqueueCurationKey(
-    key: string,
-    identity: {
-      sessionId: string;
-      schedulingTurnKey: string;
-      expectedTopicEpoch: number;
-      expectedRevision: number;
-    },
-  ): boolean {
-    const curationQueue = deps.curationQueue;
-    if (!curationQueue) return false;
-    return curationQueue.enqueue(key, async () => {
-      await runQueuedCuration(identity);
-    });
-  }
-
-  async function runQueuedCuration(identity: {
-    sessionId: string;
-    schedulingTurnKey: string;
-    expectedTopicEpoch: number;
-    expectedRevision: number;
-  }): Promise<void> {
-    const resolvedConfig = config();
-    if (!resolvedConfig.curation.enabled || !deps.dataRoot) {
-      await tracker.finishCurationSchedule({
-        sessionId: identity.sessionId,
-        turnKey: identity.schedulingTurnKey,
-        expectedTopicEpoch: identity.expectedTopicEpoch,
-        expectedRevision: identity.expectedRevision,
-        outcome: "obsolete",
-        now: clock().toISOString(),
-      });
-      return;
-    }
-
-    const pending = (await tracker.listPendingCurationSchedules()).find(
-      (entry) =>
-        entry.sessionId === identity.sessionId &&
-        entry.schedule.schedulingTurnKey === identity.schedulingTurnKey &&
-        entry.schedule.expectedTopicEpoch === identity.expectedTopicEpoch &&
-        entry.schedule.expectedRevision === identity.expectedRevision &&
-        entry.schedule.status === "pending",
-    );
-    if (!pending) return;
-
-    const session = tracker
-      .listRetainedSessions()
-      .find((candidate) => candidate.sessionId === identity.sessionId);
-    const expected = session?.curation;
-    if (
-      !session?.agentId ||
-      !expected ||
-      expected.topicEpoch !== identity.expectedTopicEpoch ||
-      expected.revision !== identity.expectedRevision
-    ) {
-      await tracker.finishCurationSchedule({
-        sessionId: identity.sessionId,
-        turnKey: identity.schedulingTurnKey,
-        expectedTopicEpoch: identity.expectedTopicEpoch,
-        expectedRevision: identity.expectedRevision,
-        outcome: "obsolete",
-        now: clock().toISOString(),
-      });
-      return;
-    }
-
-    const processedEventIds = statsAggregator.listProcessedEventIds();
-    const allTurns = [...(session.history ?? []), session.current];
-    const acceptedEventIds = new Set(processedEventIds);
-    for (const turn of allTurns) {
-      const eventId = resolveTurnEventId(identity.sessionId, turn);
-      if (eventId) acceptedEventIds.add(eventId);
-    }
-    const acceptedTurns = qualifyingTurns(expected, allTurns);
-    const schedulingIndex = acceptedTurns.findIndex(
-      (turn) => turn.turnKey === identity.schedulingTurnKey,
-    );
-    logger.info("runQueuedCuration executing", {
-      sessionId: identity.sessionId,
-      schedulingTurnKey: identity.schedulingTurnKey,
-      schedulingIndex,
-      qualifyingTurnCount: acceptedTurns.length,
-      allTurnCount: allTurns.length,
-    });
-    if (schedulingIndex < 0) {
-      await tracker.finishCurationSchedule({
-        sessionId: identity.sessionId,
-        turnKey: identity.schedulingTurnKey,
-        expectedTopicEpoch: identity.expectedTopicEpoch,
-        expectedRevision: identity.expectedRevision,
-        outcome: "obsolete",
-        now: clock().toISOString(),
-      });
-      return;
-    }
-
-    const conversationTurns = acceptedTurns
-      .slice(0, schedulingIndex + 1)
-      .flatMap((turn) => {
-        const turns: RecentTurn[] = [];
-        if (turn.input?.trim()) {
-          turns.push({
-            role: "user",
-            text: sanitizeHistoricalIntentInput(turn.input),
-            ...(turn.intent?.result
-              ? {
-                  historicalIntent: {
-                    intent: turn.intent.result.intent,
-                    domain: turn.intent.result.domain,
-                    topic: turn.intent.result.topic,
-                    keywords: turn.intent.result.keywords,
-                  },
-                }
-              : {}),
-          });
-        }
-        if (turn.result?.trim()) {
-          const assistantText = sanitizeConversationText(turn.result);
-          if (assistantText) {
-            turns.push({
-              role: "assistant",
-              text: assistantText,
-            });
-          }
-        }
-        return turns;
-      });
-
-    const visibleSkills = await listAvailableSkills({
-      api,
-      agentId: session.agentId,
-      bundledSkillsDir,
-      intents: catalog.get(),
-    });
-    const schedulingTurn = acceptedTurns[schedulingIndex];
-    const previousInjectedCandidateNames =
-      expected.candidates.length > 0
-        ? expected.candidates.map((c) => c.name)
-        : (schedulingTurn?.intent?.recommendedSkills ?? []);
-
-    const matchedIntent = findIntentDefinition(catalog, expected.intentId);
-    const directDeclaredSkills = matchedIntent?.definition.skills ?? [];
-    const directSkillNames = new Set(
-      directDeclaredSkills.map((s) => s.trim().toLowerCase()).filter(Boolean),
-    );
-    const directSkills =
-      directSkillNames.size > 0
-        ? visibleSkills.filter((skill) =>
-            directSkillNames.has(skill.name.toLowerCase()),
-          )
-        : [];
-
-    const primarySkillNames = new Set(
-      [...previousInjectedCandidateNames, ...directDeclaredSkills]
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean),
-    );
-    const primarySkills =
-      primarySkillNames.size > 0
-        ? visibleSkills.filter((skill) =>
-            primarySkillNames.has(skill.name.toLowerCase()),
-          )
-        : [];
-
-    const neededDomainSkillsCount = Math.max(0, 15 - primarySkills.length);
-    const currentDomain = matchedIntent?.definition.domain
-      ?.trim()
-      .toLowerCase();
-    const allDomainSkills =
-      currentDomain && neededDomainSkillsCount > 0
-        ? visibleSkills.filter(
-            (skill) =>
-              !primarySkillNames.has(skill.name.toLowerCase()) &&
-              skill.domains?.some((d) => d.toLowerCase() === currentDomain),
-          )
-        : [];
-    const domainSkills =
-      allDomainSkills.length > 0
-        ? selectExplorationCandidates(allDomainSkills, neededDomainSkillsCount)
-        : [];
-
-    let seedSkills = [...primarySkills, ...domainSkills];
-    if (seedSkills.length === 0) {
-      seedSkills = selectExplorationCandidates(visibleSkills, 10);
-    }
-
-    if (seedSkills.length === 0) {
-      await tracker.finishCurationSchedule({
-        sessionId: identity.sessionId,
-        turnKey: identity.schedulingTurnKey,
-        expectedTopicEpoch: identity.expectedTopicEpoch,
-        expectedRevision: identity.expectedRevision,
-        outcome: "failed",
-        now: clock().toISOString(),
-      });
-      return;
-    }
-    const activeExperienceCatalog =
-      experienceCatalog ?? new SkillExperienceCatalog(deps.dataRoot);
-
-    logger.info("runQueuedCuration calling curator subagent", {
-      seedSkillsCount: seedSkills.length,
-      conversationTurnsCount: conversationTurns.length,
-    });
-    let proposal;
-    try {
-      proposal = await curator({
-        api,
-        config: resolvedConfig,
-        agentId: session.agentId,
-        sessionId: identity.sessionId,
-        dataRoot: deps.dataRoot,
-        curation: expected,
-        conversation: conversationTurns,
-        candidates: seedSkills,
-        experienceIdentities: expected.recommendedExperienceRefs,
-        experienceCandidates: activeExperienceCatalog
-          .listForSkills(seedSkills.map((skill) => skill.name))
-          .map(({ identity, keywords }) => ({ identity, keywords })),
-      });
-    } catch (error) {
-      logger.warn("curation subagent failed", { error });
-      proposal = undefined;
-    }
-    logger.info("runQueuedCuration curator proposal result", {
-      hasProposal: Boolean(proposal),
-      proposal,
-    });
-
-    if (!proposal) {
-      await tracker.finishCurationSchedule({
-        sessionId: identity.sessionId,
-        turnKey: identity.schedulingTurnKey,
-        expectedTopicEpoch: identity.expectedTopicEpoch,
-        expectedRevision: identity.expectedRevision,
-        outcome: "failed",
-        now: clock().toISOString(),
-      });
-      return;
-    }
-
-    const curationCommitResult = await validateAndCommitCuration({
-      schedule: pending,
-      expected,
-      proposal,
-      visibleSkills,
-      directSkills,
-      experienceCatalog: activeExperienceCatalog,
-      completedTurnCursor: schedulingIndex + 1,
-      finalizedTurns: acceptedTurns,
-      acceptedEventIds,
-      now: clock().toISOString(),
-      commit: tracker.commitCurationSchedule.bind(tracker),
-      finish: tracker.finishCurationSchedule.bind(tracker),
-    });
-    logger.info("runQueuedCuration validateAndCommitCuration outcome", {
-      curationCommitResult,
-    });
-
-    if (curationCommitResult.status === "applied") {
-      statsAggregator.recordCuration(
-        identity.sessionId,
-        {
-          status: "applied",
-          topicEpoch: curationCommitResult.curation.topicEpoch,
-          revision: curationCommitResult.curation.revision,
-          candidates: curationCommitResult.curation.candidates,
-          recommendedExperienceRefs:
-            curationCommitResult.curation.recommendedExperienceRefs,
-          reason: proposal.reason,
-          finishedAt: clock().toISOString(),
-        },
-        identity.schedulingTurnKey,
-      );
-    }
-  }
-
-  async function maybeScheduleCuration(
-    association: TurnAssociation,
-    resolvedConfig: ResolvedSkillHarnessPluginConfig,
-  ): Promise<void> {
-    const curationQueue = deps.curationQueue;
-    logger.info("maybeScheduleCuration called", {
-      sessionId: association.sessionId,
-      turnKey: association.turnKey,
-      enabled: resolvedConfig.curation.enabled,
-    });
-    if (!curationQueue || !resolvedConfig.curation.enabled) return;
-
-    try {
-      const session = tracker
-        .listRetainedSessions()
-        .find((candidate) => candidate.sessionId === association.sessionId);
-      const curation = session?.curation;
-      logger.info("maybeScheduleCuration session found", {
-        sessionId: association.sessionId,
-        hasCuration: Boolean(curation),
-        topicEpoch: curation?.topicEpoch,
-        cursor: curation?.completedTurnCursor,
-      });
-      if (!curation) return;
-      const cadence = evaluateCurationCadence({
-        curation,
-        finalizedTurns: [...(session.history ?? []), session.current],
-      });
-      logger.info("maybeScheduleCuration cadence evaluated", {
-        eligible: cadence.eligible,
-        schedulingTurnKey: cadence.schedulingTurnKey,
-      });
-      if (!cadence.eligible || !cadence.schedulingTurnKey) return;
-
-      const reserved = await tracker.reserveCurationSchedule({
-        sessionId: association.sessionId,
-        turnKey: cadence.schedulingTurnKey,
-        expectedTopicEpoch: curation.topicEpoch,
-        expectedRevision: curation.revision,
-        now: clock().toISOString(),
-      });
-      logger.info("maybeScheduleCuration reservation result", { reserved });
-      if (reserved !== "reserved") return;
-
-      const key = `curation:${association.sessionId}:${cadence.schedulingTurnKey}:${curation.topicEpoch}:${curation.revision}`;
-      enqueueCurationKey(key, {
-        sessionId: association.sessionId,
-        schedulingTurnKey: cadence.schedulingTurnKey,
-        expectedTopicEpoch: curation.topicEpoch,
-        expectedRevision: curation.revision,
-      });
-      logger.info("maybeScheduleCuration subagent enqueued", { key });
-    } catch (error) {
-      logger.warn("failed to schedule curation", { error });
-    }
-  }
-
-  async function recoverCurationSchedules(): Promise<void> {
-    const curationQueue = deps.curationQueue;
-    if (!curationQueue) return;
-    const resolvedConfig = config();
-    if (!resolvedConfig.curation.enabled) return;
-
-    try {
-      const acceptedEventIds = statsAggregator.listProcessedEventIds();
-      const missing = reconcileCurationSchedules({
-        sessions: tracker.listRetainedSessions(),
-        acceptedEventIds,
-      });
-      for (const candidate of missing) {
-        const reserved = await tracker.reserveCurationSchedule({
-          sessionId: candidate.sessionId,
-          turnKey: candidate.turnKey,
-          expectedTopicEpoch: candidate.expectedTopicEpoch,
-          expectedRevision: candidate.expectedRevision,
-          now: clock().toISOString(),
-        });
-        if (reserved !== "reserved" && reserved !== "already-pending") continue;
-        const key = `curation:${candidate.sessionId}:${candidate.turnKey}:${candidate.expectedTopicEpoch}:${candidate.expectedRevision}`;
-        enqueueCurationKey(key, {
-          sessionId: candidate.sessionId,
-          schedulingTurnKey: candidate.turnKey,
-          expectedTopicEpoch: candidate.expectedTopicEpoch,
-          expectedRevision: candidate.expectedRevision,
-        });
-      }
-
-      const pending = await tracker.listPendingCurationSchedules();
-      for (const entry of pending) {
-        const key = `curation:${entry.sessionId}:${entry.schedule.schedulingTurnKey}:${entry.schedule.expectedTopicEpoch}:${entry.schedule.expectedRevision}`;
-        enqueueCurationKey(key, {
-          sessionId: entry.sessionId,
-          schedulingTurnKey: entry.schedule.schedulingTurnKey,
-          expectedTopicEpoch: entry.schedule.expectedTopicEpoch,
-          expectedRevision: entry.schedule.expectedRevision,
-        });
-      }
-    } catch (error) {
-      logger.warn("failed to recover curation schedules", { error });
-    }
-  }
-
   async function finalizeTrackedTurn(
     association: TurnAssociation | undefined,
     ctx: PluginHookAgentContext,
@@ -2836,7 +2304,6 @@ export function createHookHandlers(deps: HookDeps) {
     if (!agentEndStats) return;
 
     const resolvedConfig = config();
-    await maybeScheduleCuration(association, resolvedConfig);
     const reviewConfig = resolvedConfig.review;
     if (!reviewConfig.enabled) return;
 
@@ -3128,6 +2595,5 @@ export function createHookHandlers(deps: HookDeps) {
     onMessageSending,
     onAgentEnd,
     onSessionEnd,
-    recoverCurationSchedules,
   };
 }
