@@ -19,9 +19,10 @@ import {
   type ReviewTriggerKeywords,
 } from "./review/trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
-import { registerSkillTools } from "./skills/index.js";
+import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
 import { createIntentQmdIndex } from "./qmd/intent-index.js";
+import { createSkillQmdIndex } from "./qmd/skill-index.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -278,6 +279,10 @@ export function createPlugin(
         dataRoot,
         config: () => config.qmd,
       });
+      const qmdSkillIndex = createSkillQmdIndex({
+        dataRoot,
+        config: () => config.qmd,
+      });
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const curationQueue = createCurationQueue();
@@ -298,6 +303,23 @@ export function createPlugin(
         qmdIntentIndex.schedule(catalog.get());
       };
 
+      const scheduleSkillSearchIndex = (agentId: string) => {
+        void listAvailableSkills({
+          api,
+          agentId,
+          intents: catalog.get(),
+        })
+          .then((skills) => {
+            qmdSkillIndex.schedule(agentId, skills);
+          })
+          .catch((error: unknown) => {
+            logger.warn("failed to schedule QMD skill search index", {
+              error,
+              agentId,
+            });
+          });
+      };
+
       const deps: HookDeps = {
         api,
         config: () => config,
@@ -313,6 +335,7 @@ export function createPlugin(
         refreshTriggerKeywords: refreshTriggerKeywordCache,
         getConfiguredAgentSkills,
         qmdIntentIndex,
+        qmdSkillIndex,
 
         bundledSkillsDir: path.join(defaultPackageRoot, "skills"),
         dataRoot,
@@ -323,6 +346,7 @@ export function createPlugin(
       refreshLiveConfigFromRuntime();
       refreshTriggerKeywordCache();
       refreshRuntimeIntents();
+      scheduleSkillSearchIndex("main");
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
         timeoutMs: config.timeoutMs * 2 + 1_500,
@@ -337,6 +361,8 @@ export function createPlugin(
       registerSkillTools(api, {
         getIntents: () => catalog.get(),
         experienceCatalog,
+        qmdSkillIndex,
+        scheduleSkillSearchIndex,
       });
 
       setImmediate(() => {
