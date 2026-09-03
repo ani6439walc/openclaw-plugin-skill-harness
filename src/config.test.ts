@@ -211,6 +211,7 @@ describe("resolveConfig", () => {
 
       expect(result.qmd).toEqual({
         timeoutMs: 8_000,
+        indexRefreshIntervalSeconds: 300,
         embedding: {
           baseUrl: "https://embedding.example.test/v1",
           model: "embedding-model",
@@ -224,12 +225,11 @@ describe("resolveConfig", () => {
         },
         skillSearch: {
           collectionWeights: { meta: 1, body: 1, references: 1 },
-          scheduleCooldownMs: 5_000,
         },
       });
     });
 
-    it("resolves default skillSearch weights and cooldown", () => {
+    it("resolves default skillSearch weights and index refresh interval", () => {
       const manifest = JSON.parse(
         readFileSync(
           new URL("../openclaw.plugin.json", import.meta.url),
@@ -240,9 +240,9 @@ describe("resolveConfig", () => {
           properties: {
             qmd: {
               properties: {
+                indexRefreshIntervalSeconds: { default?: number };
                 skillSearch?: {
                   properties: {
-                    scheduleCooldownMs: { default?: number };
                     collectionWeights?: {
                       properties: {
                         meta: { default?: number };
@@ -257,19 +257,19 @@ describe("resolveConfig", () => {
       };
       expect(resolveConfig({}).qmd.skillSearch).toEqual({
         collectionWeights: { meta: 1, body: 1, references: 1 },
-        scheduleCooldownMs: 5_000,
       });
+      expect(resolveConfig({}).qmd.indexRefreshIntervalSeconds).toBe(300);
       expect(
-        manifest.configSchema.properties.qmd.properties.skillSearch?.properties
-          .scheduleCooldownMs.default,
-      ).toBe(5000);
+        manifest.configSchema.properties.qmd.properties
+          .indexRefreshIntervalSeconds.default,
+      ).toBe(300);
       expect(
         manifest.configSchema.properties.qmd.properties.skillSearch?.properties
           .collectionWeights?.properties.meta.default,
       ).toBe(1);
     });
 
-    it("accepts custom skillSearch collection weights and cooldown", () => {
+    it("accepts custom skillSearch collection weights", () => {
       expect(
         resolveConfig({
           qmd: {
@@ -283,13 +283,11 @@ describe("resolveConfig", () => {
             },
             skillSearch: {
               collectionWeights: { meta: 2, body: 1.5, references: 0.5 },
-              scheduleCooldownMs: 12_000,
             },
           },
         }).qmd.skillSearch,
       ).toEqual({
         collectionWeights: { meta: 2, body: 1.5, references: 0.5 },
-        scheduleCooldownMs: 12_000,
       });
     });
 

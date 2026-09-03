@@ -65,10 +65,10 @@ export type ResolvedSkillSearchConfig = {
     body: number;
     references: number;
   };
-  scheduleCooldownMs: number;
 };
 export type ResolvedQmdConfig = {
   timeoutMs: number;
+  indexRefreshIntervalSeconds: number;
   embedding: Required<Pick<QmdEmbeddingConfig, "baseUrl" | "model">> &
     Omit<QmdEmbeddingConfig, "baseUrl" | "model">;
   expansion: Required<Pick<QmdEndpointConfig, "baseUrl" | "model">> &

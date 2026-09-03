@@ -258,7 +258,9 @@ export function registerSkillTools(
             });
           }
 
-          options.scheduleSkillSearchIndex?.(agentId);
+          if (index.getStatus(agentId) === "idle") {
+            options.scheduleSkillSearchIndex?.(agentId);
+          }
 
           const inventory = await listAvailableSkills({
             api,
@@ -448,9 +450,6 @@ export function registerSkillTools(
         fileContent: optionalStringParam(params, "file_content"),
         absorbedInto: optionalStringParam(params, "absorbed_into"),
       });
-      if (result.success) {
-        options.scheduleSkillSearchIndex?.(agentId);
-      }
       return jsonToolResult(result);
     },
   });

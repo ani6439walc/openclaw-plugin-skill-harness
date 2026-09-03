@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,7 @@ afterEach(async () => {
 
 const qmdConfig: ResolvedQmdConfig = {
   timeoutMs: 1_234,
+  indexRefreshIntervalSeconds: 300,
   embedding: {
     baseUrl: "https://embedding.example.test/v1",
     model: "embedding-model",
@@ -29,7 +30,6 @@ const qmdConfig: ResolvedQmdConfig = {
   },
   skillSearch: {
     collectionWeights: { meta: 1, body: 1, references: 1 },
-    scheduleCooldownMs: 0,
   },
 };
 
@@ -195,6 +195,65 @@ describe("createIntentQmdIndex", () => {
       collection: expect.stringMatching(/^intent-topic-keywords-/),
       limit: 1,
     });
+  });
+
+  it("keeps unchanged intent snapshot files untouched", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const createStore = vi.fn().mockResolvedValue(createStoreDouble({}));
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+
+    index.schedule(catalog);
+    await waitForReady(index);
+    const examplePath = path.join(
+      root,
+      "qmd",
+      "intents",
+      "examples",
+      "implementation-0.md",
+    );
+    const before = await stat(examplePath);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    index.schedule(refreshedCatalog);
+    await waitFor(
+      () => createStore.mock.calls.length === 2,
+      "refreshed intent index did not build",
+    );
+    expect((await stat(examplePath)).mtimeMs).toBe(before.mtimeMs);
+    await index.close();
+  });
+
+  it("does not rebuild when non-index QMD settings change", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const createStore = vi.fn().mockResolvedValue(createStoreDouble({}));
+    let config = qmdConfig;
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => config,
+      createStore,
+    });
+
+    index.schedule(catalog);
+    await waitForReady(index);
+    config = {
+      ...qmdConfig,
+      timeoutMs: 9_999,
+      embedding: {
+        ...qmdConfig.embedding,
+        baseUrl: "https://other.example.test/v1",
+      },
+      expansion: { ...qmdConfig.expansion, model: "other-expand-model" },
+    };
+    index.schedule(catalog);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(createStore).toHaveBeenCalledTimes(1);
+    await index.close();
   });
 
   it("coalesces overlapping schedules into the latest catalog snapshot", async () => {

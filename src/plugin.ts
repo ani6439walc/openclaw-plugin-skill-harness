@@ -148,6 +148,19 @@ export function extractConfiguredAgentSkillsMap(
   return map;
 }
 
+export function extractConfiguredAgentIds(config?: OpenClawConfig): string[] {
+  const ids: string[] = [];
+  if (Array.isArray(config?.agents?.list)) {
+    for (const agent of config.agents.list) {
+      const id = agent?.id?.trim().toLowerCase();
+      if (id && id !== "defaults") {
+        ids.push(id);
+      }
+    }
+  }
+  return ids;
+}
+
 function wipeAgentSkillsConfig(config?: OpenClawConfig): void {
   if (!config?.agents) return;
   if (config.agents.defaults) {
@@ -300,10 +313,33 @@ export function createPlugin(
 
       const refreshRuntimeIntents = () => {
         catalog.load("intents");
-        qmdIntentIndex.schedule(catalog.get());
+      };
+
+      const knownAgentIds = new Set<string>(["main"]);
+      const collectKnownAgentIds = () => {
+        for (const id of extractConfiguredAgentIds(api.config)) {
+          knownAgentIds.add(id);
+        }
+        if (api.runtime?.config?.current) {
+          for (const id of extractConfiguredAgentIds(
+            api.runtime.config.current() as OpenClawConfig,
+          )) {
+            knownAgentIds.add(id);
+          }
+        }
+        for (const key of configuredSkillsMap.keys()) {
+          if (key !== "defaults") {
+            knownAgentIds.add(key);
+          }
+        }
+        return knownAgentIds;
       };
 
       const scheduleSkillSearchIndex = (agentId: string) => {
+        const normalized = agentId.trim().toLowerCase();
+        if (normalized && normalized !== "defaults") {
+          knownAgentIds.add(normalized);
+        }
         void listAvailableSkills({
           api,
           agentId,
@@ -318,6 +354,25 @@ export function createPlugin(
               agentId,
             });
           });
+      };
+
+      const refreshQmdIndexes = () => {
+        refreshLiveConfigFromRuntime();
+        refreshRuntimeIntents();
+        qmdIntentIndex.schedule(catalog.get());
+        for (const agentId of collectKnownAgentIds()) {
+          scheduleSkillSearchIndex(agentId);
+        }
+      };
+
+      const scheduleQmdIndexRefresh = () => {
+        const intervalSeconds = config.qmd.indexRefreshIntervalSeconds;
+        if (intervalSeconds <= 0) return;
+        const timer = setTimeout(() => {
+          refreshQmdIndexes();
+          scheduleQmdIndexRefresh();
+        }, intervalSeconds * 1_000);
+        timer.unref();
       };
 
       const deps: HookDeps = {
@@ -345,8 +400,8 @@ export function createPlugin(
 
       refreshLiveConfigFromRuntime();
       refreshTriggerKeywordCache();
-      refreshRuntimeIntents();
-      scheduleSkillSearchIndex("main");
+      refreshQmdIndexes();
+      scheduleQmdIndexRefresh();
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
         timeoutMs: config.timeoutMs * 2 + 1_500,
