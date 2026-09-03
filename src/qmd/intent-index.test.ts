@@ -27,6 +27,10 @@ const qmdConfig: ResolvedQmdConfig = {
     model: "expand-model",
     apiKey: "expand-key",
   },
+  skillSearch: {
+    collectionWeights: { meta: 1, body: 1, references: 1 },
+    scheduleCooldownMs: 0,
+  },
 };
 
 const catalog: IntentCatalogEntry[] = [

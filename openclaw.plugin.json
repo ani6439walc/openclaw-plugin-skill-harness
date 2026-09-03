@@ -114,6 +114,42 @@
               "model": { "type": "string" },
               "apiKey": { "type": "string" }
             }
+          },
+          "skillSearch": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Optional skill_search QMD collection weights and rebuild cooldown.",
+            "properties": {
+              "collectionWeights": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Relative weights for weighted RRF across skill collections. Defaults to 1 for each collection.",
+                "properties": {
+                  "meta": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": 1
+                  },
+                  "body": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": 1
+                  },
+                  "references": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": 1
+                  }
+                }
+              },
+              "scheduleCooldownMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 60000,
+                "default": 5000,
+                "description": "Minimum delay between skill index rebuild schedules in milliseconds."
+              }
+            }
           }
         },
         "required": ["embedding", "expansion"]

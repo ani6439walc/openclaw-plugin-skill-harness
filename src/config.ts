@@ -12,6 +12,7 @@ import type {
   ResolvedQmdConfig,
   ResolvedRoutingConfig,
   ResolvedSkillHarnessPluginConfig,
+  ResolvedSkillSearchConfig,
 } from "./types.js";
 
 export function clampInt(
@@ -66,10 +67,16 @@ const DEFAULT_REVIEW = {
   },
 } as const;
 
+const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
+  collectionWeights: { meta: 1, body: 1, references: 1 },
+  scheduleCooldownMs: 5_000,
+};
+
 const DEFAULT_QMD: ResolvedQmdConfig = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   embedding: { baseUrl: "", model: "" },
   expansion: { baseUrl: "", model: "" },
+  skillSearch: DEFAULT_SKILL_SEARCH,
 };
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
@@ -242,8 +249,47 @@ const QmdSchema = z
     timeoutMs: z.number().optional().catch(undefined),
     embedding: QmdEmbeddingSchema,
     expansion: QmdEndpointSchema,
+    skillSearch: z.unknown().optional(),
   })
   .catch(DEFAULT_QMD);
+
+const SkillSearchSchema = z
+  .object({
+    collectionWeights: z
+      .object({
+        meta: z
+          .number()
+          .positive()
+          .default(DEFAULT_SKILL_SEARCH.collectionWeights.meta),
+        body: z
+          .number()
+          .positive()
+          .default(DEFAULT_SKILL_SEARCH.collectionWeights.body),
+        references: z
+          .number()
+          .positive()
+          .default(DEFAULT_SKILL_SEARCH.collectionWeights.references),
+      })
+      .default(DEFAULT_SKILL_SEARCH.collectionWeights),
+    scheduleCooldownMs: boundedInt(
+      DEFAULT_SKILL_SEARCH.scheduleCooldownMs,
+      0,
+      60_000,
+    ),
+  })
+  .default(DEFAULT_SKILL_SEARCH);
+
+function resolveSkillSearchConfig(raw: unknown): ResolvedSkillSearchConfig {
+  const qmd =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>).qmd
+      : undefined;
+  const skillSearch =
+    qmd && typeof qmd === "object" && !Array.isArray(qmd)
+      ? (qmd as Record<string, unknown>).skillSearch
+      : undefined;
+  return SkillSearchSchema.parse(skillSearch === undefined ? {} : skillSearch);
+}
 
 const RoutingScoreSchema = (fallback: number) =>
   z.number().min(0).max(1).optional().default(fallback);
@@ -327,7 +373,10 @@ export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
     ResolvedSkillHarnessPluginConfig,
     "qmd" | "routing"
   > & {
-    qmd: Omit<ResolvedQmdConfig, "timeoutMs"> & { timeoutMs?: number };
+    qmd: Omit<ResolvedQmdConfig, "timeoutMs" | "skillSearch"> & {
+      timeoutMs?: number;
+      skillSearch?: unknown;
+    };
   };
   return {
     ...resolved,
@@ -339,6 +388,7 @@ export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
         1_000,
         60_000,
       ),
+      skillSearch: resolveSkillSearchConfig(raw),
     },
     routing: resolveRoutingConfig(raw),
   };
