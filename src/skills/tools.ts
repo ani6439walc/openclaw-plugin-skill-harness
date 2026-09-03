@@ -258,8 +258,6 @@ export function registerSkillTools(
             });
           }
 
-          options.scheduleSkillSearchIndex?.(agentId);
-
           const inventory = await listAvailableSkills({
             api,
             agentId,
@@ -448,9 +446,6 @@ export function registerSkillTools(
         fileContent: optionalStringParam(params, "file_content"),
         absorbedInto: optionalStringParam(params, "absorbed_into"),
       });
-      if (result.success) {
-        options.scheduleSkillSearchIndex?.(agentId);
-      }
       return jsonToolResult(result);
     },
   });

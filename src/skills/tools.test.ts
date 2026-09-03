@@ -412,7 +412,7 @@ describe("registerSkillTools", () => {
       });
       expect(result.skills[0]).not.toHaveProperty("usage_stats");
       expect(result.skills[0]).not.toHaveProperty("evidence");
-      expect(scheduleSkillSearchIndex).toHaveBeenCalledWith("main");
+      expect(scheduleSkillSearchIndex).not.toHaveBeenCalledWith("main");
       expect(qmdSkillIndex.schedule).not.toHaveBeenCalled();
       expect(qmdSkillIndex.search).toHaveBeenCalledWith({
         agentId: "main",
@@ -526,7 +526,7 @@ describe("registerSkillTools", () => {
           "---\nname: fresh-skill\ndescription: Fresh skill\n---\n\n# Fresh\n",
       });
       expect(result).toMatchObject({ success: true });
-      expect(scheduleSkillSearchIndex).toHaveBeenCalledWith("main");
+      expect(scheduleSkillSearchIndex).not.toHaveBeenCalledWith("main");
     } finally {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
       fs.rmSync(stateDir, { recursive: true, force: true });
