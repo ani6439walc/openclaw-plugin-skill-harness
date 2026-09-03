@@ -435,7 +435,9 @@ describe("createSkillQmdIndex", () => {
   });
 
   it("clones the active generation before incrementally rebuilding", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-skills-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
     roots.push(root);
     const skill = await createSkillFixture({
       name: "clone-source",
@@ -460,14 +462,25 @@ describe("createSkillQmdIndex", () => {
     });
 
     index.schedule("main", [skill]);
-    await waitFor(() => index.getStatus("main") === "ready", "first generation did not become ready");
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "first generation did not become ready",
+    );
     await writeFile(skill.location, "updated body", "utf8");
     index.schedule("main", [skill]);
-    await waitFor(() => index.getStatus("main") === "ready" && createStore.mock.calls.length === 2, "candidate generation did not publish");
+    await waitFor(
+      () =>
+        index.getStatus("main") === "ready" &&
+        createStore.mock.calls.length === 2,
+      "candidate generation did not publish",
+    );
 
     expect(backup).toHaveBeenCalledOnce();
     const active = JSON.parse(
-      await readFile(path.join(root, "qmd", "skills", "main", "active.json"), "utf8"),
+      await readFile(
+        path.join(root, "qmd", "skills", "main", "active.json"),
+        "utf8",
+      ),
     ) as { generation: string };
     expect(active.generation).toMatch(/^gen-2-/);
     await index.close();
@@ -482,7 +495,12 @@ describe("createSkillQmdIndex", () => {
     const docsRoot = await mkdtemp(path.join(tmpdir(), "skill-harness-docs-"));
     roots.push(docsRoot);
     await writeSkillSnapshot({ docsRoot, skills: [skill] });
-    const bodyPath = path.join(docsRoot, "body", safePathSegment(skill.name), "SKILL.md");
+    const bodyPath = path.join(
+      docsRoot,
+      "body",
+      safePathSegment(skill.name),
+      "SKILL.md",
+    );
     const before = await (await import("node:fs/promises")).stat(bodyPath);
     await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -492,8 +510,35 @@ describe("createSkillQmdIndex", () => {
     expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
+  it("waits for pending fingerprint scheduling before closing", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "close-race",
+      description: "Close race skill",
+      body: "body",
+    });
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: (async () => createStoreDouble({})) as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await index.close();
+
+    await expect(
+      fsPromises.access(path.join(root, "qmd", "skills", "main")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("does not rebuild when only non-index QMD settings change", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-skills-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
     roots.push(root);
     const skill = await createSkillFixture({
       name: "stable-config",
@@ -510,13 +555,22 @@ describe("createSkillQmdIndex", () => {
     });
 
     index.schedule("main", [skill]);
-    await waitFor(() => index.getStatus("main") === "ready", "initial index did not become ready");
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "initial index did not become ready",
+    );
     config = {
       ...qmdConfig,
       timeoutMs: 9_999,
-      embedding: { ...qmdConfig.embedding, baseUrl: "https://other.example.test/v1" },
+      embedding: {
+        ...qmdConfig.embedding,
+        baseUrl: "https://other.example.test/v1",
+      },
       expansion: { ...qmdConfig.expansion, model: "other-expand-model" },
-      skillSearch: { ...qmdConfig.skillSearch, collectionWeights: { meta: 3, body: 2, references: 1 } },
+      skillSearch: {
+        ...qmdConfig.skillSearch,
+        collectionWeights: { meta: 3, body: 2, references: 1 },
+      },
     };
     index.schedule("main", [skill]);
     await new Promise((resolve) => setTimeout(resolve, 0));
