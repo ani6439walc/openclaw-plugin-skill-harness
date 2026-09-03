@@ -226,9 +226,9 @@ describe("writeSkillSnapshot", () => {
       (name) => !name.endsWith(".identity.yml"),
     );
     expect(names).toEqual(["safe.md"]);
-    await expect(
-      readFile(path.join(refsDir, "safe.md"), "utf8"),
-    ).resolves.toBe("inside references\n");
+    await expect(readFile(path.join(refsDir, "safe.md"), "utf8")).resolves.toBe(
+      "inside references\n",
+    );
   });
 
   it("skips a references directory that is itself an escaping symlink", async () => {
@@ -725,6 +725,184 @@ describe("createSkillQmdIndex", () => {
         ],
       }),
     ]);
+
+    await index.close();
+  });
+
+  it("serializes builds across index instances so orphans are not cleared mid-build", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "lock-safe",
+      description: "Lock safe skill",
+      body: "body",
+    });
+
+    let releaseFirst: (() => void) | undefined;
+    let firstGenerationRoot: string | undefined;
+    let secondCreateStarted = false;
+
+    const createStoreA = vi.fn(async (options: { dbPath: string }) => {
+      firstGenerationRoot = path.dirname(options.dbPath);
+      const { promise, resolve } =
+        Promise.withResolvers<Record<string, never>>();
+      releaseFirst = () => resolve({});
+      return createStoreDouble({
+        embed: vi.fn(() => promise),
+        search: vi.fn().mockResolvedValue([
+          {
+            body: `---\nskill: lock-safe\nkind: meta\npath: meta.md\n---\nLock safe skill`,
+            score: 0.8,
+          },
+        ]),
+      });
+    });
+    const createStoreB = vi.fn(async () => {
+      secondCreateStarted = true;
+      return createStoreDouble({
+        search: vi.fn().mockResolvedValue([
+          {
+            body: `---\nskill: lock-safe\nkind: meta\npath: meta.md\n---\nLock safe skill`,
+            score: 0.8,
+          },
+        ]),
+      });
+    });
+
+    const indexA = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => ({
+        ...qmdConfig,
+        skillSearch: {
+          ...qmdConfig.skillSearch,
+          scheduleCooldownMs: 0,
+        },
+      }),
+      createStore: createStoreA as never,
+      nowMs: () => nowMs,
+    });
+    const indexB = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => ({
+        ...qmdConfig,
+        skillSearch: {
+          ...qmdConfig.skillSearch,
+          scheduleCooldownMs: 0,
+        },
+      }),
+      createStore: createStoreB as never,
+      nowMs: () => nowMs,
+    });
+
+    indexA.schedule("main", [skill]);
+    await waitFor(
+      () => firstGenerationRoot !== undefined,
+      "first build did not create a generation root",
+    );
+    expect(firstGenerationRoot).toBeDefined();
+
+    indexB.schedule("main", [skill]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(secondCreateStarted).toBe(false);
+    expect(await readdir(firstGenerationRoot!)).toContain("docs");
+
+    releaseFirst?.();
+    await waitFor(
+      () => indexA.getStatus("main") === "ready",
+      "first build did not become ready",
+    );
+    await waitFor(
+      () => createStoreB.mock.calls.length >= 1,
+      "second build did not start after lock release",
+    );
+    await waitFor(
+      () => indexB.getStatus("main") === "ready",
+      "second build did not become ready",
+    );
+
+    await indexA.close();
+    await indexB.close();
+  });
+
+  it("retries LEASE_BUSY build failures after the backoff window", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "lease-busy",
+      description: "Lease busy skill",
+      body: "body",
+    });
+
+    class EmbeddingIdentityStateError extends Error {
+      code: string;
+      constructor(code: string, message: string) {
+        super(message);
+        this.name = "EmbeddingIdentityStateError";
+        this.code = code;
+      }
+    }
+
+    const createStore = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new EmbeddingIdentityStateError(
+          "LEASE_BUSY",
+          "Embedding build lease is owned by other-owner.",
+        ),
+      )
+      .mockResolvedValue(
+        createStoreDouble({
+          search: vi.fn().mockResolvedValue([
+            {
+              body: `---\nskill: lease-busy\nkind: meta\npath: meta.md\n---\nLease busy skill`,
+              score: 0.7,
+            },
+          ]),
+        }),
+      );
+
+    const pendingTimers: Array<{ delayMs: number; callback: () => void }> = [];
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+      setTimer: (callback, delayMs) => {
+        const timer = { delayMs, callback };
+        pendingTimers.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => {
+        const indexOfTimer = pendingTimers.indexOf(
+          timer as (typeof pendingTimers)[number],
+        );
+        if (indexOfTimer >= 0) pendingTimers.splice(indexOfTimer, 1);
+      },
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "failed",
+      "LEASE_BUSY build did not mark failed",
+    );
+    expect(createStore).toHaveBeenCalledTimes(1);
+    await waitFor(
+      () => pendingTimers.length === 1,
+      "LEASE_BUSY retry timer was not armed",
+    );
+
+    nowMs += pendingTimers[0]!.delayMs;
+    pendingTimers.shift()!.callback();
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "LEASE_BUSY retry did not become ready",
+    );
+    expect(createStore).toHaveBeenCalledTimes(2);
 
     await index.close();
   });
