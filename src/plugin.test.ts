@@ -140,7 +140,7 @@ describe("createPlugin", () => {
     expect(listRetainedSessions).not.toHaveBeenCalled();
     expect(listPendingCurationSchedules).not.toHaveBeenCalled();
 
-    await vi.runAllTimersAsync();
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(listProcessedEventIds).toHaveBeenCalled();
     expect(listRetainedSessions).toHaveBeenCalled();
@@ -158,7 +158,7 @@ describe("createPlugin", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 
     expect(() => createPlugin(api).register(api)).not.toThrow();
-    await vi.runAllTimersAsync();
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(warn).toHaveBeenCalledWith("failed to recover curation schedules", {
       error,
@@ -256,6 +256,23 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
 
     expect(load).toHaveBeenCalledWith("intents");
+  });
+
+  it("refreshes QMD sources only on the configured polling interval", async () => {
+    vi.useFakeTimers();
+    const api = createApi({
+      pluginConfig: { qmd: { indexRefreshIntervalSeconds: 300 } },
+    });
+    const load = vi.spyOn(IntentCatalog.prototype, "load").mockReturnValue(0);
+
+    createPlugin(api).register(api);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(299_999);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(load).toHaveBeenCalledTimes(2);
   });
 
   it("registers hooks when keyword coverage keyword cache is corrupt", () => {

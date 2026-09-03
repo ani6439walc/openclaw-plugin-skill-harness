@@ -300,7 +300,6 @@ export function createPlugin(
 
       const refreshRuntimeIntents = () => {
         catalog.load("intents");
-        qmdIntentIndex.schedule(catalog.get());
       };
 
       const scheduleSkillSearchIndex = (agentId: string) => {
@@ -318,6 +317,23 @@ export function createPlugin(
               agentId,
             });
           });
+      };
+
+      const refreshQmdIndexes = () => {
+        refreshLiveConfigFromRuntime();
+        refreshRuntimeIntents();
+        qmdIntentIndex.schedule(catalog.get());
+        scheduleSkillSearchIndex("main");
+      };
+
+      const scheduleQmdIndexRefresh = () => {
+        const intervalSeconds = config.qmd.indexRefreshIntervalSeconds;
+        if (intervalSeconds <= 0) return;
+        const timer = setTimeout(() => {
+          refreshQmdIndexes();
+          scheduleQmdIndexRefresh();
+        }, intervalSeconds * 1_000);
+        timer.unref();
       };
 
       const deps: HookDeps = {
@@ -345,8 +361,8 @@ export function createPlugin(
 
       refreshLiveConfigFromRuntime();
       refreshTriggerKeywordCache();
-      refreshRuntimeIntents();
-      scheduleSkillSearchIndex("main");
+      refreshQmdIndexes();
+      scheduleQmdIndexRefresh();
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
         timeoutMs: config.timeoutMs * 2 + 1_500,
