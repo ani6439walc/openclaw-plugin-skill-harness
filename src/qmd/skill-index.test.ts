@@ -291,6 +291,54 @@ describe("skillIdentityFromDocsPath", () => {
       relativePath: "references/references/body/api.md",
     });
   });
+
+  it("parses identity from qmd:// virtual filepath hits", () => {
+    expect(
+      skillIdentityFromDocsPath({
+        docsRoot: "/tmp/docs",
+        filepath: "qmd://skill-meta/openclaw/meta.md",
+        collection: "skill-meta",
+      }),
+    ).toEqual({
+      skillName: "openclaw",
+      relativePath: "meta.md",
+    });
+
+    expect(
+      skillIdentityFromDocsPath({
+        docsRoot: "/tmp/docs",
+        filepath: "qmd://skill-body/git-master/SKILL.md",
+        collection: "skill-body",
+      }),
+    ).toEqual({
+      skillName: "git-master",
+      relativePath: "SKILL.md",
+    });
+
+    expect(
+      skillIdentityFromDocsPath({
+        docsRoot: "/tmp/docs",
+        filepath: "qmd://skill-references/home-assistant/workflows.md",
+        collection: "skill-references",
+      }),
+    ).toEqual({
+      skillName: "home-assistant",
+      relativePath: "references/workflows.md",
+    });
+  });
+
+  it("parses identity from collection-relative displayPath hits", () => {
+    expect(
+      skillIdentityFromDocsPath({
+        docsRoot: "/tmp/docs",
+        filepath: "openclaw/meta.md",
+        collection: "skill-meta",
+      }),
+    ).toEqual({
+      skillName: "openclaw",
+      relativePath: "meta.md",
+    });
+  });
 });
 
 describe("createSkillQmdIndex", () => {
@@ -819,6 +867,73 @@ describe("createSkillQmdIndex", () => {
           expect.objectContaining({
             collection: "skill-references",
             path: "references/references/body/api.md",
+          }),
+        ],
+      }),
+    ]);
+
+    await index.close();
+  });
+
+  it("recovers skill identity from qmd:// virtual hits when frontmatter is missing", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "openclaw",
+      description: "OpenClaw ops",
+      body: "Gateway config guidance",
+    });
+
+    const createStore = vi.fn(async () =>
+      createStoreDouble({
+        search: vi.fn(async (searchOptions?: { collection?: string }) => {
+          if (searchOptions?.collection !== "skill-meta") return [];
+          return [
+            {
+              file: "qmd://skill-meta/openclaw/meta.md",
+              displayPath: "openclaw/meta.md",
+              body: "# openclaw\n\nComprehensive OpenClaw operations",
+              score: 0.91,
+            },
+          ];
+        }),
+      }),
+    );
+
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => ({
+        ...qmdConfig,
+        skillSearch: {
+          ...qmdConfig.skillSearch,
+          scheduleCooldownMs: 0,
+        },
+      }),
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "qmd virtual path index did not become ready",
+    );
+
+    const results = await index.search({
+      agentId: "main",
+      query: "openclaw gateway",
+      limit: 5,
+      includeEvidence: true,
+    });
+    expect(results).toEqual([
+      expect.objectContaining({
+        name: "openclaw",
+        evidence: [
+          expect.objectContaining({
+            collection: "skill-meta",
+            path: "meta.md",
           }),
         ],
       }),

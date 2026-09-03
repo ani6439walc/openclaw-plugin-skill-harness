@@ -118,11 +118,88 @@ async function resolveConfinedPath(
   }
 }
 
+const COLLECTION_DIR_BY_NAME: Record<string, string> = {
+  [META_COLLECTION]: "meta",
+  [BODY_COLLECTION]: "body",
+  [REFS_COLLECTION]: "references",
+};
+
+function decodeSkillSegment(encodedSkill: string): string {
+  try {
+    return decodeURIComponent(encodedSkill);
+  } catch {
+    return encodedSkill;
+  }
+}
+
+function identityFromCollectionRelativePath(params: {
+  collection: string;
+  relativeWithinCollection: string;
+}): { skillName?: string; relativePath?: string } {
+  const parts = params.relativeWithinCollection.split("/").filter(Boolean);
+  if (parts.length < 1) return {};
+  const [encodedSkill, ...rest] = parts;
+  if (!encodedSkill) return {};
+  const skillName = decodeSkillSegment(encodedSkill);
+  const remainder = rest.join("/");
+  if (remainder) {
+    return {
+      skillName,
+      relativePath:
+        params.collection === REFS_COLLECTION
+          ? `references/${remainder}`
+          : remainder,
+    };
+  }
+  if (params.collection === META_COLLECTION) {
+    return { skillName, relativePath: "meta.md" };
+  }
+  if (params.collection === BODY_COLLECTION) {
+    return { skillName, relativePath: "SKILL.md" };
+  }
+  return { skillName, relativePath: "references/unknown" };
+}
+
+function identityFromQmdVirtualPath(params: {
+  filepath: string;
+  collection: string;
+}): { skillName?: string; relativePath?: string } {
+  const match = /^qmd:\/\/([^/]+)\/(.*)$/.exec(params.filepath);
+  if (!match) return {};
+  const virtualCollection = match[1] ?? "";
+  const relativeWithinCollection = match[2] ?? "";
+  if (!COLLECTION_DIR_BY_NAME[virtualCollection]) return {};
+  // Prefer the virtual collection from the QMD hit; fall back to the search filter.
+  return identityFromCollectionRelativePath({
+    collection: virtualCollection || params.collection,
+    relativeWithinCollection,
+  });
+}
+
 export function skillIdentityFromDocsPath(params: {
   docsRoot: string;
   filepath: string;
   collection: string;
 }): { skillName?: string; relativePath?: string } {
+  const fromVirtual = identityFromQmdVirtualPath(params);
+  if (fromVirtual.skillName) return fromVirtual;
+
+  // QMD hybrid hits often expose collection-relative displayPath values like
+  // "openclaw/meta.md" alongside qmd:// virtual filepath values.
+  if (
+    !params.filepath.includes("://") &&
+    !path.isAbsolute(params.filepath) &&
+    !params.filepath.startsWith("meta/") &&
+    !params.filepath.startsWith("body/") &&
+    !params.filepath.startsWith("references/")
+  ) {
+    const fromDisplay = identityFromCollectionRelativePath({
+      collection: params.collection,
+      relativeWithinCollection: params.filepath.split(path.sep).join("/"),
+    });
+    if (fromDisplay.skillName) return fromDisplay;
+  }
+
   const relative = path
     .relative(params.docsRoot, params.filepath)
     .split(path.sep)
@@ -145,29 +222,10 @@ export function skillIdentityFromDocsPath(params: {
   ) {
     return {};
   }
-  let skillName: string;
-  try {
-    skillName = decodeURIComponent(encodedSkill!);
-  } catch {
-    skillName = encodedSkill!;
-  }
-  const remainder = rest.join("/");
-  if (remainder) {
-    return {
-      skillName,
-      relativePath:
-        params.collection === REFS_COLLECTION
-          ? `references/${remainder}`
-          : remainder,
-    };
-  }
-  if (params.collection === META_COLLECTION) {
-    return { skillName, relativePath: "meta.md" };
-  }
-  if (params.collection === BODY_COLLECTION) {
-    return { skillName, relativePath: "SKILL.md" };
-  }
-  return { skillName, relativePath: "references/unknown" };
+  return identityFromCollectionRelativePath({
+    collection: params.collection,
+    relativeWithinCollection: [encodedSkill, ...rest].join("/"),
+  });
 }
 
 export function safePathSegment(value: string): string {
@@ -473,15 +531,22 @@ function parseStoreHits(params: {
     const fromBody = parseFrontmatterIdentity(result.body);
     let skillName = fromBody.skillName;
     let relativePath = fromBody.relativePath;
-    const filepath = result.filepath ?? result.file ?? result.displayPath;
-    if ((!skillName || !relativePath) && filepath && params.docsRoot) {
-      const fromPath = skillIdentityFromDocsPath({
-        docsRoot: params.docsRoot,
-        filepath,
-        collection: params.collection,
-      });
-      skillName = skillName ?? fromPath.skillName;
-      relativePath = relativePath ?? fromPath.relativePath;
+    const pathCandidates = [
+      result.filepath,
+      result.file,
+      result.displayPath,
+    ].filter((value): value is string => Boolean(value));
+    if ((!skillName || !relativePath) && params.docsRoot) {
+      for (const filepath of pathCandidates) {
+        const fromPath = skillIdentityFromDocsPath({
+          docsRoot: params.docsRoot,
+          filepath,
+          collection: params.collection,
+        });
+        skillName = skillName ?? fromPath.skillName;
+        relativePath = relativePath ?? fromPath.relativePath;
+        if (skillName && relativePath) break;
+      }
     }
     if (!skillName) continue;
     hits.push({
