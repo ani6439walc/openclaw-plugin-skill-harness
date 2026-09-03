@@ -32,6 +32,15 @@ class IncompleteEmbeddingBuildError extends Error {
 
 type QmdCreateStore = typeof createStore;
 
+type SQLiteBackupDatabase = {
+  backup(targetPath: string): Promise<unknown>;
+};
+
+type ActiveGeneration = {
+  generation: string;
+  fingerprint: string;
+};
+
 type CollectionKind = "meta" | "body" | "reference";
 
 type SearchHit = {
@@ -86,9 +95,7 @@ type AgentState = {
   failedFingerprint?: string;
   consecutiveFailures: number;
   nextRetryAtMs: number;
-  lastScheduleStartedAtMs: number;
   generation: number;
-  cooldownTimer?: unknown;
   retryTimer?: unknown;
 };
 
@@ -303,7 +310,6 @@ async function referenceFingerprint(skillDir: string): Promise<string[]> {
 }
 
 async function snapshotFingerprint(
-  agentId: string,
   skills: readonly AvailableSkill[],
   config: ResolvedQmdConfig,
 ): Promise<string> {
@@ -320,8 +326,6 @@ async function snapshotFingerprint(
       }
       return {
         name: skill.name,
-        source: skill.source ?? null,
-        location: skill.location,
         description: skill.description,
         bodyHash,
         references: await referenceFingerprint(path.dirname(skill.location)),
@@ -330,9 +334,11 @@ async function snapshotFingerprint(
   );
   return hash(
     JSON.stringify({
-      agentId,
       skills: skillEntries,
-      qmd: config,
+      embedding: {
+        model: config.embedding.model,
+        dimension: config.embedding.dimension,
+      },
     }),
   );
 }
@@ -371,20 +377,24 @@ async function writeIndexedDocument(params: {
   content: string;
 }): Promise<void> {
   await fs.mkdir(path.dirname(params.contentPath), { recursive: true });
-  await fs.writeFile(
-    params.contentPath,
-    normalizeIndexedContent(params.content),
-    "utf8",
-  );
-  await fs.writeFile(
-    `${params.contentPath}.identity.yml`,
-    identitySidecarBody({
-      skill: params.skill,
-      kind: params.kind,
-      relativePath: params.relativePath,
-    }),
-    "utf8",
-  );
+  const content = normalizeIndexedContent(params.content);
+  const identity = identitySidecarBody({
+    skill: params.skill,
+    kind: params.kind,
+    relativePath: params.relativePath,
+  });
+  const writeIfChanged = async (target: string, next: string) => {
+    try {
+      if ((await fs.readFile(target, "utf8")) === next) return;
+    } catch {
+      // New documents are written below.
+    }
+    await fs.writeFile(target, next, "utf8");
+  };
+  await Promise.all([
+    writeIfChanged(params.contentPath, content),
+    writeIfChanged(`${params.contentPath}.identity.yml`, identity),
+  ]);
 }
 
 function skillSnapshotCollections(
@@ -407,6 +417,37 @@ function skillSnapshotCollections(
   };
 }
 
+async function removeStaleSnapshotDocuments(
+  docsRoot: string,
+  expected: ReadonlySet<string>,
+): Promise<void> {
+  async function visit(directory: string): Promise<void> {
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    await Promise.all(
+      entries.map(async (entry) => {
+        const target = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          await visit(target);
+          const children = await fs.readdir(target).catch(() => []);
+          if (children.length === 0) await fs.rmdir(target).catch(() => undefined);
+          return;
+        }
+        const relative = path.relative(docsRoot, target).split(path.sep).join("/");
+        const contentRelative = relative.endsWith(".identity.yml")
+          ? relative.slice(0, -".identity.yml".length)
+          : relative;
+        if (!expected.has(contentRelative)) await fs.rm(target, { force: true });
+      }),
+    );
+  }
+  await visit(docsRoot);
+}
+
 export async function writeSkillSnapshot(params: {
   docsRoot: string;
   skills: readonly AvailableSkill[];
@@ -422,11 +463,14 @@ export async function writeSkillSnapshot(params: {
     fs.mkdir(referencesRoot, { recursive: true }),
   ]);
 
+  const expected = new Set<string>();
   for (const skill of params.skills) {
     const skillSegment = safePathSegment(skill.name);
     const skillDir = path.dirname(skill.location);
     const metaPath = path.join(metaRoot, skillSegment, "meta.md");
     const bodyPath = path.join(bodyRoot, skillSegment, "SKILL.md");
+    expected.add(`meta/${skillSegment}/meta.md`);
+    expected.add(`body/${skillSegment}/SKILL.md`);
     await writeIndexedDocument({
       contentPath: metaPath,
       skill,
@@ -459,6 +503,7 @@ export async function writeSkillSnapshot(params: {
       const confinedSource = await resolveConfinedPath(skillDir, sourcePath);
       if (!confinedSource) continue;
       const targetPath = path.join(referencesRoot, skillSegment, relative);
+      expected.add(`references/${skillSegment}/${relative}`);
       let content = "";
       try {
         content = await fs.readFile(confinedSource, "utf8");
@@ -480,6 +525,7 @@ export async function writeSkillSnapshot(params: {
     }
   }
 
+  await removeStaleSnapshotDocuments(params.docsRoot, expected);
   return skillSnapshotCollections(params.docsRoot);
 }
 
@@ -587,6 +633,79 @@ export function createSkillQmdIndex(params: {
     );
   }
 
+  function activeGenerationPath(agentId: string): string {
+    return path.join(agentRoot(agentId), "active.json");
+  }
+
+  async function readActiveGeneration(
+    agentId: string,
+  ): Promise<{ generationRoot: string; docsRoot: string } | undefined> {
+    try {
+      const active = JSON.parse(
+        await fs.readFile(activeGenerationPath(agentId), "utf8"),
+      ) as Partial<ActiveGeneration>;
+      if (!active.generation || !active.fingerprint) return;
+      const generationRoot = path.join(agentRoot(agentId), active.generation);
+      const docsRoot = path.join(generationRoot, "docs");
+      await Promise.all([
+        fs.access(path.join(generationRoot, "skill-search.sqlite")),
+        fs.access(docsRoot),
+      ]);
+      return { generationRoot, docsRoot };
+    } catch {
+      return;
+    }
+  }
+
+  async function writeActiveGeneration(
+    agentId: string,
+    generationRoot: string,
+    fingerprint: string,
+  ): Promise<void> {
+    const target = activeGenerationPath(agentId);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+    await fs.writeFile(
+      temporary,
+      JSON.stringify({ generation: path.basename(generationRoot), fingerprint }),
+      "utf8",
+    );
+    await fs.rename(temporary, target);
+  }
+
+  async function cloneGeneration(params: {
+    source: { generationRoot: string; docsRoot: string };
+    targetRoot: string;
+    sourceStore?: QMDStore;
+    createStore?: QmdCreateStore;
+  }): Promise<void> {
+    await fs.mkdir(params.targetRoot, { recursive: true });
+    const targetDbPath = path.join(params.targetRoot, "skill-search.sqlite");
+    let sourceStore = params.sourceStore;
+    try {
+      if (!sourceStore) {
+        const createQmdStore =
+          params.createStore ?? (await import("@wei840222/qmd")).createStore;
+        sourceStore = await createQmdStore({
+          dbPath: path.join(params.source.generationRoot, "skill-search.sqlite"),
+          readOnly: true,
+        });
+      }
+      if (!sourceStore) throw new Error("missing skill generation source store");
+      const database = sourceStore.internal?.db as unknown as
+        | SQLiteBackupDatabase
+        | undefined;
+      if (database) await database.backup(targetDbPath);
+      await fs.cp(params.source.docsRoot, path.join(params.targetRoot, "docs"), {
+        recursive: true,
+      });
+    } finally {
+      if (sourceStore && sourceStore !== params.sourceStore) {
+        await sourceStore.close().catch(() => undefined);
+      }
+    }
+  }
+
   async function clearOrphanGenerations(
     agentId: string,
     keepRoots: readonly string[] = [],
@@ -669,41 +788,16 @@ export function createSkillQmdIndex(params: {
       status: "idle",
       consecutiveFailures: 0,
       nextRetryAtMs: 0,
-      lastScheduleStartedAtMs: 0,
       generation: 0,
     };
     agents.set(agentId, created);
     return created;
   }
 
-  function clearCooldownTimer(state: AgentState): void {
-    if (state.cooldownTimer === undefined) return;
-    clearTimer(state.cooldownTimer);
-    state.cooldownTimer = undefined;
-  }
-
   function clearRetryTimer(state: AgentState): void {
     if (state.retryTimer === undefined) return;
     clearTimer(state.retryTimer);
     state.retryTimer = undefined;
-  }
-
-  function armCooldownResume(agentId: string, state: AgentState): void {
-    if (state.cooldownTimer !== undefined || state.running || !state.desired) {
-      return;
-    }
-    const cooldownMs = params.config().skillSearch.scheduleCooldownMs;
-    if (cooldownMs <= 0 || !state.store || state.lastScheduleStartedAtMs <= 0) {
-      return;
-    }
-    const remainingMs = Math.max(
-      0,
-      cooldownMs - (now() - state.lastScheduleStartedAtMs),
-    );
-    state.cooldownTimer = setTimer(() => {
-      state.cooldownTimer = undefined;
-      maybeStart(agentId, state);
-    }, remainingMs);
   }
 
   function resetRetryState(state: AgentState): void {
@@ -808,7 +902,6 @@ export function createSkillQmdIndex(params: {
   ): Promise<void> {
     clearRetryTimer(state);
     state.status = "building";
-    state.lastScheduleStartedAtMs = now();
     const root = agentRoot(agentId);
     let generationRoot = "";
     let nextStore: QMDStore | undefined;
@@ -841,11 +934,26 @@ export function createSkillQmdIndex(params: {
               root,
               `gen-${generation}-${target.fingerprint.slice(0, 12)}`,
             );
+            const previous = state.generationRoot && state.docsRoot
+              ? { generationRoot: state.generationRoot, docsRoot: state.docsRoot }
+              : await readActiveGeneration(agentId);
             await clearOrphanGenerations(
               agentId,
-              state.generationRoot ? [state.generationRoot] : [],
+              previous ? [previous.generationRoot] : [],
             );
-            await fs.mkdir(generationRoot, { recursive: true });
+            if (previous) {
+              await cloneGeneration({
+                source: previous,
+                targetRoot: generationRoot,
+                sourceStore:
+                  previous.generationRoot === state.generationRoot
+                    ? state.store
+                    : undefined,
+                createStore: params.createStore,
+              });
+            } else {
+              await fs.mkdir(generationRoot, { recursive: true });
+            }
           }
           const docsRoot =
             reusable?.docsRoot ?? path.join(generationRoot, "docs");
@@ -904,6 +1012,7 @@ export function createSkillQmdIndex(params: {
 
           const previousStore = state.store;
           const previousRoot = state.generationRoot;
+          await writeActiveGeneration(agentId, generationRoot, target.fingerprint);
           state.store = nextStore;
           state.generationRoot = generationRoot;
           state.docsRoot = docsRoot;
@@ -959,41 +1068,17 @@ export function createSkillQmdIndex(params: {
   async function runWorker(agentId: string, state: AgentState): Promise<void> {
     try {
       while (state.desired) {
-        const cooldownMs = params.config().skillSearch.scheduleCooldownMs;
-        const sinceLastStart = now() - state.lastScheduleStartedAtMs;
-        if (
-          state.store &&
-          cooldownMs > 0 &&
-          state.lastScheduleStartedAtMs > 0 &&
-          sinceLastStart < cooldownMs
-        ) {
-          break;
-        }
-        clearCooldownTimer(state);
         const target = state.desired;
         state.desired = undefined;
         await build(agentId, state, target);
       }
     } finally {
       state.running = undefined;
-      armCooldownResume(agentId, state);
     }
   }
 
   function maybeStart(agentId: string, state: AgentState): void {
     if (state.running || !state.desired) return;
-    const cooldownMs = params.config().skillSearch.scheduleCooldownMs;
-    const sinceLastStart = now() - state.lastScheduleStartedAtMs;
-    if (
-      state.store &&
-      cooldownMs > 0 &&
-      state.lastScheduleStartedAtMs > 0 &&
-      sinceLastStart < cooldownMs
-    ) {
-      armCooldownResume(agentId, state);
-      return;
-    }
-    clearCooldownTimer(state);
     state.running = runWorker(agentId, state);
   }
 
@@ -1003,11 +1088,7 @@ export function createSkillQmdIndex(params: {
   ): void {
     const state = getState(agentId);
     void (async () => {
-      const fingerprint = await snapshotFingerprint(
-        agentId,
-        skills,
-        params.config(),
-      );
+      const fingerprint = await snapshotFingerprint(skills, params.config());
       if (
         fingerprint === state.currentFingerprint &&
         !state.desired &&
@@ -1156,7 +1237,6 @@ export function createSkillQmdIndex(params: {
     async close() {
       for (const state of agents.values()) {
         state.desired = undefined;
-        clearCooldownTimer(state);
         clearRetryTimer(state);
       }
       await Promise.all(

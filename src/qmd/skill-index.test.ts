@@ -46,7 +46,7 @@ const qmdConfig: ResolvedQmdConfig = {
   },
   skillSearch: {
     collectionWeights: { meta: 2, body: 1, references: 0.5 },
-    scheduleCooldownMs: 5_000,
+    indexRefreshIntervalSeconds: 300,
   },
 };
 
@@ -86,6 +86,7 @@ function createStoreDouble(params: {
   update?: ReturnType<typeof vi.fn>;
   embed?: ReturnType<typeof vi.fn>;
   getStatus?: ReturnType<typeof vi.fn>;
+  internal?: QMDStore["internal"];
 }) {
   return {
     update: params.update ?? vi.fn().mockResolvedValue({}),
@@ -97,6 +98,7 @@ function createStoreDouble(params: {
     searchLex: vi.fn().mockResolvedValue([]),
     searchVector: vi.fn().mockResolvedValue([]),
     close: params.close ?? vi.fn().mockResolvedValue(undefined),
+    ...(params.internal ? { internal: params.internal } : {}),
   } as unknown as QMDStore;
 }
 
@@ -432,6 +434,97 @@ describe("createSkillQmdIndex", () => {
     await index.close();
   });
 
+  it("clones the active generation before incrementally rebuilding", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-skills-"));
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "clone-source",
+      description: "Clone source skill",
+      body: "first body",
+    });
+    const backup = vi.fn(async (targetPath: string) => {
+      await writeFile(targetPath, "copied sqlite", "utf8");
+    });
+    const firstStore = createStoreDouble({
+      internal: { db: { backup } } as QMDStore["internal"],
+    });
+    const createStore = vi
+      .fn()
+      .mockResolvedValueOnce(firstStore)
+      .mockResolvedValueOnce(createStoreDouble({}));
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(() => index.getStatus("main") === "ready", "first generation did not become ready");
+    await writeFile(skill.location, "updated body", "utf8");
+    index.schedule("main", [skill]);
+    await waitFor(() => index.getStatus("main") === "ready" && createStore.mock.calls.length === 2, "candidate generation did not publish");
+
+    expect(backup).toHaveBeenCalledOnce();
+    const active = JSON.parse(
+      await readFile(path.join(root, "qmd", "skills", "main", "active.json"), "utf8"),
+    ) as { generation: string };
+    expect(active.generation).toMatch(/^gen-2-/);
+    await index.close();
+  });
+
+  it("keeps unchanged snapshot documents untouched", async () => {
+    const skill = await createSkillFixture({
+      name: "snapshot-diff",
+      description: "Snapshot diff skill",
+      body: "body",
+    });
+    const docsRoot = await mkdtemp(path.join(tmpdir(), "skill-harness-docs-"));
+    roots.push(docsRoot);
+    await writeSkillSnapshot({ docsRoot, skills: [skill] });
+    const bodyPath = path.join(docsRoot, "body", safePathSegment(skill.name), "SKILL.md");
+    const before = await (await import("node:fs/promises")).stat(bodyPath);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await writeSkillSnapshot({ docsRoot, skills: [skill] });
+    const after = await (await import("node:fs/promises")).stat(bodyPath);
+
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+  });
+
+  it("does not rebuild when only non-index QMD settings change", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-skills-"));
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "stable-config",
+      description: "Stable config skill",
+      body: "body",
+    });
+    const createStore = vi.fn(async () => createStoreDouble({}));
+    let config = qmdConfig;
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => config,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(() => index.getStatus("main") === "ready", "initial index did not become ready");
+    config = {
+      ...qmdConfig,
+      timeoutMs: 9_999,
+      embedding: { ...qmdConfig.embedding, baseUrl: "https://other.example.test/v1" },
+      expansion: { ...qmdConfig.expansion, model: "other-expand-model" },
+      skillSearch: { ...qmdConfig.skillSearch, collectionWeights: { meta: 3, body: 2, references: 1 } },
+    };
+    index.schedule("main", [skill]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(createStore).toHaveBeenCalledTimes(1);
+    await index.close();
+  });
+
   it("keeps serving the previous store while a newer rebuild is in flight", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-qmd-skills-"),
@@ -475,10 +568,6 @@ describe("createSkillQmdIndex", () => {
       dataRoot: root,
       config: () => ({
         ...qmdConfig,
-        skillSearch: {
-          ...qmdConfig.skillSearch,
-          scheduleCooldownMs: 0,
-        },
       }),
       createStore: createStore as never,
       nowMs: () => nowMs,
@@ -511,7 +600,7 @@ describe("createSkillQmdIndex", () => {
     await index.close();
   });
 
-  it("returns undefined on failed-empty builds and auto-resumes cooldown schedules", async () => {
+  it("returns undefined on failed-empty builds and rebuilds changed snapshots", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-qmd-skills-"),
     );
@@ -578,17 +667,8 @@ describe("createSkillQmdIndex", () => {
     });
     index.schedule("main", [changed]);
     await waitFor(
-      () => pendingTimers.length === 1,
-      "cooldown resume timer was not armed",
-    );
-    expect(createStore).toHaveBeenCalledTimes(2);
-    expect(index.getStatus("main")).toBe("ready");
-
-    nowMs += pendingTimers[0]!.delayMs;
-    pendingTimers.shift()!.callback();
-    await waitFor(
       () => createStore.mock.calls.length >= 3,
-      "cooldown schedule did not auto-resume rebuild",
+      "changed snapshot did not rebuild",
     );
 
     await index.close();
@@ -712,10 +792,6 @@ describe("createSkillQmdIndex", () => {
       dataRoot: root,
       config: () => ({
         ...qmdConfig,
-        skillSearch: {
-          ...qmdConfig.skillSearch,
-          scheduleCooldownMs: 0,
-        },
       }),
       createStore: createStore as never,
       nowMs: () => nowMs,
@@ -773,10 +849,6 @@ describe("createSkillQmdIndex", () => {
       dataRoot: root,
       config: () => ({
         ...qmdConfig,
-        skillSearch: {
-          ...qmdConfig.skillSearch,
-          scheduleCooldownMs: 0,
-        },
       }),
       createStore: createStore as never,
       nowMs: () => nowMs,
@@ -839,10 +911,6 @@ describe("createSkillQmdIndex", () => {
       dataRoot: root,
       config: () => ({
         ...qmdConfig,
-        skillSearch: {
-          ...qmdConfig.skillSearch,
-          scheduleCooldownMs: 0,
-        },
       }),
       createStore: createStore as never,
       nowMs: () => nowMs,
@@ -906,10 +974,6 @@ describe("createSkillQmdIndex", () => {
       dataRoot: root,
       config: () => ({
         ...qmdConfig,
-        skillSearch: {
-          ...qmdConfig.skillSearch,
-          scheduleCooldownMs: 0,
-        },
       }),
       createStore: createStore as never,
       nowMs: () => nowMs,
@@ -988,10 +1052,6 @@ describe("createSkillQmdIndex", () => {
       dataRoot: root,
       config: () => ({
         ...qmdConfig,
-        skillSearch: {
-          ...qmdConfig.skillSearch,
-          scheduleCooldownMs: 0,
-        },
       }),
       createStore: createStoreA as never,
       nowMs: () => nowMs,
@@ -1000,10 +1060,6 @@ describe("createSkillQmdIndex", () => {
       dataRoot: root,
       config: () => ({
         ...qmdConfig,
-        skillSearch: {
-          ...qmdConfig.skillSearch,
-          scheduleCooldownMs: 0,
-        },
       }),
       createStore: createStoreB as never,
       nowMs: () => nowMs,
