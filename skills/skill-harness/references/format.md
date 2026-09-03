@@ -8,7 +8,7 @@ An intent has YAML frontmatter for classification metadata plus a plain-text Mar
 
 The body is the entire guidance value, not a Markdown document: do not create headings, lists, fences, commands, paths, a `## Skills & Tools` section, workflow text, or experience text. Durable workflows and lessons belong in referenced skills, not intent definitions.
 
-Runtime experience records are host-curated, skill-scoped files under `experiences/`; do not create, edit, or reference them while drafting an intent.
+Runtime experience records are host-owned, skill-scoped files under `experiences/`; do not create, edit, or reference them while drafting an intent.
 
 ## Frontmatter routing fields
 

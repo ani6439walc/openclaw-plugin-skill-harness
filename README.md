@@ -265,6 +265,8 @@ This skill does not manually repeat production-owned work: per-turn classificati
 
 ## Skill tools
 
+Skill Harness registers four runtime tools for agents to discover, search, view, and inspect skills:
+
 | Tool               | Purpose                                                            |
 | ------------------ | ------------------------------------------------------------------ |
 | `skill_list`       | Broad inventory fallback for broad or uncertain tasks.             |
@@ -272,7 +274,29 @@ This skill does not manually repeat production-owned work: per-turn classificati
 | `skill_view`       | Reads a visible skill or allowed support file before use.          |
 | `skill_experience` | Searches bounded runtime experiences for currently visible skills. |
 
-`skill_experience` accepts an optional query of at most 500 Unicode code points. It searches at most six visible skills, returns at most three entries, caps each body at 2,000 code points, and caps all returned bodies at 5,000 code points. It reports unavailable requested skills separately and does not expose a catalog-wide experience inventory.
+### Tool parameters and specifications
+
+- **`skill_list`**: Lists all available skills across bundled, workspace, and configured roots.
+  - **Inputs**: None.
+  - **Returns**: `{ skills: Array<{ name, description, path, source }> }`.
+
+- **`skill_search`**: Hybrid semantic/lexical discovery over skill metadata, full bodies, and references via QMD.
+  - **Inputs**:
+    - `query` (string, required): Task description or search keywords.
+    - `show_evidence` (boolean, optional, default `true`): When `true`, returns matching chunk text evidence for each hit. Set to `false` to omit snippets.
+    - `show_related` (boolean, optional, default `false`): When `true`, returns related skills based on domain and capability links.
+  - **Returns**: `{ results: Array<{ name, description, path, score, evidence?, related_skills? }> }`.
+
+- **`skill_view`**: Inspects the full `SKILL.md` or an allowed support file of a visible skill.
+  - **Inputs**:
+    - `name` (string, required): Name of the visible skill.
+    - `path` (string, optional): Relative path to a support file within the skill directory (e.g., `references/...`).
+  - **Returns**: `{ name, content, path }`.
+
+- **`skill_experience`**: Searches bounded runtime experiences for currently visible skills.
+  - **Inputs**:
+    - `query` (string, optional): Search query (at most 500 Unicode code points).
+  - Searches at most six visible skills, returns at most three entries, caps each body at 2,000 code points, and caps all returned bodies at 5,000 code points. Reports unavailable requested skills separately and does not expose a catalog-wide experience inventory.
 
 `skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. This intentionally does not apply OpenClaw's `agents.defaults.skills` or `agents.list[].skills` allowlists: visibility follows root precedence and disabled bundled-skill entries only. Prompt-time automatic configured-skill injection is narrower and includes explicit configured names plus workspace skills.
 

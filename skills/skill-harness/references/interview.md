@@ -38,7 +38,7 @@ Confirm these fields in order:
 - If the user is describing an existing intent, say so directly.
 - If two intents are colliding, recommend the smallest clean split.
 - Do not propose `candidate.keywords`: current QMD candidate projection does not consume them. For durable domain-independent availability, consider only `candidate.scope: cross-flow` after checking its broader routing impact.
-- Gather only direct `skills[]` dependencies. Session-local curation owns candidate ranking and runtime experience references; do not interview for or add experience records.
+- Gather only direct `skills[]` dependencies. Candidate discovery and runtime experience references are host-owned; do not interview for or add experience records.
 - Do not write the final intent file until the boundary is clear.
 - **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, fastpath metadata, and guidance. (See `references/format.md` for full spec.)
 

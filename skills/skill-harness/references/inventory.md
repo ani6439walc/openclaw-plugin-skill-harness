@@ -8,7 +8,7 @@ Build an inventory from the runtime-resolved catalogs instead of walking source 
 
 ### Skills
 
-Call `skill_list` once to obtain the invoking agent's resolved inventory across bundled, workspace, configured extra, and managed skill roots. Do not reconstruct root precedence manually. Use `skill_search` only to narrow an uncertain capability and `skill_view` only when a description cannot establish the boundary.
+Call `skill_list` once to obtain the invoking agent's resolved inventory across bundled, workspace, and configured extra skill roots. Do not reconstruct root precedence manually. Use `skill_search` only to narrow an uncertain capability and `skill_view` only when a description cannot establish the boundary.
 
 ### Tools
 
@@ -16,7 +16,7 @@ List currently available tools from the runtime catalog, config, built-in help, 
 
 ### Existing intents
 
-Use structured file/search tools to list and inspect runtime intent Markdown in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`. Experience records live separately under `experiences/`; treat them as host-curated runtime evidence, not as intent content or inventory-maintenance input.
+Use structured file/search tools to list and inspect runtime intent Markdown in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`. Experience records live separately under `experiences/`; treat them as host-owned runtime evidence, not as intent content or inventory-maintenance input.
 
 ## Step 2 — Capability table
 

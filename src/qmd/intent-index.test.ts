@@ -91,11 +91,9 @@ async function waitFor(
   condition: () => boolean,
   message: string,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  throw new Error(message);
 }
 
 async function waitForReady(

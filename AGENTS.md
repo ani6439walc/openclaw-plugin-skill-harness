@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository packages the `skill-harness` OpenClaw plugin. `index.ts` and `api.ts` are entry points; domains live in `src/` (`hooks/`, `classification/`, `intents/`, `skills/`, `session/`, `curation/`, `review/`, and `stats/`). Tests are colocated as `*.test.ts`. Bundled skill files and Python audits live under `skills/skill-harness/`. `openclaw.plugin.json` defines the plugin contract; `dist/` is untracked build output.
+This repository packages the `skill-harness` OpenClaw plugin. `index.ts` and `api.ts` are entry points; domains live in `src/` (`hooks/`, `classification/`, `intents/`, `skills/`, `session/`, `experiences/`, `qmd/`, `review/`, and `stats/`). Tests are colocated as `*.test.ts`. Bundled skill files and Python audits live under `skills/skill-harness/`. `openclaw.plugin.json` defines the plugin contract; `dist/` is untracked build output.
 
 ## Build, Test, and Development Commands
 
