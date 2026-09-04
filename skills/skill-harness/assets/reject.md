@@ -8,11 +8,11 @@ triggers:
     User says something is wrong, rejects a suggestion, cancels a proposed
     action, or corrects their previous message without a full new task.
 examples:
-  - wrong
-  - not that
-  - don't
-  - cancel
-  - that's not what I meant
+  - "That's wrong, please stop the execution."
+  - "Not that one, I meant the second option."
+  - "Don't do that, wait a moment."
+  - Cancel the previous operation and revert changes.
+  - "That's not what I meant, let me clarify."
 keywords:
   - "no"
   - not that

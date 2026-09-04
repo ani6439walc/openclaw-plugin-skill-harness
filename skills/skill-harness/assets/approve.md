@@ -8,10 +8,10 @@ triggers:
     User simply agrees, confirms, or says to proceed without introducing a new
     concrete task.
 examples:
-  - OK
-  - "yes"
-  - agreed
-  - go ahead
+  - "OK, that sounds good to me."
+  - "Yes, please proceed with this plan."
+  - "Agreed, let's move forward with this approach."
+  - Go ahead and execute the changes.
 keywords:
   - ok
   - okay

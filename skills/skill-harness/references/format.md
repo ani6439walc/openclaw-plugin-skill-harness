@@ -27,14 +27,22 @@ skills:
 Route this request to the declared skills and follow the bounded routing context.
 ```
 
+Frontmatter keys must follow this fixed canonical order:
+
+1. `domain` (required, single string)
+2. `triggers` (required, array of full descriptive sentences)
+3. `examples` (required, array of realistic user message sentences)
+4. `keywords` (optional, array of exact/short phrases for Step 1 BM25)
+5. `skills` (optional, array of exact skill names in lowercase)
+
 - `domain` is required and must be one string.
-- `skills` is optional and must be a list of exact skill names. Use it only for skills the intent should load or strongly prefer.
+- `skills` is optional and must be a list of exact skill names written strictly in lowercase. Use it only for skills the intent should load or strongly prefer.
 - The complete plain-text body is required guidance, one durable routing-behavior sentence shared across keyword, QMD trigger, and classified routes.
 - `keywords` is optional short phrases for Step 1 QMD keyword BM25 retrieval; never place a hint or workflow body here.
 
 ## Skills metadata rule
 
-- Put skill dependencies in frontmatter `skills[]`.
+- Put skill dependencies in frontmatter `skills[]` written strictly in lowercase.
 - List only skills that directly help this routing outcome.
 - Do not put a skill list, tool instructions, commands, workflow text, or experience text in the guidance body.
 

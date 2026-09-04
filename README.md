@@ -235,22 +235,23 @@ This plugin version supports only those current schemas. It does not migrate, re
 Keep each intent narrow and concrete:
 
 - one user outcome per file
-- concrete triggers and examples
+- fixed frontmatter key order: `domain`, `triggers`, `examples`, `keywords`, `skills`
+- concrete triggers and examples formatted as complete sentences
 - domain metadata that matches the requested outcome
 - `keywords` (top-level string array) for exact/similarity BM25 routing shortcuts
-- `skills[]` only when the skill genuinely helps
+- `skills[]` written strictly in lowercase only when the skill genuinely helps
 - one durable plain-text body sentence for routing behavior
 
 Example intent file (`~/.openclaw/plugins/skill-harness/intents/format.md`):
 
 ```yaml
 ---
+domain: "development"
 triggers:
   - "User wants to format code or fix linting layout"
 examples:
   - "format this file"
   - "run prettier on src/"
-domain: "development"
 keywords:
   - "format"
   - "prettier"
