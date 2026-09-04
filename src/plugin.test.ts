@@ -211,16 +211,15 @@ describe("createPlugin", () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
-  it("extracts configured agent IDs excluding defaults", () => {
+  it("extracts configured agent IDs from entries", () => {
     const config = {
       agents: {
         defaults: { skills: ["alpha"] },
-        list: [
-          { id: "main", skills: ["alpha"] },
-          { id: "coder" },
-          { id: "REVIEWER", skills: [] },
-          { id: "defaults" },
-        ],
+        entries: {
+          main: { skills: ["alpha"] },
+          coder: {},
+          REVIEWER: { skills: [] },
+        },
       },
     };
     expect(extractConfiguredAgentIds(config as never)).toEqual([
@@ -245,7 +244,11 @@ describe("createPlugin", () => {
     const api = createApi({
       config: {
         agents: {
-          list: [{ id: "main" }, { id: "coder" }, { id: "reviewer" }],
+          entries: {
+            main: {},
+            coder: {},
+            reviewer: {},
+          },
         },
       },
       pluginConfig: { qmd: { indexRefreshIntervalSeconds: 300 } },
@@ -395,13 +398,16 @@ describe("createPlugin", () => {
     }
   });
 
-  it("wipes agents.defaults.skills and agents.list[].skills to empty arrays during registration", () => {
+  it("wipes agents.defaults.skills and agents.entries.*.skills during registration", () => {
     const apiConfig = {
       agents: {
         defaults: {
           skills: ["github", "weather"],
         },
-        list: [{ id: "writer", skills: ["docs-search"] }, { id: "coder" }],
+        entries: {
+          writer: { skills: ["docs-search"] },
+          coder: {},
+        },
       },
     };
     const runtimeConfig = {
@@ -409,7 +415,9 @@ describe("createPlugin", () => {
         defaults: {
           skills: ["slack"],
         },
-        list: [{ id: "main", skills: ["acpx"] }],
+        entries: {
+          main: { skills: ["acpx"] },
+        },
       },
     };
     const api = createApi({
@@ -427,10 +435,10 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
 
     expect(apiConfig.agents.defaults.skills).toEqual([]);
-    expect(apiConfig.agents.list[0].skills).toEqual([]);
-    expect(apiConfig.agents.list[1].skills).toEqual([]);
+    expect(apiConfig.agents.entries.writer.skills).toEqual([]);
+    expect(apiConfig.agents.entries.coder.skills).toEqual([]);
     expect(runtimeConfig.agents.defaults.skills).toEqual([]);
-    expect(runtimeConfig.agents.list[0].skills).toEqual([]);
+    expect(runtimeConfig.agents.entries.main.skills).toEqual([]);
   });
 
   it("asynchronously refreshes configured skills from raw config and clears removed skills", async () => {
@@ -439,14 +447,14 @@ describe("createPlugin", () => {
       fs.writeFileSync(
         configPath,
         JSON.stringify({
-          agents: { list: [{ id: "main", skills }] },
+          agents: { entries: { main: { skills } } },
         }),
       );
     };
     writeOpenClawConfig(["skill-harness"]);
 
     const apiConfig = {
-      agents: { list: [{ id: "main", skills: ["skill-harness"] }] },
+      agents: { entries: { main: { skills: ["skill-harness"] } } },
     };
     const api = createApi({
       config: apiConfig,

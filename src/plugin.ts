@@ -125,14 +125,13 @@ export function extractConfiguredAgentSkillsMap(
     map.set("defaults", [...defaults]);
   }
 
-  if (Array.isArray(config.agents.list)) {
-    for (const agent of config.agents.list) {
-      if (!agent?.id) continue;
-      if (Array.isArray(agent.skills)) {
-        map.set(agent.id.trim().toLowerCase(), [...agent.skills]);
-      } else if (defaults) {
-        map.set(agent.id.trim().toLowerCase(), [...defaults]);
-      }
+  for (const [agentId, agent] of Object.entries(config.agents.entries ?? {})) {
+    const normalizedAgentId = agentId.trim().toLowerCase();
+    if (!normalizedAgentId) continue;
+    if (Array.isArray(agent.skills)) {
+      map.set(normalizedAgentId, [...agent.skills]);
+    } else if (defaults) {
+      map.set(normalizedAgentId, [...defaults]);
     }
   }
 
@@ -141,12 +140,10 @@ export function extractConfiguredAgentSkillsMap(
 
 export function extractConfiguredAgentIds(config?: OpenClawConfig): string[] {
   const ids: string[] = [];
-  if (Array.isArray(config?.agents?.list)) {
-    for (const agent of config.agents.list) {
-      const id = agent?.id?.trim().toLowerCase();
-      if (id && id !== "defaults") {
-        ids.push(id);
-      }
+  for (const agentId of Object.keys(config?.agents?.entries ?? {})) {
+    const normalizedAgentId = agentId.trim().toLowerCase();
+    if (normalizedAgentId) {
+      ids.push(normalizedAgentId);
     }
   }
   return ids;
@@ -157,12 +154,8 @@ function wipeAgentSkillsConfig(config?: OpenClawConfig): void {
   if (config.agents.defaults) {
     config.agents.defaults.skills = [];
   }
-  if (Array.isArray(config.agents.list)) {
-    for (const agent of config.agents.list) {
-      if (agent) {
-        agent.skills = [];
-      }
-    }
+  for (const agent of Object.values(config.agents.entries ?? {})) {
+    agent.skills = [];
   }
 }
 
