@@ -105,7 +105,7 @@ graph TD
   M --> N[Record stats and optionally review the completed turn]
 ```
 
-Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. The plugin `agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid trigger/example retrieval with expansion, and candidate scoring for Step 3 fallback classification.
+Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid trigger/example retrieval with expansion, and candidate scoring for Step 3 fallback classification.
 
 ### Architecture and routing contract
 
@@ -125,6 +125,51 @@ The routing stages are:
 QMD snapshot files live under `qmd/intents/` and its SQLite database under `qmd/intent-routing.sqlite`; they refresh in the background, so a cold or unhealthy index fails open to the classifier.
 
 Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains only the selected intent, guidance, direct candidates, and nested experience metadata. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
+
+#### Context injection format
+
+**Static configured skills (appended to system context)**:
+
+```markdown
+### Configured skills
+
+Review and apply when relevant:
+
+<configured_skills>
+<skill name="browser">
+Automate web browsing and interaction.
+</skill>
+</configured_skills>
+```
+
+**Dynamic routing context (prepended before user message)**:
+
+```text
+[Skill Harness Context (advisory, non-user input)]:
+<skill_harness_plugin>
+  <intent name="format">
+    Format the specified files following repository style conventions.
+  </intent>
+  <skill_candidates>
+    <skill name="code-formatter">
+      Run Prettier, ESLint, or language formatters.
+      <skill_experience>
+        <identity>format-config</identity>
+        <keywords>prettier, eslint, tabs</keywords>
+      </skill_experience>
+    </skill>
+  </skill_candidates>
+</skill_harness_plugin>
+
+[User Message]:
+```
+
+The prompt layout minimizes token consumption:
+
+- `<intent name="${intent}">` merges the intent name and guidance into a single tag.
+- Skill file paths are omitted from prompt injection; agents inspect `path` dynamically via `skill_list` or `skill_view`.
+- Redundant policy blocks are eliminated.
+- Candidate skills nest candidate-scoped `<skill_experience>` identity and keyword metadata; full experience records can be retrieved on demand via `skill_experience`.
 
 ## Basic configuration
 
@@ -287,6 +332,7 @@ Skill Harness registers four runtime tools for agents to discover, search, view,
 - **`skill_list`**: Lists all available skills across bundled, workspace, and configured roots.
   - **Inputs**: None.
   - **Returns**: `{ skills: Array<{ name, description, path, source }> }`.
+  - **Note**: Because prompt injection (`<configured_skills>` and `<skill_candidates>`) omits file paths to conserve tokens, agents obtain the filesystem `path` through `skill_list` or view skill contents and reference files directly via `skill_view`.
 
 - **`skill_search`**: Hybrid semantic/lexical discovery over skill metadata, full bodies, and references via QMD.
   - **Inputs**:

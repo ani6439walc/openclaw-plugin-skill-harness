@@ -49,3 +49,33 @@ Frontmatter keys must follow this fixed canonical order:
 ## No cross-references
 
 Intent metadata must not mention other intents by name or id. The classifier sees frontmatter metadata; Step 1 routing uses `keywords`. See `references/interview.md` for the full rule context.
+
+## Runtime prompt format
+
+At prompt construction time, the plugin compiles the matched intent and candidate skills into a compact structure:
+
+```text
+[Skill Harness Context (advisory, non-user input)]:
+<skill_harness_plugin>
+  <intent name="intent-id">
+    One durable plain-text routing guidance sentence.
+  </intent>
+  <skill_candidates>
+    <skill name="skill-name">
+      Skill description
+      <skill_experience>
+        <identity>experience-id</identity>
+        <keywords>tag1, tag2</keywords>
+      </skill_experience>
+    </skill>
+  </skill_candidates>
+</skill_harness_plugin>
+
+[User Message]:
+```
+
+Key rules of the runtime format:
+
+- `<intent name="${intent}">` combines intent identity and guidance in one tag.
+- `<skill name="${name}">` encapsulates skill identity and description. File paths are omitted from both candidate skills and static `<configured_skills>` to save prompt tokens; agents inspect `path` dynamically via `skill_list` or `skill_view`.
+- `<context_policy>` is omitted.

@@ -248,14 +248,12 @@ function formatSkillXmlBlock(
   tag: string,
   skills: AvailableSkill[] | undefined,
   attributes = "",
-  includeDetails = false,
   experiencesBySkill?: ReadonlyMap<string, readonly string[]>,
 ): string {
   const body = skills
     ?.map((skill) =>
       formatSkillXml(
         skill,
-        includeDetails,
         experiencesBySkill?.get(canonicalIdentity(skill.name)),
       ),
     )
@@ -265,7 +263,6 @@ function formatSkillXmlBlock(
 
 function formatSkillXml(
   skill: AvailableSkill,
-  includeDetails: boolean,
   experiences: readonly string[] = [],
 ): string {
   const lines: string[] = [];
@@ -273,9 +270,6 @@ function formatSkillXml(
     lines.push(escapeXmlText(skill.description));
   }
   lines.push(...experiences);
-  if (includeDetails) {
-    lines.push(formatXmlTextElement("path", skill.location));
-  }
   return xmlBlock(
     "skill",
     lines.join("\n"),
@@ -322,7 +316,6 @@ export function buildRoutingContext(params: {
           "skill_candidates",
           [...params.candidates],
           "",
-          false,
           experiencesBySkill,
         )
       : undefined,
@@ -507,6 +500,6 @@ export function formatConfiguredSkills(
   skills: AvailableSkill[] | undefined,
 ): string {
   if (!skills?.length) return "";
-  const xml = formatSkillXmlBlock("configured_skills", skills, "", true);
-  return `### Agent-configured skills\n\nActively review and apply these pre-configured skills when relevant to the task and environment:\n\n${xml}`;
+  const xml = formatSkillXmlBlock("configured_skills", skills);
+  return `### Configured skills\n\nReview and apply when relevant:\n\n${xml}`;
 }

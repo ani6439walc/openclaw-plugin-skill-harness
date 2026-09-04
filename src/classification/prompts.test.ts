@@ -224,7 +224,7 @@ describe("buildRoutingContext", () => {
 });
 
 describe("formatConfiguredSkills", () => {
-  it("formats configured skills with name attribute, bare description, and path", () => {
+  it("formats configured skills with name attribute and bare description without path", () => {
     const skills = [
       {
         name: "test-skill",
@@ -235,9 +235,11 @@ describe("formatConfiguredSkills", () => {
     const formatted = formatConfiguredSkills(skills);
     expect(formatted).toContain("<configured_skills>");
     expect(formatted).toContain(
-      '<skill name="test-skill">\n    A skill for testing.\n    <path>/path/to/test-skill/SKILL.md</path>\n  </skill>',
+      '  <skill name="test-skill">\n    A skill for testing.\n  </skill>',
     );
-    expect(formatted).toContain("### Agent-configured skills");
+    expect(formatted).not.toContain("<path>");
+    expect(formatted).toContain("### Configured skills");
+    expect(formatted).toContain("Review and apply when relevant:");
   });
 
   it("returns empty string when skills list is empty or undefined", () => {

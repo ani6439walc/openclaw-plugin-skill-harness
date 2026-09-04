@@ -36,6 +36,7 @@ If ambiguous, ask one routing question: "Are you working on one intent, auditing
 - Do not hand-edit `review.json`, `keyword-coverage.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, startup seeding, Review persistence, skill-placement, stats, or cleanup workflows in this skill.
 - Check changed intent files for canonical routing-only format: complete valid classification frontmatter with fixed key order (`domain`, `triggers`, `examples`, optional `keywords`, optional `skills` with lowercase names), one plain-text body `guidance` sentence, concrete triggers/examples, and no cross-references to other intent ids. The entire body is guidance; do not add sections, lists, fences, commands, paths, or other Markdown formatting.
 - Keep concrete shell commands, MCP documentation calls, workflows, and durable lessons in referenced skills; do not add them to intent definitions.
+- In prompt context, configured skills and candidate skills omit filesystem paths (`<path>`) to conserve tokens; agents obtain paths through `skill_list` and inspect skill files or references using `skill_view`.
 - When reviewing, creating, splitting, merging, or extracting intents, validate domain-intent consistency using `references/clustering.md`.
 
 ---

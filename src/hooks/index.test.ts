@@ -2375,9 +2375,6 @@ describe("createHookHandlers internal turn guards", () => {
         expect(systemContext).toContain("<configured_skills>");
         expect(systemContext).toContain('<skill name="static-scope">');
         expect(systemContext).toContain("Static scope workspace skill.");
-        expect(systemContext).toContain(
-          `<path>${path.join(workspaceDir, "skills", "static-scope", "SKILL.md")}</path>`,
-        );
         expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
         expect(refreshIntents).not.toHaveBeenCalled();
         expect(topicChecker).not.toHaveBeenCalled();
@@ -4451,11 +4448,9 @@ Current user request: fresh clean request
     expect(result?.appendSystemContext).toContain(
       "### Using Skill Harness context",
     );
+    expect(result?.appendSystemContext).toContain("### Configured skills");
     expect(result?.appendSystemContext).toContain(
-      "### Agent-configured skills",
-    );
-    expect(result?.appendSystemContext).toContain(
-      "Actively review and apply these pre-configured skills when relevant to the task and environment:",
+      "Review and apply when relevant:",
     );
     expect(result?.appendSystemContext).toContain("<configured_skills>");
     expect(result?.appendSystemContext).toContain(
@@ -4505,14 +4500,8 @@ Current user request: fresh clean request
     expect(systemContext).toContain("<configured_skills>");
     expect(systemContext).toContain('<skill name="direct">');
     expect(systemContext).toContain("Direct workspace skill.");
-    expect(systemContext).toContain(
-      `<path>${path.join(workspaceDir, "skills", "direct", "SKILL.md")}</path>`,
-    );
     expect(systemContext).toContain('<skill name="nested">');
     expect(systemContext).toContain("Nested workspace skill.");
-    expect(systemContext).toContain(
-      `<path>${path.join(workspaceDir, "skills", "groups", "deep", "nested", "SKILL.md")}</path>`,
-    );
   });
 
   it("unions explicit configured skills with workspace skills using workspace winners and explicit-first order", async () => {
@@ -4571,9 +4560,6 @@ Current user request: fresh clean request
     expect(systemContext).toContain('<skill name="workspace-only">');
     expect(systemContext.match(/<skill name="shared">/g)).toHaveLength(1);
     expect(systemContext).toContain("Workspace shared winner.");
-    expect(systemContext).toContain(
-      `<path>${path.join(workspaceDir, "skills", "shared", "SKILL.md")}</path>`,
-    );
     expect(systemContext).not.toContain("Lower-precedence explicit copy.");
     expect(renderedNames).toEqual([
       "explicit-only",
@@ -4772,13 +4758,9 @@ Current user request: fresh clean request
     );
 
     expect(mainContext).toContain('<skill name="main-only">');
-    expect(mainContext).toContain(`<path>${mainSkillPath}</path>`);
     expect(mainContext).not.toContain('<skill name="librarian-only">');
-    expect(mainContext).not.toContain(librarianSkillPath);
     expect(librarianContext).toContain('<skill name="librarian-only">');
-    expect(librarianContext).toContain(`<path>${librarianSkillPath}</path>`);
     expect(librarianContext).not.toContain('<skill name="main-only">');
-    expect(librarianContext).not.toContain(mainSkillPath);
     expect(resolveAgentWorkspaceDir).toHaveBeenCalledWith(
       expect.anything(),
       "main",

@@ -8,7 +8,7 @@ Build an inventory from the runtime-resolved catalogs instead of walking source 
 
 ### Skills
 
-Call `skill_list` once to obtain the invoking agent's resolved inventory across bundled, workspace, and configured extra skill roots. Do not reconstruct root precedence manually. Use `skill_search` only to narrow an uncertain capability and `skill_view` only when a description cannot establish the boundary.
+Call `skill_list` once to obtain the invoking agent's resolved inventory across bundled, workspace, and configured extra skill roots (returns `name`, `description`, `path`, and `source`). Do not reconstruct root precedence manually. Use `skill_search` only to narrow an uncertain capability and `skill_view` only when a description cannot establish the boundary.
 
 ### Tools
 
