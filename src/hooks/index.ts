@@ -1,21 +1,5 @@
 import { normalizeForKeyword } from "../normalize.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
-import type {
-  PluginHookBeforePromptBuildEvent,
-  PluginHookAgentContext,
-  PluginHookBeforePromptBuildResult,
-  PluginHookAfterToolCallEvent,
-  PluginHookAgentEndEvent,
-  PluginHookBeforeAgentFinalizeEvent,
-  PluginHookBeforeAgentFinalizeResult,
-  PluginHookBeforeToolCallEvent,
-  PluginHookSessionEndEvent,
-  PluginHookSessionContext,
-  PluginHookToolContext,
-  PluginHookToolResultPersistContext,
-  PluginHookToolResultPersistEvent,
-  PluginHookMessageSendingEvent,
-} from "openclaw/plugin-sdk/types";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
 import {
@@ -94,7 +78,24 @@ import type {
   IntentionResult,
 } from "../types.js";
 import { emitPipelineEvent } from "./pipeline-events.js";
-import type { HookDeps, PendingToolCall } from "./types.js";
+import type {
+  HookDeps,
+  PendingToolCall,
+  PluginHookAfterToolCallEvent,
+  PluginHookAgentContext,
+  PluginHookAgentEndEvent,
+  PluginHookBeforeAgentFinalizeEvent,
+  PluginHookBeforeAgentFinalizeResult,
+  PluginHookBeforePromptBuildEvent,
+  PluginHookBeforePromptBuildResult,
+  PluginHookBeforeToolCallEvent,
+  PluginHookMessageSendingEvent,
+  PluginHookSessionContext,
+  PluginHookSessionEndEvent,
+  PluginHookToolContext,
+  PluginHookToolResultPersistContext,
+  PluginHookToolResultPersistEvent,
+} from "./types.js";
 import {
   TurnAssociationRegistry,
   type TurnAssociation,
@@ -2076,7 +2077,7 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    const eventRunId = (event as { runId?: string }).runId;
+    const eventRunId = event.runId;
     const association = resolveAssociatedTurn({
       eventRunId,
       contextRunId: ctx.runId,

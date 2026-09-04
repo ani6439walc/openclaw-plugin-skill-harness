@@ -1,6 +1,6 @@
-import type { PluginHookAgentContext } from "openclaw/plugin-sdk/types";
-import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness";
+import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { logger } from "../../api.js";
+import type { PluginHookAgentContext } from "./types.js";
 
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";

@@ -20,7 +20,7 @@ import { defaultStatsAggregator } from "../stats/index.js";
 import { defaultCatalog } from "../intents/index.js";
 import type { IntentCatalogEntry } from "../types.js";
 import { resolvePackageRoot } from "../file-utils.js";
-import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness";
+import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { TurnAssociationRegistry } from "./turn-associations.js";
 import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import {
@@ -32,7 +32,7 @@ import {
 } from "../constants.js";
 import type { IntentReviewLogWriter } from "../review/log-writer.js";
 
-vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
+vi.mock("openclaw/plugin-sdk/agent-harness-runtime", () => ({
   emitAgentEvent: vi.fn(),
 }));
 

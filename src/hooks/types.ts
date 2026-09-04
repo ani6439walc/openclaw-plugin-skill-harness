@@ -25,6 +25,103 @@ import type {
   TurnAssociationRegistry,
 } from "./turn-associations.js";
 
+export interface PluginHookAgentContext {
+  readonly runId?: string;
+  readonly agentId?: string;
+  readonly sessionKey?: string;
+  readonly sessionId?: string;
+  readonly messageProvider?: string;
+  readonly channelId?: string;
+  readonly trigger?: string;
+  readonly modelProviderId?: string;
+  readonly modelId?: string;
+}
+
+export interface PluginHookBeforePromptBuildEvent {
+  readonly prompt: string;
+  readonly messages: unknown[];
+}
+
+export interface PluginHookBeforePromptBuildResult {
+  readonly systemPrompt?: string;
+  readonly prependContext?: string;
+  readonly appendContext?: string;
+  readonly toolsAllow?: string[];
+  readonly prependSystemContext?: string;
+  readonly appendSystemContext?: string;
+}
+
+export interface PluginHookBeforeToolCallEvent {
+  readonly toolName: string;
+  readonly params: Record<string, unknown>;
+  readonly runId?: string;
+  readonly toolCallId?: string;
+}
+
+export interface PluginHookAfterToolCallEvent extends PluginHookBeforeToolCallEvent {
+  readonly result?: unknown;
+  readonly error?: string;
+  readonly durationMs?: number;
+}
+
+export interface PluginHookToolContext extends PluginHookAgentContext {
+  readonly toolName: string;
+  readonly toolCallId?: string;
+}
+
+export interface PluginHookToolResultPersistContext {
+  readonly agentId?: string;
+  readonly sessionKey?: string;
+  readonly toolName?: string;
+  readonly toolCallId?: string;
+}
+
+export interface PluginHookToolResultPersistEvent {
+  readonly toolName?: string;
+  readonly toolCallId?: string;
+  readonly message: unknown;
+  readonly isSynthetic?: boolean;
+}
+
+export interface PluginHookAgentEndEvent {
+  readonly runId?: string;
+  readonly messages: unknown[];
+  readonly success: boolean;
+  readonly error?: string;
+  readonly durationMs?: number;
+}
+
+export interface PluginHookBeforeAgentFinalizeEvent {
+  readonly runId?: string;
+  readonly sessionId: string;
+}
+
+export interface PluginHookBeforeAgentFinalizeResult {
+  readonly action?: "continue" | "revise" | "finalize";
+  readonly reason?: string;
+  readonly retry?: {
+    readonly instruction: string;
+    readonly idempotencyKey?: string;
+    readonly maxAttempts?: number;
+  };
+}
+
+export interface PluginHookMessageSendingEvent {
+  readonly content: string;
+}
+
+export interface PluginHookSessionContext {
+  readonly agentId?: string;
+  readonly sessionId: string;
+  readonly sessionKey?: string;
+}
+
+export interface PluginHookSessionEndEvent {
+  readonly sessionId: string;
+  readonly sessionKey?: string;
+  readonly messageCount: number;
+}
+
 export interface PendingToolCall {
   name: string;
   params: Record<string, unknown>;

@@ -14,3 +14,5 @@ allowBuilds:
   tree-sitter-typescript: true
 minimumReleaseAgeExclude:
   - '@wei840222/qmd@2026.8.24 || 2026.8.28'
+  - '@openclaw/ai@2026.9.1'
+  - openclaw@2026.9.1
