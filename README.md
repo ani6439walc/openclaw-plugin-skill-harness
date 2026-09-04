@@ -145,6 +145,8 @@ Automate web browsing and interaction.
 **Dynamic routing context (prepended before user message)**:
 
 ```text
+[Fri 2026-09-04 20:35 GMT+8]
+
 <<<BEGIN_SKILL_HARNESS_CONTEXT>>>
 Skill Harness context (advisory, non-user input):
 When relevant, load candidate skills with `skill_view` before proceeding:
@@ -163,13 +165,17 @@ When relevant, load candidate skills with `skill_view` before proceeding:
   </skill_candidates>
 </skill_harness_plugin>
 <<<END_SKILL_HARNESS_CONTEXT>>>
+
+Format index.ts using prettier
 ```
 
 The prompt layout minimizes token consumption:
 
+- Dynamic routing context is separated from the leading timestamp by a blank line and enclosed in dedicated `<<<BEGIN_SKILL_HARNESS_CONTEXT>>>` and `<<<END_SKILL_HARNESS_CONTEXT>>>` delimiters to isolate advisory metadata without triggering OpenClaw's internal runtime stripping or requiring synthetic `[User Message]:` pseudo-headers.
+- An unbracketed advisory header (`Skill Harness context (advisory, non-user input):`) and conditional action directive (`When relevant, load candidate skills with \`skill_view\` before proceeding:`) guide agent execution only when candidate skills are present.
 - `<intent name="${intent}">` merges the intent name and guidance into a single tag.
 - Skill file paths are omitted from prompt injection; agents inspect `path` dynamically via `skill_list` or `skill_view`.
-- Redundant policy blocks are eliminated.
+- Redundant policy blocks and legacy headers are eliminated.
 - Candidate skills nest candidate-scoped `<skill_experience>` identity and keyword metadata; full experience records can be retrieved on demand via `skill_experience`.
 
 ## Basic configuration
