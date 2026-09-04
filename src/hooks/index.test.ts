@@ -23,7 +23,13 @@ import { resolvePackageRoot } from "../file-utils.js";
 import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness";
 import { TurnAssociationRegistry } from "./turn-associations.js";
 import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
-import { USER_MESSAGE_BOUNDARY } from "../constants.js";
+import {
+  INTERNAL_RUNTIME_CONTEXT_BEGIN,
+  INTERNAL_RUNTIME_CONTEXT_END,
+  UNTRUSTED_CONTEXT_HEADER,
+  CANDIDATE_SKILLS_GUIDANCE,
+  USER_MESSAGE_BOUNDARY,
+} from "../constants.js";
 import type { IntentReviewLogWriter } from "../review/log-writer.js";
 
 vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
@@ -2796,18 +2802,21 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
     expect(result?.prependContext).toMatch(
-      /^\n\n\[Skill Harness Context \(advisory, non-user input\)\]:/,
+      /^\n\n<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>/,
     );
     expect(result?.prependContext).toContain(
-      "input)]:\n<skill_harness_plugin>",
+      `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>`,
     );
+    expect(result?.prependContext).not.toContain(CANDIDATE_SKILLS_GUIDANCE);
     expect(result?.prependContext).toContain(
       '<intent name="social-casual">\n    Reply warmly.\n  </intent>',
     );
     expect(result?.prependContext).toContain(
-      `</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}`,
+      `</skill_harness_plugin>\n${INTERNAL_RUNTIME_CONTEXT_END}`,
     );
-    expect(result?.prependContext?.endsWith(USER_MESSAGE_BOUNDARY)).toBe(true);
+    expect(result?.prependContext?.endsWith(INTERNAL_RUNTIME_CONTEXT_END)).toBe(
+      true,
+    );
     expect(result?.prependContext).not.toContain("<task_complexity>");
     expect(result?.prependContext).not.toContain("## Guidelines");
     expect(result?.prependContext).not.toContain("## Instruction Hint");
@@ -4016,6 +4025,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
       expect(result?.prependContext).toContain("<skill_candidates>");
+      expect(result?.prependContext).toContain(CANDIDATE_SKILLS_GUIDANCE);
       expect(result?.prependContext).toContain(
         '<skill name="domain-test-skill">',
       );
@@ -4461,7 +4471,7 @@ Current user request: fresh clean request
     );
     expect(result?.appendSystemContext).toContain("### Configured skills");
     expect(result?.appendSystemContext).toContain(
-      "Review and apply when relevant:",
+      "When relevant, load with `skill_view` before proceeding:",
     );
     expect(result?.appendSystemContext).toContain("<configured_skills>");
     expect(result?.appendSystemContext).toContain(

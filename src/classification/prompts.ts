@@ -1,8 +1,11 @@
 import {
   FALLBACK_INTENT,
   FALLBACK_INTENT_ID,
+  INTERNAL_RUNTIME_CONTEXT_BEGIN,
+  INTERNAL_RUNTIME_CONTEXT_END,
   SKILL_HARNESS_PLUGIN_TAG,
   UNTRUSTED_CONTEXT_HEADER,
+  CANDIDATE_SKILLS_GUIDANCE,
   USER_MESSAGE_BOUNDARY,
 } from "../constants.js";
 import { xmlBlock } from "../xml-format.js";
@@ -322,7 +325,11 @@ export function buildRoutingContext(params: {
   ].filter((block): block is string => Boolean(block));
 
   const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
-  return `${UNTRUSTED_CONTEXT_HEADER}\n${taggedContent}\n\n${USER_MESSAGE_BOUNDARY}`;
+  const header =
+    params.candidates.length > 0
+      ? `${UNTRUSTED_CONTEXT_HEADER}\n${CANDIDATE_SKILLS_GUIDANCE}`
+      : UNTRUSTED_CONTEXT_HEADER;
+  return `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${header}\n${taggedContent}\n${INTERNAL_RUNTIME_CONTEXT_END}`;
 }
 
 function escapeXmlText(value: string | null | undefined): string {
@@ -501,5 +508,5 @@ export function formatConfiguredSkills(
 ): string {
   if (!skills?.length) return "";
   const xml = formatSkillXmlBlock("configured_skills", skills);
-  return `### Configured skills\n\nReview and apply when relevant:\n\n${xml}`;
+  return `### Configured skills\n\nWhen relevant, load with \`skill_view\` before proceeding:\n\n${xml}`;
 }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  INTERNAL_RUNTIME_CONTEXT_BEGIN,
+  INTERNAL_RUNTIME_CONTEXT_END,
   UNTRUSTED_CONTEXT_HEADER,
+  CANDIDATE_SKILLS_GUIDANCE,
   USER_MESSAGE_BOUNDARY,
 } from "../constants.js";
 import {
@@ -51,10 +54,26 @@ describe("sanitizeConversationText", () => {
     ).toBe("進入 inventory 模式先 scan吧");
   });
 
-  it("strips the routing block and its trailing user-message boundary marker", () => {
+  it("strips the routing block wrapped in internal runtime context delimiters", () => {
     expect(
       sanitizeConversationText(
-        `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>\n<intent name="other">\nguidance\n</intent>\n</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}\n\n進入 inventory 模式先 scan吧`,
+        `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>\n<intent name="other">\nguidance\n</intent>\n</skill_harness_plugin>\n${INTERNAL_RUNTIME_CONTEXT_END}\n\n進入 inventory 模式先 scan吧`,
+      ),
+    ).toBe("進入 inventory 模式先 scan吧");
+  });
+
+  it("strips the routing block with candidate skills guidance", () => {
+    expect(
+      sanitizeConversationText(
+        `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${UNTRUSTED_CONTEXT_HEADER}\n${CANDIDATE_SKILLS_GUIDANCE}\n<skill_harness_plugin>\n<intent name="other">\nguidance\n</intent>\n</skill_harness_plugin>\n${INTERNAL_RUNTIME_CONTEXT_END}\n\n進入 inventory 模式先 scan吧`,
+      ),
+    ).toBe("進入 inventory 模式先 scan吧");
+  });
+
+  it("strips the legacy routing block and its trailing user-message boundary marker", () => {
+    expect(
+      sanitizeConversationText(
+        `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>\n<intent name="other">\nguidance\n</intent>\n</skill_harness_plugin>\n\n[User Message]:\n\n進入 inventory 模式先 scan吧`,
       ),
     ).toBe("進入 inventory 模式先 scan吧");
   });
@@ -75,7 +94,7 @@ describe("sanitizeConversationText", () => {
       sanitizeConversationText(
         `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>\nhint\n</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}\n\nreal user request`,
       ),
-    ).not.toContain("Skill Harness Context");
+    ).not.toContain("Skill Harness");
   });
 });
 

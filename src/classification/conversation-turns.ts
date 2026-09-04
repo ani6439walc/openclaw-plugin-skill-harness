@@ -1,5 +1,8 @@
 import {
+  INTERNAL_RUNTIME_CONTEXT_BEGIN,
+  INTERNAL_RUNTIME_CONTEXT_END,
   UNTRUSTED_CONTEXT_HEADER,
+  CANDIDATE_SKILLS_GUIDANCE,
   USER_MESSAGE_BOUNDARY,
 } from "../constants.js";
 import type { RecentTurn } from "../types.js";
@@ -14,6 +17,7 @@ const ESCAPED_USER_MESSAGE_BOUNDARY = USER_MESSAGE_BOUNDARY.replace(
   /[.*+?^${}()|[\]\\]/g,
   "\\$&",
 );
+const LEGACY_USER_MESSAGE_BOUNDARY = "\\[User Message\\]:";
 const OPENCLAW_ASSEMBLED_CONTEXT_HEADER =
   "OpenClaw assembled context for this turn:";
 const CONTEXT_WARNINGS_HEADER = "--- Context Warnings ---";
@@ -23,7 +27,7 @@ const CONVERSATION_CONTEXT_END_TAG = "</conversation_context>";
 // Build per call: the /g flag mutates lastIndex on shared RegExp instances.
 function routingBlockWithOptionalBoundary(): RegExp {
   return new RegExp(
-    `<skill_harness_plugin\\b[^>]*>[\\s\\S]*?<\\/skill_harness_plugin>\\s*(?:${ESCAPED_USER_MESSAGE_BOUNDARY})?\\s*`,
+    `(?:<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\\s*)?<skill_harness_plugin\\b[^>]*>[\\s\\S]*?<\\/skill_harness_plugin>\\s*(?:${ESCAPED_USER_MESSAGE_BOUNDARY}|${LEGACY_USER_MESSAGE_BOUNDARY})?\\s*`,
     "gi",
   );
 }
@@ -33,6 +37,14 @@ export function sanitizeConversationText(text: string): string {
   return text
     .split(UNTRUSTED_CONTEXT_HEADER)
     .join(" ")
+    .split("[Skill Harness Context (advisory, non-user input)]:")
+    .join(" ")
+    .split(CANDIDATE_SKILLS_GUIDANCE)
+    .join(" ")
+    .replace(
+      /<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>/gi,
+      " ",
+    )
     .replace(routingBlockWithOptionalBoundary(), " ")
     .replace(/<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>/gi, " ")
     .replace(

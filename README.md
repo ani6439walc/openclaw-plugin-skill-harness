@@ -133,7 +133,7 @@ Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness
 ```markdown
 ### Configured skills
 
-Review and apply when relevant:
+When relevant, load with `skill_view` before proceeding:
 
 <configured_skills>
 <skill name="browser">
@@ -145,7 +145,9 @@ Automate web browsing and interaction.
 **Dynamic routing context (prepended before user message)**:
 
 ```text
-[Skill Harness Context (advisory, non-user input)]:
+<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>
+Skill Harness context (advisory, non-user input):
+When relevant, load candidate skills with `skill_view` before proceeding:
 <skill_harness_plugin>
   <intent name="format">
     Format the specified files following repository style conventions.
@@ -160,8 +162,7 @@ Automate web browsing and interaction.
     </skill>
   </skill_candidates>
 </skill_harness_plugin>
-
-[User Message]:
+<<<END_OPENCLAW_INTERNAL_CONTEXT>>>
 ```
 
 The prompt layout minimizes token consumption:

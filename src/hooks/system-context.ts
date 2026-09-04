@@ -2,7 +2,7 @@ export const SKILL_HARNESS_SYSTEM_CONTEXT = `## Skills (mandatory)
 
 Before acting, actively check whether a reusable skill can improve correctness, safety, or execution quality. Skills contain specialized workflows, exact commands, project conventions, pitfalls, and verification procedures that are more reliable than improvising from general knowledge.
 
-If an injected skill candidate matches or is even partially relevant to the current request, load it with \`skill_view\` before proceeding and follow the relevant instructions. Do not skip a relevant skill merely because the task appears familiar or could be handled with general-purpose tools.
+If any configured skill or injected skill candidate matches or is even partially relevant to the current request, load it with \`skill_view\` before proceeding and follow the relevant instructions. Do not skip a relevant skill merely because the task appears familiar or could be handled with general-purpose tools.
 
 Use only the Skill Harness tools exposed in the current turn. Do not call or depend on a tool that is absent from the active tool set. When a workflow supplies a narrower tool allowlist, a stricter tool-call budget, or more specific discovery instructions, follow that narrower workflow.
 

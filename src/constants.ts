@@ -12,9 +12,15 @@ export const DEFAULT_RECENT_ASSISTANT_TURNS = 5;
 export const DEFAULT_RECENT_USER_CHARS = 220;
 export const DEFAULT_RECENT_ASSISTANT_CHARS = 180;
 export const SKILL_HARNESS_PLUGIN_TAG = "skill_harness_plugin";
+export const INTERNAL_RUNTIME_CONTEXT_BEGIN =
+  "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>";
+export const INTERNAL_RUNTIME_CONTEXT_END =
+  "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>";
 export const UNTRUSTED_CONTEXT_HEADER =
-  "[Skill Harness Context (advisory, non-user input)]:";
-export const USER_MESSAGE_BOUNDARY = "[User Message]:";
+  "Skill Harness context (advisory, non-user input):";
+export const CANDIDATE_SKILLS_GUIDANCE =
+  "When relevant, load candidate skills with `skill_view` before proceeding:";
+export const USER_MESSAGE_BOUNDARY = INTERNAL_RUNTIME_CONTEXT_END;
 
 export const FALLBACK_INTENT_ID = "other";
 export const FALLBACK_INTENT: IntentDefinition = {

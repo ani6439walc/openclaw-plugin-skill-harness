@@ -12,7 +12,14 @@ import type {
   IntentionResult,
   RecentTurn,
 } from "../types.js";
-import { FALLBACK_INTENT_ID, USER_MESSAGE_BOUNDARY } from "../constants.js";
+import {
+  FALLBACK_INTENT_ID,
+  INTERNAL_RUNTIME_CONTEXT_BEGIN,
+  INTERNAL_RUNTIME_CONTEXT_END,
+  UNTRUSTED_CONTEXT_HEADER,
+  CANDIDATE_SKILLS_GUIDANCE,
+  USER_MESSAGE_BOUNDARY,
+} from "../constants.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
 
 function conversationContextFrom(prompt: string): string {
@@ -115,6 +122,9 @@ describe("buildRoutingContext", () => {
       experiences: [experience],
     });
 
+    expect(result).toContain(
+      `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${UNTRUSTED_CONTEXT_HEADER}\n${CANDIDATE_SKILLS_GUIDANCE}\n<skill_harness_plugin>`,
+    );
     expect(result).toContain("<skill_harness_plugin>");
     expect(result).toContain(
       '  <intent name="architecture">\n    Render the selected skills with stable evidence.\n  </intent>',
@@ -143,10 +153,11 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("<body>");
     expect(result).not.toContain("/private/SKILL.md");
     expect(result).not.toContain("/private/experience.md");
+    expect(result.startsWith(INTERNAL_RUNTIME_CONTEXT_BEGIN)).toBe(true);
     expect(result).toContain(
-      `</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}`,
+      `</skill_harness_plugin>\n${INTERNAL_RUNTIME_CONTEXT_END}`,
     );
-    expect(result.endsWith(USER_MESSAGE_BOUNDARY)).toBe(true);
+    expect(result.endsWith(INTERNAL_RUNTIME_CONTEXT_END)).toBe(true);
   });
 
   it("omits empty optional blocks and renders candidate-scoped experiences only within their matching skill", () => {
@@ -174,6 +185,10 @@ describe("buildRoutingContext", () => {
       candidates: [],
       experiences: [],
     });
+    expect(empty).toContain(
+      `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>`,
+    );
+    expect(empty).not.toContain(CANDIDATE_SKILLS_GUIDANCE);
     expect(empty).not.toContain("<skill_candidates>");
     expect(empty).not.toContain("<skill_experiences>");
     expect(empty).not.toContain("<task_complexity>");
@@ -239,7 +254,9 @@ describe("formatConfiguredSkills", () => {
     );
     expect(formatted).not.toContain("<path>");
     expect(formatted).toContain("### Configured skills");
-    expect(formatted).toContain("Review and apply when relevant:");
+    expect(formatted).toContain(
+      "When relevant, load with `skill_view` before proceeding:",
+    );
   });
 
   it("returns empty string when skills list is empty or undefined", () => {
