@@ -7,7 +7,11 @@ import matter from "gray-matter";
 import { logger } from "../../api.js";
 import { withFileLock } from "../file-utils.js";
 import type { AvailableSkill } from "../skills/types.js";
-import type { ResolvedQmdConfig } from "../types.js";
+import type {
+  ResolvedQmdConfig,
+  ResolvedSkillHarnessPluginConfig,
+  ResolvedSkillsConfig,
+} from "../types.js";
 import { normalizeEmbeddingModel } from "./provider-resolver.js";
 import { weightedReciprocalRankFusion } from "./rrf.js";
 
@@ -314,8 +318,12 @@ async function referenceFingerprint(skillDir: string): Promise<string[]> {
 
 async function snapshotFingerprint(
   skills: readonly AvailableSkill[],
-  config: ResolvedQmdConfig,
+  config:
+    | ResolvedQmdConfig
+    | { qmd: ResolvedQmdConfig }
+    | ResolvedSkillHarnessPluginConfig,
 ): Promise<string> {
+  const qmd = "qmd" in config ? config.qmd : config;
   const ordered = [...skills].sort((left, right) =>
     left.name.localeCompare(right.name),
   );
@@ -339,8 +347,8 @@ async function snapshotFingerprint(
     JSON.stringify({
       skills: skillEntries,
       embedding: {
-        model: normalizeEmbeddingModel(config.embedding.model),
-        dimension: config.embedding.dimension,
+        model: normalizeEmbeddingModel(qmd.embedding.model),
+        dimension: qmd.embedding.dimension,
       },
     }),
   );
@@ -615,9 +623,14 @@ function parseStoreHits(params: {
   return hits;
 }
 
+export type SkillQmdIndexConfigProvider = () =>
+  | ResolvedQmdConfig
+  | { qmd: ResolvedQmdConfig; skills?: ResolvedSkillsConfig }
+  | ResolvedSkillHarnessPluginConfig;
+
 export function createSkillQmdIndex(params: {
   dataRoot: string;
-  config: () => ResolvedQmdConfig;
+  config: SkillQmdIndexConfigProvider;
   createStore?: QmdCreateStore;
   nowMs?: () => number;
   setTimer?: (callback: () => void, delayMs: number) => unknown;
@@ -933,7 +946,8 @@ export function createSkillQmdIndex(params: {
       root,
       async () => {
         try {
-          const qmd = params.config();
+          const rawConfig = params.config();
+          const qmd = "qmd" in rawConfig ? rawConfig.qmd : rawConfig;
           if (
             !qmd.embedding.baseUrl ||
             !qmd.embedding.model ||
@@ -1177,20 +1191,25 @@ export function createSkillQmdIndex(params: {
       const activeStore = state?.store;
       if (!activeStore) return;
 
-      const qmd = params.config();
+      const rawConfig = params.config();
+      const skills = "skills" in rawConfig ? rawConfig.skills : undefined;
+      const collectionWeights = skills?.search?.collectionWeights ??
+        ("skillSearch" in (rawConfig as Record<string, unknown>)
+          ? (rawConfig as Record<string, any>).skillSearch?.collectionWeights
+          : undefined) ?? { meta: 1, body: 1, references: 1 };
       const candidateLimit = Math.max(limit, DEFAULT_CANDIDATE_LIMIT);
       const collections = [
         {
           name: META_COLLECTION,
-          weight: qmd.skillSearch.collectionWeights.meta,
+          weight: collectionWeights.meta,
         },
         {
           name: BODY_COLLECTION,
-          weight: qmd.skillSearch.collectionWeights.body,
+          weight: collectionWeights.body,
         },
         {
           name: REFS_COLLECTION,
-          weight: qmd.skillSearch.collectionWeights.references,
+          weight: collectionWeights.references,
         },
       ];
 

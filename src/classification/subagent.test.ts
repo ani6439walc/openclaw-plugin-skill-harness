@@ -26,8 +26,12 @@ describe("model resolution", () => {
         api,
         "main",
         resolveConfig({
-          model: "bifrost/explicit",
-          modelFallback: "google/fallback",
+          routing: {
+            classifier: {
+              model: "bifrost/explicit",
+              modelFallback: "google/fallback",
+            },
+          },
         }),
         currentRun,
       ),
@@ -39,7 +43,9 @@ describe("model resolution", () => {
       getModelRef(
         api,
         "main",
-        resolveConfig({ modelFallback: "google/fallback" }),
+        resolveConfig({
+          routing: { classifier: { modelFallback: "google/fallback" } },
+        }),
         currentRun,
       ),
     ).toEqual({ provider: "openai", model: "session-model" });
@@ -50,7 +56,9 @@ describe("model resolution", () => {
       getModelRef(
         api,
         "main",
-        resolveConfig({ modelFallback: "google/fallback" }),
+        resolveConfig({
+          routing: { classifier: { modelFallback: "google/fallback" } },
+        }),
         {},
       ),
     ).toEqual({ provider: "anthropic", model: "agent-primary" });
@@ -61,7 +69,9 @@ describe("model resolution", () => {
       getModelRef(
         { config: {} } as OpenClawPluginApi,
         "main",
-        resolveConfig({ modelFallback: "google/fallback" }),
+        resolveConfig({
+          routing: { classifier: { modelFallback: "google/fallback" } },
+        }),
         {},
       ),
     ).toEqual({ provider: "google", model: "fallback" });
@@ -245,7 +255,9 @@ describe("buildIntentionEmbeddedRunParams", () => {
     const result = buildIntentionEmbeddedRunParams({
       params: {
         api: { config: { plugins: {} } } as unknown as OpenClawPluginApi,
-        config: resolveConfig({ timeoutMs: 4321, thinking: "low" }),
+        config: resolveConfig({
+          routing: { classifier: { timeoutMs: 4321, thinking: "low" } },
+        }),
         agentId: "main",
         messageProvider: "telegram",
         modelRef: { provider: "openai", model: "gpt-5-mini" },

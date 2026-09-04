@@ -39,11 +39,28 @@ export type QmdEmbeddingConfig = QmdEndpointConfig & {
   dimension?: number;
 };
 
+export type ResolvedScopeConfig = {
+  agents: string[];
+  chatTypes: string[];
+  allowedChatIds: string[];
+  deniedChatIds: string[];
+};
+
+export type ResolvedClassifierConfig = {
+  model: string | undefined;
+  modelFallback: string | undefined;
+  thinking: ThinkLevel;
+  timeoutMs: number;
+  queryMode: "message" | "recent" | "full";
+  contextWindow: ContextWindow;
+};
+
 export type ResolvedRoutingConfig = {
-  qmd: {
+  thresholds: {
     directRouteMinScore: number;
     minCandidateScore: number;
   };
+  classifier: ResolvedClassifierConfig;
 };
 
 export type ResolvedSkillSearchConfig = {
@@ -53,6 +70,11 @@ export type ResolvedSkillSearchConfig = {
     references: number;
   };
 };
+
+export type ResolvedSkillsConfig = {
+  search: ResolvedSkillSearchConfig;
+};
+
 export type ResolvedQmdConfig = {
   timeoutMs: number;
   indexRefreshIntervalSeconds: number;
@@ -62,22 +84,13 @@ export type ResolvedQmdConfig = {
     Omit<QmdEmbeddingConfig, "baseUrl" | "model" | "dimension">;
   expansion: Required<Pick<QmdEndpointConfig, "baseUrl" | "model">> &
     Omit<QmdEndpointConfig, "baseUrl" | "model">;
-  skillSearch: ResolvedSkillSearchConfig;
 };
 
 export type ResolvedSkillHarnessPluginConfig = {
-  agents: string[];
-  model: string | undefined;
-  modelFallback: string | undefined;
-  thinking: ThinkLevel;
-  allowedChatTypes: string[];
-  allowedChatIds: string[];
-  deniedChatIds: string[];
-  queryMode: "message" | "recent" | "full";
-  contextWindow: ContextWindow;
-  timeoutMs: number;
-  qmd: ResolvedQmdConfig;
+  scope: ResolvedScopeConfig;
   routing: ResolvedRoutingConfig;
+  skills: ResolvedSkillsConfig;
+  qmd: ResolvedQmdConfig;
   review: ResolvedReviewConfig;
 };
 

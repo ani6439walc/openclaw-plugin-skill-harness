@@ -182,13 +182,32 @@ Configure Skill Harness in `openclaw.json`:
       "skill-harness": {
         enabled: true,
         config: {
-          agents: ["main"],
-          allowedChatTypes: ["direct"],
-          model: "google/gemini-3-flash",
-          modelFallback: "openai/gpt-5-mini",
-          thinking: "medium",
-          queryMode: "recent",
-          timeoutMs: 5000,
+          scope: {
+            agents: ["main"],
+            chatTypes: ["direct"],
+          },
+          routing: {
+            classifier: {
+              model: "google/gemini-3-flash",
+              modelFallback: "openai/gpt-5-mini",
+              thinking: "medium",
+              queryMode: "recent",
+              timeoutMs: 5000,
+            },
+            thresholds: {
+              directRouteMinScore: 0.85,
+              minCandidateScore: 0.35,
+            },
+          },
+          skills: {
+            search: {
+              collectionWeights: {
+                meta: 1,
+                body: 1,
+                references: 1,
+              },
+            },
+          },
           qmd: {
             embedding: {
               baseUrl: "https://your-embedding-endpoint/v1",
@@ -199,13 +218,6 @@ Configure Skill Harness in `openclaw.json`:
               baseUrl: "https://your-openai-compatible-endpoint/v1",
               model: "your-expansion-model",
               apiKey: "${QMD_EXPANSION_API_KEY}",
-            },
-          },
-          // Optional. Omit this entire block to keep these defaults.
-          routing: {
-            qmd: {
-              directRouteMinScore: 0.85,
-              minCandidateScore: 0.35,
             },
           },
           review: {
@@ -220,28 +232,29 @@ Configure Skill Harness in `openclaw.json`:
 
 ### Important options
 
-| Option                                      | Default            | Purpose                                                                                                                                                                                                                                                                                                              |
-| ------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agents`                                    | `["main"]`         | OpenClaw agent IDs eligible for dynamic intent routing.                                                                                                                                                                                                                                                              |
-| `allowedChatTypes`                          | `["direct"]`       | Chat types that may run dynamic routing.                                                                                                                                                                                                                                                                             |
-| `allowedChatIds` / `deniedChatIds`          | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                                                                                                                                                                                                                                          |
-| `model` / `modelFallback`                   | unset              | Scanner model and last-resort resolution fallback.                                                                                                                                                                                                                                                                   |
-| `thinking`                                  | `"medium"`         | Intent-classifier thinking level.                                                                                                                                                                                                                                                                                    |
-| `queryMode` / `contextWindow`               | `"recent"`         | Scanner context and its limits.                                                                                                                                                                                                                                                                                      |
-| `timeoutMs`                                 | `5000`             | Intent-classifier time budget.                                                                                                                                                                                                                                                                                       |
-| `qmd.embedding` / `expansion`               | required           | Remote endpoint and model for mandatory QMD hybrid routing. Supports OpenClaw `provider/model` syntax (e.g. `bifrost/text-embedding-3-small`) to auto-resolve `baseUrl` and `apiKey` from OpenClaw's `models.providers`. Explicit `baseUrl` and `apiKey` remain supported. `embedding.dimension` defaults to `1536`. |
-| `qmd.timeoutMs`                             | `timeoutMs`        | Per-request QMD embedding and expansion timeout.                                                                                                                                                                                                                                                                     |
-| `qmd.skillSearch.collectionWeights`         | `1/1/1`            | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.                                                                                                                                                                                                                   |
-| `qmd.indexRefreshIntervalSeconds`           | `300`              | Seconds between source checks for QMD intent and skill indexes; `0` disables subsequent automatic checks.                                                                                                                                                                                                            |
-| `routing.qmd.directRouteMinScore`           | `0.85`             | Inclusive QMD score required for direct routing bypass in Step 1 and Step 2.                                                                                                                                                                                                                                         |
-| `routing.qmd.minCandidateScore`             | `0.35`             | Inclusive QMD score floor for classifier candidate projection in Step 3.                                                                                                                                                                                                                                             |
-| `review.enabled`                            | `false`            | Enables post-turn Intent Review.                                                                                                                                                                                                                                                                                     |
-| `review.thinking` / `timeoutSeconds`        | `"medium"` / `300` | Intent Review thinking level and time budget in seconds.                                                                                                                                                                                                                                                             |
-| `review.keywordCoverage.everyAcceptedTurns` | `50`               | Cadence for automatic cross-session keyword-coverage review.                                                                                                                                                                                                                                                         |
-| `review.triggers.skillPlacement.enabled`    | `true`             | Enables bounded placement review for one eligible resolved skill.                                                                                                                                                                                                                                                    |
-| `review.triggers.*.enabled`                 | `true`             | Enables the individual ordinary Review trigger; thresholds remain in the plugin manifest.                                                                                                                                                                                                                            |
+| Option                                           | Default                        | Purpose                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scope.agents`                                   | `["main"]`                     | OpenClaw agent IDs eligible for dynamic intent routing.                                                                                                                                                                                                                                                              |
+| `scope.chatTypes`                                | `["direct"]`                   | Chat types that may run dynamic routing (`"direct"`, `"group"`, `"channel"`, `"explicit"`).                                                                                                                                                                                                                          |
+| `scope.allowedChatIds` / `deniedChatIds`         | `[]`                           | Optional chat allow-list and deny-list for dynamic routing.                                                                                                                                                                                                                                                          |
+| `routing.thresholds.directRouteMinScore`         | `0.85`                         | Inclusive QMD score required for direct routing bypass in Step 1 and Step 2.                                                                                                                                                                                                                                         |
+| `routing.thresholds.minCandidateScore`           | `0.35`                         | Inclusive QMD score floor for classifier candidate projection in Step 3.                                                                                                                                                                                                                                             |
+| `routing.classifier.model` / `modelFallback`     | unset                          | Scanner model and last-resort resolution fallback.                                                                                                                                                                                                                                                                   |
+| `routing.classifier.thinking`                    | `"medium"`                     | Intent-classifier thinking level.                                                                                                                                                                                                                                                                                    |
+| `routing.classifier.queryMode` / `contextWindow` | `"recent"` / unset             | Scanner context and its limits.                                                                                                                                                                                                                                                                                      |
+| `routing.classifier.timeoutMs`                   | `5000`                         | Intent-classifier time budget in milliseconds.                                                                                                                                                                                                                                                                       |
+| `skills.search.collectionWeights`                | `1/1/1`                        | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.                                                                                                                                                                                                                   |
+| `qmd.embedding` / `expansion`                    | required                       | Remote endpoint and model for mandatory QMD hybrid routing. Supports OpenClaw `provider/model` syntax (e.g. `bifrost/text-embedding-3-small`) to auto-resolve `baseUrl` and `apiKey` from OpenClaw's `models.providers`. Explicit `baseUrl` and `apiKey` remain supported. `embedding.dimension` defaults to `1536`. |
+| `qmd.timeoutMs`                                  | `routing.classifier.timeoutMs` | Per-request QMD embedding and expansion timeout.                                                                                                                                                                                                                                                                     |
+| `qmd.indexRefreshIntervalSeconds`                | `300`                          | Seconds between source checks for QMD intent and skill indexes; `0` disables subsequent automatic checks.                                                                                                                                                                                                            |
+| `review.enabled`                                 | `false`                        | Enables post-turn Intent Review.                                                                                                                                                                                                                                                                                     |
+| `review.model` / `review.modelFallback`          | unset                          | Review model and last-resort resolution fallback (defaults to classifier model/fallback if unset).                                                                                                                                                                                                                   |
+| `review.thinking` / `timeoutSeconds`             | `"medium"` / `300`             | Intent Review thinking level and time budget in seconds.                                                                                                                                                                                                                                                             |
+| `review.keywordCoverage.everyAcceptedTurns`      | `50`                           | Cadence for automatic cross-session keyword-coverage review.                                                                                                                                                                                                                                                         |
+| `review.triggers.skillPlacement.enabled`         | `true`                         | Enables bounded placement review for one eligible resolved skill.                                                                                                                                                                                                                                                    |
+| `review.triggers.*.enabled`                      | `true`                         | Enables the individual ordinary Review trigger; thresholds remain in the plugin manifest.                                                                                                                                                                                                                            |
 
-Intent Classifier and Intent Review resolve models in this order: their explicit configured model, the top-level model when applicable, current session model, agent primary model, then their configured fallback. A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
+Intent Classifier and Intent Review resolve models in this order: their explicit configured model (`routing.classifier.model` or `review.model`), current session model, agent primary model, then their configured fallback (`routing.classifier.modelFallback` or `review.modelFallback`). A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
 ### Upgrade from the removed instruction writer to mandatory QMD routing
 

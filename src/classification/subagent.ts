@@ -105,8 +105,8 @@ export function getModelRef(
   return resolveModelRefChain(
     api,
     agentId,
-    [config.model, currentModelRef],
-    [config.modelFallback],
+    [config.routing.classifier.model, currentModelRef],
+    [config.routing.classifier.modelFallback],
   );
 }
 
@@ -123,8 +123,8 @@ export function getReviewModelRef(
   return resolveModelRefChain(
     api,
     agentId,
-    [config.review.model ?? config.model, currentModelRef],
-    [config.review.modelFallback ?? config.modelFallback],
+    [config.review.model ?? config.routing.classifier.model, currentModelRef],
+    [config.review.modelFallback ?? config.routing.classifier.modelFallback],
   );
 }
 
@@ -204,7 +204,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     prompt: params.prompt,
     provider: params.params.modelRef.provider,
     model: params.params.modelRef.model,
-    timeoutMs: params.params.config.timeoutMs,
+    timeoutMs: params.params.config.routing.classifier.timeoutMs,
     runId: params.subagentSessionId,
     workspaceDir,
     agentDir: workspaceDir,
@@ -214,7 +214,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     promptMode: "none" as const,
     toolsAllow: [],
     disableTools: true,
-    thinkLevel: params.params.config.thinking,
+    thinkLevel: params.params.config.routing.classifier.thinking,
   };
 }
 

@@ -304,7 +304,7 @@ export function createPlugin(
         dataRoot,
         config: () => {
           refreshLiveConfigFromRuntime();
-          return config.qmd;
+          return { qmd: config.qmd, skills: config.skills };
         },
       });
       const tracker = SessionTracker.create(dataRoot);
@@ -413,7 +413,7 @@ export function createPlugin(
       scheduleQmdIndexRefresh();
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
-        timeoutMs: config.timeoutMs * 2 + 1_500,
+        timeoutMs: config.routing.classifier.timeoutMs * 2 + 1_500,
       });
       api.on("before_tool_call", handlers.onBeforeToolCall);
       api.on("after_tool_call", handlers.onAfterToolCall);

@@ -44,9 +44,10 @@ const qmdConfig: ResolvedQmdConfig = {
     model: "expand-model",
     apiKey: "expand-key",
   },
-  skillSearch: {
-    collectionWeights: { meta: 2, body: 1, references: 0.5 },
-    indexRefreshIntervalSeconds: 300,
+  skills: {
+    search: {
+      collectionWeights: { meta: 2, body: 1, references: 0.5 },
+    },
   },
 };
 
@@ -616,9 +617,10 @@ describe("createSkillQmdIndex", () => {
         baseUrl: "https://other.example.test/v1",
       },
       expansion: { ...qmdConfig.expansion, model: "other-expand-model" },
-      skillSearch: {
-        ...qmdConfig.skillSearch,
-        collectionWeights: { meta: 3, body: 2, references: 1 },
+      skills: {
+        search: {
+          collectionWeights: { meta: 3, body: 2, references: 1 },
+        },
       },
     };
     index.schedule("main", [skill]);

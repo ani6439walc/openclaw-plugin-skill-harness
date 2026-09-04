@@ -616,8 +616,8 @@ export function createHookHandlers(deps: HookDeps) {
     );
     const conversation = limitConversationTurns(
       allTurns,
-      refreshedConfig.queryMode,
-      refreshedConfig.contextWindow,
+      refreshedConfig.routing.classifier.queryMode,
+      refreshedConfig.routing.classifier.contextWindow,
     );
 
     return { latestUserMessage, historicalIntents, conversation };
@@ -658,7 +658,7 @@ export function createHookHandlers(deps: HookDeps) {
         topKeywordHit &&
         matchedKeywordIntent &&
         topKeywordHit.score >=
-          params.refreshedConfig.routing.qmd.directRouteMinScore
+          params.refreshedConfig.routing.thresholds.directRouteMinScore
       ) {
         emitPipelineEvent(
           params.ctx,
@@ -724,7 +724,8 @@ export function createHookHandlers(deps: HookDeps) {
       if (
         topHit &&
         topIntent &&
-        topHit.score >= params.refreshedConfig.routing.qmd.directRouteMinScore
+        topHit.score >=
+          params.refreshedConfig.routing.thresholds.directRouteMinScore
       ) {
         emitPipelineEvent(
           params.ctx,
@@ -772,7 +773,8 @@ export function createHookHandlers(deps: HookDeps) {
         intents: params.availableIntents,
         qmdHits,
         histories: params.historicalIntents,
-        minCandidateScore: params.refreshedConfig.routing.qmd.minCandidateScore,
+        minCandidateScore:
+          params.refreshedConfig.routing.thresholds.minCandidateScore,
       });
     } catch (error) {
       logger.warn("intent candidate projection failed; using full catalog", {
@@ -1789,7 +1791,7 @@ export function createHookHandlers(deps: HookDeps) {
               model: params.modelRef.model,
               modelFallback:
                 params.resolvedConfig.review.modelFallback ??
-                params.resolvedConfig.modelFallback,
+                params.resolvedConfig.routing.classifier.modelFallback,
               thinking: params.resolvedConfig.review.thinking,
               timeoutMs: params.resolvedConfig.review.timeoutSeconds * 1_000,
             },

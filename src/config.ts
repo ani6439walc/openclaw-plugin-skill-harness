@@ -9,10 +9,14 @@ import {
 } from "./constants.js";
 import type {
   ContextWindow,
+  ResolvedClassifierConfig,
   ResolvedQmdConfig,
+  ResolvedReviewConfig,
   ResolvedRoutingConfig,
+  ResolvedScopeConfig,
   ResolvedSkillHarnessPluginConfig,
   ResolvedSkillSearchConfig,
+  ResolvedSkillsConfig,
 } from "./types.js";
 import type { OpenClawConfig } from "../api.js";
 import { resolveQmdEndpoint } from "./qmd/provider-resolver.js";
@@ -38,6 +42,45 @@ const DEFAULT_CONTEXT_WINDOW: ContextWindow = {
   },
 };
 
+const DEFAULT_SCOPE: ResolvedScopeConfig = {
+  agents: ["main"],
+  chatTypes: ["direct"],
+  allowedChatIds: [],
+  deniedChatIds: [],
+};
+
+const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
+  model: undefined,
+  modelFallback: undefined,
+  thinking: "medium",
+  timeoutMs: DEFAULT_TIMEOUT_MS,
+  queryMode: DEFAULT_QUERY_MODE,
+  contextWindow: DEFAULT_CONTEXT_WINDOW,
+};
+
+const DEFAULT_ROUTING: ResolvedRoutingConfig = {
+  thresholds: {
+    directRouteMinScore: 0.85,
+    minCandidateScore: 0.35,
+  },
+  classifier: DEFAULT_CLASSIFIER,
+};
+
+const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
+  collectionWeights: { meta: 1, body: 1, references: 1 },
+};
+
+const DEFAULT_SKILLS: ResolvedSkillsConfig = {
+  search: DEFAULT_SKILL_SEARCH,
+};
+
+const DEFAULT_QMD: ResolvedQmdConfig = {
+  timeoutMs: DEFAULT_TIMEOUT_MS,
+  indexRefreshIntervalSeconds: 300,
+  embedding: { baseUrl: "", model: "", dimension: 1536 },
+  expansion: { baseUrl: "", model: "" },
+};
+
 const DEFAULT_REVIEW = {
   enabled: false,
   model: undefined,
@@ -61,40 +104,13 @@ const DEFAULT_REVIEW = {
   },
 } as const;
 
-const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
-  collectionWeights: { meta: 1, body: 1, references: 1 },
-};
-
-const DEFAULT_QMD: ResolvedQmdConfig = {
-  timeoutMs: DEFAULT_TIMEOUT_MS,
-  indexRefreshIntervalSeconds: 300,
-  embedding: { baseUrl: "", model: "", dimension: 1536 },
-  expansion: { baseUrl: "", model: "" },
-  skillSearch: DEFAULT_SKILL_SEARCH,
-};
-
-const DEFAULT_ROUTING: ResolvedRoutingConfig = {
-  qmd: {
-    directRouteMinScore: 0.85,
-    minCandidateScore: 0.35,
-  },
-};
-
-const DEFAULT_CONFIG = {
-  agents: ["main"],
-  model: undefined,
-  modelFallback: undefined,
-  thinking: "medium",
-  allowedChatTypes: ["direct"],
-  allowedChatIds: [],
-  deniedChatIds: [],
-  queryMode: DEFAULT_QUERY_MODE,
-  contextWindow: DEFAULT_CONTEXT_WINDOW,
-  timeoutMs: DEFAULT_TIMEOUT_MS,
-  qmd: DEFAULT_QMD,
+const DEFAULT_CONFIG: ResolvedSkillHarnessPluginConfig = {
+  scope: DEFAULT_SCOPE,
   routing: DEFAULT_ROUTING,
+  skills: DEFAULT_SKILLS,
+  qmd: DEFAULT_QMD,
   review: DEFAULT_REVIEW,
-} satisfies ResolvedSkillHarnessPluginConfig;
+};
 
 const StringListSchema = z
   .union([
@@ -122,6 +138,26 @@ const boundedInt = (fallback: number, min: number, max: number) =>
     .catch(fallback)
     .transform((value) => clampInt(value, fallback, min, max));
 
+const ScopeSchema = z
+  .object({
+    agents: stringListWithDefault(["main"]),
+    chatTypes: z
+      .union([z.string().transform((val) => [val]), z.array(z.unknown())])
+      .catch(["direct"])
+      .transform((values: unknown[]) => {
+        const filtered = values
+          .filter((v): v is string => typeof v === "string")
+          .map((v) => v.trim())
+          .filter((v): v is "direct" | "group" | "channel" | "explicit" =>
+            ["direct", "group", "channel", "explicit"].includes(v),
+          );
+        return filtered.length > 0 ? filtered : ["direct"];
+      }),
+    allowedChatIds: StringListSchema,
+    deniedChatIds: StringListSchema,
+  })
+  .catch(DEFAULT_SCOPE);
+
 const UserContextWindowSchema = z
   .object({
     turns: boundedInt(DEFAULT_RECENT_USER_TURNS, 0, 20),
@@ -143,10 +179,108 @@ const ContextWindowSchema = z
   })
   .catch(DEFAULT_CONTEXT_WINDOW);
 
-const enabledSchema = z.boolean().catch(true);
 const ThinkLevelSchema = z
   .enum(["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"])
   .catch("medium");
+
+const ClassifierSchema = z
+  .object({
+    model: z.string().optional().catch(undefined),
+    modelFallback: z.string().optional().catch(undefined),
+    thinking: ThinkLevelSchema,
+    timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
+    queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
+    contextWindow: ContextWindowSchema,
+  })
+  .catch(DEFAULT_CLASSIFIER)
+  .transform((val): ResolvedClassifierConfig => ({
+    model: val.model ?? undefined,
+    modelFallback: val.modelFallback ?? undefined,
+    thinking: val.thinking,
+    timeoutMs: val.timeoutMs,
+    queryMode: val.queryMode,
+    contextWindow: val.contextWindow,
+  }));
+
+const RoutingScoreSchema = (fallback: number) =>
+  z.number().min(0).max(1).optional().default(fallback);
+
+const RoutingThresholdsSchema = z
+  .object({
+    directRouteMinScore: RoutingScoreSchema(
+      DEFAULT_ROUTING.thresholds.directRouteMinScore,
+    ),
+    minCandidateScore: RoutingScoreSchema(
+      DEFAULT_ROUTING.thresholds.minCandidateScore,
+    ),
+  })
+  .strict()
+  .default(DEFAULT_ROUTING.thresholds)
+  .superRefine((thresholds, context) => {
+    const { directRouteMinScore, minCandidateScore } = thresholds;
+    if (minCandidateScore > directRouteMinScore) {
+      context.addIssue({
+        code: "custom",
+        path: ["minCandidateScore"],
+        message:
+          "minCandidateScore must be less than or equal to directRouteMinScore",
+      });
+    }
+  });
+
+const RoutingSchema = z
+  .object({
+    thresholds: RoutingThresholdsSchema.optional().default(
+      DEFAULT_ROUTING.thresholds,
+    ),
+    classifier: ClassifierSchema.optional().default(DEFAULT_CLASSIFIER),
+  })
+  .strict();
+
+function resolveRoutingConfig(raw: unknown): ResolvedRoutingConfig {
+  const routing =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>).routing
+      : undefined;
+  return RoutingSchema.parse(routing === undefined ? {} : routing);
+}
+
+const SkillSearchSchema = z
+  .object({
+    collectionWeights: z
+      .object({
+        meta: z
+          .number()
+          .positive()
+          .default(DEFAULT_SKILL_SEARCH.collectionWeights.meta),
+        body: z
+          .number()
+          .positive()
+          .default(DEFAULT_SKILL_SEARCH.collectionWeights.body),
+        references: z
+          .number()
+          .positive()
+          .default(DEFAULT_SKILL_SEARCH.collectionWeights.references),
+      })
+      .default(DEFAULT_SKILL_SEARCH.collectionWeights),
+  })
+  .default(DEFAULT_SKILL_SEARCH);
+
+const SkillsSchema = z
+  .object({
+    search: SkillSearchSchema.optional().default(DEFAULT_SKILL_SEARCH),
+  })
+  .default(DEFAULT_SKILLS);
+
+function resolveSkillsConfig(raw: unknown): ResolvedSkillsConfig {
+  const skills =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>).skills
+      : undefined;
+  return SkillsSchema.parse(skills === undefined ? {} : skills);
+}
+
+const enabledSchema = z.boolean().catch(true);
 const ReviewSchema = z
   .object({
     enabled: z.boolean().catch(false),
@@ -207,7 +341,16 @@ const ReviewSchema = z
       })
       .catch(DEFAULT_REVIEW.triggers),
   })
-  .catch(DEFAULT_REVIEW);
+  .catch(DEFAULT_REVIEW)
+  .transform((val): ResolvedReviewConfig => ({
+    enabled: val.enabled,
+    model: val.model ?? undefined,
+    modelFallback: val.modelFallback ?? undefined,
+    thinking: val.thinking,
+    timeoutSeconds: val.timeoutSeconds,
+    keywordCoverage: val.keywordCoverage,
+    triggers: val.triggers,
+  }));
 
 const QmdEndpointObjectSchema = z.object({
   baseUrl: z.string().trim().catch(""),
@@ -221,122 +364,39 @@ const QmdEndpointSchema = QmdEndpointObjectSchema.catch({
 const QmdEmbeddingSchema = QmdEndpointObjectSchema.extend({
   dimension: z.number().int().positive().default(1536).catch(1536),
 }).catch({ baseUrl: "", model: "", dimension: 1536 });
+
 const QmdSchema = z
   .object({
     timeoutMs: z.number().optional().catch(undefined),
     indexRefreshIntervalSeconds: boundedInt(300, 0, 86_400),
     embedding: QmdEmbeddingSchema,
     expansion: QmdEndpointSchema,
-    skillSearch: z.unknown().optional(),
   })
   .catch(DEFAULT_QMD);
 
-const SkillSearchSchema = z
-  .object({
-    collectionWeights: z
-      .object({
-        meta: z
-          .number()
-          .positive()
-          .default(DEFAULT_SKILL_SEARCH.collectionWeights.meta),
-        body: z
-          .number()
-          .positive()
-          .default(DEFAULT_SKILL_SEARCH.collectionWeights.body),
-        references: z
-          .number()
-          .positive()
-          .default(DEFAULT_SKILL_SEARCH.collectionWeights.references),
-      })
-      .default(DEFAULT_SKILL_SEARCH.collectionWeights),
-  })
-  .default(DEFAULT_SKILL_SEARCH);
-
-function resolveSkillSearchConfig(raw: unknown): ResolvedSkillSearchConfig {
-  const qmd =
-    raw && typeof raw === "object" && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>).qmd
-      : undefined;
-  const skillSearch =
-    qmd && typeof qmd === "object" && !Array.isArray(qmd)
-      ? (qmd as Record<string, unknown>).skillSearch
-      : undefined;
-  return SkillSearchSchema.parse(skillSearch === undefined ? {} : skillSearch);
-}
-
-const RoutingScoreSchema = (fallback: number) =>
-  z.number().min(0).max(1).optional().default(fallback);
-const RoutingSchema = z
-  .object({
-    qmd: z
-      .object({
-        directRouteMinScore: RoutingScoreSchema(
-          DEFAULT_ROUTING.qmd.directRouteMinScore,
-        ),
-        minCandidateScore: RoutingScoreSchema(
-          DEFAULT_ROUTING.qmd.minCandidateScore,
-        ),
-      })
-      .strict()
-      .optional()
-      .default(DEFAULT_ROUTING.qmd),
-  })
-  .strict()
-  .superRefine((routing, context) => {
-    const { directRouteMinScore, minCandidateScore } = routing.qmd;
-    if (minCandidateScore > directRouteMinScore) {
-      context.addIssue({
-        code: "custom",
-        path: ["qmd"],
-        message:
-          "minCandidateScore must be less than or equal to directRouteMinScore",
-      });
-    }
-  });
-
-function resolveRoutingConfig(raw: unknown): ResolvedRoutingConfig {
-  const routing =
-    raw && typeof raw === "object" && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>).routing
-      : undefined;
-  return RoutingSchema.parse(routing === undefined ? {} : routing);
-}
-
 const SkillHarnessConfigSchema = z
   .object({
-    agents: stringListWithDefault(["main"]),
-    model: z.string().optional().catch(undefined),
-    modelFallback: z.string().optional().catch(undefined),
-    thinking: ThinkLevelSchema,
-    allowedChatTypes: stringListWithDefault(["direct"]),
-    allowedChatIds: StringListSchema,
-    deniedChatIds: StringListSchema,
-    queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
-    contextWindow: ContextWindowSchema,
-    timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
-    qmd: QmdSchema,
+    scope: ScopeSchema.optional().default(DEFAULT_SCOPE),
     routing: z.unknown().optional(),
-    review: ReviewSchema,
+    skills: z.unknown().optional(),
+    qmd: QmdSchema,
+    review: ReviewSchema.optional().default(DEFAULT_REVIEW),
   })
-  .catch(DEFAULT_CONFIG);
+  .catch({
+    scope: DEFAULT_SCOPE,
+    routing: DEFAULT_ROUTING,
+    skills: DEFAULT_SKILLS,
+    qmd: DEFAULT_QMD,
+    review: DEFAULT_REVIEW,
+  });
 
 export function resolveConfig(
   raw: unknown,
   options?: { openClawConfig?: OpenClawConfig; env?: NodeJS.ProcessEnv },
 ): ResolvedSkillHarnessPluginConfig {
-  const resolved = SkillHarnessConfigSchema.parse(raw) as Omit<
-    ResolvedSkillHarnessPluginConfig,
-    "qmd" | "routing"
-  > & {
-    qmd: Omit<
-      ResolvedQmdConfig,
-      "timeoutMs" | "indexRefreshIntervalSeconds" | "skillSearch"
-    > & {
-      timeoutMs?: number;
-      indexRefreshIntervalSeconds?: number;
-      skillSearch?: unknown;
-    };
-  };
+  const resolved = SkillHarnessConfigSchema.parse(raw);
+  const resolvedRouting = resolveRoutingConfig(raw);
+  const resolvedSkills = resolveSkillsConfig(raw);
 
   const resolvedEmbedding = resolveQmdEndpoint(resolved.qmd.embedding, {
     ...options,
@@ -344,16 +404,19 @@ export function resolveConfig(
   });
   const resolvedExpansion = resolveQmdEndpoint(resolved.qmd.expansion, options);
 
+  const timeoutMs = clampInt(
+    resolved.qmd.timeoutMs,
+    resolvedRouting.classifier.timeoutMs,
+    1_000,
+    60_000,
+  );
+
   return {
-    ...resolved,
+    scope: resolved.scope,
+    routing: resolvedRouting,
+    skills: resolvedSkills,
     qmd: {
-      ...resolved.qmd,
-      timeoutMs: clampInt(
-        resolved.qmd.timeoutMs,
-        resolved.timeoutMs,
-        1_000,
-        60_000,
-      ),
+      timeoutMs,
       indexRefreshIntervalSeconds: clampInt(
         resolved.qmd.indexRefreshIntervalSeconds,
         300,
@@ -372,8 +435,7 @@ export function resolveConfig(
         ...resolved.qmd.expansion,
         ...resolvedExpansion,
       },
-      skillSearch: resolveSkillSearchConfig(raw),
     },
-    routing: resolveRoutingConfig(raw),
+    review: resolved.review,
   };
 }

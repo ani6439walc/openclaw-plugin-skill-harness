@@ -29,8 +29,12 @@ describe("skill-harness manifest", () => {
   });
 
   it("matches the runtime contextWindow schema", () => {
-    const properties = manifest.configSchema.properties;
+    const properties =
+      manifest.configSchema.properties.routing.properties.classifier.properties;
 
+    expect(manifest.configSchema.properties).not.toHaveProperty(
+      "contextWindow",
+    );
     expect(properties).not.toHaveProperty("recentUserTurns");
     expect(properties).not.toHaveProperty("recentAssistantTurns");
     expect(properties).not.toHaveProperty("recentUserChars");
@@ -72,7 +76,9 @@ describe("skill-harness manifest", () => {
   });
 
   it("keeps timeoutMs aligned with the runtime schema", () => {
-    const timeoutMs = manifest.configSchema.properties.timeoutMs;
+    const timeoutMs =
+      manifest.configSchema.properties.routing.properties.classifier.properties
+        .timeoutMs;
     expect(timeoutMs).toMatchObject({
       minimum: 1_000,
       maximum: 60_000,
@@ -82,9 +88,10 @@ describe("skill-harness manifest", () => {
 
   it("does not apply null defaults to optional model strings", () => {
     const properties = manifest.configSchema.properties;
+    const classifierProps = properties.routing.properties.classifier.properties;
     const optionalModels = [
-      properties.model,
-      properties.modelFallback,
+      classifierProps.model,
+      classifierProps.modelFallback,
       properties.review.properties.model,
       properties.review.properties.modelFallback,
     ];

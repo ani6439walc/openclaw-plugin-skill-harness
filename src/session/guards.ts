@@ -7,7 +7,7 @@ export function isEnabledForAgent(
   agentId: string | undefined,
 ): boolean {
   if (!agentId) return false;
-  return config.agents.includes(agentId);
+  return config.scope.agents.includes(agentId);
 }
 
 export function isEligibleInteractiveSession(ctx: {
@@ -100,7 +100,7 @@ export function isAllowedChatType(
 ): boolean {
   const chatType = resolveChatType(ctx);
   if (!chatType) return false;
-  return config.allowedChatTypes.includes(chatType);
+  return config.scope.chatTypes.includes(chatType);
 }
 
 export function isAllowedChatId(
@@ -121,11 +121,11 @@ export function isAllowedChatId(
   if (chatIdParts.length === 0) return true;
   const chatId = chatIdParts.join(":");
   if (
-    config.allowedChatIds.length > 0 &&
-    !config.allowedChatIds.includes(chatId)
+    config.scope.allowedChatIds.length > 0 &&
+    !config.scope.allowedChatIds.includes(chatId)
   )
     return false;
-  if (config.deniedChatIds.includes(chatId)) return false;
+  if (config.scope.deniedChatIds.includes(chatId)) return false;
   return true;
 }
 

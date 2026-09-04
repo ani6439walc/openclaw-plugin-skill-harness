@@ -2277,7 +2277,7 @@ describe("createHookHandlers internal turn guards", () => {
   it("injects only base static context for an agent excluded from intent analysis", async () => {
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
-      config: () => resolveConfig({ agents: ["other"] }),
+      config: () => resolveConfig({ scope: { agents: ["other"] } }),
       refreshLiveConfigFromRuntime: vi.fn(),
       refreshIntents: vi.fn(),
     });
@@ -2299,17 +2299,17 @@ describe("createHookHandlers internal turn guards", () => {
   it.each([
     {
       label: "disallowed chat type",
-      config: { allowedChatTypes: ["group"] },
+      config: { scope: { chatTypes: ["group"] } },
       sessionKey: "agent:main:direct:123",
     },
     {
       label: "chat id absent from allowlist",
-      config: { allowedChatIds: ["direct:999"] },
+      config: { scope: { allowedChatIds: ["direct:999"] } },
       sessionKey: "agent:main:direct:123",
     },
     {
       label: "denied chat id",
-      config: { deniedChatIds: ["direct:123"] },
+      config: { scope: { deniedChatIds: ["direct:123"] } },
       sessionKey: "agent:main:direct:123",
     },
     {
@@ -2548,9 +2548,20 @@ describe("createHookHandlers topic switch flow", () => {
       });
     const topicChecker = params.topicChecker ?? vi.fn();
     const emitAgentEvent = emitHostAgentEvent;
+    const inputConfig =
+      (params.configRaw as Record<string, unknown> | undefined) ?? {};
+    const inputRouting =
+      (inputConfig.routing as Record<string, unknown> | undefined) ?? {};
     const rawConfig = {
-      model: "google/test-intent",
-      ...((params.configRaw as Record<string, unknown> | undefined) ?? {}),
+      ...inputConfig,
+      routing: {
+        ...inputRouting,
+        classifier: {
+          model: "google/test-intent",
+          ...((inputRouting.classifier as
+            Record<string, unknown> | undefined) ?? {}),
+        },
+      },
     };
     const defaultQmdIntentIndex = {
       searchKeywords: vi
@@ -3549,7 +3560,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       intents: [intent, versionControlIntent],
       configRaw: {
         routing: {
-          qmd: { directRouteMinScore: 0.95 },
+          thresholds: { directRouteMinScore: 0.95 },
         },
       },
       classifier,
@@ -3601,7 +3612,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       intents: [intent, versionControlIntent, operationsIntent],
       configRaw: {
         routing: {
-          qmd: {
+          thresholds: {
             directRouteMinScore: 0.95,
             minCandidateScore: 0.75,
           },
@@ -3741,7 +3752,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       historicalIntents: [],
       intents: [versionControlIntent],
       configRaw: {
-        routing: { qmd: { directRouteMinScore: 0.92 } },
+        routing: { thresholds: { directRouteMinScore: 0.92 } },
       },
       classifier,
       topicChecker: vi.fn().mockResolvedValue({
@@ -4778,7 +4789,7 @@ Current user request: fresh clean request
     const classifier = vi.fn();
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
-      configRaw: { agents: ["main"] },
+      configRaw: { scope: { agents: ["main"] } },
       classifier,
       bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
       getConfiguredAgentSkills,

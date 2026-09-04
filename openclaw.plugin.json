@@ -14,66 +14,200 @@
     "additionalProperties": false,
     "required": ["qmd"],
     "properties": {
-      "allowedChatTypes": {
-        "type": "array",
-        "items": {
-          "type": "string",
-          "enum": ["direct", "group", "channel", "explicit"]
+      "scope": {
+        "type": "object",
+        "description": "Session, chat, and agent filtering.",
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Agent IDs eligible for intention scanning.",
+            "default": ["main"]
+          },
+          "chatTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["direct", "group", "channel", "explicit"]
+            },
+            "description": "Which chat types are eligible.",
+            "default": ["direct"]
+          },
+          "allowedChatIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Allow-list of chat IDs.",
+            "default": []
+          },
+          "deniedChatIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Deny-list of chat IDs.",
+            "default": []
+          }
         },
-        "description": "Which chat types are eligible.",
-        "default": ["direct"]
+        "default": {}
       },
-      "allowedChatIds": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Allow-list of chat IDs.",
-        "default": []
+      "routing": {
+        "type": "object",
+        "description": "Pre-turn dynamic intent routing thresholds and fallback classifier.",
+        "additionalProperties": false,
+        "properties": {
+          "thresholds": {
+            "type": "object",
+            "description": "QMD-score thresholds for dynamic intent routing.",
+            "additionalProperties": false,
+            "properties": {
+              "directRouteMinScore": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.85,
+                "description": "Inclusive QMD score required for direct routing bypass."
+              },
+              "minCandidateScore": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.35,
+                "description": "Inclusive QMD score required to consider an intent candidate."
+              }
+            },
+            "default": {}
+          },
+          "classifier": {
+            "type": "object",
+            "description": "Intent classifier sub-agent configuration for candidate adjudication.",
+            "additionalProperties": false,
+            "properties": {
+              "model": {
+                "type": "string",
+                "description": "Explicit lightweight model for the intention scanner (e.g. google/gemini-3-flash). If unset, resolves from current session model, agent primary model, then modelFallback."
+              },
+              "modelFallback": {
+                "type": "string",
+                "description": "Last-resort scanner model after explicit, current-session, and agent-primary resolution."
+              },
+              "thinking": {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "adaptive",
+                  "max"
+                ],
+                "description": "Thinking level for the intent classifier sub-agent.",
+                "default": "medium"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 60000,
+                "description": "Budget in milliseconds for each intention scanner sub-agent run.",
+                "default": 5000
+              },
+              "queryMode": {
+                "type": "string",
+                "enum": ["message", "recent", "full"],
+                "description": "Context sent to scanner: latest message only, recent turns, or full history.",
+                "default": "recent"
+              },
+              "contextWindow": {
+                "type": "object",
+                "description": "Turn and character limits for recent conversation context.",
+                "additionalProperties": false,
+                "properties": {
+                  "user": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "turns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 20,
+                        "default": 5
+                      },
+                      "chars": {
+                        "type": "integer",
+                        "minimum": 40,
+                        "maximum": 1000,
+                        "default": 220
+                      }
+                    }
+                  },
+                  "assistant": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "turns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10,
+                        "default": 5
+                      },
+                      "chars": {
+                        "type": "integer",
+                        "minimum": 40,
+                        "maximum": 1000,
+                        "default": 180
+                      }
+                    }
+                  }
+                },
+                "default": {}
+              }
+            },
+            "default": {}
+          }
+        },
+        "default": {}
       },
-      "deniedChatIds": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Deny-list of chat IDs.",
-        "default": []
-      },
-      "agents": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Agent IDs eligible for intention scanning.",
-        "default": ["main"]
-      },
-      "model": {
-        "type": "string",
-        "description": "Explicit lightweight model for the intention scanner (e.g. google/gemini-3-flash). If unset, resolves from the current session model, then the agent primary model, then modelFallback."
-      },
-      "modelFallback": {
-        "type": "string",
-        "description": "Last-resort scanner model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
-      },
-      "thinking": {
-        "type": "string",
-        "enum": [
-          "off",
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "adaptive",
-          "max"
-        ],
-        "description": "Thinking level for the intent classifier sub-agent.",
-        "default": "medium"
-      },
-      "timeoutMs": {
-        "type": "integer",
-        "minimum": 1000,
-        "maximum": 60000,
-        "description": "Budget in milliseconds for each intention scanner sub-agent run.",
-        "default": 5000
+      "skills": {
+        "type": "object",
+        "description": "Skill dispatch and search configuration.",
+        "additionalProperties": false,
+        "properties": {
+          "search": {
+            "type": "object",
+            "description": "Skill search QMD collection weights.",
+            "additionalProperties": false,
+            "properties": {
+              "collectionWeights": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Relative weights for weighted RRF across skill collections. Defaults to 1 for each collection.",
+                "properties": {
+                  "meta": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": 1
+                  },
+                  "body": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": 1
+                  },
+                  "references": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": 1
+                  }
+                }
+              }
+            },
+            "default": {}
+          }
+        },
+        "default": {}
       },
       "qmd": {
         "type": "object",
-        "description": "Required QMD remote services for mandatory hybrid intent routing. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
+        "description": "Required QMD remote services for mandatory hybrid intent routing and skill search. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
         "additionalProperties": false,
         "properties": {
           "timeoutMs": {
@@ -132,114 +266,9 @@
             "maximum": 86400,
             "default": 300,
             "description": "Seconds between source checks for QMD intent and skill index refreshes; 0 disables subsequent automatic checks."
-          },
-          "skillSearch": {
-            "type": "object",
-            "additionalProperties": false,
-            "description": "Optional skill_search QMD collection weights.",
-            "properties": {
-              "collectionWeights": {
-                "type": "object",
-                "additionalProperties": false,
-                "description": "Relative weights for weighted RRF across skill collections. Defaults to 1 for each collection.",
-                "properties": {
-                  "meta": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                    "default": 1
-                  },
-                  "body": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                    "default": 1
-                  },
-                  "references": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                    "default": 1
-                  }
-                }
-              }
-            }
           }
         },
         "required": ["embedding", "expansion"]
-      },
-      "routing": {
-        "type": "object",
-        "description": "Optional QMD-score thresholds for dynamic intent routing. Invalid scores or ordering reject the plugin configuration.",
-        "additionalProperties": false,
-        "properties": {
-          "qmd": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "directRouteMinScore": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.85,
-                "description": "Inclusive QMD score required for direct routing bypass."
-              },
-              "minCandidateScore": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.35
-              }
-            }
-          }
-        }
-      },
-      "queryMode": {
-        "type": "string",
-        "enum": ["message", "recent", "full"],
-        "description": "Context sent to scanner: latest message only, recent turns, or full history.",
-        "default": "recent"
-      },
-      "contextWindow": {
-        "type": "object",
-        "description": "Turn and character limits for recent conversation context.",
-        "additionalProperties": false,
-        "properties": {
-          "user": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "turns": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 20,
-                "default": 5
-              },
-              "chars": {
-                "type": "integer",
-                "minimum": 40,
-                "maximum": 1000,
-                "default": 220
-              }
-            }
-          },
-          "assistant": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "turns": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 10,
-                "default": 5
-              },
-              "chars": {
-                "type": "integer",
-                "minimum": 40,
-                "maximum": 1000,
-                "default": 180
-              }
-            }
-          }
-        },
-        "default": {}
       },
       "review": {
         "type": "object",
