@@ -120,7 +120,7 @@ describe("createPlugin", () => {
     expect(api.registerCommand).not.toHaveBeenCalled();
   });
 
-  it("budgets before_prompt_build timeout for topic and classifier rounds only", () => {
+  it("runs after Active Memory in the authorized prompt-build phase", () => {
     const api = createApi();
 
     createPlugin(api).register(api);
@@ -128,7 +128,11 @@ describe("createPlugin", () => {
     expect(api.on).toHaveBeenCalledWith(
       "before_prompt_build",
       expect.any(Function),
-      { timeoutMs: 11_500 },
+      {
+        timeoutMs: 11_500,
+        requiresToolAuthority: true,
+        priority: -1,
+      },
     );
   });
 
