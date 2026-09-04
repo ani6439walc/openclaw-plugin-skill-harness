@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { logger } from "../../api.js";
 import {
   findAvailableSkill,
   listAvailableSkills,
+  resetDuplicateSkillWarningCache,
   resolveAvailableSkills,
   resolveSkillInventory,
 } from "./indexer.js";
@@ -380,5 +382,33 @@ describe("skill indexer", () => {
         cacheTtlMs: 0,
       }),
     ).resolves.toMatchObject({ name: "testing-skill" });
+  });
+
+  it("deduplicates duplicate skill name warning logs across repeated index runs", async () => {
+    resetDuplicateSkillWarningCache();
+    const warnSpy = vi.spyOn(logger, "warn").mockReturnValue(undefined);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const api = createApi(stateDir, workspaceDir);
+    writeSkillAt(
+      path.join(workspaceDir, "skills", "first-dup"),
+      "dup-skill",
+      "First duplicate",
+    );
+    writeSkillAt(
+      path.join(workspaceDir, "skills", "second-dup"),
+      "dup-skill",
+      "Second duplicate",
+    );
+
+    await resolveSkillInventory({ api, agentId: "main", cacheTtlMs: 0 });
+    await resolveSkillInventory({ api, agentId: "main", cacheTtlMs: 0 });
+
+    const duplicateWarnings = warnSpy.mock.calls.filter(
+      ([msg]) => msg === "duplicate skill name ignored while indexing skills",
+    );
+    expect(duplicateWarnings).toHaveLength(1);
+    warnSpy.mockRestore();
   });
 });

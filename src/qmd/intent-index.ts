@@ -6,6 +6,7 @@ import matter from "gray-matter";
 import { logger } from "../../api.js";
 import { withFileLock } from "../file-utils.js";
 import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
+import { normalizeEmbeddingModel } from "./provider-resolver.js";
 
 const TRIGGERS_COLLECTION = "intent-triggers";
 const EXAMPLES_COLLECTION = "intent-examples";
@@ -68,7 +69,7 @@ function snapshotFingerprint(
         keywords: intent.definition.keywords,
       })),
       embedding: {
-        model: config.embedding.model,
+        model: normalizeEmbeddingModel(config.embedding.model),
         dimension: config.embedding.dimension ?? null,
       },
     }),
@@ -248,6 +249,7 @@ export function createIntentQmdIndex(params: {
   let store: QMDStore | undefined;
   let status: QmdIntentIndexStatus = "idle";
   let running: Promise<void> | undefined;
+  let buildingFingerprint: string | undefined;
   let failedFingerprint: string | undefined;
   let consecutiveFailures = 0;
   let nextRetryAtMs = 0;
@@ -374,7 +376,12 @@ export function createIntentQmdIndex(params: {
       while (desired) {
         const target = desired;
         desired = undefined;
-        await build(target);
+        buildingFingerprint = target.fingerprint;
+        try {
+          await build(target);
+        } finally {
+          buildingFingerprint = undefined;
+        }
       }
     } finally {
       running = undefined;
@@ -393,7 +400,19 @@ export function createIntentQmdIndex(params: {
   return {
     schedule(intents) {
       const fingerprint = snapshotFingerprint(intents, params.config());
-      if (fingerprint === currentFingerprint && !desired) return;
+      if (
+        (fingerprint === currentFingerprint ||
+          fingerprint === buildingFingerprint) &&
+        (!desired || desired.fingerprint === fingerprint) &&
+        (store !== undefined || buildingFingerprint !== undefined)
+      ) {
+        expectedFingerprint = fingerprint;
+        return;
+      }
+      if (desired?.fingerprint === fingerprint) {
+        expectedFingerprint = fingerprint;
+        return;
+      }
       expectedFingerprint = fingerprint;
       if (failedFingerprint === fingerprint && Date.now() < nextRetryAtMs) {
         return;
@@ -443,6 +462,7 @@ export function createIntentQmdIndex(params: {
     async close() {
       desired = undefined;
       await running;
+      buildingFingerprint = undefined;
       const activeStore = store;
       store = undefined;
       currentFingerprint = undefined;

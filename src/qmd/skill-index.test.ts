@@ -628,6 +628,106 @@ describe("createSkillQmdIndex", () => {
     await index.close();
   });
 
+  it("does not rebuild when only the embedding provider prefix changes", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "provider-prefix-change",
+      description: "Provider change skill",
+      body: "body",
+    });
+    const createStore = vi.fn(async () => createStoreDouble({}));
+    let config: ResolvedQmdConfig = {
+      ...qmdConfig,
+      embedding: {
+        ...qmdConfig.embedding,
+        model: "openai/text-embedding-3-small",
+      },
+    };
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => config,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "initial index did not become ready",
+    );
+
+    // Switch provider prefix from openai/ to bifrost/ while keeping model identical
+    config = {
+      ...config,
+      embedding: {
+        ...config.embedding,
+        model: "bifrost/text-embedding-3-small",
+      },
+    };
+    index.schedule("main", [skill]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(createStore).toHaveBeenCalledTimes(1);
+    await index.close();
+  });
+
+  it("does not re-queue or rebuild when scheduled repeatedly while building the same fingerprint", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "in-flight-dedupe",
+      description: "In-flight dedupe skill",
+      body: "body",
+    });
+
+    let releaseEmbed: (() => void) | undefined;
+    let embedStarted = false;
+    const createStore = vi.fn(async () =>
+      createStoreDouble({
+        embed: vi.fn(() => {
+          embedStarted = true;
+          const { promise, resolve } =
+            Promise.withResolvers<Record<string, never>>();
+          releaseEmbed = () => resolve({});
+          return promise;
+        }),
+      }),
+    );
+
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    index.schedule("main", [skill]);
+    await waitFor(() => embedStarted, "embed did not start");
+
+    // Re-schedule multiple times with the exact same skills while building
+    index.schedule("main", [skill]);
+    index.schedule("main", [skill]);
+
+    // Release embed and wait for index to be ready
+    releaseEmbed?.();
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "index did not become ready",
+    );
+
+    // Allow any pending microtasks to run
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // createStore should only be called ONCE
+    expect(createStore).toHaveBeenCalledTimes(1);
+    await index.close();
+  });
+
   it("keeps serving the previous store while a newer rebuild is in flight", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-qmd-skills-"),

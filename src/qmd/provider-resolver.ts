@@ -208,3 +208,18 @@ export function resolveQmdEndpoint(
       : {}),
   };
 }
+
+/**
+ * Normalizes an embedding model reference by stripping any 'provider/' prefix.
+ * For example, 'bifrost/text-embedding-3-small' and 'openai/text-embedding-3-small'
+ * both normalize to 'text-embedding-3-small'.
+ */
+export function normalizeEmbeddingModel(rawModel?: string): string {
+  if (!rawModel) return "";
+  const trimmed = rawModel.trim();
+  const slashIndex = trimmed.indexOf("/");
+  if (slashIndex > 0) {
+    return trimmed.slice(slashIndex + 1).trim();
+  }
+  return trimmed;
+}

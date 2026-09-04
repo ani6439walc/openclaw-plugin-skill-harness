@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveQmdEndpoint } from "./provider-resolver.js";
+import {
+  normalizeEmbeddingModel,
+  resolveQmdEndpoint,
+} from "./provider-resolver.js";
 import type { OpenClawConfig } from "../../api.js";
 
 describe("resolveQmdEndpoint", () => {
@@ -294,5 +297,27 @@ describe("resolveQmdEndpoint", () => {
     );
 
     expect(result.dimension).toBe(1536);
+  });
+});
+
+describe("normalizeEmbeddingModel", () => {
+  it("strips provider prefix from provider/model format", () => {
+    expect(normalizeEmbeddingModel("bifrost/text-embedding-3-small")).toBe(
+      "text-embedding-3-small",
+    );
+    expect(normalizeEmbeddingModel("openai/text-embedding-3-small")).toBe(
+      "text-embedding-3-small",
+    );
+  });
+
+  it("leaves plain model names unchanged", () => {
+    expect(normalizeEmbeddingModel("text-embedding-3-small")).toBe(
+      "text-embedding-3-small",
+    );
+  });
+
+  it("handles undefined and empty string", () => {
+    expect(normalizeEmbeddingModel(undefined)).toBe("");
+    expect(normalizeEmbeddingModel("")).toBe("");
   });
 });

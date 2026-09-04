@@ -8,6 +8,7 @@ import { logger } from "../../api.js";
 import { withFileLock } from "../file-utils.js";
 import type { AvailableSkill } from "../skills/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
+import { normalizeEmbeddingModel } from "./provider-resolver.js";
 import { weightedReciprocalRankFusion } from "./rrf.js";
 
 const META_COLLECTION = "skill-meta";
@@ -92,6 +93,7 @@ type AgentState = {
     skills: readonly AvailableSkill[];
   };
   running?: Promise<void>;
+  buildingFingerprint?: string;
   scheduling?: Promise<void>;
   failedFingerprint?: string;
   consecutiveFailures: number;
@@ -337,7 +339,7 @@ async function snapshotFingerprint(
     JSON.stringify({
       skills: skillEntries,
       embedding: {
-        model: config.embedding.model,
+        model: normalizeEmbeddingModel(config.embedding.model),
         dimension: config.embedding.dimension,
       },
     }),
@@ -1108,7 +1110,12 @@ export function createSkillQmdIndex(params: {
       while (state.desired) {
         const target = state.desired;
         state.desired = undefined;
-        await build(agentId, state, target);
+        state.buildingFingerprint = target.fingerprint;
+        try {
+          await build(agentId, state, target);
+        } finally {
+          state.buildingFingerprint = undefined;
+        }
       }
     } finally {
       state.running = undefined;
@@ -1128,10 +1135,15 @@ export function createSkillQmdIndex(params: {
     const scheduling = (async () => {
       const fingerprint = await snapshotFingerprint(skills, params.config());
       if (
-        fingerprint === state.currentFingerprint &&
-        !state.desired &&
-        state.store
+        (fingerprint === state.currentFingerprint ||
+          fingerprint === state.buildingFingerprint) &&
+        (!state.desired || state.desired.fingerprint === fingerprint) &&
+        (state.store !== undefined || state.buildingFingerprint !== undefined)
       ) {
+        state.expectedFingerprint = fingerprint;
+        return;
+      }
+      if (state.desired?.fingerprint === fingerprint) {
         state.expectedFingerprint = fingerprint;
         return;
       }
@@ -1303,6 +1315,7 @@ export function createSkillQmdIndex(params: {
         state.docsRoot = undefined;
         state.currentFingerprint = undefined;
         state.expectedFingerprint = undefined;
+        state.buildingFingerprint = undefined;
         resetRetryState(state);
         state.status = "idle";
         if (activeStore) await activeStore.close().catch(() => undefined);

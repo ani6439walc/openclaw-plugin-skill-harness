@@ -23,6 +23,11 @@ import type {
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 
 const SKILL_INDEX_MAX_DEPTH = 32;
+const loggedDuplicateSkills = new Set<string>();
+
+export function resetDuplicateSkillWarningCache(): void {
+  loggedDuplicateSkills.clear();
+}
 
 interface CachedSkillIndex {
   expiresAtMs: number;
@@ -286,11 +291,15 @@ async function buildSkillIndex(
       const key = skill?.name.toLowerCase();
       if (skill && key && !disabledSkillNames.has(key)) {
         if (index.has(key)) {
-          logger.warn("duplicate skill name ignored while indexing skills", {
-            ignoredPath: skill.location,
-            name: skill.name,
-            root,
-          });
+          const dedupeKey = `${root}:${skill.location}:${key}`;
+          if (!loggedDuplicateSkills.has(dedupeKey)) {
+            loggedDuplicateSkills.add(dedupeKey);
+            logger.warn("duplicate skill name ignored while indexing skills", {
+              ignoredPath: skill.location,
+              name: skill.name,
+              root,
+            });
+          }
         } else {
           index.set(key, skill);
         }
