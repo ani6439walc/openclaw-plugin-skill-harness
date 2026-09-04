@@ -64,12 +64,6 @@
         "description": "Thinking level for the intent classifier sub-agent.",
         "default": "medium"
       },
-      "lowEffortRoutingMode": {
-        "type": "string",
-        "enum": ["fastpath-only", "full", "off"],
-        "description": "Intent-routing behavior when the main agent uses off, minimal, or low reasoning effort. fastpath-only preserves deterministic exact keyword hints but skips all LLM scanner sub-agents; full keeps the full pipeline; off disables the plugin for low-effort turns.",
-        "default": "fastpath-only"
-      },
       "timeoutMs": {
         "type": "integer",
         "minimum": 1000,

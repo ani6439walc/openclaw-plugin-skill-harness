@@ -6,8 +6,6 @@ export type ContextWindow = {
 export type ThinkLevel =
   "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive" | "max";
 
-export type LowEffortRoutingMode = "fastpath-only" | "full" | "off";
-
 export type ResolvedReviewConfig = {
   enabled: boolean;
   model: string | undefined;
@@ -70,7 +68,6 @@ export type ResolvedSkillHarnessPluginConfig = {
   model: string | undefined;
   modelFallback: string | undefined;
   thinking: ThinkLevel;
-  lowEffortRoutingMode: LowEffortRoutingMode;
   allowedChatTypes: string[];
   allowedChatIds: string[];
   deniedChatIds: string[];

@@ -142,7 +142,6 @@ Configure Skill Harness in `openclaw.json`:
           model: "google/gemini-3-flash",
           modelFallback: "openai/gpt-5-mini",
           thinking: "medium",
-          lowEffortRoutingMode: "fastpath-only",
           queryMode: "recent",
           timeoutMs: 5000,
           qmd: {
@@ -183,7 +182,6 @@ Configure Skill Harness in `openclaw.json`:
 | `allowedChatIds` / `deniedChatIds`          | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                               |
 | `model` / `modelFallback`                   | unset              | Scanner model and last-resort resolution fallback.                                                        |
 | `thinking`                                  | `"medium"`         | Intent-classifier thinking level.                                                                         |
-| `lowEffortRoutingMode`                      | `"fastpath-only"`  | Routing behavior when the main agent uses off, minimal, or low reasoning effort.                          |
 | `queryMode` / `contextWindow`               | `"recent"`         | Scanner context and its limits.                                                                           |
 | `timeoutMs`                                 | `5000`             | Intent-classifier time budget.                                                                            |
 | `qmd.embedding` / `expansion`               | required           | Remote endpoint and model for mandatory QMD hybrid routing; `apiKey` is optional for keyless proxies.     |
@@ -433,10 +431,8 @@ Routing is fail-open. Eligible turns evaluate the 3-stage pipeline: Step 1 check
 QMD BM25 lexical matches against indexed intent `keywords`; Step 2 performs QMD
 hybrid search over triggers and examples with conversation expansion; Step 3
 projects candidate intents and invokes a single LLM intent classifier call only
-when no direct QMD match reaches the threshold. The low-effort mode
-(`lowEffortRoutingMode: "fastpath-only"`) skips LLM classification when direct routes
-miss. Every eligible normal agent still receives fixed skill-discovery context even
-when dynamic intent routing is skipped or fails.
+when no direct QMD match reaches the threshold. Every eligible normal agent still receives
+fixed skill-discovery context even when dynamic intent routing is skipped or fails.
 
 Intent Review is disabled by default; when enabled, its runtime edits and
 keyword-coverage writes are serialized so concurrent reviews cannot race on the
@@ -459,7 +455,7 @@ pnpm run build
 
 ### No routing context is injected
 
-Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the classifier model can resolve. With low reasoning effort, `lowEffortRoutingMode: "off"` disables model classification and `"fastpath-only"` requires a matching keyword route.
+Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the classifier model can resolve.
 
 ### Runtime intents are missing
 

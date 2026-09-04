@@ -83,7 +83,6 @@ const DEFAULT_CONFIG = {
   model: undefined,
   modelFallback: undefined,
   thinking: "medium",
-  lowEffortRoutingMode: "fastpath-only",
   allowedChatTypes: ["direct"],
   allowedChatIds: [],
   deniedChatIds: [],
@@ -146,9 +145,6 @@ const enabledSchema = z.boolean().catch(true);
 const ThinkLevelSchema = z
   .enum(["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"])
   .catch("medium");
-const LowEffortRoutingModeSchema = z
-  .enum(["fastpath-only", "full", "off"])
-  .catch("fastpath-only");
 const ReviewSchema = z
   .object({
     enabled: z.boolean().catch(false),
@@ -310,7 +306,6 @@ const SkillHarnessConfigSchema = z
     model: z.string().optional().catch(undefined),
     modelFallback: z.string().optional().catch(undefined),
     thinking: ThinkLevelSchema,
-    lowEffortRoutingMode: LowEffortRoutingModeSchema,
     allowedChatTypes: stringListWithDefault(["direct"]),
     allowedChatIds: StringListSchema,
     deniedChatIds: StringListSchema,

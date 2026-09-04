@@ -120,8 +120,6 @@ function sanitizeHistoricalIntentRecords(
   });
 }
 
-const LOW_EFFORT_LEVELS = new Set(["off", "minimal", "low"]);
-
 const MAX_PROJECTION_CANDIDATE_IDS = 128;
 const MAX_PROJECTION_MATCHED_KEYWORDS = 32;
 const MAX_PROJECTION_KEYWORD_CHARS = 200;
@@ -307,32 +305,6 @@ function toIntentProjectionTelemetry(params: {
       .slice(0, MAX_PROJECTION_MATCHED_KEYWORDS)
       .map((keyword) => keyword.slice(0, MAX_PROJECTION_KEYWORD_CHARS)),
   };
-}
-
-function resolveReasoningEffort(
-  ctx: PluginHookAgentContext,
-): string | undefined {
-  const value = (ctx as Record<string, unknown>).reasoningEffort;
-  return typeof value === "string" ? value.trim().toLowerCase() : undefined;
-}
-
-function isLowEffort(ctx: PluginHookAgentContext): boolean {
-  const effort = resolveReasoningEffort(ctx);
-  return effort ? LOW_EFFORT_LEVELS.has(effort) : false;
-}
-
-function shouldSkipAllForLowEffort(
-  ctx: PluginHookAgentContext,
-  config: ResolvedSkillHarnessPluginConfig,
-): boolean {
-  return config.lowEffortRoutingMode === "off" && isLowEffort(ctx);
-}
-
-function shouldUseDeterministicLowEffortRoutingMode(
-  ctx: PluginHookAgentContext,
-  config: ResolvedSkillHarnessPluginConfig,
-): boolean {
-  return config.lowEffortRoutingMode === "fastpath-only" && isLowEffort(ctx);
 }
 
 function readTriggerKeywordsFailOpen(
@@ -731,19 +703,6 @@ export function createHookHandlers(deps: HookDeps) {
               }
             : {},
       );
-    }
-
-    // Low-effort fastpath check
-    if (
-      shouldUseDeterministicLowEffortRoutingMode(
-        params.ctx,
-        params.refreshedConfig,
-      )
-    ) {
-      logger.debug(
-        "low-effort fastpath-only routing mode found no keyword match; skipping LLM-based intent analysis.",
-      );
-      return;
     }
 
     // Step 2: QMD Hybrid Search (Triggers & Examples) with Context Expansion
@@ -1196,12 +1155,6 @@ export function createHookHandlers(deps: HookDeps) {
       // THEN refresh config and intents
       refreshLiveConfigFromRuntime();
       const refreshedConfig = config();
-      if (shouldSkipAllForLowEffort(ctx, refreshedConfig)) {
-        logger.debug(
-          "low-effort routing mode is off; skipping intention scan.",
-        );
-        return toPromptBuildResult(undefined, configuredSkillsXml);
-      }
       const { latestUserMessage, historicalIntents, conversation } =
         buildConversationContext(event, ctx, refreshedConfig);
       routing.association = await prepareTrackingTurn({

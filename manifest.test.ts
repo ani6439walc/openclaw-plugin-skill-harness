@@ -143,8 +143,11 @@ describe("skill-harness manifest", () => {
     ).toBe(0.5);
   });
 
-  it("does not expose removed instruction writer settings", () => {
+  it("does not expose removed instruction writer or lowEffortRoutingMode settings", () => {
     expect(manifest.configSchema.properties).not.toHaveProperty("instruction");
+    expect(manifest.configSchema.properties).not.toHaveProperty(
+      "lowEffortRoutingMode",
+    );
   });
 
   it("documents the strict upgrade path for removed instruction settings", () => {

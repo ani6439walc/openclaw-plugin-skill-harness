@@ -417,32 +417,10 @@ describe("resolveConfig", () => {
       expect(result).not.toHaveProperty("evolution");
     });
 
-    it("defaults low-effort routing mode to deterministic fastpath only", () => {
-      const result = resolveConfig({});
+    it("ignores retired lowEffortRoutingMode setting", () => {
+      const result = resolveConfig({ lowEffortRoutingMode: "off" });
 
-      expect(result.lowEffortRoutingMode).toBe("fastpath-only");
-    });
-
-    it("accepts low-effort routing mode values and falls back on invalid values", () => {
-      expect(
-        resolveConfig({ lowEffortRoutingMode: "full" }).lowEffortRoutingMode,
-      ).toBe("full");
-      expect(
-        resolveConfig({ lowEffortRoutingMode: "off" }).lowEffortRoutingMode,
-      ).toBe("off");
-      expect(
-        resolveConfig({ lowEffortRoutingMode: "fastpath-only" })
-          .lowEffortRoutingMode,
-      ).toBe("fastpath-only");
-      expect(
-        resolveConfig({ lowEffortRoutingMode: "invalid" }).lowEffortRoutingMode,
-      ).toBe("fastpath-only");
-    });
-
-    it("ignores the retired lowThinkingMode setting", () => {
-      expect(resolveConfig({ lowThinkingMode: "full" })).toMatchObject({
-        lowEffortRoutingMode: "fastpath-only",
-      });
+      expect(result).not.toHaveProperty("lowEffortRoutingMode");
     });
   });
 
