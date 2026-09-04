@@ -792,9 +792,7 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain(
       '"intentCatalog":{"mode":"projected","originalCount":6,"includedCount":3,"omittedCount":3}',
     );
-    expect(prompt).toContain(
-      '"selectionReasons":["exact-fastpath-keyword-overlap"]',
-    );
+    expect(prompt).toContain('"selectionReasons":["exact-keyword-overlap"]');
     expect(prompt).not.toContain('"id":"writing"');
     expect(prompt).not.toContain('"id":"health"');
     expect(prompt).not.toContain('"id":"finance"');

@@ -22,7 +22,6 @@ import {
   withFileLock,
   writeJsonAtomic,
 } from "../file-utils.js";
-import { isIntentComplexity } from "../constants.js";
 import { sanitizeHistoricalIntentInput } from "../classification/conversation.js";
 
 export const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -959,9 +958,6 @@ export class SessionTracker {
         domain: result.domain ?? DEFAULT_MIGRATED_DOMAIN,
         confidence: result.confidence,
       };
-      if (isIntentComplexity(result.complexity)) {
-        record.complexity = result.complexity;
-      }
       if (result.keywords?.length) record.keywords = [...result.keywords];
       if (result.topic) record.topic = result.topic;
       if (result.topicChangeReason) {

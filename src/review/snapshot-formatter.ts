@@ -78,12 +78,10 @@ function formatIntentMetadata(
   addDefined(metadata, "intent", intent?.intent);
   addDefined(metadata, "domain", intent?.domain);
   addDefined(metadata, "confidence", intent?.confidence);
-  addDefined(metadata, "complexity", intent?.complexity);
   addDefined(metadata, "reason", intent?.reason);
   addDefined(metadata, "topic", intent?.topic);
   addDefined(metadata, "keywords", intent?.keywords);
   addDefined(metadata, "topicChangeReason", intent?.topicChangeReason);
-  addDefined(metadata, "suggestion", intent?.suggestion);
   if (recommendationCandidates?.length) {
     metadata.recommendationCandidates = recommendationCandidates.map(
       (candidate) => ({

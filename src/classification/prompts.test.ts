@@ -488,6 +488,7 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain('"keywords":');
     expect(result).toContain('"confidence":');
     expect(result).not.toContain('"complexity":');
+    expect(result).not.toContain('"suggestion":');
     expect(result).toContain("historical_intent");
     expect(result).toContain(
       "standalone request, continuation, correction, or target clarification",
@@ -631,46 +632,20 @@ describe("parseIntentionResult", () => {
     expect(result!.confidence).toBe(0.9);
   });
 
-  it("should parse with suggestion when confidence is low", () => {
+  it("should parse when confidence is low", () => {
     const raw = JSON.stringify({
       intent: "other",
       reason: "Unable to confidently classify",
       keywords: ["unclear", "request"],
       topic: "User request is unclear and needs clarification.",
       confidence: 0.45,
-      suggestion: "Please clarify what you need help with",
     });
 
     const result = parseIntentionResult(raw, ["coding", "debugging", "other"]);
 
     expect(result).toBeDefined();
     expect(result!.intent).toBe("other");
-    expect(result!.suggestion).toBe("Please clarify what you need help with");
-  });
-
-  it("preserves a low-confidence suggestion when topic context is present", () => {
-    const result = parseIntentionResult(
-      JSON.stringify({
-        intent: "coding",
-        reason: "Likely a coding follow-up",
-        confidence: 0.45,
-        complexity: "low",
-        suggestion: "Confirm which file should change",
-      }),
-      ["coding", "other"],
-      {
-        basis: "The latest message references the preceding coding task.",
-        keywords: ["file", "change"],
-        topic: "User may be continuing a coding change.",
-        domain: "coding",
-        changed: false,
-        reason: "same-topic",
-        confidence: 0.7,
-        complexity: "low",
-      },
-    );
-
-    expect(result?.suggestion).toBe("Confirm which file should change");
+    expect((result as Record<string, unknown>).suggestion).toBeUndefined();
   });
 
   it("should handle case-insensitive intent matching", () => {
@@ -771,7 +746,7 @@ describe("parseIntentionResult", () => {
     const result = parseIntentionResult(raw, ["coding"]);
 
     expect(result).toBeDefined();
-    expect(result!.suggestion).toBeUndefined();
+    expect((result as Record<string, unknown>).suggestion).toBeUndefined();
   });
 
   it("discards a high-confidence suggestion without rejecting the result", () => {
@@ -788,7 +763,7 @@ describe("parseIntentionResult", () => {
     const result = parseIntentionResult(raw, ["coding"]);
 
     expect(result).toBeDefined();
-    expect(result!.suggestion).toBeUndefined();
+    expect((result as Record<string, unknown>).suggestion).toBeUndefined();
   });
 
   it("should parse JSON wrapped in ```json code block", () => {
@@ -823,20 +798,6 @@ describe("parseIntentionResult", () => {
     expect(result).toBeUndefined();
   });
 
-  it("should handle optional suggestion only when present", () => {
-    const raw = JSON.stringify({
-      intent: "coding",
-      reason: "test",
-      keywords: ["code"],
-      topic: "User wants help with code.",
-      confidence: 0.5,
-      suggestion: "Consider breaking into smaller tasks",
-    });
-    const result = parseIntentionResult(raw, ["coding"]);
-    expect(result).toBeDefined();
-    expect(result!.suggestion).toBe("Consider breaking into smaller tasks");
-  });
-
   it("should NOT have suggestion when not in JSON", () => {
     const raw = JSON.stringify({
       intent: "coding",
@@ -847,7 +808,7 @@ describe("parseIntentionResult", () => {
     });
     const result = parseIntentionResult(raw, ["coding"]);
     expect(result).toBeDefined();
-    expect(result!.suggestion).toBeUndefined();
+    expect((result as Record<string, unknown>).suggestion).toBeUndefined();
   });
 });
 

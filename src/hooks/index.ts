@@ -386,10 +386,6 @@ function buildQmdIntentResult(params: {
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
     topic: `QMD match for ${params.intent.id}.`,
-    previousTopic:
-      params.latestHistoricalIntent && !sameIntent
-        ? params.latestHistoricalIntent.topic
-        : undefined,
     topicChangeReason: !params.latestHistoricalIntent
       ? "start"
       : sameIntent
@@ -413,10 +409,6 @@ function buildKeywordIntentResult(params: {
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
     topic: `Keyword match for ${params.intent.id}.`,
-    previousTopic:
-      params.latestHistoricalIntent && !sameIntent
-        ? params.latestHistoricalIntent.topic
-        : undefined,
     topicChangeReason: !params.latestHistoricalIntent
       ? "start"
       : sameIntent

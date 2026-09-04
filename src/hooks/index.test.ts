@@ -3251,7 +3251,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         complexity: "low" as const,
       },
       expected: {
-        previousTopic: undefined,
         topicChangeReason: undefined,
       },
     },
@@ -3265,7 +3264,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         complexity: "medium" as const,
       },
       expected: {
-        previousTopic: "User is fixing code.",
         topicChangeReason: "match",
       },
     },

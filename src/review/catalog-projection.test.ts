@@ -101,7 +101,7 @@ describe("projectIntentCatalog", () => {
       entries: [
         {
           entry: projectionCatalog[3],
-          selectionReasons: ["exact-fastpath-keyword-overlap"],
+          selectionReasons: ["exact-keyword-overlap"],
         },
         {
           entry: projectionCatalog[1],
@@ -109,7 +109,7 @@ describe("projectIntentCatalog", () => {
             "matched-intent",
             "observed-intent",
             "observed-domain",
-            "exact-fastpath-keyword-overlap",
+            "exact-keyword-overlap",
           ],
         },
         {

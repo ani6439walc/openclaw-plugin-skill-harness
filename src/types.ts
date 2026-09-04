@@ -129,19 +129,14 @@ export type IntentProjectionTelemetry = {
   matchedKeywords: string[];
 };
 
-export type IntentComplexity = "low" | "medium" | "high";
-
 export type IntentionResult = {
   intent: string;
   reason: string;
-  suggestion?: string;
   keywords?: string[];
   domain: string;
   topic?: string;
   topicChangeReason?: "start" | "marker" | "shift" | "change" | "match";
-  previousTopic?: string;
   confidence: number;
-  complexity?: IntentComplexity;
 };
 
 export type ClassifiedIntentionResult = IntentionResult;
@@ -164,7 +159,7 @@ export type HistoricalIntent = Pick<
   IntentionResult,
   "intent" | "domain" | "keywords" | "topic" | "topicChangeReason"
 > &
-  Partial<Pick<IntentionResult, "confidence" | "complexity">>;
+  Partial<Pick<IntentionResult, "confidence">>;
 
 export type HistoricalIntentRecord = HistoricalIntent & {
   input: string;

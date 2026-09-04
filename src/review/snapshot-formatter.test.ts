@@ -14,12 +14,10 @@ const fullSnapshot: ReviewSnapshot = {
       intent: "intent-review",
       domain: "development",
       confidence: 0.92,
-      complexity: "medium",
       reason: "Review existing intent coverage.",
       topic: "Intent Review behavior",
       keywords: ["intent", "review", "boundary"],
       topicChangeReason: "match",
-      suggestion: "Inspect the current intent before proposing changes.",
     },
     skillsUsed: [
       {
@@ -69,7 +67,6 @@ const fullSnapshot: ReviewSnapshot = {
         intent: "intent-review",
         domain: "development",
         confidence: 0.88,
-        complexity: "medium",
         reason: "The user corrected the requested review operation.",
         topic: "Intent boundary correction",
         keywords: ["intent", "correction"],
@@ -191,7 +188,7 @@ const expectedFullSnapshot = `<review_snapshot>
     </user_input>
 
     <intent_metadata>
-      {"intent":"intent-review","domain":"development","confidence":0.92,"complexity":"medium","reason":"Review existing intent coverage.","topic":"Intent Review behavior","keywords":["intent","review","boundary"],"topicChangeReason":"match","suggestion":"Inspect the current intent before proposing changes."}
+      {"intent":"intent-review","domain":"development","confidence":0.92,"reason":"Review existing intent coverage.","topic":"Intent Review behavior","keywords":["intent","review","boundary"],"topicChangeReason":"match"}
     </intent_metadata>
 
     <skills_used>
@@ -229,7 +226,7 @@ const expectedFullSnapshot = `<review_snapshot>
       </user_input>
 
       <intent_metadata>
-        {"intent":"intent-review","domain":"development","confidence":0.88,"complexity":"medium","reason":"The user corrected the requested review operation.","topic":"Intent boundary correction","keywords":["intent","correction"],"topicChangeReason":"match"}
+        {"intent":"intent-review","domain":"development","confidence":0.88,"reason":"The user corrected the requested review operation.","topic":"Intent boundary correction","keywords":["intent","correction"],"topicChangeReason":"match"}
       </intent_metadata>
 
       <tool_calls>
@@ -501,10 +498,10 @@ describe("formatReviewSnapshot", () => {
       '"intentCatalog":{"mode":"projected","originalCount":7,"includedCount":4,"omittedCount":3}',
     );
     expect(output).toContain(
-      '<intent>{"id":"cross-operations","domain":"operations","triggers":["operational review"],"examples":[],"keywords":["Ｒｅｖｉｅｗ"],"selectionReasons":["exact-fastpath-keyword-overlap"]}</intent>',
+      '<intent>{"id":"cross-operations","domain":"operations","triggers":["operational review"],"examples":[],"keywords":["Ｒｅｖｉｅｗ"],"selectionReasons":["exact-keyword-overlap"]}</intent>',
     );
     expect(output).toContain(
-      '<intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"keywords":["intent","review"],"selectionReasons":["matched-intent","observed-intent","observed-domain","exact-fastpath-keyword-overlap"]}</intent>',
+      '<intent>{"id":"intent-review","domain":"development","triggers":["review intent behavior"],"examples":["Check whether an intent covers the workflow."],"keywords":["intent","review"],"selectionReasons":["matched-intent","observed-intent","observed-domain","exact-keyword-overlap"]}</intent>',
     );
     expect(catalog.indexOf('"id":"cross-operations"')).toBeLessThan(
       catalog.indexOf('"id":"debugging"'),

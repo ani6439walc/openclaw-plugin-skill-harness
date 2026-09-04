@@ -10,7 +10,7 @@ import {
   readJsonFile,
   safeWriteJson,
 } from "../file-utils.js";
-import { FALLBACK_INTENT_ID, isIntentComplexity } from "../constants.js";
+import { FALLBACK_INTENT_ID } from "../constants.js";
 import type { SkillInventoryItem, SkillSource } from "../skills/types.js";
 import { SKILL_SOURCE_ORDER } from "../skills/types.js";
 import { canonicalIdentity } from "../normalize.js";
@@ -41,7 +41,6 @@ const LATENCY_BUCKETS = [
 const statsAggregatorCache = new Map<string, StatsAggregator>();
 
 type CountMap = Record<string, number>;
-type ComplexityCounts = { low: number; medium: number; high: number };
 type RecordedIntentResult = NonNullable<
   NonNullable<SessionState["intent"]>["result"]
 >;
@@ -96,22 +95,7 @@ type DailyBucket = DailyBucketV3 & {
   intentRouting: Record<string, DailyRoutingCounts>;
   skillRouting: Record<string, DailySkillRouting>;
   toolErrors: CountMap;
-  curation?: DailyCurationStats;
 };
-
-export interface DailyCurationStats {
-  appliedRevisions: number;
-  candidatesKept: number;
-  candidatesAdded: number;
-}
-
-export interface CurationStats {
-  appliedRevisions: number;
-  candidatesKept: number;
-  candidatesAdded: number;
-  recommendedExperiencesSelected: number;
-  lastAppliedAt?: string;
-}
 
 type ProjectionStats = DailyProjectionCounts & {
   projectedRate: number;
@@ -181,7 +165,6 @@ type Stats = {
     averageConfidence: number;
     otherTurns: number;
     otherRate: number;
-    curationAppliedCount?: number;
   };
   intents: Record<
     string,
@@ -192,7 +175,6 @@ type Stats = {
       last7Days: number;
       averageConfidence: number;
       lowConfidenceTurns: number;
-      complexity: ComplexityCounts;
       skillAssistedTurns: number;
       toolAssistedTurns: number;
       erroredTurns: number;
@@ -226,7 +208,6 @@ type Stats = {
   >;
   projection: ProjectionStats;
   skillInventory: SkillInventoryStats;
-  curation?: CurationStats;
   daily: Record<string, DailyBucket>;
   processedEvents: Record<string, string>;
 };
@@ -312,15 +293,6 @@ function emptyProjectionStats(): ProjectionStats {
   };
 }
 
-function emptyCurationStats(): CurationStats {
-  return {
-    appliedRevisions: 0,
-    candidatesKept: 0,
-    candidatesAdded: 0,
-    recommendedExperiencesSelected: 0,
-  };
-}
-
 function createStats(nowIso: string): Stats {
   return {
     schemaVersion: 4,
@@ -338,7 +310,6 @@ function createStats(nowIso: string): Stats {
       averageConfidence: 0,
       otherTurns: 0,
       otherRate: 0,
-      curationAppliedCount: 0,
     },
     intents: {},
     skills: {},
@@ -346,7 +317,6 @@ function createStats(nowIso: string): Stats {
     tools: {},
     projection: emptyProjectionStats(),
     skillInventory: { startedAt: nowIso, agents: {} },
-    curation: emptyCurationStats(),
     daily: {},
     processedEvents: {},
   };
@@ -386,11 +356,6 @@ function createDailyBucket(): DailyBucket {
     intentRouting: {},
     skillRouting: {},
     toolErrors: {},
-    curation: {
-      appliedRevisions: 0,
-      candidatesKept: 0,
-      candidatesAdded: 0,
-    },
   };
 }
 
@@ -705,17 +670,6 @@ function isLatencyHistogram(value: unknown): value is LatencyHistogram {
   );
 }
 
-function isDailyCurationStats(value: unknown): value is DailyCurationStats {
-  return (
-    isRecord(value) &&
-    hasNonNegativeIntegers(value, [
-      "appliedRevisions",
-      "candidatesKept",
-      "candidatesAdded",
-    ])
-  );
-}
-
 function isDailyBucket(value: unknown): value is DailyBucket {
   if (!isDailyBucketV3(value) || !isRecord(value)) return false;
   const record = value as Record<string, unknown>;
@@ -728,8 +682,7 @@ function isDailyBucket(value: unknown): value is DailyBucket {
       hasNonNegativeIntegers(entry, DAILY_ROUTING_FIELDS),
     ) &&
     isBoundedDailyAttributionMap(record.skillRouting, isDailySkillRouting) &&
-    isBoundedDailyAttributionMap(record.toolErrors, isNonNegativeInteger) &&
-    (record.curation === undefined || isDailyCurationStats(record.curation))
+    isBoundedDailyAttributionMap(record.toolErrors, isNonNegativeInteger)
   );
 }
 
@@ -796,8 +749,7 @@ function assertStatsBase(
         "toolAssistedTurns",
         "erroredTurns",
       ]) ||
-      !isIsoTimestamp(intent.lastSeenAt) ||
-      !hasNumbers(intent.complexity, ["low", "medium", "high"])
+      !isIsoTimestamp(intent.lastSeenAt)
     ) {
       throw new Error("unsupported or invalid stats schema");
     }
@@ -1033,7 +985,6 @@ function recordIntentStats(params: {
     last7Days: 0,
     averageConfidence: 0,
     lowConfidenceTurns: 0,
-    complexity: { low: 0, medium: 0, high: 0 },
     skillAssistedTurns: 0,
     toolAssistedTurns: 0,
     erroredTurns: 0,
@@ -1045,9 +996,6 @@ function recordIntentStats(params: {
   intent.turns += 1;
   intent.lastSeenAt = eventTime;
   intent.lowConfidenceTurns += result.confidence < 0.8 ? 1 : 0;
-  if (isIntentComplexity(result.complexity)) {
-    intent.complexity[result.complexity] += 1;
-  }
   intent.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
   intent.toolAssistedTurns += toolCallCount > 0 ? 1 : 0;
   intent.erroredTurns += errored ? 1 : 0;

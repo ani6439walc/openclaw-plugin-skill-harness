@@ -20,7 +20,6 @@ export type PipelineMetadata = {
   keywords?: string[];
   topic?: string;
   changed?: boolean;
-  complexity?: string;
   intent?: string;
   reason?: string;
   confidence?: number;

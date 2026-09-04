@@ -1,4 +1,4 @@
-import type { IntentComplexity, IntentDefinition } from "./types.js";
+import type { IntentDefinition } from "./types.js";
 
 export const DEFAULT_TIMEOUT_MS = 5_000;
 export const PROCESSED_EVENTS_RETENTION_DAYS = 90;
@@ -25,7 +25,3 @@ export const FALLBACK_INTENT: IntentDefinition = {
   guidance:
     "No predefined intent detected. Main Agent should determine the user's true intent and choose an appropriate strategy.",
 };
-
-export function isIntentComplexity(value: unknown): value is IntentComplexity {
-  return value === "low" || value === "medium" || value === "high";
-}

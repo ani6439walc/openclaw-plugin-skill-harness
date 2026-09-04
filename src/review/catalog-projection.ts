@@ -8,7 +8,7 @@ export type CatalogSelectionReason =
   | "matched-intent"
   | "observed-intent"
   | "observed-domain"
-  | "exact-fastpath-keyword-overlap";
+  | "exact-keyword-overlap";
 
 export type CatalogProjectionFallbackReason =
   | "trigger-requires-full-catalog"
@@ -47,7 +47,7 @@ const SELECTION_REASON_ORDER: readonly CatalogSelectionReason[] = [
   "matched-intent",
   "observed-intent",
   "observed-domain",
-  "exact-fastpath-keyword-overlap",
+  "exact-keyword-overlap",
 ];
 
 function compareStrings(left: string, right: string): number {
@@ -154,7 +154,7 @@ export function projectIntentCatalog(
       observedKeywords.has(normalizeForKeyword(keyword)),
     );
     if (hasExactKeywordOverlap) {
-      addReason(entry.id, "exact-fastpath-keyword-overlap");
+      addReason(entry.id, "exact-keyword-overlap");
     }
   }
 
@@ -192,7 +192,7 @@ export function projectIntentCatalog(
       candidate.entry.id !== matchedIntentId &&
       Boolean(domain) &&
       !observedDomains.has(domain) &&
-      candidate.selectionReasons.includes("exact-fastpath-keyword-overlap")
+      candidate.selectionReasons.includes("exact-keyword-overlap")
     );
   });
   if (!hasCrossDomainKeywordNeighbor) {

@@ -1,7 +1,6 @@
 import {
   FALLBACK_INTENT,
   FALLBACK_INTENT_ID,
-  isIntentComplexity,
   SKILL_HARNESS_PLUGIN_TAG,
   UNTRUSTED_CONTEXT_HEADER,
   USER_MESSAGE_BOUNDARY,
@@ -415,8 +414,7 @@ Required fields:
 
 Optional fields:
 - "keywords": string[] - Relevant keywords extracted from latest_message.
-- "topic": string - Concise natural-language phrase describing the user's current subject.
-- "suggestion": string - Optional when confidence is below 0.8; provide general guidance.`;
+- "topic": string - Concise natural-language phrase describing the user's current subject.`;
   const outputStyle = `### Output Style
 ${ULTRA_CONCISE_JSON_OUTPUT_STYLE}`;
   const outputShapeTemplates = `### Output Shape Template
@@ -498,13 +496,6 @@ export function parseIntentionResult(
       topic,
       confidence: parsed.confidence,
     };
-
-    // Optional suggestion
-    const suggestion =
-      typeof parsed.suggestion === "string" ? parsed.suggestion.trim() : "";
-    if (parsed.confidence < 0.8 && suggestion) {
-      result.suggestion = suggestion;
-    }
 
     return result;
   } catch {

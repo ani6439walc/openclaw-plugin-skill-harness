@@ -1603,7 +1603,6 @@ describe("SessionTracker", () => {
                 topic: "plan / change",
                 topicChangeReason: "shift",
                 confidence: 0.8,
-                complexity: "medium",
               },
             },
           },
@@ -1615,7 +1614,6 @@ describe("SessionTracker", () => {
                 reason: "test",
                 domain: "other",
                 confidence: 0.8,
-                complexity: "low",
               },
             },
           },
@@ -1628,7 +1626,6 @@ describe("SessionTracker", () => {
               reason: "test",
               domain: "coding",
               confidence: 0.75,
-              complexity: "medium",
             },
           },
         },
@@ -1643,62 +1640,14 @@ describe("SessionTracker", () => {
           topic: "plan / change",
           topicChangeReason: "shift",
           confidence: 0.8,
-          complexity: "medium",
         },
         {
           input: "Implement the change",
           intent: "CODING",
           domain: "coding",
           confidence: 0.75,
-          complexity: "medium",
         },
       ]);
-    });
-
-    it("should omit complexity when the stored result has no complexity", async () => {
-      await persistSessionFixture(tracker, "missing-complexity", {
-        current: {
-          input: "please comit this",
-          intent: {
-            result: {
-              intent: "version-control",
-              reason: "Topic keyword similarity match: comit -> commit",
-              domain: "git",
-              confidence: 0.833,
-            },
-          },
-        },
-      });
-
-      expect(tracker.getHistoricalIntentRecords("missing-complexity")).toEqual([
-        {
-          input: "please comit this",
-          intent: "version-control",
-          domain: "git",
-          confidence: 0.833,
-        },
-      ]);
-    });
-
-    it("should omit an unknown persisted complexity value", async () => {
-      await persistSessionFixture(tracker, "unknown-complexity", {
-        current: {
-          input: "continue",
-          intent: {
-            result: {
-              intent: "version-control",
-              reason: "legacy persisted result",
-              domain: "git",
-              confidence: 0.9,
-              complexity: "unknown" as never,
-            },
-          },
-        },
-      });
-
-      expect(
-        tracker.getHistoricalIntentRecords("unknown-complexity")[0],
-      ).not.toHaveProperty("complexity");
     });
 
     it("should return an empty array when the session does not exist", () => {
