@@ -23,7 +23,7 @@ export function normalizeForComparison(value: string): string {
 
 /**
  * Normalize for keyword matching (whitespace-insensitive).
- * Use for: keyword lookup, trigger matching, fastpath comparison.
+ * Use for: keyword lookup, trigger matching, keyword comparison.
  * Pattern: NFKC → remove all whitespace → lowercase
  */
 export function normalizeForKeyword(value: string): string {

@@ -188,7 +188,7 @@ describe("runIntentionSubagent", () => {
         examples: ["do allowed work"],
         domain: "development",
         skills: [],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Do allowed work.",
       },
     },

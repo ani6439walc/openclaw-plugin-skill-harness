@@ -135,7 +135,7 @@ const REQUIRED_WEAK_INTENT_REVIEW_PROMPT_SNIPPETS = [
   "class-level routing definitions: strict classification frontmatter plus one plain-text guidance body",
   "Do not create one-intent-per-session artifacts",
   "classification ambiguity",
-  "frontmatter triggers/examples/domain/fastpath",
+  "frontmatter triggers/examples/domain/keywords",
   "### Target preference order",
   "Prefer updating the currently matched intent",
   "prefer updating an existing class-level/umbrella intent from the Intent Catalog",
@@ -261,7 +261,7 @@ describe("buildReviewPrompt", () => {
     [
       "weak-intent",
       "classification ambiguity",
-      "frontmatter triggers/examples/domain/fastpath",
+      "frontmatter triggers/examples/domain/keywords",
     ],
     [
       "behavior-fix",
@@ -355,7 +355,7 @@ describe("buildReviewPrompt", () => {
         trigger: "weak-intent",
         required: [
           "classification ambiguity",
-          "frontmatter triggers/examples/domain/fastpath",
+          "frontmatter triggers/examples/domain/keywords",
         ],
         forbidden: [
           "high tool-call turn reveals a reusable way to reduce future calls",
@@ -2066,7 +2066,7 @@ describe("runReviewSubagent", () => {
         content.replace("- Casual social chat", "- Privileged production work"),
     },
     {
-      name: "fastpath keywords",
+      name: "keywords",
       mutate: (content: string) =>
         content.replace("- hi", "- deploy production"),
     },

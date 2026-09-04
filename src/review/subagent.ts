@@ -113,15 +113,15 @@ const REVIEW_INSTRUCTIONS: Record<
   },
   "weak-intent": {
     focus:
-      "Explain the classification ambiguity, likely matched intent, neighboring collision, and missing or misleading trigger/example/domain/fastpath coverage.",
-    goal: "Refine the matched intent Markdown frontmatter triggers/examples/domain/fastpath metadata and clarify its boundary without adding unrelated guidance.",
+      "Explain the classification ambiguity, likely matched intent, neighboring collision, and missing or misleading trigger/example/domain/keyword coverage.",
+    goal: "Refine the matched intent Markdown frontmatter triggers/examples/domain/keywords metadata and clarify its boundary without adding unrelated guidance.",
     workflow:
-      "weak-intent: focus on frontmatter triggers, examples, domain, fastpath metadata, and boundary clarity; prefer refine and do not change guidance for classification-only ambiguity. Use split or merge only when concrete neighboring-collision evidence proves refinement cannot preserve a clear class-level boundary.",
+      "weak-intent: focus on frontmatter triggers, examples, domain, keywords metadata, and boundary clarity; prefer refine and do not change guidance for classification-only ambiguity. Use split or merge only when concrete neighboring-collision evidence proves refinement cannot preserve a clear class-level boundary.",
   },
   "behavior-fix": {
     focus:
-      "Compare the user correction with the matched intent's routed behavior and identify the specific host-owned guidance, domain, fastpath keyword, or skill metadata that caused, allowed, or failed to prevent the mistake. Treat style, tone, format, verbosity, workflow, or step-order correction as first-class behavior evidence when concrete. When the snapshot shows an explicit user correction, misroute, or wrong tool/no-tool behavior with concrete evidence, prefer a narrow finding over no_finding.",
-    goal: "Refine the matched intent Markdown's domain, fastpath metadata, frontmatter skills, or guidance to encode the corrected behavior.",
+      "Compare the user correction with the matched intent's routed behavior and identify the specific host-owned guidance, domain, routing keyword, or skill metadata that caused, allowed, or failed to prevent the mistake. Treat style, tone, format, verbosity, workflow, or step-order correction as first-class behavior evidence when concrete. When the snapshot shows an explicit user correction, misroute, or wrong tool/no-tool behavior with concrete evidence, prefer a narrow finding over no_finding.",
+    goal: "Refine the matched intent Markdown's domain, keywords metadata, frontmatter skills, or guidance to encode the corrected behavior.",
     workflow:
       "behavior-fix: if the snapshot contains an explicit user correction, style/tone/format/verbosity/workflow/step-order correction, concrete misroute, or wrong tool/no-tool behavior, prefer a narrow finding over no_finding; encode the smallest correction that would prevent recurrence. Preserve a task-class scoped behavior preference in guidance rather than as a global personality note. Prefer refine; use split or merge only with concrete boundary-collision evidence. Also check whether the turn exposes a trigger keyword gap; suggest only stable phrases that clearly mean agent/routing correction.",
   },
@@ -181,7 +181,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - The target library shape is class-level routing definitions: strict classification frontmatter plus one plain-text guidance body. Do not create one-intent-per-session artifacts.
 
 ### Target preference order
-- Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, fastpath, domain, or direct-skill improvements.
+- Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, keywords, domain, or direct-skill improvements.
 - If the matched intent is absent or clearly wrong, prefer updating an existing class-level/umbrella intent from the Intent Catalog when catalog context is available and one intent already covers the broader task class.
 - Use only operations justified by the requested trigger's workflow. Prefer refine; create, split, or merge only when that trigger's concrete evidence establishes the corresponding class-level boundary change.
 - Do not create support files or propose references/templates/scripts. Preserve conversation-specific but reusable details only as concise routing metadata or guidance changes in the relevant intent Markdown.

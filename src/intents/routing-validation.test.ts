@@ -45,7 +45,7 @@ describe("validateRoutingIntentDirectory", () => {
     return validateRoutingIntentDirectory(dir).errors;
   }
 
-  it("accepts routing-only intents, normalizes values, and defaults fastpath", () => {
+  it("accepts routing-only intents, normalizes values, and defaults keywords", () => {
     write("simple.md", intentMarkdown());
     write(
       "complete.md",
