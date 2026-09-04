@@ -26,6 +26,8 @@ import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import {
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
   INTERNAL_RUNTIME_CONTEXT_END,
+  ROUTING_ADVISORY_HEADER,
+  ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   UNTRUSTED_CONTEXT_HEADER,
   CANDIDATE_SKILLS_GUIDANCE,
   USER_MESSAGE_BOUNDARY,
@@ -2801,20 +2803,20 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
-    expect(result?.prependContext).toMatch(
-      /^\n\n<<<BEGIN_SKILL_HARNESS_CONTEXT>>>/,
-    );
+    expect(
+      result?.prependContext?.startsWith(ROUTING_ADVISORY_INTENT_ONLY_HEADER),
+    ).toBe(true);
     expect(result?.prependContext).toContain(
-      `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>`,
+      `${ROUTING_ADVISORY_INTENT_ONLY_HEADER}\n<skill_harness_plugin>`,
     );
-    expect(result?.prependContext).not.toContain(CANDIDATE_SKILLS_GUIDANCE);
+    expect(result?.prependContext).not.toContain(ROUTING_ADVISORY_HEADER);
     expect(result?.prependContext).toContain(
       '<intent name="social-casual">\n    Reply warmly.\n  </intent>',
     );
-    expect(result?.prependContext).toContain(
-      `</skill_harness_plugin>\n${INTERNAL_RUNTIME_CONTEXT_END}`,
+    expect(result?.prependContext).not.toContain(
+      INTERNAL_RUNTIME_CONTEXT_BEGIN,
     );
-    expect(result?.prependContext?.endsWith(INTERNAL_RUNTIME_CONTEXT_END)).toBe(
+    expect(result?.prependContext?.endsWith("</skill_harness_plugin>")).toBe(
       true,
     );
     expect(result?.prependContext).not.toContain("<task_complexity>");
@@ -4025,7 +4027,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
       expect(result?.prependContext).toContain("<skill_candidates>");
-      expect(result?.prependContext).toContain(CANDIDATE_SKILLS_GUIDANCE);
+      expect(result?.prependContext).toContain(ROUTING_ADVISORY_HEADER);
       expect(result?.prependContext).toContain(
         '<skill name="domain-test-skill">',
       );

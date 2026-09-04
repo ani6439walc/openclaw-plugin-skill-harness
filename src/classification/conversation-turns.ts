@@ -1,6 +1,8 @@
 import {
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
   INTERNAL_RUNTIME_CONTEXT_END,
+  ROUTING_ADVISORY_HEADER,
+  ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   UNTRUSTED_CONTEXT_HEADER,
   CANDIDATE_SKILLS_GUIDANCE,
   USER_MESSAGE_BOUNDARY,
@@ -35,6 +37,10 @@ function routingBlockWithOptionalBoundary(): RegExp {
 export function sanitizeConversationText(text: string): string {
   // Header split must run before tag matching: the header mentions the tag inline.
   return text
+    .split(ROUTING_ADVISORY_HEADER)
+    .join(" ")
+    .split(ROUTING_ADVISORY_INTENT_ONLY_HEADER)
+    .join(" ")
     .split(UNTRUSTED_CONTEXT_HEADER)
     .join(" ")
     .split("[Skill Harness Context (advisory, non-user input)]:")
@@ -50,12 +56,14 @@ export function sanitizeConversationText(text: string): string {
       " ",
     )
     .replace(routingBlockWithOptionalBoundary(), " ")
-    .replace(/<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>/gi, " ")
     .replace(
-      /Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi,
+      /(?:Context:\s*)?<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>/gi,
       " ",
     )
-    .replace(/Sender \(untrusted metadata\):\s*```json[\s\S]*?```\s*/gi, " ")
+    .replace(
+      /(?:Conversation info|Sender)(?: \(untrusted metadata\):|: ⟦openclaw:ctx⟧)\s*```json[\s\S]*?```\s*/gi,
+      " ",
+    )
     .replace(/^\s*System:\s*\[[^\]]+\]\s*Model switched to .*$/gim, " ")
     .replace(/\s+/g, " ")
     .trim();

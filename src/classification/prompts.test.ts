@@ -16,6 +16,8 @@ import {
   FALLBACK_INTENT_ID,
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
   INTERNAL_RUNTIME_CONTEXT_END,
+  ROUTING_ADVISORY_HEADER,
+  ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   UNTRUSTED_CONTEXT_HEADER,
   CANDIDATE_SKILLS_GUIDANCE,
   USER_MESSAGE_BOUNDARY,
@@ -123,7 +125,7 @@ describe("buildRoutingContext", () => {
     });
 
     expect(result).toContain(
-      `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${UNTRUSTED_CONTEXT_HEADER}\n${CANDIDATE_SKILLS_GUIDANCE}\n<skill_harness_plugin>`,
+      `${ROUTING_ADVISORY_HEADER}\n<skill_harness_plugin>`,
     );
     expect(result).toContain("<skill_harness_plugin>");
     expect(result).toContain(
@@ -153,11 +155,10 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("<body>");
     expect(result).not.toContain("/private/SKILL.md");
     expect(result).not.toContain("/private/experience.md");
-    expect(result.startsWith(INTERNAL_RUNTIME_CONTEXT_BEGIN)).toBe(true);
-    expect(result).toContain(
-      `</skill_harness_plugin>\n${INTERNAL_RUNTIME_CONTEXT_END}`,
-    );
-    expect(result.endsWith(INTERNAL_RUNTIME_CONTEXT_END)).toBe(true);
+    expect(result.startsWith(ROUTING_ADVISORY_HEADER)).toBe(true);
+    expect(result).not.toContain(INTERNAL_RUNTIME_CONTEXT_BEGIN);
+    expect(result).not.toContain(INTERNAL_RUNTIME_CONTEXT_END);
+    expect(result.endsWith("</skill_harness_plugin>")).toBe(true);
   });
 
   it("omits empty optional blocks and renders candidate-scoped experiences only within their matching skill", () => {
@@ -186,8 +187,9 @@ describe("buildRoutingContext", () => {
       experiences: [],
     });
     expect(empty).toContain(
-      `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>`,
+      `${ROUTING_ADVISORY_INTENT_ONLY_HEADER}\n<skill_harness_plugin>`,
     );
+    expect(empty).not.toContain(ROUTING_ADVISORY_HEADER);
     expect(empty).not.toContain(CANDIDATE_SKILLS_GUIDANCE);
     expect(empty).not.toContain("<skill_candidates>");
     expect(empty).not.toContain("<skill_experiences>");

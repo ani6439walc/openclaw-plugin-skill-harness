@@ -1,12 +1,9 @@
 import {
   FALLBACK_INTENT,
   FALLBACK_INTENT_ID,
-  INTERNAL_RUNTIME_CONTEXT_BEGIN,
-  INTERNAL_RUNTIME_CONTEXT_END,
+  ROUTING_ADVISORY_HEADER,
+  ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   SKILL_HARNESS_PLUGIN_TAG,
-  UNTRUSTED_CONTEXT_HEADER,
-  CANDIDATE_SKILLS_GUIDANCE,
-  USER_MESSAGE_BOUNDARY,
 } from "../constants.js";
 import { xmlBlock } from "../xml-format.js";
 import { canonicalIdentity } from "../normalize.js";
@@ -327,9 +324,9 @@ export function buildRoutingContext(params: {
   const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
   const header =
     params.candidates.length > 0
-      ? `${UNTRUSTED_CONTEXT_HEADER}\n${CANDIDATE_SKILLS_GUIDANCE}`
-      : UNTRUSTED_CONTEXT_HEADER;
-  return `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${header}\n${taggedContent}\n${INTERNAL_RUNTIME_CONTEXT_END}`;
+      ? ROUTING_ADVISORY_HEADER
+      : ROUTING_ADVISORY_INTENT_ONLY_HEADER;
+  return `${header}\n${taggedContent}`;
 }
 
 function escapeXmlText(value: string | null | undefined): string {

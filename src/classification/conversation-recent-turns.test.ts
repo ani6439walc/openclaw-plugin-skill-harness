@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { UNTRUSTED_CONTEXT_HEADER } from "../constants.js";
+import {
+  ROUTING_ADVISORY_HEADER,
+  UNTRUSTED_CONTEXT_HEADER,
+} from "../constants.js";
 import { extractRecentTurns } from "./conversation.js";
 
 describe("extractRecentTurns", () => {
@@ -39,7 +42,7 @@ describe("extractRecentTurns", () => {
       { role: "user", content: "test" },
       {
         role: "assistant",
-        content: `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>Chat hint test</skill_harness_plugin>\nreal reply`,
+        content: `${ROUTING_ADVISORY_HEADER}\n<skill_harness_plugin>Chat hint test</skill_harness_plugin>\nreal reply`,
       },
     ]);
 

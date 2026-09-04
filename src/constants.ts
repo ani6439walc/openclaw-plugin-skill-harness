@@ -12,6 +12,10 @@ export const DEFAULT_RECENT_ASSISTANT_TURNS = 5;
 export const DEFAULT_RECENT_USER_CHARS = 220;
 export const DEFAULT_RECENT_ASSISTANT_CHARS = 180;
 export const SKILL_HARNESS_PLUGIN_TAG = "skill_harness_plugin";
+export const ROUTING_ADVISORY_HEADER =
+  "Inferred intent and candidate skills (advisory, non-user input; load with `skill_view` if relevant):";
+export const ROUTING_ADVISORY_INTENT_ONLY_HEADER =
+  "Inferred user intent from conversation (advisory, non-user input):";
 export const INTERNAL_RUNTIME_CONTEXT_BEGIN =
   "<<<BEGIN_SKILL_HARNESS_CONTEXT>>>";
 export const INTERNAL_RUNTIME_CONTEXT_END = "<<<END_SKILL_HARNESS_CONTEXT>>>";

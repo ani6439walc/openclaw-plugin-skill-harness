@@ -55,9 +55,7 @@ Intent metadata must not mention other intents by name or id. The classifier see
 At prompt construction time, the plugin compiles the matched intent and candidate skills into a compact structure:
 
 ```text
-<<<BEGIN_SKILL_HARNESS_CONTEXT>>>
-Skill Harness context (advisory, non-user input):
-When relevant, load candidate skills with `skill_view` before proceeding:
+Inferred intent and candidate skills (advisory, non-user input; load with `skill_view` if relevant):
 <skill_harness_plugin>
   <intent name="intent-id">
     One durable plain-text routing guidance sentence.
@@ -72,12 +70,11 @@ When relevant, load candidate skills with `skill_view` before proceeding:
     </skill>
   </skill_candidates>
 </skill_harness_plugin>
-<<<END_SKILL_HARNESS_CONTEXT>>>
 ```
 
 Key rules of the runtime format:
 
-- Dynamic context is enclosed in `<<<BEGIN_SKILL_HARNESS_CONTEXT>>>` and `<<<END_SKILL_HARNESS_CONTEXT>>>` with the `Skill Harness context (advisory, non-user input):` header and conditional `When relevant, load candidate skills with \`skill_view\` before proceeding:` guidance.
+- Dynamic context is introduced by a concise single-line advisory header (`Inferred intent and candidate skills (advisory, non-user input; load with \`skill_view\` if relevant):`when candidates exist, or`Inferred user intent from conversation (advisory, non-user input):`when intent-only) directly preceding`<skill_harness_plugin>`.
 - `<intent name="${intent}">` combines intent identity and guidance in one tag.
 - `<skill name="${name}">` encapsulates skill identity and description. File paths are omitted from both candidate skills and static `<configured_skills>` to save prompt tokens; agents inspect `path` dynamically via `skill_list` or `skill_view`.
 - `<context_policy>` is omitted.

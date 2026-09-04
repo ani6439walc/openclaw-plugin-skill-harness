@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
   INTERNAL_RUNTIME_CONTEXT_END,
+  ROUTING_ADVISORY_HEADER,
+  ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   UNTRUSTED_CONTEXT_HEADER,
   CANDIDATE_SKILLS_GUIDANCE,
   USER_MESSAGE_BOUNDARY,
@@ -68,6 +70,50 @@ describe("sanitizeConversationText", () => {
         `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${UNTRUSTED_CONTEXT_HEADER}\n${CANDIDATE_SKILLS_GUIDANCE}\n<skill_harness_plugin>\n<intent name="other">\nguidance\n</intent>\n</skill_harness_plugin>\n${INTERNAL_RUNTIME_CONTEXT_END}\n\n進入 inventory 模式先 scan吧`,
       ),
     ).toBe("進入 inventory 模式先 scan吧");
+  });
+
+  it("strips single-line routing advisory headers with candidate skills", () => {
+    expect(
+      sanitizeConversationText(
+        `${ROUTING_ADVISORY_HEADER}\n<skill_harness_plugin>\n<intent name="memory-lookup">\nguidance\n</intent>\n<skill_candidates>\n<skill name="treemd">\ndesc\n</skill>\n</skill_candidates>\n</skill_harness_plugin>\n\n進入 inventory 模式先 scan吧`,
+      ),
+    ).toBe("進入 inventory 模式先 scan吧");
+  });
+
+  it("strips single-line routing advisory headers for intent-only routing", () => {
+    expect(
+      sanitizeConversationText(
+        `${ROUTING_ADVISORY_INTENT_ONLY_HEADER}\n<skill_harness_plugin>\n<intent name="general-chat">\nguidance\n</intent>\n</skill_harness_plugin>\n\n進入 inventory 模式先 scan吧`,
+      ),
+    ).toBe("進入 inventory 模式先 scan吧");
+  });
+
+  it("strips OpenClaw 2026.9.1 conversation info context marker and active memory block", () => {
+    const raw = `Conversation info: ⟦openclaw:ctx⟧
+\`\`\`json
+{"sender":{"id":"529296776637972480","name":"烤雞堡","username":"wei840222"}}
+\`\`\`
+
+${ROUTING_ADVISORY_HEADER}
+<skill_harness_plugin>
+  <intent name="memory-lookup">
+    guidance
+  </intent>
+  <skill_candidates>
+    <skill name="treemd">
+      desc
+    </skill>
+  </skill_candidates>
+</skill_harness_plugin>
+
+Context:
+<active_memory_plugin>
+PATH: darling/projects/personal/減肥.md (detailed weight loss journey & diet records)
+</active_memory_plugin>
+
+我之前都吃甚麼`;
+
+    expect(sanitizeConversationText(raw)).toBe("我之前都吃甚麼");
   });
 
   it("strips the legacy routing block and its trailing user-message boundary marker", () => {
