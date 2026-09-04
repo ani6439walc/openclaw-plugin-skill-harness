@@ -4,6 +4,7 @@ import * as classification from "./index.js";
 import {
   buildRoutingContext,
   buildIntentionPrompt,
+  formatConfiguredSkills,
   parseIntentionResult,
 } from "./prompts.js";
 import type {
@@ -115,19 +116,22 @@ describe("buildRoutingContext", () => {
     });
 
     expect(result).toContain("<skill_harness_plugin>");
-    expect(result).toContain("<selected_intent>architecture</selected_intent>");
-    expect(result).not.toContain("<task_complexity>");
     expect(result).toContain(
-      "<intent_guidance>Render the selected skills with stable evidence.</intent_guidance>",
+      '  <intent name="architecture">\n    Render the selected skills with stable evidence.\n  </intent>',
     );
+    expect(result).not.toContain("<selected_intent>");
+    expect(result).not.toContain("<intent_guidance>");
+    expect(result).not.toContain("<context_policy>");
+    expect(result).not.toContain("<task_complexity>");
     expect(result).toContain("<skill_candidates>");
-    expect(result).toContain("<name>architecture-diagram</name>");
+    expect(result).not.toContain("<name>architecture-diagram</name>");
+    expect(result).not.toContain("<description>");
     expect(result).toContain(
-      "<description>Draw &lt;clear&gt; diagrams &amp; validate them.</description>",
+      '    <skill name="architecture-diagram">\n      Draw &lt;clear&gt; diagrams &amp; validate them.',
     );
     expect(result).not.toContain("<skill_experiences>");
     expect(result).toMatch(
-      /<skill>\n\s+<name>architecture-diagram<\/name>\n\s+<description>Draw &lt;clear&gt; diagrams &amp; validate them.<\/description>\n\s+<skill_experience>/,
+      /<skill name="architecture-diagram">\n\s+Draw &lt;clear&gt; diagrams &amp; validate them\.\n\s+<skill_experience>/,
     );
     expect(result).toContain(
       "<identity>architecture-diagram/layout</identity>",
@@ -216,6 +220,29 @@ describe("buildRoutingContext", () => {
     });
     expect(unmatched).not.toContain("<skill_experience>");
     expect(unmatched).not.toContain("skill/unmatched");
+  });
+});
+
+describe("formatConfiguredSkills", () => {
+  it("formats configured skills with name attribute, bare description, and path", () => {
+    const skills = [
+      {
+        name: "test-skill",
+        description: "A skill for testing.",
+        location: "/path/to/test-skill/SKILL.md",
+      },
+    ];
+    const formatted = formatConfiguredSkills(skills);
+    expect(formatted).toContain("<configured_skills>");
+    expect(formatted).toContain(
+      '<skill name="test-skill">\n    A skill for testing.\n    <path>/path/to/test-skill/SKILL.md</path>\n  </skill>',
+    );
+    expect(formatted).toContain("### Agent-configured skills");
+  });
+
+  it("returns empty string when skills list is empty or undefined", () => {
+    expect(formatConfiguredSkills([])).toBe("");
+    expect(formatConfiguredSkills(undefined)).toBe("");
   });
 });
 

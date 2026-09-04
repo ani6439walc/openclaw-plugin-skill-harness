@@ -54,12 +54,12 @@ describe("sanitizeConversationText", () => {
   it("strips the routing block and its trailing user-message boundary marker", () => {
     expect(
       sanitizeConversationText(
-        `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>\n<selected_intent>other</selected_intent>\n</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}\n\n進入 inventory 模式先 scan吧`,
+        `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>\n<intent name="other">\nguidance\n</intent>\n</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}\n\n進入 inventory 模式先 scan吧`,
       ),
     ).toBe("進入 inventory 模式先 scan吧");
   });
 
-  it("preserves standalone User Message: text not attached to the routing block", () => {
+  it("preserves standalone user-message boundary text not attached to the routing block", () => {
     expect(
       sanitizeConversationText(`請解釋 ${USER_MESSAGE_BOUNDARY} 這個詞`),
     ).toBe(`請解釋 ${USER_MESSAGE_BOUNDARY} 這個詞`);
@@ -75,7 +75,7 @@ describe("sanitizeConversationText", () => {
       sanitizeConversationText(
         `${UNTRUSTED_CONTEXT_HEADER}\n<skill_harness_plugin>\nhint\n</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}\n\nreal user request`,
       ),
-    ).not.toContain("Generated Skill Harness context");
+    ).not.toContain("Skill Harness Context");
   });
 });
 

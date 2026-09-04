@@ -2373,10 +2373,8 @@ describe("createHookHandlers internal turn guards", () => {
         expect(result?.prependContext).toBeUndefined();
         expect(systemContext).toContain(SKILL_HARNESS_SYSTEM_CONTEXT);
         expect(systemContext).toContain("<configured_skills>");
-        expect(systemContext).toContain("<name>static-scope</name>");
-        expect(systemContext).toContain(
-          "<description>Static scope workspace skill.</description>",
-        );
+        expect(systemContext).toContain('<skill name="static-scope">');
+        expect(systemContext).toContain("Static scope workspace skill.");
         expect(systemContext).toContain(
           `<path>${path.join(workspaceDir, "skills", "static-scope", "SKILL.md")}</path>`,
         );
@@ -2790,13 +2788,13 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
     expect(result?.prependContext).toMatch(
-      /^\nGenerated Skill Harness context for this turn follows\./,
+      /^\n\n\[Skill Harness Context \(advisory, non-user input\)\]:/,
     );
     expect(result?.prependContext).toContain(
-      "advisory guidance:\n<skill_harness_plugin>",
+      "input)]:\n<skill_harness_plugin>",
     );
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
+      '<intent name="social-casual">\n    Reply warmly.\n  </intent>',
     );
     expect(result?.prependContext).toContain(
       `</skill_harness_plugin>\n\n${USER_MESSAGE_BOUNDARY}`,
@@ -2919,10 +2917,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
-    );
-    expect(result?.prependContext).toContain(
-      "<selected_intent>social-casual</selected_intent>",
+      '<intent name="social-casual">\n    Reply warmly.\n  </intent>',
     );
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
@@ -3075,7 +3070,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     });
 
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
+      '<intent name="social-casual">\n    Reply warmly.\n  </intent>',
     );
     expect(tracker.preparePromptTurn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3198,7 +3193,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
+      '<intent name="social-casual">\n    Reply warmly.\n  </intent>',
     );
   });
 
@@ -3367,10 +3362,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
 
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Use git carefully.</intent_guidance>",
-    );
-    expect(result?.prependContext).toContain(
-      "<selected_intent>version-control</selected_intent>",
+      '<intent name="version-control">\n    Use git carefully.\n  </intent>',
     );
     expect(result?.appendSystemContext).toBe(SKILL_HARNESS_SYSTEM_CONTEXT);
     expect(classifier).not.toHaveBeenCalled();
@@ -3683,7 +3675,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     expect(result?.prependContext).toContain("<skill_harness_plugin");
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Use git carefully.</intent_guidance>",
+      '<intent name="version-control">\n    Use git carefully.\n  </intent>',
     );
     expect(classifier).not.toHaveBeenCalled();
     expect(record).toHaveBeenCalledWith(
@@ -3855,10 +3847,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Implement the requested change.</intent_guidance>",
-    );
-    expect(result?.prependContext).toContain(
-      "<selected_intent>coding</selected_intent>",
+      '<intent name="coding">\n    Implement the requested change.\n  </intent>',
     );
     expect(record).toHaveBeenCalledWith(
       "session-1",
@@ -3913,7 +3902,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Implement the requested change.</intent_guidance>",
+      '<intent name="coding">\n    Implement the requested change.\n  </intent>',
     );
     expect(record).toHaveBeenCalled();
   });
@@ -3950,10 +3939,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
       expect(result?.prependContext).toContain(
-        "<intent_guidance>Implement the requested change.</intent_guidance>",
-      );
-      expect(result?.prependContext).toContain(
-        "<selected_intent>coding</selected_intent>",
+        '<intent name="coding">\n    Implement the requested change.\n  </intent>',
       );
     },
   );
@@ -3966,7 +3952,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
+      '<intent name="social-casual">\n    Reply warmly.\n  </intent>',
     );
     expect(result?.appendSystemContext).toContain(SKILL_HARNESS_SYSTEM_CONTEXT);
     expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
@@ -4023,10 +4009,10 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
       expect(result?.prependContext).toContain("<skill_candidates>");
       expect(result?.prependContext).toContain(
-        "<name>domain-test-skill</name>",
+        '<skill name="domain-test-skill">',
       );
       expect(result?.prependContext).toContain(
-        "<intent_guidance>Implement the requested change.</intent_guidance>",
+        '<intent name="coding">\n    Implement the requested change.\n  </intent>',
       );
       expect(result?.prependContext).not.toContain("\n## Instruction Hint\n");
     } finally {
@@ -4128,7 +4114,7 @@ Current user request: fresh clean request
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
     expect(result?.prependContext).toContain(
-      "<intent_guidance>Use git carefully.</intent_guidance>",
+      '<intent name="version-control">\n    Use git carefully.\n  </intent>',
     );
     expect(record).toHaveBeenCalledWith(
       "session-1",
@@ -4289,11 +4275,11 @@ Current user request: fresh clean request
       );
 
       expect(result?.prependContext).toContain(
-        "<intent_guidance>Draw the requested architecture.</intent_guidance>",
+        '<intent name="architecture">\n    Draw the requested architecture.\n  </intent>',
       );
       expect(result?.prependContext).toContain("<skill_candidates>");
       expect(result?.prependContext).toContain(
-        "<name>architecture-diagram</name>",
+        '<skill name="architecture-diagram">',
       );
       expect(result?.prependContext).not.toContain("blogwatcher");
     } finally {
@@ -4472,7 +4458,9 @@ Current user request: fresh clean request
       "Actively review and apply these pre-configured skills when relevant to the task and environment:",
     );
     expect(result?.appendSystemContext).toContain("<configured_skills>");
-    expect(result?.appendSystemContext).toContain("<name>skill-harness</name>");
+    expect(result?.appendSystemContext).toContain(
+      '<skill name="skill-harness">',
+    );
   });
 
   it("automatically appends direct and nested workspace skills when no skills are explicitly configured", async () => {
@@ -4515,17 +4503,13 @@ Current user request: fresh clean request
 
     expect(getConfiguredAgentSkills).toHaveBeenCalledWith("main");
     expect(systemContext).toContain("<configured_skills>");
-    expect(systemContext).toContain("<name>direct</name>");
-    expect(systemContext).toContain(
-      "<description>Direct workspace skill.</description>",
-    );
+    expect(systemContext).toContain('<skill name="direct">');
+    expect(systemContext).toContain("Direct workspace skill.");
     expect(systemContext).toContain(
       `<path>${path.join(workspaceDir, "skills", "direct", "SKILL.md")}</path>`,
     );
-    expect(systemContext).toContain("<name>nested</name>");
-    expect(systemContext).toContain(
-      "<description>Nested workspace skill.</description>",
-    );
+    expect(systemContext).toContain('<skill name="nested">');
+    expect(systemContext).toContain("Nested workspace skill.");
     expect(systemContext).toContain(
       `<path>${path.join(workspaceDir, "skills", "groups", "deep", "nested", "SKILL.md")}</path>`,
     );
@@ -4579,16 +4563,14 @@ Current user request: fresh clean request
     );
     const systemContext = result?.appendSystemContext ?? "";
     const renderedNames = Array.from(
-      systemContext.matchAll(/<name>([^<]+)<\/name>/g),
+      systemContext.matchAll(/<skill name="([^"]+)">/g),
       (match) => match[1],
     );
 
-    expect(systemContext).toContain("<name>explicit-only</name>");
-    expect(systemContext).toContain("<name>workspace-only</name>");
-    expect(systemContext.match(/<name>shared<\/name>/g)).toHaveLength(1);
-    expect(systemContext).toContain(
-      "<description>Workspace shared winner.</description>",
-    );
+    expect(systemContext).toContain('<skill name="explicit-only">');
+    expect(systemContext).toContain('<skill name="workspace-only">');
+    expect(systemContext.match(/<skill name="shared">/g)).toHaveLength(1);
+    expect(systemContext).toContain("Workspace shared winner.");
     expect(systemContext).toContain(
       `<path>${path.join(workspaceDir, "skills", "shared", "SKILL.md")}</path>`,
     );
@@ -4629,10 +4611,10 @@ Current user request: fresh clean request
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
       expect(result?.appendSystemContext).toContain(
-        "<name>workspace-only</name>",
+        '<skill name="workspace-only">',
       );
       expect(result?.appendSystemContext).toContain(
-        "<description>Workspace fallback skill.</description>",
+        "Workspace fallback skill.",
       );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -4672,10 +4654,10 @@ Current user request: fresh clean request
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
       expect(result?.appendSystemContext).toContain(
-        "<name>workspace-only</name>",
+        '<skill name="workspace-only">',
       );
       expect(result?.appendSystemContext).toContain(
-        "<description>Workspace resolver fallback skill.</description>",
+        "Workspace resolver fallback skill.",
       );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -4715,11 +4697,9 @@ Current user request: fresh clean request
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
       expect(result?.appendSystemContext).toContain(
-        "<name>explicit-only</name>",
+        '<skill name="explicit-only">',
       );
-      expect(result?.appendSystemContext).toContain(
-        "<description>Explicit fallback skill.</description>",
-      );
+      expect(result?.appendSystemContext).toContain("Explicit fallback skill.");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -4791,13 +4771,13 @@ Current user request: fresh clean request
       "SKILL.md",
     );
 
-    expect(mainContext).toContain("<name>main-only</name>");
+    expect(mainContext).toContain('<skill name="main-only">');
     expect(mainContext).toContain(`<path>${mainSkillPath}</path>`);
-    expect(mainContext).not.toContain("<name>librarian-only</name>");
+    expect(mainContext).not.toContain('<skill name="librarian-only">');
     expect(mainContext).not.toContain(librarianSkillPath);
-    expect(librarianContext).toContain("<name>librarian-only</name>");
+    expect(librarianContext).toContain('<skill name="librarian-only">');
     expect(librarianContext).toContain(`<path>${librarianSkillPath}</path>`);
-    expect(librarianContext).not.toContain("<name>main-only</name>");
+    expect(librarianContext).not.toContain('<skill name="main-only">');
     expect(librarianContext).not.toContain(mainSkillPath);
     expect(resolveAgentWorkspaceDir).toHaveBeenCalledWith(
       expect.anything(),

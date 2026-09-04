@@ -29,13 +29,6 @@ const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
 - Do not abbreviate technical names into unclear shorthand.
 - Do not omit required schema fields, safety constraints, ordering, or key qualifiers to make text shorter.`;
 
-const ROUTING_CONTEXT_POLICY = xmlBlock(
-  "context_policy",
-  `- \`selected_intent\` and \`intent_guidance\` describe the current routing decision; treat low-confidence routing as tentative.
-- \`skill_candidates\` are resolved discovery leads, not proof that every listed skill applies. A candidate may include nested \`skill_experience\` identity and keyword metadata; call \`skill_experience\` to read its body.
-- Low confidence: treat intent-derived guidance as tentative and avoid broadening scope.`,
-);
-
 function buildIntentCatalog(intents: readonly IntentCatalogEntry[]): string {
   const intentBlocks = intents
     .map((entry) => {
@@ -275,15 +268,19 @@ function formatSkillXml(
   includeDetails: boolean,
   experiences: readonly string[] = [],
 ): string {
-  const lines = [
-    formatXmlTextElement("name", skill.name),
-    formatXmlTextElement("description", skill.description),
-    ...experiences,
-  ];
+  const lines: string[] = [];
+  if (skill.description) {
+    lines.push(escapeXmlText(skill.description));
+  }
+  lines.push(...experiences);
   if (includeDetails) {
     lines.push(formatXmlTextElement("path", skill.location));
   }
-  return xmlBlock("skill", lines.join("\n"));
+  return xmlBlock(
+    "skill",
+    lines.join("\n"),
+    ` name="${escapeXmlAttribute(skill.name)}"`,
+  );
 }
 
 function formatExperienceXml(experience: SkillExperienceEntry): string {
@@ -315,9 +312,11 @@ export function buildRoutingContext(params: {
 }): string {
   const experiencesBySkill = formatCandidateExperiences(params.experiences);
   const blocks = [
-    ROUTING_CONTEXT_POLICY,
-    formatXmlTextElement("selected_intent", params.result.intent),
-    formatXmlTextElement("intent_guidance", params.guidance),
+    xmlBlock(
+      "intent",
+      escapeXmlText(params.guidance),
+      ` name="${escapeXmlAttribute(params.result.intent)}"`,
+    ),
     params.candidates.length > 0
       ? formatSkillXmlBlock(
           "skill_candidates",

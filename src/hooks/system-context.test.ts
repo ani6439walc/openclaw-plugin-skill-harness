@@ -45,7 +45,8 @@ describe("SKILL_HARNESS_SYSTEM_CONTEXT", () => {
         "### Using Skill Harness context",
       ),
     ).toBe(true);
-    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("intent_guidance");
+    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain('<intent name="...">');
+    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("intent guidance");
     expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("skill_candidates");
     expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("skill_experiences");
     expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain(

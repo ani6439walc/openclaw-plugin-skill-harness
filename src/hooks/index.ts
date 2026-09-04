@@ -331,7 +331,7 @@ function toPromptBuildResult(
     ? `${systemContext}\n\n${configuredSkillsXml}`
     : systemContext;
   return {
-    ...(prependContext ? { prependContext: `\n${prependContext}` } : {}),
+    ...(prependContext ? { prependContext: `\n\n${prependContext}` } : {}),
     appendSystemContext,
   };
 }
