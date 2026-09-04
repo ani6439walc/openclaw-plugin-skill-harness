@@ -27,7 +27,7 @@ const CONVERSATION_CONTEXT_END_TAG = "</conversation_context>";
 // Build per call: the /g flag mutates lastIndex on shared RegExp instances.
 function routingBlockWithOptionalBoundary(): RegExp {
   return new RegExp(
-    `(?:<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\\s*)?<skill_harness_plugin\\b[^>]*>[\\s\\S]*?<\\/skill_harness_plugin>\\s*(?:${ESCAPED_USER_MESSAGE_BOUNDARY}|${LEGACY_USER_MESSAGE_BOUNDARY})?\\s*`,
+    `(?:(?:${INTERNAL_RUNTIME_CONTEXT_BEGIN}|<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>)\\s*)?<skill_harness_plugin\\b[^>]*>[\\s\\S]*?<\\/skill_harness_plugin>\\s*(?:${ESCAPED_USER_MESSAGE_BOUNDARY}|${LEGACY_USER_MESSAGE_BOUNDARY})?\\s*`,
     "gi",
   );
 }
@@ -41,6 +41,10 @@ export function sanitizeConversationText(text: string): string {
     .join(" ")
     .split(CANDIDATE_SKILLS_GUIDANCE)
     .join(" ")
+    .replace(
+      /<<<BEGIN_SKILL_HARNESS_CONTEXT>>>[\s\S]*?<<<END_SKILL_HARNESS_CONTEXT>>>/gi,
+      " ",
+    )
     .replace(
       /<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>/gi,
       " ",

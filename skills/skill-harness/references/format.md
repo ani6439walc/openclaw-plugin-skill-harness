@@ -55,7 +55,7 @@ Intent metadata must not mention other intents by name or id. The classifier see
 At prompt construction time, the plugin compiles the matched intent and candidate skills into a compact structure:
 
 ```text
-<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>
+<<<BEGIN_SKILL_HARNESS_CONTEXT>>>
 Skill Harness context (advisory, non-user input):
 When relevant, load candidate skills with `skill_view` before proceeding:
 <skill_harness_plugin>
@@ -72,7 +72,7 @@ When relevant, load candidate skills with `skill_view` before proceeding:
     </skill>
   </skill_candidates>
 </skill_harness_plugin>
-<<<END_OPENCLAW_INTERNAL_CONTEXT>>>
+<<<END_SKILL_HARNESS_CONTEXT>>>
 ```
 
 Key rules of the runtime format:

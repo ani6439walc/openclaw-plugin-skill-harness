@@ -13,9 +13,8 @@ export const DEFAULT_RECENT_USER_CHARS = 220;
 export const DEFAULT_RECENT_ASSISTANT_CHARS = 180;
 export const SKILL_HARNESS_PLUGIN_TAG = "skill_harness_plugin";
 export const INTERNAL_RUNTIME_CONTEXT_BEGIN =
-  "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>";
-export const INTERNAL_RUNTIME_CONTEXT_END =
-  "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>";
+  "<<<BEGIN_SKILL_HARNESS_CONTEXT>>>";
+export const INTERNAL_RUNTIME_CONTEXT_END = "<<<END_SKILL_HARNESS_CONTEXT>>>";
 export const UNTRUSTED_CONTEXT_HEADER =
   "Skill Harness context (advisory, non-user input):";
 export const CANDIDATE_SKILLS_GUIDANCE =
