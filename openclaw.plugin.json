@@ -85,22 +85,45 @@
           "embedding": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["baseUrl", "model"],
+            "required": ["model"],
             "properties": {
-              "baseUrl": { "type": "string" },
-              "model": { "type": "string" },
-              "apiKey": { "type": "string" },
-              "dimension": { "type": "integer", "minimum": 1 }
+              "baseUrl": {
+                "type": "string",
+                "description": "Optional base URL for OpenAI-compatible embeddings. If omitted, resolved from the OpenClaw provider prefix in model."
+              },
+              "model": {
+                "type": "string",
+                "description": "Embedding model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/text-embedding-3-small')."
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "Optional API key for embeddings. If omitted, resolved from the OpenClaw provider or environment."
+              },
+              "dimension": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1536,
+                "description": "Embedding vector dimension. Defaults to 1536."
+              }
             }
           },
           "expansion": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["baseUrl", "model"],
+            "required": ["model"],
             "properties": {
-              "baseUrl": { "type": "string" },
-              "model": { "type": "string" },
-              "apiKey": { "type": "string" }
+              "baseUrl": {
+                "type": "string",
+                "description": "Optional base URL for OpenAI-compatible expansion. If omitted, resolved from the OpenClaw provider prefix in model."
+              },
+              "model": {
+                "type": "string",
+                "description": "Expansion model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/gpt-4o-mini')."
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "Optional API key for expansion. If omitted, resolved from the OpenClaw provider or environment."
+              }
             }
           },
           "indexRefreshIntervalSeconds": {

@@ -470,4 +470,52 @@ describe("createPlugin", () => {
 
     expect(removed).toEqual([]);
   });
+
+  it("resolves QMD provider baseUrl and apiKey dynamically from live OpenClaw config", () => {
+    const apiConfig = {
+      models: {
+        providers: {
+          bifrost: {
+            baseUrl: "https://bifrost.home-infra.weii.cloud/openai/v1",
+            apiKey: "bifrost-secret-token",
+            models: [],
+          },
+        },
+      },
+    };
+    const api = createApi({
+      config: apiConfig,
+      pluginConfig: {
+        qmd: {
+          embedding: {
+            model: "bifrost/text-embedding-3-small",
+          },
+          expansion: {
+            model: "bifrost/gpt-4o-mini",
+          },
+        },
+      },
+      runtime: {
+        agent: { resolveAgentWorkspaceDir: () => stateDir },
+        config: { current: () => apiConfig },
+        state: { resolveStateDir: () => stateDir },
+      } as never,
+    });
+
+    createPlugin(api).register(api);
+
+    expect(createHookHandlersSpy).toHaveBeenCalled();
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+    const resolvedConfig = deps.config();
+    expect(resolvedConfig.qmd.embedding.baseUrl).toBe(
+      "https://bifrost.home-infra.weii.cloud/openai/v1",
+    );
+    expect(resolvedConfig.qmd.embedding.model).toBe("text-embedding-3-small");
+    expect(resolvedConfig.qmd.embedding.apiKey).toBe("bifrost-secret-token");
+    expect(resolvedConfig.qmd.expansion.baseUrl).toBe(
+      "https://bifrost.home-infra.weii.cloud/openai/v1",
+    );
+    expect(resolvedConfig.qmd.expansion.model).toBe("gpt-4o-mini");
+    expect(resolvedConfig.qmd.expansion.apiKey).toBe("bifrost-secret-token");
+  });
 });

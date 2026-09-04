@@ -233,7 +233,16 @@ export function createPlugin(
 ): OpenClawPluginDefinition & {
   register: NonNullable<OpenClawPluginDefinition["register"]>;
 } {
-  let config = resolveConfig(api.pluginConfig as Record<string, unknown>);
+  const getOpenClawConfig = (): OpenClawConfig | undefined => {
+    return (
+      (api.runtime?.config?.current?.() as OpenClawConfig | undefined) ??
+      api.config
+    );
+  };
+
+  let config = resolveConfig(api.pluginConfig as Record<string, unknown>, {
+    openClawConfig: getOpenClawConfig(),
+  });
 
   const refreshLiveConfigFromRuntime = () => {
     const livePluginConfig = resolveLivePluginConfigObject(
@@ -243,7 +252,12 @@ export function createPlugin(
       PLUGIN_ID,
       api.pluginConfig as Record<string, unknown>,
     );
-    config = resolveConfig(livePluginConfig ?? {});
+    config = resolveConfig(
+      livePluginConfig ?? (api.pluginConfig as Record<string, unknown>) ?? {},
+      {
+        openClawConfig: getOpenClawConfig(),
+      },
+    );
   };
 
   return definePluginEntry({
@@ -281,11 +295,17 @@ export function createPlugin(
       const experienceCatalog = new SkillExperienceCatalog(dataRoot);
       const qmdIntentIndex = createIntentQmdIndex({
         dataRoot,
-        config: () => config.qmd,
+        config: () => {
+          refreshLiveConfigFromRuntime();
+          return config.qmd;
+        },
       });
       const qmdSkillIndex = createSkillQmdIndex({
         dataRoot,
-        config: () => config.qmd,
+        config: () => {
+          refreshLiveConfigFromRuntime();
+          return config.qmd;
+        },
       });
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);

@@ -14,6 +14,8 @@ import type {
   ResolvedSkillHarnessPluginConfig,
   ResolvedSkillSearchConfig,
 } from "./types.js";
+import type { OpenClawConfig } from "../api.js";
+import { resolveQmdEndpoint } from "./qmd/provider-resolver.js";
 
 export function clampInt(
   value: number | undefined,
@@ -66,7 +68,7 @@ const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
 const DEFAULT_QMD: ResolvedQmdConfig = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   indexRefreshIntervalSeconds: 300,
-  embedding: { baseUrl: "", model: "" },
+  embedding: { baseUrl: "", model: "", dimension: 1536 },
   expansion: { baseUrl: "", model: "" },
   skillSearch: DEFAULT_SKILL_SEARCH,
 };
@@ -217,8 +219,8 @@ const QmdEndpointSchema = QmdEndpointObjectSchema.catch({
   model: "",
 });
 const QmdEmbeddingSchema = QmdEndpointObjectSchema.extend({
-  dimension: z.number().int().positive().optional().catch(undefined),
-}).catch({ baseUrl: "", model: "" });
+  dimension: z.number().int().positive().default(1536).catch(1536),
+}).catch({ baseUrl: "", model: "", dimension: 1536 });
 const QmdSchema = z
   .object({
     timeoutMs: z.number().optional().catch(undefined),
@@ -318,7 +320,10 @@ const SkillHarnessConfigSchema = z
   })
   .catch(DEFAULT_CONFIG);
 
-export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
+export function resolveConfig(
+  raw: unknown,
+  options?: { openClawConfig?: OpenClawConfig; env?: NodeJS.ProcessEnv },
+): ResolvedSkillHarnessPluginConfig {
   const resolved = SkillHarnessConfigSchema.parse(raw) as Omit<
     ResolvedSkillHarnessPluginConfig,
     "qmd" | "routing"
@@ -332,6 +337,13 @@ export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
       skillSearch?: unknown;
     };
   };
+
+  const resolvedEmbedding = resolveQmdEndpoint(resolved.qmd.embedding, {
+    ...options,
+    defaultDimension: 1536,
+  });
+  const resolvedExpansion = resolveQmdEndpoint(resolved.qmd.expansion, options);
+
   return {
     ...resolved,
     qmd: {
@@ -348,6 +360,18 @@ export function resolveConfig(raw: unknown): ResolvedSkillHarnessPluginConfig {
         0,
         86_400,
       ),
+      embedding: {
+        ...resolved.qmd.embedding,
+        ...resolvedEmbedding,
+        dimension:
+          resolvedEmbedding.dimension ??
+          resolved.qmd.embedding.dimension ??
+          1536,
+      },
+      expansion: {
+        ...resolved.qmd.expansion,
+        ...resolvedExpansion,
+      },
       skillSearch: resolveSkillSearchConfig(raw),
     },
     routing: resolveRoutingConfig(raw),

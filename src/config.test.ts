@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { resolveConfig, clampInt } from "./config.js";
+import type { OpenClawConfig } from "../api.js";
 import {
   DEFAULT_QUERY_MODE,
   DEFAULT_TIMEOUT_MS,
@@ -164,7 +165,7 @@ describe("resolveConfig", () => {
       for (const endpoint of ["embedding", "expansion"]) {
         expect(
           manifest.configSchema.properties.qmd.properties[endpoint]?.required,
-        ).toEqual(["baseUrl", "model"]);
+        ).toEqual(["model"]);
       }
       expect(quickStart).toContain("qmd: {");
       expect(quickStart.indexOf("qmd: {")).toBeLessThan(
@@ -213,6 +214,64 @@ describe("resolveConfig", () => {
       });
     });
 
+    it("resolves baseUrl and apiKey dynamically from OpenClaw provider config when omitted", () => {
+      const mockOpenClawConfig = {
+        models: {
+          providers: {
+            bifrost: {
+              baseUrl: "https://bifrost.home-infra.weii.cloud/openai/v1",
+              apiKey: "bifrost-key-123",
+              models: [],
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      const result = resolveConfig(
+        {
+          qmd: {
+            embedding: {
+              model: "bifrost/text-embedding-3-small",
+            },
+            expansion: {
+              model: "bifrost/gpt-4o-mini",
+            },
+          },
+        },
+        { openClawConfig: mockOpenClawConfig },
+      );
+
+      expect(result.qmd.embedding).toEqual({
+        baseUrl: "https://bifrost.home-infra.weii.cloud/openai/v1",
+        model: "text-embedding-3-small",
+        apiKey: "bifrost-key-123",
+        dimension: 1536,
+      });
+      expect(result.qmd.expansion).toEqual({
+        baseUrl: "https://bifrost.home-infra.weii.cloud/openai/v1",
+        model: "gpt-4o-mini",
+        apiKey: "bifrost-key-123",
+      });
+    });
+
+    it("preserves explicit dimension override for embedding", () => {
+      const result = resolveConfig({
+        qmd: {
+          embedding: {
+            baseUrl: "https://example.com/v1",
+            model: "custom-embed",
+            dimension: 768,
+          },
+          expansion: {
+            baseUrl: "https://example.com/v1",
+            model: "custom-expand",
+          },
+        },
+      });
+
+      expect(result.qmd.embedding.dimension).toBe(768);
+    });
+
     it("resolves default skillSearch weights and index refresh interval", () => {
       const manifest = JSON.parse(
         readFileSync(
@@ -225,6 +284,11 @@ describe("resolveConfig", () => {
             qmd: {
               properties: {
                 indexRefreshIntervalSeconds: { default?: number };
+                embedding?: {
+                  properties: {
+                    dimension?: { default?: number };
+                  };
+                };
                 skillSearch?: {
                   properties: {
                     collectionWeights?: {
@@ -243,6 +307,11 @@ describe("resolveConfig", () => {
         collectionWeights: { meta: 1, body: 1, references: 1 },
       });
       expect(resolveConfig({}).qmd.indexRefreshIntervalSeconds).toBe(300);
+      expect(resolveConfig({}).qmd.embedding.dimension).toBe(1536);
+      expect(
+        manifest.configSchema.properties.qmd.properties.embedding?.properties
+          .dimension?.default,
+      ).toBe(1536);
       expect(
         manifest.configSchema.properties.qmd.properties
           .indexRefreshIntervalSeconds.default,

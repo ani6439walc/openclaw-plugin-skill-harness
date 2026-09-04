@@ -56,8 +56,10 @@ export type ResolvedSkillSearchConfig = {
 export type ResolvedQmdConfig = {
   timeoutMs: number;
   indexRefreshIntervalSeconds: number;
-  embedding: Required<Pick<QmdEmbeddingConfig, "baseUrl" | "model">> &
-    Omit<QmdEmbeddingConfig, "baseUrl" | "model">;
+  embedding: Required<
+    Pick<QmdEmbeddingConfig, "baseUrl" | "model" | "dimension">
+  > &
+    Omit<QmdEmbeddingConfig, "baseUrl" | "model" | "dimension">;
   expansion: Required<Pick<QmdEndpointConfig, "baseUrl" | "model">> &
     Omit<QmdEndpointConfig, "baseUrl" | "model">;
   skillSearch: ResolvedSkillSearchConfig;
