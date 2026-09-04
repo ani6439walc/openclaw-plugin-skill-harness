@@ -77,6 +77,7 @@ When relevant, load candidate skills with `skill_view` before proceeding:
 
 Key rules of the runtime format:
 
+- Dynamic context is enclosed in `<<<BEGIN_SKILL_HARNESS_CONTEXT>>>` and `<<<END_SKILL_HARNESS_CONTEXT>>>` with the `Skill Harness context (advisory, non-user input):` header and conditional `When relevant, load candidate skills with \`skill_view\` before proceeding:` guidance.
 - `<intent name="${intent}">` combines intent identity and guidance in one tag.
 - `<skill name="${name}">` encapsulates skill identity and description. File paths are omitted from both candidate skills and static `<configured_skills>` to save prompt tokens; agents inspect `path` dynamically via `skill_list` or `skill_view`.
 - `<context_policy>` is omitted.
