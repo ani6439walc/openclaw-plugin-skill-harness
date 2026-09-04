@@ -2,13 +2,8 @@ import { Type } from "typebox";
 import type { OpenClawPluginApi } from "../../api.js";
 import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
-import { manageSkill } from "./manage.js";
 import { relatedSkillsBySkillName } from "./related.js";
-import {
-  skillSourcePriority,
-  SKILL_SOURCE_ORDER,
-  type SkillSource,
-} from "./types.js";
+import { skillSourcePriority } from "./types.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
 import type { IntentCatalogEntry } from "../types.js";
@@ -25,15 +20,13 @@ const MAX_EXPERIENCE_QUERY_CODE_POINTS = 500;
 const MAX_EXPERIENCE_ENTRIES = 3;
 const MAX_EXPERIENCE_BODY_CODE_POINTS = 2_000;
 const MAX_EXPERIENCE_TOTAL_CODE_POINTS = 5_000;
-const SKILL_SOURCE_SCHEMA = Type.Union(
-  SKILL_SOURCE_ORDER.map((source) => Type.Literal(source)),
-);
 
 export interface RegisterSkillToolsOptions {
   getIntents?: (agentId: string) => readonly IntentCatalogEntry[];
   experienceCatalog?: SkillExperienceCatalog;
   qmdSkillIndex?: SkillQmdIndex;
   scheduleSkillSearchIndex?: (agentId: string) => void;
+  bundledSkillsDir?: string;
 }
 
 function jsonToolResult(data: unknown) {
@@ -58,9 +51,15 @@ function requiredStringParam(params: unknown, key: string): string {
   return optionalStringParam(params, key) ?? "";
 }
 
-function booleanParam(params: unknown, key: string): boolean {
-  if (!params || typeof params !== "object") return false;
-  return (params as Record<string, unknown>)[key] === true;
+function booleanParam(
+  params: unknown,
+  key: string,
+  defaultValue = false,
+): boolean {
+  if (!params || typeof params !== "object") return defaultValue;
+  const value = (params as Record<string, unknown>)[key];
+  if (typeof value === "boolean") return value;
+  return defaultValue;
 }
 
 function optionalIntegerParam(
@@ -79,10 +78,6 @@ function paginationParams(params: unknown): { offset: number; limit: number } {
     optionalIntegerParam(params, "limit") ?? DEFAULT_SKILL_LIST_LIMIT;
   const limit = Math.min(MAX_SKILL_LIST_LIMIT, Math.max(1, requestedLimit));
   return { offset, limit };
-}
-
-function defaultAgentId(): string {
-  return "main";
 }
 
 function toolAgentId(context: { agentId?: string }): string | undefined {
@@ -119,7 +114,6 @@ export function registerSkillTools(
         description:
           "List OpenClaw skills visible to the current agent. Use only when the task is broad, terminology is uncertain, or focused search is insufficient. Set show_related to include direct optional relations: current-to-related is declared by the returned skill, while related-to-current is declared by another visible skill. Use skill_view to read full SKILL.md content or linked support files.",
         parameters: Type.Object({
-          source: Type.Optional(SKILL_SOURCE_SCHEMA),
           offset: Type.Optional(
             Type.Number({
               description:
@@ -153,8 +147,7 @@ export function registerSkillTools(
             api,
             agentId,
             intents: options.getIntents?.(agentId),
-            source: optionalStringParam(params, "source") as
-              SkillSource | undefined,
+            bundledSkillsDir: options.bundledSkillsDir,
           });
           const relatedSkills = showRelated
             ? relatedSkillsBySkillName(skills)
@@ -225,7 +218,13 @@ export function registerSkillTools(
           show_evidence: Type.Optional(
             Type.Boolean({
               description:
-                "When true, include top matching chunk evidence for each skill.",
+                "When true, include top matching chunk evidence for each skill. Defaults to true.",
+            }),
+          ),
+          show_related: Type.Optional(
+            Type.Boolean({
+              description:
+                "When true, include direct related skills in each returned skill.",
             }),
           ),
         }),
@@ -248,7 +247,8 @@ export function registerSkillTools(
             Math.max(1, requestedLimit),
           );
           const showStats = booleanParam(params, "show_stats");
-          const showEvidence = booleanParam(params, "show_evidence");
+          const showEvidence = booleanParam(params, "show_evidence", true);
+          const showRelated = booleanParam(params, "show_related");
 
           const index = options.qmdSkillIndex;
           if (!index) {
@@ -266,7 +266,11 @@ export function registerSkillTools(
             api,
             agentId,
             intents: options.getIntents?.(agentId),
+            bundledSkillsDir: options.bundledSkillsDir,
           });
+          const relatedSkills = showRelated
+            ? relatedSkillsBySkillName(inventory)
+            : undefined;
           const hits = await index.search({
             agentId,
             query,
@@ -307,6 +311,12 @@ export function registerSkillTools(
                   : {}),
                 ...(showEvidence && hit.evidence
                   ? { evidence: hit.evidence }
+                  : {}),
+                ...(showRelated && relatedSkills
+                  ? {
+                      related_skills:
+                        relatedSkills.get(skill.name.toLowerCase()) ?? [],
+                    }
                   : {}),
               };
             })
@@ -369,6 +379,7 @@ export function registerSkillTools(
               name: requiredStringParam(params, "name"),
               filePath: optionalStringParam(params, "file_path"),
               intents: options.getIntents?.(agentId),
+              bundledSkillsDir: options.bundledSkillsDir,
             }),
           );
         },
@@ -376,83 +387,6 @@ export function registerSkillTools(
     },
     { name: "skill_view" },
   );
-
-  api.registerTool({
-    name: "skill_manage",
-    label: "Manage Skills",
-    description:
-      "Create, edit, patch, delete, and manage support files for OpenClaw skills. Use only when available and authorized. This is a write-capable tool; validate names and paths before mutating skill files and prefer focused patches.",
-    parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("create"),
-        Type.Literal("patch"),
-        Type.Literal("edit"),
-        Type.Literal("delete"),
-        Type.Literal("write_file"),
-        Type.Literal("remove_file"),
-      ]),
-      name: Type.String({
-        description:
-          "Skill name. Use lowercase letters, numbers, dots, underscores, and hyphens; max 64 characters.",
-      }),
-      content: Type.Optional(
-        Type.String({
-          description:
-            "Full SKILL.md content with YAML frontmatter. Required for create/edit.",
-        }),
-      ),
-      old_string: Type.Optional(
-        Type.String({
-          description:
-            "Text to find for patch. Must be unique unless replace_all is true.",
-        }),
-      ),
-      new_string: Type.Optional(
-        Type.String({
-          description:
-            "Replacement text for patch. Can be an empty string to delete matched text.",
-        }),
-      ),
-      replace_all: Type.Optional(
-        Type.Boolean({
-          description:
-            "For patch: replace every occurrence instead of one unique match.",
-        }),
-      ),
-      file_path: Type.Optional(
-        Type.String({
-          description:
-            "Support file path for patch/write_file/remove_file. Must be under references/, templates/, scripts/, assets/, or examples/.",
-        }),
-      ),
-      file_content: Type.Optional(
-        Type.String({ description: "Content for write_file." }),
-      ),
-      absorbed_into: Type.Optional(
-        Type.String({
-          description:
-            "For delete: umbrella skill name when merged, or empty string when deleting with no forwarding target.",
-        }),
-      ),
-    }),
-    async execute(_toolCallId, params) {
-      const agentId = defaultAgentId();
-      const result = await manageSkill({
-        api,
-        agentId,
-        action: requiredStringParam(params, "action"),
-        name: requiredStringParam(params, "name"),
-        content: optionalStringParam(params, "content"),
-        oldString: optionalStringParam(params, "old_string"),
-        newString: optionalStringParam(params, "new_string"),
-        replaceAll: booleanParam(params, "replace_all"),
-        filePath: optionalStringParam(params, "file_path"),
-        fileContent: optionalStringParam(params, "file_content"),
-        absorbedInto: optionalStringParam(params, "absorbed_into"),
-      });
-      return jsonToolResult(result);
-    },
-  });
 
   api.registerTool(
     (toolContext) => {

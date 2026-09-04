@@ -48,9 +48,8 @@ triggers:
 examples:
   - "route this"
 domain: "routing"
-fastpath:
-  keywords:
-    - "route"
+keywords:
+  - "route"
 ---
 Route this request using stable evidence.
 `,
@@ -66,16 +65,14 @@ Route this request using stable evidence.
           triggers: ["route"],
           examples: ["route this"],
           domain: "routing",
-          fastpath: {
-            keywords: ["route"],
-          },
+          keywords: ["route"],
           guidance: "Route this request using stable evidence.",
         },
       },
     ]);
   });
 
-  it("defaults missing fastpath metadata to an empty keyword list", () => {
+  it("defaults missing keywords metadata to an empty keyword list", () => {
     fs.writeFileSync(
       path.join(root, "intents", "chat.md"),
       `---
@@ -92,7 +89,7 @@ Reply naturally to this social interaction.
     const catalog = IntentCatalog.create(root);
     expect(catalog.load("intents", { silent: true })).toBe(1);
 
-    expect(catalog.get()[0]?.definition.fastpath).toEqual({ keywords: [] });
+    expect(catalog.get()[0]?.definition.keywords).toEqual([]);
   });
 
   it("loads the strict routing contract without a legacy Markdown body", () => {
@@ -102,8 +99,7 @@ Reply naturally to this social interaction.
 triggers: ["route"]
 examples: ["route this"]
 domain: "routing"
-fastpath:
-  keywords: ["route"]
+keywords: ["route"]
 ---
 Route this request using stable evidence.
 `,
@@ -118,7 +114,7 @@ Route this request using stable evidence.
           triggers: ["route"],
           examples: ["route this"],
           domain: "routing",
-          fastpath: { keywords: ["route"] },
+          keywords: ["route"],
           guidance: "Route this request using stable evidence.",
         },
       },

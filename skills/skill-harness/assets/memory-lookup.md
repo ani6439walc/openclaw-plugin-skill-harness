@@ -13,10 +13,9 @@ examples:
   - What do I usually order at that restaurant?
   - Help me find the settings notes about Talos
   - What travel plans did I mention before?
-fastpath:
-  keywords:
-    - I mentioned before
-    - do you remember
+keywords:
+  - I mentioned before
+  - do you remember
 skills:
   - treemd
   - obsidian

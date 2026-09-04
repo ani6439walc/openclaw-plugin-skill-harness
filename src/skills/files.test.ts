@@ -40,7 +40,7 @@ const FILE_TEST_INTENTS: IntentCatalogEntry[] = [
       triggers: ["write"],
       examples: ["write"],
       domain: "writing",
-      fastpath: { keywords: [] },
+      keywords: [],
       skills: ["writer"],
       guidance: "Use the writer skill.",
     },

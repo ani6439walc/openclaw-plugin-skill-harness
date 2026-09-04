@@ -8,7 +8,7 @@ Build an inventory from the runtime-resolved catalogs instead of walking source 
 
 ### Skills
 
-Call `skill_list` once to obtain the invoking agent's resolved inventory across bundled, workspace, configured extra, and managed skill roots. Do not reconstruct root precedence manually. Use `skill_search` only to narrow an uncertain capability and `skill_view` only when a description cannot establish the boundary.
+Call `skill_list` once to obtain the invoking agent's resolved inventory across bundled, workspace, and configured extra skill roots. Do not reconstruct root precedence manually. Use `skill_search` only to narrow an uncertain capability and `skill_view` only when a description cannot establish the boundary.
 
 ### Tools
 
@@ -16,7 +16,7 @@ List currently available tools from the runtime catalog, config, built-in help, 
 
 ### Existing intents
 
-Use structured file/search tools to list and inspect runtime intent Markdown in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`. Experience records live separately under `experiences/`; treat them as host-curated runtime evidence, not as intent content or inventory-maintenance input.
+Use structured file/search tools to list and inspect runtime intent Markdown in the active OpenClaw-resolved catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`. Experience records live separately under `experiences/`; treat them as host-owned runtime evidence, not as intent content or inventory-maintenance input.
 
 ## Step 2 — Capability table
 
@@ -51,7 +51,7 @@ Use simple format checks instead of command-specific validation steps:
 - Frontmatter exists and required fields have the right shape.
 - Frontmatter contains classification metadata; the complete plain-text body contains one routing `guidance` sentence.
 - Triggers/examples are concrete and non-duplicative.
-- Optional `fastpath.keywords` are durable exact whole-message evidence and must also be appropriate for domain-scoped lexical QMD topic-keyword retrieval. Optional `candidate.scope` is justified only for durable cross-domain coverage; do not add compatibility-only `candidate.keywords`.
+- Optional `keywords` are durable short phrases appropriate for Step 1 QMD keyword BM25 retrieval.
 - New intents do not collide with existing runtime intent boundaries.
 - Domain-intent consistency criteria pass for every changed or newly proposed domain/intent relationship.
 - Skill dependencies use direct frontmatter `skills[]`; the body remains only the one plain-text guidance sentence.

@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository packages the `skill-harness` OpenClaw plugin. `index.ts` and `api.ts` are entry points; domains live in `src/` (`hooks/`, `classification/`, `intents/`, `skills/`, `session/`, `curation/`, `review/`, and `stats/`). Tests are colocated as `*.test.ts`. Bundled skill files and Python audits live under `skills/skill-harness/`. `openclaw.plugin.json` defines the plugin contract; `dist/` is untracked build output.
+This repository packages the `skill-harness` OpenClaw plugin. `index.ts` and `api.ts` are entry points; domains live in `src/` (`hooks/`, `classification/`, `intents/`, `skills/`, `session/`, `experiences/`, `qmd/`, `review/`, and `stats/`). Tests are colocated as `*.test.ts`. Bundled skill files and Python audits live under `skills/skill-harness/`. `openclaw.plugin.json` defines the plugin contract; `dist/` is untracked build output.
 
 ## Build, Test, and Development Commands
 
@@ -31,6 +31,8 @@ Use Vitest globals in colocated `<module>.test.ts` files. Cover contracts, failu
 ## Runtime & Agent-Specific Rules
 
 Keep package assets separate from runtime state. `skills/skill-harness/assets/` contains first-install examples; live intents, sessions, experiences, and statistics belong under `~/.openclaw/plugins/skill-harness/`. Never include that private data in commits.
+
+The dynamic routing pipeline is structured in three stages: Step 1 (QMD Keyword BM25 over intent `keywords`), Step 2 (QMD Hybrid Trigger/Example Search with conversation expansion), and Step 3 (Fallback single-call Intent Classifier with QMD candidates). Topic checkers, complexity scoring, instruction writers, and legacy `fastpath` / `candidate` frontmatter fields are obsolete and strictly forbidden. Intent YAML frontmatter only permits `triggers`, `examples`, `domain`, `skills`, and `keywords`; the body is strictly single-line plain-text routing `guidance`.
 
 Production JSON I/O should use `readJsonFile()`, `writeJsonAtomic()`, or `safeWriteJson()` from `src/file-utils.ts`; do not recreate parsing or atomic-write behavior. Keep `src/plugin.ts` thin and place behavior in its owning domain. Verify uncertain OpenClaw SDK imports, hook payloads, and APIs against the installed package rather than guessing. Typecheck and unit tests do not prove that a running Gateway loaded the plugin; runtime claims require OpenClaw runtime inspection.
 

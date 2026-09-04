@@ -24,11 +24,10 @@ Confirm these fields in order:
 4. one required `domain`
 5. `triggers`
 6. `examples`
-7. optional exact `fastpath.keywords`
-8. optional cross-flow candidate scope or manual exact candidate keywords
-9. one durable plain-text body routing `guidance` sentence
-10. direct skills that help the routing outcome
-11. collision check with existing intents
+7. optional exact `keywords`
+8. one durable plain-text body routing `guidance` sentence
+9. direct skills that help the routing outcome
+10. collision check with existing intents
 
 ## Rules
 
@@ -37,10 +36,9 @@ Confirm these fields in order:
 - Prefer narrowing scope over making a broad catch-all intent.
 - If the user is describing an existing intent, say so directly.
 - If two intents are colliding, recommend the smallest clean split.
-- Do not propose `candidate.keywords`: current QMD candidate projection does not consume them. For durable domain-independent availability, consider only `candidate.scope: cross-flow` after checking its broader routing impact.
-- Gather only direct `skills[]` dependencies. Session-local curation owns candidate ranking and runtime experience references; do not interview for or add experience records.
+- Gather only direct `skills[]` dependencies. Candidate discovery and runtime experience references are host-owned; do not interview for or add experience records.
 - Do not write the final intent file until the boundary is clear.
-- **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, fastpath metadata, and guidance. (See `references/format.md` for full spec.)
+- **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, keywords, and guidance. (See `references/format.md` for full spec.)
 
 ## User-specified flow override
 

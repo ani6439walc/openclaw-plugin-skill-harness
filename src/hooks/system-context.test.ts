@@ -10,7 +10,7 @@ describe("SKILL_HARNESS_SYSTEM_CONTEXT", () => {
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_list`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_search`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_view`");
-    expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_manage`");
+    expect(SKILL_HARNESS_SYSTEM_CONTEXT).not.toContain("`skill_manage`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_experience`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain(
       "Use only the Skill Harness tools exposed in the current turn",
@@ -53,5 +53,6 @@ describe("SKILL_HARNESS_SYSTEM_CONTEXT", () => {
     );
     expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("Instruction Hint");
     expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("## Skills (mandatory)");
+    expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("skill_manage");
   });
 });

@@ -26,7 +26,7 @@ describe("StatsAggregator", () => {
       examples: [],
       domain: "development",
       skills: ["git-master", "dev-lifecycle"],
-      fastpath: { keywords: [] },
+      keywords: [],
       guidance: "Follow the version-control workflow.",
     },
   };
@@ -1629,7 +1629,7 @@ describe("StatsAggregator", () => {
         triggers: ["prompt"],
         examples: [],
         domain: "development",
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: [
           "Candidate skills:",
           "  skill: prompt-engineering-expert",
@@ -1741,7 +1741,7 @@ describe("StatsAggregator", () => {
         triggers: ["chat"],
         examples: [],
         domain: "chat",
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Just chat.",
       },
     };
@@ -1960,67 +1960,6 @@ describe("StatsAggregator", () => {
       const statsPath = path.join(tempDir, "stats.json");
       fs.writeFileSync(statsPath, JSON.stringify({ schemaVersion: 999 }));
       expect(aggregator.getAcceptedTurnCount()).toBeUndefined();
-    });
-  });
-
-  describe("recordCuration", () => {
-    it("records curation metrics in summary, curation, and daily bucket", () => {
-      const now = "2026-08-18T10:00:00.000Z";
-      const result = aggregator.recordCuration(
-        "session-1",
-        {
-          status: "applied",
-          topicEpoch: 1,
-          revision: 1,
-          candidates: [
-            { name: "skill-kept", provenance: "curator-kept" },
-            { name: "skill-added", provenance: "curator-added" },
-          ],
-          recommendedExperienceRefs: ["exp-1"],
-          reason: "Added new skill",
-          finishedAt: now,
-        },
-        "turn-1",
-        { nowMs: Date.parse(now) },
-      );
-
-      expect(result).toBe(true);
-
-      const stats = readStats();
-      expect(stats.summary.curationAppliedCount).toBe(1);
-      expect(stats.curation).toEqual({
-        appliedRevisions: 1,
-        candidatesKept: 1,
-        candidatesAdded: 1,
-        recommendedExperiencesSelected: 1,
-        lastAppliedAt: now,
-      });
-      expect(stats.daily["2026-08-18"]?.curation).toEqual({
-        appliedRevisions: 1,
-        candidatesKept: 1,
-        candidatesAdded: 1,
-      });
-
-      const secondResult = aggregator.recordCuration(
-        "session-1",
-        {
-          status: "applied",
-          topicEpoch: 1,
-          revision: 1,
-          candidates: [
-            { name: "skill-kept", provenance: "curator-kept" },
-            { name: "skill-added", provenance: "curator-added" },
-          ],
-          recommendedExperienceRefs: ["exp-1"],
-          reason: "Added new skill",
-          finishedAt: now,
-        },
-        "turn-1",
-        { nowMs: Date.parse(now) },
-      );
-      expect(secondResult).toBe(false);
-      const afterStats = readStats();
-      expect(afterStats.summary.curationAppliedCount).toBe(1);
     });
   });
 });

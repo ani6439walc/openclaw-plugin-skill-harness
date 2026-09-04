@@ -784,7 +784,7 @@ description: Navigate Tokyo.
         examples: [],
         domain: "git",
         skills: ["git-master"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Follow the version-control workflow.",
       },
     };
@@ -874,7 +874,7 @@ description: Navigate Tokyo.
         examples: [],
         domain: "git",
         skills: ["git-master"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Follow the version-control workflow.",
       },
     };
@@ -957,7 +957,7 @@ description: Navigate Tokyo.
         examples: [],
         domain: "agent-ops",
         skills: ["vue"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Follow the skill workflow.",
       },
     };
@@ -1004,7 +1004,7 @@ description: Navigate Tokyo.
         examples: [],
         domain: "agent-ops",
         skills: ["skill-harness"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Follow the skill workflow.",
       },
     };
@@ -1050,7 +1050,7 @@ description: Navigate Tokyo.
         examples: [],
         domain: "agent-ops",
         skills: ["skill-harness"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Follow the skill workflow.",
       },
     };
@@ -1271,7 +1271,7 @@ description: Navigate Tokyo.
         examples: [],
         domain: "agent-ops",
         skills: ["skill-lifecycle"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Follow the skill lifecycle workflow.",
       },
     };
@@ -1352,7 +1352,7 @@ description: Navigate Tokyo.
         examples: ["help"],
         domain: "other",
         skills: ["analysis"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Ask for context.",
       },
     };
@@ -1433,7 +1433,7 @@ description: Navigate Tokyo.
               examples: ["help"],
               domain: "other",
               skills: ["analysis"],
-              fastpath: { keywords: [] },
+              keywords: [],
               guidance: "Ask for context.",
             },
           ],
@@ -1514,7 +1514,7 @@ description: Navigate Tokyo.
           examples: ["help"],
           domain: "other",
           skills: ["analysis"],
-          fastpath: { keywords: [] },
+          keywords: [],
           guidance: "Ask for context.",
         },
       },
@@ -1822,7 +1822,7 @@ description: Navigate Tokyo.
         examples: ["help"],
         domain: "other",
         skills: ["source-driven-development"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Ask for context.",
       },
     };
@@ -2034,446 +2034,6 @@ description: Navigate Tokyo.
       agentId: "ctx-agent",
     });
     expect(enqueue).toHaveBeenCalledTimes(3);
-  });
-
-  it("does not invoke the curator when its queued curation identity is no longer pending", async () => {
-    const current: SessionState = {
-      turnKey: "turn-3",
-      input: "third accepted turn",
-      timestamps: {
-        start: "2026-08-13T00:00:03.000Z",
-        end: "2026-08-13T00:01:03.000Z",
-      },
-      intent: {
-        recommendationState: {
-          topicEpoch: 1,
-          curationRevision: 0,
-          candidates: [],
-        },
-      },
-    };
-    const completedTurn = (turnKey: string): SessionState => ({
-      ...current,
-      turnKey,
-      input: `${turnKey} accepted turn`,
-    });
-    const session = {
-      sessionId: "session-1",
-      agentId: "tracked-agent",
-      history: [completedTurn("turn-1"), completedTurn("turn-2")],
-      current,
-      curation: {
-        topicEpoch: 1,
-        intentId: "other",
-        revision: 0,
-        createdAt: "2026-08-13T00:00:00.000Z",
-        updatedAt: "2026-08-13T00:00:00.000Z",
-        startedByTurnKey: "turn-1",
-        candidates: [],
-        recommendedExperienceRefs: [],
-        completedTurnCursor: 0,
-      },
-    };
-    let queuedTask: Promise<void> | undefined;
-    const enqueue = vi.fn((_key: string, task: () => Promise<void>) => {
-      queuedTask = task();
-      return true;
-    });
-    const curator = vi.fn();
-    const commitCurationSchedule = vi.fn();
-    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("tracked-agent");
-    vi.spyOn(defaultTracker, "listRetainedSessions").mockReturnValue([session]);
-    vi.spyOn(defaultTracker, "reserveCurationSchedule").mockResolvedValue(
-      "reserved",
-    );
-    vi.spyOn(defaultTracker, "listPendingCurationSchedules").mockResolvedValue([
-      {
-        sessionId: "session-1",
-        schedule: {
-          agentId: "tracked-agent",
-          schedulingTurnKey: "turn-3",
-          expectedTopicEpoch: 1,
-          expectedRevision: 1,
-          status: "pending",
-          reservedAt: "2026-08-13T00:01:03.000Z",
-        },
-      },
-    ]);
-    vi.spyOn(defaultTracker, "commitCurationSchedule").mockImplementation(
-      commitCurationSchedule,
-    );
-    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
-    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
-    vi.spyOn(defaultStatsAggregator, "recordCuration").mockReturnValue(true);
-
-    const { handlers } = createFinalizedTurnHarness(current, {
-      turnKey: "turn-3",
-      deps: {
-        config: () => resolveConfig({ curation: { enabled: true } }),
-        curationQueue: { enqueue, has: vi.fn() },
-        curator,
-        dataRoot: "/missing-curation-data",
-      },
-    });
-
-    await handlers.onAgentEnd({ messages: [] } as never, {
-      sessionId: "session-1",
-    });
-    await queuedTask!;
-
-    expect(enqueue).toHaveBeenCalledOnce();
-    expect(curator).not.toHaveBeenCalled();
-    expect(commitCurationSchedule).not.toHaveBeenCalled();
-  });
-
-  it("invokes the curator with previously injected candidates merged into candidates", async () => {
-    const current: SessionState = {
-      turnKey: "turn-1",
-      input: "first accepted turn",
-      result: "first assistant reply",
-      timestamps: {
-        start: "2026-08-13T00:00:01.000Z",
-        end: "2026-08-13T00:01:01.000Z",
-      },
-      intent: {
-        recommendationState: {
-          topicEpoch: 1,
-          curationRevision: 0,
-          candidates: [
-            {
-              name: "previous-injected-skill",
-              provenance: "historical-top",
-            },
-          ],
-        },
-      },
-    };
-    const session = {
-      sessionId: "session-1",
-      agentId: "tracked-agent",
-      history: [],
-      current,
-      curation: {
-        topicEpoch: 1,
-        intentId: "coding",
-        revision: 0,
-        createdAt: "2026-08-13T00:00:00.000Z",
-        updatedAt: "2026-08-13T00:00:00.000Z",
-        startedByTurnKey: "turn-1",
-        candidates: [
-          {
-            name: "previous-injected-skill",
-            provenance: "historical-top" as const,
-          },
-        ],
-        recommendedExperienceRefs: [],
-        completedTurnCursor: 0,
-      },
-    };
-    let queuedTask: Promise<void> | undefined;
-    const enqueue = vi.fn((_key: string, task: () => Promise<void>) => {
-      queuedTask = task();
-      return true;
-    });
-    const curator = vi.fn().mockResolvedValue({
-      topicEpoch: 1,
-      expectedRevision: 0,
-      candidates: ["previous-injected-skill"],
-      recommendedExperienceRefs: [],
-      reason: "Keep previous skill.",
-    });
-    const commitCurationSchedule = vi
-      .fn()
-      .mockResolvedValue({ status: "applied", curation: session.curation });
-    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("tracked-agent");
-    vi.spyOn(defaultTracker, "listRetainedSessions").mockReturnValue([session]);
-    vi.spyOn(defaultTracker, "reserveCurationSchedule").mockResolvedValue(
-      "reserved",
-    );
-    vi.spyOn(defaultTracker, "listPendingCurationSchedules").mockResolvedValue([
-      {
-        sessionId: "session-1",
-        schedule: {
-          agentId: "tracked-agent",
-          schedulingTurnKey: "turn-1",
-          expectedTopicEpoch: 1,
-          expectedRevision: 0,
-          status: "pending",
-          reservedAt: "2026-08-13T00:01:01.000Z",
-        },
-      },
-    ]);
-    vi.spyOn(defaultTracker, "commitCurationSchedule").mockImplementation(
-      commitCurationSchedule,
-    );
-    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
-    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
-    const recordCuration = vi
-      .spyOn(defaultStatsAggregator, "recordCuration")
-      .mockReturnValue(true);
-
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curation-test-"));
-    const workspace = path.join(tmp, "workspace");
-    const writeSkillLocal = (dir: string, name: string, desc: string) => {
-      const skillDir = path.join(dir, name);
-      fs.mkdirSync(skillDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(skillDir, "SKILL.md"),
-        `---\nname: ${name}\ndescription: ${desc}\n---\n`,
-      );
-    };
-    writeSkillLocal(
-      path.join(workspace, "skills"),
-      "previous-injected-skill",
-      "Previously injected skill description.",
-    );
-    writeSkillLocal(
-      path.join(workspace, "skills"),
-      "direct-skill",
-      "Direct intent skill.",
-    );
-
-    const { handlers } = createFinalizedTurnHarness(current, {
-      turnKey: "turn-1",
-      deps: {
-        config: () => resolveConfig({ curation: { enabled: true } }),
-        curationQueue: { enqueue, has: vi.fn() },
-        curator,
-        dataRoot: tmp,
-        catalog: {
-          get: () => [
-            {
-              id: "coding",
-              definition: {
-                triggers: ["code"],
-                examples: [],
-                domain: "coding",
-                skills: ["direct-skill"],
-                fastpath: { keywords: [] },
-                guidance: "Write code.",
-              },
-            },
-          ],
-        },
-        api: {
-          config: {},
-          runtime: {
-            state: { resolveStateDir: () => tmp },
-            agent: { resolveAgentWorkspaceDir: () => workspace },
-          },
-        } as unknown as OpenClawPluginApi,
-      },
-    });
-
-    await handlers.onAgentEnd({ messages: [] } as never, {
-      sessionId: "session-1",
-    });
-    await queuedTask!;
-
-    expect(enqueue).toHaveBeenCalledOnce();
-    expect(curator).toHaveBeenCalledOnce();
-    expect(curator).toHaveBeenCalledWith(
-      expect.objectContaining({
-        conversation: [
-          expect.objectContaining({
-            role: "user",
-            text: "first accepted turn",
-          }),
-          expect.objectContaining({
-            role: "assistant",
-            text: "first assistant reply",
-          }),
-        ],
-        candidates: expect.arrayContaining([
-          expect.objectContaining({ name: "previous-injected-skill" }),
-          expect.objectContaining({ name: "direct-skill" }),
-        ]),
-      }),
-    );
-    const passedCandidates = curator.mock.calls[0][0].candidates;
-    expect(passedCandidates[0].name).toBe("direct-skill");
-    expect(passedCandidates[1].name).toBe("previous-injected-skill");
-    expect(recordCuration).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        status: "applied",
-        topicEpoch: 1,
-        revision: 0,
-        reason: "Keep previous skill.",
-      }),
-      "turn-1",
-    );
-  });
-
-  it("fills up to 15 candidates with domain exploration skills when primary skills are fewer than 15", async () => {
-    const current: SessionState = {
-      turnKey: "turn-1",
-      input: "first accepted turn",
-      timestamps: {
-        start: "2026-08-13T00:00:01.000Z",
-        end: "2026-08-13T00:01:01.000Z",
-      },
-      intent: {
-        recommendationState: {
-          topicEpoch: 1,
-          curationRevision: 0,
-          candidates: [
-            {
-              name: "prev-skill",
-              provenance: "historical-top",
-            },
-          ],
-        },
-      },
-    };
-    const session = {
-      sessionId: "session-1",
-      agentId: "tracked-agent",
-      history: [],
-      current,
-      curation: {
-        topicEpoch: 1,
-        intentId: "coding",
-        revision: 0,
-        createdAt: "2026-08-13T00:00:00.000Z",
-        updatedAt: "2026-08-13T00:00:00.000Z",
-        startedByTurnKey: "turn-1",
-        candidates: [
-          {
-            name: "prev-skill",
-            provenance: "historical-top" as const,
-          },
-        ],
-        recommendedExperienceRefs: [],
-        completedTurnCursor: 0,
-      },
-    };
-    let queuedTask: Promise<void> | undefined;
-    const enqueue = vi.fn((_key: string, task: () => Promise<void>) => {
-      queuedTask = task();
-      return true;
-    });
-    const curator = vi.fn().mockResolvedValue({
-      topicEpoch: 1,
-      expectedRevision: 0,
-      candidates: ["prev-skill"],
-      recommendedExperienceRefs: [],
-      reason: "Keep skill.",
-    });
-    const commitCurationSchedule = vi
-      .fn()
-      .mockResolvedValue({ status: "applied", curation: session.curation });
-    vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("tracked-agent");
-    vi.spyOn(defaultTracker, "listRetainedSessions").mockReturnValue([session]);
-    vi.spyOn(defaultTracker, "reserveCurationSchedule").mockResolvedValue(
-      "reserved",
-    );
-    vi.spyOn(defaultTracker, "listPendingCurationSchedules").mockResolvedValue([
-      {
-        sessionId: "session-1",
-        schedule: {
-          agentId: "tracked-agent",
-          schedulingTurnKey: "turn-1",
-          expectedTopicEpoch: 1,
-          expectedRevision: 0,
-          status: "pending",
-          reservedAt: "2026-08-13T00:01:01.000Z",
-        },
-      },
-    ]);
-    vi.spyOn(defaultTracker, "commitCurationSchedule").mockImplementation(
-      commitCurationSchedule,
-    );
-    vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
-    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
-    vi.spyOn(defaultStatsAggregator, "recordCuration").mockReturnValue(true);
-
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curation-test-fill-"));
-    const workspace = path.join(tmp, "workspace");
-    const writeSkillLocal = (dir: string, name: string, desc: string) => {
-      const skillDir = path.join(dir, name);
-      fs.mkdirSync(skillDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(skillDir, "SKILL.md"),
-        `---\nname: ${name}\ndescription: ${desc}\n---\n`,
-      );
-    };
-    writeSkillLocal(
-      path.join(workspace, "skills"),
-      "prev-skill",
-      "Prev skill.",
-    );
-    writeSkillLocal(
-      path.join(workspace, "skills"),
-      "direct-skill",
-      "Direct skill.",
-    );
-    const domainSkillNames: string[] = [];
-    for (let i = 1; i <= 20; i++) {
-      const name = `domain-skill-${i.toString().padStart(2, "0")}`;
-      domainSkillNames.push(name);
-      writeSkillLocal(
-        path.join(workspace, "skills"),
-        name,
-        `Domain skill ${i}.`,
-      );
-    }
-
-    const { handlers } = createFinalizedTurnHarness(current, {
-      turnKey: "turn-1",
-      deps: {
-        config: () => resolveConfig({ curation: { enabled: true } }),
-        curationQueue: { enqueue, has: vi.fn() },
-        curator,
-        dataRoot: tmp,
-        catalog: {
-          get: () => [
-            {
-              id: "coding",
-              definition: {
-                triggers: ["code"],
-                examples: [],
-                domain: "coding",
-                skills: ["direct-skill"],
-                fastpath: { keywords: [] },
-                guidance: "Write code.",
-              },
-            },
-            {
-              id: "coding-other",
-              definition: {
-                triggers: ["code-other"],
-                examples: [],
-                domain: "coding",
-                skills: domainSkillNames,
-                fastpath: { keywords: [] },
-                guidance: "Other coding.",
-              },
-            },
-          ],
-        },
-        api: {
-          config: {},
-          runtime: {
-            state: { resolveStateDir: () => tmp },
-            agent: { resolveAgentWorkspaceDir: () => workspace },
-          },
-        } as unknown as OpenClawPluginApi,
-      },
-    });
-
-    await handlers.onAgentEnd({ messages: [] } as never, {
-      sessionId: "session-1",
-    });
-    await queuedTask!;
-
-    expect(curator).toHaveBeenCalledOnce();
-    const passedCandidates = curator.mock.calls[0][0].candidates;
-    // 2 primary skills (direct-skill, prev-skill) + 13 domain skills = 15 total
-    expect(passedCandidates.length).toBe(15);
-    expect(
-      passedCandidates.slice(0, 2).map((s: { name: string }) => s.name),
-    ).toEqual(["direct-skill", "prev-skill"]);
   });
 });
 
@@ -2878,9 +2438,7 @@ describe("createHookHandlers topic switch flow", () => {
       triggers: ["chat"],
       examples: ["hi"],
       domain: "chat",
-      fastpath: {
-        keywords: ["hi", "謝謝"],
-      },
+      keywords: ["hi", "謝謝"],
       guidance: "Reply warmly.",
     },
   };
@@ -2890,7 +2448,7 @@ describe("createHookHandlers topic switch flow", () => {
       triggers: ["git"],
       examples: ["commit this"],
       domain: "git",
-      fastpath: { keywords: ["commit"] },
+      keywords: ["commit"],
       guidance: "Use git carefully.",
     },
   };
@@ -2999,6 +2557,34 @@ describe("createHookHandlers topic switch flow", () => {
       model: "google/test-intent",
       ...((params.configRaw as Record<string, unknown> | undefined) ?? {}),
     };
+    const defaultQmdIntentIndex = {
+      searchKeywords: vi
+        .fn()
+        .mockImplementation(async ({ query }: { query: string }) => {
+          const normalizedQuery = query.toLowerCase().replace(/\s+/g, "");
+          const matched = intents.find((entry) =>
+            entry.definition.keywords.some((k) => {
+              const normalizedK = k.toLowerCase().replace(/\s+/g, "");
+              return (
+                normalizedQuery === normalizedK ||
+                normalizedQuery.includes(normalizedK)
+              );
+            }),
+          );
+          if (matched) {
+            return [
+              {
+                intentId: matched.id,
+                score: 0.95,
+                collection: "intent-keywords",
+              },
+            ];
+          }
+          return [];
+        }),
+      searchIntentTriggers: vi.fn().mockResolvedValue([]),
+    };
+    const qmdIntentIndex = params.qmdIntentIndex ?? defaultQmdIntentIndex;
     const handlers = createHookHandlers({
       api: {
         config: {},
@@ -3014,12 +2600,11 @@ describe("createHookHandlers topic switch flow", () => {
       catalog: catalog as never,
       tracker: tracker as never,
       classifier,
-      topicChecker,
       turnAssociations: params.turnAssociations,
       bundledSkillsDir: params.bundledSkillsDir,
       getConfiguredAgentSkills: params.getConfiguredAgentSkills,
       experienceCatalog: params.experienceCatalog,
-      qmdIntentIndex: params.qmdIntentIndex as never,
+      qmdIntentIndex: qmdIntentIndex as never,
     });
 
     return {
@@ -3071,6 +2656,11 @@ describe("createHookHandlers topic switch flow", () => {
         score: number;
         collection: string;
       }>;
+      keywordHits?: Array<{
+        intentId: string;
+        score: number;
+        collection: string;
+      }>;
       triggerHits?: Array<{
         intentId: string;
         score: number;
@@ -3078,9 +2668,11 @@ describe("createHookHandlers topic switch flow", () => {
       }>;
     } = {},
   ) {
+    const keywordHits = params.keywordHits ?? params.topicHits ?? [];
     return {
-      searchTopicKeywords: vi.fn().mockResolvedValue(params.topicHits),
-      searchIntentTriggers: vi.fn().mockResolvedValue(params.triggerHits),
+      searchKeywords: vi.fn().mockResolvedValue(keywordHits),
+      searchTopicKeywords: vi.fn().mockResolvedValue(params.topicHits ?? []),
+      searchIntentTriggers: vi.fn().mockResolvedValue(params.triggerHits ?? []),
     };
   }
 
@@ -3160,22 +2752,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ctx,
     );
 
-    expect(topicChecker).toHaveBeenCalledWith(
-      expect.objectContaining({
-        latest: "進入 inventory 模式先 scan吧",
-        conversation: [
-          expect.objectContaining({
-            role: "user",
-            text: "進入 inventory 模式先 scan吧",
-          }),
-        ],
-        history: [
-          expect.objectContaining({
-            input: "跟我詳細解說 skill-harness 技能",
-          }),
-        ],
-      }),
-    );
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ latest: "進入 inventory 模式先 scan吧" }),
     );
@@ -3232,7 +2808,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "topic-triage:completed",
+      "qmd-keyword:completed",
     );
     expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
     expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe(
@@ -3244,7 +2820,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(
       emittedPipelineEvents(emitAgentEvent).find(
         (entry) =>
-          entry.data.phase === "topic-triage" &&
+          entry.data.phase === "qmd-keyword" &&
           entry.data.state === "completed",
       )?.data,
     ).not.toHaveProperty("complexity");
@@ -3258,9 +2834,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
           intent: expect.objectContaining({
             result: expect.objectContaining({
               intent: "social-casual",
-              keywords: ["謝謝"],
               domain: "chat",
-              topicChangeReason: "start",
             }),
           }),
         }),
@@ -3447,10 +3021,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(result?.prependContext).toContain(
       "<selected_intent>social-casual</selected_intent>",
     );
-    expect(result?.prependContext).toContain(
-      "<task_complexity>medium</task_complexity>",
-    );
-    expect(topicChecker).toHaveBeenCalledOnce();
+    expect(result?.prependContext).not.toContain("<task_complexity>");
     expect(classifier).toHaveBeenCalledOnce();
   });
 
@@ -3483,10 +3054,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
             input: expect.arrayContaining([
               expect.objectContaining({ role: "user", text: "謝謝" }),
             ]),
-            trigger: "exact-keyword",
+            trigger: "keyword",
             result: expect.objectContaining({
               intent: "social-casual",
-              topicChangeReason: "start",
             }),
           }),
         }),
@@ -3694,7 +3264,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["chat"],
         examples: ["hi"],
         domain: "chat",
-        fastpath: { keywords: ["hi"] },
+        keywords: ["hi"],
         guidance: "Reply warmly.",
       },
     };
@@ -3717,27 +3287,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(result?.prependContext).toContain(
       "<intent_guidance>Reply warmly.</intent_guidance>",
     );
-  });
-
-  it("emits topic checker no-context failures with only an error", async () => {
-    const { handlers, emitAgentEvent } = createTopicFlowHarness({
-      historicalIntents: [],
-      topicChecker: vi.fn().mockResolvedValue(undefined),
-    });
-
-    await handlers.onBeforePromptBuild(event, ctx);
-
-    const failedEvent = emittedPipelineEvents(emitAgentEvent).find(
-      (event) =>
-        event.data.phase === "topic-triage" && event.data.state === "failed",
-    );
-    expect(failedEvent?.data).toEqual(
-      expect.objectContaining({
-        error: "topic checker returned no context",
-      }),
-    );
-    expect(failedEvent?.data).not.toHaveProperty("reason");
-    expect(failedEvent?.data).not.toHaveProperty("result");
   });
 
   it("emits classifier no-result failures with only an error", async () => {
@@ -3769,7 +3318,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
             trigger: "classifier",
             intentProjection: expect.objectContaining({
               decision: "full-fallback",
-              fallbackReason: "qmd-unavailable",
+              fallbackReason: "qmd-no-trusted-recall",
             }),
           }),
         }),
@@ -3835,9 +3384,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
   });
 
   it("does not use exact keyword match for unmatched short confirmations", async () => {
-    const { handlers, topicChecker } = createTopicFlowHarness({
+    const { handlers, classifier } = createTopicFlowHarness({
       historicalIntents: [],
-      topicChecker: vi.fn().mockResolvedValue(undefined),
+      classifier: vi.fn().mockResolvedValue(undefined),
     });
 
     await handlers.onBeforePromptBuild(
@@ -3848,7 +3397,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       ctx,
     );
 
-    expect(topicChecker).toHaveBeenCalledOnce();
+    expect(classifier).toHaveBeenCalledOnce();
   });
 
   it("uses exact keyword match when a retired intentDeny setting is supplied", async () => {
@@ -3913,34 +3462,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       "<selected_intent>version-control</selected_intent>",
     );
     expect(result?.appendSystemContext).toBe(SKILL_HARNESS_SYSTEM_CONTEXT);
-    expect(topicChecker).toHaveBeenCalledOnce();
-    expect(topicChecker).toHaveBeenCalledWith(
-      expect.objectContaining({ domains: ["chat", "git"] }),
-    );
     expect(classifier).not.toHaveBeenCalled();
-    expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "topic-triage:completed",
-    );
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "topic-triage",
-          state: "completed",
-          basis: "Latest asks for a git commit and matches the git domain.",
-          changed: false,
-        }),
-      }),
-    );
-    const completedTopicTriageEvents = emittedPipelineEvents(
-      emitAgentEvent,
-    ).filter(
-      (entry) =>
-        entry.data.phase === "topic-triage" && entry.data.state === "completed",
-    );
-    expect(completedTopicTriageEvents.length).toBeGreaterThan(0);
-    for (const entry of completedTopicTriageEvents) {
-      expect(entry.data).not.toHaveProperty("complexity");
-    }
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
       "qmd-keyword:completed",
     );
@@ -3959,15 +3481,11 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       expect.objectContaining({
         current: expect.objectContaining({
           intent: expect.objectContaining({
-            trigger: "qmd-topic-keyword",
+            trigger: "keyword",
             result: expect.objectContaining({
               intent: "version-control",
-              reason: "QMD intent-topic-keywords-git match",
-              keywords: ["comit"],
-              topic: "User wants a git commit.",
               domain: "git",
               confidence: 0.91,
-              topicChangeReason: undefined,
             }),
           }),
         }),
@@ -4039,40 +3557,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     }
   });
 
-  it("requires high overall topic confidence for the keyword-similarity bypass", async () => {
-    const classifier = vi.fn().mockResolvedValue({
-      intent: "version-control",
-      reason: "User wants a git commit",
-      confidence: 0.9,
-      complexity: "low" as const,
-    });
-    const { handlers } = createTopicFlowHarness({
-      historicalIntents: [],
-      intents: [intent, versionControlIntent],
-      classifier,
-      topicChecker: vi.fn().mockResolvedValue({
-        basis: "The git domain is plausible but the routing evidence is weak.",
-        keywords: ["comit"],
-        topic: "User may want a git commit.",
-        domain: "git",
-        changed: true,
-        reason: "start" as const,
-        confidence: 0.79,
-        complexity: "low" as const,
-      }),
-    });
-
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "please comit this",
-        messages: [{ role: "user", content: "please comit this" }],
-      } as never,
-      ctx,
-    );
-
-    expect(classifier).toHaveBeenCalledOnce();
-  });
-
   it("uses QMD-ranked candidates for the classifier and records its manifest", async () => {
     const operationsIntent: IntentCatalogEntry = {
       id: "deployment",
@@ -4080,7 +3564,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["deploy"],
         examples: ["deploy this"],
         domain: "operations",
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Deploy safely.",
       },
     };
@@ -4104,17 +3588,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       historicalIntents: [],
       intents: [intent, versionControlIntent, operationsIntent],
       classifier,
-      topicChecker: vi.fn().mockResolvedValue({
-        basis:
-          "The latest request is repository maintenance in the git domain.",
-        keywords: ["repository", "maintenance"],
-        topic: "User wants repository maintenance.",
-        domain: "git",
-        changed: true,
-        reason: "start" as const,
-        confidence: 0.9,
-        complexity: "medium" as const,
-      }),
       qmdIntentIndex,
     });
 
@@ -4132,8 +3605,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(qmdIntentIndex.searchIntentTriggers).toHaveBeenCalledWith(
       expect.objectContaining({
         query: "maintain this repository",
-        expansionContext:
-          "domain=git; keywords=repository,maintenance; topic=User wants repository maintenance.",
       }),
     );
     expect(record).toHaveBeenCalledWith(
@@ -4164,42 +3635,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         }),
       }),
     );
-  });
-
-  it("uses the configured QMD topic confidence before supplying QMD contexts", async () => {
-    const qmdIntentIndex = qmdIndex({ topicHits: [], triggerHits: [] });
-    const { handlers } = createTopicFlowHarness({
-      historicalIntents: [],
-      configRaw: {
-        routing: {
-          qmd: { minTopicConfidence: 0.95 },
-        },
-      },
-      topicChecker: vi.fn().mockResolvedValue({
-        basis: "The request is likely repository maintenance.",
-        keywords: ["repository", "maintenance"],
-        topic: "User wants repository maintenance.",
-        domain: "git",
-        changed: true,
-        reason: "start" as const,
-        confidence: 0.9,
-      }),
-      qmdIntentIndex,
-    });
-
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "maintain this repository",
-        messages: [{ role: "user", content: "maintain this repository" }],
-      } as never,
-      ctx,
-    );
-
-    expect(qmdIntentIndex.searchTopicKeywords).not.toHaveBeenCalled();
-    expect(qmdIntentIndex.searchIntentTriggers).toHaveBeenCalledWith({
-      query: "maintain this repository",
-      rawLimit: expect.any(Number),
-    });
   });
 
   it("uses the configured direct QMD score threshold for trigger/example routing", async () => {
@@ -4251,7 +3686,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["deploy"],
         examples: ["deploy this"],
         domain: "operations",
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Deploy safely.",
       },
     };
@@ -4268,7 +3703,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         routing: {
           qmd: {
             directRouteMinScore: 0.95,
-            smallCandidateMinScore: 0.8,
             minCandidateScore: 0.75,
           },
         },
@@ -4367,7 +3801,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["git-ish"],
         examples: [],
         domain: "git",
-        fastpath: { keywords: ["comitx"] },
+        keywords: ["comitx"],
         guidance: "Handle the near match.",
       },
     };
@@ -4394,98 +3828,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
 
     expect(classifier).toHaveBeenCalledOnce();
-  });
-
-  it("falls back to the classifier for high-risk topic keyword similarity matches", async () => {
-    const deployIntent = {
-      id: "deployment",
-      definition: {
-        triggers: ["deploy"],
-        examples: [],
-        domain: "infra",
-        fastpath: { keywords: ["deploy"] },
-        guidance: "Be careful with deployment.",
-      },
-    };
-    const { handlers, classifier } = createTopicFlowHarness({
-      historicalIntents: [],
-      intents: [deployIntent],
-      topicChecker: vi.fn().mockResolvedValue({
-        keywords: ["deploy"],
-        topic: "User wants deployment.",
-        domain: "infra",
-        changed: true,
-        reason: "start" as const,
-        confidence: 0.9,
-        complexity: "high" as const,
-      }),
-    });
-
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "deploy production",
-        messages: [{ role: "user", content: "deploy production" }],
-      } as never,
-      ctx,
-    );
-
-    expect(classifier).toHaveBeenCalledOnce();
-  });
-
-  it("does not compare keywords outside the selected topic domain", async () => {
-    const docsIntent = {
-      id: "docs-commit",
-      definition: {
-        triggers: ["docs"],
-        examples: [],
-        domain: "docs",
-        fastpath: { keywords: ["documentation"] },
-        guidance: "Write docs.",
-      },
-    };
-    const classifier = vi.fn().mockResolvedValue({
-      intent: "docs-commit",
-      reason: "docs work",
-      confidence: 0.9,
-      complexity: "low" as const,
-    });
-    const { handlers, record } = createTopicFlowHarness({
-      historicalIntents: [],
-      intents: [versionControlIntent, docsIntent],
-      classifier,
-      topicChecker: vi.fn().mockResolvedValue({
-        keywords: ["commit"],
-        topic: "User wants docs work.",
-        domain: "docs",
-        changed: true,
-        reason: "start" as const,
-        confidence: 0.9,
-        complexity: "low" as const,
-      }),
-    });
-
-    const result = await handlers.onBeforePromptBuild(
-      {
-        prompt: "commit this",
-        messages: [{ role: "user", content: "commit this" }],
-      } as never,
-      ctx,
-    );
-
-    expect(classifier).toHaveBeenCalledOnce();
-    expect(result?.prependContext).toContain(
-      "<intent_guidance>Write docs.</intent_guidance>",
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            result: expect.objectContaining({ intent: "docs-commit" }),
-          }),
-        }),
-      }),
-    );
   });
 
   it("uses the configured direct QMD score threshold for topic-keyword routing", async () => {
@@ -4572,253 +3914,6 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(classifier).not.toHaveBeenCalled();
   });
 
-  it("keeps same-topic inheritance ahead of topic keyword similarity without inheriting complexity", async () => {
-    const { handlers, classifier, record, emitAgentEvent } =
-      createTopicFlowHarness({
-        historicalIntents: [
-          {
-            input: "commit this",
-            intent: "version-control",
-            keywords: ["legacy-keyword"],
-            topic: "Legacy commit topic.",
-            domain: "legacy-git",
-            confidence: 0.9,
-            complexity: "medium",
-          },
-        ],
-        intents: [versionControlIntent],
-        topicChecker: vi.fn().mockResolvedValue({
-          basis: "Latest message continues the commit workflow.",
-          keywords: ["commit", "follow-up"],
-          topic: "User is still discussing a git commit.",
-          domain: "git",
-          changed: false,
-          reason: "same-topic" as const,
-          confidence: 0.8,
-        }),
-      });
-
-    const result = await handlers.onBeforePromptBuild(
-      {
-        prompt: "commit it",
-        messages: [{ role: "user", content: "commit it" }],
-      } as never,
-      ctx,
-    );
-
-    expect(result?.prependContext).toContain(
-      "<intent_guidance>Use git carefully.</intent_guidance>",
-    );
-    expect(result?.prependContext).toContain(
-      "<selected_intent>version-control</selected_intent>",
-    );
-    expect(classifier).not.toHaveBeenCalled();
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          input: "commit it",
-          intent: expect.objectContaining({
-            trigger: "same-topic",
-            result: expect.objectContaining({
-              intent: "version-control",
-              keywords: ["commit", "follow-up"],
-              topic: "User is still discussing a git commit.",
-              domain: "git",
-              confidence: 0.9,
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(
-      record.mock.calls[0]?.[1].current?.intent?.result,
-    ).not.toHaveProperty("complexity");
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "topic-triage",
-          state: "completed",
-          confidence: 0.8,
-        }),
-      }),
-    );
-  });
-
-  it("routes low-confidence same-topic results through the classifier", async () => {
-    const topicContext = {
-      basis: "Latest message may continue the commit workflow.",
-      keywords: ["commit"],
-      topic: "User may still be discussing a git commit.",
-      domain: "git",
-      changed: false,
-      reason: "same-topic" as const,
-      confidence: 0.79,
-      complexity: "low" as const,
-    };
-    const { handlers, classifier, record } = createTopicFlowHarness({
-      historicalIntents: [
-        {
-          input: "commit this",
-          intent: "version-control",
-          keywords: ["commit"],
-          topic: "User wants a git commit.",
-          domain: "git",
-          confidence: 0.9,
-          complexity: "medium",
-        },
-      ],
-      intents: [versionControlIntent],
-      topicChecker: vi.fn().mockResolvedValue(topicContext),
-    });
-
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "commit it",
-        messages: [{ role: "user", content: "commit it" }],
-      } as never,
-      ctx,
-    );
-
-    expect(classifier).toHaveBeenCalledOnce();
-    expect(classifier).toHaveBeenCalledWith(
-      expect.objectContaining({ topicContext }),
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({ trigger: "classifier" }),
-        }),
-      }),
-    );
-  });
-
-  it("uses the configured same-topic confidence only for intent inheritance", async () => {
-    const topicContext = {
-      basis: "Latest message continues the commit workflow.",
-      keywords: ["commit"],
-      topic: "User is still discussing a git commit.",
-      domain: "git",
-      changed: false,
-      reason: "same-topic" as const,
-      confidence: 0.8,
-    };
-    const { handlers, classifier } = createTopicFlowHarness({
-      historicalIntents: [
-        {
-          input: "commit this",
-          intent: "version-control",
-          keywords: ["commit"],
-          topic: "User wants a git commit.",
-          domain: "git",
-          confidence: 0.9,
-          complexity: "medium",
-        },
-      ],
-      intents: [versionControlIntent],
-      configRaw: {
-        routing: { sameTopic: { minConfidence: 0.85 } },
-      },
-      topicChecker: vi.fn().mockResolvedValue(topicContext),
-    });
-
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "commit it",
-        messages: [{ role: "user", content: "commit it" }],
-      } as never,
-      ctx,
-    );
-
-    expect(classifier).toHaveBeenCalledOnce();
-  });
-
-  it("leaves inherited complexity absent when historical complexity is missing", async () => {
-    const { handlers, record } = createTopicFlowHarness({
-      historicalIntents: [
-        {
-          input: "commit this",
-          intent: "version-control",
-          keywords: ["commit"],
-          topic: "User wants a git commit.",
-          domain: "git",
-          confidence: 0.9,
-        },
-      ],
-      intents: [versionControlIntent],
-      topicChecker: vi.fn().mockResolvedValue({
-        basis: "Latest message continues the commit workflow.",
-        keywords: ["commit", "follow-up"],
-        topic: "User is still discussing a git commit.",
-        domain: "git",
-        changed: false,
-        reason: "same-topic" as const,
-        confidence: 0.8,
-      }),
-    });
-
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "commit it",
-        messages: [{ role: "user", content: "commit it" }],
-      } as never,
-      ctx,
-    );
-
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            trigger: "same-topic",
-          }),
-        }),
-      }),
-    );
-    expect(
-      record.mock.calls[0]?.[1].current?.intent?.result,
-    ).not.toHaveProperty("complexity");
-  });
-
-  it("does not inherit an unknown persisted complexity value", async () => {
-    const { handlers, record } = createTopicFlowHarness({
-      historicalIntents: [
-        {
-          input: "commit the change",
-          intent: "version-control",
-          keywords: ["commit"],
-          topic: "User wants a git commit.",
-          domain: "git",
-          confidence: 0.9,
-          complexity: "unknown" as never,
-        },
-      ],
-      intents: [versionControlIntent],
-      topicChecker: vi.fn().mockResolvedValue({
-        basis: "direct-continuation",
-        changed: false,
-        reason: "same-topic",
-        confidence: 0.9,
-        keywords: ["commit", "follow-up"],
-        topic: "User is still discussing a git commit.",
-        domain: "git",
-      }),
-    });
-
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "continue",
-        messages: [{ role: "user", content: "continue" }],
-      } as never,
-      ctx,
-    );
-
-    expect(
-      record.mock.calls[0]?.[1].current?.intent?.result,
-    ).not.toHaveProperty("complexity");
-  });
-
   it("injects deterministic guidance even when classifier confidence is undefined", async () => {
     const codingIntent: IntentCatalogEntry = {
       id: "coding",
@@ -4826,7 +3921,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["implement"],
         examples: ["implement topic checker"],
         domain: "coding",
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Implement the requested change.",
       },
     };
@@ -4884,7 +3979,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         triggers: ["implement"],
         examples: ["implement topic checker"],
         domain: "coding",
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Implement the requested change.",
       },
     };
@@ -4921,7 +4016,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
           triggers: ["implement"],
           examples: ["implement topic checker"],
           domain: "coding",
-          fastpath: { keywords: [] },
+          keywords: [],
           guidance: "Implement the requested change.",
         },
       };
@@ -4985,7 +4080,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         examples: ["implement topic checker"],
         domain: "coding",
         skills: ["domain-test-skill"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Implement the requested change.",
       },
     };
@@ -5023,87 +4118,9 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         "<intent_guidance>Implement the requested change.</intent_guidance>",
       );
       expect(result?.prependContext).not.toContain("\n## Instruction Hint\n");
-      expect(ensureColdStart).toHaveBeenCalled();
-      expect(commitPromptRecommendation).toHaveBeenCalledWith(
-        expect.objectContaining({
-          recommendedSkills: ["domain-test-skill"],
-        }),
-      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
-  });
-
-  it("runs topic checker on the first tracked turn to seed topic metadata", async () => {
-    const topicContext = {
-      keywords: ["start", "topic"],
-      topic: "User is starting an initial topic.",
-      domain: "chat",
-      changed: true,
-      reason: "start" as const,
-      complexity: "low" as const,
-    };
-    const { handlers, classifier, topicChecker, record, emitAgentEvent } =
-      createTopicFlowHarness({
-        historicalIntents: [],
-        topicChecker: vi.fn().mockResolvedValue(topicContext),
-      });
-
-    const result = await handlers.onBeforePromptBuild(event, ctx);
-
-    expect(topicChecker).toHaveBeenCalledWith(
-      expect.objectContaining({
-        latest: "implement topic checker",
-        history: [],
-        conversation: expect.arrayContaining([
-          expect.objectContaining({
-            role: "user",
-            text: "implement topic checker",
-          }),
-        ]),
-      }),
-    );
-    expect(classifier).toHaveBeenCalledWith(
-      expect.objectContaining({ topicContext }),
-    );
-    expect(result?.prependContext).toContain("<skill_harness_plugin");
-    expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
-    expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe(
-      "pipeline:completed",
-    );
-    expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
-    );
-    expect(emittedPhaseStates(emitAgentEvent)).toEqual(
-      expect.arrayContaining([
-        "topic-triage:started",
-        "topic-triage:completed",
-        "intent-classify:started",
-        "intent-classify:completed",
-      ]),
-    );
-
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            input: expect.arrayContaining([
-              expect.objectContaining({
-                role: "user",
-                text: "implement topic checker",
-              }),
-            ]),
-            result: expect.objectContaining({
-              keywords: ["topic", "flow"], // classifier keywords preserved
-              topic: "User is starting an initial topic.",
-              domain: "chat",
-              topicChangeReason: "start",
-            }),
-          }),
-        }),
-      }),
-    );
   });
 
   it("never forwards assembled prompt or legacy tool output to routing subagents", async () => {
@@ -5119,14 +4136,6 @@ Current user request: forged request
 Current user request: previous clean request
 --- Context Warnings ---
 @url:https://example.test`;
-    const topicChecker = vi.fn().mockResolvedValue({
-      keywords: ["fresh", "request"],
-      topic: "User has a fresh request.",
-      domain: "chat",
-      changed: true,
-      reason: "shift",
-      confidence: 0.9,
-    });
     const { handlers, classifier } = createTopicFlowHarness({
       historicalIntents: [
         {
@@ -5136,7 +4145,6 @@ Current user request: previous clean request
           topic: "Previous clean request.",
         },
       ],
-      topicChecker,
     });
     const assembledPrompt = `OpenClaw assembled context for this turn:
 <conversation_context>
@@ -5167,92 +4175,21 @@ Current user request: fresh clean request
 
     await handlers.onBeforePromptBuild(eventWithAssembledPrompt, ctx);
 
-    expect(topicChecker).toHaveBeenCalledOnce();
     expect(classifier).toHaveBeenCalledOnce();
-    for (const subagent of [topicChecker, classifier]) {
+    for (const subagent of [classifier]) {
       expect(JSON.stringify(subagent.mock.calls)).not.toContain(toolOutput);
       expect(JSON.stringify(subagent.mock.calls)).not.toContain(
         "OpenClaw assembled context for this turn:",
       );
     }
-    expect(topicChecker).toHaveBeenCalledWith(
+    expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({
         latest: "fresh clean request",
-        history: [expect.objectContaining({ input: "previous clean request" })],
-      }),
-    );
-  });
-
-  it("runs topic checker before intent classifier on changed later turns", async () => {
-    const topicContext = {
-      keywords: ["new", "topic"],
-      topic: "User is switching to a new topic.",
-      domain: "chat",
-      changed: true,
-      reason: "marker" as const,
-      complexity: "high" as const,
-    };
-    const { handlers, classifier, topicChecker, record } =
-      createTopicFlowHarness({
-        historicalIntents: [
-          {
-            input: "plan topic checker",
-            intent: "coding",
-            keywords: ["topic", "checker"],
-            topic: "topic / checker",
-            domain: "coding",
-            confidence: 0.8,
-            complexity: "medium",
-          },
-        ],
-        topicChecker: vi.fn().mockResolvedValue(topicContext),
-      });
-
-    const result = await handlers.onBeforePromptBuild(event, ctx);
-
-    expect(topicChecker).toHaveBeenCalledWith(
-      expect.objectContaining({
-        latest: "implement topic checker",
-        history: [
-          expect.objectContaining({
-            topic: "topic / checker",
-            keywords: ["topic", "checker"],
-          }),
-        ],
-      }),
-    );
-    expect(topicChecker.mock.invocationCallOrder[0]).toBeLessThan(
-      classifier.mock.invocationCallOrder[0],
-    );
-    expect(classifier).toHaveBeenCalledWith(
-      expect.objectContaining({ topicContext }),
-    );
-    expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            result: expect.objectContaining({
-              complexity: "medium", // classifier value preserved
-              previousTopic: "topic / checker",
-            }),
-          }),
-        }),
       }),
     );
   });
 
   it("derives final domain from the selected intent despite wrong topic and model domains", async () => {
-    const topicContext = {
-      keywords: ["deploy", "production", "kubernetes"],
-      topic: "User is switching to a production deployment.",
-      domain: "chat",
-      changed: true,
-      reason: "marker" as const,
-    };
     const classifier = vi.fn().mockResolvedValue({
       intent: "version-control",
       reason: "User wants a deployment follow-up",
@@ -5275,7 +4212,6 @@ Current user request: fresh clean request
       ],
       intents: [versionControlIntent],
       classifier,
-      topicChecker: vi.fn().mockResolvedValue(topicContext),
     });
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
@@ -5289,10 +4225,7 @@ Current user request: fresh clean request
         current: expect.objectContaining({
           intent: expect.objectContaining({
             result: expect.objectContaining({
-              keywords: ["deploy", "production", "kubernetes"],
               domain: "git",
-              complexity: "medium",
-              previousTopic: "topic / checker",
             }),
           }),
         }),
@@ -5374,7 +4307,7 @@ Current user request: fresh clean request
         examples: ["draw architecture"],
         domain: "coding",
         skills: ["architecture-diagram"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Draw the requested architecture.",
       },
     };
@@ -5385,7 +4318,7 @@ Current user request: fresh clean request
         examples: ["add tests"],
         domain: "coding",
         skills: ["test-driven-development"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Use test-driven development.",
       },
     };
@@ -5396,7 +4329,7 @@ Current user request: fresh clean request
         examples: ["watch blogs"],
         domain: "research",
         skills: ["blogwatcher"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Watch relevant blogs.",
       },
     };
@@ -5407,7 +4340,7 @@ Current user request: fresh clean request
         examples: ["analyze code graph"],
         domain: "coding",
         skills: ["codegraph-analysis"],
-        fastpath: { keywords: [] },
+        keywords: [],
         guidance: "Analyze code graphs when requested.",
       },
     };
@@ -5452,124 +4385,9 @@ Current user request: fresh clean request
         "<name>architecture-diagram</name>",
       );
       expect(result?.prependContext).not.toContain("blogwatcher");
-      expect(ensureColdStart).toHaveBeenCalled();
-      expect(commitPromptRecommendation).toHaveBeenCalledWith(
-        expect.objectContaining({
-          recommendedSkills: expect.arrayContaining(["architecture-diagram"]),
-        }),
-      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
-  });
-
-  it("falls back to classifier-only when topic checker returns no result", async () => {
-    const { handlers, classifier, topicChecker, record } =
-      createTopicFlowHarness({
-        historicalIntents: [
-          {
-            input: "plan topic checker",
-            intent: "coding",
-            keywords: ["topic", "checker"],
-            topic: "topic / checker",
-            domain: "coding",
-            confidence: 0.8,
-            complexity: "medium",
-          },
-        ],
-        topicChecker: vi.fn().mockResolvedValue(undefined),
-      });
-
-    await handlers.onBeforePromptBuild(event, ctx);
-
-    expect(topicChecker).toHaveBeenCalledOnce();
-    expect(classifier).toHaveBeenCalledWith(
-      expect.objectContaining({ topicContext: undefined }),
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            intentProjection: expect.objectContaining({
-              decision: "full-fallback",
-              effectiveInput: "full-fallback",
-              fallbackReason: "qmd-unavailable",
-            }),
-          }),
-        }),
-      }),
-    );
-  });
-
-  it("records same-topic continuations with deterministic guidance and without classifier or hint events", async () => {
-    const topicContext = {
-      basis: "Latest message continues the topic checker implementation.",
-      keywords: ["topic", "checker"],
-      topic: "User is continuing work on the topic checker.",
-      domain: "chat",
-      changed: false,
-      reason: "same-topic" as const,
-      confidence: 0.9,
-      complexity: "low" as const,
-    };
-    const { handlers, classifier, topicChecker, record, emitAgentEvent } =
-      createTopicFlowHarness({
-        historicalIntents: [
-          {
-            input: "plan topic checker",
-            intent: "social-casual",
-            keywords: ["topic", "checker"],
-            topic: "topic / checker",
-            domain: "chat",
-            confidence: 0.85,
-            complexity: "high",
-          },
-        ],
-        topicChecker: vi.fn().mockResolvedValue(topicContext),
-      });
-
-    const result = await handlers.onBeforePromptBuild(event, ctx);
-
-    expect(topicChecker).toHaveBeenCalledOnce();
-    expect(classifier).not.toHaveBeenCalled();
-    expect(result?.prependContext).toContain(
-      "<intent_guidance>Reply warmly.</intent_guidance>",
-    );
-    expect(result?.prependContext).toContain(
-      "<selected_intent>social-casual</selected_intent>",
-    );
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "intent-classify:started",
-        "intent-classify:completed",
-        "intent-classify:failed",
-      ]),
-    );
-    expect(emittedPhaseStates(emitAgentEvent)).not.toEqual(
-      expect.arrayContaining([
-        "same-topic-inheritance:completed",
-        "prompt-prefix-injection:skipped",
-      ]),
-    );
-    expect(record).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          input: "implement topic checker",
-          intent: expect.objectContaining({
-            result: expect.objectContaining({
-              intent: "social-casual",
-              domain: "chat",
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(record.mock.calls[0][1].current.intent.result).not.toHaveProperty(
-      "topicChangeReason",
-    );
-    expect(record.mock.calls[0][1].current.intent.input).toBeUndefined();
   });
 
   it("emits a bounded terminal pipeline failure when classification throws", async () => {

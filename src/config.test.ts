@@ -74,51 +74,39 @@ describe("resolveConfig", () => {
   describe("QMD routing", () => {
     it("resolves default routing thresholds when routing is omitted", () => {
       expect(resolveConfig({}).routing).toEqual({
-        sameTopic: { minConfidence: 0.8 },
         qmd: {
-          minTopicConfidence: 0.8,
           directRouteMinScore: 0.85,
-          smallCandidateMinScore: 0.65,
           minCandidateScore: 0.35,
         },
       });
     });
 
-    it("accepts independent same-topic and QMD routing thresholds", () => {
+    it("accepts independent QMD routing thresholds", () => {
       expect(
         resolveConfig({
           routing: {
-            sameTopic: { minConfidence: 0.9 },
             qmd: {
-              minTopicConfidence: 0.7,
               directRouteMinScore: 0.9,
-              smallCandidateMinScore: 0.6,
               minCandidateScore: 0.2,
             },
           },
         }).routing,
       ).toEqual({
-        sameTopic: { minConfidence: 0.9 },
         qmd: {
-          minTopicConfidence: 0.7,
           directRouteMinScore: 0.9,
-          smallCandidateMinScore: 0.6,
           minCandidateScore: 0.2,
         },
       });
     });
 
     it("rejects out-of-range and non-monotonic routing thresholds", () => {
-      expect(() =>
-        resolveConfig({ routing: { sameTopic: { minConfidence: 1.1 } } }),
-      ).toThrow();
       expect(() => resolveConfig({ routing: null })).toThrow();
       expect(() =>
         resolveConfig({
           routing: {
             qmd: {
-              directRouteMinScore: 0.6,
-              smallCandidateMinScore: 0.7,
+              directRouteMinScore: 0.3,
+              minCandidateScore: 0.7,
             },
           },
         }),
@@ -169,10 +157,6 @@ describe("resolveConfig", () => {
       expect(
         manifest.configSchema.properties.qmd.properties,
       ).not.toHaveProperty("rerank");
-      expect(
-        manifest.configSchema.properties.routing?.properties.sameTopic
-          .properties.minConfidence.default,
-      ).toBe(0.8);
       expect(
         manifest.configSchema.properties.routing?.properties.qmd.properties
           .directRouteMinScore.default,
@@ -480,41 +464,10 @@ describe("resolveConfig", () => {
   });
 
   describe("curation", () => {
-    it("defaults to an enabled independent curator configuration", () => {
-      expect(resolveConfig({}).curation).toEqual({
-        enabled: true,
-        model: undefined,
-        modelFallback: undefined,
-        thinking: "medium",
-        timeoutSeconds: 30,
-      });
-      expect(
-        resolveConfig({ review: { enabled: false } }).curation.enabled,
-      ).toBe(true);
-    });
-
-    it("parses curator model settings and clamps its timeout", () => {
-      expect(
-        resolveConfig({
-          curation: {
-            enabled: false,
-            model: "google/curator",
-            modelFallback: "openai/fallback",
-            thinking: "high",
-            timeoutSeconds: 0,
-          },
-        }).curation,
-      ).toEqual({
-        enabled: false,
-        model: "google/curator",
-        modelFallback: "openai/fallback",
-        thinking: "high",
-        timeoutSeconds: 10,
-      });
-      expect(
-        resolveConfig({ curation: { timeoutSeconds: 700 } }).curation
-          .timeoutSeconds,
-      ).toBe(600);
+    it("ignores removed curation settings", () => {
+      expect(resolveConfig({ curation: { enabled: true } })).not.toHaveProperty(
+        "curation",
+      );
     });
   });
 
@@ -550,11 +503,9 @@ describe("resolveConfig", () => {
 
     it("ignores nested timeoutMs settings", () => {
       const result = resolveConfig({
-        curation: { timeoutMs: 1 },
         review: { timeoutMs: 1 },
       });
 
-      expect(result.curation.timeoutSeconds).toBe(30);
       expect(result.review.timeoutSeconds).toBe(300);
     });
   });

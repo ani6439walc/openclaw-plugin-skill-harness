@@ -36,14 +36,6 @@ const DEFAULT_CONTEXT_WINDOW: ContextWindow = {
   },
 };
 
-const DEFAULT_CURATION = {
-  enabled: true,
-  model: undefined,
-  modelFallback: undefined,
-  thinking: "medium",
-  timeoutSeconds: 30,
-} as const;
-
 const DEFAULT_REVIEW = {
   enabled: false,
   model: undefined,
@@ -80,11 +72,8 @@ const DEFAULT_QMD: ResolvedQmdConfig = {
 };
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
-  sameTopic: { minConfidence: 0.8 },
   qmd: {
-    minTopicConfidence: 0.8,
     directRouteMinScore: 0.85,
-    smallCandidateMinScore: 0.65,
     minCandidateScore: 0.35,
   },
 };
@@ -103,7 +92,6 @@ const DEFAULT_CONFIG = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   qmd: DEFAULT_QMD,
   routing: DEFAULT_ROUTING,
-  curation: DEFAULT_CURATION,
   review: DEFAULT_REVIEW,
 } satisfies ResolvedSkillHarnessPluginConfig;
 
@@ -161,15 +149,6 @@ const ThinkLevelSchema = z
 const LowEffortRoutingModeSchema = z
   .enum(["fastpath-only", "full", "off"])
   .catch("fastpath-only");
-const CurationSchema = z
-  .object({
-    enabled: z.boolean().catch(true),
-    model: z.string().optional().catch(undefined),
-    modelFallback: z.string().optional().catch(undefined),
-    thinking: ThinkLevelSchema,
-    timeoutSeconds: boundedInt(30, 10, 600),
-  })
-  .catch(DEFAULT_CURATION);
 const ReviewSchema = z
   .object({
     enabled: z.boolean().catch(false),
@@ -291,25 +270,10 @@ const RoutingScoreSchema = (fallback: number) =>
   z.number().min(0).max(1).optional().default(fallback);
 const RoutingSchema = z
   .object({
-    sameTopic: z
-      .object({
-        minConfidence: RoutingScoreSchema(
-          DEFAULT_ROUTING.sameTopic.minConfidence,
-        ),
-      })
-      .strict()
-      .optional()
-      .default(DEFAULT_ROUTING.sameTopic),
     qmd: z
       .object({
-        minTopicConfidence: RoutingScoreSchema(
-          DEFAULT_ROUTING.qmd.minTopicConfidence,
-        ),
         directRouteMinScore: RoutingScoreSchema(
           DEFAULT_ROUTING.qmd.directRouteMinScore,
-        ),
-        smallCandidateMinScore: RoutingScoreSchema(
-          DEFAULT_ROUTING.qmd.smallCandidateMinScore,
         ),
         minCandidateScore: RoutingScoreSchema(
           DEFAULT_ROUTING.qmd.minCandidateScore,
@@ -321,17 +285,13 @@ const RoutingSchema = z
   })
   .strict()
   .superRefine((routing, context) => {
-    const { directRouteMinScore, smallCandidateMinScore, minCandidateScore } =
-      routing.qmd;
-    if (
-      minCandidateScore > smallCandidateMinScore ||
-      smallCandidateMinScore > directRouteMinScore
-    ) {
+    const { directRouteMinScore, minCandidateScore } = routing.qmd;
+    if (minCandidateScore > directRouteMinScore) {
       context.addIssue({
         code: "custom",
         path: ["qmd"],
         message:
-          "minCandidateScore must be less than or equal to smallCandidateMinScore, which must be less than or equal to directRouteMinScore",
+          "minCandidateScore must be less than or equal to directRouteMinScore",
       });
     }
   });
@@ -359,7 +319,6 @@ const SkillHarnessConfigSchema = z
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
     qmd: QmdSchema,
     routing: z.unknown().optional(),
-    curation: CurationSchema,
     review: ReviewSchema,
   })
   .catch(DEFAULT_CONFIG);

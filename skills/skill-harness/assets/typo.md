@@ -1,7 +1,5 @@
 ---
 domain: chat
-candidate:
-  scope: cross-flow
 triggers:
   - >-
     The user's message likely contains misspellings or damaged text that should

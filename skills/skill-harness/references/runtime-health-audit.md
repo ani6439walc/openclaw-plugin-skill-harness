@@ -46,9 +46,9 @@ For `stats` interpretation, read `runtime.stats.attribution` before any per-inte
 - schema-v4 reports `post-v4-window-only` and its exact `startedAt`; daily attribution before that boundary is unavailable, and the start UTC date can be partial;
 - schema-v4 daily `intentOutcomes`, `intentRouting`, `skillRouting`, and `toolErrors` have host-bounded cardinality. Named entries use `value:<trimmed-name>` so a visible `__other__` bucket means the date exceeded its named-key budget, not that an actual intent, skill, or tool was called `__other__`.
 - `toolReliability.latencyHistogram` is `unavailable` for v3 and post-boundary only for v4. Its fixed buckets include `unknown` for missing or invalid duration measurements; do not read that bucket as zero latency.
-- `curation` reports aggregate session-local curation activity: `appliedRevisions`, `candidatesKept`, `candidatesAdded`, and `recommendedExperiencesSelected` along with `summary.curationAppliedCount`.
+- `curation` reports legacy/historical aggregate session-local curation activity when present in stats: `appliedRevisions`, `candidatesKept`, `candidatesAdded`, and `recommendedExperiencesSelected` along with `summary.curationAppliedCount`.
 
-Use `runtime.stats.routingEffectiveness`, `projectionEfficiency`, `intentPortfolio`, `skillLifecycle`, `toolReliability`, `curation`, and `dataHealth` as aggregate decision inputs. They never include user/session text, tool parameters/results, or Review evidence. `review.json` remains the only source for ordinary Review outcomes and applied changes.
+Use `runtime.stats.routingEffectiveness`, `projectionEfficiency`, `intentPortfolio`, `skillLifecycle`, `toolReliability`, and `dataHealth` as aggregate decision inputs. They never include user/session text, tool parameters/results, or Review evidence. `review.json` remains the only source for ordinary Review outcomes and applied changes.
 
 The script reports no raw state text, so inspect a specific record only after a separate explicit privacy and scope decision.
 

@@ -59,9 +59,7 @@ function catalogEntryTieBreakKey(entry: CatalogEntry): string {
     entry.domain ?? null,
     entry.triggers ?? [],
     entry.examples ?? [],
-    entry.fastpath?.keywords ?? [],
-    entry.candidate?.scope ?? null,
-    entry.candidate?.keywords ?? [],
+    entry.keywords ?? [],
     entry.skills ?? [],
     entry.guidance ?? null,
   ]);
@@ -152,8 +150,8 @@ export function projectIntentCatalog(
       addReason(entry.id, "observed-domain");
     }
 
-    const hasExactKeywordOverlap = (entry.fastpath?.keywords ?? []).some(
-      (keyword) => observedKeywords.has(normalizeForKeyword(keyword)),
+    const hasExactKeywordOverlap = (entry.keywords ?? []).some((keyword) =>
+      observedKeywords.has(normalizeForKeyword(keyword)),
     );
     if (hasExactKeywordOverlap) {
       addReason(entry.id, "exact-fastpath-keyword-overlap");

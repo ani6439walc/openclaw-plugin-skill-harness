@@ -54,13 +54,8 @@ describe("validateRoutingIntentDirectory", () => {
         frontmatter: `skills:
   - "  Alpha.Skill  "
   - "beta-skill"
-candidate:
-  scope: cross-flow
-  keywords:
-    - "  exact candidate  "
-fastpath:
-  keywords:
-    - "  exact route  "
+keywords:
+  - "  exact route  "
 `,
       }),
     );
@@ -78,11 +73,7 @@ fastpath:
               examples: ["route this example"],
               domain: "routing",
               skills: ["Alpha.Skill", "beta-skill"],
-              candidate: {
-                scope: "cross-flow",
-                keywords: ["exact candidate"],
-              },
-              fastpath: { keywords: ["exact route"] },
+              keywords: ["exact route"],
               guidance: "Keep routing focused！",
             },
           },
@@ -93,13 +84,33 @@ fastpath:
               triggers: ["route this"],
               examples: ["route this example"],
               domain: "routing",
-              fastpath: { keywords: [] },
+              keywords: [],
               guidance: "Route this request using stable evidence.",
             },
           },
         ],
       },
     );
+  });
+
+  it("accepts top-level keywords array directly", () => {
+    write(
+      "keyword-direct.md",
+      intentMarkdown({
+        frontmatter: `keywords:
+  - "deploy"
+  - "release"
+`,
+      }),
+    );
+
+    const result = validateRoutingIntentDirectory(dir, ["keyword-direct"]);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.intents[0]?.definition.keywords).toEqual([
+      "deploy",
+      "release",
+    ]);
   });
 
   it("accepts empty examples and counts guidance limits by Unicode code points", () => {
@@ -316,11 +327,11 @@ Keep it focused.
       expect.arrayContaining([
         "body.md: guidance must not start with a Markdown list, heading, or fence",
         "guidance.md: unsupported top-level field guidance",
-        "hint.md: fastpath.hint is not supported",
+        "hint.md: unsupported top-level field fastpath",
         "unknown.md: unsupported top-level field enabled",
         "unknown.md: unsupported top-level field name",
-        "unknown-candidate.md: candidate contains unsupported field weight",
-        "unknown-fastpath.md: fastpath contains unsupported field mode",
+        "unknown-candidate.md: unsupported top-level field candidate",
+        "unknown-fastpath.md: unsupported top-level field fastpath",
       ]),
     );
   });
@@ -338,25 +349,13 @@ Route this request.
 `,
     );
     write(
-      "bad-candidate.md",
-      intentMarkdown({
-        frontmatter: `candidate:
-  scope: global
-  keywords: ["valid", ""]
-`,
-      }),
-    );
-    write(
-      "bad-fastpath.md",
-      intentMarkdown({ frontmatter: "fastpath: exact\n" }),
+      "bad-keywords.md",
+      intentMarkdown({ frontmatter: "keywords: exact\n" }),
     );
     write(
       "implicit-scalars.md",
       intentMarkdown({
-        frontmatter: `candidate: 2026-08-12
-fastpath:
-  keywords: 2026-08-12
-`,
+        frontmatter: `keywords: 2026-08-12\n`,
       }),
     );
 
@@ -366,11 +365,8 @@ fastpath:
         "bad-arrays.md: examples must be an array containing only non-empty strings",
         "bad-arrays.md: domain must be a non-empty string",
         "bad-arrays.md: skills must be an array containing only non-empty strings",
-        "bad-candidate.md: candidate.scope must be cross-flow when provided",
-        "bad-candidate.md: candidate.keywords must be an array containing only non-empty strings",
-        "bad-fastpath.md: fastpath must be an object",
-        "implicit-scalars.md: candidate must be an object",
-        "implicit-scalars.md: fastpath.keywords must be an array containing only non-empty strings",
+        "bad-keywords.md: keywords must be an array containing only non-empty strings",
+        "implicit-scalars.md: keywords must be an array containing only non-empty strings",
       ]),
     );
   });

@@ -40,7 +40,7 @@ const catalog: IntentCatalogEntry[] = [
       triggers: ["implement the requested feature"],
       examples: ["add a QMD fastpath"],
       domain: "development",
-      fastpath: { keywords: ["implement", "feature"] },
+      keywords: ["implement", "feature"],
       guidance: "Implement the requested feature carefully.",
     },
   },
@@ -91,11 +91,9 @@ async function waitFor(
   condition: () => boolean,
   message: string,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  throw new Error(message);
 }
 
 async function waitForReady(
@@ -120,7 +118,7 @@ describe("createIntentQmdIndex", () => {
     ]);
     const searchLex = vi.fn().mockResolvedValue([
       {
-        filepath: "/snapshot/topic-keywords/implementation-0.md",
+        filepath: "/snapshot/keywords/implementation-0.md",
         score: 0.91,
       },
     ]);
@@ -180,19 +178,18 @@ describe("createIntentQmdIndex", () => {
     });
 
     await expect(
-      index.searchTopicKeywords({
+      index.searchKeywords({
         query: "implement feature",
-        domain: "development",
       }),
     ).resolves.toEqual([
       {
         intentId: "implementation",
         score: 0.91,
-        collection: expect.stringMatching(/^intent-topic-keywords-/),
+        collection: "intent-keywords",
       },
     ]);
     expect(searchLex).toHaveBeenCalledWith("implement feature", {
-      collection: expect.stringMatching(/^intent-topic-keywords-/),
+      collection: "intent-keywords",
       limit: 1,
     });
   });

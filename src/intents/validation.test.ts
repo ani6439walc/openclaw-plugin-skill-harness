@@ -19,9 +19,8 @@ triggers:
 examples:
   - "example"
 domain: "test"
-fastpath:
-  keywords:
-    - "hi"
+keywords:
+  - "hi"
 ---
 Handle the test request.
 `;
@@ -74,64 +73,19 @@ Handle the test request.
     });
   });
 
-  it("accepts valid candidate metadata", () => {
+  it("rejects candidate metadata as an unsupported top-level field", () => {
     fs.writeFileSync(
       path.join(dir, "one.md"),
       valid().replace(
         'domain: "test"',
-        'domain: "test"\ncandidate:\n  scope: cross-flow\n  keywords:\n    - "approval"\n    - "核准"',
-      ),
-    );
-
-    expect(validateRoutingIntentDirectory(dir)).toMatchObject({
-      valid: true,
-      errors: [],
-    });
-  });
-
-  it("rejects unknown or invalid candidate metadata", () => {
-    fs.writeFileSync(
-      path.join(dir, "bad-scope.md"),
-      valid().replace(
-        'domain: "test"',
-        'domain: "test"\ncandidate:\n  scope: global',
-      ),
-    );
-    fs.writeFileSync(
-      path.join(dir, "bad-keywords.md"),
-      valid().replace(
-        'domain: "test"',
-        'domain: "test"\ncandidate:\n  keywords:\n    - ""\n    - 123',
-      ),
-    );
-    fs.writeFileSync(
-      path.join(dir, "unknown-field.md"),
-      valid().replace(
-        'domain: "test"',
-        'domain: "test"\ncandidate:\n  scope: cross-flow\n  weight: 2',
-      ),
-    );
-    fs.writeFileSync(
-      path.join(dir, "not-object.md"),
-      valid().replace(
-        'domain: "test"',
-        'domain: "test"\ncandidate: cross-flow',
+        'domain: "test"\ncandidate:\n  scope: cross-flow\n  keywords:\n    - "approval"',
       ),
     );
 
     const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
-      "bad-scope.md: candidate.scope must be cross-flow when provided",
-    );
-    expect(result.errors).toContain(
-      "bad-keywords.md: candidate.keywords must be an array containing only non-empty strings",
-    );
-    expect(result.errors).toContain(
-      "unknown-field.md: candidate contains unsupported field weight",
-    );
-    expect(result.errors).toContain(
-      "not-object.md: candidate must be an object",
+      "one.md: unsupported top-level field candidate",
     );
   });
 
@@ -156,7 +110,7 @@ Handle the test request.
       path.join(dir, "one.md"),
       valid().replace(
         "triggers:",
-        'id: one\nname: One\nenabled: true\nkeywords: ["hi"]\ntriggers:',
+        'id: one\nname: One\nenabled: true\nfastpath: {}\ntags: ["hi"]\ntriggers:',
       ),
     );
 
@@ -168,27 +122,21 @@ Handle the test request.
       "one.md: unsupported top-level field enabled",
     );
     expect(result.errors).toContain(
-      "one.md: unsupported top-level field keywords",
+      "one.md: unsupported top-level field fastpath",
     );
+    expect(result.errors).toContain("one.md: unsupported top-level field tags");
   });
 
-  it("rejects unsupported fastpath hints and invalid fastpath fields", () => {
+  it("rejects invalid keywords fields", () => {
     fs.writeFileSync(
       path.join(dir, "one.md"),
-      valid().replace(
-        'fastpath:\n  keywords:\n    - "hi"',
-        'fastpath:\n  hint: "Use a tiny direct hint."\n  keywords:\n    - ""\n    - 123\n  mode: direct',
-      ),
+      valid().replace('keywords:\n  - "hi"', 'keywords:\n  - ""\n  - 123'),
     );
 
     const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain("one.md: fastpath.hint is not supported");
     expect(result.errors).toContain(
-      "one.md: fastpath.keywords must be an array containing only non-empty strings",
-    );
-    expect(result.errors).toContain(
-      "one.md: fastpath contains unsupported field mode",
+      "one.md: keywords must be an array containing only non-empty strings",
     );
   });
 

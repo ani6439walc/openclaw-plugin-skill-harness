@@ -1,7 +1,5 @@
 ---
 domain: follow-up
-candidate:
-  scope: cross-flow
 triggers:
   - >-
     The user gives a short rejection, correction, cancellation, or wait signal
@@ -15,19 +13,18 @@ examples:
   - don't
   - cancel
   - that's not what I meant
-fastpath:
-  keywords:
-    - "no"
-    - not that
-    - wrong
-    - don't
-    - cancel
-    - not yet
-    - that's not what I meant
-    - I was wrong
-    - wait
-    - hold on
-    - start over
+keywords:
+  - "no"
+  - not that
+  - wrong
+  - don't
+  - cancel
+  - not yet
+  - that's not what I meant
+  - I was wrong
+  - wait
+  - hold on
+  - start over
 ---
 
 Route a context-dependent rejection, cancellation, or correction here, stop the rejected action, identify what changed from the recent context, and clarify only when the target is ambiguous.

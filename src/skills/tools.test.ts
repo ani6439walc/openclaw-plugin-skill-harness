@@ -74,7 +74,7 @@ const TOOL_TEST_INTENTS: IntentCatalogEntry[] = [
       triggers: ["write"],
       examples: ["write this"],
       domain: "writing",
-      fastpath: { keywords: [] },
+      keywords: [],
       skills: ["writer"],
       guidance: "Use the writer skill.",
     },
@@ -86,7 +86,7 @@ const TOOL_TEST_INTENTS: IntentCatalogEntry[] = [
       examples: ["agent workflow"],
       domain: "agent-ops",
       skills: ["writer"],
-      fastpath: { keywords: [] },
+      keywords: [],
       guidance: "Use the writer workflow when drafting workflow text.",
     },
   },
@@ -152,12 +152,11 @@ describe("registerSkillTools", () => {
       ),
     });
 
-    expect(api.registerTool).toHaveBeenCalledTimes(5);
+    expect(api.registerTool).toHaveBeenCalledTimes(4);
     expect([...toolsForAgent(api).keys()]).toEqual([
       "skill_list",
       "skill_search",
       "skill_view",
-      "skill_manage",
       "skill_experience",
     ]);
     const toolsWithoutAgent = toolsForAgent(api, "");
@@ -167,7 +166,7 @@ describe("registerSkillTools", () => {
     expect(toolsWithoutAgent.has("skill_experience")).toBe(false);
   });
 
-  it("describes focused discovery, required reading, and authorized mutation", () => {
+  it("describes focused discovery and required reading", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const api = createApi(path.join(tmp, "state"), path.join(tmp, "workspace"));
     registerSkillTools(api);
@@ -186,9 +185,6 @@ describe("registerSkillTools", () => {
     );
     expect(description("skill_view")).toContain(
       "Read the complete skill before following its workflow",
-    );
-    expect(description("skill_manage")).toContain(
-      "Use only when available and authorized",
     );
   });
 
@@ -358,7 +354,7 @@ describe("registerSkillTools", () => {
             triggers: ["react"],
             examples: ["build a react ui"],
             skills: ["react"],
-            fastpath: { keywords: ["react"] },
+            keywords: ["react"],
             guidance: "Use the react skill for UI work.",
           },
         },
@@ -411,14 +407,14 @@ describe("registerSkillTools", () => {
         ],
       });
       expect(result.skills[0]).not.toHaveProperty("usage_stats");
-      expect(result.skills[0]).not.toHaveProperty("evidence");
+      expect(result.skills[0]).toHaveProperty("evidence");
       expect(scheduleSkillSearchIndex).not.toHaveBeenCalledWith("main");
       expect(qmdSkillIndex.schedule).not.toHaveBeenCalled();
       expect(qmdSkillIndex.search).toHaveBeenCalledWith({
         agentId: "main",
         query: "react ui",
         limit: 20,
-        includeEvidence: false,
+        includeEvidence: true,
       });
     } finally {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
@@ -463,7 +459,7 @@ describe("registerSkillTools", () => {
     }
   });
 
-  it("validates search criteria and keeps evidence and stats opt-in", async () => {
+  it("validates search criteria, defaults evidence to true, and keeps stats opt-in", async () => {
     const workspaceDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "skill-tools-qmd-"),
     );
@@ -504,23 +500,8 @@ describe("registerSkillTools", () => {
       expect(defaultResult).toMatchObject({
         success: true,
         query: "react",
-        skills: [{ name: "react", score: 0.84 }],
-      });
-      expect(defaultResult.skills[0]).not.toHaveProperty("usage_stats");
-      expect(defaultResult.skills[0]).not.toHaveProperty("evidence");
-      expect(defaultResult.skills[0]).not.toHaveProperty("related_skills");
-
-      const richResult = await runTool(search, {
-        query: "react",
-        show_stats: true,
-        show_evidence: true,
-      });
-      expect(richResult.skills[0]).toHaveProperty("usage_stats");
-      expect(richResult.skills[0]).toMatchObject({
-        evidence: [
+        skills: [
           {
-            collection: "skill-meta",
-            path: "meta.md",
             score: 0.84,
           },
         ],
@@ -531,39 +512,6 @@ describe("registerSkillTools", () => {
         limit: 20,
         includeEvidence: true,
       });
-    } finally {
-      fs.rmSync(workspaceDir, { recursive: true, force: true });
-      fs.rmSync(stateDir, { recursive: true, force: true });
-    }
-  });
-
-  it("schedules skill search index after successful skill_manage", async () => {
-    const workspaceDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "skill-tools-manage-qmd-"),
-    );
-    const stateDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "skill-tools-manage-state-"),
-    );
-    try {
-      const api = createApi(stateDir, workspaceDir);
-      const scheduleSkillSearchIndex = vi.fn();
-      const qmdSkillIndex: SkillQmdIndex = {
-        schedule: vi.fn(),
-        search: vi.fn(async () => []),
-        getStatus: vi.fn((_agentId: string) => "ready"),
-        close: vi.fn(async () => {}),
-      };
-      registerSkillTools(api, { qmdSkillIndex, scheduleSkillSearchIndex });
-      const manage = toolsForAgent(api, "main").get("skill_manage");
-      expect(manage).toBeTruthy();
-      const result = await runTool(manage, {
-        action: "create",
-        name: "fresh-skill",
-        content:
-          "---\nname: fresh-skill\ndescription: Fresh skill\n---\n\n# Fresh\n",
-      });
-      expect(result).toMatchObject({ success: true });
-      expect(scheduleSkillSearchIndex).not.toHaveBeenCalledWith("main");
     } finally {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
       fs.rmSync(stateDir, { recursive: true, force: true });
@@ -665,12 +613,13 @@ describe("registerSkillTools", () => {
         needsReview: true,
       },
     });
-    registerSkillTools(api, { getIntents: () => TOOL_TEST_INTENTS });
+    registerSkillTools(api, {
+      getIntents: () => TOOL_TEST_INTENTS,
+      bundledSkillsDir: "",
+    });
     const tools = toolsForAgent(api);
 
-    await expect(
-      runTool(tools.get("skill_list"), { source: "workspace" }),
-    ).resolves.toMatchObject({
+    await expect(runTool(tools.get("skill_list"), {})).resolves.toMatchObject({
       success: true,
       count: 1,
       skills: [
@@ -682,15 +631,12 @@ describe("registerSkillTools", () => {
         },
       ],
     });
-    const listWithoutStats = await runTool(tools.get("skill_list"), {
-      source: "workspace",
-    });
+    const listWithoutStats = await runTool(tools.get("skill_list"), {});
     expect(listWithoutStats.skills[0]).not.toHaveProperty("usage_stats");
     expect(listWithoutStats.skills[0]).not.toHaveProperty("related_skills");
 
     await expect(
       runTool(tools.get("skill_list"), {
-        source: "workspace",
         show_stats: true,
       }),
     ).resolves.toMatchObject({
@@ -710,13 +656,6 @@ describe("registerSkillTools", () => {
           },
         },
       ],
-    });
-    await expect(
-      runTool(tools.get("skill_list"), { source: "managed" }),
-    ).resolves.toMatchObject({
-      success: true,
-      count: 0,
-      skills: [],
     });
     await expect(
       runTool(tools.get("skill_view"), { name: "writer" }),
@@ -826,7 +765,6 @@ describe("registerSkillTools", () => {
 
     await expect(
       runTool(tools.get("skill_list"), {
-        source: "workspace",
         offset: 1,
         limit: 1,
         show_related: true,
@@ -847,7 +785,7 @@ describe("registerSkillTools", () => {
     });
   });
 
-  it("excludes filtered and shadowed skills from incoming relations", async () => {
+  it("excludes shadowed skills from incoming relations", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const stateDir = path.join(tmp, "state");
     const workspaceDir = path.join(tmp, "workspace");
@@ -855,7 +793,7 @@ describe("registerSkillTools", () => {
     writeSkill(workspaceDir, "target");
     writeSkill(workspaceDir, "shadowed");
     writeSkill(stateDir, "managed-source", {
-      target: "Visible only without a source filter.",
+      target: "Visible without source filter.",
     });
     writeSkill(stateDir, "shadowed", {
       target: "Must not survive workspace precedence.",
@@ -863,28 +801,16 @@ describe("registerSkillTools", () => {
     registerSkillTools(api);
     const tools = toolsForAgent(api);
 
-    const workspaceOnly = await runTool(tools.get("skill_list"), {
-      source: "workspace",
+    const result = await runTool(tools.get("skill_list"), {
       show_related: true,
     });
     expect(
-      workspaceOnly.skills.find(
-        (skill: { name: string }) => skill.name === "target",
-      ),
-    ).toMatchObject({ related_skills: [] });
-
-    const allSources = await runTool(tools.get("skill_list"), {
-      show_related: true,
-    });
-    expect(
-      allSources.skills.find(
-        (skill: { name: string }) => skill.name === "target",
-      ),
+      result.skills.find((skill: { name: string }) => skill.name === "target"),
     ).toMatchObject({
       related_skills: [
         {
           name: "managed-source",
-          reason: "Visible only without a source filter.",
+          reason: "Visible without source filter.",
           direction: "related-to-current",
         },
       ],
@@ -906,7 +832,6 @@ describe("registerSkillTools", () => {
     const tools = toolsForAgent(api);
 
     const result = await runTool(tools.get("skill_list"), {
-      source: "workspace",
       show_related: true,
     });
 
@@ -927,12 +852,10 @@ describe("registerSkillTools", () => {
     for (let index = 0; index < 155; index += 1) {
       writeSkill(workspaceDir, `skill-${String(index).padStart(3, "0")}`);
     }
-    registerSkillTools(api);
+    registerSkillTools(api, { bundledSkillsDir: "" });
     const tools = toolsForAgent(api);
 
-    await expect(
-      runTool(tools.get("skill_list"), { source: "workspace" }),
-    ).resolves.toMatchObject({
+    await expect(runTool(tools.get("skill_list"), {})).resolves.toMatchObject({
       success: true,
       total: 155,
       count: 150,
@@ -947,7 +870,6 @@ describe("registerSkillTools", () => {
     });
 
     const secondPage = await runTool(tools.get("skill_list"), {
-      source: "workspace",
       offset: 150,
     });
     expect(secondPage).toMatchObject({
@@ -970,30 +892,51 @@ describe("registerSkillTools", () => {
     ]);
   });
 
-  it("creates skills through skill_manage", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
-    const workspaceDir = path.join(tmp, "workspace");
-    const stateDir = path.join(tmp, "state");
-    const api = createApi(stateDir, workspaceDir);
-    registerSkillTools(api);
-    const tools = toolsForAgent(api);
+  it("includes direct related skills in skill_search when show_related is true", async () => {
+    const workspaceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-search-related-"),
+    );
+    const stateDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-search-related-state-"),
+    );
+    try {
+      writeSkill(workspaceDir, "react", {
+        nextjs: "React is used by Next.js.",
+      });
+      writeSkill(workspaceDir, "nextjs");
+      const api = createApi(stateDir, workspaceDir);
+      const qmdSkillIndex: SkillQmdIndex = {
+        schedule: vi.fn(),
+        search: vi.fn(async () => [{ name: "react", score: 0.95 }]),
+        getStatus: vi.fn(() => "ready"),
+        close: vi.fn(async () => {}),
+      };
+      registerSkillTools(api, { qmdSkillIndex });
+      const search = toolsForAgent(api, "main").get("skill_search");
+      expect(search).toBeTruthy();
 
-    await expect(
-      runTool(tools.get("skill_manage"), {
-        action: "create",
-        name: "managed-skill",
-        content:
-          "---\nname: managed-skill\ndescription: Managed by tool.\n---\n\n# Managed Skill\n",
-      }),
-    ).resolves.toMatchObject({ success: true });
+      const withoutRelated = await runTool(search, {
+        query: "react",
+      });
+      expect(withoutRelated.skills[0]).not.toHaveProperty("related_skills");
 
-    await expect(
-      runTool(tools.get("skill_view"), { name: "managed-skill" }),
-    ).resolves.toMatchObject({
-      success: true,
-      name: "managed-skill",
-      source: "managed",
-      domains: [],
-    });
+      const withRelated = await runTool(search, {
+        query: "react",
+        show_related: true,
+      });
+      expect(withRelated.skills[0]).toMatchObject({
+        name: "react",
+        related_skills: [
+          {
+            name: "nextjs",
+            reason: "React is used by Next.js.",
+            direction: "current-to-related",
+          },
+        ],
+      });
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 });

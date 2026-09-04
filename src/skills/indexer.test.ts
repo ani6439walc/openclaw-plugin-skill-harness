@@ -308,7 +308,7 @@ describe("skill indexer", () => {
           examples: ["workspace"],
           domain: "workspace-domain",
           skills: ["shared-skill", "zeta-skill"],
-          fastpath: { keywords: [] },
+          keywords: [],
           guidance: "Use the workspace skill workflow.",
         },
       },

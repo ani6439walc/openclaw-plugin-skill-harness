@@ -29,12 +29,12 @@ If ambiguous, ask one routing question: "Are you working on one intent, auditing
 - Current source layout:
   - Bundled skill assets live under this skill directory, especially `assets/` and `references/`.
   - Runtime editable intents live in the active OpenClaw-resolved runtime intent catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/intents/`.
-  - Runtime experiences live in a separate skill-scoped catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/experiences/`; do not treat them as intent bodies or manually curate them.
+  - Runtime experiences live in a separate skill-scoped catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/experiences/`; do not treat them as intent bodies or manually edit them.
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
 - Treat runtime session text as private. Keyword-audit and runtime-health reports stay local; never send raw retained conversations, tool payloads, Review suggestions, or Review evidence to external tools or artifacts.
-- Do not hand-edit `review.json`, `keyword-coverage.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, session-local curation, startup seeding, Review persistence, skill-placement, stats, or cleanup workflows in this skill.
-- Check changed intent files for canonical routing-only format: complete valid classification frontmatter, one plain-text body `guidance` sentence, concrete triggers/examples, conservative optional `candidate` metadata, direct frontmatter `skills[]` when skill loading is needed, and no cross-references to other intent ids. The entire body is guidance; do not add sections, lists, fences, commands, paths, or other Markdown formatting.
+- Do not hand-edit `review.json`, `keyword-coverage.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, startup seeding, Review persistence, skill-placement, stats, or cleanup workflows in this skill.
+- Check changed intent files for canonical routing-only format: complete valid classification frontmatter, one plain-text body `guidance` sentence, concrete triggers/examples, optional `keywords`, direct frontmatter `skills[]` when skill loading is needed, and no cross-references to other intent ids. The entire body is guidance; do not add sections, lists, fences, commands, paths, or other Markdown formatting.
 - Keep concrete shell commands, MCP documentation calls, workflows, and durable lessons in referenced skills; do not add them to intent definitions.
 - When reviewing, creating, splitting, merging, or extracting intents, validate domain-intent consistency using `references/clustering.md`.
 
@@ -111,7 +111,7 @@ Read and follow `references/design.md`. Keep these checkpoints visible:
 | #   | Anti-pattern                                    | Why not                                   | Do instead                                                                     |
 | --- | ----------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
 | 1   | **Ask multiple questions at once**              | Confuses user, degrades response quality  | Interview one question at a time                                               |
-| 2   | **Cross-reference other intents in metadata**   | Classifier only sees routing metadata     | Express boundaries via triggers, examples, domain, fastpath, and body guidance |
+| 2   | **Cross-reference other intents in metadata**   | Classifier only sees routing metadata     | Express boundaries via triggers, examples, domain, keywords, and body guidance |
 | 3   | **Skip format rules before writing**            | Inconsistent format breaks plugin parsing | Read `references/format.md` first                                              |
 | 4   | **Create a new intent when one already exists** | Causes duplication and collision          | Check existing intents during interview                                        |
 | 5   | **Use vague descriptions as triggers**          | Classification cannot match accurately    | Use concrete phrases or keywords                                               |
@@ -164,7 +164,7 @@ User wants to measure, analyze, or propose changes to Intent Review trigger keyw
 
 Keywords: "Review keywords", "trigger keywords", "keyword hit rate", "keyword misses", "keyword collisions", "分析關鍵字", "統計關鍵字", "更新關鍵字", "successful-pattern", "behavior-fix", "entity-context"
 
-Do not use this mode for intent `fastpath.keywords`; route that through design or inventory with the labeled-fixture rules in `references/format.md`. Do not propose new `candidate.keywords`: the schema retains them for compatibility, but current QMD candidate projection does not consume them.
+Do not use this mode for intent `keywords`; route that through design or inventory with the labeled-fixture rules in `references/format.md`.
 
 ### Workflow
 
@@ -242,8 +242,7 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 - Frontmatter is the complete intent file and has required fields with the right shapes.
 - The complete plain-text intent body is one durable routing-guidance sentence.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
-- `fastpath.keywords` must be durable exact whole-message evidence; the same values also form the domain-scoped lexical QMD topic-keyword collection.
-- `candidate.scope: cross-flow` is used only for durable domain-independent coverage. Do not add `candidate.keywords`: it is compatibility metadata and is not a current QMD projection input.
+- `keywords` must be durable exact whole-message evidence; the same values also form the lexical QMD keyword collection.
 - Review trigger keywords are a separate runtime surface. Analyze them with `references/keyword-audit.md` and `scripts/review-keyword-audit.py`; never infer a write from phrase frequency alone.
 - Skill dependencies use direct frontmatter `skills[]`; tools, workflows, commands, and lessons stay in referenced skills.
 - Intent metadata does not cross-reference other intent ids.

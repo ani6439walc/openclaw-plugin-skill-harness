@@ -18,7 +18,6 @@ describe("skill-harness manifest", () => {
       "skill_list",
       "skill_search",
       "skill_view",
-      "skill_manage",
       "skill_experience",
     ]);
     expect(manifest).not.toHaveProperty("commandAliases");
@@ -86,8 +85,6 @@ describe("skill-harness manifest", () => {
     const optionalModels = [
       properties.model,
       properties.modelFallback,
-      properties.curation.properties.model,
-      properties.curation.properties.modelFallback,
       properties.review.properties.model,
       properties.review.properties.modelFallback,
     ];
@@ -98,37 +95,8 @@ describe("skill-harness manifest", () => {
     }
   });
 
-  it("exposes enabled-by-default independent curator settings", () => {
-    const curation = manifest.configSchema.properties.curation;
-
-    expect(curation.description).toContain("background curator");
-    expect(curation.additionalProperties).toBe(false);
-    expect(curation.properties.enabled.default).toBe(true);
-    expect(curation.properties.model.description).toContain(
-      "inherits the top-level model",
-    );
-    expect(curation.properties.modelFallback.description).toContain(
-      "not a runtime retry model",
-    );
-    expect(curation.properties.thinking).toMatchObject({
-      default: "medium",
-      enum: [
-        "off",
-        "minimal",
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "adaptive",
-        "max",
-      ],
-    });
-    expect(curation.properties.timeoutSeconds).toMatchObject({
-      minimum: 10,
-      maximum: 600,
-      default: 30,
-    });
-    expect(curation.default).toEqual({});
+  it("does not expose removed curation settings", () => {
+    expect(manifest.configSchema.properties).not.toHaveProperty("curation");
   });
 
   it("exposes disabled-by-default Review settings", () => {

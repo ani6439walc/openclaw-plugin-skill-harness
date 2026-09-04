@@ -13,17 +13,12 @@ import type {
   KeywordCoverageReviewParams,
   KeywordCoverageReviewerResult,
 } from "../review/keyword-coverage-subagent.js";
-import type {
-  runIntentionSubagent,
-  runTopicSwitchSubagent,
-} from "../classification/index.js";
+import type { runIntentionSubagent } from "../classification/index.js";
 import type { ReviewTriggerKeywords } from "../review/trigger-keywords.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
 import type { IntentQmdIndex } from "../qmd/intent-index.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
-import type { SampleWithoutReplacement } from "../curation/index.js";
-import type { CurationQueue } from "../curation/queue.js";
 import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import type {
   TurnAssociation,
@@ -52,8 +47,6 @@ export type HookDeps = {
   statsAggregator?: typeof defaultStatsAggregator;
   skillInventoryResolver?: typeof resolveSkillInventory;
   clock?: () => Date;
-  sampleWithoutReplacement?: SampleWithoutReplacement;
-  curationQueue?: CurationQueue;
   experienceCatalog?: SkillExperienceCatalog;
   qmdIntentIndex?: IntentQmdIndex;
   qmdSkillIndex?: SkillQmdIndex;
@@ -65,8 +58,6 @@ export type HookDeps = {
     params: KeywordCoverageReviewParams,
   ) => Promise<KeywordCoverageReviewerResult | undefined>;
   classifier?: typeof runIntentionSubagent;
-  topicChecker?: typeof runTopicSwitchSubagent;
-  curator?: typeof import("../curation/subagent.js").runCurationSubagent;
   reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
     Partial<
       Pick<

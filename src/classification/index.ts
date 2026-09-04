@@ -28,5 +28,4 @@ export {
   getModelRef,
   getReviewModelRef,
   runIntentionSubagent,
-  runTopicSwitchSubagent,
 } from "./subagent.js";

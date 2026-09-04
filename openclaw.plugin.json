@@ -6,13 +6,7 @@
     "onStartup": true
   },
   "contracts": {
-    "tools": [
-      "skill_list",
-      "skill_search",
-      "skill_view",
-      "skill_manage",
-      "skill_experience"
-    ]
+    "tools": ["skill_list", "skill_search", "skill_view", "skill_experience"]
   },
   "skills": ["./skills"],
   "configSchema": {
@@ -156,53 +150,25 @@
       },
       "routing": {
         "type": "object",
-        "description": "Optional confidence and QMD-score thresholds for dynamic intent routing. Invalid scores or ordering reject the plugin configuration.",
+        "description": "Optional QMD-score thresholds for dynamic intent routing. Invalid scores or ordering reject the plugin configuration.",
         "additionalProperties": false,
         "properties": {
-          "sameTopic": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "minConfidence": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.8,
-                "description": "Minimum topic-triage confidence for same-topic intent inheritance."
-              }
-            }
-          },
           "qmd": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "minTopicConfidence": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.8,
-                "description": "Minimum topic-triage confidence for topic-keyword QMD and trigger/example QMD context."
-              },
               "directRouteMinScore": {
                 "type": "number",
                 "minimum": 0,
                 "maximum": 1,
                 "default": 0.85,
-                "description": "Strictly-greater QMD score required for a direct route."
-              },
-              "smallCandidateMinScore": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.65,
-                "description": "Inclusive QMD score that selects the small classifier candidate set."
+                "description": "Inclusive QMD score required for direct routing bypass."
               },
               "minCandidateScore": {
                 "type": "number",
                 "minimum": 0,
                 "maximum": 1,
-                "default": 0.35,
-                "description": "Inclusive minimum QMD score for any classifier candidate projection."
+                "default": 0.35
               }
             }
           }
@@ -254,48 +220,6 @@
                 "default": 180
               }
             }
-          }
-        },
-        "default": {}
-      },
-      "curation": {
-        "type": "object",
-        "description": "Enabled-by-default background curator settings. Curation is independent of Intent Review and does not depend on review.enabled.",
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "model": {
-            "type": "string",
-            "description": "Explicit dedicated model for the background curator. If unset, inherits the top-level model before current-session and agent-primary resolution."
-          },
-          "modelFallback": {
-            "type": "string",
-            "description": "Last-resort background curator model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
-          },
-          "thinking": {
-            "type": "string",
-            "enum": [
-              "off",
-              "minimal",
-              "low",
-              "medium",
-              "high",
-              "xhigh",
-              "adaptive",
-              "max"
-            ],
-            "description": "Thinking level for the background curator sub-agent.",
-            "default": "medium"
-          },
-          "timeoutSeconds": {
-            "type": "integer",
-            "minimum": 10,
-            "maximum": 600,
-            "default": 30,
-            "description": "Budget in seconds for each background curator sub-agent run."
           }
         },
         "default": {}
