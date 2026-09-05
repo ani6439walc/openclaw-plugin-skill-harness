@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -72,14 +72,20 @@ function qmdResult(intentId: string) {
 
 function createStoreDouble(params: {
   search?: ReturnType<typeof vi.fn>;
+  searchLex?: ReturnType<typeof vi.fn>;
   close?: ReturnType<typeof vi.fn>;
   update?: ReturnType<typeof vi.fn>;
+  embed?: ReturnType<typeof vi.fn>;
+  getStatus?: ReturnType<typeof vi.fn>;
 }) {
   return {
     update: params.update ?? vi.fn().mockResolvedValue({}),
-    embed: vi.fn().mockResolvedValue({}),
+    embed: params.embed ?? vi.fn().mockResolvedValue({ errors: 0 }),
+    getStatus:
+      params.getStatus ??
+      vi.fn().mockResolvedValue({ needsEmbedding: 0, totalDocuments: 1 }),
     search: params.search ?? vi.fn().mockResolvedValue([]),
-    searchLex: vi.fn().mockResolvedValue([]),
+    searchLex: params.searchLex ?? vi.fn().mockResolvedValue([]),
     close: params.close ?? vi.fn().mockResolvedValue(undefined),
   } as unknown as QMDStore;
 }
@@ -89,8 +95,10 @@ async function waitFor(
   message: string,
 ): Promise<void> {
   for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (condition()) return;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+  throw new Error(message);
 }
 
 async function waitForReady(
@@ -103,6 +111,284 @@ async function waitForReady(
 }
 
 describe("createIntentQmdIndex", () => {
+  it("reopens a matching completed index after process restart", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const firstStore = createStoreDouble({});
+    const firstCreateStore = vi.fn().mockResolvedValue(firstStore);
+    const firstIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: firstCreateStore,
+    });
+
+    firstIndex.schedule(catalog);
+    await waitForReady(firstIndex);
+    await writeFile(
+      path.join(root, "qmd", "intent-routing.sqlite"),
+      "existing index",
+    );
+    await firstIndex.close();
+
+    const reopenedSearch = vi.fn().mockResolvedValue([qmdResult("implementation")]);
+    const reopenedLexSearch = vi.fn().mockResolvedValue([
+      { filepath: "/snapshot/keywords/implementation-0.md", score: 0.91 },
+    ]);
+    const reopenedStore = createStoreDouble({
+      search: reopenedSearch,
+      searchLex: reopenedLexSearch,
+    });
+    const secondCreateStore = vi.fn().mockResolvedValue(reopenedStore);
+    const restartedIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: secondCreateStore,
+    });
+
+    restartedIndex.schedule(catalog);
+    await waitForReady(restartedIndex);
+
+    await expect(
+      restartedIndex.searchIntentTriggers({ query: "implement", rawLimit: 1 }),
+    ).resolves.toEqual([
+      {
+        intentId: "implementation",
+        score: 0.91,
+        collection: "intent-triggers-and-examples",
+      },
+    ]);
+    await expect(
+      restartedIndex.searchKeywords({ query: "implement" }),
+    ).resolves.toEqual([
+      {
+        intentId: "implementation",
+        score: 0.91,
+        collection: "intent-keywords",
+      },
+    ]);
+    expect(secondCreateStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dbPath: path.join(root, "qmd", "intent-routing.sqlite"),
+        readOnly: true,
+        remoteRequestTimeoutMs: 1_234,
+        config: expect.objectContaining({
+          models: expect.objectContaining({
+            embed_api_key: "embedding-key",
+            generate_api_key: "expand-key",
+          }),
+        }),
+      }),
+    );
+    expect(reopenedStore.update).not.toHaveBeenCalled();
+    expect(reopenedStore.embed).not.toHaveBeenCalled();
+
+    await restartedIndex.close();
+  });
+
+  it("rebuilds after restart when the catalog fingerprint changed", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const firstIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn().mockResolvedValue(createStoreDouble({})),
+    });
+
+    firstIndex.schedule(catalog);
+    await waitForReady(firstIndex);
+    await writeFile(
+      path.join(root, "qmd", "intent-routing.sqlite"),
+      "existing index",
+    );
+    await firstIndex.close();
+
+    const rebuiltStore = createStoreDouble({});
+    const createStore = vi.fn().mockResolvedValue(rebuiltStore);
+    const restartedIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+
+    restartedIndex.schedule(refreshedCatalog);
+    await waitForReady(restartedIndex);
+
+    expect(createStore).toHaveBeenCalledOnce();
+    expect(createStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dbPath: path.join(root, "qmd", "intent-routing.sqlite"),
+        config: expect.any(Object),
+      }),
+    );
+    expect(rebuiltStore.update).toHaveBeenCalledOnce();
+    expect(rebuiltStore.embed).toHaveBeenCalledOnce();
+
+    await restartedIndex.close();
+  });
+
+  it("rebuilds when a matching persisted database cannot be reopened", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const firstIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn().mockResolvedValue(createStoreDouble({})),
+    });
+
+    firstIndex.schedule(catalog);
+    await waitForReady(firstIndex);
+    await writeFile(
+      path.join(root, "qmd", "intent-routing.sqlite"),
+      "corrupt index",
+    );
+    await firstIndex.close();
+
+    const rebuiltStore = createStoreDouble({});
+    const createStore = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("database disk image is malformed"))
+      .mockResolvedValueOnce(rebuiltStore);
+    const restartedIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+
+    restartedIndex.schedule(catalog);
+    await waitForReady(restartedIndex);
+
+    expect(createStore).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        dbPath: path.join(root, "qmd", "intent-routing.sqlite"),
+        readOnly: true,
+        remoteRequestTimeoutMs: 1_234,
+        config: expect.objectContaining({
+          models: expect.objectContaining({
+            generate_api_model: "expand-model",
+          }),
+        }),
+      }),
+    );
+    expect(createStore).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        dbPath: path.join(root, "qmd", "intent-routing.sqlite"),
+        config: expect.any(Object),
+      }),
+    );
+    expect(rebuiltStore.update).toHaveBeenCalledOnce();
+    expect(rebuiltStore.embed).toHaveBeenCalledOnce();
+
+    await restartedIndex.close();
+  });
+
+  it("rebuilds when a matching persisted index still needs embeddings", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const firstIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn().mockResolvedValue(createStoreDouble({})),
+    });
+
+    firstIndex.schedule(catalog);
+    await waitForReady(firstIndex);
+    await writeFile(
+      path.join(root, "qmd", "intent-routing.sqlite"),
+      "incomplete index",
+    );
+    await firstIndex.close();
+
+    const incompleteStore = createStoreDouble({
+      getStatus: vi
+        .fn()
+        .mockResolvedValue({ needsEmbedding: 1, totalDocuments: 1 }),
+    });
+    const rebuiltStore = createStoreDouble({});
+    const createStore = vi
+      .fn()
+      .mockResolvedValueOnce(incompleteStore)
+      .mockResolvedValueOnce(rebuiltStore);
+    const restartedIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+
+    restartedIndex.schedule(catalog);
+    await waitForReady(restartedIndex);
+
+    expect(incompleteStore.close).toHaveBeenCalledOnce();
+    expect(rebuiltStore.update).toHaveBeenCalledOnce();
+    expect(rebuiltStore.embed).toHaveBeenCalledOnce();
+
+    await restartedIndex.close();
+  });
+
+  it("does not publish an incomplete rebuilt index", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const incompleteStore = createStoreDouble({
+      embed: vi.fn().mockResolvedValue({ errors: 1 }),
+      getStatus: vi
+        .fn()
+        .mockResolvedValue({ needsEmbedding: 1, totalDocuments: 1 }),
+    });
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn().mockResolvedValue(incompleteStore),
+    });
+
+    index.schedule(catalog);
+    await waitFor(
+      () => index.getStatus() === "failed",
+      "incomplete QMD index was published",
+    );
+
+    await expect(
+      index.searchIntentTriggers({ query: "implement", rawLimit: 1 }),
+    ).resolves.toBeUndefined();
+    expect(incompleteStore.close).toHaveBeenCalledOnce();
+    await expect(
+      stat(path.join(root, "qmd", "intent-routing.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("invalidates persisted readiness before mutating a stale database", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const firstIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn().mockResolvedValue(createStoreDouble({})),
+    });
+
+    firstIndex.schedule(catalog);
+    await waitForReady(firstIndex);
+    await writeFile(
+      path.join(root, "qmd", "intent-routing.sqlite"),
+      "existing index",
+    );
+    await firstIndex.close();
+
+    const failedRefresh = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn().mockRejectedValue(new Error("database locked")),
+    });
+    failedRefresh.schedule(refreshedCatalog);
+    await waitFor(
+      () => failedRefresh.getStatus() === "failed",
+      "stale QMD refresh did not fail",
+    );
+
+    await expect(
+      stat(path.join(root, "qmd", "intent-routing.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("builds a managed snapshot and uses default QMD expansion", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
     roots.push(root);
@@ -119,13 +405,9 @@ describe("createIntentQmdIndex", () => {
         score: 0.91,
       },
     ]);
-    const createStore = vi.fn().mockResolvedValue({
-      update: vi.fn().mockResolvedValue({}),
-      embed: vi.fn().mockResolvedValue({}),
-      search,
-      searchLex,
-      close: vi.fn().mockResolvedValue(undefined),
-    } as unknown as QMDStore);
+    const createStore = vi.fn().mockResolvedValue(
+      createStoreDouble({ search, searchLex }),
+    );
     const index = createIntentQmdIndex({
       dataRoot: root,
       config: () => qmdConfig,

@@ -4,7 +4,7 @@ import path from "node:path";
 import type { QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
-import { withFileLock } from "../file-utils.js";
+import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
 import { normalizeEmbeddingModel } from "./provider-resolver.js";
 import { boundQmdQuery } from "./query-budget.js";
@@ -14,8 +14,25 @@ const EXAMPLES_COLLECTION = "intent-examples";
 const KEYWORDS_COLLECTION = "intent-keywords";
 const INITIAL_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 60_000;
+const INTENT_INDEX_METADATA_SCHEMA_VERSION = 1;
 
 type QmdCreateStore = (typeof import("@wei840222/qmd"))["createStore"];
+
+type IntentIndexMetadata = {
+  schemaVersion: typeof INTENT_INDEX_METADATA_SCHEMA_VERSION;
+  fingerprint: string;
+};
+
+function isIntentIndexMetadata(value: unknown): value is IntentIndexMetadata {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "schemaVersion" in value &&
+    value.schemaVersion === INTENT_INDEX_METADATA_SCHEMA_VERSION &&
+    "fingerprint" in value &&
+    typeof value.fingerprint === "string"
+  );
+}
 
 type QmdResult = {
   body: string;
@@ -56,6 +73,24 @@ function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function buildStoreModels(config: ResolvedQmdConfig) {
+  return {
+      embed_api_url: config.embedding.baseUrl,
+      embed_api_model: config.embedding.model,
+      ...(config.embedding.apiKey
+        ? { embed_api_key: config.embedding.apiKey }
+        : {}),
+      ...(config.embedding.dimension
+        ? { embed_dimension: config.embedding.dimension }
+        : {}),
+      generate_api_url: config.expansion.baseUrl,
+      generate_api_model: config.expansion.model,
+    ...(config.expansion.apiKey
+      ? { generate_api_key: config.expansion.apiKey }
+      : {}),
+  };
+}
+
 function snapshotFingerprint(
   intents: readonly IntentCatalogEntry[],
   config: ResolvedQmdConfig,
@@ -69,9 +104,19 @@ function snapshotFingerprint(
         domain: intent.definition.domain,
         keywords: intent.definition.keywords,
       })),
-      embedding: {
-        model: normalizeEmbeddingModel(config.embedding.model),
-        dimension: config.embedding.dimension ?? null,
+      qmd: {
+        timeoutMs: config.timeoutMs,
+        embedding: {
+          baseUrl: config.embedding.baseUrl,
+          model: normalizeEmbeddingModel(config.embedding.model),
+          apiKey: config.embedding.apiKey,
+          dimension: config.embedding.dimension ?? null,
+        },
+        expansion: {
+          baseUrl: config.expansion.baseUrl,
+          model: config.expansion.model,
+          apiKey: config.expansion.apiKey,
+        },
       },
     }),
   );
@@ -243,6 +288,11 @@ export function createIntentQmdIndex(params: {
     "intent-routing.sqlite",
   );
   const snapshotRoot = path.join(params.dataRoot, "qmd", "intents");
+  const metadataPath = path.join(
+    params.dataRoot,
+    "qmd",
+    "intent-routing.json",
+  );
   let currentFingerprint: string | undefined;
   let expectedFingerprint: string | undefined;
   let desired:
@@ -281,6 +331,50 @@ export function createIntentQmdIndex(params: {
     nextRetryAtMs = 0;
   }
 
+  function readPersistedFingerprint(): string | undefined {
+    try {
+      const metadata = readJsonFile<unknown>(metadataPath);
+      return isIntentIndexMetadata(metadata) ? metadata.fingerprint : undefined;
+    } catch {
+      return;
+    }
+  }
+
+  function persistFingerprint(fingerprint: string): void {
+    writeJsonAtomic(metadataPath, {
+      schemaVersion: INTENT_INDEX_METADATA_SCHEMA_VERSION,
+      fingerprint,
+    } satisfies IntentIndexMetadata);
+  }
+
+  async function reopenCompletedStore(
+    fingerprint: string,
+  ): Promise<QMDStore | undefined> {
+    if (readPersistedFingerprint() !== fingerprint) return;
+    const createQmdStore =
+      params.createStore ?? (await import("@wei840222/qmd")).createStore;
+    let reopenedStore: QMDStore | undefined;
+    try {
+      const qmd = params.config();
+      reopenedStore = await createQmdStore({
+        dbPath: databasePath,
+        config: { collections: {}, models: buildStoreModels(qmd) },
+        readOnly: true,
+        remoteRequestTimeoutMs: qmd.timeoutMs,
+      });
+      const indexStatus = await reopenedStore.getStatus();
+      if (indexStatus.needsEmbedding > 0 || indexStatus.totalDocuments <= 0) {
+        await reopenedStore.close().catch(() => undefined);
+        return;
+      }
+      return reopenedStore;
+    } catch (error) {
+      if (reopenedStore) await reopenedStore.close().catch(() => undefined);
+      logger.warn("failed to reopen completed QMD intent index", { error });
+      return;
+    }
+  }
+
   function recordBuildFailure(fingerprint: string, error: unknown): void {
     consecutiveFailures =
       failedFingerprint === fingerprint ? consecutiveFailures + 1 : 1;
@@ -305,6 +399,30 @@ export function createIntentQmdIndex(params: {
       const locked = await withFileLock(
         databasePath,
         async () => {
+          const reopenedStore = await reopenCompletedStore(target.fingerprint);
+          if (reopenedStore) {
+            nextStore = reopenedStore;
+            if (desired?.fingerprint === target.fingerprint) {
+              await reopenedStore.close();
+              nextStore = undefined;
+              return;
+            }
+            const previousStore = store;
+            store = reopenedStore;
+            currentFingerprint = target.fingerprint;
+            status = "ready";
+            resetRetryState();
+            if (previousStore) {
+              await previousStore.close().catch((error: unknown) => {
+                logger.warn("failed to close previous QMD intent index", {
+                  error,
+                });
+              });
+            }
+            return true;
+          }
+
+          await fs.rm(metadataPath, { force: true });
           const qmd = params.config();
           if (
             !qmd.embedding.baseUrl ||
@@ -323,32 +441,25 @@ export function createIntentQmdIndex(params: {
             dbPath: databasePath,
             config: {
               collections,
-              models: {
-                embed_api_url: qmd.embedding.baseUrl,
-                embed_api_model: qmd.embedding.model,
-                ...(qmd.embedding.apiKey
-                  ? { embed_api_key: qmd.embedding.apiKey }
-                  : {}),
-                ...(qmd.embedding.dimension
-                  ? { embed_dimension: qmd.embedding.dimension }
-                  : {}),
-                generate_api_url: qmd.expansion.baseUrl,
-                generate_api_model: qmd.expansion.model,
-                ...(qmd.expansion.apiKey
-                  ? { generate_api_key: qmd.expansion.apiKey }
-                  : {}),
-              },
+              models: buildStoreModels(qmd),
             },
             remoteRequestTimeoutMs: qmd.timeoutMs,
           });
           await nextStore.update();
-          await nextStore.embed();
+          const embedResult = await nextStore.embed();
+          const indexStatus = await nextStore.getStatus();
+          if (embedResult.errors > 0 || indexStatus.needsEmbedding > 0) {
+            throw new Error(
+              `QMD intent index embedding is incomplete (errors=${embedResult.errors}, needsEmbedding=${indexStatus.needsEmbedding}).`,
+            );
+          }
 
           if (desired?.fingerprint === target.fingerprint) {
             await nextStore.close();
             return;
           }
           const previousStore = store;
+          persistFingerprint(target.fingerprint);
           store = nextStore;
           currentFingerprint = target.fingerprint;
           status = "ready";
