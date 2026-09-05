@@ -407,7 +407,6 @@ export function createPlugin(
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
         timeoutMs: config.routing.classifier.timeoutMs * 2 + 1_500,
-        requiresToolAuthority: true,
         priority: -1,
       });
       api.on("before_tool_call", handlers.onBeforeToolCall);

@@ -120,7 +120,7 @@ describe("createPlugin", () => {
     expect(api.registerCommand).not.toHaveBeenCalled();
   });
 
-  it("runs after Active Memory in the authorized prompt-build phase", () => {
+  it("registers before_prompt_build with lower priority to run after default prompt-build hooks", () => {
     const api = createApi();
 
     createPlugin(api).register(api);
@@ -130,7 +130,6 @@ describe("createPlugin", () => {
       expect.any(Function),
       {
         timeoutMs: 11_500,
-        requiresToolAuthority: true,
         priority: -1,
       },
     );
