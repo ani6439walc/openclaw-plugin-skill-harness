@@ -1490,6 +1490,10 @@ export async function runReviewSubagent(params: {
     workspaceDir,
     [...allowedExperienceSkills],
   );
+  const sessionDirectory = params.dataRoot
+    ? agentSessionsPath(params.dataRoot, "review")
+    : "/tmp";
+  fs.mkdirSync(sessionDirectory, { recursive: true });
   try {
     const result = await params.api.runtime.agent.runEmbeddedAgent({
       sessionId: runId,
@@ -1507,7 +1511,7 @@ export async function runReviewSubagent(params: {
       runId,
       workspaceDir,
       agentDir: workspaceDir,
-      sessionFile: `${params.dataRoot ? agentSessionsPath(params.dataRoot, "review") : "/tmp"}/${runId}.session.jsonl`,
+      sessionFile: `${sessionDirectory}/${runId}.session.jsonl`,
       ...buildEmbeddedSubagentRunDefaults(),
       modelRun: false,
       promptMode: "minimal",

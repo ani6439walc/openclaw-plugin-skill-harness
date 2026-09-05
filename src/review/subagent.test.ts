@@ -1699,8 +1699,12 @@ describe("runReviewSubagent", () => {
     expect(fs.existsSync(options.workspaceDir)).toBe(false);
   });
 
-  it("places session file under dataRoot when provided", async () => {
+  it("creates the review session directory under dataRoot", async () => {
     const intentDirectory = createIntentDirectory();
+    const dataRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "review-data-root-"),
+    );
+    tempRoots.push(dataRoot);
     const runEmbeddedAgent = vi.fn().mockResolvedValue({
       payloads: [
         {
@@ -1721,13 +1725,17 @@ describe("runReviewSubagent", () => {
       modelRef: { provider: "google", model: "review" },
       snapshot,
       triggers: ["weak-intent"],
-      dataRoot: "/tmp/test-data-root",
+      dataRoot,
     });
 
+    const sessionDirectory = path.join(dataRoot, "agents", "review", "sessions");
+    expect(fs.statSync(sessionDirectory).isDirectory()).toBe(true);
     expect(runEmbeddedAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionFile: expect.stringMatching(
-          /^\/tmp\/test-data-root\/agents\/review\/sessions\/skill-harness-review-.+\.session\.jsonl$/,
+          new RegExp(
+            `^${sessionDirectory.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\/skill-harness-review-.+\\.session\\.jsonl$`,
+          ),
         ),
       }),
     );
