@@ -191,6 +191,46 @@ describe("createIntentQmdIndex", () => {
     });
   });
 
+  it("bounds long intent queries before remote embedding", async () => {
+    // Given: a QMD store enforcing its remote provider's 8,192-byte limit.
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const search = vi.fn(
+      async (options: { query: string }): Promise<readonly unknown[]> => {
+        if (Buffer.byteLength(options.query, "utf8") > 8_192) {
+          throw new Error("INPUT_BUDGET_EXCEEDED");
+        }
+        return [];
+      },
+    );
+    const createStore = vi
+      .fn()
+      .mockResolvedValue(createStoreDouble({ search }));
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+    index.schedule(catalog);
+    await waitForReady(index);
+
+    // When: routing receives a long message whose actual request is at the end.
+    const query = `prefix-marker ${"你".repeat(3_000)} suffix-marker`;
+    await expect(
+      index.searchIntentTriggers({ query, rawLimit: 12 }),
+    ).resolves.toEqual([]);
+
+    // Then: hybrid search remains available and retains both ends of the request.
+    const passedQuery = search.mock.calls[0]?.[0].query;
+    expect(passedQuery).toBeDefined();
+    expect(Buffer.byteLength(passedQuery ?? "", "utf8")).toBeLessThanOrEqual(
+      8_192,
+    );
+    expect(passedQuery).toMatch(/^prefix-marker/u);
+    expect(passedQuery).toMatch(/suffix-marker$/u);
+    await index.close();
+  });
+
   it("keeps unchanged intent snapshot files untouched", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
     roots.push(root);

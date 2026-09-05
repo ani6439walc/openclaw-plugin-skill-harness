@@ -4063,7 +4063,8 @@ Current user request: previous clean request
         },
       ],
     });
-    const assembledPrompt = `OpenClaw assembled context for this turn:
+    const assembledPrompt = `Runtime-owned prefix that must not reach routing.
+OpenClaw assembled context for this turn:
 <conversation_context>
 [assistant] tool call: web_search
 [toolResult] ${toolOutput}

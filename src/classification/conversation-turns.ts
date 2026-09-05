@@ -1,6 +1,5 @@
 import {
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
-  INTERNAL_RUNTIME_CONTEXT_END,
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   UNTRUSTED_CONTEXT_HEADER,
@@ -22,6 +21,9 @@ const ESCAPED_USER_MESSAGE_BOUNDARY = USER_MESSAGE_BOUNDARY.replace(
 const LEGACY_USER_MESSAGE_BOUNDARY = "\\[User Message\\]:";
 const OPENCLAW_ASSEMBLED_CONTEXT_HEADER =
   "OpenClaw assembled context for this turn:";
+const EMBEDDED_OPENCLAW_ASSEMBLED_CONTEXT_PATTERN = new RegExp(
+  `${OPENCLAW_ASSEMBLED_CONTEXT_HEADER}\\s*<conversation_context>`,
+);
 const CONTEXT_WARNINGS_HEADER = "--- Context Warnings ---";
 const ATTACHED_CONTEXT_HEADER = "--- Attached Context ---";
 const CONVERSATION_CONTEXT_END_TAG = "</conversation_context>";
@@ -70,10 +72,16 @@ export function sanitizeConversationText(text: string): string {
 }
 
 export function sanitizeHistoricalIntentInput(text: string): string {
-  const prompt = text.trimStart();
-  if (!prompt.startsWith(OPENCLAW_ASSEMBLED_CONTEXT_HEADER)) {
+  const input = text.trimStart();
+  const assembledContextIndex = input.startsWith(
+    OPENCLAW_ASSEMBLED_CONTEXT_HEADER,
+  )
+    ? 0
+    : input.search(EMBEDDED_OPENCLAW_ASSEMBLED_CONTEXT_PATTERN);
+  if (assembledContextIndex === -1) {
     return sanitizeConversationText(text);
   }
+  const prompt = input.slice(assembledContextIndex);
 
   const conversationEndIndex = prompt.lastIndexOf(CONVERSATION_CONTEXT_END_TAG);
   if (conversationEndIndex === -1) return "";

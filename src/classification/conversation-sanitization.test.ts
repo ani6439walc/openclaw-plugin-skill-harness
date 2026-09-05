@@ -145,6 +145,37 @@ PATH: darling/projects/personal/減肥.md (detailed weight loss journey & diet r
 });
 
 describe("sanitizeHistoricalIntentInput", () => {
+  it("extracts only the user request when assembled context follows a runtime prefix", () => {
+    // Given: runtime-owned context precedes the assembled prompt envelope.
+    const input = `Runtime preface that must not reach routing.
+OpenClaw assembled context for this turn:
+<conversation_context>
+[assistant] previous answer
+[toolResult] tool output that must not reach routing
+</conversation_context>
+Current user request: 修正 prompt extraction
+--- Attached Context ---
+attachment that must not reach routing`;
+
+    // When: historical input is reduced to routing-safe user text.
+    const result = sanitizeHistoricalIntentInput(input);
+
+    // Then: only the current external request remains.
+    expect(result).toBe("修正 prompt extraction");
+  });
+
+  it("preserves ordinary text that mentions the assembled context header", () => {
+    // Given: user-authored text mentions the marker without an assembled envelope.
+    const input =
+      "為什麼 log 會顯示 OpenClaw assembled context for this turn: 這一行？";
+
+    // When: historical input is sanitized.
+    const result = sanitizeHistoricalIntentInput(input);
+
+    // Then: the ordinary user message remains intact.
+    expect(result).toBe(input);
+  });
+
   it("extracts only the user request from legacy assembled OpenClaw context", () => {
     expect(
       sanitizeHistoricalIntentInput(`OpenClaw assembled context for this turn:

@@ -7,6 +7,7 @@ import { logger } from "../../api.js";
 import { withFileLock } from "../file-utils.js";
 import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
 import { normalizeEmbeddingModel } from "./provider-resolver.js";
+import { boundQmdQuery } from "./query-budget.js";
 
 const TRIGGERS_COLLECTION = "intent-triggers";
 const EXAMPLES_COLLECTION = "intent-examples";
@@ -428,7 +429,7 @@ export function createIntentQmdIndex(params: {
       if (!activeStore) return;
       try {
         const results = (await activeStore.search({
-          query,
+          query: boundQmdQuery(query),
           collections: [TRIGGERS_COLLECTION, EXAMPLES_COLLECTION],
           includeHyde: false,
           ...(expansionContext ? { expansionContext } : {}),
