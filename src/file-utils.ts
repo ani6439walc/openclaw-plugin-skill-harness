@@ -163,10 +163,35 @@ function sleep(ms: number): Promise<void> {
 type FileLockOwner = {
   pid: number;
   createdAtMs: number;
+  processStartTime?: string;
 };
 
 function lockOwnerPath(lockPath: string): string {
   return path.join(lockPath, "owner.json");
+}
+
+function readProcessStartTime(pid: number): string | undefined {
+  if (process.platform !== "linux") return;
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    const commandEnd = stat.lastIndexOf(")");
+    if (commandEnd < 0) return;
+    return stat
+      .slice(commandEnd + 1)
+      .trim()
+      .split(/\s+/u)[19];
+  } catch {
+    return;
+  }
+}
+
+function processStartedAfter(pid: number, timestampMs: number): boolean {
+  if (process.platform !== "linux" || timestampMs <= 0) return false;
+  try {
+    return fs.statSync(`/proc/${pid}`).mtimeMs > timestampMs;
+  } catch {
+    return false;
+  }
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -198,6 +223,9 @@ function readLockOwner(lockPath: string): FileLockOwner | undefined {
         Number.isFinite(parsed.createdAtMs)
           ? parsed.createdAtMs
           : 0,
+      ...(typeof parsed.processStartTime === "string"
+        ? { processStartTime: parsed.processStartTime }
+        : {}),
     };
   } catch {
     return undefined;
@@ -205,9 +233,11 @@ function readLockOwner(lockPath: string): FileLockOwner | undefined {
 }
 
 function writeLockOwner(lockPath: string): void {
+  const processStartTime = readProcessStartTime(process.pid);
   const owner: FileLockOwner = {
     pid: process.pid,
     createdAtMs: Date.now(),
+    ...(processStartTime ? { processStartTime } : {}),
   };
   fs.writeFileSync(
     lockOwnerPath(lockPath),
@@ -224,8 +254,14 @@ function writeLockOwner(lockPath: string): void {
  */
 function tryReclaimOrphanedLock(lockPath: string): boolean {
   const owner = readLockOwner(lockPath);
-  if (!owner || isProcessAlive(owner.pid)) {
-    return false;
+  if (!owner) return false;
+  if (isProcessAlive(owner.pid)) {
+    const currentStartTime = readProcessStartTime(owner.pid);
+    if (owner.processStartTime && currentStartTime) {
+      if (owner.processStartTime === currentStartTime) return false;
+    } else if (!processStartedAfter(owner.pid, owner.createdAtMs)) {
+      return false;
+    }
   }
   try {
     fs.rmSync(lockPath, { recursive: true, force: true });

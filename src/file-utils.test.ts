@@ -102,6 +102,33 @@ describe("FileLock", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("reclaims an orphaned lock when its pid was reused", async () => {
+    if (process.platform !== "linux") return;
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-lock-test-"));
+    const targetPath = path.join(tempDir, "session.json");
+    const lockPath = `${targetPath}.lock`;
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(
+      path.join(lockPath, "owner.json"),
+      `${JSON.stringify({
+        pid: process.pid,
+        createdAtMs: Date.now() - 60_000,
+        processStartTime: "reused-pid",
+      })}\n`,
+      "utf8",
+    );
+
+    try {
+      const contender = new FileLock(targetPath);
+      expect(await contender.acquire({ maxWaitMs: 50 })).toBe(true);
+      contender.release();
+      expect(fs.existsSync(lockPath)).toBe(false);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("plugin data paths", () => {
