@@ -227,12 +227,13 @@ export function createPlugin(
 ): OpenClawPluginDefinition & {
   register: NonNullable<OpenClawPluginDefinition["register"]>;
 } {
-  const getOpenClawConfig = (): OpenClawConfig | undefined => {
-    return (
-      (api.runtime?.config?.current?.() as OpenClawConfig | undefined) ??
-      api.config
-    );
+  const canAccessRuntime = api.registrationMode !== "cli-metadata";
+  const getRuntimeConfig = (): OpenClawConfig | undefined => {
+    if (!canAccessRuntime) return undefined;
+    return api.runtime?.config?.current?.() as OpenClawConfig | undefined;
   };
+  const getOpenClawConfig = (): OpenClawConfig | undefined =>
+    getRuntimeConfig() ?? api.config;
 
   let config = resolveConfig(api.pluginConfig as Record<string, unknown>, {
     openClawConfig: getOpenClawConfig(),
@@ -240,9 +241,7 @@ export function createPlugin(
 
   const refreshLiveConfigFromRuntime = () => {
     const livePluginConfig = resolveLivePluginConfigObject(
-      api.runtime.config?.current
-        ? () => api.runtime.config.current() as OpenClawConfig
-        : undefined,
+      canAccessRuntime ? getRuntimeConfig : undefined,
       PLUGIN_ID,
       api.pluginConfig as Record<string, unknown>,
     );
@@ -260,9 +259,7 @@ export function createPlugin(
     description:
       "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
     register() {
-      const runtimeConfig = api.runtime?.config?.current
-        ? (api.runtime.config.current() as OpenClawConfig)
-        : undefined;
+      const runtimeConfig = getRuntimeConfig();
 
       const configuredSkillsMap = extractConfiguredAgentSkillsMap(api.config);
       const runtimeSkillsMap = extractConfiguredAgentSkillsMap(runtimeConfig);
@@ -281,7 +278,10 @@ export function createPlugin(
         configuredSkillsMap,
       );
 
-      const stateDir = resolveStateDirFromApi(api, process.env);
+      const stateDir = resolveStateDirFromApi(
+        canAccessRuntime ? api : undefined,
+        process.env,
+      );
       const dataRoot = resolvePluginDataRoot(stateDir, PLUGIN_ID);
       initializePluginDataRoot({ dataRoot });
 
@@ -325,10 +325,9 @@ export function createPlugin(
         for (const id of extractConfiguredAgentIds(api.config)) {
           knownAgentIds.add(id);
         }
-        if (api.runtime?.config?.current) {
-          for (const id of extractConfiguredAgentIds(
-            api.runtime.config.current() as OpenClawConfig,
-          )) {
+        const currentRuntimeConfig = getRuntimeConfig();
+        if (currentRuntimeConfig) {
+          for (const id of extractConfiguredAgentIds(currentRuntimeConfig)) {
             knownAgentIds.add(id);
           }
         }

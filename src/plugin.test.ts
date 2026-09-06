@@ -76,6 +76,31 @@ describe("createPlugin", () => {
     return api;
   }
 
+  it("registers hooks and tools without runtime access during CLI metadata registration", () => {
+    const runtime = new Proxy(Object.create(null), {
+      get() {
+        throw new Error("runtime unavailable");
+      },
+    });
+    const api = createApi({
+      registrationMode: "cli-metadata",
+      runtime,
+    } as Partial<OpenClawPluginApi>);
+
+    expect(() => createPlugin(api).register(api)).not.toThrow();
+    expect(api.on).toHaveBeenCalledTimes(8);
+    expect(api.on).toHaveBeenCalledWith(
+      "before_prompt_build",
+      expect.any(Function),
+      expect.objectContaining({ priority: -1 }),
+    );
+    expect(
+      api.registerTool.mock.calls.map(([tool, options]) =>
+        typeof tool === "function" ? options?.name : tool.name,
+      ),
+    ).toEqual(["skill_list", "skill_search", "skill_view", "skill_experience"]);
+  });
+
   it("registers the session_end hook", () => {
     const api = createApi();
 
