@@ -227,7 +227,10 @@ export function createPlugin(
 ): OpenClawPluginDefinition & {
   register: NonNullable<OpenClawPluginDefinition["register"]>;
 } {
+  const isFullRegistration =
+    api.registrationMode === undefined || api.registrationMode === "full";
   const getOpenClawConfig = (): OpenClawConfig | undefined => {
+    if (!isFullRegistration) return api.config;
     return (
       (api.runtime?.config?.current?.() as OpenClawConfig | undefined) ??
       api.config
@@ -260,6 +263,7 @@ export function createPlugin(
     description:
       "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
     register() {
+      if (!isFullRegistration) return;
       const runtimeConfig = api.runtime?.config?.current
         ? (api.runtime.config.current() as OpenClawConfig)
         : undefined;
