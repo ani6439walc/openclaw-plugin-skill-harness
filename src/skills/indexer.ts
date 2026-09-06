@@ -290,12 +290,15 @@ async function buildSkillIndex(
       );
       const key = skill?.name.toLowerCase();
       if (skill && key && !disabledSkillNames.has(key)) {
-        if (index.has(key)) {
+        const keptSkill = index.get(key);
+        if (keptSkill) {
           const dedupeKey = `${root}:${skill.location}:${key}`;
           if (!loggedDuplicateSkills.has(dedupeKey)) {
             loggedDuplicateSkills.add(dedupeKey);
-            logger.warn("duplicate skill name ignored while indexing skills", {
+            const message = `duplicate skill name ignored while indexing skills: name="${skill.name}" ignored="${skill.location}" kept="${keptSkill.location}"`;
+            logger.warn(message, {
               ignoredPath: skill.location,
+              keptPath: keptSkill.location,
               name: skill.name,
               root,
             });

@@ -405,10 +405,33 @@ describe("skill indexer", () => {
     await resolveSkillInventory({ api, agentId: "main", cacheTtlMs: 0 });
     await resolveSkillInventory({ api, agentId: "main", cacheTtlMs: 0 });
 
-    const duplicateWarnings = warnSpy.mock.calls.filter(
-      ([msg]) => msg === "duplicate skill name ignored while indexing skills",
+    const keptPath = path.join(
+      workspaceDir,
+      "skills",
+      "first-dup",
+      "SKILL.md",
     );
-    expect(duplicateWarnings).toHaveLength(1);
+    const ignoredPath = path.join(
+      workspaceDir,
+      "skills",
+      "second-dup",
+      "SKILL.md",
+    );
+    const message = `duplicate skill name ignored while indexing skills: name="dup-skill" ignored="${ignoredPath}" kept="${keptPath}"`;
+    const duplicateWarnings = warnSpy.mock.calls.filter(
+      ([msg]) => msg === message,
+    );
+    expect(duplicateWarnings).toEqual([
+      [
+        message,
+        {
+          ignoredPath,
+          keptPath,
+          name: "dup-skill",
+          root: path.join(workspaceDir, "skills"),
+        },
+      ],
+    ]);
     warnSpy.mockRestore();
   });
 });
