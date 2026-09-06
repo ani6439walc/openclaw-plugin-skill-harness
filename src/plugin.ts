@@ -19,6 +19,7 @@ import {
 } from "./review/trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
+import { resolveSkillRoots } from "./skills/roots.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
 import { createIntentQmdIndex } from "./qmd/intent-index.js";
 import { createSkillQmdIndex } from "./qmd/skill-index.js";
@@ -284,6 +285,7 @@ export function createPlugin(
       const dataRoot = resolvePluginDataRoot(stateDir, PLUGIN_ID);
       initializePluginDataRoot({ dataRoot });
 
+      const bundledSkillsDir = path.join(defaultPackageRoot, "skills");
       const catalog = IntentCatalog.create(dataRoot);
       const experienceCatalog = new SkillExperienceCatalog(dataRoot);
       const qmdIntentIndex = createIntentQmdIndex({
@@ -349,7 +351,14 @@ export function createPlugin(
           intents: catalog.get(),
         })
           .then((skills) => {
-            qmdSkillIndex.schedule(agentId, skills);
+            qmdSkillIndex.schedule(agentId, {
+              skills,
+              sourceRoots: resolveSkillRoots({
+                api,
+                agentId,
+                bundledSkillsDir,
+              }).map((root) => root.path),
+            });
           })
           .catch((error: unknown) => {
             logger.warn("failed to schedule QMD skill search index", {
@@ -394,7 +403,7 @@ export function createPlugin(
         qmdIntentIndex,
         qmdSkillIndex,
 
-        bundledSkillsDir: path.join(defaultPackageRoot, "skills"),
+        bundledSkillsDir,
         dataRoot,
       };
 

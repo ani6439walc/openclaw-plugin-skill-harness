@@ -260,9 +260,27 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
     await vi.waitFor(
       () => {
-        expect(scheduleSpy).toHaveBeenCalledWith("main", expect.any(Array));
-        expect(scheduleSpy).toHaveBeenCalledWith("coder", expect.any(Array));
-        expect(scheduleSpy).toHaveBeenCalledWith("reviewer", expect.any(Array));
+        expect(scheduleSpy).toHaveBeenCalledWith(
+          "main",
+          expect.objectContaining({
+            skills: expect.any(Array),
+            sourceRoots: expect.any(Array),
+          }),
+        );
+        expect(scheduleSpy).toHaveBeenCalledWith(
+          "coder",
+          expect.objectContaining({
+            skills: expect.any(Array),
+            sourceRoots: expect.any(Array),
+          }),
+        );
+        expect(scheduleSpy).toHaveBeenCalledWith(
+          "reviewer",
+          expect.objectContaining({
+            skills: expect.any(Array),
+            sourceRoots: expect.any(Array),
+          }),
+        );
       },
       { timeout: 3000 },
     );

@@ -17,6 +17,7 @@ import type { ResolvedQmdConfig } from "../types.js";
 import {
   createSkillQmdIndex,
   safePathSegment,
+  skillIndexFingerprint,
   skillIdentityFromDocsPath,
   writeSkillSnapshot,
 } from "./skill-index.js";
@@ -101,6 +102,15 @@ function createStoreDouble(params: {
     close: params.close ?? vi.fn().mockResolvedValue(undefined),
     ...(params.internal ? { internal: params.internal } : {}),
   } as unknown as QMDStore;
+}
+
+function scheduleSkills(
+  index: ReturnType<typeof createSkillQmdIndex>,
+  agentId: string,
+  skills: readonly AvailableSkill[],
+  sourceRoots: readonly string[] = ["/shared-skills"],
+): void {
+  index.schedule(agentId, { skills, sourceRoots });
 }
 
 async function waitFor(
@@ -345,6 +355,153 @@ describe("skillIdentityFromDocsPath", () => {
 });
 
 describe("createSkillQmdIndex", () => {
+  it("keeps a stable fingerprint across skill content changes", () => {
+    const first = skillIndexFingerprint({
+      sourceRoots: ["/skills/b", "/skills/a", "/skills/a"],
+      embeddingModel: "openai/text-embedding-3-small",
+      embeddingDimension: 1536,
+    });
+    const same = skillIndexFingerprint({
+      sourceRoots: ["/skills/a", "/skills/b"],
+      embeddingModel: "bifrost/text-embedding-3-small",
+      embeddingDimension: 1536,
+    });
+    const otherRoot = skillIndexFingerprint({
+      sourceRoots: ["/skills/a"],
+      embeddingModel: "text-embedding-3-small",
+      embeddingDimension: 1536,
+    });
+
+    expect(same).toBe(first);
+    expect(otherRoot).not.toBe(first);
+  });
+
+  it("shares one store and filters results by each agent's allowed skills", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-shared-qmd-"));
+    roots.push(root);
+    const alpha = await createSkillFixture({
+      name: "alpha",
+      description: "Alpha skill",
+      body: "alpha",
+    });
+    const beta = await createSkillFixture({
+      name: "beta",
+      description: "Beta skill",
+      body: "beta",
+    });
+    const search = vi.fn().mockResolvedValue([
+      { body: "---\nskill: alpha\npath: SKILL.md\n---\nalpha", score: 0.9 },
+      { body: "---\nskill: beta\npath: SKILL.md\n---\nbeta", score: 0.8 },
+    ]);
+    const createStore = vi.fn(async () => createStoreDouble({ search }));
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+    });
+
+    scheduleSkills(index, "main", [alpha, beta]);
+    scheduleSkills(index, "lite", [beta]);
+    await waitFor(
+      () => index.getStatus("main") === "ready" && index.getStatus("lite") === "ready",
+      "shared index did not become ready",
+    );
+
+    const main = await index.search({ agentId: "main", query: "skills", limit: 5 });
+    const lite = await index.search({ agentId: "lite", query: "skills", limit: 5 });
+
+    expect(createStore).toHaveBeenCalledTimes(1);
+    expect(main?.map((hit) => hit.name).sort()).toEqual(["alpha", "beta"]);
+    expect(lite?.map((hit) => hit.name)).toEqual(["beta"]);
+    await index.close();
+  });
+
+
+  it("restores persisted allowed skills before the first scheduled refresh", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-qmd-skills-"),
+    );
+    roots.push(root);
+    const fingerprint = skillIndexFingerprint({
+      sourceRoots: ["/shared-skills"],
+      embeddingModel: qmdConfig.embedding.model,
+      embeddingDimension: qmdConfig.embedding.dimension,
+    });
+    const indexRoot = path.join(root, "qmd", "skills", "indexes", fingerprint);
+    await mkdir(path.join(indexRoot, "docs"), { recursive: true });
+    await writeFile(path.join(indexRoot, "skill-search.sqlite"), "sqlite", "utf8");
+    await mkdir(path.join(root, "qmd", "skills", "agents"), { recursive: true });
+    await writeFile(
+      path.join(root, "qmd", "skills", "agents", "main.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        fingerprint,
+        allowedSkillNames: ["beta"],
+      }),
+      "utf8",
+    );
+    const search = vi.fn().mockResolvedValue([
+      { body: "---\nskill: alpha\npath: SKILL.md\n---\nalpha", score: 1 },
+      { body: "---\nskill: beta\npath: SKILL.md\n---\nbeta", score: 0.9 },
+    ]);
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: (async () => createStoreDouble({ search })) as never,
+    });
+
+    const results = await index.search({ agentId: "main", query: "skills", limit: 5 });
+
+    expect(results?.map((result) => result.name)).toEqual(["beta"]);
+    await index.close();
+  });
+
+  it("keeps partial embeddings searchable and retries the same store", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-partial-qmd-"));
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "partial",
+      description: "Partial skill",
+      body: "partial",
+    });
+    const pendingTimers: Array<() => void> = [];
+    const store = createStoreDouble({
+      search: vi.fn().mockResolvedValue([
+        { body: "---\nskill: partial\npath: SKILL.md\n---\npartial", score: 1 },
+      ]),
+      embed: vi
+        .fn()
+        .mockResolvedValueOnce({ errors: 1 })
+        .mockResolvedValueOnce({ errors: 0 }),
+      getStatus: vi
+        .fn()
+        .mockResolvedValueOnce({ needsEmbedding: 1, totalDocuments: 1 })
+        .mockResolvedValueOnce({ needsEmbedding: 0, totalDocuments: 1 }),
+    });
+    const createStore = vi.fn(async () => store);
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: createStore as never,
+      nowMs: () => nowMs,
+      setTimer: (callback) => {
+        pendingTimers.push(callback);
+        return callback;
+      },
+      clearTimer: () => undefined,
+    });
+
+    scheduleSkills(index, "main", [skill]);
+    await waitFor(() => index.getStatus("main") === "ready", "partial index not searchable");
+    expect((await index.search({ agentId: "main", query: "partial", limit: 1 }))?.[0]?.name).toBe("partial");
+    expect(pendingTimers).toHaveLength(1);
+    pendingTimers.shift()?.();
+    await waitFor(() => (store.embed as ReturnType<typeof vi.fn>).mock.calls.length === 2, "partial retry did not resume");
+    expect(createStore).toHaveBeenCalledTimes(1);
+    await index.close();
+  });
+
   it("builds a searchable store and ranks by best fused chunk", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-qmd-skills-"),
@@ -405,7 +562,7 @@ describe("createSkillQmdIndex", () => {
       nowMs: () => nowMs,
     });
 
-    index.schedule("main", [travel, coding]);
+    scheduleSkills(index, "main", [travel, coding]);
     await waitFor(
       () => index.getStatus("main") === "ready",
       `index did not become ready; status=${index.getStatus("main")}`,
@@ -432,107 +589,6 @@ describe("createSkillQmdIndex", () => {
     expect(hits?.[0]?.evidence?.length).toBeGreaterThan(0);
     expect(hits?.some((hit) => hit.name === "code-review")).toBe(true);
 
-    await index.close();
-  });
-
-  it("clones the active generation before incrementally rebuilding", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "skill-harness-qmd-skills-"),
-    );
-    roots.push(root);
-    const skill = await createSkillFixture({
-      name: "clone-source",
-      description: "Clone source skill",
-      body: "first body",
-    });
-    const backup = vi.fn(async (targetPath: string) => {
-      await writeFile(targetPath, "copied sqlite", "utf8");
-    });
-    const firstStore = createStoreDouble({
-      internal: { db: { backup } } as QMDStore["internal"],
-    });
-    const createStore = vi
-      .fn()
-      .mockResolvedValueOnce(firstStore)
-      .mockResolvedValueOnce(createStoreDouble({}));
-    const index = createSkillQmdIndex({
-      dataRoot: root,
-      config: () => qmdConfig,
-      createStore: createStore as never,
-      nowMs: () => nowMs,
-    });
-
-    index.schedule("main", [skill]);
-    await waitFor(
-      () => index.getStatus("main") === "ready",
-      "first generation did not become ready",
-    );
-    await writeFile(skill.location, "updated body", "utf8");
-    index.schedule("main", [skill]);
-    await waitFor(
-      () =>
-        index.getStatus("main") === "ready" &&
-        createStore.mock.calls.length === 2,
-      "candidate generation did not publish",
-    );
-
-    expect(backup).toHaveBeenCalledOnce();
-    const active = JSON.parse(
-      await readFile(
-        path.join(root, "qmd", "skills", "main", "active.json"),
-        "utf8",
-      ),
-    ) as { generation: string };
-    expect(active.generation).toMatch(/^gen-2-/);
-    await index.close();
-  });
-
-  it("falls back to a clean build when active generation cloning fails", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "skill-harness-qmd-skills-"),
-    );
-    roots.push(root);
-    const skill = await createSkillFixture({
-      name: "clone-fallback",
-      description: "Clone fallback skill",
-      body: "first body",
-    });
-    const firstStore = createStoreDouble({
-      internal: {} as QMDStore["internal"],
-    });
-    const secondStore = createStoreDouble({});
-    const createStore = vi
-      .fn()
-      .mockResolvedValueOnce(firstStore)
-      .mockResolvedValueOnce(secondStore);
-    const index = createSkillQmdIndex({
-      dataRoot: root,
-      config: () => qmdConfig,
-      createStore: createStore as never,
-      nowMs: () => nowMs,
-    });
-
-    index.schedule("main", [skill]);
-    await waitFor(
-      () => index.getStatus("main") === "ready",
-      "first generation did not become ready",
-    );
-    await writeFile(skill.location, "updated body", "utf8");
-    index.schedule("main", [skill]);
-    await waitFor(
-      () =>
-        index.getStatus("main") === "ready" &&
-        createStore.mock.calls.length === 2,
-      "candidate generation did not publish",
-    );
-
-    const active = JSON.parse(
-      await readFile(
-        path.join(root, "qmd", "skills", "main", "active.json"),
-        "utf8",
-      ),
-    ) as { generation: string };
-    expect(active.generation).toMatch(/^gen-2-/);
     await index.close();
   });
 
@@ -577,7 +633,7 @@ describe("createSkillQmdIndex", () => {
       nowMs: () => nowMs,
     });
 
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
     await index.close();
 
     await expect(
@@ -604,7 +660,7 @@ describe("createSkillQmdIndex", () => {
       nowMs: () => nowMs,
     });
 
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
     await waitFor(
       () => index.getStatus("main") === "ready",
       "initial index did not become ready",
@@ -623,7 +679,7 @@ describe("createSkillQmdIndex", () => {
         },
       },
     };
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(createStore).toHaveBeenCalledTimes(1);
@@ -655,7 +711,7 @@ describe("createSkillQmdIndex", () => {
       nowMs: () => nowMs,
     });
 
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
     await waitFor(
       () => index.getStatus("main") === "ready",
       "initial index did not become ready",
@@ -669,7 +725,7 @@ describe("createSkillQmdIndex", () => {
         model: "bifrost/text-embedding-3-small",
       },
     };
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(createStore).toHaveBeenCalledTimes(1);
@@ -708,12 +764,12 @@ describe("createSkillQmdIndex", () => {
       nowMs: () => nowMs,
     });
 
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
     await waitFor(() => embedStarted, "embed did not start");
 
     // Re-schedule multiple times with the exact same skills while building
-    index.schedule("main", [skill]);
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
+    scheduleSkills(index, "main", [skill]);
 
     // Release embed and wait for index to be ready
     releaseEmbed?.();
@@ -727,350 +783,6 @@ describe("createSkillQmdIndex", () => {
 
     // createStore should only be called ONCE
     expect(createStore).toHaveBeenCalledTimes(1);
-    await index.close();
-  });
-
-  it("keeps serving the previous store while a newer rebuild is in flight", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "skill-harness-qmd-skills-"),
-    );
-    roots.push(root);
-    const first = await createSkillFixture({
-      name: "alpha",
-      description: "First skill",
-      body: "alpha body",
-    });
-    const second = await createSkillFixture({
-      name: "beta",
-      description: "Second skill",
-      body: "beta body",
-    });
-
-    let releaseEmbed: (() => void) | undefined;
-    let embedCount = 0;
-    let secondEmbedStarted = false;
-    const createStore = vi.fn(async () =>
-      createStoreDouble({
-        search: vi.fn().mockResolvedValue([
-          {
-            body: `---\nskill: alpha\nkind: meta\npath: meta.md\n---\nFirst skill`,
-            score: 0.8,
-          },
-        ]),
-        embed: vi.fn(() => {
-          embedCount += 1;
-          if (embedCount === 1) return Promise.resolve({});
-          secondEmbedStarted = true;
-          const { promise, resolve } =
-            Promise.withResolvers<Record<string, never>>();
-          releaseEmbed = () => resolve({});
-          return promise;
-        }),
-      }),
-    );
-
-    const index = createSkillQmdIndex({
-      dataRoot: root,
-      config: () => ({
-        ...qmdConfig,
-      }),
-      createStore: createStore as never,
-      nowMs: () => nowMs,
-    });
-
-    index.schedule("main", [first]);
-    await waitFor(
-      () => index.getStatus("main") === "ready",
-      "first build did not become ready",
-    );
-
-    index.schedule("main", [first, second]);
-    await waitFor(
-      () => index.getStatus("main") === "building" && secondEmbedStarted,
-      "second build did not start",
-    );
-
-    const staleHits = await index.search({
-      agentId: "main",
-      query: "alpha",
-      limit: 5,
-    });
-    expect(staleHits?.[0]?.name).toBe("alpha");
-
-    releaseEmbed?.();
-    await waitFor(
-      () => index.getStatus("main") === "ready",
-      "second build did not become ready",
-    );
-    await index.close();
-  });
-
-  it("returns undefined on failed-empty builds and rebuilds changed snapshots", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "skill-harness-qmd-skills-"),
-    );
-    roots.push(root);
-    const skill = await createSkillFixture({
-      name: "gamma",
-      description: "Gamma skill",
-      body: "gamma body",
-    });
-
-    const pendingTimers: Array<{ delayMs: number; callback: () => void }> = [];
-    const createStore = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("boom"))
-      .mockResolvedValue(
-        createStoreDouble({
-          search: vi.fn().mockResolvedValue([
-            {
-              body: `---\nskill: gamma\nkind: meta\npath: meta.md\n---\nGamma skill`,
-              score: 0.7,
-            },
-          ]),
-        }),
-      );
-
-    const index = createSkillQmdIndex({
-      dataRoot: root,
-      config: () => qmdConfig,
-      createStore: createStore as never,
-      nowMs: () => nowMs,
-      setTimer: (callback, delayMs) => {
-        const timer = { delayMs, callback };
-        pendingTimers.push(timer);
-        return timer;
-      },
-      clearTimer: (timer) => {
-        const indexOfTimer = pendingTimers.indexOf(
-          timer as (typeof pendingTimers)[number],
-        );
-        if (indexOfTimer >= 0) pendingTimers.splice(indexOfTimer, 1);
-      },
-    });
-
-    index.schedule("main", [skill]);
-    await waitFor(
-      () => index.getStatus("main") === "failed",
-      "failed-empty build did not mark failed",
-    );
-    expect(
-      await index.search({ agentId: "main", query: "gamma", limit: 5 }),
-    ).toBeUndefined();
-
-    nowMs += 60_000;
-    index.schedule("main", [skill]);
-    await waitFor(
-      () => index.getStatus("main") === "ready",
-      "retry build did not become ready",
-    );
-
-    const changed = await createSkillFixture({
-      name: "gamma",
-      description: "Gamma skill refreshed",
-      body: "gamma body refreshed",
-    });
-    index.schedule("main", [changed]);
-    await waitFor(
-      () => createStore.mock.calls.length >= 3,
-      "changed snapshot did not rebuild",
-    );
-
-    await index.close();
-  });
-
-  it("preserves an incomplete generation and resumes embedding after backoff", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "skill-harness-qmd-skills-"),
-    );
-    roots.push(root);
-    const skill = await createSkillFixture({
-      name: "resume-partial",
-      description: "Resume partial embeddings",
-      body: "body",
-    });
-    const pendingTimers: Array<{ delayMs: number; callback: () => void }> = [];
-    const firstStore = createStoreDouble({
-      embed: vi.fn().mockResolvedValue({ errors: 3 }),
-      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 7 }),
-    });
-    const resumedStore = createStoreDouble({
-      embed: vi.fn().mockResolvedValue({ errors: 0 }),
-      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
-    });
-    const createStore = vi
-      .fn()
-      .mockImplementationOnce(async (options: { dbPath: string }) => {
-        await writeFile(options.dbPath, "partial index", "utf8");
-        return firstStore;
-      })
-      .mockResolvedValueOnce(resumedStore);
-    const index = createSkillQmdIndex({
-      dataRoot: root,
-      config: () => qmdConfig,
-      createStore: createStore as never,
-      nowMs: () => nowMs,
-      setTimer: (callback, delayMs) => {
-        const timer = { delayMs, callback };
-        pendingTimers.push(timer);
-        return timer;
-      },
-      clearTimer: (timer) => {
-        const indexOfTimer = pendingTimers.indexOf(
-          timer as (typeof pendingTimers)[number],
-        );
-        if (indexOfTimer >= 0) pendingTimers.splice(indexOfTimer, 1);
-      },
-    });
-
-    index.schedule("main", [skill]);
-    await waitFor(
-      () => index.getStatus("main") === "failed",
-      "partial build did not mark failed",
-    );
-    expect(
-      await index.search({ agentId: "main", query: "resume", limit: 5 }),
-    ).toBeUndefined();
-    expect(firstStore.close).toHaveBeenCalledTimes(1);
-    await waitFor(
-      () => pendingTimers.length === 1,
-      "partial build retry timer was not armed",
-    );
-
-    const agentRoot = path.join(root, "qmd", "skills", safePathSegment("main"));
-    const generations = (await readdir(agentRoot)).filter((name) =>
-      name.startsWith("gen-"),
-    );
-    expect(generations).toHaveLength(1);
-    const dbPath = path.join(agentRoot, generations[0]!, "skill-search.sqlite");
-    expect(
-      await fsPromises.stat(path.join(agentRoot, generations[0]!, "docs")),
-    ).toBeDefined();
-
-    nowMs += pendingTimers[0]!.delayMs;
-    pendingTimers.shift()!.callback();
-    await waitFor(
-      () => index.getStatus("main") === "ready",
-      "partial generation did not resume to ready",
-    );
-    expect(createStore).toHaveBeenCalledTimes(2);
-    expect(createStore.mock.calls[1]?.[0]).toEqual(
-      expect.objectContaining({
-        dbPath,
-        config: expect.objectContaining({
-          collections: expect.objectContaining({
-            "skill-body": expect.objectContaining({
-              path: path.join(path.dirname(dbPath), "docs", "body"),
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(resumedStore.update).toHaveBeenCalledTimes(1);
-    expect(resumedStore.embed).toHaveBeenCalledTimes(1);
-
-    await index.close();
-  });
-
-  it("rebuilds when only the SKILL.md body changes", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "skill-harness-qmd-skills-"),
-    );
-    roots.push(root);
-    const skill = await createSkillFixture({
-      name: "delta",
-      description: "Stable description",
-      body: "original body",
-    });
-
-    const createStore = vi.fn(async () =>
-      createStoreDouble({
-        search: vi.fn().mockResolvedValue([
-          {
-            body: `---\nskill: delta\nkind: body\npath: SKILL.md\n---\nbody`,
-            score: 0.5,
-          },
-        ]),
-      }),
-    );
-    const index = createSkillQmdIndex({
-      dataRoot: root,
-      config: () => ({
-        ...qmdConfig,
-      }),
-      createStore: createStore as never,
-      nowMs: () => nowMs,
-    });
-
-    index.schedule("main", [skill]);
-    await waitFor(
-      () => index.getStatus("main") === "ready",
-      "initial body index did not become ready",
-    );
-    expect(createStore).toHaveBeenCalledTimes(1);
-
-    await writeFile(skill.location, "updated body only", "utf8");
-    index.schedule("main", [skill]);
-    await waitFor(
-      () => createStore.mock.calls.length >= 2,
-      "body-only change did not rebuild skill index",
-    );
-
-    await index.close();
-  });
-
-  it("clears orphan generation directories before building", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "skill-harness-qmd-skills-"),
-    );
-    roots.push(root);
-    const skill = await createSkillFixture({
-      name: "orphan-cleanup",
-      description: "Cleanup orphans",
-      body: "Body",
-    });
-    const agentDir = path.join(root, "qmd", "skills", safePathSegment("main"));
-    const orphan = path.join(agentDir, "gen-1-deadbeefdead");
-    await mkdir(path.join(orphan, "docs"), { recursive: true });
-    await writeFile(path.join(orphan, "docs", "stale.txt"), "stale", "utf8");
-
-    const createStore = vi.fn(async () =>
-      createStoreDouble({
-        search: vi.fn().mockResolvedValue([
-          {
-            filepath: path.join(
-              "docs",
-              "meta",
-              safePathSegment("orphan-cleanup"),
-              "meta.md",
-            ),
-            body: "---\nskill: orphan-cleanup\npath: meta.md\n---\n",
-            score: 0.9,
-          },
-        ]),
-      }),
-    );
-    const index = createSkillQmdIndex({
-      dataRoot: root,
-      config: () => ({
-        ...qmdConfig,
-      }),
-      createStore: createStore as never,
-      nowMs: () => nowMs,
-    });
-
-    index.schedule("main", [skill]);
-    await waitFor(
-      () => index.getStatus("main") === "ready",
-      "orphan cleanup index did not become ready",
-    );
-
-    const generations = (await readdir(agentDir)).filter((name) =>
-      name.startsWith("gen-"),
-    );
-    expect(generations).toHaveLength(1);
-    expect(generations[0]).not.toBe("gen-1-deadbeefdead");
-
     await index.close();
   });
 
@@ -1121,7 +833,7 @@ describe("createSkillQmdIndex", () => {
       nowMs: () => nowMs,
     });
 
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
     await waitFor(
       () => index.getStatus("main") === "ready",
       "path fallback index did not become ready",
@@ -1184,7 +896,7 @@ describe("createSkillQmdIndex", () => {
       nowMs: () => nowMs,
     });
 
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
     await waitFor(
       () => index.getStatus("main") === "ready",
       "qmd virtual path index did not become ready",
@@ -1211,7 +923,7 @@ describe("createSkillQmdIndex", () => {
     await index.close();
   });
 
-  it("serializes builds across index instances so orphans are not cleared mid-build", async () => {
+  it("serializes refreshes across index instances sharing a fingerprint", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-qmd-skills-"),
     );
@@ -1223,11 +935,11 @@ describe("createSkillQmdIndex", () => {
     });
 
     let releaseFirst: (() => void) | undefined;
-    let firstGenerationRoot: string | undefined;
+    let firstIndexRoot: string | undefined;
     let secondCreateStarted = false;
 
     const createStoreA = vi.fn(async (options: { dbPath: string }) => {
-      firstGenerationRoot = path.dirname(options.dbPath);
+      firstIndexRoot = path.dirname(options.dbPath);
       const { promise, resolve } =
         Promise.withResolvers<Record<string, never>>();
       releaseFirst = () => resolve({});
@@ -1270,18 +982,18 @@ describe("createSkillQmdIndex", () => {
       nowMs: () => nowMs,
     });
 
-    indexA.schedule("main", [skill]);
+    scheduleSkills(indexA, "main", [skill]);
     await waitFor(
-      () => firstGenerationRoot !== undefined,
-      "first build did not create a generation root",
+      () => firstIndexRoot !== undefined,
+      "first refresh did not create the shared index root",
     );
-    expect(firstGenerationRoot).toBeDefined();
+    expect(firstIndexRoot).toBeDefined();
 
-    indexB.schedule("main", [skill]);
+    scheduleSkills(indexB, "main", [skill]);
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(secondCreateStarted).toBe(false);
-    expect(await readdir(firstGenerationRoot!)).toContain("docs");
+    expect(await readdir(firstIndexRoot!)).toContain("docs");
 
     releaseFirst?.();
     await waitFor(
@@ -1359,7 +1071,7 @@ describe("createSkillQmdIndex", () => {
       },
     });
 
-    index.schedule("main", [skill]);
+    scheduleSkills(index, "main", [skill]);
     await waitFor(
       () => index.getStatus("main") === "failed",
       "LEASE_BUSY build did not mark failed",
@@ -1381,47 +1093,4 @@ describe("createSkillQmdIndex", () => {
     await index.close();
   });
 
-  it("fails the build when generation listing hits a non-ENOENT error", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "skill-harness-qmd-skills-"),
-    );
-    roots.push(root);
-    const skill = await createSkillFixture({
-      name: "permission-denied",
-      description: "Permission denied skill",
-      body: "Body",
-    });
-    const agentDir = path.join(root, "qmd", "skills", safePathSegment("main"));
-    await mkdir(agentDir, { recursive: true });
-
-    const realReaddir = fsPromises.readdir.bind(fsPromises);
-    const readdirSpy = vi
-      .spyOn(fsPromises, "readdir")
-      .mockImplementation(async (dir, options) => {
-        if (path.resolve(String(dir)) === path.resolve(agentDir)) {
-          throw Object.assign(new Error("permission denied"), {
-            code: "EACCES",
-          });
-        }
-        return realReaddir(dir as never, options as never);
-      });
-
-    const createStore = vi.fn(async () => createStoreDouble({}));
-    const index = createSkillQmdIndex({
-      dataRoot: root,
-      config: () => qmdConfig,
-      createStore: createStore as never,
-      nowMs: () => nowMs,
-    });
-
-    index.schedule("main", [skill]);
-    await waitFor(
-      () => index.getStatus("main") === "failed",
-      "non-ENOENT generation listing did not mark failed",
-    );
-    expect(createStore).not.toHaveBeenCalled();
-    expect(readdirSpy).toHaveBeenCalled();
-
-    await index.close();
-  });
 });

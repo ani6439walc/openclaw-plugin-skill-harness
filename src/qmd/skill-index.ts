@@ -24,27 +24,7 @@ const DEFAULT_CANDIDATE_LIMIT = 40;
 const MAX_EVIDENCE_PER_SKILL = 3;
 const BUILD_LOCK_BUSY = "BUILD_LOCK_BUSY";
 
-class IncompleteEmbeddingBuildError extends Error {
-  readonly preserveGeneration = true;
-
-  constructor(params: { errors: number; needsEmbedding: number }) {
-    super(
-      `QMD skill index embedding is incomplete (errors=${params.errors}, needsEmbedding=${params.needsEmbedding}).`,
-    );
-    this.name = "IncompleteEmbeddingBuildError";
-  }
-}
-
 type QmdCreateStore = typeof createStore;
-
-type SQLiteBackupDatabase = {
-  backup(targetPath: string): Promise<unknown>;
-};
-
-type ActiveGeneration = {
-  generation: string;
-  fingerprint: string;
-};
 
 type CollectionKind = "meta" | "body" | "reference";
 
@@ -74,7 +54,7 @@ export type SkillQmdSearchHit = {
 export type SkillQmdIndexStatus = "idle" | "building" | "ready" | "failed";
 
 export interface SkillQmdIndex {
-  schedule(agentId: string, skills: readonly AvailableSkill[]): void;
+  schedule(agentId: string, input: SkillQmdScheduleInput): void;
   search(params: {
     agentId: string;
     query: string;
@@ -84,27 +64,6 @@ export interface SkillQmdIndex {
   getStatus(agentId: string): SkillQmdIndexStatus;
   close(): Promise<void>;
 }
-
-type AgentState = {
-  status: SkillQmdIndexStatus;
-  store?: QMDStore;
-  generationRoot?: string;
-  docsRoot?: string;
-  currentFingerprint?: string;
-  expectedFingerprint?: string;
-  desired?: {
-    fingerprint: string;
-    skills: readonly AvailableSkill[];
-  };
-  running?: Promise<void>;
-  buildingFingerprint?: string;
-  scheduling?: Promise<void>;
-  failedFingerprint?: string;
-  consecutiveFailures: number;
-  nextRetryAtMs: number;
-  generation: number;
-  retryTimer?: unknown;
-};
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -299,59 +258,6 @@ async function listReferenceFiles(skillDir: string): Promise<string[]> {
 
   await walk(referencesRoot);
   return files;
-}
-
-async function referenceFingerprint(skillDir: string): Promise<string[]> {
-  const files = await listReferenceFiles(skillDir);
-  const identities: string[] = [];
-  for (const relative of files) {
-    try {
-      const absolute = path.join(skillDir, "references", relative);
-      const raw = await fs.readFile(absolute);
-      identities.push(`${relative}:${hash(raw.toString("utf8"))}`);
-    } catch {
-      identities.push(`${relative}:missing`);
-    }
-  }
-  return identities;
-}
-
-async function snapshotFingerprint(
-  skills: readonly AvailableSkill[],
-  config:
-    | ResolvedQmdConfig
-    | { qmd: ResolvedQmdConfig }
-    | ResolvedSkillHarnessPluginConfig,
-): Promise<string> {
-  const qmd = "qmd" in config ? config.qmd : config;
-  const ordered = [...skills].sort((left, right) =>
-    left.name.localeCompare(right.name),
-  );
-  const skillEntries = await Promise.all(
-    ordered.map(async (skill) => {
-      let bodyHash = "missing";
-      try {
-        bodyHash = hash(await fs.readFile(skill.location, "utf8"));
-      } catch {
-        bodyHash = "missing";
-      }
-      return {
-        name: skill.name,
-        description: skill.description,
-        bodyHash,
-        references: await referenceFingerprint(path.dirname(skill.location)),
-      };
-    }),
-  );
-  return hash(
-    JSON.stringify({
-      skills: skillEntries,
-      embedding: {
-        model: normalizeEmbeddingModel(qmd.embedding.model),
-        dimension: qmd.embedding.dimension,
-      },
-    }),
-  );
 }
 
 function stripMarkdownFrontmatter(raw: string): string {
@@ -628,6 +534,72 @@ export type SkillQmdIndexConfigProvider = () =>
   | { qmd: ResolvedQmdConfig; skills?: ResolvedSkillsConfig }
   | ResolvedSkillHarnessPluginConfig;
 
+export interface SkillQmdScheduleInput {
+  skills: readonly AvailableSkill[];
+  sourceRoots: readonly string[];
+}
+
+export function skillIndexFingerprint(params: {
+  sourceRoots: readonly string[];
+  embeddingModel: string;
+  embeddingDimension: number;
+}): string {
+  const sourceRoots = [...new Set(params.sourceRoots.map((root) => path.resolve(root)))].sort();
+  return hash(
+    JSON.stringify({
+      sourceRoots,
+      embeddingModel: normalizeEmbeddingModel(params.embeddingModel),
+      embeddingDimension: params.embeddingDimension,
+    }),
+  );
+}
+
+type AgentIndexState = {
+  fingerprint?: string;
+  expectedFingerprint?: string;
+  allowedSkillNames: Set<string>;
+  scheduling?: Promise<void>;
+};
+
+type SharedIndexState = {
+  fingerprint: string;
+  root: string;
+  docsRoot: string;
+  databasePath: string;
+  sourceRoots: readonly string[];
+  status: SkillQmdIndexStatus;
+  store?: QMDStore;
+  opening?: Promise<QMDStore | undefined>;
+  refreshing?: Promise<void>;
+  retryTimer?: unknown;
+  consecutiveFailures: number;
+  nextRetryAtMs: number;
+  needsEmbedding: number;
+  lastRefreshError?: unknown;
+  agentIds: Set<string>;
+  skillsByAgent: Map<string, readonly AvailableSkill[]>;
+  refreshSignature?: string;
+  queuedSignature?: string;
+  usable: boolean;
+};
+
+function normalizeAgentId(agentId: string): string {
+  return agentId.trim().toLowerCase() || "main";
+}
+
+function skillSetSignature(skills: readonly AvailableSkill[]): string {
+  return hash(
+    JSON.stringify(
+      [...skills]
+        .map((skill) => [skill.name.toLowerCase(), path.resolve(skill.location)])
+        .sort((left, right) =>
+          (left[0] ?? "").localeCompare(right[0] ?? "") ||
+          (left[1] ?? "").localeCompare(right[1] ?? ""),
+        ),
+    ),
+  );
+}
+
 export function createSkillQmdIndex(params: {
   dataRoot: string;
   config: SkillQmdIndexConfigProvider;
@@ -636,7 +608,11 @@ export function createSkillQmdIndex(params: {
   setTimer?: (callback: () => void, delayMs: number) => unknown;
   clearTimer?: (timer: unknown) => void;
 }): SkillQmdIndex {
-  const agents = new Map<string, AgentState>();
+  const agents = new Map<string, AgentIndexState>();
+  const indexes = new Map<string, SharedIndexState>();
+  const skillsRoot = path.join(params.dataRoot, "qmd", "skills");
+  const indexesRoot = path.join(skillsRoot, "indexes");
+  const mappingsRoot = path.join(skillsRoot, "agents");
   const now = () => params.nowMs?.() ?? Date.now();
   const setTimer =
     params.setTimer ??
@@ -645,572 +621,433 @@ export function createSkillQmdIndex(params: {
     params.clearTimer ??
     ((timer: unknown) => clearTimeout(timer as NodeJS.Timeout));
 
-  function agentRoot(agentId: string): string {
-    return path.join(
-      params.dataRoot,
-      "qmd",
-      "skills",
-      safePathSegment(agentId),
-    );
-  }
-
-  function activeGenerationPath(agentId: string): string {
-    return path.join(agentRoot(agentId), "active.json");
-  }
-
-  async function readActiveGeneration(
-    agentId: string,
-  ): Promise<{ generationRoot: string; docsRoot: string } | undefined> {
-    try {
-      const active = JSON.parse(
-        await fs.readFile(activeGenerationPath(agentId), "utf8"),
-      ) as Partial<ActiveGeneration>;
-      if (!active.generation || !active.fingerprint) return;
-      const generationRoot = path.join(agentRoot(agentId), active.generation);
-      const docsRoot = path.join(generationRoot, "docs");
-      await Promise.all([
-        fs.access(path.join(generationRoot, "skill-search.sqlite")),
-        fs.access(docsRoot),
-      ]);
-      return { generationRoot, docsRoot };
-    } catch {
-      return;
+  function config(): { qmd: ResolvedQmdConfig; skills?: ResolvedSkillsConfig } {
+    const raw = params.config();
+    if ("qmd" in raw) {
+      return { qmd: raw.qmd, ...(raw.skills ? { skills: raw.skills } : {}) };
     }
+    const skills = "skills" in (raw as Record<string, unknown>)
+      ? (raw as ResolvedQmdConfig & { skills?: ResolvedSkillsConfig }).skills
+      : undefined;
+    return { qmd: raw, ...(skills ? { skills } : {}) };
   }
 
-  async function writeActiveGeneration(
+  function indexState(
+    fingerprint: string,
+    sourceRoots: readonly string[] = [],
+  ): SharedIndexState {
+    const existing = indexes.get(fingerprint);
+    if (existing) return existing;
+    const root = path.join(indexesRoot, fingerprint);
+    const created: SharedIndexState = {
+      fingerprint,
+      root,
+      docsRoot: path.join(root, "docs"),
+      databasePath: path.join(root, "skill-search.sqlite"),
+      sourceRoots: [...sourceRoots],
+      status: "idle",
+      consecutiveFailures: 0,
+      nextRetryAtMs: 0,
+      needsEmbedding: 0,
+      agentIds: new Set(),
+      skillsByAgent: new Map(),
+      usable: false,
+    };
+    indexes.set(fingerprint, created);
+    return created;
+  }
+
+  function agentState(agentId: string): AgentIndexState {
+    const existing = agents.get(agentId);
+    if (existing) return existing;
+    const created: AgentIndexState = {
+      allowedSkillNames: new Set(),
+    };
+    agents.set(agentId, created);
+    return created;
+  }
+
+  function mappingPath(agentId: string): string {
+    return path.join(mappingsRoot, `${safePathSegment(agentId)}.json`);
+  }
+
+  async function writeAgentMapping(
     agentId: string,
-    generationRoot: string,
     fingerprint: string,
   ): Promise<void> {
-    const target = activeGenerationPath(agentId);
+    const target = mappingPath(agentId);
     await fs.mkdir(path.dirname(target), { recursive: true });
     const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
     await fs.writeFile(
       temporary,
       JSON.stringify({
-        generation: path.basename(generationRoot),
+        schemaVersion: 1,
         fingerprint,
+        allowedSkillNames: [
+          ...(agents.get(agentId)?.allowedSkillNames ?? new Set<string>()),
+        ].sort(),
       }),
       "utf8",
     );
     await fs.rename(temporary, target);
   }
 
-  async function cloneGeneration(params: {
-    source: { generationRoot: string; docsRoot: string };
-    targetRoot: string;
-    sourceStore?: QMDStore;
-    createStore?: QmdCreateStore;
-  }): Promise<void> {
-    await fs.mkdir(params.targetRoot, { recursive: true });
-    const targetDbPath = path.join(params.targetRoot, "skill-search.sqlite");
-    let sourceStore = params.sourceStore;
+  async function loadExistingIndexCatalog(): Promise<void> {
+    let entries: Dirent[] = [];
     try {
-      if (!sourceStore) {
-        const createQmdStore =
-          params.createStore ?? (await import("@wei840222/qmd")).createStore;
-        sourceStore = await createQmdStore({
-          dbPath: path.join(
-            params.source.generationRoot,
-            "skill-search.sqlite",
-          ),
-          readOnly: true,
-        });
-      }
-      if (!sourceStore)
-        throw new Error("missing skill generation source store");
-      const database = sourceStore.internal?.db as unknown as
-        SQLiteBackupDatabase | undefined;
-      if (!database || typeof database.backup !== "function") {
-        throw new Error(
-          "underlying SQLite database backup is unavailable for skill generation clone",
-        );
-      }
-      await database.backup(targetDbPath);
-      await fs.cp(
-        params.source.docsRoot,
-        path.join(params.targetRoot, "docs"),
-        {
-          recursive: true,
-        },
-      );
-    } finally {
-      if (sourceStore && sourceStore !== params.sourceStore) {
-        await sourceStore.close().catch(() => undefined);
-      }
-    }
-  }
-
-  async function clearOrphanGenerations(
-    agentId: string,
-    keepRoots: readonly string[] = [],
-  ): Promise<void> {
-    const root = agentRoot(agentId);
-    const resolvedKeepRoots = new Set(
-      keepRoots.map((entry) => path.resolve(entry)),
-    );
-    let entries: Dirent[];
-    try {
-      entries = await fs.readdir(root, { withFileTypes: true });
+      entries = await fs.readdir(indexesRoot, { withFileTypes: true });
     } catch (error) {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === "ENOENT"
-      ) {
-        return;
+      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+        logger.warn("failed to load QMD skill index catalog", { error });
       }
-      return;
     }
-    await Promise.all(
-      entries.map(async (entry) => {
-        if (!entry.isDirectory() || !entry.name.startsWith("gen-")) return;
-        const candidate = path.join(root, entry.name);
-        if (resolvedKeepRoots.has(path.resolve(candidate))) {
-          return;
-        }
-        await fs
-          .rm(candidate, { recursive: true, force: true })
-          .catch(() => undefined);
-      }),
-    );
-  }
-
-  async function findReusableGeneration(
-    agentId: string,
-    fingerprint: string,
-  ): Promise<{ generationRoot: string; docsRoot: string } | undefined> {
-    const root = agentRoot(agentId);
-    let entries: Dirent[];
-    try {
-      entries = await fs.readdir(root, { withFileTypes: true });
-    } catch (error) {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === "ENOENT"
-      ) {
-        return;
-      }
-      throw error;
-    }
-
-    const suffix = `-${fingerprint.slice(0, 12)}`;
-    const candidates = entries
-      .filter((entry) => entry.isDirectory() && entry.name.endsWith(suffix))
-      .sort((left, right) => right.name.localeCompare(left.name));
-    for (const entry of candidates) {
-      const generationRoot = path.join(root, entry.name);
-      const docsRoot = path.join(generationRoot, "docs");
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !/^[a-f0-9]{64}$/u.test(entry.name)) continue;
+      const state = indexState(entry.name);
       try {
-        await Promise.all([
-          fs.access(path.join(generationRoot, "skill-search.sqlite")),
-          fs.access(docsRoot),
-        ]);
-        return { generationRoot, docsRoot };
+        await Promise.all([fs.access(state.databasePath), fs.access(state.docsRoot)]);
+        state.status = "ready";
+        state.usable = true;
       } catch {
-        // A stale directory will be removed by the fresh-build path below.
+        indexes.delete(entry.name);
+      }
+    }
+
+    let mappings: Dirent[] = [];
+    try {
+      mappings = await fs.readdir(mappingsRoot, { withFileTypes: true });
+    } catch (error) {
+      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+        logger.warn("failed to load QMD skill agent mappings", { error });
+      }
+    }
+    for (const entry of mappings) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      try {
+        const parsed = JSON.parse(
+          await fs.readFile(path.join(mappingsRoot, entry.name), "utf8"),
+        ) as {
+          schemaVersion?: unknown;
+          fingerprint?: unknown;
+          allowedSkillNames?: unknown;
+        };
+        if (
+          parsed.schemaVersion !== 1 ||
+          typeof parsed.fingerprint !== "string" ||
+          !/^[a-f0-9]{64}$/u.test(parsed.fingerprint)
+        ) continue;
+        const shared = indexes.get(parsed.fingerprint);
+        if (!shared) continue;
+        const encodedAgentId = entry.name.slice(0, -".json".length);
+        let agentId: string;
+        try {
+          agentId = decodeURIComponent(encodedAgentId);
+        } catch {
+          agentId = encodedAgentId;
+        }
+        const agent = agentState(agentId);
+        agent.fingerprint = parsed.fingerprint;
+        agent.expectedFingerprint = parsed.fingerprint;
+        agent.allowedSkillNames = new Set(
+          Array.isArray(parsed.allowedSkillNames)
+            ? parsed.allowedSkillNames.filter(
+                (value): value is string => typeof value === "string",
+              )
+            : [],
+        );
+        shared.agentIds.add(agentId);
+      } catch {
+        // Invalid mappings fail open and are replaced by the next schedule.
       }
     }
   }
 
-  function getState(agentId: string): AgentState {
-    const existing = agents.get(agentId);
-    if (existing) return existing;
-    const created: AgentState = {
-      status: "idle",
-      consecutiveFailures: 0,
-      nextRetryAtMs: 0,
-      generation: 0,
-    };
-    agents.set(agentId, created);
-    return created;
+  const initialization = loadExistingIndexCatalog();
+
+  async function createConfiguredStore(
+    state: SharedIndexState,
+  ): Promise<QMDStore> {
+    const { qmd } = config();
+    if (
+      !qmd.embedding.baseUrl ||
+      !qmd.embedding.model ||
+      !qmd.expansion.baseUrl ||
+      !qmd.expansion.model
+    ) {
+      throw new Error("QMD embedding and expansion endpoints must be configured.");
+    }
+    const createQmdStore =
+      params.createStore ?? (await import("@wei840222/qmd")).createStore;
+    return createQmdStore({
+      dbPath: state.databasePath,
+      config: {
+        collections: skillSnapshotCollections(state.docsRoot),
+        models: {
+          embed_api_url: qmd.embedding.baseUrl,
+          embed_api_model: qmd.embedding.model,
+          ...(qmd.embedding.apiKey ? { embed_api_key: qmd.embedding.apiKey } : {}),
+          ...(qmd.embedding.dimension ? { embed_dimension: qmd.embedding.dimension } : {}),
+          generate_api_url: qmd.expansion.baseUrl,
+          generate_api_model: qmd.expansion.model,
+          ...(qmd.expansion.apiKey ? { generate_api_key: qmd.expansion.apiKey } : {}),
+        },
+      },
+      remoteRequestTimeoutMs: qmd.timeoutMs,
+    });
   }
 
-  function clearRetryTimer(state: AgentState): void {
+  function ensureStore(state: SharedIndexState): Promise<QMDStore | undefined> {
+    if (state.store) return Promise.resolve(state.store);
+    if (state.opening) return state.opening;
+    const opening = (async () => {
+      try {
+        await Promise.all([fs.access(state.databasePath), fs.access(state.docsRoot)]);
+        const store = await createConfiguredStore(state);
+        state.store = store;
+        state.status = "ready";
+        return store;
+      } catch (error) {
+        state.lastRefreshError = error;
+        state.status = "failed";
+        logger.warn("failed to open persisted QMD skill index", {
+          error,
+          fingerprint: state.fingerprint,
+        });
+        return;
+      }
+    })();
+    state.opening = opening;
+    void opening.finally(() => {
+      if (state.opening === opening) state.opening = undefined;
+    });
+    return opening;
+  }
+
+  function clearRetryTimer(state: SharedIndexState): void {
     if (state.retryTimer === undefined) return;
     clearTimer(state.retryTimer);
     state.retryTimer = undefined;
   }
 
-  function resetRetryState(state: AgentState): void {
+  function resetRetryState(state: SharedIndexState): void {
     clearRetryTimer(state);
-    state.failedFingerprint = undefined;
     state.consecutiveFailures = 0;
     state.nextRetryAtMs = 0;
+    state.lastRefreshError = undefined;
   }
 
-  function isRetryableBuildError(error: unknown): boolean {
-    if (!error || typeof error !== "object") return false;
-    const code =
-      "code" in error && error.code !== undefined ? String(error.code) : "";
-    if (code === "LEASE_BUSY" || code === BUILD_LOCK_BUSY) return true;
-    const message = error instanceof Error ? error.message : String(error);
-    return message.includes("LEASE_BUSY") || message.includes(BUILD_LOCK_BUSY);
+  function mergedSkills(state: SharedIndexState): readonly AvailableSkill[] {
+    const byName = new Map<string, AvailableSkill>();
+    for (const skills of state.skillsByAgent.values()) {
+      for (const skill of skills) {
+        const key = skill.name.toLowerCase();
+        if (!byName.has(key)) byName.set(key, skill);
+      }
+    }
+    return [...byName.values()];
   }
 
-  function preservesGeneration(error: unknown): boolean {
-    return (
-      error instanceof IncompleteEmbeddingBuildError ||
-      (typeof error === "object" &&
-        error !== null &&
-        "preserveGeneration" in error &&
-        error.preserveGeneration === true)
-    );
-  }
-
-  function armRetryResume(
-    agentId: string,
-    state: AgentState,
-    target: { fingerprint: string; skills: readonly AvailableSkill[] },
-  ): void {
+  function armRetry(state: SharedIndexState): void {
     if (state.retryTimer !== undefined) return;
     const delayMs = Math.max(0, state.nextRetryAtMs - now());
     state.retryTimer = setTimer(() => {
       state.retryTimer = undefined;
-      if (state.desired && state.desired.fingerprint !== target.fingerprint) {
-        maybeStart(agentId, state);
-        return;
-      }
-      state.desired = {
-        fingerprint: target.fingerprint,
-        skills: [...target.skills],
-      };
-      maybeStart(agentId, state);
+      startRefresh(state);
     }, delayMs);
   }
 
-  function recordBuildFailure(
-    state: AgentState,
-    fingerprint: string,
+  function recordRefreshProblem(
+    state: SharedIndexState,
     error: unknown,
   ): void {
-    state.consecutiveFailures =
-      state.failedFingerprint === fingerprint
-        ? state.consecutiveFailures + 1
-        : 1;
-    state.failedFingerprint = fingerprint;
+    state.consecutiveFailures += 1;
     const delayMs = Math.min(
       INITIAL_RETRY_DELAY_MS * 2 ** (state.consecutiveFailures - 1),
       MAX_RETRY_DELAY_MS,
     );
     state.nextRetryAtMs = now() + delayMs;
-    state.status = state.store ? "ready" : "failed";
-    logger.warn("failed to refresh QMD skill index", { error, delayMs });
+    state.lastRefreshError = error;
+    state.status = state.usable ? "ready" : "failed";
+    logger.warn("failed to refresh QMD skill index", {
+      error,
+      delayMs,
+      fingerprint: state.fingerprint,
+    });
+    armRetry(state);
   }
 
-  async function nextGenerationNumber(agentId: string): Promise<number> {
-    const root = agentRoot(agentId);
-    let entries: Dirent[];
-    try {
-      entries = await fs.readdir(root, { withFileTypes: true });
-    } catch (error) {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === "ENOENT"
-      ) {
-        return 1;
-      }
-      throw error;
-    }
-    let maxGeneration = 0;
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.startsWith("gen-")) continue;
-      const match = /^gen-(\d+)-/.exec(entry.name);
-      if (!match) continue;
-      const value = Number(match[1]);
-      if (Number.isFinite(value) && value > maxGeneration) {
-        maxGeneration = value;
-      }
-    }
-    return maxGeneration + 1;
+  async function bindAgents(state: SharedIndexState): Promise<void> {
+    await Promise.all(
+      [...state.agentIds].map(async (agentId) => {
+        const agent = agents.get(agentId);
+        if (!agent || agent.expectedFingerprint !== state.fingerprint) return;
+        const previousFingerprint = agent.fingerprint;
+        agent.fingerprint = state.fingerprint;
+        await writeAgentMapping(agentId, state.fingerprint);
+        await fs
+          .rm(path.join(skillsRoot, safePathSegment(agentId)), {
+            recursive: true,
+            force: true,
+          })
+          .catch(() => undefined);
+        if (previousFingerprint && previousFingerprint !== state.fingerprint) {
+          const previous = indexes.get(previousFingerprint);
+          previous?.agentIds.delete(agentId);
+          previous?.skillsByAgent.delete(agentId);
+        }
+      }),
+    );
   }
 
-  async function build(
-    agentId: string,
-    state: AgentState,
-    target: { fingerprint: string; skills: readonly AvailableSkill[] },
-  ): Promise<void> {
+  async function refreshIndex(state: SharedIndexState): Promise<void> {
     clearRetryTimer(state);
-    state.status = "building";
-    const root = agentRoot(agentId);
-    let generationRoot = "";
-    let nextStore: QMDStore | undefined;
-
+    if (!state.store) state.status = "building";
     const locked = await withFileLock(
-      root,
+      state.root,
       async () => {
         try {
-          const rawConfig = params.config();
-          const qmd = "qmd" in rawConfig ? rawConfig.qmd : rawConfig;
-          if (
-            !qmd.embedding.baseUrl ||
-            !qmd.embedding.model ||
-            !qmd.expansion.baseUrl ||
-            !qmd.expansion.model
-          ) {
-            throw new Error(
-              "QMD embedding and expansion endpoints must be configured.",
-            );
-          }
-          const reusable = await findReusableGeneration(
-            agentId,
-            target.fingerprint,
-          );
-          if (reusable) {
-            generationRoot = reusable.generationRoot;
-          } else {
-            const generation = await nextGenerationNumber(agentId);
-            state.generation = generation;
-            generationRoot = path.join(
-              root,
-              `gen-${generation}-${target.fingerprint.slice(0, 12)}`,
-            );
-            const previous =
-              state.generationRoot && state.docsRoot
-                ? {
-                    generationRoot: state.generationRoot,
-                    docsRoot: state.docsRoot,
-                  }
-                : await readActiveGeneration(agentId);
-            await clearOrphanGenerations(
-              agentId,
-              previous ? [previous.generationRoot] : [],
-            );
-            if (previous) {
-              try {
-                await cloneGeneration({
-                  source: previous,
-                  targetRoot: generationRoot,
-                  sourceStore:
-                    previous.generationRoot === state.generationRoot
-                      ? state.store
-                      : undefined,
-                  createStore: params.createStore,
-                });
-              } catch (error) {
-                logger.warn(
-                  "failed to clone active skill generation; falling back to clean build",
-                  { error, agentId },
-                );
-                await fs.rm(generationRoot, { recursive: true, force: true });
-                await fs.mkdir(generationRoot, { recursive: true });
-              }
-            } else {
-              await fs.mkdir(generationRoot, { recursive: true });
-            }
-          }
-          const docsRoot =
-            reusable?.docsRoot ?? path.join(generationRoot, "docs");
-          const collections = reusable
-            ? skillSnapshotCollections(docsRoot)
-            : await writeSkillSnapshot({
-                docsRoot,
-                skills: target.skills,
-              });
-          // Dynamic import keeps tests able to inject createStore without loading
-          // the native QMD package at module evaluation time.
-          const createQmdStore =
-            params.createStore ?? (await import("@wei840222/qmd")).createStore;
-          nextStore = await createQmdStore({
-            dbPath: path.join(generationRoot, "skill-search.sqlite"),
-            config: {
-              collections,
-              models: {
-                embed_api_url: qmd.embedding.baseUrl,
-                embed_api_model: qmd.embedding.model,
-                ...(qmd.embedding.apiKey
-                  ? { embed_api_key: qmd.embedding.apiKey }
-                  : {}),
-                ...(qmd.embedding.dimension
-                  ? { embed_dimension: qmd.embedding.dimension }
-                  : {}),
-                generate_api_url: qmd.expansion.baseUrl,
-                generate_api_model: qmd.expansion.model,
-                ...(qmd.expansion.apiKey
-                  ? { generate_api_key: qmd.expansion.apiKey }
-                  : {}),
-              },
-            },
-            remoteRequestTimeoutMs: qmd.timeoutMs,
+          await fs.mkdir(state.root, { recursive: true });
+          const skills = mergedSkills(state);
+          const collections = await writeSkillSnapshot({
+            docsRoot: state.docsRoot,
+            skills,
           });
-          await nextStore.update();
-          const embedResult = await nextStore.embed();
-          const status = await nextStore.getStatus();
-          if (embedResult.errors > 0 || status.needsEmbedding > 0) {
-            throw new IncompleteEmbeddingBuildError({
-              errors: embedResult.errors,
-              needsEmbedding: status.needsEmbedding,
+          let store = state.store;
+          if (!store) {
+            const { qmd } = config();
+            const createQmdStore =
+              params.createStore ?? (await import("@wei840222/qmd")).createStore;
+            store = await createQmdStore({
+              dbPath: state.databasePath,
+              config: {
+                collections,
+                models: {
+                  embed_api_url: qmd.embedding.baseUrl,
+                  embed_api_model: qmd.embedding.model,
+                  ...(qmd.embedding.apiKey ? { embed_api_key: qmd.embedding.apiKey } : {}),
+                  ...(qmd.embedding.dimension ? { embed_dimension: qmd.embedding.dimension } : {}),
+                  generate_api_url: qmd.expansion.baseUrl,
+                  generate_api_model: qmd.expansion.model,
+                  ...(qmd.expansion.apiKey ? { generate_api_key: qmd.expansion.apiKey } : {}),
+                },
+              },
+              remoteRequestTimeoutMs: qmd.timeoutMs,
             });
+            state.store = store;
           }
-
-          if (
-            state.desired &&
-            state.desired.fingerprint !== target.fingerprint
-          ) {
-            await nextStore.close();
-            await fs
-              .rm(generationRoot, { recursive: true, force: true })
-              .catch(() => undefined);
-            return true;
-          }
-
-          const previousStore = state.store;
-          const previousRoot = state.generationRoot;
-          await writeActiveGeneration(
-            agentId,
-            generationRoot,
-            target.fingerprint,
-          );
-          state.store = nextStore;
-          state.generationRoot = generationRoot;
-          state.docsRoot = docsRoot;
-          state.currentFingerprint = target.fingerprint;
+          await store.update();
+          state.usable = true;
+          await bindAgents(state);
           state.status = "ready";
-          resetRetryState(state);
-          if (previousStore) {
-            await previousStore.close().catch((error: unknown) => {
-              logger.warn("failed to close previous QMD skill index", {
-                error,
-              });
-            });
+          const embedResult = await store.embed();
+          const status = await store.getStatus();
+          state.needsEmbedding = status.needsEmbedding;
+          if (embedResult.errors > 0 || status.needsEmbedding > 0) {
+            recordRefreshProblem(
+              state,
+              new Error(
+                `QMD skill embedding incomplete (errors=${embedResult.errors}, needsEmbedding=${status.needsEmbedding})`,
+              ),
+            );
+          } else {
+            resetRetryState(state);
           }
-          if (previousRoot && previousRoot !== generationRoot) {
-            await fs
-              .rm(previousRoot, { recursive: true, force: true })
-              .catch(() => undefined);
-          }
-          nextStore = undefined;
-          return true;
+          state.status = "ready";
         } catch (error) {
-          if (nextStore) await nextStore.close().catch(() => undefined);
-          nextStore = undefined;
-          if (
-            !(generationRoot && preservesGeneration(error)) &&
-            generationRoot
-          ) {
-            await fs
-              .rm(generationRoot, { recursive: true, force: true })
-              .catch(() => undefined);
-          }
-          recordBuildFailure(state, target.fingerprint, error);
-          if (preservesGeneration(error) || isRetryableBuildError(error)) {
-            armRetryResume(agentId, state, target);
-          }
-          return true;
+          recordRefreshProblem(state, error);
         }
+        return true;
       },
-      // Embedding a full skill corpus can take minutes; wait for the peer build
-      // instead of racing clearOrphanGenerations against its generation root.
       { maxWaitMs: 30 * 60 * 1000 },
     );
-
     if (locked === undefined) {
-      const error = Object.assign(new Error("skill index build lock is busy"), {
-        code: BUILD_LOCK_BUSY,
-      });
-      recordBuildFailure(state, target.fingerprint, error);
-      armRetryResume(agentId, state, target);
+      recordRefreshProblem(
+        state,
+        Object.assign(new Error("skill index refresh lock is busy"), {
+          code: BUILD_LOCK_BUSY,
+        }),
+      );
     }
   }
 
-  async function runWorker(agentId: string, state: AgentState): Promise<void> {
-    try {
-      while (state.desired) {
-        const target = state.desired;
-        state.desired = undefined;
-        state.buildingFingerprint = target.fingerprint;
-        try {
-          await build(agentId, state, target);
-        } finally {
-          state.buildingFingerprint = undefined;
-        }
+  function startRefresh(state: SharedIndexState): void {
+    if (state.refreshing) return;
+    const signature = skillSetSignature(mergedSkills(state));
+    state.refreshSignature = signature;
+    const refreshing = refreshIndex(state);
+    state.refreshing = refreshing;
+    void refreshing.finally(() => {
+      if (state.refreshing === refreshing) state.refreshing = undefined;
+      if (state.queuedSignature && state.queuedSignature !== state.refreshSignature) {
+        state.queuedSignature = undefined;
+        startRefresh(state);
       }
-    } finally {
-      state.running = undefined;
-    }
-  }
-
-  function maybeStart(agentId: string, state: AgentState): void {
-    if (state.running || !state.desired) return;
-    state.running = runWorker(agentId, state);
+    });
   }
 
   function scheduleLocked(
     agentId: string,
-    skills: readonly AvailableSkill[],
+    input: SkillQmdScheduleInput,
   ): void {
-    const state = getState(agentId);
+    const agent = agentState(agentId);
+    agent.allowedSkillNames = new Set(
+      input.skills.map((skill) => skill.name.toLowerCase()),
+    );
     const scheduling = (async () => {
-      const fingerprint = await snapshotFingerprint(skills, params.config());
-      if (
-        (fingerprint === state.currentFingerprint ||
-          fingerprint === state.buildingFingerprint) &&
-        (!state.desired || state.desired.fingerprint === fingerprint) &&
-        (state.store !== undefined || state.buildingFingerprint !== undefined)
-      ) {
-        state.expectedFingerprint = fingerprint;
+      await initialization;
+      const { qmd } = config();
+      const fingerprint = skillIndexFingerprint({
+        sourceRoots: input.sourceRoots,
+        embeddingModel: qmd.embedding.model,
+        embeddingDimension: qmd.embedding.dimension,
+      });
+      agent.expectedFingerprint = fingerprint;
+      const state = indexState(fingerprint, input.sourceRoots);
+      state.agentIds.add(agentId);
+      state.skillsByAgent.set(agentId, [...input.skills]);
+      const signature = skillSetSignature(mergedSkills(state));
+      if (state.refreshing) {
+        if (signature !== state.refreshSignature) state.queuedSignature = signature;
         return;
       }
-      if (state.desired?.fingerprint === fingerprint) {
-        state.expectedFingerprint = fingerprint;
-        return;
-      }
-      state.expectedFingerprint = fingerprint;
-      if (
-        state.failedFingerprint === fingerprint &&
-        now() < state.nextRetryAtMs
-      ) {
-        return;
-      }
-
-      state.desired = { fingerprint, skills: [...skills] };
-      maybeStart(agentId, state);
+      if (state.lastRefreshError && now() < state.nextRetryAtMs) return;
+      startRefresh(state);
     })();
-    state.scheduling = scheduling;
+    agent.scheduling = scheduling;
     void scheduling
       .catch((error: unknown) => {
         logger.warn("failed to schedule QMD skill index", { error, agentId });
       })
       .finally(() => {
-        if (state.scheduling === scheduling) state.scheduling = undefined;
+        if (agent.scheduling === scheduling) agent.scheduling = undefined;
       });
   }
 
   return {
-    schedule(agentId, skills) {
-      scheduleLocked(agentId.trim() || "main", skills);
+    schedule(agentId, input) {
+      scheduleLocked(normalizeAgentId(agentId), input);
     },
     async search({ agentId, query, limit, includeEvidence }) {
-      const state = agents.get(agentId.trim() || "main");
-      const activeStore = state?.store;
+      await initialization;
+      const normalizedAgentId = normalizeAgentId(agentId);
+      const agent = agents.get(normalizedAgentId);
+      if (!agent?.fingerprint) return;
+      const state = indexes.get(agent.fingerprint);
+      if (!state) return;
+      const activeStore = state.store ?? (await ensureStore(state));
       if (!activeStore) return;
 
-      const rawConfig = params.config();
-      const skills = "skills" in rawConfig ? rawConfig.skills : undefined;
-      const collectionWeights = skills?.search?.collectionWeights ??
-        ("skillSearch" in (rawConfig as Record<string, unknown>)
-          ? (rawConfig as Record<string, any>).skillSearch?.collectionWeights
-          : undefined) ?? { meta: 1, body: 1, references: 1 };
+      const { skills } = config();
+      const collectionWeights = skills?.search?.collectionWeights ?? {
+        meta: 1,
+        body: 1,
+        references: 1,
+      };
       const candidateLimit = Math.max(limit, DEFAULT_CANDIDATE_LIMIT);
       const collections = [
-        {
-          name: META_COLLECTION,
-          weight: collectionWeights.meta,
-        },
-        {
-          name: BODY_COLLECTION,
-          weight: collectionWeights.body,
-        },
-        {
-          name: REFS_COLLECTION,
-          weight: collectionWeights.references,
-        },
+        { name: META_COLLECTION, weight: collectionWeights.meta },
+        { name: BODY_COLLECTION, weight: collectionWeights.body },
+        { name: REFS_COLLECTION, weight: collectionWeights.references },
       ];
 
       try {
@@ -1236,10 +1073,12 @@ export function createSkillQmdIndex(params: {
               }>,
               collection: collection.name,
               docsRoot: state.docsRoot,
-            }).sort((left, right) => {
-              if (right.score !== left.score) return right.score - left.score;
-              return hitId(left).localeCompare(hitId(right));
-            });
+            })
+              .filter((hit) => agent.allowedSkillNames.has(hit.skillName.toLowerCase()))
+              .sort((left, right) => {
+                if (right.score !== left.score) return right.score - left.score;
+                return hitId(left).localeCompare(hitId(right));
+              });
             return { collection, ranked };
           }),
         );
@@ -1250,14 +1089,10 @@ export function createSkillQmdIndex(params: {
           ),
           weights: collectionHits.map((entry) => entry.collection.weight),
         });
-
         const hitById = new Map<string, SearchHit>();
         for (const entry of collectionHits) {
-          for (const hit of entry.ranked) {
-            hitById.set(hitId(hit), hit);
-          }
+          for (const hit of entry.ranked) hitById.set(hitId(hit), hit);
         }
-
         const bestBySkill = new Map<
           string,
           { score: number; evidence: SkillQmdEvidence[] }
@@ -1278,18 +1113,15 @@ export function createSkillQmdIndex(params: {
               score: fusedHit.score,
               evidence: [evidence],
             });
-            continue;
-          }
-          if (fusedHit.score > existing.score) {
-            existing.score = fusedHit.score;
-          }
-          existing.evidence.push(evidence);
-          existing.evidence.sort((left, right) => right.score - left.score);
-          if (existing.evidence.length > MAX_EVIDENCE_PER_SKILL) {
-            existing.evidence.length = MAX_EVIDENCE_PER_SKILL;
+          } else {
+            if (fusedHit.score > existing.score) existing.score = fusedHit.score;
+            existing.evidence.push(evidence);
+            existing.evidence.sort((left, right) => right.score - left.score);
+            if (existing.evidence.length > MAX_EVIDENCE_PER_SKILL) {
+              existing.evidence.length = MAX_EVIDENCE_PER_SKILL;
+            }
           }
         }
-
         return [...bestBySkill.entries()]
           .map(([name, value]) => ({
             name,
@@ -1307,47 +1139,33 @@ export function createSkillQmdIndex(params: {
       }
     },
     getStatus(agentId) {
-      return agents.get(agentId.trim() || "main")?.status ?? "idle";
+      const agent = agents.get(normalizeAgentId(agentId));
+      const fingerprint = agent?.fingerprint ?? agent?.expectedFingerprint;
+      if (!fingerprint) return "idle";
+      return indexes.get(fingerprint)?.status ?? "idle";
     },
     async close() {
-      for (const state of agents.values()) {
-        state.desired = undefined;
-        clearRetryTimer(state);
-      }
+      await initialization;
       await Promise.all(
         [...agents.values()]
-          .map((state) => state.scheduling)
-          .filter(
-            (scheduling): scheduling is Promise<void> =>
-              scheduling !== undefined,
-          ),
+          .map((agent) => agent.scheduling)
+          .filter((value): value is Promise<void> => value !== undefined),
       );
-      for (const state of agents.values()) state.desired = undefined;
+      for (const state of indexes.values()) clearRetryTimer(state);
       await Promise.all(
-        [...agents.values()]
-          .map((state) => state.running)
-          .filter((running): running is Promise<void> => running !== undefined),
+        [...indexes.values()]
+          .map((state) => state.refreshing)
+          .filter((value): value is Promise<void> => value !== undefined),
       );
-      for (const [agentId, state] of agents.entries()) {
-        const activeStore = state.store;
-        state.store = undefined;
-        state.docsRoot = undefined;
-        state.currentFingerprint = undefined;
-        state.expectedFingerprint = undefined;
-        state.buildingFingerprint = undefined;
-        resetRetryState(state);
-        state.status = "idle";
-        if (activeStore) await activeStore.close().catch(() => undefined);
-        if (state.generationRoot) {
-          await fs
-            .rm(state.generationRoot, { recursive: true, force: true })
-            .catch(() => undefined);
-        }
-        await fs
-          .rm(agentRoot(agentId), { recursive: true, force: true })
-          .catch(() => undefined);
-      }
+      await Promise.all(
+        [...indexes.values()].map(async (state) => {
+          const store = state.store;
+          state.store = undefined;
+          if (store) await store.close().catch(() => undefined);
+        }),
+      );
       agents.clear();
+      indexes.clear();
     },
   };
 }
