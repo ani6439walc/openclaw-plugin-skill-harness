@@ -1,6 +1,5 @@
 allowBuilds:
   "@google/genai": true
-  better-sqlite3: true
   koffi: true
   node-llama-cpp: true
   openclaw: true
@@ -13,6 +12,6 @@ allowBuilds:
   tree-sitter-rust: true
   tree-sitter-typescript: true
 minimumReleaseAgeExclude:
-  - '@wei840222/qmd@2026.8.24 || 2026.8.28'
+  - '@wei840222/qmd@2026.9.6'
   - '@openclaw/ai@2026.9.1'
   - openclaw@2026.9.1
