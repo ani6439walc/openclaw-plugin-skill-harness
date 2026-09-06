@@ -128,7 +128,7 @@ describe("model resolution", () => {
 });
 
 describe("buildIntentionEmbeddedRunParams", () => {
-  it("uses a run-specific session file", () => {
+  it("does not claim a persisted transcript for transient classification", () => {
     const result = buildIntentionEmbeddedRunParams({
       params: {
         api: { config: {} } as OpenClawPluginApi,
@@ -141,9 +141,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
       prompt: "classify",
     });
 
-    expect(result.sessionFile).toBe(
-      "/tmp/skill-harness-test-run.session.jsonl",
-    );
+    expect(result).not.toHaveProperty("sessionFile");
   });
 
   it("uses dataRoot paths when provided", () => {
@@ -163,12 +161,10 @@ describe("buildIntentionEmbeddedRunParams", () => {
 
     expect(result.workspaceDir).toBe(`${dataRoot}/workspace`);
     expect(result.agentDir).toBe(`${dataRoot}/workspace`);
-    expect(result.sessionFile).toBe(
-      `${dataRoot}/agents/intention/sessions/skill-harness-test-run.session.jsonl`,
-    );
+    expect(result).not.toHaveProperty("sessionFile");
   });
 
-  it("uses intention agent name in session path", () => {
+  it("keeps transient classification identity independent of dataRoot", () => {
     const dataRoot = "/tmp/test-data-root";
     const result = buildIntentionEmbeddedRunParams({
       params: {
@@ -183,9 +179,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
       prompt: "intent classification",
     });
 
-    expect(result.sessionFile).toBe(
-      `${dataRoot}/agents/intention/sessions/skill-harness-test-run.session.jsonl`,
-    );
+    expect(result).not.toHaveProperty("sessionFile");
   });
 });
 
@@ -280,7 +274,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
     expect(result.authProfileFailurePolicy).toBe("local");
     expect(result.cleanupBundleMcpOnRunEnd).toBe(true);
     expect(result.thinkLevel).toBe("low");
-    expect(result.sessionFile).toBe("/tmp/subagent-1.session.jsonl");
+    expect(result).not.toHaveProperty("sessionFile");
     expect(result.workspaceDir).toBe("/tmp");
     expect(result.agentDir).toBe("/tmp");
   });

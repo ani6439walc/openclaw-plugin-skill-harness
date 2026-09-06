@@ -14,6 +14,18 @@ export function buildEmbeddedSubagentRunDefaults() {
   };
 }
 
+export function isGatewayDrainingError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || Array.isArray(error)) {
+    return false;
+  }
+  const candidate = error as { name?: unknown; message?: unknown };
+  return (
+    candidate.name === "GatewayDrainingError" ||
+    candidate.message === "Gateway is draining; new tasks are not accepted" ||
+    candidate.message === "gateway is draining for restart"
+  );
+}
+
 export function formatEmbeddedError(error: unknown): string | undefined {
   if (typeof error === "string") return error.trim() || undefined;
   if (typeof error !== "object" || error === null || Array.isArray(error)) {

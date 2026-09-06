@@ -34,8 +34,10 @@ import { validateExperienceDirectory } from "../experiences/index.js";
 import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
+  formatEmbeddedError,
+  isGatewayDrainingError,
 } from "../subagent-runtime.js";
-import { agentSessionsPath, withFileLock } from "../file-utils.js";
+import { withFileLock } from "../file-utils.js";
 import { extractPayloadText } from "../classification/index.js";
 
 export interface ReviewSubagentResult {
@@ -1490,10 +1492,6 @@ export async function runReviewSubagent(params: {
     workspaceDir,
     [...allowedExperienceSkills],
   );
-  const sessionDirectory = params.dataRoot
-    ? agentSessionsPath(params.dataRoot, "review")
-    : "/tmp";
-  fs.mkdirSync(sessionDirectory, { recursive: true });
   try {
     const result = await params.api.runtime.agent.runEmbeddedAgent({
       sessionId: runId,
@@ -1511,7 +1509,6 @@ export async function runReviewSubagent(params: {
       runId,
       workspaceDir,
       agentDir: workspaceDir,
-      sessionFile: `${sessionDirectory}/${runId}.session.jsonl`,
       ...buildEmbeddedSubagentRunDefaults(),
       modelRun: false,
       promptMode: "minimal",
@@ -1804,10 +1801,12 @@ export async function runReviewSubagent(params: {
         : {}),
     };
   } catch (err) {
-    logger.warn("review subagent error", {
-      error: err,
-      modelRef: params.modelRef,
-    });
+    if (!isGatewayDrainingError(err)) {
+      logger.warn("review subagent error", {
+        error: formatEmbeddedError(err) ?? String(err),
+        modelRef: params.modelRef,
+      });
+    }
   } finally {
     fs.rmSync(workspaceDir, { recursive: true, force: true });
   }

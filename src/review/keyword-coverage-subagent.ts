@@ -3,10 +3,11 @@ import { z } from "zod";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { extractPayloadText } from "../classification/subagent.js";
-import { agentSessionsPath, agentWorkspacePath } from "../file-utils.js";
+import { agentWorkspacePath } from "../file-utils.js";
 import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
+  isGatewayDrainingError,
 } from "../subagent-runtime.js";
 import type { ResolvedSkillHarnessPluginConfig, ThinkLevel } from "../types.js";
 import {
@@ -616,7 +617,6 @@ function buildCoverageEmbeddedRunParams(params: {
   pluginConfig?: ResolvedSkillHarnessPluginConfig;
 }) {
   const workspaceDir = agentWorkspacePath(params.dataRoot);
-  const sessionDir = agentSessionsPath(params.dataRoot, "keyword-coverage");
   return {
     sessionId: params.sessionId,
     sessionKey: params.sessionKey,
@@ -630,7 +630,6 @@ function buildCoverageEmbeddedRunParams(params: {
     runId: params.sessionId,
     workspaceDir,
     agentDir: workspaceDir,
-    sessionFile: `${sessionDir}/${params.sessionId}.session.jsonl`,
     ...buildEmbeddedSubagentRunDefaults(),
     modelRun: false,
     promptMode: "none" as const,
@@ -652,7 +651,7 @@ async function runCoverageModelPass(params: {
   thinking: ThinkLevel;
   timeoutMs: number;
   pluginConfig?: ResolvedSkillHarnessPluginConfig;
-}): Promise<string | undefined> {
+}): Promise<{ response?: string; gatewayDraining?: true }> {
   const identity = createCoverageSessionIdentity({
     agentId: params.agentId,
     sessionId: params.sessionId,
@@ -682,13 +681,16 @@ async function runCoverageModelPass(params: {
       logger.warn("keyword coverage model pass returned an error", {
         error: embeddedError,
       });
-      return undefined;
+      return {};
     }
 
-    return extractPayloadText(result);
+    return { response: extractPayloadText(result) };
   } catch (err) {
+    if (isGatewayDrainingError(err)) {
+      return { gatewayDraining: true };
+    }
     logger.warn("keyword coverage model pass failed", { error: err });
-    return undefined;
+    return {};
   }
 }
 
@@ -711,11 +713,11 @@ export async function runKeywordCoverageReview(
     prompt: string,
     stagedResponse: string | undefined,
     missingExecutionMessage: string,
-  ): Promise<string | undefined> => {
-    if (stagedResponse !== undefined) return stagedResponse;
+  ): Promise<{ response?: string; gatewayDraining?: true }> => {
+    if (stagedResponse !== undefined) return { response: stagedResponse };
     if (!params.api || !params.modelRef) {
       logger.warn(missingExecutionMessage);
-      return undefined;
+      return {};
     }
 
     return runCoverageModelPass({
@@ -747,13 +749,14 @@ export async function runKeywordCoverageReview(
     triggerKeywords,
   );
 
-  const discoveryRaw = await runPass(
+  const discoveryPass = await runPass(
     discoveryPrompt,
     params.stagedModelResponses?.discovery,
     "keyword coverage review failed: missing model execution path",
   );
 
-  const discovery = parseKeywordCoverageModelResponse(discoveryRaw, documents, {
+  if (discoveryPass.gatewayDraining) return undefined;
+  const discovery = parseKeywordCoverageModelResponse(discoveryPass.response, documents, {
     triggerKeywords,
   });
   if (!discovery) return undefined;
@@ -776,14 +779,15 @@ export async function runKeywordCoverageReview(
     replayEvidence,
   });
 
-  const adjudicationRaw = await runPass(
+  const adjudicationPass = await runPass(
     adjudicationPrompt,
     params.stagedModelResponses?.adjudication,
     "keyword coverage adjudication failed: missing model execution path",
   );
 
+  if (adjudicationPass.gatewayDraining) return undefined;
   const adjudicated = parseKeywordCoverageModelResponse(
-    adjudicationRaw,
+    adjudicationPass.response,
     documents,
     { triggerKeywords },
   );

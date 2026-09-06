@@ -1685,9 +1685,6 @@ describe("runReviewSubagent", () => {
             fs: { workspaceOnly: true },
           }),
         }),
-        sessionFile: expect.stringMatching(
-          /^\/tmp\/skill-harness-review-.+\.session\.jsonl$/,
-        ),
       }),
     );
     const options = runEmbeddedAgent.mock.calls[0]?.[0] as {
@@ -1696,10 +1693,11 @@ describe("runReviewSubagent", () => {
     };
     expect(options.workspaceDir).not.toBe(intentDirectory);
     expect(options.agentDir).toBe(options.workspaceDir);
+    expect(options).not.toHaveProperty("sessionFile");
     expect(fs.existsSync(options.workspaceDir)).toBe(false);
   });
 
-  it("creates the review session directory under dataRoot", async () => {
+  it("does not claim a persisted transcript for transient review runs", async () => {
     const intentDirectory = createIntentDirectory();
     const dataRoot = fs.mkdtempSync(
       path.join(os.tmpdir(), "review-data-root-"),
@@ -1728,17 +1726,8 @@ describe("runReviewSubagent", () => {
       dataRoot,
     });
 
-    const sessionDirectory = path.join(dataRoot, "agents", "review", "sessions");
-    expect(fs.statSync(sessionDirectory).isDirectory()).toBe(true);
-    expect(runEmbeddedAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionFile: expect.stringMatching(
-          new RegExp(
-            `^${sessionDirectory.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\/skill-harness-review-.+\\.session\\.jsonl$`,
-          ),
-        ),
-      }),
-    );
+    const options = runEmbeddedAgent.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(options).not.toHaveProperty("sessionFile");
   });
 
   it("allows skill_view for skill-candidate reviews without broader skill tools", async () => {
@@ -3631,6 +3620,9 @@ describe("runReviewSubagent", () => {
   });
 
   it("returns subagent-error without invoking the configured fallback", async () => {
+    const warnSpy = vi
+      .spyOn(logger, "warn")
+      .mockImplementation(() => undefined);
     const runEmbeddedAgent = vi
       .fn()
       .mockRejectedValue(new Error("all cooldown"));
@@ -3653,6 +3645,39 @@ describe("runReviewSubagent", () => {
       }),
     ).resolves.toEqual({ findings: [], outcome: "subagent-error" });
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith("review subagent error", {
+      error: "all cooldown",
+      modelRef: { provider: "bifrost", model: "glm-5" },
+    });
+  });
+
+  it("does not warn when review is rejected by gateway restart draining", async () => {
+    const warnSpy = vi
+      .spyOn(logger, "warn")
+      .mockImplementation(() => undefined);
+    const drainingError = Object.assign(
+      new Error("Gateway is draining; new tasks are not accepted"),
+      { name: "GatewayDrainingError" },
+    );
+    const runEmbeddedAgent = vi.fn().mockRejectedValue(drainingError);
+    const api = {
+      config: {},
+      runtime: { agent: { runEmbeddedAgent } },
+    } as unknown as OpenClawPluginApi;
+
+    await expect(
+      runReviewSubagent({
+        api,
+        config: resolveConfig({ review: { enabled: true } }),
+        agentId: "main",
+        intentDirectory: createIntentDirectory(),
+        modelRef: { provider: "bifrost", model: "review" },
+        snapshot,
+        triggers: ["weak-intent"],
+      }),
+    ).resolves.toEqual({ findings: [], outcome: "subagent-error" });
+
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it("logs parse failures without raw model replies", async () => {

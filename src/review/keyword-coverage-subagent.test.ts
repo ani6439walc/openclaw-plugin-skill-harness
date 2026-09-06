@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildKeywordCoverageDiscoveryPrompt,
   runKeywordCoverageReview,
@@ -6,8 +6,12 @@ import {
 import type { KeywordCoverageReviewParams } from "./keyword-coverage-subagent.js";
 import type { CoverageCandidateDocument } from "./keyword-coverage.js";
 import type { ReviewTriggerKeywords } from "./trigger-keywords.js";
+import { logger } from "../../api.js";
 
 describe("runKeywordCoverageReview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   const triggerKeywords: ReviewTriggerKeywords = {
     successfulPattern: ["完成", "verified"],
     behaviorFix: ["不對", "redo"],
@@ -44,6 +48,30 @@ describe("runKeywordCoverageReview", () => {
       timeoutMs: 30000,
     },
   };
+
+  it("does not warn when gateway draining rejects a coverage model pass", async () => {
+    const warnSpy = vi
+      .spyOn(logger, "warn")
+      .mockImplementation(() => undefined);
+    const drainingError = Object.assign(
+      new Error("Gateway is draining; new tasks are not accepted"),
+      { name: "GatewayDrainingError" },
+    );
+    const runEmbeddedAgent = vi.fn().mockRejectedValue(drainingError);
+
+    await expect(
+      runKeywordCoverageReview({
+        ...baseParams,
+        api: {
+          config: {},
+          runtime: { agent: { runEmbeddedAgent } },
+        } as never,
+        modelRef: { provider: "bifrost", model: "review" },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
 
   describe("tool-free boundary", () => {
     it("rejects when model attempts to use tools", async () => {
@@ -701,9 +729,6 @@ describe("runKeywordCoverageReview", () => {
           promptMode: "none",
           toolsAllow: [],
           disableTools: true,
-          sessionFile: expect.stringContaining(
-            "/agents/keyword-coverage/sessions/",
-          ),
           prompt: expect.stringContaining("<keyword_coverage_discovery>"),
         }),
       );
@@ -717,6 +742,8 @@ describe("runKeywordCoverageReview", () => {
           prompt: expect.stringContaining("<keyword_coverage_adjudication>"),
         }),
       );
+      expect(runEmbeddedAgent.mock.calls[0][0]).not.toHaveProperty("sessionFile");
+      expect(runEmbeddedAgent.mock.calls[1][0]).not.toHaveProperty("sessionFile");
       expect(runEmbeddedAgent.mock.calls[0][0].prompt).not.toContain(
         "test-session",
       );

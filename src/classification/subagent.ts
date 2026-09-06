@@ -10,7 +10,7 @@ import { FALLBACK_INTENT_ID } from "../constants.js";
 import { buildIntentionPrompt, parseIntentionResult } from "./prompts.js";
 import { resolveCanonicalSessionKeyFromSessionId } from "../session/index.js";
 import { buildEmbeddedSubagentRunDefaults } from "../subagent-runtime.js";
-import { agentWorkspacePath, agentSessionsPath } from "../file-utils.js";
+import { agentWorkspacePath } from "../file-utils.js";
 import type {
   ClassifiedIntentionResult,
   IntentCatalogEntry,
@@ -192,9 +192,6 @@ export function buildIntentionEmbeddedRunParams(params: {
 }) {
   const dataRoot = params.params.dataRoot;
   const workspaceDir = dataRoot ? agentWorkspacePath(dataRoot) : "/tmp";
-  const sessionDir = dataRoot
-    ? agentSessionsPath(dataRoot, "intention")
-    : "/tmp";
   return {
     sessionId: params.subagentSessionId,
     sessionKey: params.subagentSessionKey,
@@ -208,7 +205,6 @@ export function buildIntentionEmbeddedRunParams(params: {
     runId: params.subagentSessionId,
     workspaceDir,
     agentDir: workspaceDir,
-    sessionFile: `${sessionDir}/${params.subagentSessionId}.session.jsonl`,
     ...buildEmbeddedSubagentRunDefaults(),
     modelRun: true,
     promptMode: "none" as const,
