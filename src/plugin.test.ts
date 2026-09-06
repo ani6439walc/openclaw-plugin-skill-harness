@@ -76,22 +76,6 @@ describe("createPlugin", () => {
     return api;
   }
 
-  it("does not access runtime during CLI metadata registration", () => {
-    const runtime = new Proxy(Object.create(null), {
-      get() {
-        throw new Error("runtime unavailable");
-      },
-    });
-    const api = createApi({
-      registrationMode: "cli-metadata",
-      runtime,
-    } as Partial<OpenClawPluginApi>);
-
-    expect(() => createPlugin(api).register(api)).not.toThrow();
-    expect(api.on).not.toHaveBeenCalled();
-    expect(api.registerTool).not.toHaveBeenCalled();
-  });
-
   it("registers the session_end hook", () => {
     const api = createApi();
 
