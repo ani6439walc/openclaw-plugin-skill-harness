@@ -139,25 +139,45 @@ type CoverageRuntimeTargets = Partial<
   >
 >;
 
-function formatConversationExpansionContext(params: {
+export function formatConversationExpansionContext(params: {
   conversation?: readonly RecentTurn[];
   latestHistoricalIntent?: HistoricalIntentRecord;
 }): string | undefined {
-  const parts: string[] = [];
+  const hasIntent = Boolean(params.latestHistoricalIntent);
+  const hasTurns = Boolean(
+    params.conversation && params.conversation.length > 0,
+  );
+  if (!hasIntent && !hasTurns) {
+    return undefined;
+  }
+
+  const sections: string[] = [
+    "[Task Context]\n" +
+      "You are expanding a query for conversational assistant skill & intent routing.\n" +
+      "- Ground the expansion in the ongoing dialogue: resolve pronouns, slang, abbreviations, and elliptical expressions using the conversation context.\n" +
+      "- Stay faithful to the user's actual intent and topic; do not introduce unrelated domains or invent scenarios not grounded in the query or dialogue history.",
+  ];
+
   if (params.latestHistoricalIntent) {
-    parts.push(`previous_intent=${params.latestHistoricalIntent.intent}`);
+    const routingDetails: string[] = [
+      `previous_intent=${params.latestHistoricalIntent.intent}`,
+    ];
     if (params.latestHistoricalIntent.topic) {
-      parts.push(`previous_topic=${params.latestHistoricalIntent.topic}`);
+      routingDetails.push(
+        `previous_topic=${params.latestHistoricalIntent.topic}`,
+      );
     }
+    sections.push(`[Previous Routing State]\n${routingDetails.join("; ")}`);
   }
+
   if (params.conversation?.length) {
-    const recent = params.conversation
-      .slice(-3)
-      .map((t) => `[${t.role}] ${t.text.trim().slice(0, 120)}`)
-      .join(" ");
-    parts.push(`recent_dialog=${recent}`);
+    const dialogLines = params.conversation
+      .map((t) => `- [${t.role}] ${t.text.trim()}`)
+      .join("\n");
+    sections.push(`[Recent Dialogue]\n${dialogLines}`);
   }
-  return parts.length > 0 ? parts.join("; ") : undefined;
+
+  return sections.join("\n\n");
 }
 
 function truncateSelectedPlacementSkillContent(content: string): {

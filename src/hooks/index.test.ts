@@ -10,6 +10,7 @@ import {
   coverageEpochMilestone,
   coverageWatermarkEligible,
   createHookHandlers,
+  formatConversationExpansionContext,
 } from "./index.js";
 import {
   SKILL_HARNESS_INTENT_CONTEXT,
@@ -25,12 +26,8 @@ import { TurnAssociationRegistry } from "./turn-associations.js";
 import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import {
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
-  INTERNAL_RUNTIME_CONTEXT_END,
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
-  UNTRUSTED_CONTEXT_HEADER,
-  CANDIDATE_SKILLS_GUIDANCE,
-  USER_MESSAGE_BOUNDARY,
 } from "../constants.js";
 import type { IntentReviewLogWriter } from "../review/log-writer.js";
 
@@ -4829,5 +4826,56 @@ Current user request: fresh clean request
     );
     expect(result?.appendSystemContext).toContain("<configured_skills>");
     expect(classifier).not.toHaveBeenCalled();
+  });
+});
+
+describe("formatConversationExpansionContext", () => {
+  it("returns undefined when both conversation and historical intent are empty", () => {
+    expect(formatConversationExpansionContext({})).toBeUndefined();
+    expect(
+      formatConversationExpansionContext({ conversation: [] }),
+    ).toBeUndefined();
+  });
+
+  it("formats task context and routing state when only historical intent is present", () => {
+    const result = formatConversationExpansionContext({
+      latestHistoricalIntent: {
+        input: "where should I go",
+        intent: "travel-planning",
+        domain: "other",
+        topic: "seaside vacation",
+      },
+    });
+
+    expect(result).toBeDefined();
+    expect(result).toContain("[Task Context]");
+    expect(result).toContain("Stay faithful to the user's actual intent and topic");
+    expect(result).toContain("[Previous Routing State]");
+    expect(result).toContain("previous_intent=travel-planning");
+    expect(result).toContain("previous_topic=seaside vacation");
+    expect(result).not.toContain("[Recent Dialogue]");
+  });
+
+  it("formats all dialogue turns across multiple turns without slicing to 3 or 120 chars", () => {
+    const longText = "a".repeat(200);
+    const conversation = [
+      { role: "user" as const, text: "turn 1" },
+      { role: "assistant" as const, text: "turn 2" },
+      { role: "user" as const, text: "turn 3" },
+      { role: "assistant" as const, text: "turn 4" },
+      { role: "user" as const, text: longText },
+    ];
+
+    const result = formatConversationExpansionContext({
+      conversation,
+    });
+
+    expect(result).toBeDefined();
+    expect(result).toContain("[Task Context]");
+    expect(result).toContain("- [user] turn 1");
+    expect(result).toContain("- [assistant] turn 2");
+    expect(result).toContain("- [user] turn 3");
+    expect(result).toContain("- [assistant] turn 4");
+    expect(result).toContain(`- [user] ${longText}`);
   });
 });

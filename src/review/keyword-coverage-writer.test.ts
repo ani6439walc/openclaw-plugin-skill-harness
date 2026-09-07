@@ -61,6 +61,7 @@ describe("KeywordCoverageWriter", () => {
         policy: "ordinary",
         targets: ["behavior-fix"],
         mutations: [],
+        nowMs: Date.parse("2026-08-08T00:01:00.000Z"),
       }),
     ).toBe("already-applied");
 
