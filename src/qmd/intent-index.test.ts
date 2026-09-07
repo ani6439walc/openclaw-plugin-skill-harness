@@ -901,4 +901,176 @@ describe("createIntentQmdIndex", () => {
       "QMD retry was not attempted after the reset delay",
     );
   });
+
+  it("writes pure markdown body without frontmatter and creates identity sidecar files", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const store = createStoreDouble({});
+    const createStore = vi.fn().mockResolvedValue(store);
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+
+    index.schedule(catalog);
+    await waitForReady(index);
+
+    const exampleMdPath = path.join(
+      root,
+      "qmd",
+      "intents",
+      "examples",
+      "implementation-0.md",
+    );
+    const exampleSidecarPath = path.join(
+      root,
+      "qmd",
+      "intents",
+      "examples",
+      "implementation-0.md.identity.yml",
+    );
+    const keywordMdPath = path.join(
+      root,
+      "qmd",
+      "intents",
+      "keywords",
+      "implementation-0.md",
+    );
+    const keywordSidecarPath = path.join(
+      root,
+      "qmd",
+      "intents",
+      "keywords",
+      "implementation-0.md.identity.yml",
+    );
+
+    const exampleMdContent = await readFile(exampleMdPath, "utf8");
+    expect(exampleMdContent).toBe("add a QMD fastpath\n");
+    expect(exampleMdContent).not.toContain("---");
+    expect(exampleMdContent).not.toContain("intent_id");
+
+    const exampleSidecarContent = await readFile(exampleSidecarPath, "utf8");
+    expect(exampleSidecarContent).toContain("intent_id: implementation");
+    expect(exampleSidecarContent).toContain("domain: development");
+    expect(exampleSidecarContent).toContain("kind: example");
+
+    const keywordMdContent = await readFile(keywordMdPath, "utf8");
+    expect(keywordMdContent).toBe("implement\n");
+    expect(keywordMdContent).not.toContain("---");
+
+    const keywordSidecarContent = await readFile(keywordSidecarPath, "utf8");
+    expect(keywordSidecarContent).toContain("intent_id: implementation");
+    expect(keywordSidecarContent).toContain("kind: keyword");
+
+    expect(createStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          collections: expect.objectContaining({
+            "intent-examples": expect.objectContaining({
+              pattern: "**/*.md",
+              ignore: ["**/*.identity.yml"],
+            }),
+            "intent-keywords": expect.objectContaining({
+              pattern: "**/*.md",
+              ignore: ["**/*.identity.yml"],
+            }),
+          }),
+        }),
+      }),
+    );
+
+    await index.close();
+  });
+
+  it("resolves intentId from result path when body has no frontmatter", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const searchMock = vi.fn().mockResolvedValue([
+      {
+        file: "/path/to/examples/implementation-0.md",
+        body: "pure markdown body without frontmatter",
+        score: 0.95,
+      },
+    ]);
+    const store = createStoreDouble({ search: searchMock });
+    const createStore = vi.fn().mockResolvedValue(store);
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+
+    index.schedule(catalog);
+    await waitForReady(index);
+
+    const hits = await index.searchIntentExamplesAndKeywords({
+      query: "fastpath",
+      rawLimit: 5,
+    });
+
+    expect(hits).toEqual([
+      {
+        intentId: "implementation",
+        score: 0.95,
+        collection: "intent-examples-and-keywords",
+      },
+    ]);
+
+    await index.close();
+  });
+
+  it("prunes stale identity sidecar files when intent snapshots change", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const firstStore = createStoreDouble({});
+    const updateMock = vi.fn().mockResolvedValue({});
+    const rebuiltStore = createStoreDouble({ update: updateMock });
+    const createStore = vi
+      .fn()
+      .mockResolvedValueOnce(firstStore)
+      .mockResolvedValueOnce(rebuiltStore);
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+
+    index.schedule(keywordRefreshedCatalog);
+    await waitForReady(index);
+
+    const thirdKeywordMdPath = path.join(
+      root,
+      "qmd",
+      "intents",
+      "keywords",
+      "implementation-2.md",
+    );
+    const thirdKeywordSidecarPath = path.join(
+      root,
+      "qmd",
+      "intents",
+      "keywords",
+      "implementation-2.md.identity.yml",
+    );
+
+    await expect(stat(thirdKeywordMdPath)).resolves.toBeDefined();
+    await expect(stat(thirdKeywordSidecarPath)).resolves.toBeDefined();
+
+    index.schedule(catalog);
+    await waitFor(
+      () => updateMock.mock.calls.length === 1,
+      "rebuiltStore was not updated",
+    );
+    await waitForReady(index);
+
+    await expect(stat(thirdKeywordMdPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(stat(thirdKeywordSidecarPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    await index.close();
+  });
 });

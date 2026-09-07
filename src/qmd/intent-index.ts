@@ -13,7 +13,7 @@ const EXAMPLES_COLLECTION = "intent-examples";
 const KEYWORDS_COLLECTION = "intent-keywords";
 const INITIAL_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 60_000;
-const INTENT_INDEX_METADATA_SCHEMA_VERSION = 1;
+const INTENT_INDEX_METADATA_SCHEMA_VERSION = 2;
 
 type QmdCreateStore = (typeof import("@wei840222/qmd"))["createStore"];
 
@@ -34,7 +34,10 @@ function isIntentIndexMetadata(value: unknown): value is IntentIndexMetadata {
 }
 
 type QmdResult = {
-  body: string;
+  filepath?: string;
+  file?: string;
+  displayPath?: string;
+  body?: string;
   score: number;
   explain?: unknown;
 };
@@ -96,6 +99,7 @@ function snapshotFingerprint(
 ): string {
   return hash(
     JSON.stringify({
+      schemaVersion: INTENT_INDEX_METADATA_SCHEMA_VERSION,
       intents: intents.map((intent) => ({
         id: intent.id,
         examples: intent.definition.examples,
@@ -128,15 +132,21 @@ function documentPath(
   return path.join(collectionRoot, `${intent.id}-${index}.md`);
 }
 
-function documentBody(params: {
+function normalizeIndexedContent(text: string): string {
+  const trimmed = text.trim();
+  return trimmed ? `${trimmed}\n` : "";
+}
+
+function identitySidecarBody(params: {
   intent: IntentCatalogEntry;
   kind: "example" | "keyword";
-  text: string;
+  relativePath: string;
 }): string {
-  return matter.stringify(params.text.trim(), {
+  return matter.stringify("", {
     intent_id: params.intent.id,
     domain: params.intent.definition.domain,
     kind: params.kind,
+    path: params.relativePath,
   });
 }
 
@@ -176,7 +186,10 @@ async function writeSnapshotDiff(params: {
         .relative(params.root, target)
         .split(path.sep)
         .join("/");
-      if (target.endsWith(".md") && !expected.has(relative)) {
+      if (
+        (target.endsWith(".md") || target.endsWith(".identity.yml")) &&
+        !expected.has(relative)
+      ) {
         await fs.rm(target, { force: true });
       }
     }
@@ -186,7 +199,10 @@ async function writeSnapshotDiff(params: {
 
 function snapshotDocuments(intents: readonly IntentCatalogEntry[]): {
   documents: SnapshotDocument[];
-  collections: Record<string, { path: string; pattern: string }>;
+  collections: Record<
+    string,
+    { path: string; pattern: string; ignore?: string[] }
+  >;
 } {
   const documents: SnapshotDocument[] = [];
   const append = (params: {
@@ -197,9 +213,25 @@ function snapshotDocuments(intents: readonly IntentCatalogEntry[]): {
   }) => {
     for (const intent of params.intents) {
       params.texts(intent).forEach((text, index) => {
+        const mdRelativePath = path.join(
+          params.root,
+          `${intent.id}-${index}.md`,
+        );
+        const sidecarRelativePath = path.join(
+          params.root,
+          `${intent.id}-${index}.md.identity.yml`,
+        );
         documents.push({
-          path: path.join(params.root, `${intent.id}-${index}.md`),
-          content: documentBody({ intent, kind: params.kind, text }),
+          path: mdRelativePath,
+          content: normalizeIndexedContent(text),
+        });
+        documents.push({
+          path: sidecarRelativePath,
+          content: identitySidecarBody({
+            intent,
+            kind: params.kind,
+            relativePath: mdRelativePath,
+          }),
         });
       });
     }
@@ -216,11 +248,32 @@ function snapshotDocuments(intents: readonly IntentCatalogEntry[]): {
     kind: "keyword",
     texts: (intent) => intent.definition.keywords,
   });
-  const collections: Record<string, { path: string; pattern: string }> = {
-    [EXAMPLES_COLLECTION]: { path: "examples", pattern: "**/*.md" },
-    [KEYWORDS_COLLECTION]: { path: "keywords", pattern: "**/*.md" },
+  const collections: Record<
+    string,
+    { path: string; pattern: string; ignore?: string[] }
+  > = {
+    [EXAMPLES_COLLECTION]: {
+      path: "examples",
+      pattern: "**/*.md",
+      ignore: ["**/*.identity.yml"],
+    },
+    [KEYWORDS_COLLECTION]: {
+      path: "keywords",
+      pattern: "**/*.md",
+      ignore: ["**/*.identity.yml"],
+    },
   };
   return { documents, collections };
+}
+
+function intentIdFromPath(
+  candidatePath: string | undefined,
+): string | undefined {
+  if (!candidatePath) return undefined;
+  const cleanPath = candidatePath.replace(/^qmd:\/\/[^/]+\//, "");
+  const base = path.basename(cleanPath);
+  const match = /^(.+)-\d+\.md(?:\.identity\.yml)?$/u.exec(base);
+  return match?.[1]?.trim();
 }
 
 function parseHits(
@@ -231,18 +284,36 @@ function parseHits(
   const seen = new Set<string>();
   for (const result of results) {
     if (!Number.isFinite(result.score)) continue;
-    let intentId: unknown;
-    try {
-      intentId = matter(result.body).data.intent_id;
-    } catch {
-      continue;
+    let intentId: string | undefined;
+
+    const pathCandidates = [
+      result.filepath,
+      result.file,
+      result.displayPath,
+    ].filter((value): value is string => Boolean(value));
+
+    for (const candidate of pathCandidates) {
+      intentId = intentIdFromPath(candidate);
+      if (intentId) break;
     }
-    if (typeof intentId !== "string" || !intentId.trim()) continue;
-    const normalizedId = intentId.trim().toLowerCase();
+
+    if (!intentId && result.body) {
+      try {
+        const parsed = matter(result.body).data.intent_id;
+        if (typeof parsed === "string" && parsed.trim()) {
+          intentId = parsed.trim();
+        }
+      } catch {
+        // Ignore fallback errors
+      }
+    }
+
+    if (!intentId) continue;
+    const normalizedId = intentId.toLowerCase();
     if (seen.has(normalizedId)) continue;
     seen.add(normalizedId);
     hits.push({
-      intentId: intentId.trim(),
+      intentId,
       score: result.score,
       collection,
       ...(result.explain === undefined ? {} : { explain: result.explain }),
@@ -259,8 +330,7 @@ function parseLexHits(
   const seen = new Set<string>();
   for (const result of results) {
     if (!Number.isFinite(result.score)) continue;
-    const match = /^(.+)-\d+\.md$/u.exec(path.basename(result.filepath));
-    const intentId = match?.[1];
+    const intentId = intentIdFromPath(result.filepath);
     if (!intentId) continue;
     const normalizedId = intentId.toLowerCase();
     if (seen.has(normalizedId)) continue;
@@ -293,7 +363,10 @@ export function createIntentQmdIndex(params: {
   async function writeSnapshot(
     intents: readonly IntentCatalogEntry[],
   ): Promise<{
-    collections: Record<string, { path: string; pattern: string }>;
+    collections: Record<
+      string,
+      { path: string; pattern: string; ignore?: string[] }
+    >;
   }> {
     const snapshot = snapshotDocuments(intents);
     await writeSnapshotDiff({

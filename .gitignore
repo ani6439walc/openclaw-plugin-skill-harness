@@ -150,6 +150,5 @@ __pycache__/
 .codegraph
 .codex
 .omo
-
 sessions
-cache
+tasks
