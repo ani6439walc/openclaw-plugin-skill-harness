@@ -1384,6 +1384,7 @@ export async function runReviewSubagent(params: {
       ...buildEmbeddedSubagentRunDefaults(),
       modelRun: false,
       promptMode: "minimal",
+      sessionPersistence: "detached",
       toolsAllow: buildReviewToolsAllow(),
       disableTools: false,
       thinkLevel: params.config.review.thinking,
@@ -1698,17 +1699,6 @@ export async function runReviewSubagent(params: {
       });
     }
   } finally {
-    try {
-      await params.api.runtime.subagent.deleteSession({
-        sessionKey,
-        deleteTranscript: true,
-      });
-    } catch (error) {
-      logger.warn("failed to delete review subagent session", {
-        error,
-        sessionKey,
-      });
-    }
     fs.rmSync(workspaceDir, { recursive: true, force: true });
   }
 

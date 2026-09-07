@@ -231,45 +231,38 @@ describe("runReviewSubagent", () => {
       },
     } as unknown as OpenClawPluginApi;
 
-    return runReviewSubagent({
-      api,
-      config: resolveConfig({}),
-      agentId: "main",
-      intentDirectory: root,
-      modelRef: { provider: "test", model: "review" },
-      snapshot: {
-        ...snapshot,
-        current: {
-          ...snapshot.current,
-          capabilityFit: {
-            ...snapshot.current.capabilityFit!,
-            turnHasToolErrors: true,
+    return {
+      result: await runReviewSubagent({
+        api,
+        config: resolveConfig({}),
+        agentId: "main",
+        intentDirectory: root,
+        modelRef: { provider: "test", model: "review" },
+        snapshot: {
+          ...snapshot,
+          current: {
+            ...snapshot.current,
+            capabilityFit: {
+              ...snapshot.current.capabilityFit!,
+              turnHasToolErrors: true,
+            },
           },
         },
-      },
-      triggers: ["capability-fit"],
-    });
+        triggers: ["capability-fit"],
+      }),
+      runEmbeddedAgent: api.runtime.agent.runEmbeddedAgent,
+      deleteSession,
+    };
   }
 
-  it("cleans up its session after a no-finding review", async () => {
-    const deleteSession = vi.fn();
-
-    const result = await runNoFindingReview(deleteSession);
-
-    expect(result.outcome).toBe("nofinding");
-    expect(deleteSession).toHaveBeenCalledWith({
-      sessionKey: "agent:main:skill-harness-review:2959d5f1da6a",
-      deleteTranscript: true,
-    });
-  });
-
-  it("keeps the review outcome when cleanup fails", async () => {
-    const deleteSession = vi
-      .fn()
-      .mockRejectedValue(new Error("cleanup failed"));
-
-    const result = await runNoFindingReview(deleteSession);
+  it("uses a detached session without scheduling persistent cleanup", async () => {
+    const { result, runEmbeddedAgent, deleteSession } =
+      await runNoFindingReview(vi.fn());
 
     expect(result.outcome).toBe("nofinding");
+    expect(runEmbeddedAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionPersistence: "detached" }),
+    );
+    expect(deleteSession).not.toHaveBeenCalled();
   });
 });

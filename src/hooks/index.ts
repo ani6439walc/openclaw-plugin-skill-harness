@@ -655,7 +655,7 @@ export function createHookHandlers(deps: HookDeps) {
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
-        "qmd-example-keyword",
+        "qmd-hybrid",
         "started",
       );
       const limits = getQmdCandidateLimits(params.availableIntents.length);
@@ -681,7 +681,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
-          "qmd-example-keyword",
+          "qmd-hybrid",
           "completed",
           {
             intent: topIntent.id,
@@ -702,7 +702,7 @@ export function createHookHandlers(deps: HookDeps) {
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
-        "qmd-example-keyword",
+        "qmd-hybrid",
         qmdHits === undefined ? "failed" : "completed",
         qmdHits === undefined
           ? { error: "QMD intent example/keyword index unavailable" }
@@ -754,7 +754,7 @@ export function createHookHandlers(deps: HookDeps) {
     emitPipelineEvent(
       params.ctx,
       params.resolvedSessionKey,
-      "intent-classify",
+      "llm-classifier",
       "started",
     );
     let result: IntentionResult | undefined;
@@ -787,7 +787,7 @@ export function createHookHandlers(deps: HookDeps) {
     emitPipelineEvent(
       params.ctx,
       params.resolvedSessionKey,
-      "intent-classify",
+      "llm-classifier",
       result ? "completed" : "failed",
       result
         ? {

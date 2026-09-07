@@ -1,16 +1,12 @@
 import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { logger } from "../../api.js";
+import type { IntentTrigger } from "../types.js";
 import type { PluginHookAgentContext } from "./types.js";
 
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
-export type PipelinePhase =
-  | "pipeline"
-  | "topic-triage"
-  | "qmd-keyword"
-  | "qmd-example-keyword"
-  | "intent-classify";
+export type PipelinePhase = "pipeline" | IntentTrigger;
 
 export type PipelineState = "started" | "completed" | "failed";
 

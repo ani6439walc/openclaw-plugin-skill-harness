@@ -3254,7 +3254,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
     const failedEvent = emittedPipelineEvents(emitAgentEvent).find(
       (event) =>
-        event.data.phase === "intent-classify" && event.data.state === "failed",
+        event.data.phase === "llm-classifier" && event.data.state === "failed",
     );
     expect(failedEvent?.data).toEqual(
       expect.objectContaining({
@@ -3488,16 +3488,15 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(classifier).toHaveBeenCalledOnce();
     const qmdEvents = emittedPipelineEvents(emitAgentEvent).filter(
       (entry) =>
-        entry.data.phase === "qmd-keyword" ||
-        entry.data.phase === "qmd-example-keyword",
+        entry.data.phase === "qmd-keyword" || entry.data.phase === "qmd-hybrid",
     );
     expect(
       qmdEvents.map((event) => `${event.data.phase}:${event.data.state}`),
     ).toEqual([
       "qmd-keyword:started",
       "qmd-keyword:completed",
-      "qmd-example-keyword:started",
-      "qmd-example-keyword:completed",
+      "qmd-hybrid:started",
+      "qmd-hybrid:completed",
     ]);
     for (const event of qmdEvents.filter(
       (event) => event.data.state === "completed",
