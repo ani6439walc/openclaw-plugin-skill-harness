@@ -117,7 +117,7 @@ def qmd_health(qmd_root: Path) -> dict[str, Any]:
         if snapshot_root.is_dir()
         else 0
     )
-    database_path = qmd_root / "intent-routing.sqlite"
+    database_path = snapshot_root / "intent-routing.sqlite"
     unavailable = {
         "databaseStatus": "unavailable",
         "integrityCheck": None,

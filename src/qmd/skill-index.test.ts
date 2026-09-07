@@ -490,14 +490,12 @@ describe("createSkillQmdIndex", () => {
     });
     const pendingTimers: Array<() => void> = [];
     const store = createStoreDouble({
-      search: vi
-        .fn()
-        .mockResolvedValue([
-          {
-            body: "---\nskill: partial\npath: SKILL.md\n---\npartial",
-            score: 1,
-          },
-        ]),
+      search: vi.fn().mockResolvedValue([
+        {
+          body: "---\nskill: partial\npath: SKILL.md\n---\npartial",
+          score: 1,
+        },
+      ]),
       embed: vi
         .fn()
         .mockResolvedValueOnce({ errors: 1 })

@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -135,7 +142,7 @@ describe("createIntentQmdIndex", () => {
     firstIndex.schedule(catalog);
     await waitForReady(firstIndex);
     await writeFile(
-      path.join(root, "qmd", "intent-routing.sqlite"),
+      path.join(root, "qmd", "intents", "intent-routing.sqlite"),
       "existing index",
     );
     await firstIndex.close();
@@ -185,7 +192,7 @@ describe("createIntentQmdIndex", () => {
     ]);
     expect(secondCreateStore).toHaveBeenCalledWith(
       expect.objectContaining({
-        dbPath: path.join(root, "qmd", "intent-routing.sqlite"),
+        dbPath: path.join(root, "qmd", "intents", "intent-routing.sqlite"),
         readOnly: true,
         remoteRequestTimeoutMs: 1_234,
         config: expect.objectContaining({
@@ -214,7 +221,7 @@ describe("createIntentQmdIndex", () => {
     firstIndex.schedule(catalog);
     await waitForReady(firstIndex);
     await writeFile(
-      path.join(root, "qmd", "intent-routing.sqlite"),
+      path.join(root, "qmd", "intents", "intent-routing.sqlite"),
       "existing index",
     );
     await firstIndex.close();
@@ -233,7 +240,7 @@ describe("createIntentQmdIndex", () => {
     expect(createStore).toHaveBeenCalledOnce();
     expect(createStore).toHaveBeenCalledWith(
       expect.objectContaining({
-        dbPath: path.join(root, "qmd", "intent-routing.sqlite"),
+        dbPath: path.join(root, "qmd", "intents", "intent-routing.sqlite"),
         config: expect.any(Object),
       }),
     );
@@ -255,7 +262,7 @@ describe("createIntentQmdIndex", () => {
     firstIndex.schedule(catalog);
     await waitForReady(firstIndex);
     await writeFile(
-      path.join(root, "qmd", "intent-routing.sqlite"),
+      path.join(root, "qmd", "intents", "intent-routing.sqlite"),
       "existing index",
     );
     await firstIndex.close();
@@ -290,6 +297,50 @@ describe("createIntentQmdIndex", () => {
     await restartedIndex.close();
   });
 
+  it("prunes obsolete snapshot directories without deleting colocated index files", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const firstStore = createStoreDouble({});
+    const rebuiltStore = createStoreDouble({});
+    const createStore = vi
+      .fn()
+      .mockResolvedValueOnce(firstStore)
+      .mockResolvedValueOnce(rebuiltStore);
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+
+    index.schedule(catalog);
+    await waitForReady(index);
+    const indexRoot = path.join(root, "qmd", "intents");
+    const databasePath = path.join(indexRoot, "intent-routing.sqlite");
+    const metadataPath = path.join(indexRoot, "intent-routing.json");
+    await writeFile(databasePath, "existing index");
+    await mkdir(path.join(indexRoot, "triggers"));
+    await writeFile(
+      path.join(indexRoot, "triggers", "obsolete.md"),
+      "obsolete trigger snapshot",
+    );
+
+    index.schedule(refreshedCatalog);
+    await waitFor(
+      () => rebuiltStore.update.mock.calls.length === 1,
+      "index did not rebuild",
+    );
+
+    await expect(readFile(databasePath, "utf8")).resolves.toBe(
+      "existing index",
+    );
+    await expect(stat(metadataPath)).resolves.toBeDefined();
+    await expect(stat(path.join(indexRoot, "triggers"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    await index.close();
+  });
+
   it("rebuilds when a matching persisted database cannot be reopened", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
     roots.push(root);
@@ -302,7 +353,7 @@ describe("createIntentQmdIndex", () => {
     firstIndex.schedule(catalog);
     await waitForReady(firstIndex);
     await writeFile(
-      path.join(root, "qmd", "intent-routing.sqlite"),
+      path.join(root, "qmd", "intents", "intent-routing.sqlite"),
       "corrupt index",
     );
     await firstIndex.close();
@@ -324,7 +375,7 @@ describe("createIntentQmdIndex", () => {
     expect(createStore).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        dbPath: path.join(root, "qmd", "intent-routing.sqlite"),
+        dbPath: path.join(root, "qmd", "intents", "intent-routing.sqlite"),
         readOnly: true,
         remoteRequestTimeoutMs: 1_234,
         config: expect.objectContaining({
@@ -337,7 +388,7 @@ describe("createIntentQmdIndex", () => {
     expect(createStore).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        dbPath: path.join(root, "qmd", "intent-routing.sqlite"),
+        dbPath: path.join(root, "qmd", "intents", "intent-routing.sqlite"),
         config: expect.any(Object),
       }),
     );
@@ -359,7 +410,7 @@ describe("createIntentQmdIndex", () => {
     firstIndex.schedule(catalog);
     await waitForReady(firstIndex);
     await writeFile(
-      path.join(root, "qmd", "intent-routing.sqlite"),
+      path.join(root, "qmd", "intents", "intent-routing.sqlite"),
       "incomplete index",
     );
     await firstIndex.close();
@@ -419,7 +470,7 @@ describe("createIntentQmdIndex", () => {
     ).resolves.toBeUndefined();
     expect(incompleteStore.close).toHaveBeenCalledOnce();
     await expect(
-      stat(path.join(root, "qmd", "intent-routing.json")),
+      stat(path.join(root, "qmd", "intents", "intent-routing.json")),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -435,7 +486,7 @@ describe("createIntentQmdIndex", () => {
     firstIndex.schedule(catalog);
     await waitForReady(firstIndex);
     await writeFile(
-      path.join(root, "qmd", "intent-routing.sqlite"),
+      path.join(root, "qmd", "intents", "intent-routing.sqlite"),
       "existing index",
     );
     await firstIndex.close();
@@ -452,7 +503,7 @@ describe("createIntentQmdIndex", () => {
     );
 
     await expect(
-      stat(path.join(root, "qmd", "intent-routing.json")),
+      stat(path.join(root, "qmd", "intents", "intent-routing.json")),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 

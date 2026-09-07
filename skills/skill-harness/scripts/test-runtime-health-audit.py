@@ -30,7 +30,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         (qmd_root / "intents" / "examples" / "example.md").write_text(
             "# example\n", encoding="utf-8"
         )
-        qmd_database = sqlite3.connect(qmd_root / "intent-routing.sqlite")
+        qmd_database = sqlite3.connect(qmd_root / "intents" / "intent-routing.sqlite")
         qmd_database.executescript(
             """
             CREATE TABLE embedding_index_state (
@@ -318,7 +318,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(stats["dataHealth"]["dailyDynamicKeyCardinality"]["maxIntents"], 1)
 
     def test_reports_unavailable_qmd_without_failing_the_audit(self) -> None:
-        (self.root / "qmd" / "intent-routing.sqlite").unlink()
+        (self.root / "qmd" / "intents" / "intent-routing.sqlite").unlink()
 
         report = self.run_audit()
 

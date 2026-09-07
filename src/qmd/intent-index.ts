@@ -176,7 +176,9 @@ async function writeSnapshotDiff(params: {
         .relative(params.root, target)
         .split(path.sep)
         .join("/");
-      if (!expected.has(relative)) await fs.rm(target, { force: true });
+      if (target.endsWith(".md") && !expected.has(relative)) {
+        await fs.rm(target, { force: true });
+      }
     }
   }
   await visit(params.root);
@@ -273,13 +275,9 @@ export function createIntentQmdIndex(params: {
   config: () => ResolvedQmdConfig;
   createStore?: QmdCreateStore;
 }): IntentQmdIndex {
-  const databasePath = path.join(
-    params.dataRoot,
-    "qmd",
-    "intent-routing.sqlite",
-  );
   const snapshotRoot = path.join(params.dataRoot, "qmd", "intents");
-  const metadataPath = path.join(params.dataRoot, "qmd", "intent-routing.json");
+  const databasePath = path.join(snapshotRoot, "intent-routing.sqlite");
+  const metadataPath = path.join(snapshotRoot, "intent-routing.json");
   let currentFingerprint: string | undefined;
   let expectedFingerprint: string | undefined;
   let desired:
