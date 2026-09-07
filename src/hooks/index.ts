@@ -158,16 +158,8 @@ export function formatConversationExpansionContext(params: {
       "- Stay faithful to the user's actual intent and topic; do not introduce unrelated domains or invent scenarios not grounded in the query or dialogue history.",
   ];
 
-  if (params.latestHistoricalIntent) {
-    const routingDetails: string[] = [
-      `previous_intent=${params.latestHistoricalIntent.intent}`,
-    ];
-    if (params.latestHistoricalIntent.topic) {
-      routingDetails.push(
-        `previous_topic=${params.latestHistoricalIntent.topic}`,
-      );
-    }
-    sections.push(`[Previous Routing State]\n${routingDetails.join("; ")}`);
+  if (params.latestHistoricalIntent?.topic) {
+    sections.push(`[Previous Routing State]\nprevious_topic=${params.latestHistoricalIntent.topic}`);
   }
 
   if (params.conversation?.length) {

@@ -4851,7 +4851,7 @@ describe("formatConversationExpansionContext", () => {
     expect(result).toContain("[Task Context]");
     expect(result).toContain("Stay faithful to the user's actual intent and topic");
     expect(result).toContain("[Previous Routing State]");
-    expect(result).toContain("previous_intent=travel-planning");
+    expect(result).not.toContain("previous_intent=");
     expect(result).toContain("previous_topic=seaside vacation");
     expect(result).not.toContain("[Recent Dialogue]");
   });
