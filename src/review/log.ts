@@ -4,10 +4,6 @@ import { REVIEW_TRIGGER_TYPES, type ReviewTrigger } from "./triggers.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
 import type { SkillPlacementReason } from "../stats/aggregator.js";
-import {
-  normalizeKeywordList,
-  type TriggerKeywordTarget,
-} from "./trigger-keywords.js";
 
 export const REVIEW_OPERATIONS = [
   "create",
@@ -15,7 +11,6 @@ export const REVIEW_OPERATIONS = [
   "split",
   "merge",
 ] as const;
-
 export type ReviewOperation = (typeof REVIEW_OPERATIONS)[number];
 
 export const PROCESSED_EVENT_OUTCOMES = [
@@ -26,7 +21,6 @@ export const PROCESSED_EVENT_OUTCOMES = [
   "subagent-error",
   "validation-failed",
 ] as const;
-
 export type ProcessedEventOutcome = (typeof PROCESSED_EVENT_OUTCOMES)[number];
 
 export const NO_FINDING_REASON_CODES = [
@@ -37,7 +31,6 @@ export const NO_FINDING_REASON_CODES = [
   "already-covered",
   "privacy-sensitive",
 ] as const;
-
 export type NoFindingReasonCode = (typeof NO_FINDING_REASON_CODES)[number];
 export type NoFindingReasonCounts = Partial<
   Record<NoFindingReasonCode, number>
@@ -48,13 +41,11 @@ export const SCHEMA_REJECTION_REASON_CODES = [
   "missing-trigger-decision",
   "missing-target",
   "invalid-operation",
-  "invalid-trigger-keyword-target",
   "invalid-field-type",
   "too-long-field",
   "invalid-shape",
   "unknown",
 ] as const;
-
 export type SchemaRejectionReasonCode =
   (typeof SCHEMA_REJECTION_REASON_CODES)[number];
 export type SchemaRejectionReasonCounts = Partial<
@@ -63,12 +54,10 @@ export type SchemaRejectionReasonCounts = Partial<
 
 export type AppliedReviewChange = {
   trigger: ReviewTrigger;
-  targetKind: "intent-markdown" | "trigger-keywords" | "skill-experience";
-  operation: ReviewOperation | "adjust-trigger-keywords";
+  targetKind: "intent-markdown" | "skill-experience";
+  operation: ReviewOperation;
   targetIntentIds: string[];
   targetExperienceIds?: string[];
-  targetTrigger?: TriggerKeywordTarget;
-  keywordChange?: { add: string[]; remove: string[] };
   dedupeKey: string;
   summary: string;
   evidence: string[];
@@ -100,13 +89,12 @@ export type ReviewedSkillEpoch = {
   eventId: string;
 };
 
-export type ReviewLogV7 = {
-  schemaVersion: 7;
+export type ReviewLogV8 = {
+  schemaVersion: 8;
   createdAt: string;
   updatedAt: string;
   processedEvents: Record<string, ProcessedEventRecord>;
   reviewedSkillEpochs: Record<string, ReviewedSkillEpoch>;
-  historicalKeywordAudits: Record<string, ProcessedEventRecord>;
 };
 
 const ReviewSourceSchema = z
@@ -117,69 +105,7 @@ const ReviewSourceSchema = z
     turnStart: z.string(),
   })
   .strict();
-
-const TriggerKeywordTargetSchema = z.enum([
-  "successful-pattern",
-  "behavior-fix",
-  "entity-context",
-]);
-
-const KeywordListSchema = z
-  .array(z.string())
-  .transform((values) => normalizeKeywordList(values, []));
-
 const ProcessedEventOutcomeSchema = z.enum(PROCESSED_EVENT_OUTCOMES);
-
-function normalizeAllowlistedCounts<T extends string>(
-  value: unknown,
-  allowedKeys: readonly T[],
-): Partial<Record<T, number>> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  const input = value as Record<string, unknown>;
-  const output: Partial<Record<T, number>> = {};
-  for (const reasonCode of allowedKeys) {
-    const count = input[reasonCode];
-    if (typeof count === "number" && Number.isInteger(count) && count > 0) {
-      output[reasonCode] = count;
-    }
-  }
-  return Object.keys(output).length > 0 ? output : undefined;
-}
-
-export function normalizeNoFindingReasonCounts(
-  value: unknown,
-): NoFindingReasonCounts | undefined {
-  return normalizeAllowlistedCounts(value, NO_FINDING_REASON_CODES);
-}
-
-const KeywordChangeSchema = z
-  .object({
-    add: KeywordListSchema,
-    remove: KeywordListSchema,
-  })
-  .strict();
-
-const AppliedReviewChangeSchema = z
-  .object({
-    trigger: z.enum(REVIEW_TRIGGER_TYPES),
-    targetKind: z.enum([
-      "intent-markdown",
-      "trigger-keywords",
-      "skill-experience",
-    ]),
-    operation: z.enum([...REVIEW_OPERATIONS, "adjust-trigger-keywords"]),
-    targetIntentIds: z.array(z.string().trim().min(1)),
-    targetExperienceIds: z.array(z.string().trim().min(1)).optional(),
-    targetTrigger: TriggerKeywordTargetSchema.optional(),
-    keywordChange: KeywordChangeSchema.optional(),
-    dedupeKey: z.string().trim().min(1),
-    summary: z.string().trim().min(1),
-    evidence: z.array(z.string()),
-    correctionGoal: z.string().trim().min(1),
-    suggestedChange: z.string().trim().min(1),
-  })
-  .strict()
-  .transform((change): AppliedReviewChange => change);
 
 function hasOnlyKeys(
   value: Record<string, unknown>,
@@ -187,6 +113,24 @@ function hasOnlyKeys(
 ): boolean {
   const allowed = new Set(keys);
   return Object.keys(value).every((key) => allowed.has(key));
+}
+function normalizedCounts<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): Partial<Record<T, number>> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const result: Partial<Record<T, number>> = {};
+  for (const key of allowed) {
+    const count = (value as Record<string, unknown>)[key];
+    if (typeof count === "number" && Number.isInteger(count) && count > 0)
+      result[key] = count;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+export function normalizeNoFindingReasonCounts(
+  value: unknown,
+): NoFindingReasonCounts | undefined {
+  return normalizedCounts(value, NO_FINDING_REASON_CODES);
 }
 
 const PositiveCountsSchema = z.record(z.string(), z.number().int().positive());
@@ -196,42 +140,7 @@ const NoFindingReasonCountsSchema = PositiveCountsSchema.refine((value) =>
 const SchemaRejectionReasonCountsSchema = PositiveCountsSchema.refine((value) =>
   hasOnlyKeys(value, SCHEMA_REJECTION_REASON_CODES),
 ).transform((value): SchemaRejectionReasonCounts => value);
-
-const ProcessedEventRecordSchema = z
-  .object({
-    processedAt: z.string(),
-    source: ReviewSourceSchema.optional(),
-    triggers: z.array(z.enum(REVIEW_TRIGGER_TYPES)),
-    changeCount: z.number().int().nonnegative(),
-    outcome: ProcessedEventOutcomeSchema,
-    changes: z.array(AppliedReviewChangeSchema).optional(),
-    changedIntentIds: z.array(z.string()).optional(),
-    changedExperienceIds: z.array(z.string()).optional(),
-    validationErrors: z.array(z.string()).optional(),
-    noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
-    schemaRejectionReasonCounts: SchemaRejectionReasonCountsSchema.optional(),
-  })
-  .strict()
-  .transform((record): ProcessedEventRecord => record);
-
-const ReviewedSkillEpochSchema = z
-  .object({
-    agentId: z.string().trim().min(1),
-    skillName: z.string().trim().min(1),
-    source: z.enum(SKILL_SOURCE_ORDER),
-    reason: z.enum(["low-adoption", "zero-recommendation-usage"]),
-    completedAt: z.string(),
-    outcome: z.enum(["applied", "nofinding"]),
-    eventId: z.string().trim().min(1),
-  })
-  .strict();
-
-const ReviewedSkillEpochsSchema = z.record(
-  z.string().regex(/^[a-f0-9]{64}$/),
-  ReviewedSkillEpochSchema,
-);
-
-const IntentAppliedReviewChangeSchema = z
+const IntentChangeSchema = z
   .object({
     trigger: z.enum(REVIEW_TRIGGER_TYPES),
     targetKind: z.literal("intent-markdown"),
@@ -244,8 +153,7 @@ const IntentAppliedReviewChangeSchema = z
     suggestedChange: z.string().trim().min(1),
   })
   .strict();
-
-const SkillExperienceAppliedReviewChangeSchema = z
+const ExperienceChangeSchema = z
   .object({
     trigger: z.enum(REVIEW_TRIGGER_TYPES),
     targetKind: z.literal("skill-experience"),
@@ -259,20 +167,16 @@ const SkillExperienceAppliedReviewChangeSchema = z
     suggestedChange: z.string().trim().min(1),
   })
   .strict();
-
-const RuntimeAppliedReviewChangeSchema = z.union([
-  IntentAppliedReviewChangeSchema,
-  SkillExperienceAppliedReviewChangeSchema,
-]);
-
-const RuntimeProcessedEventRecordSchema = z
+const ProcessedEventRecordSchema = z
   .object({
     processedAt: z.string(),
     source: ReviewSourceSchema.optional(),
     triggers: z.array(z.enum(REVIEW_TRIGGER_TYPES)),
     changeCount: z.number().int().nonnegative(),
     outcome: ProcessedEventOutcomeSchema,
-    changes: z.array(RuntimeAppliedReviewChangeSchema).optional(),
+    changes: z
+      .array(z.union([IntentChangeSchema, ExperienceChangeSchema]))
+      .optional(),
     changedIntentIds: z.array(z.string()).optional(),
     changedExperienceIds: z.array(z.string()).optional(),
     validationErrors: z.array(z.string()).optional(),
@@ -280,79 +184,160 @@ const RuntimeProcessedEventRecordSchema = z
     schemaRejectionReasonCounts: SchemaRejectionReasonCountsSchema.optional(),
   })
   .strict()
-  .refine((record) => {
-    const hasKeywordTrigger = record.triggers.some(
-      (trigger) =>
-        trigger === "successful-pattern" ||
-        trigger === "behavior-fix" ||
-        trigger === "entity-context",
-    );
-    return (
-      !hasKeywordTrigger ||
-      (record.changes ?? []).some(
-        (change) => change.targetKind === "skill-experience",
-      )
-    );
-  }, "keyword-capable triggers belong in historical audits unless they create a skill experience");
-
-const HistoricalKeywordAuditRecordSchema = ProcessedEventRecordSchema.refine(
-  (record) =>
-    record.triggers.some(
-      (trigger) =>
-        trigger === "successful-pattern" ||
-        trigger === "behavior-fix" ||
-        trigger === "entity-context",
-    ) ||
-    (record.changes ?? []).some(
-      (change) => change.targetKind === "trigger-keywords",
-    ),
-);
-
-export const ReviewLogV7Schema = z
+  .transform((record): ProcessedEventRecord => record);
+const ReviewedSkillEpochSchema = z
   .object({
-    schemaVersion: z.literal(7),
+    agentId: z.string().trim().min(1),
+    skillName: z.string().trim().min(1),
+    source: z.enum(SKILL_SOURCE_ORDER),
+    reason: z.enum(["low-adoption", "zero-recommendation-usage"]),
+    completedAt: z.string(),
+    outcome: z.enum(["applied", "nofinding"]),
+    eventId: z.string().trim().min(1),
+  })
+  .strict();
+export const ReviewLogV8Schema = z
+  .object({
+    schemaVersion: z.literal(8),
     createdAt: z.string(),
     updatedAt: z.string(),
-    processedEvents: z.record(z.string(), RuntimeProcessedEventRecordSchema),
-    reviewedSkillEpochs: ReviewedSkillEpochsSchema,
-    historicalKeywordAudits: z.record(
-      z.string(),
-      HistoricalKeywordAuditRecordSchema,
+    processedEvents: z.record(z.string(), ProcessedEventRecordSchema),
+    reviewedSkillEpochs: z.record(
+      z.string().regex(/^[a-f0-9]{64}$/),
+      ReviewedSkillEpochSchema,
     ),
   })
   .strict()
-  .transform((log): ReviewLogV7 => log);
+  .transform((log): ReviewLogV8 => log);
 
-export function createReviewLogV7(nowIso: string): ReviewLogV7 {
+export function createReviewLogV8(nowIso: string): ReviewLogV8 {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     createdAt: nowIso,
     updatedAt: nowIso,
     processedEvents: {},
     reviewedSkillEpochs: {},
-    historicalKeywordAudits: {},
   };
 }
 
-export function parseReviewLogV7(raw: unknown): ReviewLogV7 {
-  return ReviewLogV7Schema.parse(raw);
+const legacyTriggerMap: Record<string, ReviewTrigger> = {
+  "successful-pattern": "intent-health-check",
+  "satisfaction-check": "intent-health-check",
+  "behavior-fix": "intent-health-check",
+  "entity-context": "intent-health-check",
+  "missing-intent": "routing-uncertainty",
+  "weak-intent": "routing-uncertainty",
+  "skill-candidate": "capability-fit",
+  "process-gap": "capability-fit",
+  "skill-placement": "capability-fit",
+};
+function migrateLegacyTrigger(value: unknown): ReviewTrigger | undefined {
+  return typeof value === "string"
+    ? (legacyTriggerMap[value] ??
+        (REVIEW_TRIGGER_TYPES.includes(value as ReviewTrigger)
+          ? (value as ReviewTrigger)
+          : undefined))
+    : undefined;
 }
-
-export function pruneReviewLogV7Events(
-  log: ReviewLogV7,
+function migrateLegacyRecord(value: unknown): ProcessedEventRecord | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const record = value as Record<string, unknown>;
+  const triggers = Array.isArray(record.triggers)
+    ? record.triggers
+        .map(migrateLegacyTrigger)
+        .filter((trigger): trigger is ReviewTrigger => Boolean(trigger))
+    : [];
+  if (
+    !triggers.length ||
+    typeof record.processedAt !== "string" ||
+    typeof record.changeCount !== "number" ||
+    !PROCESSED_EVENT_OUTCOMES.includes(record.outcome as ProcessedEventOutcome)
+  )
+    return;
+  const next: ProcessedEventRecord = {
+    processedAt: record.processedAt,
+    triggers: [...new Set(triggers)],
+    changeCount: record.changeCount,
+    outcome: record.outcome as ProcessedEventOutcome,
+  };
+  if (
+    record.source &&
+    typeof record.source === "object" &&
+    !Array.isArray(record.source)
+  )
+    next.source = record.source as ReviewSource;
+  for (const field of [
+    "changedIntentIds",
+    "changedExperienceIds",
+    "validationErrors",
+  ] as const)
+    if (
+      Array.isArray(record[field]) &&
+      record[field].every((item) => typeof item === "string")
+    )
+      next[field] = [...record[field]];
+  next.noFindingReasonCounts = normalizedCounts(
+    record.noFindingReasonCounts,
+    NO_FINDING_REASON_CODES,
+  );
+  next.schemaRejectionReasonCounts = normalizedCounts(
+    record.schemaRejectionReasonCounts,
+    SCHEMA_REJECTION_REASON_CODES,
+  );
+  return next;
+}
+export function migrateReviewLogV7(raw: unknown): ReviewLogV8 | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+  const log = raw as Record<string, unknown>;
+  if (
+    log.schemaVersion !== 7 ||
+    typeof log.createdAt !== "string" ||
+    typeof log.updatedAt !== "string" ||
+    !log.processedEvents ||
+    typeof log.processedEvents !== "object" ||
+    Array.isArray(log.processedEvents) ||
+    !log.reviewedSkillEpochs ||
+    typeof log.reviewedSkillEpochs !== "object" ||
+    Array.isArray(log.reviewedSkillEpochs)
+  )
+    return;
+  const processedEvents: Record<string, ProcessedEventRecord> = {};
+  for (const [eventId, record] of Object.entries(
+    log.processedEvents as Record<string, unknown>,
+  )) {
+    const migrated = migrateLegacyRecord(record);
+    if (migrated) processedEvents[eventId] = migrated;
+  }
+  const candidate = {
+    schemaVersion: 8 as const,
+    createdAt: log.createdAt,
+    updatedAt: log.updatedAt,
+    processedEvents,
+    reviewedSkillEpochs: log.reviewedSkillEpochs,
+  };
+  return ReviewLogV8Schema.safeParse(candidate).data;
+}
+export function parseReviewLogV8(raw: unknown): ReviewLogV8 {
+  return ReviewLogV8Schema.parse(raw);
+}
+export function pruneReviewLogV8Events(
+  log: ReviewLogV8,
   nowMs: number = Date.now(),
 ): void {
-  pruneEventRecords(log.processedEvents, nowMs);
-  pruneEventRecords(log.historicalKeywordAudits, nowMs);
-}
-
-function pruneEventRecords(
-  records: Record<string, { processedAt: string }>,
-  nowMs: number,
-): void {
-  const cutoff = nowMs - PROCESSED_EVENTS_RETENTION_DAYS * 86_400_000;
-  for (const eventId in records) {
-    const eventTime = new Date(records[eventId].processedAt).getTime();
-    if (Number.isNaN(eventTime) || eventTime < cutoff) delete records[eventId];
+  const oldestAcceptedTime = Math.min(
+    ...Object.values(log.processedEvents).map((record) =>
+      new Date(record.processedAt).getTime(),
+    ),
+  );
+  const cutoff = Math.min(
+    nowMs - PROCESSED_EVENTS_RETENTION_DAYS * 86_400_000,
+    Number.isFinite(oldestAcceptedTime) ? oldestAcceptedTime : nowMs,
+  );
+  for (const eventId in log.processedEvents) {
+    const eventTime = new Date(
+      log.processedEvents[eventId]!.processedAt,
+    ).getTime();
+    if (Number.isNaN(eventTime) || eventTime < cutoff)
+      delete log.processedEvents[eventId];
   }
 }

@@ -1,12 +1,12 @@
 import type { ReviewTrigger } from "./triggers.js";
 import type { ReviewOperation } from "./log.js";
-import type { TriggerKeywordTarget } from "./trigger-keywords.js";
 import type { SkillPlacementCandidate } from "../stats/aggregator.js";
 import type {
   AvailableSkill,
   IntentCatalogEntry,
   IntentDefinition,
   IntentionResult,
+  IntentTrigger,
 } from "../types.js";
 
 export interface ReviewRecommendationCandidate {
@@ -14,9 +14,18 @@ export interface ReviewRecommendationCandidate {
   provenance?: string;
 }
 
+export type CapabilityFitEvidence = {
+  source: "tool-call-threshold" | "tool-failure-threshold" | "skill-placement";
+  observedSkillNames: string[];
+  turnHasToolErrors: boolean;
+  recoveryVerified: boolean;
+};
+
 export type ReviewState = {
   input?: string;
   intent?: IntentionResult;
+  routeProvenance?: { trigger: IntentTrigger };
+  capabilityFit?: CapabilityFitEvidence;
   recommendationCandidates?: ReviewRecommendationCandidate[];
   skillsUsed?: Array<{
     name: string;
@@ -82,22 +91,13 @@ export type IntentMarkdownReviewFinding = BaseReviewFinding & {
   targetIntentIds: string[];
 };
 
-export type TriggerKeywordsReviewFinding = BaseReviewFinding & {
-  targetKind: "trigger-keywords";
-  targetTrigger: TriggerKeywordTarget;
-  addKeywords: string[];
-  removeKeywords: string[];
-};
-
 export type SkillExperienceReviewFinding = BaseReviewFinding & {
   targetKind: "skill-experience";
   targetExperienceIds: [string];
 };
 
 export type ReviewFinding =
-  | IntentMarkdownReviewFinding
-  | TriggerKeywordsReviewFinding
-  | SkillExperienceReviewFinding;
+  IntentMarkdownReviewFinding | SkillExperienceReviewFinding;
 
 export type ReviewSource = {
   sessionId: string;

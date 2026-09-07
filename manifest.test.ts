@@ -31,10 +31,7 @@ describe("skill-harness manifest", () => {
   it("matches the runtime contextWindow schema", () => {
     const properties =
       manifest.configSchema.properties.routing.properties.classifier.properties;
-
-    expect(manifest.configSchema.properties).not.toHaveProperty(
-      "contextWindow",
-    );
+    expect(manifest.configSchema.properties).not.toHaveProperty("contextWindow");
     expect(properties).not.toHaveProperty("recentUserTurns");
     expect(properties).not.toHaveProperty("recentAssistantTurns");
     expect(properties).not.toHaveProperty("recentUserChars");
@@ -44,59 +41,22 @@ describe("skill-harness manifest", () => {
       description: "Turn and character limits for recent conversation context.",
       additionalProperties: false,
       properties: {
-        user: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            turns: { type: "integer", minimum: 0, maximum: 20, default: 5 },
-            chars: {
-              type: "integer",
-              minimum: 40,
-              maximum: 1000,
-              default: 220,
-            },
-          },
-        },
-        assistant: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            turns: { type: "integer", minimum: 0, maximum: 10, default: 5 },
-            chars: {
-              type: "integer",
-              minimum: 40,
-              maximum: 1000,
-              default: 180,
-            },
-          },
-        },
+        user: { type: "object", additionalProperties: false, properties: { turns: { type: "integer", minimum: 0, maximum: 20, default: 5 }, chars: { type: "integer", minimum: 40, maximum: 1000, default: 220 } } },
+        assistant: { type: "object", additionalProperties: false, properties: { turns: { type: "integer", minimum: 0, maximum: 10, default: 5 }, chars: { type: "integer", minimum: 40, maximum: 1000, default: 180 } } },
       },
       default: {},
     });
   });
 
   it("keeps timeoutMs aligned with the runtime schema", () => {
-    const timeoutMs =
-      manifest.configSchema.properties.routing.properties.classifier.properties
-        .timeoutMs;
-    expect(timeoutMs).toMatchObject({
-      minimum: 1_000,
-      maximum: 60_000,
-      default: 5_000,
-    });
+    const timeoutMs = manifest.configSchema.properties.routing.properties.classifier.properties.timeoutMs;
+    expect(timeoutMs).toMatchObject({ minimum: 1_000, maximum: 60_000, default: 5_000 });
   });
 
   it("does not apply null defaults to optional model strings", () => {
     const properties = manifest.configSchema.properties;
     const classifierProps = properties.routing.properties.classifier.properties;
-    const optionalModels = [
-      classifierProps.model,
-      classifierProps.modelFallback,
-      properties.review.properties.model,
-      properties.review.properties.modelFallback,
-    ];
-
-    for (const model of optionalModels) {
+    for (const model of [classifierProps.model, classifierProps.modelFallback, properties.review.properties.model, properties.review.properties.modelFallback]) {
       expect(model.type).toBe("string");
       expect(model).not.toHaveProperty("default");
     }
@@ -106,79 +66,34 @@ describe("skill-harness manifest", () => {
     expect(manifest.configSchema.properties).not.toHaveProperty("curation");
   });
 
-  it("exposes disabled-by-default Review settings", () => {
+  it("exposes disabled-by-default three-trigger Review settings", () => {
     const review = manifest.configSchema.properties.review;
+    const triggers = review.properties.triggers.properties;
     expect(manifest.configSchema.properties).not.toHaveProperty("evolution");
-    expect(review.description).toContain("Intent Review runs");
+    expect(review.description).toContain("post-turn");
     expect(review.properties.enabled.default).toBe(false);
-    expect(review.properties.model.description).toContain(
-      "inherits the top-level model",
-    );
-    expect(review.properties.modelFallback.description).toContain(
-      "Last-resort Intent Review model",
-    );
-    expect(review.properties.modelFallback.description).toContain(
-      "not a runtime retry model",
-    );
-    expect(review.properties.timeoutSeconds).toMatchObject({
-      minimum: 60,
-      maximum: 1800,
-      default: 300,
-    });
-    expect(review.properties.keywordCoverage).toEqual({
-      type: "object",
-      description:
-        "Automatic cross-session keyword coverage review cadence for accepted routed turns.",
-      additionalProperties: false,
-      properties: {
-        everyAcceptedTurns: {
-          type: "integer",
-          minimum: 10,
-          maximum: 1000,
-          default: 50,
-        },
-      },
-      default: {},
-    });
-    expect(
-      review.properties.triggers.properties.skillCandidate.properties.toolCalls
-        .default,
-    ).toBe(5);
-    expect(
-      review.properties.triggers.properties.weakIntent.properties
-        .confidenceBelow.default,
-    ).toBe(0.5);
+    expect(review.properties.model.description).toContain("inherits the top-level model");
+    expect(review.properties.modelFallback.description).toContain("Last-resort Intent Review model");
+    expect(review.properties.modelFallback.description).toContain("not a runtime retry model");
+    expect(review.properties.timeoutSeconds).toMatchObject({ minimum: 60, maximum: 1800, default: 300 });
+    expect(review.properties).not.toHaveProperty("keywordCoverage");
+    expect(triggers.intentHealthCheck.properties.everyTurns.default).toBe(10);
+    expect(triggers.routingUncertainty.properties.confidenceBelow.default).toBe(0.5);
+    expect(triggers.capabilityFit.properties.toolCalls.default).toBe(5);
+    expect(triggers.capabilityFit.properties.toolFailures.default).toBe(2);
+    for (const removed of ["skillCandidate", "skillPlacement", "processGap", "successfulPattern", "satisfactionCheck", "missingIntent", "weakIntent", "behaviorFix", "entityContext"]) {
+      expect(triggers).not.toHaveProperty(removed);
+    }
   });
 
   it("does not expose removed instruction writer or lowEffortRoutingMode settings", () => {
     expect(manifest.configSchema.properties).not.toHaveProperty("instruction");
-    expect(manifest.configSchema.properties).not.toHaveProperty(
-      "lowEffortRoutingMode",
-    );
+    expect(manifest.configSchema.properties).not.toHaveProperty("lowEffortRoutingMode");
   });
 
   it("documents the strict upgrade path for removed instruction settings", () => {
     expect(readme).toContain("### Upgrade from the removed instruction writer");
-    expect(readme).toContain(
-      "remove the entire legacy `instruction: { ... }` block",
-    );
+    expect(readme).toContain("remove the entire legacy `instruction: { ... }` block");
     expect(readme).toContain("no automatic migration or compatibility parser");
-  });
-
-  it("accepts deprecated keyword seeds for strict-schema upgrades", () => {
-    const triggers =
-      manifest.configSchema.properties.review.properties.triggers.properties;
-
-    for (const trigger of [
-      triggers.successfulPattern,
-      triggers.behaviorFix,
-      triggers.entityContext,
-    ]) {
-      expect(trigger.properties.keywords).toMatchObject({
-        type: "array",
-        items: { type: "string" },
-      });
-      expect(trigger.properties.keywords.description).toContain("Deprecated");
-    }
   });
 });

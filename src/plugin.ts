@@ -11,12 +11,6 @@ import { IntentCatalog } from "./intents/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
-import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
-
-import {
-  normalizeReviewTriggerKeywords,
-  type ReviewTriggerKeywords,
-} from "./review/trigger-keywords.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
 import { resolveSkillRoots } from "./skills/roots.js";
@@ -40,17 +34,6 @@ const EXAMPLE_INTENT_ASSETS_DIR = path.join(
   "skill-harness",
   "assets",
 );
-
-function readKeywordCoverageKeywordsFailOpen(
-  writer: KeywordCoverageWriter,
-): ReviewTriggerKeywords {
-  try {
-    return writer.readKeywords() ?? normalizeReviewTriggerKeywords({});
-  } catch (err) {
-    logger.warn("failed to read keyword coverage keywords", { error: err });
-    return normalizeReviewTriggerKeywords({});
-  }
-}
 
 function copyFileIfMissing(sourcePath: string, targetPath: string): void {
   if (fs.existsSync(targetPath)) return;
@@ -304,16 +287,6 @@ export function createPlugin(
       });
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
-      const keywordCoverageWriter = new KeywordCoverageWriter(dataRoot);
-      let triggerKeywordCache = readKeywordCoverageKeywordsFailOpen(
-        keywordCoverageWriter,
-      );
-      const refreshTriggerKeywordCache = () => {
-        triggerKeywordCache = readKeywordCoverageKeywordsFailOpen(
-          keywordCoverageWriter,
-        );
-      };
-
       const reviewLogWriter = new IntentReviewLogWriter(dataRoot);
 
       const refreshRuntimeIntents = () => {
@@ -395,9 +368,6 @@ export function createPlugin(
         tracker,
         statsAggregator,
         reviewLogWriter,
-        keywordCoverageWriter,
-        triggerKeywords: () => triggerKeywordCache,
-        refreshTriggerKeywords: refreshTriggerKeywordCache,
         getConfiguredAgentSkills,
         qmdIntentIndex,
         qmdSkillIndex,
@@ -409,7 +379,6 @@ export function createPlugin(
       const handlers = createHookHandlers(deps);
 
       refreshLiveConfigFromRuntime();
-      refreshTriggerKeywordCache();
       refreshQmdIndexes();
       scheduleQmdIndexRefresh();
 

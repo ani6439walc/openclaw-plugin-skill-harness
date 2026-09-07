@@ -83,24 +83,6 @@ class RuntimeHealthAuditTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        (self.root / "keyword-coverage.json").write_text(
-            json.dumps(
-                {
-                    "schemaVersion": 1,
-                    "createdAt": "2026-08-01T00:00:00.000Z",
-                    "updatedAt": "2026-08-01T00:00:00.000Z",
-                    "triggerKeywords": {
-                        "successfulPattern": ["done"],
-                        "behaviorFix": ["wrong", "fix"],
-                        "entityContext": ["context"],
-                    },
-                    "processedKeywordEvents": {},
-                    "targets": {},
-                    "coverageEpochs": {},
-                }
-            ),
-            encoding="utf-8",
-        )
         (self.root / "stats.json").write_text(
             json.dumps(
                 {
@@ -267,10 +249,6 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                 "topTargetIntents": [{"intent": "example", "changes": 1}],
             },
         )
-        self.assertEqual(
-            report["runtime"]["keywordCoverage"]["keywordCounts"],
-            {"successfulPattern": 1, "behaviorFix": 2, "entityContext": 1},
-        )
         self.assertEqual(report["runtime"]["sessions"]["sessionFiles"], 1)
         self.assertEqual(report["runtime"]["sessions"]["agentArtifactFiles"], 1)
         self.assertEqual(report["runtime"]["intents"]["markdownFiles"], 1)
@@ -288,7 +266,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                 "snapshotMatchesIndexedDocuments": True,
             },
         )
-        self.assertEqual(set(report["provenance"]["stateSha256"]), {"review.json", "keyword-coverage.json", "stats.json"})
+        self.assertEqual(set(report["provenance"]["stateSha256"]), {"review.json", "stats.json"})
         stats = report["runtime"]["stats"]
         self.assertEqual(stats["attribution"]["status"], "insufficient-historical-attribution")
         self.assertEqual(stats["summary"]["curationAppliedCount"], None)

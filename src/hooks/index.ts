@@ -12,19 +12,11 @@ import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { runReviewSubagent } from "../review/subagent.js";
 import type {
-  IntentMarkdownReviewFinding,
+  CapabilityFitEvidence,
   SelectedPlacementSkill,
-  TriggerKeywordsReviewFinding,
+  SkillPlacementReviewCandidate,
 } from "../review/types.js";
-import type { SkillPlacementReviewCandidate } from "../review/types.js";
-import {
-  DEFAULT_REVIEW_TRIGGER_KEYWORDS,
-  type ReviewTriggerKeywords,
-  type TriggerKeywordTarget,
-} from "../review/trigger-keywords.js";
-import { discoverKeywordCoverageCandidates } from "../review/keyword-coverage.js";
 import { enqueueReview } from "../review/queue.js";
-import { runKeywordCoverageReview } from "../review/keyword-coverage-subagent.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import {
@@ -124,20 +116,7 @@ function sanitizeHistoricalIntentRecords(
 const MAX_PROJECTION_CANDIDATE_IDS = 128;
 const MAX_PROJECTION_MATCHED_KEYWORDS = 32;
 const MAX_PROJECTION_KEYWORD_CHARS = 200;
-const KEYWORD_COVERAGE_TARGETS: readonly TriggerKeywordTarget[] = [
-  "successful-pattern",
-  "behavior-fix",
-  "entity-context",
-];
-const KEYWORD_COVERAGE_RETRY_INTERVAL = 5;
 const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
-
-type CoverageRuntimeTargets = Partial<
-  Record<
-    TriggerKeywordTarget,
-    { cursor: number; lastCompletedAcceptedTurn: number }
-  >
->;
 
 export function formatConversationExpansionContext(params: {
   conversation?: readonly RecentTurn[];
@@ -238,34 +217,6 @@ async function resolveSelectedPlacementSkill(
   }
 }
 
-export function coverageEpochMilestone(params: {
-  cadence: number;
-  runtimeTargets: CoverageRuntimeTargets | undefined;
-}): number {
-  return (
-    Math.max(
-      0,
-      ...KEYWORD_COVERAGE_TARGETS.map(
-        (target) =>
-          params.runtimeTargets?.[target]?.lastCompletedAcceptedTurn ?? 0,
-      ),
-    ) + params.cadence
-  );
-}
-
-export function coverageWatermarkEligible(params: {
-  acceptedTurn: number;
-  cadence: number;
-  runtimeTargets: CoverageRuntimeTargets | undefined;
-}): boolean {
-  const milestone = coverageEpochMilestone(params);
-  if (params.acceptedTurn < milestone) return false;
-  return (
-    params.acceptedTurn === milestone ||
-    (params.acceptedTurn - milestone) % KEYWORD_COVERAGE_RETRY_INTERVAL === 0
-  );
-}
-
 function measureProjectionCatalogs(
   originalIntents: readonly IntentCatalogEntry[],
   candidateIntents: readonly IntentCatalogEntry[],
@@ -320,18 +271,6 @@ function toIntentProjectionTelemetry(params: {
       .slice(0, MAX_PROJECTION_MATCHED_KEYWORDS)
       .map((keyword) => keyword.slice(0, MAX_PROJECTION_KEYWORD_CHARS)),
   };
-}
-
-function readTriggerKeywordsFailOpen(
-  reader?: () => ReviewTriggerKeywords,
-): ReviewTriggerKeywords {
-  if (!reader) return DEFAULT_REVIEW_TRIGGER_KEYWORDS;
-  try {
-    return reader();
-  } catch (error) {
-    logger.warn("failed to read review trigger keywords", { error });
-    return DEFAULT_REVIEW_TRIGGER_KEYWORDS;
-  }
 }
 
 function toPromptBuildResult(
@@ -458,14 +397,11 @@ export function createHookHandlers(deps: HookDeps) {
   const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
     deps.reviewLogWriter ??
     new IntentReviewLogWriter(deps.dataRoot ?? packageRoot);
-  const coverageReviewer = deps.coverageReviewer ?? runKeywordCoverageReview;
-  const keywordCoverageWriter = deps.keywordCoverageWriter;
   const bundledSkillsDir = deps.bundledSkillsDir;
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
   const recordedToolCalls = new Set<string>();
   const pendingSkillEpochKeys = new Set<string>();
-  const pendingCoverageEpochKeys = new Set<string>();
   const turnAssociations =
     deps.turnAssociations ?? new TurnAssociationRegistry();
 
@@ -1458,6 +1394,7 @@ export function createHookHandlers(deps: HookDeps) {
     intentDefinition: ReturnType<typeof findIntentDefinition>,
     agentId: string,
     skillPlacementCandidate?: SkillPlacementReviewCandidate,
+    capabilityFit?: CapabilityFitEvidence,
   ) {
     const availableSkillNames = skillPlacementCandidate
       ? [skillPlacementCandidate.name]
@@ -1484,6 +1421,10 @@ export function createHookHandlers(deps: HookDeps) {
     return {
       ...baseSnapshot,
       ...(skillPlacementCandidate ? { agentId } : {}),
+      current: {
+        ...baseSnapshot.current,
+        ...(capabilityFit ? { capabilityFit } : {}),
+      },
       matchedIntent: intentDefinition
         ? {
             id: intentDefinition.id,
@@ -1556,130 +1497,27 @@ export function createHookHandlers(deps: HookDeps) {
             dataRoot: deps.dataRoot,
           });
           if (!reviewResult) return;
-          const keywordWriter = deps.keywordCoverageWriter;
-          if (!keywordWriter) {
-            await reviewLogWriter.record(
-              params.snapshot.eventId,
-              {
-                sessionId: params.snapshot.sessionId,
-                sessionKey: params.snapshot.sessionKey,
-                agentId: params.snapshot.agentId,
-                turnStart: params.snapshot.current.timestamps!.start!,
-              },
-              reviewResult.findings,
-              {
-                triggers: params.triggers,
-                outcome: reviewResult.outcome,
-                changedIntentIds: reviewResult.changedIntentIds,
-                changedExperienceIds: reviewResult.changedExperienceIds,
-                validationErrors: reviewResult.validationErrors,
-                noFindingReasonCounts: reviewResult.noFindingReasonCounts,
-                schemaRejectionReasonCounts:
-                  reviewResult.schemaRejectionReasonCounts,
-                skillPlacementCandidate: params.skillPlacementCandidate,
-              },
-            );
-          } else {
-            // Split findings by targetKind
-            const keywordFindings = reviewResult.findings.filter(
-              (f): f is TriggerKeywordsReviewFinding =>
-                f.targetKind === "trigger-keywords",
-            );
-            const intentFindings = reviewResult.findings.filter(
-              (f): f is IntentMarkdownReviewFinding =>
-                f.targetKind === "intent-markdown",
-            );
-            const experienceFindings = reviewResult.findings.filter(
-              (f) => f.targetKind === "skill-experience",
-            );
-            const keywordTriggered = params.triggers.some(
-              (trigger) =>
-                trigger === "successful-pattern" ||
-                trigger === "behavior-fix" ||
-                trigger === "entity-context",
-            );
-            const intentTriggers = params.triggers.filter(
-              (trigger) =>
-                trigger !== "successful-pattern" &&
-                trigger !== "behavior-fix" &&
-                trigger !== "entity-context",
-            );
-
-            if (keywordTriggered) {
-              await reviewLogWriter.recordHistoricalKeywordAudit?.(
-                params.snapshot.eventId,
-                {
-                  sessionId: params.snapshot.sessionId,
-                  sessionKey: params.snapshot.sessionKey,
-                  agentId: params.snapshot.agentId,
-                  turnStart: params.snapshot.current.timestamps!.start!,
-                },
-                keywordFindings,
-                {
-                  triggers: params.triggers,
-                  outcome: reviewResult.outcome,
-                  noFindingReasonCounts: reviewResult.noFindingReasonCounts,
-                  schemaRejectionReasonCounts:
-                    reviewResult.schemaRejectionReasonCounts,
-                },
-              );
-            }
-
-            if (keywordFindings.length > 0) {
-              // Only record keyword events for successful outcomes
-              if (
-                reviewResult.outcome === "applied" ||
-                reviewResult.outcome === "nofinding"
-              ) {
-                await keywordWriter.recordKeywordEvent({
-                  eventId: params.snapshot.eventId,
-                  policy: "ordinary",
-                  targets: [
-                    ...new Set(keywordFindings.map((f) => f.targetTrigger)),
-                  ],
-                  mutations: keywordFindings.map((f) => ({
-                    target: f.targetTrigger,
-                    add: f.addKeywords,
-                    remove: f.removeKeywords,
-                  })),
-                  outcome: reviewResult.outcome,
-                });
-                deps.refreshTriggerKeywords?.();
-              }
-            }
-
-            if (
-              intentTriggers.length > 0 ||
-              intentFindings.length > 0 ||
-              experienceFindings.length > 0 ||
-              params.skillPlacementCandidate
-            ) {
-              await reviewLogWriter.record(
-                params.snapshot.eventId,
-                {
-                  sessionId: params.snapshot.sessionId,
-                  sessionKey: params.snapshot.sessionKey,
-                  agentId: params.snapshot.agentId,
-                  turnStart: params.snapshot.current.timestamps!.start!,
-                },
-                [...intentFindings, ...experienceFindings],
-                {
-                  triggers: [
-                    ...intentTriggers,
-                    ...experienceFindings.map((finding) => finding.trigger),
-                  ],
-                  outcome: reviewResult.outcome,
-                  changedIntentIds: reviewResult.changedIntentIds,
-                  changedExperienceIds: reviewResult.changedExperienceIds,
-                  validationErrors: reviewResult.validationErrors,
-                  noFindingReasonCounts: reviewResult.noFindingReasonCounts,
-                  schemaRejectionReasonCounts:
-                    reviewResult.schemaRejectionReasonCounts,
-                  skillPlacementCandidate: params.skillPlacementCandidate,
-                },
-              );
-            }
-          }
+          await reviewLogWriter.record(
+            params.snapshot.eventId,
+            {
+              sessionId: params.snapshot.sessionId,
+              sessionKey: params.snapshot.sessionKey,
+              agentId: params.snapshot.agentId,
+              turnStart: params.snapshot.current.timestamps!.start!,
+            },
+            reviewResult.findings,
+            {
+              triggers: params.triggers,
+              outcome: reviewResult.outcome,
+              changedIntentIds: reviewResult.changedIntentIds,
+              changedExperienceIds: reviewResult.changedExperienceIds,
+              validationErrors: reviewResult.validationErrors,
+              noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+              schemaRejectionReasonCounts:
+                reviewResult.schemaRejectionReasonCounts,
+              skillPlacementCandidate: params.skillPlacementCandidate,
+            },
+          );
           if (reviewResult.changedIntentIds?.length) {
             deps.refreshIntents();
           }
@@ -1698,258 +1536,49 @@ export function createHookHandlers(deps: HookDeps) {
     }
   }
 
-  function buildCoverageEpochKey(params: {
-    acceptedTurn: number;
-    cadence: number;
-    keywordFingerprint: string;
-  }): string {
-    return createHash("sha256")
-      .update(
-        `coverage:${params.cadence}:${params.acceptedTurn}:${params.keywordFingerprint}`,
-      )
-      .digest("hex");
-  }
-
-  function fingerprintKeywords(keywords: ReviewTriggerKeywords): string {
-    return createHash("sha256")
-      .update(
-        JSON.stringify({
-          successfulPattern: keywords.successfulPattern,
-          behaviorFix: keywords.behaviorFix,
-          entityContext: keywords.entityContext,
-        }),
-      )
-      .digest("hex");
-  }
-
-  function readCoverageCursors(
-    runtimeTargets:
-      | Partial<
-          Record<
-            TriggerKeywordTarget,
-            { cursor: number; lastCompletedAcceptedTurn: number }
-          >
-        >
-      | undefined,
-  ): Record<TriggerKeywordTarget, number> {
-    return {
-      "successful-pattern": runtimeTargets?.["successful-pattern"]?.cursor ?? 0,
-      "behavior-fix": runtimeTargets?.["behavior-fix"]?.cursor ?? 0,
-      "entity-context": runtimeTargets?.["entity-context"]?.cursor ?? 0,
-    };
-  }
-
-  function enqueueKeywordCoverageRun(params: {
-    ctx: PluginHookAgentContext;
-    resolvedConfig: ResolvedSkillHarnessPluginConfig;
-    agentId: string;
-    modelRef: NonNullable<ReturnType<typeof getReviewModelRef>>;
-    acceptedTurn: number;
-    epochKey: string;
-  }): boolean {
-    if (!keywordCoverageWriter || !deps.dataRoot) return false;
-    try {
-      enqueueReviewTask(async () => {
-        try {
-          const runtimeState = keywordCoverageWriter.readRuntimeState();
-          if (!runtimeState) {
-            await keywordCoverageWriter.releaseCoverageEpoch({
-              epochKey: params.epochKey,
-            });
-            return;
-          }
-
-          const triggerKeywords =
-            runtimeState.triggerKeywords ??
-            readTriggerKeywordsFailOpen(deps.triggerKeywords);
-          const cursor = readCoverageCursors(runtimeState.targets);
-          const sessions =
-            typeof tracker.listRetainedSessions === "function"
-              ? tracker.listRetainedSessions()
-              : [];
-          const discovery = discoverKeywordCoverageCandidates({
-            sessions,
-            config: params.resolvedConfig.review.triggers,
-            triggerKeywords,
-            cursor,
-          });
-
-          const removalDocuments = KEYWORD_COVERAGE_TARGETS.flatMap(
-            (target) => discovery.removals[target] ?? [],
-          );
-          const documents =
-            removalDocuments.length > 0
-              ? removalDocuments
-              : KEYWORD_COVERAGE_TARGETS.flatMap(
-                  (target) => discovery.additions[target] ?? [],
-                );
-          if (documents.length === 0) {
-            await keywordCoverageWriter.completeCoverageEpoch({
-              epochKey: params.epochKey,
-              outcome: "nofinding",
-              nextCursors: discovery.nextCursor,
-            });
-            return;
-          }
-
-          const reviewResult = await coverageReviewer({
-            api,
-            dataRoot: deps.dataRoot!,
-            agentId: params.agentId,
-            sessionId: params.ctx.sessionId,
-            sessionKey: params.ctx.sessionKey,
-            messageProvider: params.ctx.messageProvider,
-            triggerKeywords,
-            documents,
-            cursor,
-            config: {
-              model: params.modelRef.model,
-              modelFallback:
-                params.resolvedConfig.review.modelFallback ??
-                params.resolvedConfig.routing.classifier.modelFallback,
-              thinking: params.resolvedConfig.review.thinking,
-              timeoutMs: params.resolvedConfig.review.timeoutSeconds * 1_000,
-            },
-            modelRef: params.modelRef,
-            pluginConfig: params.resolvedConfig,
-          });
-
-          if (!reviewResult) {
-            await keywordCoverageWriter.releaseCoverageEpoch({
-              epochKey: params.epochKey,
-            });
-            return;
-          }
-
-          const mutations = reviewResult.decisions
-            .filter((decision) => decision.outcome === "finding")
-            .map((decision) => ({
-              target: decision.target,
-              add: decision.addition ? [decision.addition.phrase] : [],
-              remove: decision.removal ? [decision.removal.phrase] : [],
-            }))
-            .filter(
-              (mutation) =>
-                mutation.add.length > 0 || mutation.remove.length > 0,
-            );
-
-          const outcome = mutations.length > 0 ? "applied" : "nofinding";
-          if (mutations.length > 0) {
-            const writeResult = await keywordCoverageWriter.recordKeywordEvent({
-              eventId: `coverage:${params.epochKey}`,
-              policy: "coverage",
-              targets: mutations.map((mutation) => mutation.target),
-              mutations,
-              outcome: "applied",
-            });
-            if (writeResult === "retryable-failure") {
-              await keywordCoverageWriter.releaseCoverageEpoch({
-                epochKey: params.epochKey,
-              });
-              return;
-            }
-            deps.refreshTriggerKeywords?.();
-          }
-
-          const completeResult =
-            await keywordCoverageWriter.completeCoverageEpoch({
-              epochKey: params.epochKey,
-              outcome,
-              nextCursors: discovery.nextCursor,
-            });
-          if (completeResult === "retryable-failure") {
-            await keywordCoverageWriter.releaseCoverageEpoch({
-              epochKey: params.epochKey,
-            });
-          }
-        } catch (error) {
-          logger.warn("keyword coverage epoch failed", { error });
-          try {
-            await keywordCoverageWriter.releaseCoverageEpoch({
-              epochKey: params.epochKey,
-            });
-          } catch (releaseError) {
-            logger.warn("failed to release keyword coverage epoch", {
-              error: releaseError,
-            });
-          }
-        } finally {
-          pendingCoverageEpochKeys.delete(params.epochKey);
-        }
-      });
-      return true;
-    } catch (error) {
-      logger.warn("failed to enqueue keyword coverage", { error });
-      return false;
+  function resolveCapabilityFitEvidence(params: {
+    snapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>;
+    config: ResolvedSkillHarnessPluginConfig;
+    skillPlacementCandidate?: SkillPlacementReviewCandidate;
+  }): CapabilityFitEvidence | undefined {
+    const observedSkillNames = [
+      ...new Set(
+        (params.snapshot.current.skillsUsed ?? []).map((skill) =>
+          skill.name.trim().toLowerCase(),
+        ),
+      ),
+    ];
+    if (params.skillPlacementCandidate) {
+      return {
+        source: "skill-placement",
+        observedSkillNames,
+        turnHasToolErrors: (params.snapshot.current.toolCalls ?? []).some(
+          (call) => call.error !== undefined,
+        ),
+        recoveryVerified: false,
+      };
     }
-  }
 
-  async function maybeEnqueueKeywordCoverage(params: {
-    ctx: PluginHookAgentContext;
-    resolvedConfig: ResolvedSkillHarnessPluginConfig;
-    acceptedTurn: number;
-  }): Promise<void> {
-    if (!keywordCoverageWriter || !deps.dataRoot) return;
-    if (!params.resolvedConfig.review.enabled) return;
-
-    try {
-      const cadence =
-        params.resolvedConfig.review.keywordCoverage.everyAcceptedTurns;
-      const runtimeState = keywordCoverageWriter.readRuntimeState();
-      if (!runtimeState) return;
-      if (
-        !coverageWatermarkEligible({
-          acceptedTurn: params.acceptedTurn,
-          cadence,
-          runtimeTargets: runtimeState.targets,
-        })
-      ) {
-        return;
-      }
-
-      const milestone = coverageEpochMilestone({
-        cadence,
-        runtimeTargets: runtimeState.targets,
-      });
-      const keywordFingerprint = fingerprintKeywords(
-        runtimeState.triggerKeywords,
-      );
-      const epochKey = buildCoverageEpochKey({
-        acceptedTurn: milestone,
-        cadence,
-        keywordFingerprint,
-      });
-      if (pendingCoverageEpochKeys.has(epochKey)) return;
-
-      const agentId = params.ctx.agentId ?? "main";
-      const modelRef = getReviewModelRef(api, agentId, params.resolvedConfig, {
-        modelProviderId: params.ctx.modelProviderId,
-        modelId: params.ctx.modelId,
-      });
-      if (!modelRef) return;
-
-      const reserved = await keywordCoverageWriter.reserveCoverageEpoch({
-        epochKey,
-        targets: KEYWORD_COVERAGE_TARGETS,
-        acceptedTurn: params.acceptedTurn,
-      });
-      if (reserved !== "applied") return;
-
-      pendingCoverageEpochKeys.add(epochKey);
-      const enqueued = enqueueKeywordCoverageRun({
-        ctx: params.ctx,
-        resolvedConfig: params.resolvedConfig,
-        agentId,
-        modelRef,
-        acceptedTurn: params.acceptedTurn,
-        epochKey,
-      });
-      if (!enqueued) {
-        pendingCoverageEpochKeys.delete(epochKey);
-        await keywordCoverageWriter.releaseCoverageEpoch({ epochKey });
-      }
-    } catch (error) {
-      logger.warn("failed to schedule keyword coverage", { error });
+    const toolCalls = params.snapshot.current.toolCalls ?? [];
+    const toolFailureCount = toolCalls.filter(
+      (call) => call.error !== undefined,
+    ).length;
+    if (toolFailureCount >= params.config.review.triggers.capabilityFit.toolFailures) {
+      return {
+        source: "tool-failure-threshold",
+        observedSkillNames,
+        turnHasToolErrors: true,
+        // The tracker has no tool-call-to-recovery association; do not infer it.
+        recoveryVerified: false,
+      };
+    }
+    if (toolCalls.length >= params.config.review.triggers.capabilityFit.toolCalls) {
+      return {
+        source: "tool-call-threshold",
+        observedSkillNames,
+        turnHasToolErrors: false,
+        recoveryVerified: false,
+      };
     }
   }
 
@@ -1965,19 +1594,6 @@ export function createHookHandlers(deps: HookDeps) {
     const reviewConfig = resolvedConfig.review;
     if (!reviewConfig.enabled) return;
 
-    try {
-      const acceptedTurn = statsAggregator.getAcceptedTurnCount?.();
-      if (typeof acceptedTurn === "number") {
-        await maybeEnqueueKeywordCoverage({
-          ctx,
-          resolvedConfig,
-          acceptedTurn,
-        });
-      }
-    } catch (error) {
-      logger.warn("failed to evaluate keyword coverage schedule", { error });
-    }
-
     const baseSnapshot = tracker.getReviewSnapshotForTurn(
       association.sessionId,
       association.turnKey,
@@ -1987,13 +1603,12 @@ export function createHookHandlers(deps: HookDeps) {
       baseSnapshot.current,
       baseSnapshot.turnNumber,
       reviewConfig.triggers,
-      readTriggerKeywordsFailOpen(deps.triggerKeywords),
     );
     let skillPlacementCandidate: SkillPlacementReviewCandidate | undefined;
     let ownsReservation = false;
     try {
       if (
-        reviewConfig.triggers.skillPlacement.enabled &&
+        reviewConfig.triggers.capabilityFit.enabled &&
         agentEndStats.agentId &&
         agentEndStats.skillInventoryObserved
       ) {
@@ -2022,7 +1637,9 @@ export function createHookHandlers(deps: HookDeps) {
                 )
                 .map((entry) => entry.id),
             };
-            triggers.push("skill-placement");
+            if (!triggers.includes("capability-fit")) {
+              triggers.push("capability-fit");
+            }
           }
         }
       }
@@ -2036,11 +1653,17 @@ export function createHookHandlers(deps: HookDeps) {
         modelId: ctx.modelId,
       });
       if (!modelRef) return;
+      let capabilityFit = resolveCapabilityFitEvidence({
+        snapshot: baseSnapshot,
+        config: resolvedConfig,
+        skillPlacementCandidate,
+      });
       let snapshot = await buildReviewSnapshot(
         baseSnapshot,
         agentEndStats.intentDefinition,
         agentId,
         skillPlacementCandidate,
+        capabilityFit,
       );
       const placementSkillName = skillPlacementCandidate?.name
         .trim()
@@ -2049,9 +1672,16 @@ export function createHookHandlers(deps: HookDeps) {
         pendingSkillEpochKeys.delete(skillPlacementCandidate!.epochKey);
         ownsReservation = false;
         skillPlacementCandidate = undefined;
-        const placementTriggerIndex = triggers.indexOf("skill-placement");
-        if (placementTriggerIndex >= 0)
-          triggers.splice(placementTriggerIndex, 1);
+        capabilityFit = resolveCapabilityFitEvidence({
+          snapshot: baseSnapshot,
+          config: resolvedConfig,
+        });
+        if (!capabilityFit) {
+          const capabilityTriggerIndex = triggers.indexOf("capability-fit");
+          if (capabilityTriggerIndex >= 0) {
+            triggers.splice(capabilityTriggerIndex, 1);
+          }
+        }
         if (triggers.length === 0) return;
 
         agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
@@ -2065,6 +1695,7 @@ export function createHookHandlers(deps: HookDeps) {
           agentEndStats.intentDefinition,
           agentId,
           undefined,
+          capabilityFit,
         );
       }
 

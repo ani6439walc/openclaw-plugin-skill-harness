@@ -66,20 +66,6 @@ def load_review_log(path: Path) -> dict[str, Any]:
     return value
 
 
-def load_keyword_coverage_log(path: Path) -> dict[str, Any]:
-    value = load_json(path)
-    if value.get("schemaVersion") != 1:
-        raise ValueError(f"{path} must be a current schema-v1 keyword coverage log")
-    keywords = require_object(value, "triggerKeywords", path)
-    for field in ("successfulPattern", "behaviorFix", "entityContext"):
-        if not isinstance(keywords.get(field), list) or not all(
-            isinstance(keyword, str) for keyword in keywords[field]
-        ):
-            raise ValueError(f"{path} has invalid triggerKeywords.{field}")
-    for field in ("processedKeywordEvents", "targets", "coverageEpochs"):
-        require_object(value, field, path)
-    return value
-
 
 def load_stats(path: Path) -> dict[str, Any]:
     value = load_json(path)
@@ -578,17 +564,15 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
 
 def build_report(data_root: Path) -> dict[str, Any]:
     review_path = data_root / "review.json"
-    coverage_path = data_root / "keyword-coverage.json"
     stats_path = data_root / "stats.json"
-    for path in (review_path, coverage_path, stats_path):
+    for path in (review_path, stats_path):
         if not path.is_file():
             raise ValueError(f"missing required runtime state: {path}")
 
-    before_hashes = {path.name: sha256(path) for path in (review_path, coverage_path, stats_path)}
+    before_hashes = {path.name: sha256(path) for path in (review_path, stats_path)}
     review = load_review_log(review_path)
-    coverage = load_keyword_coverage_log(coverage_path)
     stats = load_stats(stats_path)
-    after_hashes = {path.name: sha256(path) for path in (review_path, coverage_path, stats_path)}
+    after_hashes = {path.name: sha256(path) for path in (review_path, stats_path)}
     changed = sorted(name for name in before_hashes if before_hashes[name] != after_hashes[name])
     if changed:
         raise ValueError(f"runtime state changed while being read: {', '.join(changed)}")
@@ -613,20 +597,7 @@ def build_report(data_root: Path) -> dict[str, Any]:
                 "schemaVersion": review["schemaVersion"],
                 "updatedAt": review.get("updatedAt"),
                 "processedEvents": review_change_summary(review["processedEvents"]),
-                "historicalKeywordAuditCount": len(review["historicalKeywordAudits"]),
                 "reviewedSkillEpochCount": len(review["reviewedSkillEpochs"]),
-            },
-            "keywordCoverage": {
-                "schemaVersion": coverage["schemaVersion"],
-                "updatedAt": coverage.get("updatedAt"),
-                "keywordCounts": {
-                    field: len(keywords)
-                    for field, keywords in coverage["triggerKeywords"].items()
-                    if isinstance(keywords, list)
-                },
-                "processedKeywordEventCount": len(coverage["processedKeywordEvents"]),
-                "coverageEpochCount": len(coverage["coverageEpochs"]),
-                "targetCount": len(coverage["targets"]),
             },
             "stats": stats_summary(stats),
             "sessions": session_health(data_root / "sessions", data_root / "agents"),

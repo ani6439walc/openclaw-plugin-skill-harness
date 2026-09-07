@@ -68,20 +68,10 @@ describe("resolveConfig", () => {
         thinking: "medium",
         timeoutSeconds: 300,
         triggers: {
-          skillCandidate: { enabled: true, toolCalls: 5 },
-          skillPlacement: { enabled: true },
-          processGap: { enabled: true, toolFailures: 2 },
-          successfulPattern: {
-            enabled: true,
-            toolCalls: 5,
-          },
-          satisfactionCheck: { enabled: true, everyTurns: 10 },
-          missingIntent: { enabled: true },
-          weakIntent: { enabled: true, confidenceBelow: 0.5 },
-          behaviorFix: { enabled: true },
-          entityContext: { enabled: true },
+          intentHealthCheck: { enabled: true, everyTurns: 10 },
+          routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
+          capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
         },
-        keywordCoverage: { everyAcceptedTurns: 50 },
       });
 
       expect(result).not.toHaveProperty("agents");
@@ -428,17 +418,9 @@ describe("resolveConfig", () => {
           thinking: "high",
           timeoutSeconds: 600,
           triggers: {
-            skillCandidate: { enabled: false, toolCalls: 0 },
-            skillPlacement: { enabled: false },
-            processGap: { toolFailures: 500 },
-            successfulPattern: {
-              toolCalls: 0,
-            },
-            satisfactionCheck: { everyTurns: 3 },
-            missingIntent: { enabled: false },
-            weakIntent: { confidenceBelow: 2 },
-            behaviorFix: { enabled: false },
-            entityContext: { enabled: false },
+            intentHealthCheck: { everyTurns: 0 },
+            routingUncertainty: { enabled: false, confidenceBelow: 2 },
+            capabilityFit: { enabled: false, toolCalls: 0, toolFailures: 500 },
           },
         },
       });
@@ -450,55 +432,29 @@ describe("resolveConfig", () => {
         thinking: "high",
         timeoutSeconds: 600,
         triggers: {
-          skillCandidate: { enabled: false, toolCalls: 1 },
-          skillPlacement: { enabled: false },
-          processGap: { enabled: true, toolFailures: 100 },
-          successfulPattern: {
-            enabled: true,
-            toolCalls: 1,
-          },
-          satisfactionCheck: { enabled: true, everyTurns: 3 },
-          missingIntent: { enabled: false },
-          weakIntent: { enabled: true, confidenceBelow: 1 },
-          behaviorFix: { enabled: false },
-          entityContext: { enabled: false },
+          intentHealthCheck: { enabled: true, everyTurns: 1 },
+          routingUncertainty: { enabled: false, confidenceBelow: 1 },
+          capabilityFit: { enabled: false, toolCalls: 1, toolFailures: 100 },
         },
       });
     });
 
-    it("ignores removed legacy review trigger keyword seeds", () => {
+    it("drops retired review configuration keys", () => {
       const result = resolveConfig({
         review: {
+          keywordCoverage: { everyAcceptedTurns: 50 },
           triggers: {
             successfulPattern: { keywords: ["ship it"] },
-            behaviorFix: { keywords: ["wrong"] },
-            entityContext: { keywords: ["看一下"] },
+            skillPlacement: { enabled: false },
           },
         },
       });
 
-      expect(result.review.triggers.successfulPattern).not.toHaveProperty(
-        "keywords",
-      );
-      expect(result.review.triggers.behaviorFix).not.toHaveProperty("keywords");
-      expect(result.review.triggers.entityContext).not.toHaveProperty(
-        "keywords",
-      );
-    });
-
-    it("clamps keyword coverage cadence without adding a coverage enable flag", () => {
-      expect(
-        resolveConfig({
-          review: { keywordCoverage: { everyAcceptedTurns: 0 } },
-        }).review.keywordCoverage.everyAcceptedTurns,
-      ).toBe(10);
-      expect(
-        resolveConfig({
-          review: { keywordCoverage: { everyAcceptedTurns: 5_000 } },
-        }).review.keywordCoverage.everyAcceptedTurns,
-      ).toBe(1_000);
-      expect(resolveConfig({ review: {} }).review.keywordCoverage).toEqual({
-        everyAcceptedTurns: 50,
+      expect(result.review).not.toHaveProperty("keywordCoverage");
+      expect(result.review.triggers).toEqual({
+        intentHealthCheck: { enabled: true, everyTurns: 10 },
+        routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
+        capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
       });
     });
 

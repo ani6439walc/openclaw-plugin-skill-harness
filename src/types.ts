@@ -12,20 +12,14 @@ export type ResolvedReviewConfig = {
   modelFallback: string | undefined;
   thinking: ThinkLevel;
   timeoutSeconds: number;
-  keywordCoverage: { everyAcceptedTurns: number };
   triggers: {
-    skillCandidate: { enabled: boolean; toolCalls: number };
-    skillPlacement: { enabled: boolean };
-    processGap: { enabled: boolean; toolFailures: number };
-    successfulPattern: {
+    intentHealthCheck: { enabled: boolean; everyTurns: number };
+    routingUncertainty: { enabled: boolean; confidenceBelow: number };
+    capabilityFit: {
       enabled: boolean;
       toolCalls: number;
+      toolFailures: number;
     };
-    satisfactionCheck: { enabled: boolean; everyTurns: number };
-    missingIntent: { enabled: boolean };
-    weakIntent: { enabled: boolean; confidenceBelow: number };
-    behaviorFix: { enabled: boolean };
-    entityContext: { enabled: boolean };
   };
 };
 

@@ -87,20 +87,10 @@ const DEFAULT_REVIEW = {
   modelFallback: undefined,
   thinking: "medium",
   timeoutSeconds: 300,
-  keywordCoverage: { everyAcceptedTurns: 50 },
   triggers: {
-    skillCandidate: { enabled: true, toolCalls: 5 },
-    skillPlacement: { enabled: true },
-    processGap: { enabled: true, toolFailures: 2 },
-    successfulPattern: {
-      enabled: true,
-      toolCalls: 5,
-    },
-    satisfactionCheck: { enabled: true, everyTurns: 10 },
-    missingIntent: { enabled: true },
-    weakIntent: { enabled: true, confidenceBelow: 0.5 },
-    behaviorFix: { enabled: true },
-    entityContext: { enabled: true },
+    intentHealthCheck: { enabled: true, everyTurns: 10 },
+    routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
+    capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
   },
 } as const;
 
@@ -288,42 +278,15 @@ const ReviewSchema = z
     modelFallback: z.string().optional().catch(undefined),
     thinking: ThinkLevelSchema,
     timeoutSeconds: boundedInt(300, 60, 1_800),
-    keywordCoverage: z
-      .object({ everyAcceptedTurns: boundedInt(50, 10, 1_000) })
-      .catch(DEFAULT_REVIEW.keywordCoverage),
     triggers: z
       .object({
-        skillCandidate: z
+        intentHealthCheck: z
           .object({
             enabled: enabledSchema,
-            toolCalls: boundedInt(5, 1, 100),
+            everyTurns: boundedInt(10, 1, 1_000),
           })
-          .catch(DEFAULT_REVIEW.triggers.skillCandidate),
-        skillPlacement: z
-          .object({ enabled: enabledSchema })
-          .catch(DEFAULT_REVIEW.triggers.skillPlacement),
-        processGap: z
-          .object({
-            enabled: enabledSchema,
-            toolFailures: boundedInt(2, 1, 100),
-          })
-          .catch(DEFAULT_REVIEW.triggers.processGap),
-        successfulPattern: z
-          .object({
-            enabled: enabledSchema,
-            toolCalls: boundedInt(5, 1, 100),
-          })
-          .catch(DEFAULT_REVIEW.triggers.successfulPattern),
-        satisfactionCheck: z
-          .object({
-            enabled: enabledSchema,
-            everyTurns: boundedInt(10, 1, 1000),
-          })
-          .catch(DEFAULT_REVIEW.triggers.satisfactionCheck),
-        missingIntent: z
-          .object({ enabled: enabledSchema })
-          .catch(DEFAULT_REVIEW.triggers.missingIntent),
-        weakIntent: z
+          .catch(DEFAULT_REVIEW.triggers.intentHealthCheck),
+        routingUncertainty: z
           .object({
             enabled: enabledSchema,
             confidenceBelow: z
@@ -331,13 +294,14 @@ const ReviewSchema = z
               .catch(0.5)
               .transform((value) => Math.max(0, Math.min(1, value))),
           })
-          .catch(DEFAULT_REVIEW.triggers.weakIntent),
-        behaviorFix: z
-          .object({ enabled: enabledSchema })
-          .catch(DEFAULT_REVIEW.triggers.behaviorFix),
-        entityContext: z
-          .object({ enabled: enabledSchema })
-          .catch(DEFAULT_REVIEW.triggers.entityContext),
+          .catch(DEFAULT_REVIEW.triggers.routingUncertainty),
+        capabilityFit: z
+          .object({
+            enabled: enabledSchema,
+            toolCalls: boundedInt(5, 1, 100),
+            toolFailures: boundedInt(2, 1, 100),
+          })
+          .catch(DEFAULT_REVIEW.triggers.capabilityFit),
       })
       .catch(DEFAULT_REVIEW.triggers),
   })
@@ -348,7 +312,6 @@ const ReviewSchema = z
     modelFallback: val.modelFallback ?? undefined,
     thinking: val.thinking,
     timeoutSeconds: val.timeoutSeconds,
-    keywordCoverage: val.keywordCoverage,
     triggers: val.triggers,
   }));
 

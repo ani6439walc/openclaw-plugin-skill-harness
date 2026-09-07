@@ -1,9 +1,5 @@
 import type { AvailableSkill } from "../types.js";
 import { indentXmlLines } from "../xml-format.js";
-import {
-  projectIntentCatalog,
-  type CatalogProjection,
-} from "./catalog-projection.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { ReviewSnapshot } from "./types.js";
 
@@ -293,6 +289,8 @@ function formatReviewState(
   addDefined(metadata, "turnNumber", options.turnNumber);
   addDefined(metadata, "startedAt", state.timestamps?.start);
   addDefined(metadata, "endedAt", state.timestamps?.end);
+  addDefined(metadata, "routeProvenance", state.routeProvenance?.trigger);
+  addDefined(metadata, "capabilityFit", state.capabilityFit);
 
   const fields = [
     wrapOptionalReviewSnapshotBlock(
@@ -365,7 +363,6 @@ function formatMatchedIntent(snapshot: ReviewSnapshot): string | undefined {
 function formatIntentEntryMetadata(
   entry:
     ReviewSnapshot["intentCatalog"][number] | ReviewSnapshot["matchedIntent"],
-  selectionReasons?: CatalogProjection["entries"][number]["selectionReasons"],
 ): Record<string, unknown> {
   if (!entry) return {};
   const definition = "definition" in entry ? entry.definition : entry;
@@ -384,21 +381,18 @@ function formatIntentEntryMetadata(
   if ("keywords" in definition && definition.keywords !== undefined) {
     metadata.keywords = [...definition.keywords];
   }
-  if (selectionReasons) metadata.selectionReasons = [...selectionReasons];
   return metadata;
 }
 
 function formatIntentCatalog(
-  projection: CatalogProjection,
+  entries: readonly ReviewSnapshot["intentCatalog"][number][],
 ): string | undefined {
   return wrapOptionalReviewSnapshotBlock(
     "intent_catalog",
-    projection.entries
+    entries
       .map(
-        ({ entry, selectionReasons }) =>
-          `<intent>${stringifySnapshotJson(
-            formatIntentEntryMetadata(entry, selectionReasons),
-          )}</intent>`,
+        (entry) =>
+          `<intent>${stringifySnapshotJson(formatIntentEntryMetadata(entry))}</intent>`,
       )
       .join("\n"),
   );
@@ -413,39 +407,21 @@ function formatSnapshotManifest(
   snapshot: ReviewSnapshot,
   options: FormatReviewSnapshotOptions,
   availableSkillRenderedCodePointCount: number,
-  catalogProjection:
-    | CatalogProjection
-    | {
-        mode: "omitted";
-        originalCount: number;
-        includedCount: 0;
-        omittedCount: number;
-      },
+  includesIntentCatalog: boolean,
 ): string {
-  const intentCatalog: Record<string, unknown> = {
-    mode: catalogProjection.mode,
-    originalCount: catalogProjection.originalCount,
-    includedCount: catalogProjection.includedCount,
-    omittedCount: catalogProjection.omittedCount,
-  };
-  if ("fallbackReason" in catalogProjection) {
-    intentCatalog.fallbackReason = catalogProjection.fallbackReason;
-  }
   const manifest: Record<string, unknown> = {
     requestedTriggers: [...(options.requestedTriggers ?? [])],
     currentIntent: snapshot.current.intent?.intent ?? null,
     intentConfidence: snapshot.current.intent?.confidence ?? null,
+    routeProvenance: snapshot.current.routeProvenance?.trigger ?? null,
     recentTurnCount: snapshot.recent.length,
     currentSkillsUsedCount: snapshot.current.skillsUsed?.length ?? 0,
     currentToolCallCount: snapshot.current.toolCalls?.length ?? 0,
     availableSkillCount: snapshot.availableSkills?.length ?? 0,
     availableSkillRenderedCodePointCount,
     matchedIntentPresent: snapshot.matchedIntent !== undefined,
-    intentCatalog,
+    intentCatalog: includesIntentCatalog ? "full" : "omitted",
   };
-  if (snapshot.skillPlacementCandidate) {
-    manifest.skillPlacementCandidatePresent = true;
-  }
   return wrapRequiredReviewSnapshotBlock(
     "snapshot_manifest",
     stringifySnapshotJson(manifest),
@@ -502,65 +478,37 @@ export function formatReviewSnapshot(
   snapshot: ReviewSnapshot,
   options: FormatReviewSnapshotOptions = {},
 ): string {
-  const placementReview =
-    options.requestedTriggers?.includes("skill-placement");
-  const renderedSnapshot = placementReview
-    ? {
-        ...snapshot,
-        availableSkills: [],
-        current: {
-          ...snapshot.current,
-          recommendationCandidates: undefined,
-          skillsUsed: undefined,
-        },
-        recent: snapshot.recent.map((state) => ({
-          ...state,
-          skillsUsed: undefined,
-        })),
-      }
-    : snapshot;
-  const catalogProjection =
-    options.includeIntentCatalog === false
-      ? undefined
-      : projectIntentCatalog(renderedSnapshot, options.requestedTriggers ?? []);
-  const catalogManifest = catalogProjection ?? {
-    mode: "omitted" as const,
-    originalCount: renderedSnapshot.intentCatalog.length,
-    includedCount: 0 as const,
-    omittedCount: renderedSnapshot.intentCatalog.length,
-  };
-  const availableSkills = formatAvailableSkills(
-    renderedSnapshot.availableSkills,
-  );
+  const includesIntentCatalog =
+    options.includeIntentCatalog !== false &&
+    options.requestedTriggers?.some(
+      (trigger) =>
+        trigger === "routing-uncertainty" || trigger === "capability-fit",
+    ) === true;
+  const availableSkills = formatAvailableSkills(snapshot.availableSkills);
   const recent = wrapOptionalReviewSnapshotBlock(
     "recent_turns",
-    renderedSnapshot.recent
+    snapshot.recent
       .map((state, index) =>
         formatReviewState("recent_turn", state, { recentIndex: index + 1 }),
       )
       .join("\n"),
   );
-
   const blocks = [
     formatSnapshotManifest(
-      renderedSnapshot,
+      snapshot,
       options,
       availableSkills ? Array.from(indentXmlLines(availableSkills)).length : 0,
-      catalogManifest,
+      includesIntentCatalog,
     ),
-    placementReview
-      ? formatSkillPlacementCandidate(renderedSnapshot.skillPlacementCandidate)
-      : undefined,
-    placementReview
-      ? formatSelectedPlacementSkill(renderedSnapshot.selectedPlacementSkill)
-      : undefined,
-    formatReviewState("current_turn", renderedSnapshot.current, {
-      turnNumber: renderedSnapshot.turnNumber,
+    formatReviewState("current_turn", snapshot.current, {
+      turnNumber: snapshot.turnNumber,
     }),
-    formatMatchedIntent(renderedSnapshot),
+    formatMatchedIntent(snapshot),
     recent,
     availableSkills,
-    catalogProjection ? formatIntentCatalog(catalogProjection) : undefined,
+    includesIntentCatalog
+      ? formatIntentCatalog(snapshot.intentCatalog)
+      : undefined,
   ]
     .filter((block): block is string => block !== undefined)
     .join("\n\n");

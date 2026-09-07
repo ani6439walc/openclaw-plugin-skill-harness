@@ -5,9 +5,9 @@ description: "Audit Skill Harness intents, runtime health, and Review data."
 
 # Skill Harness
 
-Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), complexity analysis or skill extraction (extract), evidence-backed Intent Review keyword auditing (keyword-audit), and report-only runtime health analysis (runtime-health). Background subagents handle automated self-improvement; use analysis modes only for deliberate human-requested review.
+Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), complexity analysis or skill extraction (extract), and report-only runtime health analysis (runtime-health). Background subagents handle automated self-improvement; use analysis modes only for deliberate human-requested review.
 
-Do not manually repeat production-owned work: per-turn classification and routing injection, startup intent seeding, trigger-driven runtime intent edits, trigger-keyword persistence, skill-placement review, stats aggregation, and session cleanup. This skill is for explicit human maintenance requests and the judgment or confirmation those automated paths do not own.
+Do not manually repeat production-owned work: per-turn classification and routing injection, startup intent seeding, trigger-driven runtime intent edits, capability-fit review, stats aggregation, and session cleanup. This skill is for explicit human maintenance requests and the judgment or confirmation those automated paths do not own.
 
 ## Quick routing
 
@@ -16,11 +16,10 @@ What does the user want?
 ├─ Bootstrap or re-audit the ENTIRE catalog → inventory
 ├─ Create/rename/split/merge/refine ONE intent → design
 ├─ Check intent complexity / upgrade intents to skills → extract
-├─ Analyze Review keyword hits/misses/collisions and propose a bounded delta → keyword-audit
-└─ Check runtime state, Review applied-change distribution, coverage, or retention → runtime-health
+└─ Check runtime state, Review applied-change distribution, or retention → runtime-health
 ```
 
-If ambiguous, ask one routing question: "Are you working on one intent, auditing the whole catalog, analyzing complexity, evaluating Review keywords, or checking runtime health?"
+If ambiguous, ask one routing question: "Are you working on one intent, auditing the whole catalog, analyzing complexity, or checking runtime health?"
 
 ## Shared operating rules
 
@@ -32,8 +31,8 @@ If ambiguous, ask one routing question: "Are you working on one intent, auditing
   - Runtime experiences live in a separate skill-scoped catalog. With the default local state directory, this is `~/.openclaw/plugins/skill-harness/experiences/`; do not treat them as intent bodies or manually edit them.
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
-- Treat runtime session text as private. Keyword-audit and runtime-health reports stay local; never send raw retained conversations, tool payloads, Review suggestions, or Review evidence to external tools or artifacts.
-- Do not hand-edit `review.json`, `keyword-coverage.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, startup seeding, Review persistence, skill-placement, stats, or cleanup workflows in this skill.
+- Treat runtime session text as private. Runtime-health reports stay local; never send raw retained conversations, tool payloads, Review suggestions, or Review evidence to external tools or artifacts.
+- Do not hand-edit `review.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, startup seeding, Review persistence, skill-placement, stats, or cleanup workflows in this skill.
 - Check changed intent files for canonical routing-only format: complete valid classification frontmatter with fixed key order (`domain`, `triggers`, `examples`, optional `keywords`, optional `skills` with lowercase names), one plain-text body `guidance` sentence, concrete triggers/examples, and no cross-references to other intent ids. The entire body is guidance; do not add sections, lists, fences, commands, paths, or other Markdown formatting.
 - Keep concrete shell commands, MCP documentation calls, workflows, and durable lessons in referenced skills; do not add them to intent definitions.
 - In prompt context, configured skills and candidate skills omit filesystem paths (`<path>`) to conserve tokens; agents obtain paths through `skill_list` and inspect skill files or references using `skill_view`.
@@ -157,62 +156,22 @@ Read and follow `references/extract.md`. Keep these checkpoints visible:
 
 ---
 
-## Mode: keyword-audit
-
-### When to use
-
-User wants to measure, analyze, or propose changes to Intent Review trigger keywords using actual runtime observations.
-
-Keywords: "Review keywords", "trigger keywords", "keyword hit rate", "keyword misses", "keyword collisions", "分析關鍵字", "統計關鍵字", "更新關鍵字", "successful-pattern", "behavior-fix", "entity-context"
-
-Do not use this mode for intent `keywords`; route that through design or inventory with the labeled-fixture rules in `references/format.md`.
-
-### Workflow
-
-Read and follow `references/keyword-audit.md`. Keep these checkpoints visible:
-
-1. **Generate a read-only report** — run `scripts/review-keyword-audit.py`; it resolves the default data root, validates current schema-v7 `review.json` plus schema-v1 `keyword-coverage.json`, and records provenance. Treat unmatched documents as structural proxies, not semantic misses, and keep snippets disabled unless local content inspection is explicitly necessary.
-2. **Label evidence** — build a private ref-only fixture from `templates/review-keyword-labels.json`, rerun with `--labels`, and inspect TP/FP/FN plus collisions locally; frequency alone is not approval.
-3. **Proposal checkpoint** — present before/after coverage and at most three exact additions/removals per target; wait for explicit confirmation.
-4. **Report and proposal only** — deliver the evidence-backed delta after confirmation, but do not invoke or emulate Intent Review's production-owned writer and do not hand-edit `review.json` or `keyword-coverage.json`.
-
-### Failure modes
-
-| Trigger                                   | First fix                                                                          | Fallback                                       |
-| ----------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------- |
-| **Missing or incompatible runtime state** | Stop and report the `review.json` or `keyword-coverage.json` schema/state mismatch | Do not invent defaults or migrate runtime data |
-| **Too little retained evidence**          | Keep phrases as candidates and gather more sessions                                | Make no keyword change                         |
-| **Candidate has collisions**              | Narrow the exact phrase and rerun labeling                                         | Retain the current keyword set                 |
-| **User requests direct runtime mutation** | Explain that production Review owns keyword writes                                 | Deliver an approved but unapplied delta        |
-
-### Anti-patterns
-
-| #   | Anti-pattern                                       | Why not                                         | Do instead                                              |
-| --- | -------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
-| 1   | **Promote the most frequent phrase automatically** | Co-occurrence is not target semantics           | Require distinct-session positives and collision review |
-| 2   | **Print raw snippets by default**                  | Sessions can contain private user data          | Keep reports snippet-free and inspect refs locally      |
-| 3   | **Remove keywords with zero retained hits**        | Retention can erase prior evidence              | Require repeated labeled false positives                |
-| 4   | **Mix evidence across keyword targets**            | Host findings may update only their own trigger | Evaluate each target independently                      |
-
----
-
 ## Mode: runtime-health
 
 ### When to use
 
-User wants to inspect runtime state, Review outcomes or applied-change distribution, keyword-coverage epochs, session retention, or Skill Harness disk growth.
+User wants to inspect runtime state, Review outcomes or applied-change distribution, session retention, or Skill Harness disk growth.
 
-Keywords: "skill harness health", "runtime health", "review 統計", "review 建議分布", "review changes", "coverage epoch", "session retention", "skill harness 磁碟"
+Keywords: "skill harness health", "runtime health", "review 統計", "review 建議分布", "review changes", "session retention", "skill harness 磁碟"
 
 ### Workflow
 
 Read and follow `references/runtime-health-audit.md`. Keep these checkpoints visible:
 
 1. **Generate a report-only snapshot** — run `scripts/runtime-health-audit.py` with local mode-`0600` output. Do not expose session text, tool payloads, Review suggestion text, or evidence.
-2. **Check structural state first** — current schema-v7 `review.json`, schema-v1 `keyword-coverage.json`, schema-v3 or schema-v4 `stats.json`, QMD database state, session shape counts, and retention metadata must be interpreted before quality trends. Read the report attribution boundary before interpreting v4 daily maps.
-3. **Explain applied changes, not proposals** — use `processedEvents.changes.total`, `byTrigger`, `byOperation`, and target concentration. Keep ordinary Review separate from historical keyword audits.
-4. **Apply scheduler context** — empty coverage epochs can be normal after a restart or before the next eligible finalized turn; verify config, stats writes, model availability, and cadence before calling it a failure.
-5. **Report a bounded next observation** — state the provenance, actual counts, disk/retention state, and a next threshold. Do not modify runtime data from audit findings.
+2. **Check structural state first** — current schema-v8 `review.json`, schema-v3 or schema-v4 `stats.json`, QMD database state, session shape counts, and retention metadata must be interpreted before quality trends. Read the report attribution boundary before interpreting v4 daily maps.
+3. **Explain applied changes, not proposals** — use `processedEvents.changes.total`, `byTrigger`, `byOperation`, and target concentration.
+4. **Report a bounded next observation** — state the provenance, actual counts, disk/retention state, and a next threshold. Do not modify runtime data from audit findings.
 
 ### Failure modes
 
@@ -221,16 +180,13 @@ Read and follow `references/runtime-health-audit.md`. Keep these checkpoints vis
 | **Runtime state changed while read** | Retry later or use a quiescent copied data root                             | Report no trend conclusion                                     |
 | **Schema or session-shape failure**  | Report the count and affected state surface                                 | Investigate writer/retention code separately                   |
 | **High Review failure outcomes**     | Compare a fresh bounded window and reason counts                            | Do not change prompts/models from a historical aggregate alone |
-| **Empty coverage epochs**            | Verify `review.enabled`, new stats writes, model, and next cadence boundary | Inspect scheduler warnings in a separate implementation task   |
 
 ### Anti-patterns
 
 | #   | Anti-pattern                                                        | Why not                                                     | Do instead                                      |
 | --- | ------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- |
 | 1   | **Treat all Review events as changes**                              | Nofindings and rejected proposals are not runtime mutations | Use host-recorded `applied` and `changes.total` |
-| 2   | **Mix historical keyword audits with ordinary Review change rates** | They have different schemas and attribution limits          | Report them separately                          |
-| 3   | **Call empty coverage a defect immediately**                        | Coverage never replays startup history                      | Check runtime reload and eligible-turn context  |
-| 4   | **Print raw state to explain a counter**                            | Runtime files can contain private data                      | Use aggregate report fields only                |
+| 2   | **Print raw state to explain a counter** | Runtime files can contain private data | Use aggregate report fields only |
 
 ---
 
@@ -244,7 +200,6 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 - The complete plain-text intent body is one durable routing-guidance sentence.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
 - `keywords` must be durable exact whole-message evidence; the same values also form the lexical QMD keyword collection.
-- Review trigger keywords are a separate runtime surface. Analyze them with `references/keyword-audit.md` and `scripts/review-keyword-audit.py`; never infer a write from phrase frequency alone.
 - Skill dependencies use direct frontmatter `skills[]`; tools, workflows, commands, and lessons stay in referenced skills.
 - Intent metadata does not cross-reference other intent ids.
 - Proposed triggers do not obviously collide with existing runtime intent boundaries.
@@ -262,5 +217,4 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 | 1   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory      |
 | 2   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview → ground → draft → format check                                 | design         |
 | 3   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract        |
-| 4   | "Analyze which Review keywords should change"    | Route to **keyword-audit** → pin evidence → report → label → 🔴 CHECKPOINT → bounded proposal                     | keyword-audit  |
 | 5   | "統計過去 Review 產生的修改分布"                 | Route to **runtime-health** → report → structural check → applied-change explanation → bounded next observation   | runtime-health |

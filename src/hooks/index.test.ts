@@ -7,8 +7,6 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import {
-  coverageEpochMilestone,
-  coverageWatermarkEligible,
   createHookHandlers,
   formatConversationExpansionContext,
 } from "./index.js";
@@ -50,59 +48,6 @@ function createHandlers(
     ...overrides,
   } as never);
 }
-
-describe("keyword coverage scheduling", () => {
-  const noCompletedEpoch = {
-    "successful-pattern": { cursor: 0, lastCompletedAcceptedTurn: 0 },
-    "behavior-fix": { cursor: 0, lastCompletedAcceptedTurn: 0 },
-    "entity-context": { cursor: 0, lastCompletedAcceptedTurn: 0 },
-  };
-
-  it("triggers at a cadence milestone and every five turns after a failed epoch", () => {
-    const eligible = (acceptedTurn: number) =>
-      coverageWatermarkEligible({
-        acceptedTurn,
-        cadence: 50,
-        runtimeTargets: noCompletedEpoch,
-      });
-
-    expect(eligible(49)).toBe(false);
-    expect(eligible(50)).toBe(true);
-    expect(eligible(51)).toBe(false);
-    expect(eligible(54)).toBe(false);
-    expect(eligible(55)).toBe(true);
-    expect(eligible(56)).toBe(false);
-    expect(eligible(60)).toBe(true);
-  });
-
-  it("uses the same milestone for retries and advances after completion", () => {
-    expect(
-      coverageEpochMilestone({
-        cadence: 50,
-        runtimeTargets: noCompletedEpoch,
-      }),
-    ).toBe(50);
-
-    const completedAt50 = {
-      "successful-pattern": { cursor: 0, lastCompletedAcceptedTurn: 50 },
-      "behavior-fix": { cursor: 0, lastCompletedAcceptedTurn: 50 },
-      "entity-context": { cursor: 0, lastCompletedAcceptedTurn: 50 },
-    };
-    expect(
-      coverageEpochMilestone({
-        cadence: 50,
-        runtimeTargets: completedAt50,
-      }),
-    ).toBe(100);
-    expect(
-      coverageWatermarkEligible({
-        acceptedTurn: 55,
-        cadence: 50,
-        runtimeTargets: completedAt50,
-      }),
-    ).toBe(false);
-  });
-});
 
 describe("createHookHandlers tracking guards", () => {
   function bindAssociation(
@@ -1444,11 +1389,9 @@ description: Navigate Tokyo.
           ],
         }),
         triggers: [
-          "skill-candidate",
-          "satisfaction-check",
-          "missing-intent",
-          "weak-intent",
-          "behavior-fix",
+          "intent-health-check",
+          "routing-uncertainty",
+          "capability-fit",
         ],
       }),
     );
@@ -1458,11 +1401,9 @@ description: Navigate Tokyo.
       [],
       {
         triggers: [
-          "skill-candidate",
-          "satisfaction-check",
-          "missing-intent",
-          "weak-intent",
-          "behavior-fix",
+          "intent-health-check",
+          "routing-uncertainty",
+          "capability-fit",
         ],
         outcome: "nofinding",
         noFindingReasonCounts: { "wrong-trigger": 1 },
@@ -1527,7 +1468,7 @@ description: Navigate Tokyo.
     const reviewer = vi.fn().mockResolvedValue({
       findings: [
         {
-          trigger: "skill-candidate" as const,
+          trigger: "capability-fit" as const,
           targetKind: "skill-experience" as const,
           targetExperienceIds: ["analysis/corrected-workflow"],
           dedupeKey: "analysis-corrected-workflow",
@@ -1590,7 +1531,7 @@ description: Navigate Tokyo.
           fs.readFileSync(path.join(dataRoot, "review.json"), "utf8"),
         );
         expect(persisted).toMatchObject({
-          schemaVersion: 7,
+          schemaVersion: 8,
           processedEvents: {
             [snapshot.eventId]: {
               changedExperienceIds: ["analysis/corrected-workflow"],
@@ -1740,15 +1681,9 @@ description: Navigate Tokyo.
             enabled: true,
             model: "google/test-review",
             triggers: {
-              skillCandidate: { enabled: false },
-              processGap: { enabled: false },
-              successfulPattern: { enabled: false },
-              satisfactionCheck: { enabled: false },
-              missingIntent: { enabled: false },
-              weakIntent: { enabled: false },
-              behaviorFix: { enabled: true },
-              entityContext: { enabled: false },
-              skillPlacement: { enabled: true },
+              intentHealthCheck: { enabled: false },
+              routingUncertainty: { enabled: true },
+              capabilityFit: { enabled: true },
             },
           },
         }),
@@ -1774,7 +1709,7 @@ description: Navigate Tokyo.
     expect(reviewer).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: "ctx-agent",
-        triggers: ["behavior-fix"],
+        triggers: ["routing-uncertainty"],
       }),
     );
     expect(reviewer.mock.calls[0][0].snapshot).not.toHaveProperty(
@@ -1935,15 +1870,9 @@ description: Navigate Tokyo.
             enabled: true,
             model: "google/test-review",
             triggers: {
-              skillCandidate: { enabled: false },
-              processGap: { enabled: false },
-              successfulPattern: { enabled: false },
-              satisfactionCheck: { enabled: false },
-              missingIntent: { enabled: false },
-              weakIntent: { enabled: false },
-              behaviorFix: { enabled: false },
-              entityContext: { enabled: false },
-              skillPlacement: { enabled: true },
+              intentHealthCheck: { enabled: false },
+              routingUncertainty: { enabled: false },
+              capabilityFit: { enabled: true },
             },
           },
         }),
@@ -2000,7 +1929,7 @@ description: Navigate Tokyo.
     expect(reviewer).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: "persisted-agent",
-        triggers: ["skill-placement"],
+        triggers: ["capability-fit"],
         snapshot: expect.objectContaining({
           skillPlacementCandidate: {
             ...candidate,
@@ -2027,7 +1956,7 @@ description: Navigate Tokyo.
       expect.objectContaining({ agentId: "persisted-agent" }),
       [],
       expect.objectContaining({
-        triggers: ["skill-placement"],
+        triggers: ["capability-fit"],
         outcome: "nofinding",
         skillPlacementCandidate: expect.objectContaining({
           epochKey: candidate.epochKey,

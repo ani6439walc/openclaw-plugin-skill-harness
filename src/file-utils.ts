@@ -70,10 +70,6 @@ export function reviewLogPath(dataRoot: string): string {
   return path.join(dataRoot, "review.json");
 }
 
-export function keywordCoverageLogPath(dataRoot: string): string {
-  return path.join(dataRoot, "keyword-coverage.json");
-}
-
 export function agentWorkspacePath(dataRoot: string): string {
   return path.join(dataRoot, "workspace");
 }

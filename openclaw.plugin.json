@@ -6,13 +6,22 @@
     "onStartup": true
   },
   "contracts": {
-    "tools": ["skill_list", "skill_search", "skill_view", "skill_experience"]
+    "tools": [
+      "skill_list",
+      "skill_search",
+      "skill_view",
+      "skill_experience"
+    ]
   },
-  "skills": ["./skills"],
+  "skills": [
+    "./skills"
+  ],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["qmd"],
+    "required": [
+      "qmd"
+    ],
     "properties": {
       "scope": {
         "type": "object",
@@ -21,28 +30,43 @@
         "properties": {
           "agents": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Agent IDs eligible for intention scanning.",
-            "default": ["main"]
+            "default": [
+              "main"
+            ]
           },
           "chatTypes": {
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["direct", "group", "channel", "explicit"]
+              "enum": [
+                "direct",
+                "group",
+                "channel",
+                "explicit"
+              ]
             },
             "description": "Which chat types are eligible.",
-            "default": ["direct"]
+            "default": [
+              "direct"
+            ]
           },
           "allowedChatIds": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Allow-list of chat IDs.",
             "default": []
           },
           "deniedChatIds": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Deny-list of chat IDs.",
             "default": []
           }
@@ -113,7 +137,11 @@
               },
               "queryMode": {
                 "type": "string",
-                "enum": ["message", "recent", "full"],
+                "enum": [
+                  "message",
+                  "recent",
+                  "full"
+                ],
                 "description": "Context sent to scanner: latest message only, recent turns, or full history.",
                 "default": "recent"
               },
@@ -219,7 +247,9 @@
           "embedding": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["model"],
+            "required": [
+              "model"
+            ],
             "properties": {
               "baseUrl": {
                 "type": "string",
@@ -244,7 +274,9 @@
           "expansion": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["model"],
+            "required": [
+              "model"
+            ],
             "properties": {
               "baseUrl": {
                 "type": "string",
@@ -268,11 +300,14 @@
             "description": "Seconds between source checks for QMD intent and skill index refreshes; 0 disables subsequent automatic checks."
           }
         },
-        "required": ["embedding", "expansion"]
+        "required": [
+          "embedding",
+          "expansion"
+        ]
       },
       "review": {
         "type": "object",
-        "description": "Optional post-turn Intent Review runs that validate and apply bounded runtime intent improvements.",
+        "description": "Optional asynchronous post-turn Intent Review. It can update future runtime intents but never participates in the current route decision.",
         "additionalProperties": false,
         "properties": {
           "enabled": {
@@ -309,81 +344,18 @@
             "default": 300,
             "description": "Budget in seconds for each Intent Review sub-agent run."
           },
-          "keywordCoverage": {
-            "type": "object",
-            "description": "Automatic cross-session keyword coverage review cadence for accepted routed turns.",
-            "additionalProperties": false,
-            "properties": {
-              "everyAcceptedTurns": {
-                "type": "integer",
-                "minimum": 10,
-                "maximum": 1000,
-                "default": 50
-              }
-            },
-            "default": {}
-          },
           "triggers": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "skillCandidate": {
+              "intentHealthCheck": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "enabled": { "type": "boolean", "default": true },
-                  "toolCalls": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 100,
-                    "default": 5
-                  }
-                }
-              },
-              "skillPlacement": {
-                "type": "object",
-                "description": "Review one visible resolved skill when it has a low-adoption signal, or after 20 continuous turns with zero recommendations and usage.",
-                "additionalProperties": false,
-                "properties": {
-                  "enabled": { "type": "boolean", "default": true }
-                }
-              },
-              "processGap": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "enabled": { "type": "boolean", "default": true },
-                  "toolFailures": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 100,
-                    "default": 2
-                  }
-                }
-              },
-              "successfulPattern": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "enabled": { "type": "boolean", "default": true },
-                  "toolCalls": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 100,
-                    "default": 5
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
                   },
-                  "keywords": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Deprecated legacy seed. Accepted for configuration compatibility but ignored at runtime."
-                  }
-                }
-              },
-              "satisfactionCheck": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "enabled": { "type": "boolean", "default": true },
                   "everyTurns": {
                     "type": "integer",
                     "minimum": 1,
@@ -392,18 +364,14 @@
                   }
                 }
               },
-              "missingIntent": {
+              "routingUncertainty": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "enabled": { "type": "boolean", "default": true }
-                }
-              },
-              "weakIntent": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "enabled": { "type": "boolean", "default": true },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
                   "confidenceBelow": {
                     "type": "number",
                     "minimum": 0,
@@ -412,27 +380,25 @@
                   }
                 }
               },
-              "behaviorFix": {
+              "capabilityFit": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "enabled": { "type": "boolean", "default": true },
-                  "keywords": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Deprecated legacy seed. Accepted for configuration compatibility but ignored at runtime."
-                  }
-                }
-              },
-              "entityContext": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "enabled": { "type": "boolean", "default": true },
-                  "keywords": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Deprecated legacy seed. Accepted for configuration compatibility but ignored at runtime."
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "toolCalls": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 5
+                  },
+                  "toolFailures": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 2
                   }
                 }
               }

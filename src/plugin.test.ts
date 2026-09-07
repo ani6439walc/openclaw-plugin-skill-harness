@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger, type OpenClawPluginApi } from "../api.js";
+import type { OpenClawPluginApi } from "../api.js";
 import {
   createConfiguredAgentSkillsResolver,
   createPlugin,
@@ -10,7 +10,6 @@ import {
   initializePluginDataRoot,
 } from "./plugin.js";
 import { IntentCatalog } from "./intents/index.js";
-import { KeywordCoverageWriter } from "./review/keyword-coverage-writer.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
@@ -311,22 +310,7 @@ describe("createPlugin", () => {
     );
   });
 
-  it("registers hooks when keyword coverage keyword cache is corrupt", () => {
-    const api = createApi();
-    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-    fs.mkdirSync(dataRoot, { recursive: true });
-    fs.writeFileSync(path.join(dataRoot, "keyword-coverage.json"), "{ broken");
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 
-    expect(() => createPlugin(api).register(api)).not.toThrow();
-
-    expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
-    // Fail-open: corrupt coverage file should not block registration.
-    expect(warn).not.toHaveBeenCalledWith(
-      "failed to read review trigger keywords",
-      expect.anything(),
-    );
-  });
 
   function createPackageRootWithAssets(files: Record<string, string>): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-package-root-"));

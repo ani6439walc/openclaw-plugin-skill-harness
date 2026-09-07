@@ -4,17 +4,11 @@ import type { defaultCatalog } from "../intents/index.js";
 import type { defaultTracker } from "../session/index.js";
 import type { defaultStatsAggregator } from "../stats/index.js";
 import type { IntentReviewLogWriter } from "../review/log-writer.js";
-import type { KeywordCoverageWriter } from "../review/keyword-coverage-writer.js";
 import type {
   ReviewSubagentResult,
   runReviewSubagent,
 } from "../review/subagent.js";
-import type {
-  KeywordCoverageReviewParams,
-  KeywordCoverageReviewerResult,
-} from "../review/keyword-coverage-subagent.js";
 import type { runIntentionSubagent } from "../classification/index.js";
-import type { ReviewTriggerKeywords } from "../review/trigger-keywords.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
 import type { IntentQmdIndex } from "../qmd/intent-index.js";
@@ -151,28 +145,9 @@ export type HookDeps = {
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],
   ) => Promise<ReviewSubagentResult | undefined>;
-  coverageReviewer?: (
-    params: KeywordCoverageReviewParams,
-  ) => Promise<KeywordCoverageReviewerResult | undefined>;
   classifier?: typeof runIntentionSubagent;
   reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
-    Partial<
-      Pick<
-        IntentReviewLogWriter,
-        "completedSkillEpochKeys" | "recordHistoricalKeywordAudit"
-      >
-    >;
-  keywordCoverageWriter?: Pick<
-    KeywordCoverageWriter,
-    | "recordKeywordEvent"
-    | "readKeywords"
-    | "readRuntimeState"
-    | "reserveCoverageEpoch"
-    | "releaseCoverageEpoch"
-    | "completeCoverageEpoch"
-  >;
-  triggerKeywords?: () => ReviewTriggerKeywords;
-  refreshTriggerKeywords?: () => void;
+    Partial<Pick<IntentReviewLogWriter, "completedSkillEpochKeys">>;
   getConfiguredAgentSkills?: (agentId: string) => string[] | Promise<string[]>;
 
   bundledSkillsDir?: string;

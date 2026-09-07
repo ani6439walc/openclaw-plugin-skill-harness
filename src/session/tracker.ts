@@ -228,6 +228,9 @@ function createReviewState(
   return {
     input: sanitizeReviewInput(state.input),
     intent: state.intent?.result ? { ...state.intent.result } : undefined,
+    ...(state.intent?.trigger
+      ? { routeProvenance: { trigger: state.intent.trigger } }
+      : {}),
     skillsUsed: state.skillsUsed?.map((skill) => ({ ...skill })),
     toolCalls: state.toolCalls?.map((call) => ({
       name: call.name,
