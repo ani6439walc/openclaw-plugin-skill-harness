@@ -33,7 +33,7 @@ describe("projectQmdIntentCandidates", () => {
         {
           intentId: "version-control",
           score: 0.7,
-          collection: "intent-triggers-and-examples",
+          collection: "intent-examples-and-keywords",
         },
       ],
       histories: [
@@ -69,7 +69,7 @@ describe("projectQmdIntentCandidates", () => {
           {
             intentId: "version-control",
             score: 0.34,
-            collection: "intent-triggers-and-examples",
+            collection: "intent-examples-and-keywords",
           },
         ],
         histories: [],
@@ -88,7 +88,7 @@ describe("projectQmdIntentCandidates", () => {
         {
           intentId: "version-control",
           score: 0.5,
-          collection: "intent-triggers-and-examples",
+          collection: "intent-examples-and-keywords",
         },
       ],
       histories: [],

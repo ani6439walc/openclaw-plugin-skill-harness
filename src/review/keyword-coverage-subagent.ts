@@ -756,9 +756,13 @@ export async function runKeywordCoverageReview(
   );
 
   if (discoveryPass.gatewayDraining) return undefined;
-  const discovery = parseKeywordCoverageModelResponse(discoveryPass.response, documents, {
-    triggerKeywords,
-  });
+  const discovery = parseKeywordCoverageModelResponse(
+    discoveryPass.response,
+    documents,
+    {
+      triggerKeywords,
+    },
+  );
   if (!discovery) return undefined;
 
   const replayEvidence = buildReplayEvidence(discovery.decisions, documents);

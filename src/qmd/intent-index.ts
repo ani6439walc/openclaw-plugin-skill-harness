@@ -9,7 +9,6 @@ import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
 import { normalizeEmbeddingModel } from "./provider-resolver.js";
 import { boundQmdQuery } from "./query-budget.js";
 
-const TRIGGERS_COLLECTION = "intent-triggers";
 const EXAMPLES_COLLECTION = "intent-examples";
 const KEYWORDS_COLLECTION = "intent-keywords";
 const INITIAL_RETRY_DELAY_MS = 5_000;
@@ -56,7 +55,7 @@ export type QmdIntentIndexStatus = "idle" | "building" | "ready" | "failed";
 
 export interface IntentQmdIndex {
   schedule(intents: readonly IntentCatalogEntry[]): void;
-  searchIntentTriggers(params: {
+  searchIntentExamplesAndKeywords(params: {
     query: string;
     rawLimit: number;
     expansionContext?: string;
@@ -75,16 +74,16 @@ function hash(value: string): string {
 
 function buildStoreModels(config: ResolvedQmdConfig) {
   return {
-      embed_api_url: config.embedding.baseUrl,
-      embed_api_model: config.embedding.model,
-      ...(config.embedding.apiKey
-        ? { embed_api_key: config.embedding.apiKey }
-        : {}),
-      ...(config.embedding.dimension
-        ? { embed_dimension: config.embedding.dimension }
-        : {}),
-      generate_api_url: config.expansion.baseUrl,
-      generate_api_model: config.expansion.model,
+    embed_api_url: config.embedding.baseUrl,
+    embed_api_model: config.embedding.model,
+    ...(config.embedding.apiKey
+      ? { embed_api_key: config.embedding.apiKey }
+      : {}),
+    ...(config.embedding.dimension
+      ? { embed_dimension: config.embedding.dimension }
+      : {}),
+    generate_api_url: config.expansion.baseUrl,
+    generate_api_model: config.expansion.model,
     ...(config.expansion.apiKey
       ? { generate_api_key: config.expansion.apiKey }
       : {}),
@@ -99,7 +98,6 @@ function snapshotFingerprint(
     JSON.stringify({
       intents: intents.map((intent) => ({
         id: intent.id,
-        triggers: intent.definition.triggers,
         examples: intent.definition.examples,
         domain: intent.definition.domain,
         keywords: intent.definition.keywords,
@@ -132,7 +130,7 @@ function documentPath(
 
 function documentBody(params: {
   intent: IntentCatalogEntry;
-  kind: "trigger" | "example" | "keyword";
+  kind: "example" | "keyword";
   text: string;
 }): string {
   return matter.stringify(params.text.trim(), {
@@ -192,7 +190,7 @@ function snapshotDocuments(intents: readonly IntentCatalogEntry[]): {
   const append = (params: {
     root: string;
     intents: readonly IntentCatalogEntry[];
-    kind: "trigger" | "example" | "keyword";
+    kind: "example" | "keyword";
     texts: (intent: IntentCatalogEntry) => readonly string[];
   }) => {
     for (const intent of params.intents) {
@@ -204,12 +202,6 @@ function snapshotDocuments(intents: readonly IntentCatalogEntry[]): {
       });
     }
   };
-  append({
-    root: "triggers",
-    intents,
-    kind: "trigger",
-    texts: (intent) => intent.definition.triggers,
-  });
   append({
     root: "examples",
     intents,
@@ -223,7 +215,6 @@ function snapshotDocuments(intents: readonly IntentCatalogEntry[]): {
     texts: (intent) => intent.definition.keywords,
   });
   const collections: Record<string, { path: string; pattern: string }> = {
-    [TRIGGERS_COLLECTION]: { path: "triggers", pattern: "**/*.md" },
     [EXAMPLES_COLLECTION]: { path: "examples", pattern: "**/*.md" },
     [KEYWORDS_COLLECTION]: { path: "keywords", pattern: "**/*.md" },
   };
@@ -288,11 +279,7 @@ export function createIntentQmdIndex(params: {
     "intent-routing.sqlite",
   );
   const snapshotRoot = path.join(params.dataRoot, "qmd", "intents");
-  const metadataPath = path.join(
-    params.dataRoot,
-    "qmd",
-    "intent-routing.json",
-  );
+  const metadataPath = path.join(params.dataRoot, "qmd", "intent-routing.json");
   let currentFingerprint: string | undefined;
   let expectedFingerprint: string | undefined;
   let desired:
@@ -534,14 +521,18 @@ export function createIntentQmdIndex(params: {
         running = runWorker();
       }
     },
-    async searchIntentTriggers({ query, rawLimit, expansionContext }) {
+    async searchIntentExamplesAndKeywords({
+      query,
+      rawLimit,
+      expansionContext,
+    }) {
       if (!isReadyForCurrentCatalog()) return;
       const activeStore = store;
       if (!activeStore) return;
       try {
         const results = (await activeStore.search({
           query: boundQmdQuery(query),
-          collections: [TRIGGERS_COLLECTION, EXAMPLES_COLLECTION],
+          collections: [EXAMPLES_COLLECTION, KEYWORDS_COLLECTION],
           includeHyde: false,
           ...(expansionContext ? { expansionContext } : {}),
           rerank: false,
@@ -550,9 +541,9 @@ export function createIntentQmdIndex(params: {
           minScore: 0,
           explain: true,
         })) as QmdResult[];
-        return parseHits(results, "intent-triggers-and-examples");
+        return parseHits(results, "intent-examples-and-keywords");
       } catch (error) {
-        logger.warn("QMD intent trigger search failed", { error });
+        logger.warn("QMD intent example/keyword search failed", { error });
         return;
       }
     },

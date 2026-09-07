@@ -405,12 +405,7 @@ describe("skill indexer", () => {
     await resolveSkillInventory({ api, agentId: "main", cacheTtlMs: 0 });
     await resolveSkillInventory({ api, agentId: "main", cacheTtlMs: 0 });
 
-    const keptPath = path.join(
-      workspaceDir,
-      "skills",
-      "first-dup",
-      "SKILL.md",
-    );
+    const keptPath = path.join(workspaceDir, "skills", "first-dup", "SKILL.md");
     const ignoredPath = path.join(
       workspaceDir,
       "skills",

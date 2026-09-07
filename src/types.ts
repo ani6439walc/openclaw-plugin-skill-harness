@@ -154,13 +154,7 @@ export type IntentionResult = {
 
 export type ClassifiedIntentionResult = IntentionResult;
 
-export type IntentTrigger =
-  | "keyword"
-  | "exact-keyword"
-  | "same-topic"
-  | "qmd-topic-keyword"
-  | "qmd-trigger"
-  | "classifier";
+export type IntentTrigger = "qmd-keyword" | "qmd-hybrid" | "llm-classifier";
 
 export type AvailableSkill = {
   name: string;

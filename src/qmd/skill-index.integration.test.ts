@@ -4,11 +4,7 @@ import { tmpdir } from "node:os";
 import { scheduler } from "node:timers/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  createStore,
-  type QMDStore,
-  type StoreOptions,
-} from "@wei840222/qmd";
+import { createStore, type QMDStore, type StoreOptions } from "@wei840222/qmd";
 import type { AvailableSkill } from "../skills/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
 import { createSkillQmdIndex } from "./skill-index.js";
@@ -24,13 +20,11 @@ interface EmbeddingFixture {
 
 afterEach(async () => {
   await Promise.all(
-    servers.splice(0).map(
-      (server) => {
-        const { promise, resolve, reject } = Promise.withResolvers<void>();
-        server.close((error) => (error ? reject(error) : resolve()));
-        return promise;
-      },
-    ),
+    servers.splice(0).map((server) => {
+      const { promise, resolve, reject } = Promise.withResolvers<void>();
+      server.close((error) => (error ? reject(error) : resolve()));
+      return promise;
+    }),
   );
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
@@ -54,7 +48,9 @@ async function createEmbeddingFixture(): Promise<EmbeddingFixture> {
         dimensions: unknown;
       };
       const batch = Array.isArray(parsed.input)
-        ? parsed.input.filter((value): value is string => typeof value === "string")
+        ? parsed.input.filter(
+            (value): value is string => typeof value === "string",
+          )
         : [];
       inputs.push(batch);
       if (remainingFailures > 0) {
@@ -75,9 +71,15 @@ async function createEmbeddingFixture(): Promise<EmbeddingFixture> {
       }
       const dimension =
         typeof parsed.dimensions === "number" ? parsed.dimensions : 1536;
-      const model = typeof parsed.model === "string" ? parsed.model : "text-embedding-3-small";
+      const model =
+        typeof parsed.model === "string"
+          ? parsed.model
+          : "text-embedding-3-small";
       const data = batch.map((text, index) => {
-        const seed = [...text].reduce((total, character) => total + character.charCodeAt(0), 1);
+        const seed = [...text].reduce(
+          (total, character) => total + character.charCodeAt(0),
+          1,
+        );
         return {
           object: "embedding",
           index,
@@ -108,7 +110,8 @@ async function createEmbeddingFixture(): Promise<EmbeddingFixture> {
   server.listen(0, "127.0.0.1", () => resolve());
   await listening;
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("missing server address");
+  if (!address || typeof address === "string")
+    throw new Error("missing server address");
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     inputs,
@@ -123,7 +126,9 @@ async function createSkill(params: {
   description: string;
   body: string;
 }): Promise<AvailableSkill> {
-  const root = await mkdtemp(path.join(tmpdir(), "skill-harness-real-qmd-skill-"));
+  const root = await mkdtemp(
+    path.join(tmpdir(), "skill-harness-real-qmd-skill-"),
+  );
   roots.push(root);
   const directory = path.join(root, params.name);
   await mkdir(directory, { recursive: true });
@@ -182,7 +187,9 @@ function flattenedInputs(fixture: EmbeddingFixture, from = 0): string[] {
 describe("createSkillQmdIndex real QMD integration", () => {
   it("incrementally embeds changed documents in one SQLite and lazy-opens it after restart", async () => {
     const fixture = await createEmbeddingFixture();
-    const dataRoot = await mkdtemp(path.join(tmpdir(), "skill-harness-real-qmd-index-"));
+    const dataRoot = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-real-qmd-index-"),
+    );
     roots.push(dataRoot);
     const alpha = await createSkill({
       name: "alpha",
@@ -197,12 +204,19 @@ describe("createSkillQmdIndex real QMD integration", () => {
     const sourceRoots = [path.dirname(path.dirname(alpha.location))];
     const databasePaths: string[] = [];
     let completedEmbeds = 0;
-    const createTrackedStore = async (options: StoreOptions): Promise<QMDStore> => {
+    const createTrackedStore = async (
+      options: StoreOptions,
+    ): Promise<QMDStore> => {
       databasePaths.push(options.dbPath);
       const store = await createStore(options);
       const searchLex = store.searchLex.bind(store);
       store.search = async (options) =>
-        storeSearchFromLex(searchLex, options.query, options.collection, options.limit);
+        storeSearchFromLex(
+          searchLex,
+          options.query,
+          options.collection,
+          options.limit,
+        );
       const embed = store.embed.bind(store);
       store.embed = async (embedOptions) => {
         try {
@@ -235,10 +249,17 @@ describe("createSkillQmdIndex real QMD integration", () => {
       () => completedEmbeds === 1 || index.getStatus("main") === "failed",
       "initial real QMD embed did not finish",
     );
-    expect(index.getStatus("main"), JSON.stringify({ databasePaths, inputs: fixture.inputs })).toBe("ready");
+    expect(
+      index.getStatus("main"),
+      JSON.stringify({ databasePaths, inputs: fixture.inputs }),
+    ).toBe("ready");
     const initialInputs = flattenedInputs(fixture);
-    expect(initialInputs.some((input) => input.includes("alphaversionone"))).toBe(true);
-    expect(initialInputs.some((input) => input.includes("betastableterm"))).toBe(true);
+    expect(
+      initialInputs.some((input) => input.includes("alphaversionone")),
+    ).toBe(true);
+    expect(
+      initialInputs.some((input) => input.includes("betastableterm")),
+    ).toBe(true);
 
     await scheduler.yield();
     const afterInitialRequests = fixture.inputs.length;
@@ -248,10 +269,17 @@ describe("createSkillQmdIndex real QMD integration", () => {
       "utf8",
     );
     index.schedule("main", { skills: [alpha, beta], sourceRoots });
-    await waitUntil(() => completedEmbeds === 2, "changed-document embed did not finish");
+    await waitUntil(
+      () => completedEmbeds === 2,
+      "changed-document embed did not finish",
+    );
     const changedInputs = flattenedInputs(fixture, afterInitialRequests);
-    expect(changedInputs.some((input) => input.includes("alphaversiontwo"))).toBe(true);
-    expect(changedInputs.some((input) => input.includes("betastableterm"))).toBe(false);
+    expect(
+      changedInputs.some((input) => input.includes("alphaversiontwo")),
+    ).toBe(true);
+    expect(
+      changedInputs.some((input) => input.includes("betastableterm")),
+    ).toBe(false);
 
     await scheduler.yield();
     const gamma = await createSkill({
@@ -261,21 +289,36 @@ describe("createSkillQmdIndex real QMD integration", () => {
     });
     const afterChangedRequests = fixture.inputs.length;
     index.schedule("main", { skills: [alpha, beta, gamma], sourceRoots });
-    await waitUntil(() => completedEmbeds === 3, "new-document embed did not finish");
+    await waitUntil(
+      () => completedEmbeds === 3,
+      "new-document embed did not finish",
+    );
     const addedInputs = flattenedInputs(fixture, afterChangedRequests);
-    expect(addedInputs.some((input) => input.includes("gammanewterm"))).toBe(true);
-    expect(addedInputs.some((input) => input.includes("alphaversiontwo"))).toBe(false);
-    expect(addedInputs.some((input) => input.includes("betastableterm"))).toBe(false);
+    expect(addedInputs.some((input) => input.includes("gammanewterm"))).toBe(
+      true,
+    );
+    expect(addedInputs.some((input) => input.includes("alphaversiontwo"))).toBe(
+      false,
+    );
+    expect(addedInputs.some((input) => input.includes("betastableterm"))).toBe(
+      false,
+    );
 
     await scheduler.yield();
     const beforeRemovalRequests = fixture.inputs.length;
     index.schedule("main", { skills: [alpha, beta], sourceRoots });
-    await waitUntil(() => completedEmbeds === 4, "removed-document refresh did not finish");
+    await waitUntil(
+      () => completedEmbeds === 4,
+      "removed-document refresh did not finish",
+    );
     expect(fixture.inputs).toHaveLength(beforeRemovalRequests);
 
     await scheduler.yield();
     index.schedule("lite", { skills: [beta], sourceRoots });
-    await waitUntil(() => completedEmbeds === 5, "shared-agent refresh did not finish");
+    await waitUntil(
+      () => completedEmbeds === 5,
+      "shared-agent refresh did not finish",
+    );
     const mainResults = await index.search({
       agentId: "main",
       query: "alphaversiontwo",
@@ -291,7 +334,8 @@ describe("createSkillQmdIndex real QMD integration", () => {
     expect(new Set(databasePaths).size).toBe(1);
 
     const documentInputsBeforeRestart = flattenedInputs(fixture).filter(
-      (input) => input !== "betastableterm" && input.includes("integration marker"),
+      (input) =>
+        input !== "betastableterm" && input.includes("integration marker"),
     ).length;
     await index.close();
 
@@ -303,7 +347,12 @@ describe("createSkillQmdIndex real QMD integration", () => {
         const store = await createStore(options);
         const searchLex = store.searchLex.bind(store);
         store.search = async (options) =>
-          storeSearchFromLex(searchLex, options.query, options.collection, options.limit);
+          storeSearchFromLex(
+            searchLex,
+            options.query,
+            options.collection,
+            options.limit,
+          );
         const embed = store.embed.bind(store);
         store.embed = async (embedOptions) => {
           restartEmbeds += 1;
@@ -321,7 +370,8 @@ describe("createSkillQmdIndex real QMD integration", () => {
     expect(restartEmbeds).toBe(0);
     expect(
       flattenedInputs(fixture).filter(
-        (input) => input !== "betastableterm" && input.includes("integration marker"),
+        (input) =>
+          input !== "betastableterm" && input.includes("integration marker"),
       ),
     ).toHaveLength(documentInputsBeforeRestart);
     await restarted.close();
@@ -329,7 +379,9 @@ describe("createSkillQmdIndex real QMD integration", () => {
 
   it("keeps lexical search available while real QMD retries pending embeddings", async () => {
     const fixture = await createEmbeddingFixture();
-    const dataRoot = await mkdtemp(path.join(tmpdir(), "skill-harness-real-qmd-partial-"));
+    const dataRoot = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-real-qmd-partial-"),
+    );
     roots.push(dataRoot);
     const skill = await createSkill({
       name: "partial",
@@ -377,7 +429,10 @@ describe("createSkillQmdIndex real QMD integration", () => {
       () => completedEmbeds === 1 || index.getStatus("main") === "failed",
       "initial partial fixture embed did not finish",
     );
-    expect(index.getStatus("main"), JSON.stringify({ hasStore: Boolean(store), inputs: fixture.inputs })).toBe("ready");
+    expect(
+      index.getStatus("main"),
+      JSON.stringify({ hasStore: Boolean(store), inputs: fixture.inputs }),
+    ).toBe("ready");
 
     await scheduler.yield();
     await writeFile(
@@ -387,7 +442,10 @@ describe("createSkillQmdIndex real QMD integration", () => {
     );
     fixture.failNextEmbeddingRequests(9);
     index.schedule("main", { skills: [skill], sourceRoots });
-    await waitUntil(() => completedEmbeds === 2, "failed real QMD embed did not finish");
+    await waitUntil(
+      () => completedEmbeds === 2,
+      "failed real QMD embed did not finish",
+    );
     expect(
       pendingTimers.length,
       JSON.stringify({
@@ -408,7 +466,10 @@ describe("createSkillQmdIndex real QMD integration", () => {
 
     fixture.failNextEmbeddingRequests(0);
     pendingTimers.shift()?.();
-    await waitUntil(() => completedEmbeds === 3, "real QMD retry did not finish");
+    await waitUntil(
+      () => completedEmbeds === 3,
+      "real QMD retry did not finish",
+    );
     expect((await store?.getStatus())?.needsEmbedding).toBe(0);
     expect(index.getStatus("main")).toBe("ready");
     await index.close();

@@ -159,7 +159,9 @@ export function formatConversationExpansionContext(params: {
   ];
 
   if (params.latestHistoricalIntent?.topic) {
-    sections.push(`[Previous Routing State]\nprevious_topic=${params.latestHistoricalIntent.topic}`);
+    sections.push(
+      `[Previous Routing State]\nprevious_topic=${params.latestHistoricalIntent.topic}`,
+    );
   }
 
   if (params.conversation?.length) {
@@ -690,7 +692,7 @@ export function createHookHandlers(deps: HookDeps) {
           latestHistoricalIntent,
         });
         return {
-          trigger: "keyword",
+          trigger: "qmd-keyword",
           result,
         };
       }
@@ -710,14 +712,14 @@ export function createHookHandlers(deps: HookDeps) {
       );
     }
 
-    // Step 2: QMD Hybrid Search (Triggers & Examples) with Context Expansion
+    // Step 2: QMD Hybrid Search (Examples & Keywords) with Context Expansion
     let qmdHits: QmdIntentHit[] | undefined;
     let topHit: QmdIntentHit | undefined;
     if (qmdIntentIndex) {
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
-        "qmd-trigger-example",
+        "qmd-example-keyword",
         "started",
       );
       const limits = getQmdCandidateLimits(params.availableIntents.length);
@@ -725,7 +727,7 @@ export function createHookHandlers(deps: HookDeps) {
         conversation: params.conversation,
         latestHistoricalIntent,
       });
-      qmdHits = await qmdIntentIndex.searchIntentTriggers({
+      qmdHits = await qmdIntentIndex.searchIntentExamplesAndKeywords({
         query: params.latestUserMessage,
         rawLimit: limits.rawLimit,
         ...(expansionContext ? { expansionContext } : {}),
@@ -743,7 +745,7 @@ export function createHookHandlers(deps: HookDeps) {
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
-          "qmd-trigger-example",
+          "qmd-example-keyword",
           "completed",
           {
             intent: topIntent.id,
@@ -757,17 +759,17 @@ export function createHookHandlers(deps: HookDeps) {
           latestHistoricalIntent,
         });
         return {
-          trigger: "qmd-trigger",
+          trigger: "qmd-hybrid",
           result,
         };
       }
       emitPipelineEvent(
         params.ctx,
         params.resolvedSessionKey,
-        "qmd-trigger-example",
+        "qmd-example-keyword",
         qmdHits === undefined ? "failed" : "completed",
         qmdHits === undefined
-          ? { error: "QMD intent trigger index unavailable" }
+          ? { error: "QMD intent example/keyword index unavailable" }
           : topHit
             ? { score: topHit.score, collection: topHit.collection }
             : {},
@@ -839,7 +841,7 @@ export function createHookHandlers(deps: HookDeps) {
       await recordPromptBuildSession({
         association: params.association,
         latestUserMessage: params.latestUserMessage,
-        trigger: "classifier",
+        trigger: "llm-classifier",
         intentProjection,
         conversation: params.conversation,
       });
@@ -864,7 +866,7 @@ export function createHookHandlers(deps: HookDeps) {
       await recordPromptBuildSession({
         association: params.association,
         latestUserMessage: params.latestUserMessage,
-        trigger: "classifier",
+        trigger: "llm-classifier",
         intentProjection,
         conversation: params.conversation,
       });
@@ -873,7 +875,7 @@ export function createHookHandlers(deps: HookDeps) {
 
     result.domain = findIntentDomain(params.availableIntents, result.intent);
     return {
-      trigger: "classifier",
+      trigger: "llm-classifier",
       result,
       intentProjection,
     };

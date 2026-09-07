@@ -2487,7 +2487,7 @@ describe("createHookHandlers topic switch flow", () => {
     ) => string[] | Promise<string[]>;
     experienceCatalog?: { listForSkills: ReturnType<typeof vi.fn> };
     qmdIntentIndex?: {
-      searchIntentTriggers: ReturnType<typeof vi.fn>;
+      searchIntentExamplesAndKeywords: ReturnType<typeof vi.fn>;
       searchTopicKeywords: ReturnType<typeof vi.fn>;
     };
     turnAssociations?: TurnAssociationRegistry;
@@ -2593,7 +2593,7 @@ describe("createHookHandlers topic switch flow", () => {
           }
           return [];
         }),
-      searchIntentTriggers: vi.fn().mockResolvedValue([]),
+      searchIntentExamplesAndKeywords: vi.fn().mockResolvedValue([]),
     };
     const qmdIntentIndex = params.qmdIntentIndex ?? defaultQmdIntentIndex;
     const handlers = createHookHandlers({
@@ -2672,7 +2672,7 @@ describe("createHookHandlers topic switch flow", () => {
         score: number;
         collection: string;
       }>;
-      triggerHits?: Array<{
+      hybridHits?: Array<{
         intentId: string;
         score: number;
         collection: string;
@@ -2683,7 +2683,9 @@ describe("createHookHandlers topic switch flow", () => {
     return {
       searchKeywords: vi.fn().mockResolvedValue(keywordHits),
       searchTopicKeywords: vi.fn().mockResolvedValue(params.topicHits ?? []),
-      searchIntentTriggers: vi.fn().mockResolvedValue(params.triggerHits ?? []),
+      searchIntentExamplesAndKeywords: vi
+        .fn()
+        .mockResolvedValue(params.hybridHits ?? []),
     };
   }
 
@@ -2978,7 +2980,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
             input: expect.arrayContaining([
               expect.objectContaining({ role: "user", text: "謝謝" }),
             ]),
-            trigger: "keyword",
+            trigger: "qmd-keyword",
             result: expect.objectContaining({
               intent: "social-casual",
             }),
@@ -3239,7 +3241,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         current: expect.objectContaining({
           input: "implement topic checker",
           intent: expect.objectContaining({
-            trigger: "classifier",
+            trigger: "llm-classifier",
             intentProjection: expect.objectContaining({
               decision: "full-fallback",
               fallbackReason: "qmd-no-trusted-recall",
@@ -3400,7 +3402,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       expect.objectContaining({
         current: expect.objectContaining({
           intent: expect.objectContaining({
-            trigger: "keyword",
+            trigger: "qmd-keyword",
             result: expect.objectContaining({
               intent: "version-control",
               domain: "git",
@@ -3444,7 +3446,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
         reason: "start" as const,
         confidence: 0.9,
       }),
-      qmdIntentIndex: qmdIndex({ topicHits: [], triggerHits: [] }),
+      qmdIntentIndex: qmdIndex({ topicHits: [], hybridHits: [] }),
     });
 
     await handlers.onBeforePromptBuild(
@@ -3459,15 +3461,15 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     const qmdEvents = emittedPipelineEvents(emitAgentEvent).filter(
       (entry) =>
         entry.data.phase === "qmd-keyword" ||
-        entry.data.phase === "qmd-trigger-example",
+        entry.data.phase === "qmd-example-keyword",
     );
     expect(
       qmdEvents.map((event) => `${event.data.phase}:${event.data.state}`),
     ).toEqual([
       "qmd-keyword:started",
       "qmd-keyword:completed",
-      "qmd-trigger-example:started",
-      "qmd-trigger-example:completed",
+      "qmd-example-keyword:started",
+      "qmd-example-keyword:completed",
     ]);
     for (const event of qmdEvents.filter(
       (event) => event.data.state === "completed",
@@ -3495,11 +3497,11 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     });
     const qmdIntentIndex = qmdIndex({
       topicHits: [],
-      triggerHits: [
+      hybridHits: [
         {
           intentId: "version-control",
           score: 0.72,
-          collection: "intent-triggers-and-examples",
+          collection: "intent-examples-and-keywords",
         },
       ],
     });
@@ -3521,7 +3523,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     expect(classifier).toHaveBeenCalledWith(
       expect.objectContaining({ intents: [versionControlIntent] }),
     );
-    expect(qmdIntentIndex.searchIntentTriggers).toHaveBeenCalledWith(
+    expect(qmdIntentIndex.searchIntentExamplesAndKeywords).toHaveBeenCalledWith(
       expect.objectContaining({
         query: "maintain this repository",
       }),
@@ -3556,7 +3558,50 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
-  it("uses the configured direct QMD score threshold for trigger/example routing", async () => {
+  it("directly routes a hybrid example/keyword hit after BM25 misses", async () => {
+    const classifier = vi.fn();
+    const { handlers, record } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      classifier,
+      qmdIntentIndex: qmdIndex({
+        keywordHits: [],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.91,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "maintain this repository",
+        messages: [{ role: "user", content: "maintain this repository" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            trigger: "qmd-hybrid",
+            result: expect.objectContaining({
+              intent: "version-control",
+              confidence: 0.91,
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("uses the configured direct QMD score threshold for example/keyword routing", async () => {
     const classifier = vi.fn().mockResolvedValue({
       intent: "version-control",
       reason: "The request is repository maintenance.",
@@ -3583,11 +3628,11 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       }),
       qmdIntentIndex: qmdIndex({
         topicHits: [],
-        triggerHits: [
+        hybridHits: [
           {
             intentId: "version-control",
             score: 0.91,
-            collection: "intent-triggers-and-examples",
+            collection: "intent-examples-and-keywords",
           },
         ],
       }),
@@ -3638,11 +3683,11 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       }),
       qmdIntentIndex: qmdIndex({
         topicHits: [],
-        triggerHits: [
+        hybridHits: [
           {
             intentId: "version-control",
             score: 0.72,
-            collection: "intent-triggers-and-examples",
+            collection: "intent-examples-and-keywords",
           },
         ],
       }),
@@ -3779,7 +3824,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
             collection: "intent-topic-keywords-git",
           },
         ],
-        triggerHits: [],
+        hybridHits: [],
       }),
     });
 
@@ -3877,7 +3922,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
                 text: "implement topic checker",
               }),
             ]),
-            trigger: "classifier",
+            trigger: "llm-classifier",
             result: expect.objectContaining({
               intent: "coding",
               topicChangeReason: "start",
@@ -4333,7 +4378,7 @@ Current user request: fresh clean request
       expect.objectContaining({
         current: expect.objectContaining({
           intent: expect.objectContaining({
-            trigger: "classifier",
+            trigger: "llm-classifier",
             intentProjection: expect.any(Object),
           }),
         }),
@@ -4431,11 +4476,11 @@ Current user request: fresh clean request
       }),
       qmdIntentIndex: qmdIndex({
         topicHits: [],
-        triggerHits: [
+        hybridHits: [
           {
             intentId: "version-control",
             score: 0.7,
-            collection: "intent-triggers-and-examples",
+            collection: "intent-examples-and-keywords",
           },
         ],
       }),
@@ -4849,7 +4894,9 @@ describe("formatConversationExpansionContext", () => {
 
     expect(result).toBeDefined();
     expect(result).toContain("[Task Context]");
-    expect(result).toContain("Stay faithful to the user's actual intent and topic");
+    expect(result).toContain(
+      "Stay faithful to the user's actual intent and topic",
+    );
     expect(result).toContain("[Previous Routing State]");
     expect(result).not.toContain("previous_intent=");
     expect(result).toContain("previous_topic=seaside vacation");

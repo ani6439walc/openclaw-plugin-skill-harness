@@ -48,7 +48,7 @@ const refreshedCatalog: IntentCatalogEntry[] = [
     ...catalog[0],
     definition: {
       ...catalog[0].definition,
-      triggers: ["refresh the intent catalog"],
+      examples: ["refresh the intent catalog"],
     },
   },
 ];
@@ -58,7 +58,17 @@ const latestCatalog: IntentCatalogEntry[] = [
     ...catalog[0],
     definition: {
       ...catalog[0].definition,
-      triggers: ["use the latest intent catalog"],
+      examples: ["use the latest intent catalog"],
+    },
+  },
+];
+
+const keywordRefreshedCatalog: IntentCatalogEntry[] = [
+  {
+    ...catalog[0],
+    definition: {
+      ...catalog[0].definition,
+      keywords: ["implement", "feature", "refresh"],
     },
   },
 ];
@@ -130,10 +140,14 @@ describe("createIntentQmdIndex", () => {
     );
     await firstIndex.close();
 
-    const reopenedSearch = vi.fn().mockResolvedValue([qmdResult("implementation")]);
-    const reopenedLexSearch = vi.fn().mockResolvedValue([
-      { filepath: "/snapshot/keywords/implementation-0.md", score: 0.91 },
-    ]);
+    const reopenedSearch = vi
+      .fn()
+      .mockResolvedValue([qmdResult("implementation")]);
+    const reopenedLexSearch = vi
+      .fn()
+      .mockResolvedValue([
+        { filepath: "/snapshot/keywords/implementation-0.md", score: 0.91 },
+      ]);
     const reopenedStore = createStoreDouble({
       search: reopenedSearch,
       searchLex: reopenedLexSearch,
@@ -149,12 +163,15 @@ describe("createIntentQmdIndex", () => {
     await waitForReady(restartedIndex);
 
     await expect(
-      restartedIndex.searchIntentTriggers({ query: "implement", rawLimit: 1 }),
+      restartedIndex.searchIntentExamplesAndKeywords({
+        query: "implement",
+        rawLimit: 1,
+      }),
     ).resolves.toEqual([
       {
         intentId: "implementation",
         score: 0.91,
-        collection: "intent-triggers-and-examples",
+        collection: "intent-examples-and-keywords",
       },
     ]);
     await expect(
@@ -222,6 +239,53 @@ describe("createIntentQmdIndex", () => {
     );
     expect(rebuiltStore.update).toHaveBeenCalledOnce();
     expect(rebuiltStore.embed).toHaveBeenCalledOnce();
+
+    await restartedIndex.close();
+  });
+
+  it("reopens a persisted index when only intent triggers change", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const firstIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn().mockResolvedValue(createStoreDouble({})),
+    });
+
+    firstIndex.schedule(catalog);
+    await waitForReady(firstIndex);
+    await writeFile(
+      path.join(root, "qmd", "intent-routing.sqlite"),
+      "existing index",
+    );
+    await firstIndex.close();
+
+    const reopenedStore = createStoreDouble({});
+    const createStore = vi.fn().mockResolvedValue(reopenedStore);
+    const restartedIndex = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+    const triggerOnlyChange = [
+      {
+        ...catalog[0],
+        definition: {
+          ...catalog[0].definition,
+          triggers: ["a human-only routing boundary"],
+        },
+      },
+    ];
+
+    restartedIndex.schedule(triggerOnlyChange);
+    await waitForReady(restartedIndex);
+
+    expect(createStore).toHaveBeenCalledOnce();
+    expect(reopenedStore.update).not.toHaveBeenCalled();
+    expect(reopenedStore.embed).not.toHaveBeenCalled();
+    await expect(
+      stat(path.join(root, "qmd", "intents", "triggers")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
 
     await restartedIndex.close();
   });
@@ -348,7 +412,10 @@ describe("createIntentQmdIndex", () => {
     );
 
     await expect(
-      index.searchIntentTriggers({ query: "implement", rawLimit: 1 }),
+      index.searchIntentExamplesAndKeywords({
+        query: "implement",
+        rawLimit: 1,
+      }),
     ).resolves.toBeUndefined();
     expect(incompleteStore.close).toHaveBeenCalledOnce();
     await expect(
@@ -389,7 +456,7 @@ describe("createIntentQmdIndex", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("builds a managed snapshot and uses default QMD expansion", async () => {
+  it("searches examples and keywords but excludes triggers from hybrid retrieval", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
     roots.push(root);
     const search = vi.fn().mockResolvedValue([
@@ -405,9 +472,9 @@ describe("createIntentQmdIndex", () => {
         score: 0.91,
       },
     ]);
-    const createStore = vi.fn().mockResolvedValue(
-      createStoreDouble({ search, searchLex }),
-    );
+    const createStore = vi
+      .fn()
+      .mockResolvedValue(createStoreDouble({ search, searchLex }));
     const index = createIntentQmdIndex({
       dataRoot: root,
       config: () => qmdConfig,
@@ -417,7 +484,7 @@ describe("createIntentQmdIndex", () => {
     index.schedule(catalog);
     await waitForReady(index);
     await expect(
-      index.searchIntentTriggers({
+      index.searchIntentExamplesAndKeywords({
         query: "add qmd",
         rawLimit: 12,
         expansionContext:
@@ -427,7 +494,7 @@ describe("createIntentQmdIndex", () => {
       {
         intentId: "implementation",
         score: 0.91,
-        collection: "intent-triggers-and-examples",
+        collection: "intent-examples-and-keywords",
         explain: { backend: "rrf" },
       },
     ]);
@@ -445,7 +512,7 @@ describe("createIntentQmdIndex", () => {
     );
     expect(search).toHaveBeenCalledWith({
       query: "add qmd",
-      collections: ["intent-triggers", "intent-examples"],
+      collections: ["intent-examples", "intent-keywords"],
       includeHyde: false,
       expansionContext:
         "domain=development; keywords=qmd,routing; topic=Add QMD routing",
@@ -499,7 +566,7 @@ describe("createIntentQmdIndex", () => {
     // When: routing receives a long message whose actual request is at the end.
     const query = `prefix-marker ${"你".repeat(3_000)} suffix-marker`;
     await expect(
-      index.searchIntentTriggers({ query, rawLimit: 12 }),
+      index.searchIntentExamplesAndKeywords({ query, rawLimit: 12 }),
     ).resolves.toEqual([]);
 
     // Then: hybrid search remains available and retains both ends of the request.
@@ -534,7 +601,7 @@ describe("createIntentQmdIndex", () => {
     );
     const before = await stat(examplePath);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    index.schedule(refreshedCatalog);
+    index.schedule(keywordRefreshedCatalog);
     await waitFor(
       () => createStore.mock.calls.length === 2,
       "refreshed intent index did not build",
@@ -679,7 +746,7 @@ describe("createIntentQmdIndex", () => {
     await waitForReady(index);
     await expect(
       readFile(
-        path.join(root, "qmd", "intents", "triggers", "implementation-0.md"),
+        path.join(root, "qmd", "intents", "examples", "implementation-0.md"),
         "utf8",
       ),
     ).resolves.toContain("use the latest intent catalog");
@@ -715,12 +782,15 @@ describe("createIntentQmdIndex", () => {
     await waitForReady(index);
 
     await expect(
-      index.searchIntentTriggers({ query: "replacement", rawLimit: 1 }),
+      index.searchIntentExamplesAndKeywords({
+        query: "replacement",
+        rawLimit: 1,
+      }),
     ).resolves.toEqual([
       {
         intentId: "replacement",
         score: 0.91,
-        collection: "intent-triggers-and-examples",
+        collection: "intent-examples-and-keywords",
       },
     ]);
     expect(replacementSearch).toHaveBeenCalledOnce();
@@ -749,7 +819,7 @@ describe("createIntentQmdIndex", () => {
       "initial QMD failure was not recorded",
     );
     await expect(
-      index.searchIntentTriggers({ query: "locked", rawLimit: 1 }),
+      index.searchIntentExamplesAndKeywords({ query: "locked", rawLimit: 1 }),
     ).resolves.toBeUndefined();
 
     index.schedule(catalog);

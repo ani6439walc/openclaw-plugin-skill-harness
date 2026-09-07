@@ -377,7 +377,9 @@ describe("createSkillQmdIndex", () => {
   });
 
   it("shares one store and filters results by each agent's allowed skills", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-shared-qmd-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-shared-qmd-"),
+    );
     roots.push(root);
     const alpha = await createSkillFixture({
       name: "alpha",
@@ -404,19 +406,28 @@ describe("createSkillQmdIndex", () => {
     scheduleSkills(index, "main", [alpha, beta]);
     scheduleSkills(index, "lite", [beta]);
     await waitFor(
-      () => index.getStatus("main") === "ready" && index.getStatus("lite") === "ready",
+      () =>
+        index.getStatus("main") === "ready" &&
+        index.getStatus("lite") === "ready",
       "shared index did not become ready",
     );
 
-    const main = await index.search({ agentId: "main", query: "skills", limit: 5 });
-    const lite = await index.search({ agentId: "lite", query: "skills", limit: 5 });
+    const main = await index.search({
+      agentId: "main",
+      query: "skills",
+      limit: 5,
+    });
+    const lite = await index.search({
+      agentId: "lite",
+      query: "skills",
+      limit: 5,
+    });
 
     expect(createStore).toHaveBeenCalledTimes(1);
     expect(main?.map((hit) => hit.name).sort()).toEqual(["alpha", "beta"]);
     expect(lite?.map((hit) => hit.name)).toEqual(["beta"]);
     await index.close();
   });
-
 
   it("restores persisted allowed skills before the first scheduled refresh", async () => {
     const root = await mkdtemp(
@@ -430,8 +441,14 @@ describe("createSkillQmdIndex", () => {
     });
     const indexRoot = path.join(root, "qmd", "skills", "indexes", fingerprint);
     await mkdir(path.join(indexRoot, "docs"), { recursive: true });
-    await writeFile(path.join(indexRoot, "skill-search.sqlite"), "sqlite", "utf8");
-    await mkdir(path.join(root, "qmd", "skills", "agents"), { recursive: true });
+    await writeFile(
+      path.join(indexRoot, "skill-search.sqlite"),
+      "sqlite",
+      "utf8",
+    );
+    await mkdir(path.join(root, "qmd", "skills", "agents"), {
+      recursive: true,
+    });
     await writeFile(
       path.join(root, "qmd", "skills", "agents", "main.json"),
       JSON.stringify({
@@ -451,14 +468,20 @@ describe("createSkillQmdIndex", () => {
       createStore: (async () => createStoreDouble({ search })) as never,
     });
 
-    const results = await index.search({ agentId: "main", query: "skills", limit: 5 });
+    const results = await index.search({
+      agentId: "main",
+      query: "skills",
+      limit: 5,
+    });
 
     expect(results?.map((result) => result.name)).toEqual(["beta"]);
     await index.close();
   });
 
   it("keeps partial embeddings searchable and retries the same store", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-partial-qmd-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-partial-qmd-"),
+    );
     roots.push(root);
     const skill = await createSkillFixture({
       name: "partial",
@@ -467,9 +490,14 @@ describe("createSkillQmdIndex", () => {
     });
     const pendingTimers: Array<() => void> = [];
     const store = createStoreDouble({
-      search: vi.fn().mockResolvedValue([
-        { body: "---\nskill: partial\npath: SKILL.md\n---\npartial", score: 1 },
-      ]),
+      search: vi
+        .fn()
+        .mockResolvedValue([
+          {
+            body: "---\nskill: partial\npath: SKILL.md\n---\npartial",
+            score: 1,
+          },
+        ]),
       embed: vi
         .fn()
         .mockResolvedValueOnce({ errors: 1 })
@@ -493,11 +521,20 @@ describe("createSkillQmdIndex", () => {
     });
 
     scheduleSkills(index, "main", [skill]);
-    await waitFor(() => index.getStatus("main") === "ready", "partial index not searchable");
-    expect((await index.search({ agentId: "main", query: "partial", limit: 1 }))?.[0]?.name).toBe("partial");
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "partial index not searchable",
+    );
+    expect(
+      (await index.search({ agentId: "main", query: "partial", limit: 1 }))?.[0]
+        ?.name,
+    ).toBe("partial");
     expect(pendingTimers).toHaveLength(1);
     pendingTimers.shift()?.();
-    await waitFor(() => (store.embed as ReturnType<typeof vi.fn>).mock.calls.length === 2, "partial retry did not resume");
+    await waitFor(
+      () => (store.embed as ReturnType<typeof vi.fn>).mock.calls.length === 2,
+      "partial retry did not resume",
+    );
     expect(createStore).toHaveBeenCalledTimes(1);
     await index.close();
   });
@@ -1092,5 +1129,4 @@ describe("createSkillQmdIndex", () => {
 
     await index.close();
   });
-
 });

@@ -544,7 +544,9 @@ export function skillIndexFingerprint(params: {
   embeddingModel: string;
   embeddingDimension: number;
 }): string {
-  const sourceRoots = [...new Set(params.sourceRoots.map((root) => path.resolve(root)))].sort();
+  const sourceRoots = [
+    ...new Set(params.sourceRoots.map((root) => path.resolve(root))),
+  ].sort();
   return hash(
     JSON.stringify({
       sourceRoots,
@@ -591,10 +593,14 @@ function skillSetSignature(skills: readonly AvailableSkill[]): string {
   return hash(
     JSON.stringify(
       [...skills]
-        .map((skill) => [skill.name.toLowerCase(), path.resolve(skill.location)])
-        .sort((left, right) =>
-          (left[0] ?? "").localeCompare(right[0] ?? "") ||
-          (left[1] ?? "").localeCompare(right[1] ?? ""),
+        .map((skill) => [
+          skill.name.toLowerCase(),
+          path.resolve(skill.location),
+        ])
+        .sort(
+          (left, right) =>
+            (left[0] ?? "").localeCompare(right[0] ?? "") ||
+            (left[1] ?? "").localeCompare(right[1] ?? ""),
         ),
     ),
   );
@@ -626,9 +632,10 @@ export function createSkillQmdIndex(params: {
     if ("qmd" in raw) {
       return { qmd: raw.qmd, ...(raw.skills ? { skills: raw.skills } : {}) };
     }
-    const skills = "skills" in (raw as Record<string, unknown>)
-      ? (raw as ResolvedQmdConfig & { skills?: ResolvedSkillsConfig }).skills
-      : undefined;
+    const skills =
+      "skills" in (raw as Record<string, unknown>)
+        ? (raw as ResolvedQmdConfig & { skills?: ResolvedSkillsConfig }).skills
+        : undefined;
     return { qmd: raw, ...(skills ? { skills } : {}) };
   }
 
@@ -697,7 +704,12 @@ export function createSkillQmdIndex(params: {
     try {
       entries = await fs.readdir(indexesRoot, { withFileTypes: true });
     } catch (error) {
-      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      if (!(
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "ENOENT"
+      )) {
         logger.warn("failed to load QMD skill index catalog", { error });
       }
     }
@@ -705,7 +717,10 @@ export function createSkillQmdIndex(params: {
       if (!entry.isDirectory() || !/^[a-f0-9]{64}$/u.test(entry.name)) continue;
       const state = indexState(entry.name);
       try {
-        await Promise.all([fs.access(state.databasePath), fs.access(state.docsRoot)]);
+        await Promise.all([
+          fs.access(state.databasePath),
+          fs.access(state.docsRoot),
+        ]);
         state.status = "ready";
         state.usable = true;
       } catch {
@@ -717,7 +732,12 @@ export function createSkillQmdIndex(params: {
     try {
       mappings = await fs.readdir(mappingsRoot, { withFileTypes: true });
     } catch (error) {
-      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      if (!(
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "ENOENT"
+      )) {
         logger.warn("failed to load QMD skill agent mappings", { error });
       }
     }
@@ -735,7 +755,8 @@ export function createSkillQmdIndex(params: {
           parsed.schemaVersion !== 1 ||
           typeof parsed.fingerprint !== "string" ||
           !/^[a-f0-9]{64}$/u.test(parsed.fingerprint)
-        ) continue;
+        )
+          continue;
         const shared = indexes.get(parsed.fingerprint);
         if (!shared) continue;
         const encodedAgentId = entry.name.slice(0, -".json".length);
@@ -774,7 +795,9 @@ export function createSkillQmdIndex(params: {
       !qmd.expansion.baseUrl ||
       !qmd.expansion.model
     ) {
-      throw new Error("QMD embedding and expansion endpoints must be configured.");
+      throw new Error(
+        "QMD embedding and expansion endpoints must be configured.",
+      );
     }
     const createQmdStore =
       params.createStore ?? (await import("@wei840222/qmd")).createStore;
@@ -785,11 +808,17 @@ export function createSkillQmdIndex(params: {
         models: {
           embed_api_url: qmd.embedding.baseUrl,
           embed_api_model: qmd.embedding.model,
-          ...(qmd.embedding.apiKey ? { embed_api_key: qmd.embedding.apiKey } : {}),
-          ...(qmd.embedding.dimension ? { embed_dimension: qmd.embedding.dimension } : {}),
+          ...(qmd.embedding.apiKey
+            ? { embed_api_key: qmd.embedding.apiKey }
+            : {}),
+          ...(qmd.embedding.dimension
+            ? { embed_dimension: qmd.embedding.dimension }
+            : {}),
           generate_api_url: qmd.expansion.baseUrl,
           generate_api_model: qmd.expansion.model,
-          ...(qmd.expansion.apiKey ? { generate_api_key: qmd.expansion.apiKey } : {}),
+          ...(qmd.expansion.apiKey
+            ? { generate_api_key: qmd.expansion.apiKey }
+            : {}),
         },
       },
       remoteRequestTimeoutMs: qmd.timeoutMs,
@@ -801,7 +830,10 @@ export function createSkillQmdIndex(params: {
     if (state.opening) return state.opening;
     const opening = (async () => {
       try {
-        await Promise.all([fs.access(state.databasePath), fs.access(state.docsRoot)]);
+        await Promise.all([
+          fs.access(state.databasePath),
+          fs.access(state.docsRoot),
+        ]);
         const store = await createConfiguredStore(state);
         state.store = store;
         state.status = "ready";
@@ -856,10 +888,7 @@ export function createSkillQmdIndex(params: {
     }, delayMs);
   }
 
-  function recordRefreshProblem(
-    state: SharedIndexState,
-    error: unknown,
-  ): void {
+  function recordRefreshProblem(state: SharedIndexState, error: unknown): void {
     state.consecutiveFailures += 1;
     const delayMs = Math.min(
       INITIAL_RETRY_DELAY_MS * 2 ** (state.consecutiveFailures - 1),
@@ -916,7 +945,8 @@ export function createSkillQmdIndex(params: {
           if (!store) {
             const { qmd } = config();
             const createQmdStore =
-              params.createStore ?? (await import("@wei840222/qmd")).createStore;
+              params.createStore ??
+              (await import("@wei840222/qmd")).createStore;
             store = await createQmdStore({
               dbPath: state.databasePath,
               config: {
@@ -924,11 +954,17 @@ export function createSkillQmdIndex(params: {
                 models: {
                   embed_api_url: qmd.embedding.baseUrl,
                   embed_api_model: qmd.embedding.model,
-                  ...(qmd.embedding.apiKey ? { embed_api_key: qmd.embedding.apiKey } : {}),
-                  ...(qmd.embedding.dimension ? { embed_dimension: qmd.embedding.dimension } : {}),
+                  ...(qmd.embedding.apiKey
+                    ? { embed_api_key: qmd.embedding.apiKey }
+                    : {}),
+                  ...(qmd.embedding.dimension
+                    ? { embed_dimension: qmd.embedding.dimension }
+                    : {}),
                   generate_api_url: qmd.expansion.baseUrl,
                   generate_api_model: qmd.expansion.model,
-                  ...(qmd.expansion.apiKey ? { generate_api_key: qmd.expansion.apiKey } : {}),
+                  ...(qmd.expansion.apiKey
+                    ? { generate_api_key: qmd.expansion.apiKey }
+                    : {}),
                 },
               },
               remoteRequestTimeoutMs: qmd.timeoutMs,
@@ -978,17 +1014,17 @@ export function createSkillQmdIndex(params: {
     state.refreshing = refreshing;
     void refreshing.finally(() => {
       if (state.refreshing === refreshing) state.refreshing = undefined;
-      if (state.queuedSignature && state.queuedSignature !== state.refreshSignature) {
+      if (
+        state.queuedSignature &&
+        state.queuedSignature !== state.refreshSignature
+      ) {
         state.queuedSignature = undefined;
         startRefresh(state);
       }
     });
   }
 
-  function scheduleLocked(
-    agentId: string,
-    input: SkillQmdScheduleInput,
-  ): void {
+  function scheduleLocked(agentId: string, input: SkillQmdScheduleInput): void {
     const agent = agentState(agentId);
     agent.allowedSkillNames = new Set(
       input.skills.map((skill) => skill.name.toLowerCase()),
@@ -1007,7 +1043,8 @@ export function createSkillQmdIndex(params: {
       state.skillsByAgent.set(agentId, [...input.skills]);
       const signature = skillSetSignature(mergedSkills(state));
       if (state.refreshing) {
-        if (signature !== state.refreshSignature) state.queuedSignature = signature;
+        if (signature !== state.refreshSignature)
+          state.queuedSignature = signature;
         return;
       }
       if (state.lastRefreshError && now() < state.nextRetryAtMs) return;
@@ -1074,7 +1111,9 @@ export function createSkillQmdIndex(params: {
               collection: collection.name,
               docsRoot: state.docsRoot,
             })
-              .filter((hit) => agent.allowedSkillNames.has(hit.skillName.toLowerCase()))
+              .filter((hit) =>
+                agent.allowedSkillNames.has(hit.skillName.toLowerCase()),
+              )
               .sort((left, right) => {
                 if (right.score !== left.score) return right.score - left.score;
                 return hitId(left).localeCompare(hitId(right));
@@ -1114,7 +1153,8 @@ export function createSkillQmdIndex(params: {
               evidence: [evidence],
             });
           } else {
-            if (fusedHit.score > existing.score) existing.score = fusedHit.score;
+            if (fusedHit.score > existing.score)
+              existing.score = fusedHit.score;
             existing.evidence.push(evidence);
             existing.evidence.sort((left, right) => right.score - left.score);
             if (existing.evidence.length > MAX_EVIDENCE_PER_SKILL) {

@@ -1726,7 +1726,10 @@ describe("runReviewSubagent", () => {
       dataRoot,
     });
 
-    const options = runEmbeddedAgent.mock.calls[0]?.[0] as Record<string, unknown>;
+    const options = runEmbeddedAgent.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
     expect(options).not.toHaveProperty("sessionFile");
   });
 

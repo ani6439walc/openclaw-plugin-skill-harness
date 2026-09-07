@@ -742,8 +742,12 @@ describe("runKeywordCoverageReview", () => {
           prompt: expect.stringContaining("<keyword_coverage_adjudication>"),
         }),
       );
-      expect(runEmbeddedAgent.mock.calls[0][0]).not.toHaveProperty("sessionFile");
-      expect(runEmbeddedAgent.mock.calls[1][0]).not.toHaveProperty("sessionFile");
+      expect(runEmbeddedAgent.mock.calls[0][0]).not.toHaveProperty(
+        "sessionFile",
+      );
+      expect(runEmbeddedAgent.mock.calls[1][0]).not.toHaveProperty(
+        "sessionFile",
+      );
       expect(runEmbeddedAgent.mock.calls[0][0].prompt).not.toContain(
         "test-session",
       );

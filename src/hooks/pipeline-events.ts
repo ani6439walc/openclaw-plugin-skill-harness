@@ -9,7 +9,7 @@ export type PipelinePhase =
   | "pipeline"
   | "topic-triage"
   | "qmd-keyword"
-  | "qmd-trigger-example"
+  | "qmd-example-keyword"
   | "intent-classify";
 
 export type PipelineState = "started" | "completed" | "failed";

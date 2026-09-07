@@ -651,7 +651,7 @@ describe("SessionTracker", () => {
         current: {
           input: "read a skill",
           intent: {
-            trigger: "classifier",
+            trigger: "llm-classifier",
             result: {
               intent: "tool-reference",
               reason: "User wants to read a skill",
@@ -671,7 +671,7 @@ describe("SessionTracker", () => {
         ),
       );
       expect(saved.current.intent).toMatchObject({
-        trigger: "classifier",
+        trigger: "llm-classifier",
         recommendedSkills: ["skill-viewer", "tool-reference"],
         result: { intent: "tool-reference" },
       });
@@ -762,7 +762,7 @@ describe("SessionTracker", () => {
         current: {
           input: "classify this",
           intent: {
-            trigger: "classifier",
+            trigger: "llm-classifier",
             intentProjection: {
               decision: "full-fallback",
               effectiveInput: "full-fallback",
