@@ -289,8 +289,9 @@ export function createPlugin(
       const statsAggregator = StatsAggregator.create(dataRoot);
       const reviewLogWriter = new IntentReviewLogWriter(dataRoot);
 
-      const refreshRuntimeIntents = () => {
+      const refreshRuntimeIntents = (options?: { rebuildQmd?: boolean }) => {
         catalog.load("intents");
+        if (options?.rebuildQmd) qmdIntentIndex.schedule(catalog.get());
       };
 
       const knownAgentIds = new Set<string>(["main"]);

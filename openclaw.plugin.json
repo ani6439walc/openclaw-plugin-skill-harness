@@ -6,22 +6,13 @@
     "onStartup": true
   },
   "contracts": {
-    "tools": [
-      "skill_list",
-      "skill_search",
-      "skill_view",
-      "skill_experience"
-    ]
+    "tools": ["skill_list", "skill_search", "skill_view", "skill_experience"]
   },
-  "skills": [
-    "./skills"
-  ],
+  "skills": ["./skills"],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": [
-      "qmd"
-    ],
+    "required": ["qmd"],
     "properties": {
       "scope": {
         "type": "object",
@@ -34,25 +25,16 @@
               "type": "string"
             },
             "description": "Agent IDs eligible for intention scanning.",
-            "default": [
-              "main"
-            ]
+            "default": ["main"]
           },
           "chatTypes": {
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "direct",
-                "group",
-                "channel",
-                "explicit"
-              ]
+              "enum": ["direct", "group", "channel", "explicit"]
             },
             "description": "Which chat types are eligible.",
-            "default": [
-              "direct"
-            ]
+            "default": ["direct"]
           },
           "allowedChatIds": {
             "type": "array",
@@ -137,11 +119,7 @@
               },
               "queryMode": {
                 "type": "string",
-                "enum": [
-                  "message",
-                  "recent",
-                  "full"
-                ],
+                "enum": ["message", "recent", "full"],
                 "description": "Context sent to scanner: latest message only, recent turns, or full history.",
                 "default": "recent"
               },
@@ -247,9 +225,7 @@
           "embedding": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "model"
-            ],
+            "required": ["model"],
             "properties": {
               "baseUrl": {
                 "type": "string",
@@ -274,9 +250,7 @@
           "expansion": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "model"
-            ],
+            "required": ["model"],
             "properties": {
               "baseUrl": {
                 "type": "string",
@@ -300,10 +274,7 @@
             "description": "Seconds between source checks for QMD intent and skill index refreshes; 0 disables subsequent automatic checks."
           }
         },
-        "required": [
-          "embedding",
-          "expansion"
-        ]
+        "required": ["embedding", "expansion"]
       },
       "review": {
         "type": "object",

@@ -59,9 +59,9 @@ def require_object(value: dict[str, Any], field: str, path: Path) -> dict[str, A
 
 def load_review_log(path: Path) -> dict[str, Any]:
     value = load_json(path)
-    if value.get("schemaVersion") != 7:
-        raise ValueError(f"{path} must be a current schema-v7 review log")
-    for field in ("processedEvents", "reviewedSkillEpochs", "historicalKeywordAudits"):
+    if value.get("schemaVersion") != 8:
+        raise ValueError(f"{path} must be a current schema-v8 review log")
+    for field in ("processedEvents", "reviewedSkillEpochs"):
         require_object(value, field, path)
     return value
 

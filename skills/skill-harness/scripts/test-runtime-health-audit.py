@@ -51,18 +51,18 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         (self.root / "review.json").write_text(
             json.dumps(
                 {
-                    "schemaVersion": 7,
+                    "schemaVersion": 8,
                     "createdAt": "2026-08-01T00:00:00.000Z",
                     "updatedAt": "2026-08-01T00:00:00.000Z",
                     "processedEvents": {
                         "event-1": {
                             "processedAt": "2026-08-01T00:00:00.000Z",
-                            "triggers": ["skill-candidate"],
+                            "triggers": ["capability-fit"],
                             "changeCount": 1,
                             "outcome": "applied",
                             "changes": [
                                 {
-                                    "trigger": "skill-candidate",
+                                    "trigger": "capability-fit",
                                     "targetKind": "intent-markdown",
                                     "operation": "refine",
                                     "targetIntentIds": ["example"],
@@ -71,14 +71,13 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                         },
                         "event-2": {
                             "processedAt": "2026-08-01T00:01:00.000Z",
-                            "triggers": ["missing-intent"],
+                            "triggers": ["routing-uncertainty"],
                             "changeCount": 0,
                             "outcome": "nofinding",
                             "noFindingReasonCounts": {"already-covered": 1},
                         },
                     },
                     "reviewedSkillEpochs": {},
-                    "historicalKeywordAudits": {},
                 }
             ),
             encoding="utf-8",
@@ -244,7 +243,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                 "total": 1,
                 "averagePerAppliedEvent": 1.0,
                 "eventsByChangeCount": {"0": 1, "1": 1},
-                "byTrigger": {"skill-candidate": 1},
+                "byTrigger": {"capability-fit": 1},
                 "byOperation": {"refine": 1},
                 "topTargetIntents": [{"intent": "example", "changes": 1}],
             },
@@ -388,7 +387,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
             text=True,
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("schema-v7", result.stderr)
+        self.assertIn("schema-v8", result.stderr)
 
 
 if __name__ == "__main__":

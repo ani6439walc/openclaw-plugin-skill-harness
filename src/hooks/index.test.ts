@@ -1316,6 +1316,7 @@ description: Navigate Tokyo.
       "---\nname: analysis\ndescription: Break down unclear tasks.\n---\n",
     );
     const enqueue = vi.fn();
+    const refreshIntents = vi.fn();
     const reviewer = vi.fn().mockResolvedValue({
       findings: [],
       outcome: "nofinding" as const,
@@ -1348,7 +1349,7 @@ description: Navigate Tokyo.
           },
         }),
       refreshLiveConfigFromRuntime: vi.fn(),
-      refreshIntents: vi.fn(),
+      refreshIntents,
       reviewQueue: { enqueue },
       reviewer,
       reviewLogWriter,
@@ -1409,8 +1410,94 @@ description: Navigate Tokyo.
         noFindingReasonCounts: { "wrong-trigger": 1 },
       },
     );
+    expect(refreshIntents).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(tmp, "review.json"))).toBe(false);
     fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("rebuilds QMD only after a review changes an intent routing surface", async () => {
+    const snapshot = {
+      sessionId: "session-routing-refresh",
+      agentId: "main",
+      eventId: "session-routing-refresh:2026-06-11T00:00:00.000Z",
+      turnNumber: 10,
+      current: {
+        input: "find the deployment instructions",
+        intent: {
+          intent: "other",
+          reason: "test",
+          confidence: 0.2,
+          complexity: "high" as const,
+        },
+        timestamps: { start: "2026-06-11T00:00:00.000Z" },
+      },
+      recent: [],
+      intentCatalog: [],
+    };
+    const state = {
+      input: snapshot.current.input,
+      intent: { result: snapshot.current.intent },
+      timestamps: snapshot.current.timestamps,
+    };
+    vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd").mockResolvedValue(
+      "applied",
+    );
+    vi.spyOn(defaultTracker, "getTurnState").mockReturnValue(state);
+    vi.spyOn(defaultTracker, "getReviewSnapshotForTurn").mockReturnValue(
+      snapshot,
+    );
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+    vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
+    const enqueue = vi.fn();
+    const refreshIntents = vi.fn();
+    const reviewer = vi
+      .fn()
+      .mockResolvedValueOnce({
+        findings: [],
+        outcome: "applied" as const,
+        changedIntentIds: ["other"],
+        routingSurfaceChanged: true,
+      })
+      .mockResolvedValueOnce({
+        findings: [],
+        outcome: "applied" as const,
+        changedIntentIds: ["other"],
+      });
+    const reviewLogWriter = { record: vi.fn(async () => true) };
+    const turnAssociations = seedAssociation(snapshot.sessionId, "run-1");
+    const handlers = createHookHandlers({
+      api: { config: {} } as OpenClawPluginApi,
+      config: () =>
+        resolveConfig({
+          review: { enabled: true, model: "google/test-review" },
+        }),
+      refreshLiveConfigFromRuntime: vi.fn(),
+      refreshIntents,
+      reviewQueue: { enqueue },
+      reviewer,
+      reviewLogWriter,
+      dataRoot: fs.mkdtempSync(path.join(os.tmpdir(), "hook-routing-refresh-")),
+      turnAssociations,
+    });
+
+    await handlers.onAgentEnd({ messages: [], runId: "run-1" } as never, {
+      sessionId: snapshot.sessionId,
+      agentId: "main",
+    });
+    await enqueue.mock.calls[0][0]();
+    expect(refreshIntents).toHaveBeenCalledWith({ rebuildQmd: true });
+
+    bindAssociation(turnAssociations, {
+      sessionId: snapshot.sessionId,
+      turnKey: "run-2",
+      runId: "run-2",
+    });
+    await handlers.onAgentEnd({ messages: [], runId: "run-2" } as never, {
+      sessionId: snapshot.sessionId,
+      agentId: "main",
+    });
+    await enqueue.mock.calls[1][0]();
+    expect(refreshIntents).toHaveBeenLastCalledWith({ rebuildQmd: false });
   });
 
   it("persists v7 review records in distinct per-handler data roots", async () => {

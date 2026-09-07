@@ -310,8 +310,6 @@ describe("createPlugin", () => {
     );
   });
 
-
-
   function createPackageRootWithAssets(files: Record<string, string>): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-package-root-"));
     const assetsDir = path.join(root, "skills", "skill-harness", "assets");

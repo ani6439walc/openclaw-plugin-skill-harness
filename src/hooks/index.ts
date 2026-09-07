@@ -1519,7 +1519,9 @@ export function createHookHandlers(deps: HookDeps) {
             },
           );
           if (reviewResult.changedIntentIds?.length) {
-            deps.refreshIntents();
+            refreshIntents({
+              rebuildQmd: reviewResult.routingSurfaceChanged === true,
+            });
           }
         } finally {
           if (params.skillPlacementCandidate) {
@@ -1563,7 +1565,10 @@ export function createHookHandlers(deps: HookDeps) {
     const toolFailureCount = toolCalls.filter(
       (call) => call.error !== undefined,
     ).length;
-    if (toolFailureCount >= params.config.review.triggers.capabilityFit.toolFailures) {
+    if (
+      toolFailureCount >=
+      params.config.review.triggers.capabilityFit.toolFailures
+    ) {
       return {
         source: "tool-failure-threshold",
         observedSkillNames,
@@ -1572,7 +1577,9 @@ export function createHookHandlers(deps: HookDeps) {
         recoveryVerified: false,
       };
     }
-    if (toolCalls.length >= params.config.review.triggers.capabilityFit.toolCalls) {
+    if (
+      toolCalls.length >= params.config.review.triggers.capabilityFit.toolCalls
+    ) {
       return {
         source: "tool-call-threshold",
         observedSkillNames,

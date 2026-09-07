@@ -132,7 +132,7 @@ export type HookDeps = {
   api: OpenClawPluginApi;
   config: () => ResolvedSkillHarnessPluginConfig;
   refreshLiveConfigFromRuntime: () => void;
-  refreshIntents: () => void;
+  refreshIntents: (options?: { rebuildQmd?: boolean }) => void;
   catalog?: typeof defaultCatalog;
   tracker?: typeof defaultTracker;
   statsAggregator?: typeof defaultStatsAggregator;

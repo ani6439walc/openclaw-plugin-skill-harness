@@ -32,7 +32,7 @@ If ambiguous, ask one routing question: "Are you working on one intent, auditing
   - Do not assume a single user-local skill directory is the only skill source; inventory should include bundled extension skills, configured user/runtime skills, and the active OpenClaw skill catalog when available.
 - For broad, destructive, or routing-identity changes (rename, split, merge, deletion, extraction), present the plan and wait for explicit confirmation before writing.
 - Treat runtime session text as private. Runtime-health reports stay local; never send raw retained conversations, tool payloads, Review suggestions, or Review evidence to external tools or artifacts.
-- Do not hand-edit `review.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, startup seeding, Review persistence, skill-placement, stats, or cleanup workflows in this skill.
+- Do not hand-edit `review.json`, `stats.json`, session files, runtime experience files, or package files. Those are host-owned runtime records. Do not recreate production routing, startup seeding, Review persistence, capability-fit, stats, or cleanup workflows in this skill.
 - Check changed intent files for canonical routing-only format: complete valid classification frontmatter with fixed key order (`domain`, `triggers`, `examples`, optional `keywords`, optional `skills` with lowercase names), one plain-text body `guidance` sentence, concrete triggers/examples, and no cross-references to other intent ids. The entire body is guidance; do not add sections, lists, fences, commands, paths, or other Markdown formatting.
 - Keep concrete shell commands, MCP documentation calls, workflows, and durable lessons in referenced skills; do not add them to intent definitions.
 - In prompt context, configured skills and candidate skills omit filesystem paths (`<path>`) to conserve tokens; agents obtain paths through `skill_list` and inspect skill files or references using `skill_view`.
@@ -175,18 +175,18 @@ Read and follow `references/runtime-health-audit.md`. Keep these checkpoints vis
 
 ### Failure modes
 
-| Trigger                              | First fix                                                                   | Fallback                                                       |
-| ------------------------------------ | --------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| **Runtime state changed while read** | Retry later or use a quiescent copied data root                             | Report no trend conclusion                                     |
-| **Schema or session-shape failure**  | Report the count and affected state surface                                 | Investigate writer/retention code separately                   |
-| **High Review failure outcomes**     | Compare a fresh bounded window and reason counts                            | Do not change prompts/models from a historical aggregate alone |
+| Trigger                              | First fix                                        | Fallback                                                       |
+| ------------------------------------ | ------------------------------------------------ | -------------------------------------------------------------- |
+| **Runtime state changed while read** | Retry later or use a quiescent copied data root  | Report no trend conclusion                                     |
+| **Schema or session-shape failure**  | Report the count and affected state surface      | Investigate writer/retention code separately                   |
+| **High Review failure outcomes**     | Compare a fresh bounded window and reason counts | Do not change prompts/models from a historical aggregate alone |
 
 ### Anti-patterns
 
-| #   | Anti-pattern                                                        | Why not                                                     | Do instead                                      |
-| --- | ------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- |
-| 1   | **Treat all Review events as changes**                              | Nofindings and rejected proposals are not runtime mutations | Use host-recorded `applied` and `changes.total` |
-| 2   | **Print raw state to explain a counter** | Runtime files can contain private data | Use aggregate report fields only |
+| #   | Anti-pattern                             | Why not                                                     | Do instead                                      |
+| --- | ---------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- |
+| 1   | **Treat all Review events as changes**   | Nofindings and rejected proposals are not runtime mutations | Use host-recorded `applied` and `changes.total` |
+| 2   | **Print raw state to explain a counter** | Runtime files can contain private data                      | Use aggregate report fields only                |
 
 ---
 
