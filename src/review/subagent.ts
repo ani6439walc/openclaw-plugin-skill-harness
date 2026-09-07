@@ -1698,6 +1698,17 @@ export async function runReviewSubagent(params: {
       });
     }
   } finally {
+    try {
+      await params.api.runtime.subagent.deleteSession({
+        sessionKey,
+        deleteTranscript: true,
+      });
+    } catch (error) {
+      logger.warn("failed to delete review subagent session", {
+        error,
+        sessionKey,
+      });
+    }
     fs.rmSync(workspaceDir, { recursive: true, force: true });
   }
 

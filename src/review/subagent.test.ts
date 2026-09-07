@@ -206,7 +206,7 @@ it("detects only examples and keywords as QMD routing surfaces", () => {
 });
 
 describe("runReviewSubagent", () => {
-  it("fails closed when a tool-call experience is returned from an errored turn", async () => {
+  async function runNoFindingReview(deleteSession: ReturnType<typeof vi.fn>) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-intents-"));
     tempRoots.push(root);
     fs.writeFileSync(
@@ -227,10 +227,11 @@ describe("runReviewSubagent", () => {
             ],
           }),
         },
+        subagent: { deleteSession },
       },
     } as unknown as OpenClawPluginApi;
 
-    const result = await runReviewSubagent({
+    return runReviewSubagent({
       api,
       config: resolveConfig({}),
       agentId: "main",
@@ -248,6 +249,26 @@ describe("runReviewSubagent", () => {
       },
       triggers: ["capability-fit"],
     });
+  }
+
+  it("cleans up its session after a no-finding review", async () => {
+    const deleteSession = vi.fn();
+
+    const result = await runNoFindingReview(deleteSession);
+
+    expect(result.outcome).toBe("nofinding");
+    expect(deleteSession).toHaveBeenCalledWith({
+      sessionKey: "agent:main:skill-harness-review:2959d5f1da6a",
+      deleteTranscript: true,
+    });
+  });
+
+  it("keeps the review outcome when cleanup fails", async () => {
+    const deleteSession = vi
+      .fn()
+      .mockRejectedValue(new Error("cleanup failed"));
+
+    const result = await runNoFindingReview(deleteSession);
 
     expect(result.outcome).toBe("nofinding");
   });
