@@ -1459,7 +1459,19 @@ description: Navigate Tokyo.
         routingSurfaceChanged: true,
       })
       .mockResolvedValueOnce({
-        findings: [],
+        findings: [
+          {
+            trigger: "routing-uncertainty" as const,
+            targetKind: "intent-markdown" as const,
+            operation: "refine" as const,
+            targetIntentIds: ["other"],
+            dedupeKey: "other-classifier-boundary",
+            summary: "Clarify the classifier boundary",
+            evidence: ["The fallback classifier handled the request."],
+            correctionGoal: "Improve fallback classifier context.",
+            suggestedChange: "Add the stable boundary to triggers.",
+          },
+        ],
         outcome: "applied" as const,
         changedIntentIds: ["other"],
       });
