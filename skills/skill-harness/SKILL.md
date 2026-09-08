@@ -5,7 +5,7 @@ description: "Audit Skill Harness intents, runtime health, and Review data."
 
 # Skill Harness
 
-Manage the human-facing lifecycle of intent definitions: single-intent CRUD (design), full-catalog bootstrap/re-audit (inventory), complexity analysis or skill extraction (extract), and report-only runtime health analysis (runtime-health). Background subagents handle automated self-improvement; use analysis modes only for deliberate human-requested review.
+Manage the human-facing lifecycle of intent definitions: single-intent maintenance (design), full-catalog bootstrap/re-audit (inventory), complexity analysis or skill extraction (extract), and report-only runtime health analysis (runtime-health). Background subagents handle automated self-improvement; use analysis modes only for deliberate human-requested review.
 
 Do not manually repeat production-owned work: per-turn classification and routing injection, startup intent seeding, trigger-driven runtime intent edits, capability-fit review, stats aggregation, and session cleanup. This skill is for explicit human maintenance requests and the judgment or confirmation those automated paths do not own.
 
@@ -169,7 +169,7 @@ Keywords: "skill harness health", "runtime health", "review 統計", "review 建
 Read and follow `references/runtime-health-audit.md`. Keep these checkpoints visible:
 
 1. **Generate a report-only snapshot** — run `scripts/runtime-health-audit.py` with local mode-`0600` output. Do not expose session text, tool payloads, Review suggestion text, or evidence.
-2. **Check structural state first** — current schema-v8 `review.json`, schema-v3 or schema-v4 `stats.json`, QMD database state, session shape counts, and retention metadata must be interpreted before quality trends. Read the report attribution boundary before interpreting v4 daily maps.
+2. **Check structural state first** — current schema-v8 `review.json`, schema-v3 or schema-v4 `stats.json`, the QMD intent snapshot/database state, session shape counts, and retention metadata must be interpreted before quality trends. Read the report attribution boundary before interpreting v4 daily maps.
 3. **Explain applied changes, not proposals** — use `processedEvents.changes.total`, `byTrigger`, `byOperation`, and target concentration.
 4. **Report a bounded next observation** — state the provenance, actual counts, disk/retention state, and a next threshold. Do not modify runtime data from audit findings.
 
@@ -199,7 +199,7 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 - Frontmatter is the complete intent file and has required fields with the right shapes.
 - The complete plain-text intent body is one durable routing-guidance sentence.
 - Triggers and examples are concrete, non-duplicative, and aligned with the filename-derived intent id.
-- `keywords` must be durable exact whole-message evidence; the same values also form the lexical QMD keyword collection.
+- `keywords` must be durable short phrases suitable for Step 1 QMD keyword BM25 retrieval; the same values also form the lexical QMD keyword collection.
 - Skill dependencies use direct frontmatter `skills[]`; tools, workflows, commands, and lessons stay in referenced skills.
 - Intent metadata does not cross-reference other intent ids.
 - Proposed triggers do not obviously collide with existing runtime intent boundaries.
@@ -217,4 +217,4 @@ Use structured file/search tools to inspect intent format. Keep checks simple an
 | 1   | "Audit the entire intent system from scratch"    | Route to **inventory** → discovery → clustering → 🔴 CHECKPOINT → interview → generate → review                   | inventory      |
 | 2   | "Help me create a new intent for git operations" | Route to **design** → classify=create → interview → ground → draft → format check                                 | design         |
 | 3   | "Which intents are too complex?"                 | Route to **extract** → complexity scan → sub-responsibility analysis → 🔴 CHECKPOINT → draft blueprints → deliver | extract        |
-| 5   | "統計過去 Review 產生的修改分布"                 | Route to **runtime-health** → report → structural check → applied-change explanation → bounded next observation   | runtime-health |
+| 4   | "統計過去 Review 產生的修改分布"                 | Route to **runtime-health** → report → structural check → applied-change explanation → bounded next observation   | runtime-health |

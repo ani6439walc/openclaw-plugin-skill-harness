@@ -23,7 +23,7 @@ Minimum information before drafting:
 1. Purpose and boundary.
 2. Required `domain`.
 3. Concrete triggers and examples.
-4. Optional exact `keywords`.
+4. Optional durable short `keywords`.
 5. One durable plain-text body guidance sentence and direct skills worth listing in frontmatter.
 6. Neighboring or colliding intents.
 

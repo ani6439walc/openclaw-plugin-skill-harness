@@ -95,11 +95,11 @@ For each confirmed extraction:
 
      ```yaml
      ---
+     domain: "<domain>"
      triggers:
        - "<retained trigger>"
      examples:
        - "<retained example>"
-     domain: "<domain>"
      skills:
        - <new-skill-name>
      ---

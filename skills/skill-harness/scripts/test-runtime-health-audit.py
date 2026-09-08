@@ -20,12 +20,24 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         (self.root / "sessions").mkdir()
         (self.root / "agents" / "review" / "sessions").mkdir(parents=True)
         (self.root / "intents").mkdir()
-        (self.root / "intents" / "example.md").write_text("---\ntriggers: [example]\n---\n", encoding="utf-8")
+        (self.root / "intents" / "example.md").write_text(
+            "---\n"
+            "domain: test\n"
+            "triggers:\n"
+            "  - The test request matches the example intent.\n"
+            "examples:\n"
+            "  - Use the example intent.\n"
+            "keywords:\n"
+            "  - example\n"
+            "---\n"
+            "Route the example request.\n",
+            encoding="utf-8",
+        )
         qmd_root = self.root / "qmd"
-        (qmd_root / "intents" / "triggers").mkdir(parents=True)
+        (qmd_root / "intents" / "keywords").mkdir(parents=True)
         (qmd_root / "intents" / "examples").mkdir()
-        (qmd_root / "intents" / "triggers" / "example.md").write_text(
-            "# trigger\n", encoding="utf-8"
+        (qmd_root / "intents" / "keywords" / "example.md").write_text(
+            "# keyword\n", encoding="utf-8"
         )
         (qmd_root / "intents" / "examples" / "example.md").write_text(
             "# example\n", encoding="utf-8"
@@ -108,7 +120,6 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                             "last7Days": 2,
                             "averageConfidence": 0.75,
                             "lowConfidenceTurns": 1,
-                            "complexity": {"low": 0, "medium": 2, "high": 0},
                             "skillAssistedTurns": 1,
                             "toolAssistedTurns": 1,
                             "erroredTurns": 1,
@@ -268,18 +279,6 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(set(report["provenance"]["stateSha256"]), {"review.json", "stats.json"})
         stats = report["runtime"]["stats"]
         self.assertEqual(stats["attribution"]["status"], "insufficient-historical-attribution")
-        self.assertEqual(stats["summary"]["curationAppliedCount"], None)
-        self.assertEqual(
-            stats["curation"],
-            {
-                "status": "unavailable",
-                "appliedRevisions": 0,
-                "candidatesKept": 0,
-                "candidatesAdded": 0,
-                "recommendedExperiencesSelected": 0,
-                "lastAppliedAt": None,
-            },
-        )
         self.assertEqual(stats["routingEffectiveness"]["turnAdoptionRate"], 0.5)
         self.assertEqual(stats["routingEffectiveness"]["skillAdoptionRate"], 0.5)
         self.assertEqual(stats["projectionEfficiency"]["projectedRate"], 1)
@@ -335,32 +334,12 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                 "toolErrors": {"value:exec": 1, "__other__": 2},
             }
         )
-        stats["summary"]["curationAppliedCount"] = 3
-        stats["curation"] = {
-            "appliedRevisions": 3,
-            "candidatesKept": 5,
-            "candidatesAdded": 2,
-            "recommendedExperiencesSelected": 1,
-            "lastAppliedAt": "2026-08-01T00:02:00.000Z",
-        }
         stats_path.write_text(json.dumps(stats), encoding="utf-8")
 
         report = self.run_audit()
         runtime_stats = report["runtime"]["stats"]
         self.assertEqual(runtime_stats["attribution"]["status"], "post-v4-window-only")
         self.assertEqual(runtime_stats["attribution"]["startedAt"], "2026-08-01T00:02:00.000Z")
-        self.assertEqual(runtime_stats["summary"]["curationAppliedCount"], 3)
-        self.assertEqual(
-            runtime_stats["curation"],
-            {
-                "status": "available",
-                "appliedRevisions": 3,
-                "candidatesKept": 5,
-                "candidatesAdded": 2,
-                "recommendedExperiencesSelected": 1,
-                "lastAppliedAt": "2026-08-01T00:02:00.000Z",
-            },
-        )
         self.assertEqual(runtime_stats["attribution"]["dailyBucketsBeforeAttribution"], 0)
         self.assertEqual(runtime_stats["toolReliability"]["latencyHistogram"], {
             "status": "post-v4-window-only",

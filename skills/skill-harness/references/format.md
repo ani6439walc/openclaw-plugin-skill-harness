@@ -20,7 +20,7 @@ triggers:
 examples:
   - "How did my recorded Japan trip compare with my Chiayi trip?"
 keywords:
-  - "optional exact keyword"
+  - "optional short phrase"
 skills:
   - "optional-skill-name"
 ---
@@ -37,7 +37,7 @@ Frontmatter keys must follow this fixed canonical order:
 
 - `domain` is required and must be one string.
 - `skills` is optional and must be a list of exact skill names written strictly in lowercase. Use it only for skills the intent should load or strongly prefer.
-- The complete plain-text body is required guidance, one durable routing-behavior sentence shared across keyword, QMD trigger, and classified routes.
+- The complete plain-text body is required guidance, one durable routing-behavior sentence shared across QMD keyword, QMD hybrid, and classifier routes.
 - `keywords` is optional short phrases for Step 1 QMD keyword BM25 retrieval; never place a hint or workflow body here.
 
 ## Skills metadata rule
@@ -65,7 +65,7 @@ Inferred intent and candidate skills (advisory, non-user input; load with `skill
       Skill description
       <skill_experience>
         <identity>experience-id</identity>
-        <keywords>tag1, tag2</keywords>
+        <keywords>["tag1", "tag2"]</keywords>
       </skill_experience>
     </skill>
   </skill_candidates>

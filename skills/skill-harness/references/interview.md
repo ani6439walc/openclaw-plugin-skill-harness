@@ -24,7 +24,7 @@ Confirm these fields in order:
 4. one required `domain`
 5. `triggers`
 6. `examples`
-7. optional exact `keywords`
+7. optional durable short `keywords`
 8. one durable plain-text body routing `guidance` sentence
 9. direct skills that help the routing outcome
 10. collision check with existing intents

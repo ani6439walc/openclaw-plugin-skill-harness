@@ -26,6 +26,8 @@ The script resolves the standard data root automatically. Use `--data-root` only
 
 It reads and validates schema-v8 `review.json` and schema-v3 or schema-v4 `stats.json`. It records SHA-256 values for both before loading, rereads them afterward, and refuses to produce a mixed-state report if either changed. QMD is read once through a read-only SQLite connection and is reported as an observed point-in-time state; its active background build is not pinned or hashed. Session files are intentionally not hashed or snapshotted; treat the report as an observed window, not an immutable whole-runtime snapshot.
 
+The managed intent snapshot lives under `<dataRoot>/qmd/intents/`: searchable plain-text documents are in `examples/` and `keywords/`, identity sidecars end in `.md.identity.yml` and are ignored by QMD collections, and `intent-routing.sqlite` plus `intent-routing.json` are colocated with the snapshot.
+
 Completion criterion: report `reportOnly` is true, all privacy flags are false, `provenance.stateSha256` contains both runtime logs, and `runtime.qmd` reports the database state without exposing indexed document text.
 
 ## Check structural health before interpreting trends

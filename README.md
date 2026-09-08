@@ -84,7 +84,7 @@ Large skill catalogs create two practical problems:
 Skill Harness addresses both:
 
 1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and candidate-scoped `<skill_experience>` metadata (identity and keywords only) nested under the matching `<skill>`. The fixed system context does not include the runtime skill inventory.
-2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption and can refine runtime intent Markdown and selected review trigger keywords. It does not train the base model or rewrite skill files.
+2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption, can refine runtime intent Markdown, and may create at most one validated experience for a currently visible skill observed in the completed turn. It does not train the base model or rewrite skill files.
 
 ## How it works
 
@@ -105,7 +105,7 @@ graph TD
   M --> N[Record stats and optionally review the completed turn]
 ```
 
-Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid example/keyword retrieval with expansion, and candidate scoring for Step 3 fallback classification.
+Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of explicit `agents.*.skills` configuration and skills discovered from that agent's workspace `skills/` tree; explicit order is preserved, workspace-only skills are appended, and the workspace winner is used for duplicate names. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `scope.agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid example/keyword retrieval with expansion, and candidate scoring for Step 3 fallback classification.
 
 ### Architecture and routing contract
 
@@ -122,7 +122,7 @@ The routing stages are:
    - **Step 3 (Fallback Intent Classifier)**: If neither direct route matches, projects candidate intents meeting $\ge \text{minCandidateScore}$ (default `0.35`) into a focused candidate manifest (falling back to full catalog if insufficient trusted hits), and invokes a single LLM intent classifier call with prompt context (`llm-classifier`).
 5. Inject the selected intent, its one guidance sentence, direct candidates, and candidate-scoped experience metadata; then record the completed turn and run configured background work.
 
-QMD intent snapshots and their SQLite database live under `qmd/intents/`; they refresh in the background, so a cold or unhealthy index fails open to the classifier.
+QMD intent snapshots and their SQLite database live under `qmd/intents/`; searchable `examples/*.md` and `keywords/*.md` contain plain text, while `<intent>-<n>.md.identity.yml` sidecars hold identity metadata and are ignored by QMD collections. The `intent-routing.sqlite` database and `intent-routing.json` metadata stay in the same snapshot directory. They refresh in the background, so a cold or unhealthy index fails open to the classifier.
 
 Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains only the selected intent, guidance, direct candidates, and nested experience metadata. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
 
@@ -145,22 +145,22 @@ Automate web browsing and interaction.
 **Dynamic routing context (prepended before user message)**:
 
 ```text
-[Fri 2026-09-04 20:35 GMT+8]
+[Tue 2026-09-08 11:35 GMT+8]
 
 Inferred intent and candidate skills (advisory, non-user input; load with `skill_view` if relevant):
 <skill_harness_plugin>
-  <intent name="format">
-    Format the specified files following repository style conventions.
-  </intent>
-  <skill_candidates>
-    <skill name="code-formatter">
-      Run Prettier, ESLint, or language formatters.
-      <skill_experience>
-        <identity>format-config</identity>
-        <keywords>prettier, eslint, tabs</keywords>
-      </skill_experience>
-    </skill>
-  </skill_candidates>
+<intent name="format">
+Format the specified files following repository style conventions.
+</intent>
+<skill_candidates>
+<skill name="code-formatter">
+Run Prettier, ESLint, or language formatters.
+<skill_experience>
+<identity>format-config</identity>
+<keywords>["prettier", "eslint", "tabs"]</keywords>
+</skill_experience>
+</skill>
+</skill_candidates>
 </skill_harness_plugin>
 
 Format index.ts using prettier
@@ -172,6 +172,7 @@ The prompt layout minimizes token consumption:
 - `<intent name="${intent}">` merges the intent name and guidance into a single tag.
 - Skill file paths are omitted from prompt injection; agents inspect `path` dynamically via `skill_list` or `skill_view`.
 - Redundant policy blocks and legacy headers are eliminated.
+- The renderer does not emit `<<<BEGIN_SKILL_HARNESS_CONTEXT>>>` or OpenClaw reserved delimiters; conversation sanitization treats those markers only as input boundaries.
 - Candidate skills nest candidate-scoped `<skill_experience>` identity and keyword metadata; full experience records can be retrieved on demand via `skill_experience`.
 
 ## Basic configuration
@@ -402,18 +403,20 @@ Every requested trigger needs a valid positive or no-finding decision. Missing o
 
 For a placement run, the reviewer receives the complete intent catalog plus one bounded, host-resolved skill snapshot. It may refine exactly one existing intent's `skills[]` frontmatter and, only when necessary, its one-sentence guidance. It cannot create, delete, merge, rename, or modify skills. The host re-resolves the selected skill for the same tracked agent before enqueueing, validates the staged change and current runtime state under the intent lock, and writes the Review event and completed epoch atomically to schema-v8 `review.json`.
 
+Review embedded runs use `sessionPersistence: "detached"`; the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
+
 ## Runtime files and metrics
 
 Skill Harness keeps package files and runtime state separate. The paths below use the default local state directory.
 
-| Path                                                   | Purpose                                                                                    |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `~/.openclaw/plugins/skill-harness/intents/`           | Editable runtime intent catalog.                                                           |
-| `~/.openclaw/plugins/skill-harness/experiences/`       | Skill-scoped runtime experiences; current candidates expose identity/keyword metadata.     |
-| `~/.openclaw/plugins/skill-harness/sessions/`          | Per-session JSON snapshots for audit and Review context.                                   |
-| `~/.openclaw/plugins/skill-harness/agents/*/sessions/` | Embedded-agent session artifacts.                                                          |
-| `~/.openclaw/plugins/skill-harness/stats.json`         | Schema-v4 intent, skill, tool, routing, projection, inventory, and daily telemetry.        |
-| `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v8 current-only Review outcomes, experience writes, and completed placement epochs. |
+| Path                                                   | Purpose                                                                                                              |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `~/.openclaw/plugins/skill-harness/intents/`           | Editable runtime intent catalog.                                                                                     |
+| `~/.openclaw/plugins/skill-harness/experiences/`       | Skill-scoped runtime experiences; current candidates expose identity/keyword metadata.                               |
+| `~/.openclaw/plugins/skill-harness/sessions/`          | Per-session JSON snapshots for audit and Review context.                                                             |
+| `~/.openclaw/plugins/skill-harness/agents/*/sessions/` | Embedded-agent session artifacts.                                                                                    |
+| `~/.openclaw/plugins/skill-harness/stats.json`         | Schema-v4 intent, skill, tool, routing, projection, inventory, and daily telemetry.                                  |
+| `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v8 Review outcomes, experience writes, and completed placement epochs; compatible v7 records migrate on load. |
 
 Session cleanup preserves the ended main-session record and removes only expired session JSON plus embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json` artifacts. It does not delete root-level runtime state, intents, skills, unrelated transcripts, or package files. Retired intent-state fields such as `instructionText` are stripped when retained sessions are loaded; this cleanup never controls routing.
 
