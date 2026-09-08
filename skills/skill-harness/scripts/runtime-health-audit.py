@@ -22,6 +22,7 @@ RETENTION_DAYS = 14
 STATS_DAILY_RETENTION_DAYS = 90
 TOP_TARGETS = 10
 LATENCY_BUCKETS = ("unknown", "0-99", "100-499", "500-999", "1000-4999", "5000+")
+ROUTE_REASONS = ("qmd-keyword", "qmd-hybrid", "llm-classifier")
 
 
 def default_data_root() -> Path:
@@ -69,15 +70,50 @@ def load_review_log(path: Path) -> dict[str, Any]:
 
 def load_stats(path: Path) -> dict[str, Any]:
     value = load_json(path)
-    if value.get("schemaVersion") not in (3, 4):
-        raise ValueError(f"{path} must be a supported schema-v3 or schema-v4 stats log")
+    if value.get("schemaVersion") not in (3, 4, 5):
+        raise ValueError(
+            f"{path} must be a supported schema-v3, schema-v4, or schema-v5 stats log"
+        )
     for field in ("summary", "routing", "projection"):
         require_object(value, field, path)
-    if value["schemaVersion"] == 4:
+    if value["schemaVersion"] >= 4:
         attribution = require_object(value, "attribution", path)
         if not isinstance(attribution.get("startedAt"), str):
             raise ValueError(f"{path} has invalid attribution.startedAt")
+    if value["schemaVersion"] >= 5:
+        validate_route_reason_stats(value, path)
     return value
+
+
+def validate_route_reason_stats(value: dict[str, Any], path: Path) -> None:
+    intents = require_object(value, "intents", path)
+    for intent_id, intent_value in intents.items():
+        if not isinstance(intent_value, dict):
+            raise ValueError(f"{path} has invalid intents.{intent_id}")
+        intent = intent_value
+        route_reasons = intent.get("routeReasons")
+        if not isinstance(route_reasons, dict) or set(route_reasons) != set(ROUTE_REASONS):
+            raise ValueError(f"{path} has invalid routeReasons for {intent_id}")
+        for reason in ROUTE_REASONS:
+            route_value = route_reasons[reason]
+            if not isinstance(route_value, dict):
+                raise ValueError(f"{path} has invalid route score for {intent_id}.{reason}")
+            route = route_value
+            count = route.get("count")
+            scores = [route.get("averageScore"), route.get("minScore"), route.get("maxScore")]
+            if (
+                not isinstance(count, int)
+                or isinstance(count, bool)
+                or count < 0
+                or any(
+                    not isinstance(score, (int, float))
+                    or isinstance(score, bool)
+                    or score < 0
+                    or score > 1
+                    for score in scores
+                )
+            ):
+                raise ValueError(f"{path} has invalid route score for {intent_id}.{reason}")
 
 
 def sha256(path: Path) -> str:
@@ -302,6 +338,71 @@ def object_or_empty(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def route_reason_summary(value: Any) -> dict[str, Any]:
+    route_reasons = object_or_empty(value)
+    by_reason: dict[str, dict[str, int | float | None]] = {}
+    total_routes = 0
+    weighted_score = 0.0
+    observed_min: float | None = None
+    observed_max: float | None = None
+    for reason in ROUTE_REASONS:
+        route = object_or_empty(route_reasons.get(reason))
+        count = int(number(route.get("count")))
+        average_score = number(route.get("averageScore"))
+        min_score = number(route.get("minScore")) if count else None
+        max_score = number(route.get("maxScore")) if count else None
+        by_reason[reason] = {
+            "count": count,
+            "averageScore": average_score,
+            "minScore": min_score,
+            "maxScore": max_score,
+        }
+        total_routes += count
+        weighted_score += count * average_score
+        if min_score is not None:
+            observed_min = min_score if observed_min is None else min(observed_min, min_score)
+        if max_score is not None:
+            observed_max = max_score if observed_max is None else max(observed_max, max_score)
+    return {
+        "totalRoutes": total_routes,
+        "averageScore": round(weighted_score / total_routes, 4)
+        if total_routes
+        else 0,
+        "minScore": observed_min,
+        "maxScore": observed_max,
+        "byReason": by_reason,
+    }
+
+
+def skill_inventory_summary(stats: dict[str, Any]) -> dict[str, Any]:
+    inventory = object_or_empty(stats.get("skillInventory"))
+    agents = object_or_empty(inventory.get("agents"))
+    if not isinstance(inventory.get("startedAt"), str):
+        return {
+            "status": "unavailable",
+            "agentCount": 0,
+            "observedTurns": 0,
+            "trackedSkillRecords": 0,
+            "maxTrackedSkillRecordsPerAgent": 0,
+        }
+
+    tracked_counts = [
+        len(object_or_empty(object_or_empty(agent).get("skills")))
+        for agent in agents.values()
+    ]
+    return {
+        "status": "available",
+        "startedAt": inventory["startedAt"],
+        "agentCount": len(agents),
+        "observedTurns": sum(
+            int(number(object_or_empty(agent).get("observedTurns")))
+            for agent in agents.values()
+        ),
+        "trackedSkillRecords": sum(tracked_counts),
+        "maxTrackedSkillRecordsPerAgent": max(tracked_counts, default=0),
+    }
+
+
 def stats_attribution(stats: dict[str, Any]) -> dict[str, Any]:
     if stats["schemaVersion"] == 3:
         return {
@@ -396,32 +497,10 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
         )
     tool_rows.sort(key=lambda row: (-row["errorCalls"], -row["calls"], row["tool"]))
 
-    daily_cardinality = {
-        "maxIntents": 0,
-        "maxSkills": 0,
-        "maxTools": 0,
-        "maxProjectionFallbackReasons": 0,
-        "maxIntentOutcomes": 0,
-        "maxIntentRouting": 0,
-        "maxSkillRouting": 0,
-        "maxToolErrors": 0,
+    route_reasons_by_intent = {
+        intent_id: route_reason_summary(object_or_empty(value).get("routeReasons"))
+        for intent_id, value in intents.items()
     }
-    for bucket_value in daily.values():
-        bucket = object_or_empty(bucket_value)
-        projection_bucket = object_or_empty(bucket.get("projection"))
-        for report_key, source in (
-            ("maxIntents", bucket.get("intents")),
-            ("maxSkills", bucket.get("skills")),
-            ("maxTools", bucket.get("tools")),
-            ("maxProjectionFallbackReasons", projection_bucket.get("fallbackReasons")),
-            ("maxIntentOutcomes", bucket.get("intentOutcomes")),
-            ("maxIntentRouting", bucket.get("intentRouting")),
-            ("maxSkillRouting", bucket.get("skillRouting")),
-            ("maxToolErrors", bucket.get("toolErrors")),
-        ):
-            daily_cardinality[report_key] = max(
-                daily_cardinality[report_key], len(object_or_empty(source))
-            )
 
     return {
         "schemaVersion": stats["schemaVersion"],
@@ -468,39 +547,22 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
                 "fallbackReasons",
             )
         },
-        "routingEffectiveness": {
-            key: routing.get(key)
-            for key in (
-                "recommendationTurns",
-                "adoptedTurns",
-                "turnAdoptionRate",
-                "recommendedSkillOpportunities",
-                "adoptedSkillOpportunities",
-                "skillAdoptionRate",
-            )
-        },
-        "projectionEfficiency": {
-            key: projection.get(key)
-            for key in (
-                "eligibleTurns",
-                "projectedTurns",
-                "fullFallbackTurns",
-                "projectedRate",
-                "fullFallbackRate",
-                "averageOriginalIntentCount",
-                "averageCandidateIntentCount",
-                "averageOriginalCatalogCodePoints",
-                "averageCandidateCatalogCodePoints",
-                "averageDurationMs",
-                "fallbackReasons",
-            )
-        },
         "intentPortfolio": {
             "trackedIntents": len(intents),
             "erroredTurns": sum(row["erroredTurns"] for row in intent_rows),
             "lowConfidenceTurns": sum(row["lowConfidenceTurns"] for row in intent_rows),
             "topByTurns": intent_rows[:TOP_TARGETS],
+            "routeReasonAttribution": {
+                "status": (
+                    "available"
+                    if stats["schemaVersion"] >= 5
+                    else "not-recorded-before-schema-v5"
+                ),
+                "scoreMeaning": "selected route confidence; QMD routes use hit score",
+                "byIntent": route_reasons_by_intent,
+            },
         },
+        "skillInventory": skill_inventory_summary(stats),
         "skillLifecycle": {
             "trackedSkills": len(skills),
             "byLifecycle": counter_dict(lifecycle_counts),
@@ -533,8 +595,7 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
             "dailyBucketCount": len(daily),
             "oldestDailyBucket": min(daily) if daily else None,
             "newestDailyBucket": max(daily) if daily else None,
-            "processedEventCount": len(processed_events),
-            "dailyDynamicKeyCardinality": daily_cardinality,
+            "retainedProcessedEventCount": len(processed_events),
         },
     }
 

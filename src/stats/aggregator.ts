@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { logger } from "../../api.js";
 import { resolveTurnEventId } from "../session/index.js";
 import type { SessionState } from "../session/index.js";
-import type { IntentCatalogEntry } from "../types.js";
+import type { IntentCatalogEntry, IntentTrigger } from "../types.js";
 import {
   packageRoot,
   statsPath,
@@ -38,6 +38,11 @@ const LATENCY_BUCKETS = [
   "1000-4999",
   "5000+",
 ] as const;
+const INTENT_ROUTE_REASONS = [
+  "qmd-keyword",
+  "qmd-hybrid",
+  "llm-classifier",
+] as const satisfies readonly IntentTrigger[];
 const statsAggregatorCache = new Map<string, StatsAggregator>();
 
 type CountMap = Record<string, number>;
@@ -69,6 +74,13 @@ type DailySkillRouting = {
 };
 type LatencyBucket = (typeof LATENCY_BUCKETS)[number];
 type LatencyHistogram = Record<LatencyBucket, number>;
+type IntentRouteReason = (typeof INTENT_ROUTE_REASONS)[number];
+type IntentRouteScoreStats = {
+  count: number;
+  averageScore: number;
+  minScore: number;
+  maxScore: number;
+};
 
 type DailyProjectionCounts = {
   eligibleTurns: number;
@@ -110,6 +122,21 @@ type ProjectionStats = DailyProjectionCounts & {
   selectionReasons: CountMap;
 };
 
+type IntentStats = {
+  turns: number;
+  share: number;
+  lastSeenAt: string;
+  last7Days: number;
+  averageConfidence: number;
+  lowConfidenceTurns: number;
+  skillAssistedTurns: number;
+  toolAssistedTurns: number;
+  erroredTurns: number;
+  routeReasons: Record<IntentRouteReason, IntentRouteScoreStats>;
+};
+
+type LegacyIntentStats = Omit<IntentStats, "routeReasons">;
+
 interface SkillInventoryObservation extends SkillInventoryItem {
   winnerFingerprint: string;
   firstSeenAt: string;
@@ -150,7 +177,7 @@ export interface SkillPlacementCandidate {
 }
 
 type Stats = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   createdAt: string;
   updatedAt: string;
   attribution: { startedAt: string };
@@ -166,20 +193,7 @@ type Stats = {
     otherTurns: number;
     otherRate: number;
   };
-  intents: Record<
-    string,
-    {
-      turns: number;
-      share: number;
-      lastSeenAt: string;
-      last7Days: number;
-      averageConfidence: number;
-      lowConfidenceTurns: number;
-      skillAssistedTurns: number;
-      toolAssistedTurns: number;
-      erroredTurns: number;
-    }
-  >;
+  intents: Record<string, IntentStats>;
   skills: Record<
     string,
     {
@@ -214,8 +228,13 @@ type Stats = {
 
 type ToolStatsV3 = Omit<Stats["tools"][string], "latencyHistogram">;
 
+type StatsV4 = Omit<Stats, "schemaVersion" | "intents"> & {
+  schemaVersion: 4;
+  intents: Record<string, LegacyIntentStats>;
+};
+
 type StatsV3 = Omit<
-  Stats,
+  StatsV4,
   "schemaVersion" | "attribution" | "daily" | "tools"
 > & {
   schemaVersion: 3;
@@ -295,7 +314,7 @@ function emptyProjectionStats(): ProjectionStats {
 
 function createStats(nowIso: string): Stats {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     createdAt: nowIso,
     updatedAt: nowIso,
     attribution: { startedAt: nowIso },
@@ -328,6 +347,21 @@ function increment(counts: CountMap, key: string, amount = 1): void {
 
 function rate(numerator: number, denominator: number): number {
   return denominator > 0 ? numerator / denominator : 0;
+}
+
+function emptyIntentRouteScoreStats(): IntentRouteScoreStats {
+  return { count: 0, averageScore: 0, minScore: 1, maxScore: 0 };
+}
+
+function emptyIntentRouteReasons(): Record<
+  IntentRouteReason,
+  IntentRouteScoreStats
+> {
+  return {
+    "qmd-keyword": emptyIntentRouteScoreStats(),
+    "qmd-hybrid": emptyIntentRouteScoreStats(),
+    "llm-classifier": emptyIntentRouteScoreStats(),
+  };
 }
 
 function resolveIntentId(
@@ -497,6 +531,33 @@ function hasNonNegativeIntegers(
 ): value is Record<string, number> {
   return (
     isRecord(value) && keys.every((key) => isNonNegativeInteger(value[key]))
+  );
+}
+
+function isIntentRouteScoreStats(
+  value: unknown,
+): value is IntentRouteScoreStats {
+  if (
+    !isRecord(value) ||
+    !isNonNegativeInteger(value.count) ||
+    !hasNumbers(value, ["averageScore", "minScore", "maxScore"])
+  ) {
+    return false;
+  }
+  return [value.averageScore, value.minScore, value.maxScore].every(
+    (score) => score >= 0 && score <= 1,
+  );
+}
+
+function isIntentRouteReasons(
+  value: unknown,
+): value is Record<IntentRouteReason, IntentRouteScoreStats> {
+  if (!isRecord(value)) return false;
+  return (
+    Object.keys(value).length === INTENT_ROUTE_REASONS.length &&
+    INTENT_ROUTE_REASONS.every((reason) =>
+      isIntentRouteScoreStats(value[reason]),
+    )
   );
 }
 
@@ -706,7 +767,7 @@ function isProjectionStats(value: unknown): value is ProjectionStats {
 
 function assertStatsBase(
   stats: unknown,
-): asserts stats is Stats | StatsV3 | StatsV2 | StatsV1 {
+): asserts stats is Stats | StatsV4 | StatsV3 | StatsV2 | StatsV1 {
   if (!isRecord(stats)) throw new Error("unsupported or invalid stats schema");
   if (
     !isIsoTimestamp(stats.createdAt) ||
@@ -854,7 +915,7 @@ function assertStatsV3(
   }
 }
 
-function migrateStatsV3(stats: StatsV3, eventTime: string): Stats {
+function migrateStatsV3(stats: StatsV3, eventTime: string): StatsV4 {
   return {
     ...stats,
     schemaVersion: 4,
@@ -880,7 +941,20 @@ function migrateStatsV3(stats: StatsV3, eventTime: string): Stats {
   };
 }
 
-function assertStatsV4(stats: Stats): void {
+function migrateStatsV4(stats: StatsV4): Stats {
+  return {
+    ...stats,
+    schemaVersion: 5,
+    intents: Object.fromEntries(
+      Object.entries(stats.intents).map(([intentId, intent]) => [
+        intentId,
+        { ...intent, routeReasons: emptyIntentRouteReasons() },
+      ]),
+    ),
+  };
+}
+
+function assertStatsV4(stats: Stats | StatsV4): void {
   if (!isIsoTimestamp(stats.attribution.startedAt)) {
     throw new Error("unsupported or invalid stats schema");
   }
@@ -891,6 +965,14 @@ function assertStatsV4(stats: Stats): void {
   }
   for (const bucket of Object.values(stats.daily)) {
     if (!isDailyBucket(bucket)) {
+      throw new Error("unsupported or invalid stats schema");
+    }
+  }
+}
+
+function assertStatsV5(stats: Stats): void {
+  for (const intent of Object.values(stats.intents)) {
+    if (!isIntentRouteReasons(intent.routeReasons)) {
       throw new Error("unsupported or invalid stats schema");
     }
   }
@@ -910,26 +992,39 @@ function loadStats(statsFilePath: string, eventTime: string): Stats {
     const migrated = migrateStatsV1(stats);
     assertStatsV2(migrated);
     return canonicalizeSkillStats(
-      migrateStatsV3(migrateStatsV2(migrated, eventTime), eventTime),
+      migrateStatsV4(
+        migrateStatsV3(migrateStatsV2(migrated, eventTime), eventTime),
+      ),
       eventTime,
     );
   }
   if (stats.schemaVersion === 2) {
     assertStatsV2(stats);
     return canonicalizeSkillStats(
-      migrateStatsV3(migrateStatsV2(stats, eventTime), eventTime),
+      migrateStatsV4(
+        migrateStatsV3(migrateStatsV2(stats, eventTime), eventTime),
+      ),
       eventTime,
     );
   }
   if (stats.schemaVersion === 3) {
     assertStatsV3(stats);
-    return canonicalizeSkillStats(migrateStatsV3(stats, eventTime), eventTime);
+    return canonicalizeSkillStats(
+      migrateStatsV4(migrateStatsV3(stats, eventTime)),
+      eventTime,
+    );
   }
-  if (stats.schemaVersion !== 4) {
+  if (stats.schemaVersion === 4) {
+    assertStatsV3(stats);
+    assertStatsV4(stats);
+    return canonicalizeSkillStats(migrateStatsV4(stats), eventTime);
+  }
+  if (stats.schemaVersion !== 5) {
     throw new Error("unsupported or invalid stats schema");
   }
   assertStatsV3(stats);
   assertStatsV4(stats);
+  assertStatsV5(stats);
   return canonicalizeSkillStats(stats, eventTime);
 }
 
@@ -959,10 +1054,27 @@ function recordSummaryStats(params: {
     intentId.toLowerCase() === FALLBACK_INTENT_ID ? 1 : 0;
 }
 
+function recordIntentRouteStats(
+  intent: IntentStats,
+  routeReason: IntentRouteReason | undefined,
+  score: number,
+): void {
+  if (!routeReason) return;
+  const routeStats = intent.routeReasons[routeReason];
+  routeStats.averageScore = rate(
+    routeStats.averageScore * routeStats.count + score,
+    routeStats.count + 1,
+  );
+  routeStats.count += 1;
+  routeStats.minScore = Math.min(routeStats.minScore, score);
+  routeStats.maxScore = Math.max(routeStats.maxScore, score);
+}
+
 function recordIntentStats(params: {
   stats: Stats;
   intentId: string;
   result: RecordedIntentResult;
+  routeReason?: IntentRouteReason;
   eventTime: string;
   skillsUsed: string[];
   toolCallCount: number;
@@ -972,6 +1084,7 @@ function recordIntentStats(params: {
     stats,
     intentId,
     result,
+    routeReason,
     eventTime,
     skillsUsed,
     toolCallCount,
@@ -988,6 +1101,7 @@ function recordIntentStats(params: {
     skillAssistedTurns: 0,
     toolAssistedTurns: 0,
     erroredTurns: 0,
+    routeReasons: emptyIntentRouteReasons(),
   }));
   intent.averageConfidence = rate(
     intent.averageConfidence * intent.turns + result.confidence,
@@ -999,6 +1113,7 @@ function recordIntentStats(params: {
   intent.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
   intent.toolAssistedTurns += toolCallCount > 0 ? 1 : 0;
   intent.erroredTurns += errored ? 1 : 0;
+  recordIntentRouteStats(intent, routeReason, result.confidence);
 }
 
 function canonicalizeCountMap(counts: CountMap): CountMap {
@@ -1532,11 +1647,12 @@ export class StatsAggregator {
     try {
       const stats = readJsonFile<unknown>(statsFilePath);
       assertStatsBase(stats);
-      if (stats.schemaVersion !== 4) {
+      if (stats.schemaVersion !== 5) {
         throw new Error("unsupported or invalid stats schema");
       }
       assertStatsV3(stats);
       assertStatsV4(stats);
+      assertStatsV5(stats);
       return new Set(Object.keys(stats.processedEvents));
     } catch (error) {
       logger.warn("failed to read processed stats events", {
@@ -1703,6 +1819,7 @@ export class StatsAggregator {
           stats,
           intentId,
           result,
+          routeReason: state.intent?.trigger,
           eventTime,
           skillsUsed,
           toolCallCount: toolCalls.length,

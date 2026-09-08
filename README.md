@@ -327,7 +327,7 @@ The bundled `skill-harness` skill has an initialization path plus three explicit
 - first-install initialization checks whether `~/.openclaw/plugins/skill-harness/intents/` is missing or empty, then the plugin copies `skills/skill-harness/assets/*.md` without overwriting an existing catalog;
 - `inventory` bootstraps or re-audits the complete catalog through discovery, capability mapping, clustering, calibration, and gap drafting;
 - `design` creates, renames, or refines one intent through an interview, format checks, and an explicit staged delivery;
-- `runtime-health` runs the private, report-only runtime health audit for Review outcomes, QMD state, retention, and disk growth.
+- `runtime-health` runs the private, report-only runtime health audit for Review outcomes, per-intent route reasons and scores, QMD state, retention, and disk growth.
 
 The skill does not manually analyze complexity, split, merge, or delete runtime intents. Those evidence-backed lifecycle decisions belong to the Intent Review reviewer subagent; standalone deletion is limited to one existing obsolete intent per finding.
 
@@ -415,7 +415,7 @@ Skill Harness keeps package files and runtime state separate. The paths below us
 | `~/.openclaw/plugins/skill-harness/experiences/`       | Skill-scoped runtime experiences; current candidates expose identity/keyword metadata.                               |
 | `~/.openclaw/plugins/skill-harness/sessions/`          | Per-session JSON snapshots for audit and Review context.                                                             |
 | `~/.openclaw/plugins/skill-harness/agents/*/sessions/` | Embedded-agent session artifacts.                                                                                    |
-| `~/.openclaw/plugins/skill-harness/stats.json`         | Schema-v4 intent, skill, tool, routing, projection, inventory, and daily telemetry.                                  |
+| `~/.openclaw/plugins/skill-harness/stats.json`         | Schema-v5 intent, route-reason score, skill, tool, routing, projection, inventory, and daily telemetry.              |
 | `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v8 Review outcomes, experience writes, and completed placement epochs; compatible v7 records migrate on load. |
 
 Session cleanup preserves the ended main-session record and removes only expired session JSON plus embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json` artifacts. It does not delete root-level runtime state, intents, skills, unrelated transcripts, or package files. Retired intent-state fields such as `instructionText` are stripped when retained sessions are loaded; this cleanup never controls routing.
@@ -424,11 +424,13 @@ Session cleanup preserves the ended main-session record and removes only expired
 
 Local observations are operational measurements, not synthetic benchmarks. A recommendation opportunity is a top-level skill injected into the final direct candidate block, and adoption is that candidate's same-turn use. Related-skill metadata and routing-guidance prose do not count as recommendations. Rendered catalog size is Unicode code points rather than provider-billed tokens; provider tokenization and other plugins' context are outside this measurement scope. A projection can be eligible even if later classifier execution or parsing fails, and ordinary Review outcomes remain owned by `review.json`, never synthesized in `stats.json`.
 
-### Schema-v4 statistics and attribution boundary
+### Schema-v5 statistics and attribution boundary
 
-Schema v4 retains prior aggregates and adds attribution only from newly accepted turns. `attribution.startedAt` marks the exact UTC boundary. Per-day maps record intent outcomes, intent routing, skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
+Schema v5 retains prior aggregates, adds per-intent route-reason score telemetry, and preserves the schema-v4 attribution boundary. `attribution.startedAt` marks the exact UTC boundary. Each intent records selected route reasons (`qmd-keyword`, `qmd-hybrid`, and `llm-classifier`) with count, average score, minimum score, and maximum score. QMD scores use the selected retrieval hit score; classifier scores use classifier confidence. This is a selected-route confidence measure, not an attempt-level success rate. Per-day maps record intent outcomes, intent routing, skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
 
-Valid schema-v1, v2, and v3 files migrate atomically on the next recorded turn without backfilling historical attribution. Windows starting before `attribution.startedAt` therefore cannot support historical attribution comparisons. Inventory observations are agent-scoped: source, winning-path and content fingerprints, observation times and counts, same-turn usage, and recommendations form an epoch. Source, winner, content, or visibility-continuity changes begin a new epoch; the fingerprints remain internal and are never exposed by skill tools.
+The runtime-health projection keeps one canonical `routing` block, one canonical `projection` block, and names retained processed events as `retainedProcessedEventCount`. It omits the duplicate `routingEffectiveness` / `projectionEfficiency` aliases and the internal `dailyDynamicKeyCardinality` diagnostic.
+
+Valid schema-v1, v2, v3, and v4 files migrate atomically on the next recorded turn without backfilling historical route-reason or attribution data. Windows starting before `attribution.startedAt` therefore cannot support historical attribution comparisons. Inventory observations are agent-scoped: source, winning-path and content fingerprints, observation times and counts, same-turn usage, and recommendations form an epoch. Source, winner, content, or visibility-continuity changes begin a new epoch; the fingerprints remain internal and are never exposed by skill tools.
 
 ## Development
 

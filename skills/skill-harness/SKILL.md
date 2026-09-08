@@ -39,7 +39,7 @@ Use this when the user asks to create, rename, or refine one intent. Read `refer
 
 ## Mode: runtime-health
 
-Use this when the user asks for Skill Harness health, Review outcome distributions, session retention, QMD state, or disk growth. Read and follow `references/runtime-health-audit.md`. Run the report-only `scripts/runtime-health-audit.py` locally, keep output private, and never modify runtime state from audit findings.
+Use this when the user asks for Skill Harness health, Review outcome distributions, per-intent route reasons and scores, session retention, QMD state, or disk growth. Read and follow `references/runtime-health-audit.md`. Run the report-only `scripts/runtime-health-audit.py` locally, keep output private, and never modify runtime state from audit findings.
 
 ## Shared safety rules
 

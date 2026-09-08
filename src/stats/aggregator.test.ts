@@ -328,7 +328,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(4);
+    expect(stats.schemaVersion).toBe(5);
     expect(stats.skillInventory.startedAt).toBe("2026-06-11T00:01:00.000Z");
     expect(stats.skillInventory.agents["agent-a"]).toMatchObject({
       observedTurns: 1,
@@ -987,6 +987,72 @@ describe("StatsAggregator", () => {
     expect(intentStats).not.toHaveProperty("complexity");
   });
 
+  it("records route reasons and scores for each intent", () => {
+    const routeState = (
+      trigger: "qmd-keyword" | "qmd-hybrid" | "llm-classifier",
+      confidence: number,
+      minute: number,
+    ): SessionState =>
+      createState({
+        intent: {
+          trigger,
+          result: {
+            intent: "version-control",
+            reason: "test",
+            domain: "development",
+            confidence,
+          },
+          recommendedSkills: [],
+        },
+        skillsUsed: undefined,
+        toolCalls: undefined,
+        timestamps: {
+          start: `2026-06-11T00:${String(minute - 1).padStart(2, "0")}:00.000Z`,
+          end: `2026-06-11T00:${String(minute).padStart(2, "0")}:00.000Z`,
+        },
+      });
+
+    aggregator.record(
+      "route-keyword-1",
+      routeState("qmd-keyword", 0.9, 1),
+      intent,
+    );
+    aggregator.record(
+      "route-keyword-2",
+      routeState("qmd-keyword", 0.7, 3),
+      intent,
+    );
+    aggregator.record("route-hybrid", routeState("qmd-hybrid", 0.8, 5), intent);
+    aggregator.record(
+      "route-classifier",
+      routeState("llm-classifier", 0.6, 7),
+      intent,
+    );
+
+    const stats = readStats();
+    expect(stats.schemaVersion).toBe(5);
+    expect(stats.intents["version-control"].routeReasons).toEqual({
+      "qmd-keyword": {
+        count: 2,
+        averageScore: 0.8,
+        minScore: 0.7,
+        maxScore: 0.9,
+      },
+      "qmd-hybrid": {
+        count: 1,
+        averageScore: 0.8,
+        minScore: 0.8,
+        maxScore: 0.8,
+      },
+      "llm-classifier": {
+        count: 1,
+        averageScore: 0.6,
+        minScore: 0.6,
+        maxScore: 0.6,
+      },
+    });
+  });
+
   it("aggregates summary, intent, skill routing, tools, and daily metrics", () => {
     aggregator.record(
       "session-1",
@@ -998,7 +1064,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(4);
+    expect(stats.schemaVersion).toBe(5);
     expect(stats.attribution).toEqual({
       startedAt: "2026-06-11T00:01:00.000Z",
     });
@@ -1187,7 +1253,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(4);
+    expect(stats.schemaVersion).toBe(5);
     expect(stats.projection).toMatchObject({
       eligibleTurns: 2,
       projectedTurns: 1,
@@ -1327,7 +1393,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.schemaVersion).toBe(5);
     expect(migrated.createdAt).toBe(legacy.createdAt);
     expect(migrated.summary.turns).toBe(2);
     expect(migrated.intents["version-control"].turns).toBe(2);
@@ -1362,7 +1428,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.schemaVersion).toBe(5);
     expect(migrated.createdAt).toBe(legacy.createdAt);
     expect(migrated.summary.turns).toBe(2);
     expect(migrated.intents["version-control"].turns).toBe(2);
@@ -1417,7 +1483,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.schemaVersion).toBe(5);
     expect(migrated.attribution).toEqual({
       startedAt: "2026-06-11T00:01:00.000Z",
     });
@@ -1439,6 +1505,57 @@ describe("StatsAggregator", () => {
     expect(migrated.tools.exec.latencyHistogram).toMatchObject({
       unknown: 0,
       "100-499": 2,
+    });
+  });
+
+  it("migrates v4 without synthesizing historical route attribution", () => {
+    aggregator.record("v4-session", createState(), intent, {
+      nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+    });
+    const statsPath = path.join(tempDir, "stats.json");
+    const legacy = readStats();
+    legacy.schemaVersion = 4;
+    for (const intentStats of Object.values(legacy.intents)) {
+      delete intentStats.routeReasons;
+    }
+    fs.writeFileSync(statsPath, JSON.stringify(legacy));
+
+    expect(
+      aggregator.record(
+        "v5-session",
+        createState({
+          intent: {
+            trigger: "qmd-keyword",
+            result: {
+              intent: "version-control",
+              reason: "test",
+              domain: "development",
+              confidence: 0.9,
+            },
+            recommendedSkills: [],
+          },
+          skillsUsed: undefined,
+          toolCalls: undefined,
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(true);
+
+    const migrated = readStats();
+    expect(migrated.schemaVersion).toBe(5);
+    expect(migrated.intents["version-control"].routeReasons).toMatchObject({
+      "qmd-keyword": {
+        count: 1,
+        averageScore: 0.9,
+        minScore: 0.9,
+        maxScore: 0.9,
+      },
+      "qmd-hybrid": { count: 0 },
+      "llm-classifier": { count: 0 },
     });
   });
 
