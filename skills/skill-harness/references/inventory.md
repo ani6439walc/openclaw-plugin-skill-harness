@@ -42,7 +42,7 @@ Present the cluster map before generating or changing intents. Ask the user to c
 
 ## Step 5 — Draft gaps
 
-For each confirmed gap, use the design workflow and `references/format.md` to draft a candidate intent.
+For each confirmed gap, use the create path in the design workflow and `references/format.md` to draft a candidate intent. If the gap requires splitting, merging, or deleting existing boundaries, record the evidence and hand the lifecycle decision to Intent Review.
 
 ## Step 6 — Format check
 

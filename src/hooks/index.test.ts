@@ -251,7 +251,7 @@ describe("createHookHandlers tracking guards", () => {
     const { handlers, record } = createExactTurnToolHarness({ sessionKey });
     const longSkillOutput = `---
 name: skill-harness
-description: "Design, inventory, evolve, or extract intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing the full catalog (inventory), processing a review finding (review), or analyzing intent complexity and extracting oversized intents into skills (extract)."
+description: "Maintain Skill Harness intents on demand and inspect runtime health."
 ---
 
 # Skill Harness`;

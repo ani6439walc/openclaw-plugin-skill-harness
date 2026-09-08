@@ -8,9 +8,9 @@ At the start, classify the request into one path:
 
 1. create a brand-new intent
 2. rename an existing intent
-3. split an overloaded intent
-4. merge two overlapping intents
-5. refine an existing intent
+3. refine an existing intent
+
+If the request is to analyze complexity, split, merge, or delete, stop this interview and route it to Intent Review. Those are reviewer-owned lifecycle decisions.
 
 If ambiguous, ask a single routing question first — explain why it matters, recommend the most likely path, then proceed.
 
@@ -35,7 +35,7 @@ Confirm these fields in order:
 - If the answer can be grounded by reading `README.md` or existing runtime intents, do that instead of asking a vague question.
 - Prefer narrowing scope over making a broad catch-all intent.
 - If the user is describing an existing intent, say so directly.
-- If two intents are colliding, recommend the smallest clean split.
+- If two intents are colliding, report the overlap and route the boundary decision to Intent Review.
 - Gather only direct `skills[]` dependencies. Candidate discovery and runtime experience references are host-owned; do not interview for or add experience records.
 - Do not write the final intent file until the boundary is clear.
 - **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, keywords, and guidance. (See `references/format.md` for full spec.)

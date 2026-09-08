@@ -10,6 +10,7 @@ export const REVIEW_OPERATIONS = [
   "refine",
   "split",
   "merge",
+  "delete",
 ] as const;
 export type ReviewOperation = (typeof REVIEW_OPERATIONS)[number];
 

@@ -103,12 +103,13 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("<intent_catalog>");
   });
 
-  it("keeps routine health checks bounded to the matched intent", () => {
+  it("gives health checks the full catalog for boundary maintenance", () => {
     const prompt = buildReviewPrompt(snapshot, ["intent-health-check"]);
 
     expect(prompt).toContain("intent-health-check: Review focus:");
-    expect(prompt).toContain("do not create, split, or merge intents");
-    expect(prompt).not.toContain("<intent_catalog>");
+    expect(prompt).toContain("analyze complexity, overlap, and stale coverage");
+    expect(prompt).toContain("create, refine, split, merge, or delete");
+    expect(prompt).toContain("<intent_catalog>");
   });
 
   it("constrains capability fit to its explicit evidence source", () => {
@@ -151,6 +152,36 @@ describe("parseReviewFindings", () => {
       expect.objectContaining({
         trigger: "routing-uncertainty",
         targetKind: "intent-markdown",
+      }),
+    ]);
+  });
+
+  it("keeps valid standalone delete findings", () => {
+    expect(
+      parseReviewFindings(
+        JSON.stringify({
+          findings: [
+            {
+              trigger: "intent-health-check",
+              hasFinding: true,
+              targetKind: "intent-markdown",
+              operation: "delete",
+              targetIntentIds: ["obsolete"],
+              dedupeKey: "obsolete-intent",
+              summary: "Remove an obsolete intent.",
+              evidence: ["The catalog has a durable duplicate boundary."],
+              correctionGoal: "Remove the redundant runtime intent.",
+              suggestedChange: "Delete obsolete.md.",
+            },
+          ],
+        }),
+        ["intent-health-check"],
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        trigger: "intent-health-check",
+        operation: "delete",
+        targetIntentIds: ["obsolete"],
       }),
     ]);
   });
@@ -264,5 +295,363 @@ describe("runReviewSubagent", () => {
       expect.objectContaining({ sessionPersistence: "detached" }),
     );
     expect(deleteSession).not.toHaveBeenCalled();
+  });
+
+  it("applies a standalone reviewer-owned intent deletion", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-"));
+    tempRoots.push(root);
+    fs.writeFileSync(
+      path.join(root, "obsolete.md"),
+      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\ndomain: other\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
+    );
+    fs.writeFileSync(
+      path.join(root, "other.md"),
+      "---\ntriggers:\n  - other\nexamples:\n  - help\ndomain: other\nkeywords:\n  - help\n---\nAsk for context.\n",
+    );
+    const runEmbeddedAgent = vi
+      .fn()
+      .mockImplementation(
+        async ({ workspaceDir }: { workspaceDir: string }) => {
+          fs.rmSync(path.join(workspaceDir, "obsolete.md"));
+          return {
+            payloads: [
+              {
+                text: JSON.stringify({
+                  findings: [
+                    {
+                      trigger: "intent-health-check",
+                      hasFinding: true,
+                      targetKind: "intent-markdown",
+                      operation: "delete",
+                      targetIntentIds: ["obsolete"],
+                      dedupeKey: "obsolete-intent",
+                      summary: "Remove an obsolete intent.",
+                      evidence: [
+                        "The catalog has a durable duplicate boundary.",
+                      ],
+                      correctionGoal: "Remove the redundant runtime intent.",
+                      suggestedChange: "Delete obsolete.md.",
+                    },
+                  ],
+                }),
+              },
+            ],
+          };
+        },
+      );
+    const api = {
+      config: {},
+      runtime: {
+        agent: { runEmbeddedAgent },
+        subagent: { deleteSession: vi.fn() },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const result = await runReviewSubagent({
+      api,
+      config: resolveConfig({}),
+      agentId: "main",
+      intentDirectory: root,
+      modelRef: { provider: "test", model: "review" },
+      snapshot,
+      triggers: ["intent-health-check"],
+    });
+
+    expect(result.outcome).toBe("applied");
+    expect(result.changedIntentIds).toEqual(["obsolete"]);
+    expect(result.findings[0]).toMatchObject({
+      operation: "delete",
+      targetIntentIds: ["obsolete"],
+    });
+    expect(fs.existsSync(path.join(root, "obsolete.md"))).toBe(false);
+  });
+
+  it("rejects deletion of the last runtime intent", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-last-"));
+    tempRoots.push(root);
+    fs.writeFileSync(
+      path.join(root, "obsolete.md"),
+      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\ndomain: other\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
+    );
+    const runEmbeddedAgent = vi
+      .fn()
+      .mockImplementation(
+        async ({ workspaceDir }: { workspaceDir: string }) => {
+          fs.rmSync(path.join(workspaceDir, "obsolete.md"));
+          return {
+            payloads: [
+              {
+                text: JSON.stringify({
+                  findings: [
+                    {
+                      trigger: "intent-health-check",
+                      hasFinding: true,
+                      targetKind: "intent-markdown",
+                      operation: "delete",
+                      targetIntentIds: ["obsolete"],
+                      dedupeKey: "obsolete-intent",
+                      summary: "Remove an obsolete intent.",
+                      evidence: ["The catalog contains no surviving route."],
+                      correctionGoal: "Remove the redundant runtime intent.",
+                      suggestedChange: "Delete obsolete.md.",
+                    },
+                  ],
+                }),
+              },
+            ],
+          };
+        },
+      );
+    const api = {
+      config: {},
+      runtime: {
+        agent: { runEmbeddedAgent },
+        subagent: { deleteSession: vi.fn() },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const result = await runReviewSubagent({
+      api,
+      config: resolveConfig({}),
+      agentId: "main",
+      intentDirectory: root,
+      modelRef: { provider: "test", model: "review" },
+      snapshot,
+      triggers: ["intent-health-check"],
+    });
+
+    expect(result.outcome).toBe("validation-failed");
+    expect(result.validationErrors).toContain("no intent Markdown files found");
+    expect(fs.existsSync(path.join(root, "obsolete.md"))).toBe(true);
+  });
+
+  it("revalidates the complete live catalog before deleting an intent", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-live-"));
+    tempRoots.push(root);
+    fs.writeFileSync(
+      path.join(root, "obsolete.md"),
+      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\ndomain: other\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
+    );
+    fs.writeFileSync(
+      path.join(root, "other.md"),
+      "---\ntriggers:\n  - other\nexamples:\n  - help\ndomain: other\nkeywords:\n  - help\n---\nAsk for context.\n",
+    );
+    const runEmbeddedAgent = vi
+      .fn()
+      .mockImplementation(
+        async ({ workspaceDir }: { workspaceDir: string }) => {
+          fs.rmSync(path.join(workspaceDir, "obsolete.md"));
+          fs.writeFileSync(path.join(root, "other.md"), "invalid\n");
+          return {
+            payloads: [
+              {
+                text: JSON.stringify({
+                  findings: [
+                    {
+                      trigger: "intent-health-check",
+                      hasFinding: true,
+                      targetKind: "intent-markdown",
+                      operation: "delete",
+                      targetIntentIds: ["obsolete"],
+                      dedupeKey: "obsolete-intent",
+                      summary: "Remove an obsolete intent.",
+                      evidence: [
+                        "The catalog has a durable duplicate boundary.",
+                      ],
+                      correctionGoal: "Remove the redundant runtime intent.",
+                      suggestedChange: "Delete obsolete.md.",
+                    },
+                  ],
+                }),
+              },
+            ],
+          };
+        },
+      );
+    const api = {
+      config: {},
+      runtime: {
+        agent: { runEmbeddedAgent },
+        subagent: { deleteSession: vi.fn() },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const result = await runReviewSubagent({
+      api,
+      config: resolveConfig({}),
+      agentId: "main",
+      intentDirectory: root,
+      modelRef: { provider: "test", model: "review" },
+      snapshot,
+      triggers: ["intent-health-check"],
+    });
+
+    expect(result.outcome).toBe("validation-failed");
+    expect(
+      result.validationErrors?.some((error) => error.includes("other.md")),
+    ).toBe(true);
+    expect(fs.existsSync(path.join(root, "obsolete.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(root, "other.md"), "utf8")).toBe(
+      "invalid\n",
+    );
+  });
+
+  it("allows multiple standalone deletes when the surviving catalog remains valid", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-many-"));
+    tempRoots.push(root);
+    for (const [id, trigger, example, guidance] of [
+      ["obsolete-a", "obsolete-a", "obsolete-a", "Retire this route."],
+      ["obsolete-b", "obsolete-b", "obsolete-b", "Retire this route too."],
+      ["other", "other", "help", "Ask for context."],
+    ]) {
+      fs.writeFileSync(
+        path.join(root, `${id}.md`),
+        `---\ntriggers:\n  - ${trigger}\nexamples:\n  - ${example}\ndomain: other\nkeywords:\n  - ${example}\n---\n${guidance}\n`,
+      );
+    }
+    const runEmbeddedAgent = vi
+      .fn()
+      .mockImplementation(
+        async ({ workspaceDir }: { workspaceDir: string }) => {
+          fs.rmSync(path.join(workspaceDir, "obsolete-a.md"));
+          fs.rmSync(path.join(workspaceDir, "obsolete-b.md"));
+          return {
+            payloads: [
+              {
+                text: JSON.stringify({
+                  findings: [
+                    {
+                      trigger: "intent-health-check",
+                      hasFinding: true,
+                      targetKind: "intent-markdown",
+                      operation: "delete",
+                      targetIntentIds: ["obsolete-a"],
+                      dedupeKey: "obsolete-a-intent",
+                      summary: "Remove the first obsolete intent.",
+                      evidence: ["The route is permanently redundant."],
+                      correctionGoal: "Remove the redundant runtime intent.",
+                      suggestedChange: "Delete obsolete-a.md.",
+                    },
+                    {
+                      trigger: "intent-health-check",
+                      hasFinding: true,
+                      targetKind: "intent-markdown",
+                      operation: "delete",
+                      targetIntentIds: ["obsolete-b"],
+                      dedupeKey: "obsolete-b-intent",
+                      summary: "Remove the second obsolete intent.",
+                      evidence: ["The route is permanently redundant."],
+                      correctionGoal: "Remove the redundant runtime intent.",
+                      suggestedChange: "Delete obsolete-b.md.",
+                    },
+                  ],
+                }),
+              },
+            ],
+          };
+        },
+      );
+    const api = {
+      config: {},
+      runtime: {
+        agent: { runEmbeddedAgent },
+        subagent: { deleteSession: vi.fn() },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const result = await runReviewSubagent({
+      api,
+      config: resolveConfig({}),
+      agentId: "main",
+      intentDirectory: root,
+      modelRef: { provider: "test", model: "review" },
+      snapshot,
+      triggers: ["intent-health-check"],
+    });
+
+    expect(result.outcome).toBe("applied");
+    expect(result.changedIntentIds).toEqual(["obsolete-a", "obsolete-b"]);
+    expect(fs.existsSync(path.join(root, "other.md"))).toBe(true);
+    expect(fs.existsSync(path.join(root, "obsolete-a.md"))).toBe(false);
+    expect(fs.existsSync(path.join(root, "obsolete-b.md"))).toBe(false);
+  });
+
+  it("rejects a concurrent pair of deletes that would empty the catalog", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-race-"));
+    tempRoots.push(root);
+    for (const id of ["a", "b"]) {
+      fs.writeFileSync(
+        path.join(root, `${id}.md`),
+        `---\ntriggers:\n  - ${id}\nexamples:\n  - ${id}\ndomain: other\nkeywords:\n  - ${id}\n---\nKeep ${id}.\n`,
+      );
+    }
+    let arrived = 0;
+    let releaseBarrier: (() => void) | undefined;
+    const barrier = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    let invocation = 0;
+    const runEmbeddedAgent = vi
+      .fn()
+      .mockImplementation(
+        async ({ workspaceDir }: { workspaceDir: string }) => {
+          const target = invocation++ === 0 ? "a" : "b";
+          fs.rmSync(path.join(workspaceDir, `${target}.md`));
+          arrived += 1;
+          if (arrived === 2) releaseBarrier?.();
+          await barrier;
+          return {
+            payloads: [
+              {
+                text: JSON.stringify({
+                  findings: [
+                    {
+                      trigger: "intent-health-check",
+                      hasFinding: true,
+                      targetKind: "intent-markdown",
+                      operation: "delete",
+                      targetIntentIds: [target],
+                      dedupeKey: `${target}-intent`,
+                      summary: `Remove ${target}.`,
+                      evidence: ["The route is permanently redundant."],
+                      correctionGoal: `Remove ${target}.md.`,
+                      suggestedChange: `Delete ${target}.md.`,
+                    },
+                  ],
+                }),
+              },
+            ],
+          };
+        },
+      );
+    const api = {
+      config: {},
+      runtime: {
+        agent: { runEmbeddedAgent },
+        subagent: { deleteSession: vi.fn() },
+      },
+    } as unknown as OpenClawPluginApi;
+    const reviewParams = {
+      api,
+      config: resolveConfig({}),
+      agentId: "main",
+      intentDirectory: root,
+      modelRef: { provider: "test", model: "review" },
+      snapshot,
+      triggers: ["intent-health-check"] as const,
+    };
+
+    const results = await Promise.all([
+      runReviewSubagent(reviewParams),
+      runReviewSubagent(reviewParams),
+    ]);
+
+    expect(results.map((result) => result.outcome).sort()).toEqual([
+      "applied",
+      "validation-failed",
+    ]);
+    expect(
+      fs.readdirSync(root).filter((file) => file.endsWith(".md")),
+    ).toHaveLength(1);
   });
 });

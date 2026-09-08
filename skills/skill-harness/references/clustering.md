@@ -2,6 +2,8 @@
 
 Goal: Group all capabilities by usage intent, not by directory name.
 
+This workflow can identify overlap and complexity, but it does not apply split, merge, or delete operations. Record the evidence and let Intent Review's reviewer subagent own those lifecycle decisions.
+
 ## Actions
 
 1. Cluster capabilities into intent families based on **what the user is trying to achieve** (e.g., "review code quality", "debug a system", "design architecture", "look up past memories").
@@ -17,7 +19,7 @@ Goal: Group all capabilities by usage intent, not by directory name.
 
 ## Domain-Intent Consistency Criteria
 
-Use these criteria when reviewing a catalog, designing a new intent, refining an existing intent, or validating a split/merge/extraction result:
+Use these criteria when reviewing a catalog, designing a new intent, refining an existing intent, or validating a reviewer-owned boundary result:
 
 1. Every intent in a domain should match the meaning of that domain name.
 2. Intents inside the same domain should be semantically similar because they serve the same broad user-goal family.

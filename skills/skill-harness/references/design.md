@@ -1,6 +1,8 @@
 # Design Workflow
 
-Use this workflow when creating, renaming, splitting, merging, or refining one intent.
+Use this workflow when creating, renaming, or refining one intent at the user's request.
+
+Intent Review owns complexity analysis and evidence-backed split, merge, and delete operations. This workflow may identify those boundaries, but it must not apply them manually.
 
 ## Step 1 — Classify the action
 
@@ -8,11 +10,9 @@ Map the user's request to one action:
 
 - `create` — new intent or missing coverage.
 - `rename` — the boundary is correct but the filename-derived id is wrong.
-- `split` — one intent contains multiple independent responsibilities.
-- `merge` — two or more intents duplicate the same user goal.
 - `refine` — the intent exists and needs clearer routing metadata or guidance.
 
-For rename, split, merge, deletion, or broad boundary changes, explain the planned file operations and wait for explicit confirmation before writing.
+For rename or broad boundary changes, explain the planned file operations and wait for explicit confirmation before writing. Deletion is a safety concern, not a design action; route deletion, split, and merge decisions to Intent Review.
 
 ## Step 2 — Interview
 

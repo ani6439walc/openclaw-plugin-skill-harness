@@ -84,7 +84,7 @@ Large skill catalogs create two practical problems:
 Skill Harness addresses both:
 
 1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, direct matched-intent skill candidates, and candidate-scoped `<skill_experience>` metadata (identity and keywords only) nested under the matching `<skill>`. The fixed system context does not include the runtime skill inventory.
-2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption, can refine runtime intent Markdown, and may create at most one validated experience for a currently visible skill observed in the completed turn. It does not train the base model or rewrite skill files.
+2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption, can autonomously maintain runtime intent Markdown, and may create at most one validated experience for a currently visible skill observed in the completed turn. It does not train the base model or rewrite skill files.
 
 ## How it works
 
@@ -322,14 +322,14 @@ Format the specified files following repository style conventions.
 
 ### Human maintenance skill
 
-The bundled `skill-harness` skill is the explicit human-maintenance surface for runtime intents and privacy-safe runtime health analysis. It has four modes:
+The bundled `skill-harness` skill has an initialization path plus three explicit, user-triggered modes:
 
-- `inventory` — audit the complete resolved skill/tool/intent catalog, cluster capabilities by user goal, and identify coverage gaps after a calibration checkpoint;
-- `design` — create, refine, rename, split, or merge one intent through a staged preview and confirmation workflow;
-- `extract` — score intent complexity, identify independent responsibilities, and draft skill blueprints plus a slimmed intent after approval;
-- `runtime-health` — generate a private, report-only aggregate snapshot of Review outcomes, v3/v4 stats, session retention, and agent-artifact growth without exposing retained text or modifying runtime state.
+- first-install initialization checks whether `~/.openclaw/plugins/skill-harness/intents/` is missing or empty, then the plugin copies `skills/skill-harness/assets/*.md` without overwriting an existing catalog;
+- `inventory` bootstraps or re-audits the complete catalog through discovery, capability mapping, clustering, calibration, and gap drafting;
+- `design` creates, renames, or refines one intent through an interview, format checks, and an explicit staged delivery;
+- `runtime-health` runs the private, report-only runtime health audit for Review outcomes, QMD state, retention, and disk growth.
 
-This skill does not manually repeat production-owned work: per-turn classification and routing injection, startup seeding, trigger-driven intent edits, capability-fit review, stats aggregation, or session cleanup. Broad routing changes and skill extraction remain human-owned because they require semantic calibration and explicit write approval.
+The skill does not manually analyze complexity, split, merge, or delete runtime intents. Those evidence-backed lifecycle decisions belong to the Intent Review reviewer subagent; standalone deletion is limited to one existing obsolete intent per finding.
 
 ## Skill tools
 
@@ -389,13 +389,13 @@ Enable it with:
 }
 ```
 
-Review investigates a trigger; it does not treat the trigger as proof. Validated findings can create, refine, split, or merge runtime intents; autonomous standalone deletion is not supported. The host derives a canonical operation from a uniquely classifiable staged file lifecycle before applying it, so an incorrect model label does not discard an otherwise valid change. It never guesses when targets are both created and deleted, and it keeps standalone deletion unsupported. The reviewer never writes source files, bundled skills, OpenClaw config, memory files, or arbitrary paths.
+Review investigates a trigger; it does not treat the trigger as proof. Validated findings can create, refine, split, merge, or delete runtime intents. Standalone deletion is limited to one existing obsolete intent per finding and is checked against the staged file lifecycle before the host applies it. The host derives a canonical operation from a uniquely classifiable staged lifecycle, so an incorrect model label does not discard an otherwise valid change. It never guesses when targets are both created and deleted. The reviewer never writes source files, bundled skills, OpenClaw config, memory files, or arbitrary paths.
 
 `intent-health-check` runs at its configured cadence; `routing-uncertainty` examines fallback or low-confidence routing; `capability-fit` examines bounded tool or selected-skill evidence. A trigger starts an investigation, not proof. QMD retrieval surfaces are only an intent's `keywords` and `examples`; `triggers` remains fallback-classifier context.
 
 ### Review safeguards and skill placement
 
-A trigger starts an investigation; it is not evidence by itself. The reviewer evaluates trigger-specific evidence, durability, scope, and existing coverage, then makes the smallest valid change or records a no-finding result. Validated intent changes may create, refine, split, or merge runtime intent files, but standalone deletion is unsupported. Review can create at most one new skill experience for a successfully observed, still-visible skill; existing experiences are never refined or deleted by Review.
+A trigger starts an investigation; it is not evidence by itself. The reviewer evaluates trigger-specific evidence, durability, scope, and existing coverage, then makes the smallest valid change or records a no-finding result. Intent-health and routing-uncertainty reviews may autonomously create, refine, split, merge, or delete runtime intent files when the catalog evidence supports the operation. Review can create at most one new skill experience for a successfully observed, still-visible skill; existing experiences are never refined or deleted by Review.
 
 Every requested trigger needs a valid positive or no-finding decision. Missing or malformed decisions are recorded as `schema-rejected` with sanitized `missing-trigger-decision` counts. The staged workspace is authoritative for current intent content; the queued snapshot is historical evidence only. The reviewer cannot write source files, bundled skills, OpenClaw configuration, memory files, or arbitrary paths.
 

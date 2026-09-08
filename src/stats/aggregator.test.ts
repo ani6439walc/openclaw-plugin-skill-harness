@@ -1385,6 +1385,7 @@ describe("StatsAggregator", () => {
           },
         }),
         intent,
+        { nowMs: Date.parse("2026-06-11T00:02:00.000Z") },
       ),
     ).toBe(true);
     const legacy = readStats();
@@ -1411,6 +1412,7 @@ describe("StatsAggregator", () => {
           },
         }),
         intent,
+        { nowMs: Date.parse("2026-06-11T00:02:00.000Z") },
       ),
     ).toBe(true);
 

@@ -1417,7 +1417,7 @@ describe("SessionTracker", () => {
               name: "read",
               params: { path: "/path/to/skill-harness/SKILL.md" },
               result:
-                '---\nname: skill-harness\ndescription: "Design, inventory, or evolve intent definitions for the skill-harness plugin. Use when creating/refining a single intent (design), bootstrapping or re-auditing \n',
+                '---\nname: skill-harness\ndescription: "Maintain Skill Harness intents on demand and inspect runtime health.\n',
               durationMs: 100,
             },
           ],

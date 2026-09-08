@@ -17,8 +17,7 @@ instead of duplicating a version in workflow YAML.
 - `pnpm run test:plugin-loader`: verify the built entry loads.
 - `pnpm run format`: apply Prettier to Markdown, JSON, and TypeScript.
 - `pnpm pack --dry-run`: inspect package contents for stale artifacts.
-
-For Python audit helpers, run their adjacent unittest files directly, for example `python3 skills/skill-harness/scripts/test-runtime-health-audit.py`.
+- `python3 skills/skill-harness/scripts/test-runtime-health-audit.py`: run the report-only runtime-health audit helper tests.
 
 ## Coding Style & Naming Conventions
 
@@ -35,6 +34,8 @@ Keep package assets separate from runtime state. `skills/skill-harness/assets/` 
 The dynamic routing pipeline is structured in three stages: Step 1 (QMD Keyword BM25 over intent `keywords`), Step 2 (QMD Hybrid Example/Keyword Search with conversation expansion), and Step 3 (Fallback single-call Intent Classifier with QMD candidates). Topic checkers (`previousTopic`), runtime task complexity scoring (`complexity`), classifier `suggestion` fields, session curation (`curation` / `curationAppliedCount`), instruction writers, legacy `fastpath` / `candidate` frontmatter fields, and legacy pseudo-headers (`[Skill Harness Context...]`, `[User Message]:`) are obsolete and strictly forbidden. Do not use OpenClaw core's reserved `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>` delimiters in plugin prompt output as core runtime logic strips them from visible turns. Projection reasons use `exact-keyword-overlap`. Intent YAML frontmatter only permits `triggers`, `examples`, `domain`, `skills`, and `keywords` formatted in canonical key order (`domain`, `triggers`, `examples`, `keywords`, `skills`) with skill names strictly lowercase; `triggers[]`, `examples[]`, and `domain` are required while `keywords[]` and `skills[]` are optional; the body is strictly single-line plain-text routing `guidance`.
 
 The managed intent QMD snapshot stores plain-text `examples/*.md` and `keywords/*.md` documents with `<intent>-<n>.md.identity.yml` sidecars ignored by QMD collections; its metadata and SQLite database live together under `dataRoot/qmd/intents/`. Only validated `keywords` or `examples` changes request a QMD rebuild; trigger-only, guidance, or skills changes do not. Review is disabled by default, uses only `intent-health-check`, `routing-uncertainty`, and `capability-fit`, writes schema-v8 state with compatible v7 migration, and runs embedded sessions with detached persistence while the host cleans only the temporary workspace.
+
+The bundled `skills/skill-harness/SKILL.md` documents first-install seeding plus the explicit user-triggered `inventory`, `design`, and `runtime-health` workflows. `design` is limited to create, rename, and refine; complexity analysis, split, merge, and guarded standalone delete remain Intent Review lifecycle operations. The reviewer subagent receives the full catalog for health and routing-boundary analysis. The bundled `references/` procedures and `scripts/runtime-health-audit.py` are user-invoked support resources; they must not recreate production routing or Review persistence.
 
 Prompt injection follows a compact attribute layout to minimize prompt tokens:
 

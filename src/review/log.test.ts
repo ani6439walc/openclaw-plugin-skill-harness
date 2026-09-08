@@ -25,6 +25,40 @@ describe("review log", () => {
     ).toThrow();
   });
 
+  it("accepts a reviewer-owned standalone delete operation", () => {
+    const parsed = parseReviewLogV8({
+      schemaVersion: 8,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      processedEvents: {
+        event: {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["intent-health-check"],
+          changeCount: 1,
+          outcome: "applied",
+          changes: [
+            {
+              trigger: "intent-health-check",
+              targetKind: "intent-markdown",
+              operation: "delete",
+              targetIntentIds: ["obsolete"],
+              dedupeKey: "obsolete-intent",
+              summary: "Remove an obsolete intent.",
+              evidence: ["The catalog has a durable duplicate boundary."],
+              correctionGoal: "Remove the redundant runtime intent.",
+              suggestedChange: "Delete obsolete.md.",
+            },
+          ],
+        },
+      },
+      reviewedSkillEpochs: {},
+    });
+
+    expect(parsed.processedEvents.event?.changes?.[0]?.operation).toBe(
+      "delete",
+    );
+  });
+
   it("migrates ordinary v7 events and drops historical keyword audits", () => {
     const migrated = migrateReviewLogV7({
       schemaVersion: 7,

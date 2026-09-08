@@ -74,17 +74,17 @@ const REVIEW_INSTRUCTIONS: Record<
 > = {
   "intent-health-check": {
     focus:
-      "Examine current and recent turns for durable improvements to the matched intent or one observed skill experience.",
-    goal: "Refine only the matched intent or create one evidence-backed observed-skill experience.",
+      "Examine current and recent turns plus the full intent catalog for durable routing improvements, overloaded or overlapping boundaries, obsolete intents, or one observed skill experience.",
+    goal: "Apply the smallest evidence-backed intent lifecycle operation or create one observed-skill experience.",
     workflow:
-      "intent-health-check: do not create, split, or merge intents. Refine only a matched intent when explicit evidence supports guidance, skills, keywords, examples, or triggers. An experience requires an observed skill and a verified reusable workflow.",
+      "intent-health-check: analyze complexity, overlap, and stale coverage across the full catalog. When evidence supports it, create, refine, split, merge, or delete runtime intents; standalone delete is limited to one existing obsolete intent per finding. An experience requires an observed skill and a verified reusable workflow.",
   },
   "routing-uncertainty": {
     focus:
       "Diagnose fallback or low-confidence routing using route provenance and the full catalog.",
     goal: "Apply the smallest routing repair to the correct routing surface.",
     workflow:
-      "routing-uncertainty: qmd-keyword means repair keywords; qmd-hybrid means repair examples and/or keywords; llm-classifier means first assess missing QMD evidence and use triggers only for a fallback-classifier boundary; fallback means assess a missing or overlapping intent boundary. A trigger-only edit does not improve QMD retrieval.",
+      "routing-uncertainty: qmd-keyword means repair keywords; qmd-hybrid means repair examples and/or keywords; llm-classifier means first assess missing QMD evidence and use triggers only for a fallback-classifier boundary; fallback means assess a missing, overlapping, or obsolete intent boundary and may justify create, split, merge, or delete. A trigger-only edit does not improve QMD retrieval.",
   },
   "capability-fit": {
     focus:
@@ -96,6 +96,7 @@ const REVIEW_INSTRUCTIONS: Record<
 };
 
 const CATALOG_CONTEXT_TRIGGERS = new Set<ReviewTrigger>([
+  "intent-health-check",
   "routing-uncertainty",
   "capability-fit",
 ]);
@@ -132,7 +133,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 ### Target preference order
 - Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, keywords, domain, or direct-skill improvements.
 - If the matched intent is absent or clearly wrong, prefer updating an existing class-level/umbrella intent from the Intent Catalog when catalog context is available and one intent already covers the broader task class.
-- Use only operations justified by the requested trigger's workflow. Prefer refine; create, split, or merge only when that trigger's concrete evidence establishes the corresponding class-level boundary change.
+- Use only operations justified by the requested trigger's workflow. Prefer refine; create, split, merge, or delete only when that trigger's concrete evidence establishes the corresponding class-level boundary change.
 - Do not create support files or propose references/templates/scripts. Preserve conversation-specific but reusable details only as concise routing metadata or guidance changes in the relevant intent Markdown.
 
 ### Intent shape and boundaries
@@ -162,7 +163,8 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 
 ### Target and mutation boundaries
 ${INTENT_CRAFT_RUBRIC_TARGET_RULES_MARKER}
-- For split or merge operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to: rather than requesting extra file-management tools.
+- For split, merge, or delete operations that remove or rename intent files, use apply_patch with *** Delete File: or *** Move to: rather than requesting extra file-management tools.
+- A standalone delete must remove exactly one existing obsolete runtime intent and must be supported by durable catalog evidence; never delete a route only because it was unused in one turn.
 - Skill file maintenance is out of scope: do not list, create, edit, delete, or otherwise maintain skill files.
 - Use the review snapshot as the only skill evidence unless a selected placement skill is supplied.
 ${INTENT_CRAFT_RUBRIC_NO_FINDING_RULE_MARKER}`;
@@ -484,7 +486,7 @@ Your sole purpose is to improve the content and routing quality of runtime inten
 Target artifact shape: directly edit runtime intent Markdown files when evidence supports a change, and return JSON describing what changed.
 Hard rules — do not violate:
 Review only the requested triggers. Each trigger is independent and may return hasFinding=false.
-Do not perform unrequested trigger work. Do not turn one requested review into a different trigger review, split, or merge recommendation unless that trigger was requested and the evidence supports it.
+Do not perform unrequested trigger work. Do not turn one requested review into a different trigger review, split, merge, or delete recommendation unless that trigger was requested and the evidence supports it.
 Do not invent evidence. Modify only runtime intent Markdown files in the current workspace and the explicitly permitted new skill experience path below. Do not touch bundled/package intents, skills, config, source code, state JSON, or any other path.
 ${experienceContract}
 The review_snapshot is historical routing and turn evidence; its Matched Intent section is not authoritative current file content.
@@ -513,7 +515,7 @@ For hasFinding=false items:
 - Use reasonCode to make negative decisions auditable; do not add evidence, correctionGoal, suggestedChange, or target fields to no-finding items.
 
 For every hasFinding=true item:
-- For intent Markdown changes, first apply the smallest valid edit to the runtime intent Markdown file, then set targetKind="intent-markdown" or omit targetKind for backward compatibility; operation must be create, refine, split, or merge; targetIntentIds must list every existing or proposed intent ID affected by the change.
+- For intent Markdown changes, first apply the smallest valid edit to the runtime intent Markdown file, then set targetKind="intent-markdown" or omit targetKind for backward compatibility; operation must be create, refine, split, merge, or delete; targetIntentIds must list every existing or proposed intent ID affected by the change.
 - dedupeKey must be a stable short key for merging repeated equivalent findings.
 - summary must briefly describe the reusable lesson or correction.
 - evidence must list concrete snapshot evidence; do not leave it empty.
@@ -973,6 +975,16 @@ function validateIntentOperationChanges(params: {
           );
         }
         break;
+      case "delete":
+        if (targetIds.length !== 1) {
+          errors.push("review delete must declare exactly one target intent");
+        }
+        if (deletedIds.length !== 1) {
+          errors.push(
+            "review delete must remove exactly one existing target intent",
+          );
+        }
+        break;
     }
   }
 
@@ -1005,7 +1017,8 @@ function inferCanonicalIntentOperation(params: {
     return modifiedIds.length > 0 ? "split" : "create";
   }
   if (deletedIds.length > 0) {
-    return modifiedIds.length > 0 ? "merge" : undefined;
+    if (modifiedIds.length > 0) return "merge";
+    return deletedIds.length === 1 ? "delete" : undefined;
   }
   return modifiedIds.length > 0 ? "refine" : undefined;
 }
@@ -1045,6 +1058,29 @@ function concurrentIntentConflicts(
       return before.get(file) !== current.get(file);
     })
     .sort((a, b) => a.localeCompare(b));
+}
+
+interface IntentApplyResult {
+  conflictIds: string[];
+  validationErrors: string[];
+}
+
+function applyIntentChangesToSnapshot(
+  live: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>,
+  changedIds: readonly string[],
+): Map<string, string> {
+  const candidate = new Map(live);
+  for (const id of changedIds) {
+    const file = `${id}.md`;
+    const content = after.get(file);
+    if (content === undefined) {
+      candidate.delete(file);
+    } else {
+      candidate.set(file, content);
+    }
+  }
+  return candidate;
 }
 
 export function hasRoutingSurfaceChange(params: {
@@ -1609,7 +1645,7 @@ export async function runReviewSubagent(params: {
         validationErrors: skillPlacementErrors,
       };
     }
-    const applyConflicts = await withFileLock(
+    const applyResult = await withFileLock<IntentApplyResult>(
       params.dataRoot ?? params.intentDirectory,
       async () => {
         const liveIntentFiles = snapshotIntentFiles(params.intentDirectory);
@@ -1618,7 +1654,39 @@ export async function runReviewSubagent(params: {
           liveIntentFiles,
           changedIds,
         );
-        if (conflictIds.length > 0) return conflictIds;
+        if (conflictIds.length > 0) {
+          return { conflictIds, validationErrors: [] };
+        }
+        if (changedIds.length > 0) {
+          const candidateIntentFiles = applyIntentChangesToSnapshot(
+            liveIntentFiles,
+            afterIntentFiles,
+            changedIds,
+          );
+          const candidateWorkspace =
+            createIntentWorkspace(candidateIntentFiles);
+          try {
+            const validation = validateRoutingIntentDirectory(
+              candidateWorkspace,
+              existingIntentValidationTargets(
+                changedIds,
+                intentFindingTargets,
+                candidateIntentFiles,
+              ),
+            );
+            if (!validation.valid) {
+              logger.warn("review produced invalid live runtime intents", {
+                errors: validation.errors,
+              });
+              return {
+                conflictIds: [],
+                validationErrors: validation.errors,
+              };
+            }
+          } finally {
+            fs.rmSync(candidateWorkspace, { recursive: true, force: true });
+          }
+        }
         if (params.experienceDirectory && changedExperienceIds.length > 0) {
           const liveExperienceFiles = snapshotExperienceFiles(
             params.experienceDirectory,
@@ -1628,9 +1696,12 @@ export async function runReviewSubagent(params: {
             liveExperienceFiles.has(`${identity}.md`),
           );
           if (experienceConflicts.length > 0) {
-            return experienceConflicts.map(
-              (identity) => `experience:${identity}`,
-            );
+            return {
+              conflictIds: experienceConflicts.map(
+                (identity) => `experience:${identity}`,
+              ),
+              validationErrors: [],
+            };
           }
         }
         if (params.experienceDirectory) {
@@ -1648,25 +1719,32 @@ export async function runReviewSubagent(params: {
           after: afterIntentFiles,
           changedIds,
         });
-        return [];
+        return { conflictIds: [], validationErrors: [] };
       },
     );
-    if (applyConflicts === undefined) {
+    if (applyResult === undefined) {
       return {
         findings: [],
         outcome: "validation-failed",
         validationErrors: ["could not acquire runtime intent apply lock"],
       };
     }
-    if (applyConflicts.length > 0) {
+    if (applyResult.validationErrors.length > 0) {
+      return {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: applyResult.validationErrors,
+      };
+    }
+    if (applyResult.conflictIds.length > 0) {
       logger.warn("review skipped concurrent runtime intent edits", {
-        conflictIntentIds: applyConflicts,
+        conflictIntentIds: applyResult.conflictIds,
       });
       return {
         findings: [],
         outcome: "validation-failed",
         validationErrors: [
-          `runtime intent files changed during review: ${applyConflicts.join(", ")}`,
+          `runtime intent files changed during review: ${applyResult.conflictIds.join(", ")}`,
         ],
       };
     }

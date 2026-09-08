@@ -12,6 +12,7 @@ When enough information is collected, stop asking discovery questions and switch
 ## Safety checks
 
 - If the proposed design is still too broad or collides badly, do not force a final draft yet. Say what decision is still unresolved and ask the smallest next question.
+- If the unresolved boundary requires a split, merge, or deletion, stop manual design and route the evidence to Intent Review; those are reviewer-owned lifecycle operations.
 - Use the routing-only format in `references/format.md`: classification frontmatter, optional direct `skills[]`, and one plain-text guidance body.
 - Keep commands, tool workflows, and durable lessons in referenced skills; do not add them to the intent definition.
 - Do not draft or change runtime experience entries: those skill-scoped records live separately under `experiences/`.
@@ -25,7 +26,7 @@ When a collision is detected, present:
 - Proposed intent: <new-intent-id>
 - Overlaps with: <existing-intent-id>
 - Overlap reason: <shared triggers or examples>
-- Recommendation: split (narrow scope) / merge (combine into existing) / rename (different boundary)
+- Recommendation: route to Intent Review for split/merge/delete, or rename only when the boundary itself remains correct
 ```
 
 Ask user to confirm resolution before proceeding to final draft.

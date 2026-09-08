@@ -482,7 +482,9 @@ export function formatReviewSnapshot(
     options.includeIntentCatalog !== false &&
     options.requestedTriggers?.some(
       (trigger) =>
-        trigger === "routing-uncertainty" || trigger === "capability-fit",
+        trigger === "intent-health-check" ||
+        trigger === "routing-uncertainty" ||
+        trigger === "capability-fit",
     ) === true;
   const availableSkills = formatAvailableSkills(snapshot.availableSkills);
   const recent = wrapOptionalReviewSnapshotBlock(

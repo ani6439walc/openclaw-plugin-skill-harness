@@ -47,7 +47,7 @@ describe("formatReviewSnapshot", () => {
     expect(output).toContain('"intentConfidence":0.2');
   });
 
-  it("renders the full catalog only for routing uncertainty", () => {
+  it("renders the full catalog for boundary-aware review triggers", () => {
     const output = formatReviewSnapshot(snapshot, {
       requestedTriggers: ["routing-uncertainty"],
     });
@@ -57,13 +57,13 @@ describe("formatReviewSnapshot", () => {
     expect(output).toContain('"intentCatalog":"full"');
   });
 
-  it("omits the catalog for a bounded health check", () => {
+  it("renders the catalog for a health check", () => {
     const output = formatReviewSnapshot(snapshot, {
       requestedTriggers: ["intent-health-check"],
     });
 
-    expect(output).not.toContain("<intent_catalog>");
-    expect(output).toContain('"intentCatalog":"omitted"');
+    expect(output).toContain("<intent_catalog>");
+    expect(output).toContain('"intentCatalog":"full"');
   });
 
   it("escapes user-controlled snapshot text", () => {
