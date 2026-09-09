@@ -93,7 +93,9 @@ describe("conversation context prompt serialization", () => {
     });
     expect(historicalIntentPayloads[0].topic).toEqual(expect.any(String));
     expect(historicalIntentPayloads[1].topic).toEqual(expect.any(String));
-    const topicBoundary = context.match(/<topic_boundary>(.*?)<\/topic_boundary>/)?.[1];
+    const topicBoundary = context.match(
+      /<topic_boundary>(.*?)<\/topic_boundary>/,
+    )?.[1];
     expect(topicBoundary).toBeDefined();
     expect(JSON.parse(topicBoundary ?? "")).toMatchObject({ reason: "shift" });
   });
@@ -351,10 +353,10 @@ describe("buildIntentionPrompt", () => {
 
     expect(result.match(/<intent_catalog>/g)).toHaveLength(1);
     expect(result.match(/<\/intent_catalog>/g)).toHaveLength(1);
-    expect(result.match(/<intent domain="coding" id="[^"]+">/g)).toHaveLength(2);
-    const codingIntent = result.indexOf(
-      '<intent domain="coding" id="coding">',
+    expect(result.match(/<intent domain="coding" id="[^"]+">/g)).toHaveLength(
+      2,
     );
+    const codingIntent = result.indexOf('<intent domain="coding" id="coding">');
     const debuggingIntent = result.indexOf(
       '<intent domain="coding" id="debugging">',
     );
@@ -530,9 +532,11 @@ describe("buildIntentionPrompt", () => {
     expect(result).not.toContain("<output_format>");
     expect(result).not.toContain('"complexity":');
     expect(result).not.toContain('"suggestion":');
-    expect(result.match(/^\s*-\s+"([^"]+)":/gm)?.map((match) => {
-      return match.trim().match(/^[- ]+"([^"]+)":/)?.[1];
-    })).toEqual(["intent", "reason", "confidence", "keywords", "topic"]);
+    expect(
+      result.match(/^\s*-\s+"([^"]+)":/gm)?.map((match) => {
+        return match.trim().match(/^[- ]+"([^"]+)":/)?.[1];
+      }),
+    ).toEqual(["intent", "reason", "confidence", "keywords", "topic"]);
     const outputShape = result.match(
       /\{\n  "intent": "[^"]+",\n  "reason": "[^"]+",\n  "confidence": \{\{NUMBER_0_TO_1\}\}\n\}/,
     )?.[0];
@@ -834,9 +838,7 @@ describe("XML boundary hardening", () => {
       intents: [],
     });
 
-    expect(prompt).toContain(
-      "&lt;/latest_message&gt;&lt;latest_message&gt;",
-    );
+    expect(prompt).toContain("&lt;/latest_message&gt;&lt;latest_message&gt;");
     expect(prompt).not.toContain("</latest_message><latest_message>");
     expect(prompt.match(/<latest_message>\n/g)).toHaveLength(1);
   });
