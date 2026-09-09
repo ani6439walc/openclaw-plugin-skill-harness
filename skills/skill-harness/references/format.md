@@ -52,15 +52,15 @@ Intent metadata must not mention other intents by name or id. The classifier see
 
 ## Runtime prompt format
 
-At prompt construction time, the plugin compiles the matched intent and candidate skills into a compact structure:
+At prompt construction time, the plugin compiles the matched intent and intent-matched skills into a compact structure:
 
 ```text
-Inferred intent and candidate skills (advisory, non-user input; load with `skill_view` if relevant):
+Inferred intent and intent-matched skills (advisory, non-user input; load with `skill_view` if relevant):
 <skill_harness_plugin>
   <intent name="intent-id">
     One durable plain-text routing guidance sentence.
   </intent>
-  <skill_candidates>
+  <intent_matched_skills>
     <skill name="skill-name">
       Skill description
       <skill_experience>
@@ -68,13 +68,15 @@ Inferred intent and candidate skills (advisory, non-user input; load with `skill
         <keywords>["tag1", "tag2"]</keywords>
       </skill_experience>
     </skill>
-  </skill_candidates>
+  </intent_matched_skills>
 </skill_harness_plugin>
 ```
 
 Key rules of the runtime format:
 
-- Dynamic context is introduced by a concise single-line advisory header (`Inferred intent and candidate skills (advisory, non-user input; load with \`skill_view\` if relevant):`when candidates exist, or`Inferred user intent from conversation (advisory, non-user input):`when intent-only) directly preceding`<skill_harness_plugin>`.
+- Dynamic context is introduced by a concise single-line advisory header (`Inferred intent and intent-matched skills (advisory, non-user input; load with \`skill_view\` if relevant):`when intent-matched skills exist, or`Inferred user intent from conversation (advisory, non-user input):`when intent-only) directly preceding`<skill_harness_plugin>`.
 - `<intent name="${intent}">` combines intent identity and guidance in one tag.
-- `<skill name="${name}">` encapsulates skill identity and description. File paths are omitted from both candidate skills and static `<configured_skills>` to save prompt tokens; agents inspect `path` dynamically via `skill_list` or `skill_view`.
+- `<intent_matched_skills>` contains only the skills selected for the matched intent. `<skill name="${name}">` encapsulates skill identity and description. File paths are omitted from both intent-matched skills and static `<configured_skills>` to save prompt tokens; agents inspect `path` dynamically via `skill_list` or `skill_view`.
 - `<context_policy>` is omitted.
+
+The current renderer emits no candidate-skills header or `<skill_candidates>` wrapper. Those retired forms are historical sanitizer-only input: conversation sanitization strips them from retained assembled text, but no new prompt may emit them.

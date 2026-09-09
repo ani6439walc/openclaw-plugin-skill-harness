@@ -109,10 +109,10 @@ describe("IntentReviewLogWriter", () => {
       agentId: "main",
       name: "unused-skill",
       source: "workspace" as const,
-      reason: "zero-recommendation-usage" as const,
+      reason: "zero-intent-match-usage" as const,
       observedTurns: 20,
       usageTurns: 0,
-      recommendedTurns: 0,
+      intentMatchedTurns: 0,
     };
     expect(
       await writer.record("placement-event", source, [], {

@@ -19,6 +19,8 @@ const ESCAPED_USER_MESSAGE_BOUNDARY = USER_MESSAGE_BOUNDARY.replace(
   "\\$&",
 );
 const LEGACY_USER_MESSAGE_BOUNDARY = "\\[User Message\\]:";
+const LEGACY_ROUTING_ADVISORY_HEADER =
+  "Inferred intent and candidate skills (advisory, non-user input; load with `skill_view` if relevant):";
 const OPENCLAW_ASSEMBLED_CONTEXT_HEADER =
   "OpenClaw assembled context for this turn:";
 const EMBEDDED_OPENCLAW_ASSEMBLED_CONTEXT_PATTERN = new RegExp(
@@ -40,6 +42,8 @@ export function sanitizeConversationText(text: string): string {
   // Header split must run before tag matching: the header mentions the tag inline.
   return text
     .split(ROUTING_ADVISORY_HEADER)
+    .join(" ")
+    .split(LEGACY_ROUTING_ADVISORY_HEADER)
     .join(" ")
     .split(ROUTING_ADVISORY_INTENT_ONLY_HEADER)
     .join(" ")

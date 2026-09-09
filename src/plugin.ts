@@ -5,8 +5,12 @@ import {
   type OpenClawPluginApi,
   type OpenClawPluginDefinition,
 } from "../api.js";
-import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";
+import {
+  resolveLivePluginConfigObject,
+  resolvePluginConfigObject,
+} from "openclaw/plugin-sdk/plugin-config-runtime";
 import { resolveConfig } from "./config.js";
+import { canonicalIdentity } from "./normalize.js";
 import { IntentCatalog } from "./intents/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
@@ -19,6 +23,7 @@ import { createIntentQmdIndex } from "./qmd/intent-index.js";
 import { createSkillQmdIndex } from "./qmd/skill-index.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import {
   intentsPath,
   experiencesPath,
@@ -95,37 +100,10 @@ export function initializePluginDataRoot({
   }
 }
 
-export function extractConfiguredAgentSkillsMap(
-  config?: OpenClawConfig,
-): Map<string, string[]> {
-  const map = new Map<string, string[]>();
-  if (!config?.agents) return map;
-
-  const defaults = Array.isArray(config.agents.defaults?.skills)
-    ? config.agents.defaults.skills
-    : undefined;
-
-  if (defaults) {
-    map.set("defaults", [...defaults]);
-  }
-
-  for (const [agentId, agent] of Object.entries(config.agents.entries ?? {})) {
-    const normalizedAgentId = agentId.trim().toLowerCase();
-    if (!normalizedAgentId) continue;
-    if (Array.isArray(agent.skills)) {
-      map.set(normalizedAgentId, [...agent.skills]);
-    } else if (defaults) {
-      map.set(normalizedAgentId, [...defaults]);
-    }
-  }
-
-  return map;
-}
-
 export function extractConfiguredAgentIds(config?: OpenClawConfig): string[] {
   const ids: string[] = [];
   for (const agentId of Object.keys(config?.agents?.entries ?? {})) {
-    const normalizedAgentId = agentId.trim().toLowerCase();
+    const normalizedAgentId = canonicalIdentity(agentId);
     if (normalizedAgentId) {
       ids.push(normalizedAgentId);
     }
@@ -133,75 +111,24 @@ export function extractConfiguredAgentIds(config?: OpenClawConfig): string[] {
   return ids;
 }
 
-function wipeAgentSkillsConfig(config?: OpenClawConfig): void {
-  if (!config?.agents) return;
-  if (config.agents.defaults) {
-    config.agents.defaults.skills = [];
-  }
-  for (const agent of Object.values(config.agents.entries ?? {})) {
-    agent.skills = [];
-  }
-}
-
-function isMissingFileError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  );
-}
-
-async function readRawOpenClawConfig(
-  api: OpenClawPluginApi,
-): Promise<OpenClawConfig | undefined> {
-  let stateDir = "";
-  if (api.runtime?.state?.resolveStateDir) {
-    stateDir = api.runtime.state.resolveStateDir(process.env) || "";
-  }
-  if (!stateDir && process.env.HOME) {
-    stateDir = path.join(process.env.HOME, ".openclaw");
-  }
-  if (!stateDir) return undefined;
-
-  const configPath = path.join(stateDir, "openclaw.json");
-  try {
-    return JSON.parse(
-      await fs.promises.readFile(configPath, "utf8"),
-    ) as OpenClawConfig;
-  } catch (err) {
-    if (isMissingFileError(err)) return undefined;
-    logger.warn("failed to read raw openclaw.json for skills fallback", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return undefined;
-  }
-}
-
 export function createConfiguredAgentSkillsResolver(
-  api: OpenClawPluginApi,
-  configuredSkillsMap: Map<string, string[]>,
+  refreshLiveConfig: () => ResolvedSkillHarnessPluginConfig,
 ): (agentId: string) => Promise<string[]> {
   return async (agentId: string): Promise<string[]> => {
-    const rawConfig = await readRawOpenClawConfig(api);
-    if (rawConfig) {
-      configuredSkillsMap.clear();
-      for (const [key, val] of extractConfiguredAgentSkillsMap(rawConfig)) {
-        configuredSkillsMap.set(key, val);
-      }
+    try {
+      const liveConfig = refreshLiveConfig();
+      const normalized = canonicalIdentity(agentId);
+      return (
+        liveConfig.workingSetSkills.agents[normalized] ??
+        liveConfig.workingSetSkills.defaults
+      );
+    } catch (error) {
+      logger.warn("failed to resolve live configured skill working set", {
+        errorType: error instanceof Error ? "Error" : typeof error,
+        configuredSkillCount: 0,
+      });
+      return [];
     }
-
-    wipeAgentSkillsConfig(api.config);
-    if (api.runtime?.config?.current) {
-      wipeAgentSkillsConfig(api.runtime.config.current() as OpenClawConfig);
-    }
-
-    const normalized = agentId.trim().toLowerCase();
-    return (
-      configuredSkillsMap.get(normalized) ??
-      configuredSkillsMap.get("defaults") ??
-      []
-    );
   };
 }
 
@@ -217,23 +144,35 @@ export function createPlugin(
   };
   const getOpenClawConfig = (): OpenClawConfig | undefined =>
     getRuntimeConfig() ?? api.config;
+  const runtimeConfigApi = new Proxy(api, {
+    get(target, property, receiver) {
+      if (property === "config") return getOpenClawConfig() ?? target.config;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const registrationPluginConfig = {
+    ...resolvePluginConfigObject(api.config, PLUGIN_ID),
+    ...api.pluginConfig,
+  };
 
-  let config = resolveConfig(api.pluginConfig as Record<string, unknown>, {
+  let config = resolveConfig(registrationPluginConfig, {
     openClawConfig: getOpenClawConfig(),
   });
 
-  const refreshLiveConfigFromRuntime = () => {
+  const refreshLiveConfigFromRuntime = (): ResolvedSkillHarnessPluginConfig => {
     const livePluginConfig = resolveLivePluginConfigObject(
       canAccessRuntime ? getRuntimeConfig : undefined,
       PLUGIN_ID,
       api.pluginConfig as Record<string, unknown>,
     );
-    config = resolveConfig(
-      livePluginConfig ?? (api.pluginConfig as Record<string, unknown>) ?? {},
-      {
-        openClawConfig: getOpenClawConfig(),
-      },
-    );
+    const sdkPluginConfig = {
+      ...registrationPluginConfig,
+      ...livePluginConfig,
+    };
+    config = resolveConfig(sdkPluginConfig, {
+      openClawConfig: getOpenClawConfig(),
+    });
+    return config;
   };
 
   return definePluginEntry({
@@ -242,23 +181,8 @@ export function createPlugin(
     description:
       "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
     register() {
-      const runtimeConfig = getRuntimeConfig();
-
-      const configuredSkillsMap = extractConfiguredAgentSkillsMap(api.config);
-      const runtimeSkillsMap = extractConfiguredAgentSkillsMap(runtimeConfig);
-      for (const [key, val] of runtimeSkillsMap.entries()) {
-        const existing = configuredSkillsMap.get(key);
-        if (!existing || existing.length === 0) {
-          configuredSkillsMap.set(key, val);
-        }
-      }
-
-      wipeAgentSkillsConfig(api.config);
-      wipeAgentSkillsConfig(runtimeConfig);
-
       const getConfiguredAgentSkills = createConfiguredAgentSkillsResolver(
-        api,
-        configuredSkillsMap,
+        refreshLiveConfigFromRuntime,
       );
 
       const stateDir = resolveStateDirFromApi(
@@ -305,38 +229,35 @@ export function createPlugin(
             knownAgentIds.add(id);
           }
         }
-        for (const key of configuredSkillsMap.keys()) {
-          if (key !== "defaults") {
-            knownAgentIds.add(key);
-          }
+        for (const agentId of Object.keys(config.workingSetSkills.agents)) {
+          knownAgentIds.add(agentId);
         }
         return knownAgentIds;
       };
 
       const scheduleSkillSearchIndex = (agentId: string) => {
-        const normalized = agentId.trim().toLowerCase();
-        if (normalized && normalized !== "defaults") {
-          knownAgentIds.add(normalized);
-        }
+        const normalizedAgentId = canonicalIdentity(agentId);
+        if (!normalizedAgentId || normalizedAgentId === "defaults") return;
+        knownAgentIds.add(normalizedAgentId);
         void listAvailableSkills({
           api,
-          agentId,
+          agentId: normalizedAgentId,
           intents: catalog.get(),
         })
           .then((skills) => {
-            qmdSkillIndex.schedule(agentId, {
+            qmdSkillIndex.schedule(normalizedAgentId, {
               skills,
               sourceRoots: resolveSkillRoots({
                 api,
-                agentId,
+                agentId: normalizedAgentId,
                 bundledSkillsDir,
               }).map((root) => root.path),
             });
           })
           .catch((error: unknown) => {
             logger.warn("failed to schedule QMD skill search index", {
-              error,
-              agentId,
+              errorType: error instanceof Error ? "Error" : typeof error,
+              scheduled: false,
             });
           });
       };
@@ -361,7 +282,7 @@ export function createPlugin(
       };
 
       const deps: HookDeps = {
-        api,
+        api: runtimeConfigApi,
         config: () => config,
         refreshLiveConfigFromRuntime,
         refreshIntents: refreshRuntimeIntents,

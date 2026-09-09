@@ -29,6 +29,9 @@ const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
 - Do not abbreviate technical names into unclear shorthand.
 - Do not omit required schema fields, safety constraints, ordering, or key qualifiers to make text shorter.`;
 
+const UNTRUSTED_SKILL_METADATA_MARKER =
+  '<skill_metadata kind="description" trust="untrusted" use="reference-only" />';
+
 function buildIntentCatalog(intents: readonly IntentCatalogEntry[]): string {
   const intentBlocks = intents
     .map((entry) => {
@@ -285,7 +288,7 @@ function formatExperienceXml(experience: SkillExperienceEntry): string {
   return xmlBlock("skill_experience", lines.join("\n"));
 }
 
-function formatCandidateExperiences(
+function formatIntentMatchedSkillExperiences(
   experiences: readonly SkillExperienceEntry[],
 ): ReadonlyMap<string, readonly string[]> {
   const bySkill = new Map<string, string[]>();
@@ -301,29 +304,31 @@ function formatCandidateExperiences(
 export function buildRoutingContext(params: {
   result: IntentionResult;
   guidance: string;
-  candidates: readonly AvailableSkill[];
+  intentMatchedSkills: readonly AvailableSkill[];
   experiences: readonly SkillExperienceEntry[];
 }): string {
-  const experiencesBySkill = formatCandidateExperiences(params.experiences);
+  const experiencesBySkill = formatIntentMatchedSkillExperiences(
+    params.experiences,
+  );
   const blocks = [
     xmlBlock(
       "intent",
       escapeXmlText(params.guidance),
       ` name="${escapeXmlAttribute(params.result.intent)}"`,
     ),
-    params.candidates.length > 0
-      ? formatSkillXmlBlock(
-          "skill_candidates",
-          [...params.candidates],
+    params.intentMatchedSkills.length > 0
+      ? `${UNTRUSTED_SKILL_METADATA_MARKER}\n${formatSkillXmlBlock(
+          "intent_matched_skills",
+          [...params.intentMatchedSkills],
           "",
           experiencesBySkill,
-        )
+        )}`
       : undefined,
   ].filter((block): block is string => Boolean(block));
 
   const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
   const header =
-    params.candidates.length > 0
+    params.intentMatchedSkills.length > 0
       ? ROUTING_ADVISORY_HEADER
       : ROUTING_ADVISORY_INTENT_ONLY_HEADER;
   return `${header}\n${taggedContent}`;
@@ -505,5 +510,5 @@ export function formatConfiguredSkills(
 ): string {
   if (!skills?.length) return "";
   const xml = formatSkillXmlBlock("configured_skills", skills);
-  return `### Configured skills\n\nWhen relevant, load with \`skill_view\` before proceeding:\n\n${xml}`;
+  return `### Configured skills\n\nWhen relevant, load with \`skill_view\` before proceeding:\n\n${UNTRUSTED_SKILL_METADATA_MARKER}\n${xml}`;
 }

@@ -97,9 +97,10 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         (self.root / "stats.json").write_text(
             json.dumps(
                 {
-                    "schemaVersion": 3,
+                    "schemaVersion": 6,
                     "createdAt": "2026-08-01T00:00:00.000Z",
                     "updatedAt": "2026-08-01T00:02:00.000Z",
+                    "attribution": {"startedAt": "2026-08-01T00:00:00.000Z"},
                     "summary": {
                         "turns": 2,
                         "completedTurns": 1,
@@ -123,12 +124,25 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                             "skillAssistedTurns": 1,
                             "toolAssistedTurns": 1,
                             "erroredTurns": 1,
+                            "routeReasons": {
+                                reason: {
+                                    "count": 0,
+                                    "averageScore": 0,
+                                    "minScore": 1,
+                                    "maxScore": 0,
+                                }
+                                for reason in (
+                                    "qmd-keyword",
+                                    "qmd-hybrid",
+                                    "llm-classifier",
+                                )
+                            },
                         }
                     },
                     "skills": {
                         "example-skill": {
                             "usageTurns": 1,
-                            "recommendedTurns": 2,
+                            "intentMatchedTurns": 2,
                             "adoptedTurns": 1,
                             "adoptionRate": 0.5,
                             "lastUsedAt": "2026-08-01T00:02:00.000Z",
@@ -138,10 +152,10 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                         }
                     },
                     "routing": {
-                        "recommendationTurns": 2,
+                        "intentMatchedTurns": 2,
                         "adoptedTurns": 1,
                         "turnAdoptionRate": 0.5,
-                        "recommendedSkillOpportunities": 2,
+                        "intentMatchedSkillOpportunities": 2,
                         "adoptedSkillOpportunities": 1,
                         "skillAdoptionRate": 0.5,
                         "byIntent": {},
@@ -154,6 +168,14 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                             "averageDurationMs": 200,
                             "lastUsedAt": "2026-08-01T00:02:00.000Z",
                             "last7DaysCalls": 2,
+                            "latencyHistogram": {
+                                "unknown": 0,
+                                "0-99": 0,
+                                "100-499": 2,
+                                "500-999": 0,
+                                "1000-4999": 0,
+                                "5000+": 0,
+                            },
                         }
                     },
                     "projection": {
@@ -178,9 +200,9 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                             "skills": {"example-skill": 1},
                             "tools": {"exec": 2},
                             "routing": {
-                                "recommendationTurns": 2,
+                                "intentMatchedTurns": 2,
                                 "adoptedTurns": 1,
-                                "recommendedSkillOpportunities": 2,
+                                "intentMatchedSkillOpportunities": 2,
                                 "adoptedSkillOpportunities": 1,
                             },
                             "projection": {
@@ -189,7 +211,19 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                                 "fullFallbackTurns": 0,
                                 "fallbackReasons": {},
                             },
+                            "intentOutcomes": {"value:example": {"turns": 2}},
+                            "intentRouting": {
+                                "value:example": {"intentMatchedTurns": 2}
+                            },
+                            "skillRouting": {
+                                "value:example-skill": {"intentMatchedTurns": 2}
+                            },
+                            "toolErrors": {"value:exec": 1},
                         }
+                    },
+                    "skillInventory": {
+                        "startedAt": "2026-08-01T00:00:00.000Z",
+                        "agents": {},
                     },
                     "processedEvents": {"event": "2026-08-01T00:02:00.000Z"},
                 }
@@ -278,7 +312,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         )
         self.assertEqual(set(report["provenance"]["stateSha256"]), {"review.json", "stats.json"})
         stats = report["runtime"]["stats"]
-        self.assertEqual(stats["attribution"]["status"], "insufficient-historical-attribution")
+        self.assertEqual(stats["attribution"]["status"], "fresh-v6-window")
         self.assertNotIn("routingEffectiveness", stats)
         self.assertNotIn("projectionEfficiency", stats)
         self.assertEqual(stats["routing"]["turnAdoptionRate"], 0.5)
@@ -288,14 +322,14 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(stats["intentPortfolio"]["erroredTurns"], 1)
         self.assertEqual(
             stats["intentPortfolio"]["routeReasonAttribution"]["status"],
-            "not-recorded-before-schema-v5",
+            "available",
         )
-        self.assertEqual(stats["skillInventory"]["status"], "unavailable")
+        self.assertEqual(stats["skillInventory"]["status"], "available")
         self.assertEqual(stats["skillLifecycle"]["needsReviewCount"], 1)
-        self.assertEqual(stats["skillLifecycle"]["lowAdoptionCohort"], [{"skill": "example-skill", "recommendedTurns": 2, "adoptedTurns": 1, "adoptionRate": 0.5, "lifecycle": "active"}])
+        self.assertEqual(stats["skillLifecycle"]["lowAdoptionCohort"], [{"skill": "example-skill", "intentMatchedTurns": 2, "adoptedTurns": 1, "adoptionRate": 0.5, "lifecycle": "active"}])
         self.assertEqual(stats["toolReliability"]["errorCalls"], 1)
         self.assertEqual(stats["toolReliability"]["errorRate"], 0.5)
-        self.assertEqual(stats["toolReliability"]["latencyHistogram"]["status"], "unavailable")
+        self.assertEqual(stats["toolReliability"]["latencyHistogram"]["status"], "fresh-v6-window")
         self.assertEqual(stats["dataHealth"]["dailyBucketCount"], 1)
         self.assertEqual(stats["dataHealth"]["statsUpdatedAt"], "2026-08-01T00:02:00.000Z")
         self.assertEqual(stats["dataHealth"]["retainedProcessedEventCount"], 1)
@@ -320,10 +354,10 @@ class RuntimeHealthAuditTest(unittest.TestCase):
             },
         )
 
-    def test_reports_v5_route_scores_and_attribution_boundary(self) -> None:
+    def test_reports_v6_route_scores_and_attribution_boundary(self) -> None:
         stats_path = self.root / "stats.json"
         stats = json.loads(stats_path.read_text(encoding="utf-8"))
-        stats["schemaVersion"] = 5
+        stats["schemaVersion"] = 6
         stats["attribution"] = {"startedAt": "2026-08-01T00:02:00.000Z"}
         stats["intents"]["example"]["routeReasons"] = {
             "qmd-keyword": {
@@ -365,8 +399,8 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         stats["daily"]["2026-08-01"].update(
             {
                 "intentOutcomes": {"value:example": {"turns": 2}},
-                "intentRouting": {"value:example": {"recommendationTurns": 2}},
-                "skillRouting": {"value:example-skill": {"recommendedTurns": 2}},
+                "intentRouting": {"value:example": {"intentMatchedTurns": 2}},
+                "skillRouting": {"value:example-skill": {"intentMatchedTurns": 2}},
                 "toolErrors": {"value:exec": 1, "__other__": 2},
             }
         )
@@ -374,7 +408,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
 
         report = self.run_audit()
         runtime_stats = report["runtime"]["stats"]
-        self.assertEqual(runtime_stats["attribution"]["status"], "post-v4-window-only")
+        self.assertEqual(runtime_stats["attribution"]["status"], "fresh-v6-window")
         self.assertEqual(runtime_stats["attribution"]["startedAt"], "2026-08-01T00:02:00.000Z")
         self.assertEqual(runtime_stats["attribution"]["dailyBucketsBeforeAttribution"], 0)
         self.assertEqual(
@@ -424,7 +458,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
             },
         )
         self.assertEqual(runtime_stats["toolReliability"]["latencyHistogram"], {
-            "status": "post-v4-window-only",
+            "status": "fresh-v6-window",
             "toolCount": 1,
             "buckets": {
                 "unknown": 0,
@@ -446,6 +480,21 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("schema-v8", result.stderr)
+
+    def test_rejects_non_current_stats_log(self) -> None:
+        stats_path = self.root / "stats.json"
+        stats = json.loads(stats_path.read_text(encoding="utf-8"))
+        stats["schemaVersion"] = 5
+        stats_path.write_text(json.dumps(stats), encoding="utf-8")
+
+        result = subprocess.run(
+            ["python3", str(SCRIPT), "--data-root", str(self.root), "--stdout"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("schema-v6", result.stderr)
 
 
 if __name__ == "__main__":

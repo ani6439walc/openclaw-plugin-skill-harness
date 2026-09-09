@@ -822,7 +822,7 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     trigger: IntentTrigger;
     result?: IntentionResult;
-    recommendedSkills?: string[];
+    intentMatchedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): Promise<void> {
@@ -839,7 +839,7 @@ export function createHookHandlers(deps: HookDeps) {
             : {}),
           trigger: params.trigger,
           ...(params.result ? { result: params.result } : {}),
-          recommendedSkills: params.recommendedSkills,
+          intentMatchedSkills: params.intentMatchedSkills,
           ...(params.intentProjection
             ? { intentProjection: params.intentProjection }
             : {}),
@@ -854,7 +854,7 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     trigger: IntentTrigger;
     result: IntentionResult;
-    recommendedSkills?: string[];
+    intentMatchedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): Promise<void> {
@@ -863,7 +863,7 @@ export function createHookHandlers(deps: HookDeps) {
       latestUserMessage: params.latestUserMessage,
       trigger: params.trigger,
       result: params.result,
-      recommendedSkills: params.recommendedSkills,
+      intentMatchedSkills: params.intentMatchedSkills,
       intentProjection: params.intentProjection,
       conversation: params.conversation,
     });
@@ -874,7 +874,7 @@ export function createHookHandlers(deps: HookDeps) {
     result: IntentionResult;
     intent: IntentCatalogEntry;
   }): Promise<{
-    candidates: AvailableSkill[];
+    intentMatchedSkills: AvailableSkill[];
     experiences: ReturnType<SkillExperienceCatalog["listForSkills"]>;
   }> {
     const directSkills = await resolveAvailableSkills({
@@ -883,14 +883,14 @@ export function createHookHandlers(deps: HookDeps) {
       bundledSkillsDir,
       skillNames: params.intent.definition.skills ?? [],
     });
-    const candidates = directSkills.slice(0, 4);
+    const intentMatchedSkills = directSkills.slice(0, 4);
     const experiences = experienceCatalog
       ? experienceCatalog.listForSkills(
-          candidates.map((candidate) => candidate.name),
+          intentMatchedSkills.map((skill) => skill.name),
         )
       : [];
     return {
-      candidates,
+      intentMatchedSkills,
       experiences,
     };
   }
@@ -905,8 +905,8 @@ export function createHookHandlers(deps: HookDeps) {
           configuredSkillNames = await deps.getConfiguredAgentSkills(agentId);
         } catch (error) {
           logger.warn("failed to retrieve configured agent skill names", {
-            agentId,
-            error,
+            errorType: error instanceof Error ? "Error" : typeof error,
+            configuredSkillCount: 0,
           });
         }
       }
@@ -922,9 +922,8 @@ export function createHookHandlers(deps: HookDeps) {
         });
       } catch (error) {
         logger.warn("failed to resolve explicitly configured agent skills", {
-          agentId,
-          configuredSkillNames,
-          error,
+          errorType: error instanceof Error ? "Error" : typeof error,
+          configuredSkillCount: configuredSkillNames.length,
         });
       }
 
@@ -939,8 +938,8 @@ export function createHookHandlers(deps: HookDeps) {
         });
       } catch (error) {
         logger.warn("failed to resolve workspace agent skills", {
-          agentId,
-          error,
+          errorType: error instanceof Error ? "Error" : typeof error,
+          workspaceSkillCount: 0,
         });
       }
 
@@ -957,24 +956,25 @@ export function createHookHandlers(deps: HookDeps) {
       if (!skills.length) {
         logger.info(
           "no configured or workspace agent skills could be resolved",
-          { agentId, configuredSkillNames },
+          { configuredSkillCount: 0 },
         );
         return undefined;
       }
-      logger.info(
-        "resolved configured and workspace agent skills for prompt build",
-        {
-          agentId,
-          configuredSkillNames,
-          workspaceSkills: workspaceSkills.map((skill) => skill.name),
-          resolvedSkills: skills.map((s) => s.name),
-        },
-      );
-      return formatConfiguredSkills(skills);
+      const configuredSkillsXml = formatConfiguredSkills(skills);
+      logger.info("configured skills static context emitted", {
+        configuredSkillCount: skills.length,
+        staticHeader: configuredSkillsXml.includes("### Configured skills"),
+        configuredWrapper: configuredSkillsXml.includes("<configured_skills>"),
+        configuredSkillTag: configuredSkillsXml.includes("<skill "),
+      });
+      return configuredSkillsXml;
     } catch (error) {
       logger.warn(
         "failed to resolve configured agent skills for prompt build",
-        { error },
+        {
+          errorType: error instanceof Error ? "Error" : typeof error,
+          configuredSkillCount: 0,
+        },
       );
       return undefined;
     }
@@ -991,7 +991,10 @@ export function createHookHandlers(deps: HookDeps) {
     configuredSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
     const { trigger, result, intentProjection } = params.classification;
-    logger.debug(`intention result (${trigger}): ${JSON.stringify(result)}`);
+    logger.debug("intention result", {
+      trigger,
+      intentResolved: Boolean(result.intent),
+    });
 
     await recordPromptBuildResult({
       ctx: params.ctx,
@@ -1017,7 +1020,9 @@ export function createHookHandlers(deps: HookDeps) {
       latestUserMessage: params.latestUserMessage,
       trigger,
       result,
-      recommendedSkills: routingContext.candidates.map((skill) => skill.name),
+      intentMatchedSkills: routingContext.intentMatchedSkills.map(
+        (skill) => skill.name,
+      ),
       intentProjection,
       conversation: params.conversation,
     });
@@ -1025,7 +1030,7 @@ export function createHookHandlers(deps: HookDeps) {
       buildRoutingContext({
         result,
         guidance: intent.definition.guidance,
-        candidates: routingContext.candidates,
+        intentMatchedSkills: routingContext.intentMatchedSkills,
         experiences: routingContext.experiences,
       }),
       params.configuredSkillsXml,
@@ -1073,11 +1078,13 @@ export function createHookHandlers(deps: HookDeps) {
       if (shouldSkipSkillSystemContext(resolvedContext)) return;
 
       staticContextEligible = true;
-      intentContextEnabled = isEnabledForAgent(
-        config(),
+      refreshLiveConfigFromRuntime();
+      const refreshedConfig = config();
+      configuredSkillsXml = await resolveConfiguredSkillsXml(
         routing.effectiveAgentId,
       );
-      configuredSkillsXml = await resolveConfiguredSkillsXml(
+      intentContextEnabled = isEnabledForAgent(
+        refreshedConfig,
         routing.effectiveAgentId,
       );
 
@@ -1097,9 +1104,6 @@ export function createHookHandlers(deps: HookDeps) {
         return toPromptBuildResult(undefined, configuredSkillsXml);
       }
 
-      // THEN refresh config and intents
-      refreshLiveConfigFromRuntime();
-      const refreshedConfig = config();
       const { latestUserMessage, historicalIntents, conversation } =
         buildConversationContext(event, ctx, refreshedConfig);
       routing.association = await prepareTrackingTurn({
@@ -1118,9 +1122,13 @@ export function createHookHandlers(deps: HookDeps) {
         return toPromptBuildResult(undefined, configuredSkillsXml);
       }
 
-      logger.debug(
-        `before_prompt_build hook triggered, ctx: ${JSON.stringify(ctx)}`,
-      );
+      logger.debug("before_prompt_build hook triggered", {
+        hasSessionId: Boolean(ctx.sessionId),
+        hasSessionKey: Boolean(ctx.sessionKey),
+        hasRunId: Boolean(ctx.runId),
+        hasModelProviderId: Boolean(ctx.modelProviderId),
+        hasModelId: Boolean(ctx.modelId),
+      });
 
       const availableIntents = catalog.get();
 
@@ -1171,7 +1179,10 @@ export function createHookHandlers(deps: HookDeps) {
         },
       );
     } catch (err) {
-      logger.warn("before_prompt_build hook error", { error: err });
+      logger.warn("before_prompt_build hook error", {
+        errorType: err instanceof Error ? "Error" : typeof err,
+        staticContextAvailable: Boolean(configuredSkillsXml),
+      });
       return staticContextEligible
         ? toPromptBuildResult(
             undefined,
@@ -1822,16 +1833,18 @@ export function createHookHandlers(deps: HookDeps) {
     ctx: PluginHookAgentContext,
   ): Promise<void> {
     logger.info("onMessageSending hook triggered", {
-      ctxSessionId: ctx.sessionId,
-      ctxSessionKey: ctx.sessionKey,
-      ctxRunId: ctx.runId,
+      hasSessionId: Boolean(ctx.sessionId),
+      hasSessionKey: Boolean(ctx.sessionKey),
+      hasRunId: Boolean(ctx.runId),
     });
     const association = resolveAssociatedTurn({
       contextRunId: ctx.runId,
       sessionId: ctx.sessionId,
       sessionKey: ctx.sessionKey,
     });
-    logger.info("onMessageSending association resolved", { association });
+    logger.info("onMessageSending association resolved", {
+      associationResolved: Boolean(association),
+    });
     if (!association) return;
     const stagedEntries = toolFallbacks.listForAssociation(association);
     const stagedToolFallbacks = stagedEntries.map(
@@ -1851,7 +1864,9 @@ export function createHookHandlers(deps: HookDeps) {
       result: resultText || undefined,
       endedAt: new Date().toISOString(),
     });
-    logger.info("onMessageSending turn finalization result", { finalized });
+    logger.info("onMessageSending turn finalization result", {
+      finalizationStatus: finalized,
+    });
     if (finalized === "applied" || finalized === "already-finalized") {
       turnAssociations.markAssociationTerminal(association);
       toolFallbacks.markAssociationTerminal(association);

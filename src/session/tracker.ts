@@ -81,7 +81,7 @@ export interface IntentState {
   input?: RecentTurn[];
   trigger?: IntentTrigger;
   result?: IntentionResult;
-  recommendedSkills?: string[];
+  intentMatchedSkills?: string[];
   intentProjection?: IntentProjectionTelemetry;
 }
 
@@ -286,7 +286,7 @@ const PERSISTED_INTENT_STATE_FIELDS = new Set<keyof IntentState>([
   "input",
   "trigger",
   "result",
-  "recommendedSkills",
+  "intentMatchedSkills",
   "intentProjection",
 ]);
 
@@ -481,8 +481,8 @@ function mergeSessionState(
       current.intent.trigger = data.intent.trigger;
     if (data.intent.result !== undefined)
       current.intent.result = data.intent.result;
-    if (data.intent.recommendedSkills !== undefined) {
-      current.intent.recommendedSkills = [...data.intent.recommendedSkills];
+    if (data.intent.intentMatchedSkills !== undefined) {
+      current.intent.intentMatchedSkills = [...data.intent.intentMatchedSkills];
     }
     if (data.intent.intentProjection !== undefined) {
       current.intent.intentProjection = data.intent.intentProjection;

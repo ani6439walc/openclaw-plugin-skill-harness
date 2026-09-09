@@ -191,7 +191,7 @@ const ReviewedSkillEpochSchema = z
     agentId: z.string().trim().min(1),
     skillName: z.string().trim().min(1),
     source: z.enum(SKILL_SOURCE_ORDER),
-    reason: z.enum(["low-adoption", "zero-recommendation-usage"]),
+    reason: z.enum(["low-adoption", "zero-intent-match-usage"]),
     completedAt: z.string(),
     outcome: z.enum(["applied", "nofinding"]),
     eventId: z.string().trim().min(1),

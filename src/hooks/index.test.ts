@@ -172,6 +172,49 @@ describe("createHookHandlers tracking guards", () => {
     emitHostAgentEvent.mockReset();
   });
 
+  it("logs message finalization without raw session or association identifiers", async () => {
+    const sessionId = "private-session/customer";
+    const sessionKey = "agent:private:direct:customer";
+    const runId = "private-run/customer";
+    const turnKey = "private-turn/customer";
+    const turnAssociations = seedAssociation(
+      sessionId,
+      turnKey,
+      runId,
+      sessionKey,
+    );
+    const finalizeTurnFromAgentEnd = vi
+      .fn()
+      .mockResolvedValue("retryable-failure");
+    const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    const handlers = createHandlers(
+      {},
+      { turnAssociations, tracker: { finalizeTurnFromAgentEnd } },
+    );
+
+    await handlers.onMessageSending(
+      { content: "done" } as never,
+      { sessionId, sessionKey, runId } as never,
+    );
+
+    expect(info).toHaveBeenCalledWith("onMessageSending hook triggered", {
+      hasSessionId: true,
+      hasSessionKey: true,
+      hasRunId: true,
+    });
+    expect(info).toHaveBeenCalledWith("onMessageSending association resolved", {
+      associationResolved: true,
+    });
+    expect(info).toHaveBeenCalledWith(
+      "onMessageSending turn finalization result",
+      { finalizationStatus: "retryable-failure" },
+    );
+    const receipts = JSON.stringify(info.mock.calls);
+    for (const privateValue of [sessionId, sessionKey, runId, turnKey]) {
+      expect(receipts).not.toContain(privateValue);
+    }
+  });
+
   it("does not record tool calls without a session id", async () => {
     const resolveCurrentSessionId = vi.spyOn(
       defaultTracker,
@@ -1724,10 +1767,10 @@ description: Navigate Tokyo.
       agentId: "persisted-agent",
       name: "source-driven-development",
       source: "workspace" as const,
-      reason: "zero-recommendation-usage" as const,
+      reason: "zero-intent-match-usage" as const,
       observedTurns: 20,
       usageTurns: 0,
-      recommendedTurns: 0,
+      intentMatchedTurns: 0,
     };
     const state = {
       input: snapshot.current.input,
@@ -1849,10 +1892,10 @@ description: Navigate Tokyo.
       source: "workspace" as const,
       winnerFingerprint: "",
       fingerprint: "",
-      reason: "zero-recommendation-usage" as const,
+      reason: "zero-intent-match-usage" as const,
       observedTurns: 20,
       usageTurns: 0,
-      recommendedTurns: 0,
+      intentMatchedTurns: 0,
     };
     const definition = {
       id: "other",
@@ -2134,7 +2177,7 @@ describe("createHookHandlers internal turn guards", () => {
     vi.restoreAllMocks();
   });
 
-  it("injects static context for inter-session turns without refreshing config or intents", async () => {
+  it("injects static context for inter-session turns after refreshing config but without intents", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
     const refreshIntents = vi.fn();
     const handlers = createHookHandlers({
@@ -2168,7 +2211,7 @@ describe("createHookHandlers internal turn guards", () => {
     expect(result).toEqual({
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
-    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+    expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
     expect(refreshIntents).not.toHaveBeenCalled();
   });
 
@@ -2197,7 +2240,7 @@ describe("createHookHandlers internal turn guards", () => {
     expect(result).toEqual({
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
-    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+    expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
   });
 
   it("injects static context for protected internal completion envelopes", async () => {
@@ -2228,7 +2271,7 @@ describe("createHookHandlers internal turn guards", () => {
     expect(result).toEqual({
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
-    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+    expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
   });
 
   it("injects static context for a scoped non-user trigger without dynamic work", async () => {
@@ -2253,7 +2296,7 @@ describe("createHookHandlers internal turn guards", () => {
     expect(result).toEqual({
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
-    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+    expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
     expect(refreshIntents).not.toHaveBeenCalled();
   });
 
@@ -2278,7 +2321,7 @@ describe("createHookHandlers internal turn guards", () => {
     expect(result).toEqual({
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
-    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+    expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
     expect(refreshIntents).not.toHaveBeenCalled();
   });
 
@@ -2408,7 +2451,7 @@ describe("createHookHandlers internal turn guards", () => {
         expect(systemContext).toContain("<configured_skills>");
         expect(systemContext).toContain('<skill name="static-scope">');
         expect(systemContext).toContain("Static scope workspace skill.");
-        expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+        expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
         expect(refreshIntents).not.toHaveBeenCalled();
         expect(topicChecker).not.toHaveBeenCalled();
         expect(classifier).not.toHaveBeenCalled();
@@ -2521,6 +2564,7 @@ describe("createHookHandlers topic switch flow", () => {
     turnAssociations?: TurnAssociationRegistry;
     ensureColdStart?: ReturnType<typeof vi.fn>;
     commitPromptRecommendation?: ReturnType<typeof vi.fn>;
+    refreshLiveConfigFromRuntime?: ReturnType<typeof vi.fn>;
   }) {
     emitHostAgentEvent.mockReset();
     const intents = params.intents ?? [intent];
@@ -2634,7 +2678,8 @@ describe("createHookHandlers topic switch flow", () => {
         ...params.api,
       } as unknown as OpenClawPluginApi,
       config: () => resolveConfig(rawConfig),
-      refreshLiveConfigFromRuntime: vi.fn(),
+      refreshLiveConfigFromRuntime:
+        params.refreshLiveConfigFromRuntime ?? vi.fn(),
       refreshIntents: vi.fn(),
       catalog: catalog as never,
       tracker: tracker as never,
@@ -2677,6 +2722,51 @@ describe("createHookHandlers topic switch flow", () => {
     sessionKey: "agent:main:direct:123",
     runId: "run-1",
   };
+
+  it("logs prompt routing without raw context or classification payloads", async () => {
+    const privateResult = "private-classification/customer";
+    const privateSession = "private-session/customer";
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "social-casual",
+      reason: privateResult,
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const debug = vi.spyOn(logger, "debug").mockImplementation(() => undefined);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      classifier,
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "unmatched request",
+        messages: [
+          {
+            role: "user",
+            content: "unmatched request",
+            provenance: { kind: "external_user" },
+          },
+        ],
+      } as never,
+      { ...ctx, sessionId: privateSession } as never,
+    );
+
+    expect(debug).toHaveBeenCalledWith("before_prompt_build hook triggered", {
+      hasSessionId: true,
+      hasSessionKey: true,
+      hasRunId: true,
+      hasModelProviderId: false,
+      hasModelId: false,
+    });
+    expect(debug).toHaveBeenCalledWith("intention result", {
+      trigger: "llm-classifier",
+      intentResolved: true,
+    });
+    const receipts = JSON.stringify(debug.mock.calls);
+    expect(receipts).not.toContain(privateResult);
+    expect(receipts).not.toContain(privateSession);
+  });
 
   function emittedPipelineEvents(emitAgentEvent: ReturnType<typeof vi.fn>) {
     return emitAgentEvent.mock.calls.map((call) => call[0]);
@@ -2889,7 +2979,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     ).not.toHaveProperty("complexity");
   });
 
-  it("immediately injects candidate-scoped experience metadata without bodies", async () => {
+  it("immediately injects matched-skill experience metadata without bodies", async () => {
     const temporarySkills = fs.mkdtempSync(
       path.join(os.tmpdir(), "routing-experience-metadata-"),
     );
@@ -4049,7 +4139,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     );
   });
 
-  it("includes declared skill candidates in routing context", async () => {
+  it("includes declared intent-matched skills in routing context", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-null-hint-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -4095,7 +4185,8 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
     try {
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
-      expect(result?.prependContext).toContain("<skill_candidates>");
+      expect(result?.prependContext).toContain("<intent_matched_skills>");
+      expect(result?.prependContext).not.toContain("<skill_candidates>");
       expect(result?.prependContext).toContain(ROUTING_ADVISORY_HEADER);
       expect(result?.prependContext).toContain(
         '<skill name="domain-test-skill">',
@@ -4263,7 +4354,7 @@ Current user request: fresh clean request
     );
   });
 
-  it("includes declared skill candidates from intent skills in routing context", async () => {
+  it("includes declared intent-matched skills from intent skills in routing context", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-hook-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -4367,7 +4458,8 @@ Current user request: fresh clean request
       expect(result?.prependContext).toContain(
         '<intent name="architecture">\n    Draw the requested architecture.\n  </intent>',
       );
-      expect(result?.prependContext).toContain("<skill_candidates>");
+      expect(result?.prependContext).toContain("<intent_matched_skills>");
+      expect(result?.prependContext).not.toContain("<skill_candidates>");
       expect(result?.prependContext).toContain(
         '<skill name="architecture-diagram">',
       );
@@ -4551,6 +4643,64 @@ Current user request: fresh clean request
     );
   });
 
+  it("logs a count-only receipt when configured static context is emitted", async () => {
+    const getConfiguredAgentSkills = vi
+      .fn()
+      .mockResolvedValue(["skill-harness"]);
+    const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
+      getConfiguredAgentSkills,
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "unrelated message",
+        messages: [{ role: "user", content: "unrelated message" }],
+      } as never,
+      ctx,
+    );
+
+    const receipts = info.mock.calls.filter(
+      ([message]) => message === "configured skills static context emitted",
+    );
+    expect(receipts).toEqual([
+      [
+        "configured skills static context emitted",
+        {
+          configuredSkillCount: 1,
+          staticHeader: true,
+          configuredWrapper: true,
+          configuredSkillTag: true,
+        },
+      ],
+    ]);
+  });
+
+  it("does not log an emission receipt when no configured skills resolve", async () => {
+    const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      bundledSkillsDir: "",
+      getConfiguredAgentSkills: vi.fn().mockResolvedValue([]),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "unrelated message",
+        messages: [{ role: "user", content: "unrelated message" }],
+      } as never,
+      ctx,
+    );
+
+    expect(
+      info.mock.calls.filter(
+        ([message]) => message === "configured skills static context emitted",
+      ),
+    ).toEqual([]);
+  });
+
   it("automatically appends direct and nested workspace skills when no skills are explicitly configured", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-workspace-skills-"),
@@ -4595,6 +4745,118 @@ Current user request: fresh clean request
     expect(systemContext).toContain("Direct workspace skill.");
     expect(systemContext).toContain('<skill name="nested">');
     expect(systemContext).toContain("Nested workspace skill.");
+  });
+
+  it("refreshes the live agent-first working set before static injection for agents excluded from dynamic routing", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-live-working-set-refresh-"),
+    );
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(stateDir, "skills"),
+      "agent-first-v1",
+      "First live agent skill.",
+    );
+    writeSkill(
+      path.join(stateDir, "skills"),
+      "shared-default-v1",
+      "First live default skill.",
+    );
+    writeSkill(
+      path.join(stateDir, "skills"),
+      "agent-first-v2",
+      "Second live agent skill.",
+    );
+    writeSkill(
+      path.join(stateDir, "skills"),
+      "shared-default-v2",
+      "Second live default skill.",
+    );
+    writeSkill(
+      path.join(workspaceDir, "skills"),
+      "workspace-only",
+      "Workspace skill appended after the working set.",
+    );
+    const liveWorkingSets = [
+      ["agent-first-v1", "shared-default-v1"],
+      ["agent-first-v2", "shared-default-v2"],
+    ];
+    let liveWorkingSetIndex = -1;
+    const refreshLiveConfigFromRuntime = vi.fn(() => {
+      liveWorkingSetIndex += 1;
+    });
+    const getConfiguredAgentSkills = vi.fn(
+      () => liveWorkingSets[liveWorkingSetIndex] ?? [],
+    );
+    const { handlers, classifier } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: { scope: { agents: ["other"] } },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getConfiguredAgentSkills,
+      refreshLiveConfigFromRuntime,
+    });
+
+    try {
+      const first = await handlers.onBeforePromptBuild(event, ctx);
+      const second = await handlers.onBeforePromptBuild(event, ctx);
+      const names = (result: typeof first) =>
+        Array.from(
+          (result?.appendSystemContext ?? "").matchAll(
+            /<skill name="([^"]+)">/g,
+          ),
+          (match) => match[1],
+        );
+
+      expect(refreshLiveConfigFromRuntime).toHaveBeenCalledTimes(2);
+      expect(getConfiguredAgentSkills).toHaveBeenNthCalledWith(1, "main");
+      expect(getConfiguredAgentSkills).toHaveBeenNthCalledWith(2, "main");
+      expect(names(first)).toEqual([
+        "agent-first-v1",
+        "shared-default-v1",
+        "workspace-only",
+      ]);
+      expect(names(second)).toEqual([
+        "agent-first-v2",
+        "shared-default-v2",
+        "workspace-only",
+      ]);
+      expect(first?.appendSystemContext).toContain("### Configured skills");
+      expect(first?.appendSystemContext).toContain("<configured_skills>");
+      expect(classifier).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not disclose outer prompt-build failure details", async () => {
+    const failure = new Error("private runtime configuration detail");
+    failure.name = "private-session-identifier";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      refreshLiveConfigFromRuntime: vi.fn(() => {
+        throw failure;
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    const receipt = warn.mock.calls.find(
+      ([message]) => message === "before_prompt_build hook error",
+    );
+    expect(receipt).toEqual([
+      "before_prompt_build hook error",
+      { errorType: "Error", staticContextAvailable: false },
+    ]);
+    expect(JSON.stringify(receipt)).not.toContain(failure.message);
+    expect(JSON.stringify(receipt)).not.toContain(failure.name);
   });
 
   it("unions explicit configured skills with workspace skills using workspace winners and explicit-first order", async () => {
@@ -4662,6 +4924,8 @@ Current user request: fresh clean request
   });
 
   it("keeps workspace skills when explicit configured-skill retrieval fails", async () => {
+    const failure = new Error("private configured lookup detail");
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-skill-explicit-fail-"),
     );
@@ -4681,9 +4945,7 @@ Current user request: fresh clean request
         } as never,
       },
       bundledSkillsDir: "",
-      getConfiguredAgentSkills: vi
-        .fn()
-        .mockRejectedValue(new Error("configured lookup failed")),
+      getConfiguredAgentSkills: vi.fn().mockRejectedValue(failure),
     });
 
     try {
@@ -4695,12 +4957,23 @@ Current user request: fresh clean request
       expect(result?.appendSystemContext).toContain(
         "Workspace fallback skill.",
       );
+      const receipt = warn.mock.calls.find(
+        ([message]) =>
+          message === "failed to retrieve configured agent skill names",
+      );
+      expect(receipt).toEqual([
+        "failed to retrieve configured agent skill names",
+        { errorType: "Error", configuredSkillCount: 0 },
+      ]);
+      expect(JSON.stringify(receipt)).not.toContain(failure.message);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
 
   it("keeps workspace skills when explicit configured-skill resolution fails", async () => {
+    const failure = new Error("private explicit resolver detail");
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-skill-resolve-fail-"),
     );
@@ -4714,7 +4987,7 @@ Current user request: fresh clean request
     const resolveAgentWorkspaceDir = vi
       .fn()
       .mockImplementationOnce(() => {
-        throw new Error("explicit resolution failed");
+        throw failure;
       })
       .mockReturnValue(workspaceDir);
     const { handlers } = createTopicFlowHarness({
@@ -4738,12 +5011,23 @@ Current user request: fresh clean request
       expect(result?.appendSystemContext).toContain(
         "Workspace resolver fallback skill.",
       );
+      const receipt = warn.mock.calls.find(
+        ([message]) =>
+          message === "failed to resolve explicitly configured agent skills",
+      );
+      expect(receipt).toEqual([
+        "failed to resolve explicitly configured agent skills",
+        { errorType: "Error", configuredSkillCount: 1 },
+      ]);
+      expect(JSON.stringify(receipt)).not.toContain(failure.message);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
 
   it("keeps explicit configured skills when workspace inventory resolution fails", async () => {
+    const failure = new Error("private workspace resolver detail");
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-skill-workspace-fail-"),
     );
@@ -4758,7 +5042,7 @@ Current user request: fresh clean request
       .fn()
       .mockReturnValueOnce(workspaceDir)
       .mockImplementation(() => {
-        throw new Error("workspace lookup failed");
+        throw failure;
       });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4779,6 +5063,57 @@ Current user request: fresh clean request
         '<skill name="explicit-only">',
       );
       expect(result?.appendSystemContext).toContain("Explicit fallback skill.");
+      const receipt = warn.mock.calls.find(
+        ([message]) => message === "failed to resolve workspace agent skills",
+      );
+      expect(receipt).toEqual([
+        "failed to resolve workspace agent skills",
+        { errorType: "Error", workspaceSkillCount: 0 },
+      ]);
+      expect(JSON.stringify(receipt)).not.toContain(failure.message);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not disclose outer configured-skill formatting failures", async () => {
+    const failure = new Error("private formatter detail");
+    const info = vi.spyOn(logger, "info").mockImplementationOnce(() => {
+      throw failure;
+    });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-skill-log-fail-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(workspaceDir, "skills"),
+      "workspace-only",
+      "Workspace skill.",
+    );
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => path.join(tmp, "state") },
+          agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+    });
+
+    try {
+      await handlers.onBeforePromptBuild(event, ctx);
+
+      expect(info).toHaveBeenCalled();
+      const receipt = warn.mock.calls.find(
+        ([message]) =>
+          message ===
+          "failed to resolve configured agent skills for prompt build",
+      );
+      expect(receipt).toEqual([
+        "failed to resolve configured agent skills for prompt build",
+        { errorType: "Error", configuredSkillCount: 0 },
+      ]);
+      expect(JSON.stringify(receipt)).not.toContain(failure.message);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

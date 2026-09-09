@@ -58,11 +58,11 @@ function writeStats(stateDir: string): void {
   fs.writeFileSync(
     statsFile,
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 6,
       skills: {
         writer: {
           usageTurns: 9,
-          recommendedTurns: 10,
+          intentMatchedTurns: 10,
           adoptedTurns: 7,
           adoptionRate: 0.7,
           last7DaysUsage: 4,
@@ -97,7 +97,7 @@ describe("readAvailableSkill", () => {
       domains: ["writing"],
       usage_stats: {
         usage_turns: 9,
-        recommended_turns: 10,
+        intent_matched_turns: 10,
         adopted_turns: 7,
         adoption_rate: 0.7,
         last_7_days_usage: 4,

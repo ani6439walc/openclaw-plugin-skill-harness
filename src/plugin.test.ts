@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { OpenClawPluginApi } from "../api.js";
+import { logger } from "../api.js";
 import {
   createConfiguredAgentSkillsResolver,
   createPlugin,
@@ -245,7 +246,7 @@ describe("createPlugin", () => {
         entries: {
           main: { skills: ["alpha"] },
           coder: {},
-          REVIEWER: { skills: [] },
+          ＲＥＶＩＥＷＥＲ: { skills: [] },
         },
       },
     };
@@ -256,7 +257,7 @@ describe("createPlugin", () => {
     ]);
   });
 
-  it("schedules skill search indexing for all configured agents on refresh", async () => {
+  it("schedules skill search indexing for host and working-set agents on refresh", async () => {
     let scheduleSpy: ReturnType<typeof vi.fn> | undefined;
     createHookHandlersSpy.mockImplementationOnce(
       (deps: {
@@ -275,10 +276,14 @@ describe("createPlugin", () => {
             main: {},
             coder: {},
             reviewer: {},
+            ＲＵＮＴＩＭＥ: {},
           },
         },
       },
-      pluginConfig: { qmd: { indexRefreshIntervalSeconds: 300 } },
+      pluginConfig: {
+        qmd: { indexRefreshIntervalSeconds: 300 },
+        workingSetSkills: { agents: { writer: ["draft"] } },
+      },
     });
 
     createPlugin(api).register(api);
@@ -305,9 +310,61 @@ describe("createPlugin", () => {
             sourceRoots: expect.any(Array),
           }),
         );
+        expect(scheduleSpy).toHaveBeenCalledWith(
+          "writer",
+          expect.objectContaining({
+            skills: expect.any(Array),
+            sourceRoots: expect.any(Array),
+          }),
+        );
+        expect(scheduleSpy).toHaveBeenCalledWith(
+          "runtime",
+          expect.objectContaining({
+            skills: expect.any(Array),
+            sourceRoots: expect.any(Array),
+          }),
+        );
+        expect(scheduleSpy).not.toHaveBeenCalledWith(
+          "ＲＵＮＴＩＭＥ",
+          expect.anything(),
+        );
       },
       { timeout: 3000 },
     );
+  });
+
+  it("does not disclose scheduler errors or agent identifiers", async () => {
+    const privateAgentId = "private-agent/customer/path";
+    const failure = new Error("private scheduler detail");
+    failure.name = privateAgentId;
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    createHookHandlersSpy.mockImplementationOnce(
+      (deps: {
+        qmdSkillIndex?: { schedule: (...args: unknown[]) => void };
+      }) => {
+        if (!deps.qmdSkillIndex) throw new Error("missing QMD skill index");
+        vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(() => {
+          throw failure;
+        });
+      },
+    );
+    const api = createApi({
+      config: { agents: { entries: { [privateAgentId]: {} } } },
+    });
+
+    createPlugin(api).register(api);
+
+    await vi.waitFor(() => {
+      const receipt = warn.mock.calls.find(
+        ([message]) => message === "failed to schedule QMD skill search index",
+      );
+      expect(receipt).toEqual([
+        "failed to schedule QMD skill search index",
+        { errorType: "Error", scheduled: false },
+      ]);
+      expect(JSON.stringify(receipt)).not.toContain(privateAgentId);
+      expect(JSON.stringify(receipt)).not.toContain(failure.message);
+    });
   });
 
   function createPackageRootWithAssets(files: Record<string, string>): string {
@@ -426,7 +483,7 @@ describe("createPlugin", () => {
     }
   });
 
-  it("wipes agents.defaults.skills and agents.entries.*.skills during registration", () => {
+  it("preserves host skill configuration and resolves only live plugin working sets", async () => {
     const apiConfig = {
       agents: {
         defaults: {
@@ -447,7 +504,21 @@ describe("createPlugin", () => {
           main: { skills: ["acpx"] },
         },
       },
+      plugins: {
+        entries: {
+          "skill-harness": {
+            config: {
+              workingSetSkills: {
+                defaults: ["shared"],
+                agents: { main: ["live-agent"] },
+              },
+            },
+          },
+        },
+      },
     };
+    const apiConfigBefore = structuredClone(apiConfig);
+    const runtimeConfigBefore = structuredClone(runtimeConfig);
     const api = createApi({
       config: apiConfig,
       runtime: {
@@ -457,54 +528,139 @@ describe("createPlugin", () => {
         state: {
           resolveStateDir: () => stateDir,
         },
-      } as any,
+      } as never,
+    });
+    const readFile = vi.spyOn(fs.promises, "readFile");
+
+    createPlugin(api).register(api);
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+
+    expect(await deps.getConfiguredAgentSkills("main")).toEqual([
+      "live-agent",
+      "shared",
+    ]);
+    expect(apiConfig).toEqual(apiConfigBefore);
+    expect(runtimeConfig).toEqual(runtimeConfigBefore);
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it("resolves an agent-specific working set for an NFKC-equivalent runtime agent ID", async () => {
+    const runtimeConfig = {
+      plugins: {
+        entries: {
+          "skill-harness": {
+            config: {
+              workingSetSkills: {
+                defaults: ["shared"],
+                agents: { main: ["live-agent"] },
+              },
+            },
+          },
+        },
+      },
+    };
+    const api = createApi({
+      runtime: {
+        config: { current: () => runtimeConfig },
+        state: { resolveStateDir: () => stateDir },
+      } as never,
     });
 
     createPlugin(api).register(api);
+    const deps = createHookHandlersSpy.mock.calls[0][0];
 
-    expect(apiConfig.agents.defaults.skills).toEqual([]);
-    expect(apiConfig.agents.entries.writer.skills).toEqual([]);
-    expect(apiConfig.agents.entries.coder.skills).toEqual([]);
-    expect(runtimeConfig.agents.defaults.skills).toEqual([]);
-    expect(runtimeConfig.agents.entries.main.skills).toEqual([]);
+    expect(await deps.getConfiguredAgentSkills("main")).toEqual([
+      "live-agent",
+      "shared",
+    ]);
+    expect(await deps.getConfiguredAgentSkills("ＭＡＩＮ")).toEqual([
+      "live-agent",
+      "shared",
+    ]);
   });
 
-  it("asynchronously refreshes configured skills from raw config and clears removed skills", async () => {
-    const configPath = path.join(stateDir, "openclaw.json");
-    const writeOpenClawConfig = (skills: string[]) => {
-      fs.writeFileSync(
-        configPath,
-        JSON.stringify({
-          agents: { entries: { main: { skills } } },
-        }),
-      );
-    };
-    writeOpenClawConfig(["skill-harness"]);
-
-    const apiConfig = {
-      agents: { entries: { main: { skills: ["skill-harness"] } } },
+  it("refreshes removed working-set names and fails open on malformed live config", async () => {
+    let runtimeFailure = false;
+    let runtimeConfig: Record<string, unknown> = {
+      plugins: {
+        entries: {
+          "skill-harness": {
+            config: {
+              workingSetSkills: { agents: { main: ["skill-harness"] } },
+            },
+          },
+        },
+      },
     };
     const api = createApi({
-      config: apiConfig,
       runtime: {
-        config: { current: () => apiConfig },
+        config: {
+          current: () => {
+            if (runtimeFailure) throw new Error("runtime unavailable");
+            return runtimeConfig;
+          },
+        },
         state: { resolveStateDir: () => stateDir },
       } as never,
     });
     const readFile = vi.spyOn(fs.promises, "readFile");
-    const resolver = createConfiguredAgentSkillsResolver(
-      api,
-      new Map([["main", ["skill-harness"]]]),
+    createPlugin(api).register(api);
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+
+    expect(await deps.getConfiguredAgentSkills("main")).toEqual([
+      "skill-harness",
+    ]);
+
+    runtimeConfig = {
+      plugins: {
+        entries: {
+          "skill-harness": {
+            config: { workingSetSkills: { agents: { main: [] } } },
+          },
+        },
+      },
+    };
+    expect(await deps.getConfiguredAgentSkills("main")).toEqual([]);
+
+    runtimeConfig = {
+      plugins: {
+        entries: {
+          "skill-harness": {
+            config: { workingSetSkills: { agents: [] } },
+          },
+        },
+      },
+    };
+    expect(await deps.getConfiguredAgentSkills("main")).toEqual([]);
+
+    runtimeFailure = true;
+    expect(await deps.getConfiguredAgentSkills("main")).toEqual([]);
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it("does not disclose the agent identifier when live working-set resolution fails", async () => {
+    const privateAgentId = "private-agent/customer/path";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const resolve = createConfiguredAgentSkillsResolver(() => {
+      const failure = new Error("runtime unavailable");
+      failure.name = privateAgentId;
+      throw failure;
+    });
+
+    await resolve(privateAgentId);
+
+    const receipt = warn.mock.calls.find(
+      ([message]) =>
+        message === "failed to resolve live configured skill working set",
     );
-    const initial = await resolver("main");
-
-    expect(readFile).toHaveBeenCalledWith(configPath, "utf8");
-    expect(initial).toEqual(["skill-harness"]);
-
-    writeOpenClawConfig([]);
-    const removed = await resolver("main");
-
-    expect(removed).toEqual([]);
+    expect(receipt).toEqual([
+      "failed to resolve live configured skill working set",
+      {
+        errorType: "Error",
+        configuredSkillCount: 0,
+      },
+    ]);
+    expect(JSON.stringify(receipt)).not.toContain(privateAgentId);
   });
 
   it("resolves QMD provider baseUrl and apiKey dynamically from live OpenClaw config", () => {

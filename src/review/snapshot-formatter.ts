@@ -440,7 +440,7 @@ function formatSkillPlacementCandidate(
       reason: candidate.reason,
       observedTurns: candidate.observedTurns,
       usageTurns: candidate.usageTurns,
-      recommendedTurns: candidate.recommendedTurns,
+      intentMatchedTurns: candidate.intentMatchedTurns,
       ...(candidate.adoptionRate !== undefined
         ? { adoptionRate: candidate.adoptionRate }
         : {}),

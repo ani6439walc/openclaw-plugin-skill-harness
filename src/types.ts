@@ -69,6 +69,11 @@ export type ResolvedSkillsConfig = {
   search: ResolvedSkillSearchConfig;
 };
 
+export type ResolvedWorkingSetSkillsConfig = {
+  defaults: string[];
+  agents: Record<string, string[]>;
+};
+
 export type ResolvedQmdConfig = {
   timeoutMs: number;
   indexRefreshIntervalSeconds: number;
@@ -84,6 +89,7 @@ export type ResolvedSkillHarnessPluginConfig = {
   scope: ResolvedScopeConfig;
   routing: ResolvedRoutingConfig;
   skills: ResolvedSkillsConfig;
+  workingSetSkills: ResolvedWorkingSetSkillsConfig;
   qmd: ResolvedQmdConfig;
   review: ResolvedReviewConfig;
 };

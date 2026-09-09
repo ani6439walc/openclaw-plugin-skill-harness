@@ -38,6 +38,9 @@ Sender (untrusted metadata):
 
 System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
 
+const LEGACY_ROUTING_ADVISORY_HEADER =
+  "Inferred intent and candidate skills (advisory, non-user input; load with `skill_view` if relevant):";
+
 describe("sanitizeConversationText", () => {
   it("preserves retired untrusted-context headers as ordinary text", () => {
     const retiredHeader =
@@ -64,7 +67,7 @@ describe("sanitizeConversationText", () => {
     ).toBe("進入 inventory 模式先 scan吧");
   });
 
-  it("strips the routing block with candidate skills guidance", () => {
+  it("strips the legacy sanitizer-only candidate-skills guidance", () => {
     expect(
       sanitizeConversationText(
         `${INTERNAL_RUNTIME_CONTEXT_BEGIN}\n${UNTRUSTED_CONTEXT_HEADER}\n${CANDIDATE_SKILLS_GUIDANCE}\n<skill_harness_plugin>\n<intent name="other">\nguidance\n</intent>\n</skill_harness_plugin>\n${INTERNAL_RUNTIME_CONTEXT_END}\n\n進入 inventory 模式先 scan吧`,
@@ -72,12 +75,39 @@ describe("sanitizeConversationText", () => {
     ).toBe("進入 inventory 模式先 scan吧");
   });
 
-  it("strips single-line routing advisory headers with candidate skills", () => {
+  it("strips the current intent-matched-skills routing block", () => {
     expect(
       sanitizeConversationText(
-        `${ROUTING_ADVISORY_HEADER}\n<skill_harness_plugin>\n<intent name="memory-lookup">\nguidance\n</intent>\n<skill_candidates>\n<skill name="treemd">\ndesc\n</skill>\n</skill_candidates>\n</skill_harness_plugin>\n\n進入 inventory 模式先 scan吧`,
+        `${ROUTING_ADVISORY_HEADER}\n<skill_harness_plugin>\n<intent name="memory-lookup">\nguidance\n</intent>\n<intent_matched_skills>\n<skill name="treemd">\ndesc\n</skill>\n</intent_matched_skills>\n</skill_harness_plugin>\n\n進入 inventory 模式先 scan吧`,
       ),
     ).toBe("進入 inventory 模式先 scan吧");
+  });
+
+  it("strips the retired candidate-skills header and tag", () => {
+    expect(
+      sanitizeConversationText(
+        `${LEGACY_ROUTING_ADVISORY_HEADER}\n<skill_harness_plugin>\n<intent name="memory-lookup">\nguidance\n</intent>\n<skill_candidates>\n<skill name="treemd">\ndesc\n</skill>\n</skill_candidates>\n</skill_harness_plugin>\n\n進入 inventory 模式先 scan吧`,
+      ),
+    ).toBe("進入 inventory 模式先 scan吧");
+  });
+
+  it("strips adjacent current and retired routing forms down to user text", () => {
+    const currentRouting = `${ROUTING_ADVISORY_HEADER}
+<skill_harness_plugin>
+<intent name="memory-lookup">new guidance</intent>
+<intent_matched_skills><skill name="treemd">new desc</skill></intent_matched_skills>
+</skill_harness_plugin>`;
+    const retiredRouting = `${LEGACY_ROUTING_ADVISORY_HEADER}
+<skill_harness_plugin>
+<intent name="memory-lookup">old guidance</intent>
+<skill_candidates><skill name="treemd">old desc</skill></skill_candidates>
+</skill_harness_plugin>`;
+
+    expect(
+      sanitizeConversationText(
+        `${currentRouting}\n${retiredRouting}\nBINARY_USER_TEXT_REMAINS`,
+      ),
+    ).toBe("BINARY_USER_TEXT_REMAINS");
   });
 
   it("strips single-line routing advisory headers for intent-only routing", () => {
@@ -88,7 +118,7 @@ describe("sanitizeConversationText", () => {
     ).toBe("進入 inventory 模式先 scan吧");
   });
 
-  it("strips OpenClaw 2026.9.1 conversation info context marker and active memory block", () => {
+  it("strips legacy sanitizer-only candidate wrapper beside OpenClaw context", () => {
     const raw = `Conversation info: ⟦openclaw:ctx⟧
 \`\`\`json
 {"sender":{"id":"529296776637972480","name":"烤雞堡","username":"wei840222"}}
