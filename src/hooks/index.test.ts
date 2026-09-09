@@ -23,7 +23,6 @@ import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { TurnAssociationRegistry } from "./turn-associations.js";
 import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import {
-  INTERNAL_RUNTIME_CONTEXT_BEGIN,
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
 } from "../constants.js";
@@ -2394,7 +2393,7 @@ describe("createHookHandlers internal turn guards", () => {
       sessionKey: "agent:main:main",
     },
   ])(
-    "injects static configured skills without dynamic routing for $label",
+    "injects static working-set skills without dynamic routing for $label",
     async ({ config, sessionKey }) => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "static-scope-"));
       const stateDir = path.join(tmp, "state");
@@ -2553,9 +2552,7 @@ describe("createHookHandlers topic switch flow", () => {
     topicChecker?: ReturnType<typeof vi.fn>;
     api?: Partial<OpenClawPluginApi>;
     bundledSkillsDir?: string;
-    getConfiguredAgentSkills?: (
-      agentId: string,
-    ) => string[] | Promise<string[]>;
+    getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;
     experienceCatalog?: { listForSkills: ReturnType<typeof vi.fn> };
     qmdIntentIndex?: {
       searchIntentExamplesAndKeywords: ReturnType<typeof vi.fn>;
@@ -2686,7 +2683,7 @@ describe("createHookHandlers topic switch flow", () => {
       classifier,
       turnAssociations: params.turnAssociations,
       bundledSkillsDir: params.bundledSkillsDir,
-      getConfiguredAgentSkills: params.getConfiguredAgentSkills,
+      getWorkingSetSkills: params.getWorkingSetSkills,
       experienceCatalog: params.experienceCatalog,
       qmdIntentIndex: qmdIntentIndex as never,
     });
@@ -2807,34 +2804,14 @@ describe("createHookHandlers topic switch flow", () => {
     };
   }
 
-  const metadataPrefix = `Conversation info (untrusted metadata):
+  const currentOpenClawMetadata = `[Wed 2026-09-09 23:19 GMT+8] Conversation info: ⟦openclaw:ctx⟧
 \`\`\`json
-{
-  "chat_id": "user:529296776637972480",
-  "message_id": "1524097597906620690",
-  "sender_id": "529296776637972480",
-  "sender": "烤雞堡",
-  "timestamp": "Wed 2026-07-08 00:59:43 GMT+8",
-  "inbound_event_kind": "user_request"
-}
-\`\`\`
+{"sender":{"id":"529296776637972480","name":"烤雞堡","username":"wei840222"}}
+\`\`\``;
 
-Sender (untrusted metadata):
-\`\`\`json
-{
-  "label": "烤雞堡 (529296776637972480)",
-  "id": "529296776637972480",
-  "name": "烤雞堡",
-  "username": "wei840222",
-  "tag": "wei840222"
-}
-\`\`\`
-
-System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
-
-  it("strips platform metadata from latest, historical, and recorded prompt text", async () => {
-    const rawLatest = `${metadataPrefix}\n\n進入 inventory 模式先 scan吧`;
-    const rawHistorical = `${metadataPrefix}\n\n跟我詳細解說 skill-harness 技能`;
+  it("strips current OpenClaw metadata from latest, historical, and recorded prompt text", async () => {
+    const rawLatest = `${currentOpenClawMetadata}\n\n進入 inventory 模式先 scan吧`;
+    const rawHistorical = `${currentOpenClawMetadata}\n\n跟我詳細解說 skill-harness 技能`;
     const topicChecker = vi.fn().mockResolvedValue({
       keywords: ["inventory", "scan"],
       topic: "User wants inventory scanning.",
@@ -2931,7 +2908,7 @@ System: [2026-07-08 00:54:40 GMT+8] Model switched to openai/gpt-5.5.`;
       '<intent name="social-casual">\n    Reply warmly.\n  </intent>',
     );
     expect(result?.prependContext).not.toContain(
-      INTERNAL_RUNTIME_CONTEXT_BEGIN,
+      "<<<BEGIN_SKILL_HARNESS_CONTEXT>>>",
     );
     expect(result?.prependContext?.endsWith("</skill_harness_plugin>")).toBe(
       true,
@@ -4610,14 +4587,12 @@ Current user request: fresh clean request
     expect(classifier).toHaveBeenCalledOnce();
   });
 
-  it("appends full XML details of configured skills into appendSystemContext on prompt build turns", async () => {
-    const getConfiguredAgentSkills = vi
-      .fn()
-      .mockResolvedValue(["skill-harness"]);
+  it("appends full XML details of working-set skills into appendSystemContext on prompt build turns", async () => {
+    const getWorkingSetSkills = vi.fn().mockResolvedValue(["skill-harness"]);
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
-      getConfiguredAgentSkills,
+      getWorkingSetSkills,
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -4628,7 +4603,7 @@ Current user request: fresh clean request
       ctx,
     );
 
-    expect(getConfiguredAgentSkills).toHaveBeenCalledWith("main");
+    expect(getWorkingSetSkills).toHaveBeenCalledWith("main");
     expect(result?.appendSystemContext).toContain(SKILL_HARNESS_SYSTEM_CONTEXT);
     expect(result?.appendSystemContext).toContain(
       "### Using Skill Harness context",
@@ -4643,15 +4618,13 @@ Current user request: fresh clean request
     );
   });
 
-  it("logs a count-only receipt when configured static context is emitted", async () => {
-    const getConfiguredAgentSkills = vi
-      .fn()
-      .mockResolvedValue(["skill-harness"]);
+  it("logs a count-only receipt when working-set static context is emitted", async () => {
+    const getWorkingSetSkills = vi.fn().mockResolvedValue(["skill-harness"]);
     const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
-      getConfiguredAgentSkills,
+      getWorkingSetSkills,
     });
 
     await handlers.onBeforePromptBuild(
@@ -4663,27 +4636,27 @@ Current user request: fresh clean request
     );
 
     const receipts = info.mock.calls.filter(
-      ([message]) => message === "configured skills static context emitted",
+      ([message]) => message === "working-set skills static context emitted",
     );
     expect(receipts).toEqual([
       [
-        "configured skills static context emitted",
+        "working-set skills static context emitted",
         {
-          configuredSkillCount: 1,
+          workingSetSkillCount: 1,
           staticHeader: true,
-          configuredWrapper: true,
-          configuredSkillTag: true,
+          workingSetWrapper: true,
+          workingSetSkillTag: true,
         },
       ],
     ]);
   });
 
-  it("does not log an emission receipt when no configured skills resolve", async () => {
+  it("does not log an emission receipt when no working-set skills resolve", async () => {
     const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       bundledSkillsDir: "",
-      getConfiguredAgentSkills: vi.fn().mockResolvedValue([]),
+      getWorkingSetSkills: vi.fn().mockResolvedValue([]),
     });
 
     await handlers.onBeforePromptBuild(
@@ -4696,12 +4669,12 @@ Current user request: fresh clean request
 
     expect(
       info.mock.calls.filter(
-        ([message]) => message === "configured skills static context emitted",
+        ([message]) => message === "working-set skills static context emitted",
       ),
     ).toEqual([]);
   });
 
-  it("automatically appends direct and nested workspace skills when no skills are explicitly configured", async () => {
+  it("automatically appends direct and nested workspace skills when the working set is empty", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-workspace-skills-"),
     );
@@ -4717,7 +4690,7 @@ Current user request: fresh clean request
       "nested",
       "Nested workspace skill.",
     );
-    const getConfiguredAgentSkills = vi.fn().mockResolvedValue([]);
+    const getWorkingSetSkills = vi.fn().mockResolvedValue([]);
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       api: {
@@ -4727,7 +4700,7 @@ Current user request: fresh clean request
         } as never,
       },
       bundledSkillsDir: "",
-      getConfiguredAgentSkills,
+      getWorkingSetSkills,
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -4739,7 +4712,7 @@ Current user request: fresh clean request
     );
     const systemContext = result?.appendSystemContext ?? "";
 
-    expect(getConfiguredAgentSkills).toHaveBeenCalledWith("main");
+    expect(getWorkingSetSkills).toHaveBeenCalledWith("main");
     expect(systemContext).toContain("<working_set_skills>");
     expect(systemContext).toContain('<skill name="direct">');
     expect(systemContext).toContain("Direct workspace skill.");
@@ -4786,7 +4759,7 @@ Current user request: fresh clean request
     const refreshLiveConfigFromRuntime = vi.fn(() => {
       liveWorkingSetIndex += 1;
     });
-    const getConfiguredAgentSkills = vi.fn(
+    const getWorkingSetSkills = vi.fn(
       () => liveWorkingSets[liveWorkingSetIndex] ?? [],
     );
     const { handlers, classifier } = createTopicFlowHarness({
@@ -4799,7 +4772,7 @@ Current user request: fresh clean request
         } as never,
       },
       bundledSkillsDir: "",
-      getConfiguredAgentSkills,
+      getWorkingSetSkills,
       refreshLiveConfigFromRuntime,
     });
 
@@ -4815,8 +4788,8 @@ Current user request: fresh clean request
         );
 
       expect(refreshLiveConfigFromRuntime).toHaveBeenCalledTimes(2);
-      expect(getConfiguredAgentSkills).toHaveBeenNthCalledWith(1, "main");
-      expect(getConfiguredAgentSkills).toHaveBeenNthCalledWith(2, "main");
+      expect(getWorkingSetSkills).toHaveBeenNthCalledWith(1, "main");
+      expect(getWorkingSetSkills).toHaveBeenNthCalledWith(2, "main");
       expect(names(first)).toEqual([
         "agent-first-v1",
         "shared-default-v1",
@@ -4859,7 +4832,7 @@ Current user request: fresh clean request
     expect(JSON.stringify(receipt)).not.toContain(failure.name);
   });
 
-  it("unions explicit configured skills with workspace skills using workspace winners and explicit-first order", async () => {
+  it("unions working-set skills with workspace skills using workspace winners and working-set-first order", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-skill-union-"));
     const stateDir = path.join(tmp, "state");
     const workspaceDir = path.join(tmp, "workspace");
@@ -4883,7 +4856,7 @@ Current user request: fresh clean request
       "workspace-only",
       "Workspace-only skill.",
     );
-    const getConfiguredAgentSkills = vi
+    const getWorkingSetSkills = vi
       .fn()
       .mockResolvedValue(["explicit-only", "shared"]);
     const { handlers } = createTopicFlowHarness({
@@ -4895,7 +4868,7 @@ Current user request: fresh clean request
         } as never,
       },
       bundledSkillsDir: "",
-      getConfiguredAgentSkills,
+      getWorkingSetSkills,
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -4923,8 +4896,8 @@ Current user request: fresh clean request
     ]);
   });
 
-  it("keeps workspace skills when explicit configured-skill retrieval fails", async () => {
-    const failure = new Error("private configured lookup detail");
+  it("keeps workspace skills when working-set retrieval fails", async () => {
+    const failure = new Error("private working-set lookup detail");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-skill-explicit-fail-"),
@@ -4945,7 +4918,7 @@ Current user request: fresh clean request
         } as never,
       },
       bundledSkillsDir: "",
-      getConfiguredAgentSkills: vi.fn().mockRejectedValue(failure),
+      getWorkingSetSkills: vi.fn().mockRejectedValue(failure),
     });
 
     try {
@@ -4959,11 +4932,11 @@ Current user request: fresh clean request
       );
       const receipt = warn.mock.calls.find(
         ([message]) =>
-          message === "failed to retrieve configured agent skill names",
+          message === "failed to retrieve working-set agent skill names",
       );
       expect(receipt).toEqual([
-        "failed to retrieve configured agent skill names",
-        { errorType: "Error", configuredSkillCount: 0 },
+        "failed to retrieve working-set agent skill names",
+        { errorType: "Error", workingSetSkillCount: 0 },
       ]);
       expect(JSON.stringify(receipt)).not.toContain(failure.message);
     } finally {
@@ -4971,8 +4944,8 @@ Current user request: fresh clean request
     }
   });
 
-  it("keeps workspace skills when explicit configured-skill resolution fails", async () => {
-    const failure = new Error("private explicit resolver detail");
+  it("keeps workspace skills when working-set resolution fails", async () => {
+    const failure = new Error("private working-set resolver detail");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-skill-resolve-fail-"),
@@ -4999,7 +4972,7 @@ Current user request: fresh clean request
         } as never,
       },
       bundledSkillsDir: "",
-      getConfiguredAgentSkills: vi.fn().mockResolvedValue(["missing-explicit"]),
+      getWorkingSetSkills: vi.fn().mockResolvedValue(["missing-explicit"]),
     });
 
     try {
@@ -5012,12 +4985,11 @@ Current user request: fresh clean request
         "Workspace resolver fallback skill.",
       );
       const receipt = warn.mock.calls.find(
-        ([message]) =>
-          message === "failed to resolve explicitly configured agent skills",
+        ([message]) => message === "failed to resolve working-set agent skills",
       );
       expect(receipt).toEqual([
-        "failed to resolve explicitly configured agent skills",
-        { errorType: "Error", configuredSkillCount: 1 },
+        "failed to resolve working-set agent skills",
+        { errorType: "Error", workingSetSkillCount: 1 },
       ]);
       expect(JSON.stringify(receipt)).not.toContain(failure.message);
     } finally {
@@ -5025,7 +4997,7 @@ Current user request: fresh clean request
     }
   });
 
-  it("keeps explicit configured skills when workspace inventory resolution fails", async () => {
+  it("keeps working-set skills when workspace inventory resolution fails", async () => {
     const failure = new Error("private workspace resolver detail");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     const tmp = fs.mkdtempSync(
@@ -5053,7 +5025,7 @@ Current user request: fresh clean request
         } as never,
       },
       bundledSkillsDir: "",
-      getConfiguredAgentSkills: vi.fn().mockResolvedValue(["explicit-only"]),
+      getWorkingSetSkills: vi.fn().mockResolvedValue(["explicit-only"]),
     });
 
     try {
@@ -5076,7 +5048,7 @@ Current user request: fresh clean request
     }
   });
 
-  it("does not disclose outer configured-skill formatting failures", async () => {
+  it("does not disclose outer working-set formatting failures", async () => {
     const failure = new Error("private formatter detail");
     const info = vi.spyOn(logger, "info").mockImplementationOnce(() => {
       throw failure;
@@ -5107,11 +5079,11 @@ Current user request: fresh clean request
       const receipt = warn.mock.calls.find(
         ([message]) =>
           message ===
-          "failed to resolve configured agent skills for prompt build",
+          "failed to resolve working-set agent skills for prompt build",
       );
       expect(receipt).toEqual([
-        "failed to resolve configured agent skills for prompt build",
-        { errorType: "Error", configuredSkillCount: 0 },
+        "failed to resolve working-set agent skills for prompt build",
+        { errorType: "Error", workingSetSkillCount: 0 },
       ]);
       expect(JSON.stringify(receipt)).not.toContain(failure.message);
     } finally {
@@ -5134,7 +5106,7 @@ Current user request: fresh clean request
       "librarian-only",
       "Librarian workspace skill.",
     );
-    const getConfiguredAgentSkills = vi.fn().mockResolvedValue([]);
+    const getWorkingSetSkills = vi.fn().mockResolvedValue([]);
     const resolveAgentWorkspaceDir = vi.fn(
       (_config: unknown, agentId: string) =>
         agentId === "librarian" ? librarianWorkspace : mainWorkspace,
@@ -5148,7 +5120,7 @@ Current user request: fresh clean request
         } as never,
       },
       bundledSkillsDir: "",
-      getConfiguredAgentSkills,
+      getWorkingSetSkills,
     });
 
     const mainResult = await handlers.onBeforePromptBuild(
@@ -5201,15 +5173,15 @@ Current user request: fresh clean request
     );
   });
 
-  it("injects static configured skill context for agents excluded from intent analysis", async () => {
-    const getConfiguredAgentSkills = vi.fn().mockReturnValue(["skill-harness"]);
+  it("injects static working-set skill context for agents excluded from intent analysis", async () => {
+    const getWorkingSetSkills = vi.fn().mockReturnValue(["skill-harness"]);
     const classifier = vi.fn();
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       configRaw: { scope: { agents: ["main"] } },
       classifier,
       bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
-      getConfiguredAgentSkills,
+      getWorkingSetSkills,
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -5224,7 +5196,7 @@ Current user request: fresh clean request
       },
     );
 
-    expect(getConfiguredAgentSkills).toHaveBeenCalledWith("librarian");
+    expect(getWorkingSetSkills).toHaveBeenCalledWith("librarian");
     expect(result?.appendSystemContext).toContain(
       BASE_SKILL_HARNESS_SYSTEM_CONTEXT,
     );

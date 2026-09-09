@@ -1,10 +1,6 @@
 import {
-  INTERNAL_RUNTIME_CONTEXT_BEGIN,
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
-  UNTRUSTED_CONTEXT_HEADER,
-  CANDIDATE_SKILLS_GUIDANCE,
-  USER_MESSAGE_BOUNDARY,
 } from "../constants.js";
 import type { RecentTurn } from "../types.js";
 import {
@@ -14,13 +10,6 @@ import {
   promptRepresentsMessage,
 } from "./conversation-provenance.js";
 
-const ESCAPED_USER_MESSAGE_BOUNDARY = USER_MESSAGE_BOUNDARY.replace(
-  /[.*+?^${}()|[\]\\]/g,
-  "\\$&",
-);
-const LEGACY_USER_MESSAGE_BOUNDARY = "\\[User Message\\]:";
-const LEGACY_ROUTING_ADVISORY_HEADER =
-  "Inferred intent and candidate skills (advisory, non-user input; load with `skill_view` if relevant):";
 const OPENCLAW_ASSEMBLED_CONTEXT_HEADER =
   "OpenClaw assembled context for this turn:";
 const EMBEDDED_OPENCLAW_ASSEMBLED_CONTEXT_PATTERN = new RegExp(
@@ -29,39 +18,26 @@ const EMBEDDED_OPENCLAW_ASSEMBLED_CONTEXT_PATTERN = new RegExp(
 const CONTEXT_WARNINGS_HEADER = "--- Context Warnings ---";
 const ATTACHED_CONTEXT_HEADER = "--- Attached Context ---";
 const CONVERSATION_CONTEXT_END_TAG = "</conversation_context>";
+const OPENCLAW_TIMESTAMP_ENVELOPE_PATTERN =
+  /^\[[A-Za-z]{3} \d{4}-\d{2}-\d{2} \d{2}:\d{2}[^\]]*\]\s*/;
 
 // Build per call: the /g flag mutates lastIndex on shared RegExp instances.
-function routingBlockWithOptionalBoundary(): RegExp {
-  return new RegExp(
-    `(?:(?:${INTERNAL_RUNTIME_CONTEXT_BEGIN}|<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>)\\s*)?<skill_harness_plugin\\b[^>]*>[\\s\\S]*?<\\/skill_harness_plugin>\\s*(?:${ESCAPED_USER_MESSAGE_BOUNDARY}|${LEGACY_USER_MESSAGE_BOUNDARY})?\\s*`,
-    "gi",
-  );
+function routingBlock(): RegExp {
+  return /<skill_harness_plugin\b[^>]*>[\s\S]*?<\/skill_harness_plugin>\s*/gi;
 }
 
 export function sanitizeConversationText(text: string): string {
-  // Header split must run before tag matching: the header mentions the tag inline.
   return text
+    .replace(OPENCLAW_TIMESTAMP_ENVELOPE_PATTERN, " ")
     .split(ROUTING_ADVISORY_HEADER)
-    .join(" ")
-    .split(LEGACY_ROUTING_ADVISORY_HEADER)
     .join(" ")
     .split(ROUTING_ADVISORY_INTENT_ONLY_HEADER)
     .join(" ")
-    .split(UNTRUSTED_CONTEXT_HEADER)
-    .join(" ")
-    .split("[Skill Harness Context (advisory, non-user input)]:")
-    .join(" ")
-    .split(CANDIDATE_SKILLS_GUIDANCE)
-    .join(" ")
-    .replace(
-      /<<<BEGIN_SKILL_HARNESS_CONTEXT>>>[\s\S]*?<<<END_SKILL_HARNESS_CONTEXT>>>/gi,
-      " ",
-    )
     .replace(
       /<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>/gi,
       " ",
     )
-    .replace(routingBlockWithOptionalBoundary(), " ")
+    .replace(routingBlock(), " ")
     .replace(
       /(?:Context:\s*)?<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>/gi,
       " ",

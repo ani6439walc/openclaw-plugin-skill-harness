@@ -111,7 +111,7 @@ export function extractConfiguredAgentIds(config?: OpenClawConfig): string[] {
   return ids;
 }
 
-export function createConfiguredAgentSkillsResolver(
+export function createWorkingSetSkillsResolver(
   refreshLiveConfig: () => ResolvedSkillHarnessPluginConfig,
 ): (agentId: string) => Promise<string[]> {
   return async (agentId: string): Promise<string[]> => {
@@ -123,9 +123,9 @@ export function createConfiguredAgentSkillsResolver(
         liveConfig.workingSetSkills.defaults
       );
     } catch (error) {
-      logger.warn("failed to resolve live configured skill working set", {
+      logger.warn("failed to resolve live working-set skills", {
         errorType: error instanceof Error ? "Error" : typeof error,
-        configuredSkillCount: 0,
+        workingSetSkillCount: 0,
       });
       return [];
     }
@@ -181,7 +181,7 @@ export function createPlugin(
     description:
       "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
     register() {
-      const getConfiguredAgentSkills = createConfiguredAgentSkillsResolver(
+      const getWorkingSetSkills = createWorkingSetSkillsResolver(
         refreshLiveConfigFromRuntime,
       );
 
@@ -290,7 +290,7 @@ export function createPlugin(
         tracker,
         statsAggregator,
         reviewLogWriter,
-        getConfiguredAgentSkills,
+        getWorkingSetSkills,
         qmdIntentIndex,
         qmdSkillIndex,
 

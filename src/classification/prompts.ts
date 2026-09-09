@@ -502,7 +502,7 @@ export function parseIntentionResult(
   }
 }
 
-export function formatConfiguredSkills(
+export function formatWorkingSetSkills(
   skills: AvailableSkill[] | undefined,
 ): string {
   if (!skills?.length) return "";

@@ -1,6 +1,6 @@
 const INTER_SESSION_PROMPT_MARKER = "[Inter-session message]";
-const INTERNAL_RUNTIME_CONTEXT_BEGIN = "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>";
-const INTERNAL_RUNTIME_CONTEXT_END = "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>";
+const OPENCLAW_INTERNAL_CONTEXT_BEGIN = "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>";
+const OPENCLAW_INTERNAL_CONTEXT_END = "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>";
 const INTERNAL_RUNTIME_CONTEXT_HEADER = "OpenClaw runtime context (internal):";
 const INTERNAL_RUNTIME_CONTEXT_NOTICE =
   "This context is runtime-generated, not user-authored. Keep internal details private.";
@@ -85,12 +85,12 @@ function hasInternalTaskCompletionContext(text: string): boolean {
 
   for (;;) {
     const beginIndex = lines.indexOf(
-      INTERNAL_RUNTIME_CONTEXT_BEGIN,
+      OPENCLAW_INTERNAL_CONTEXT_BEGIN,
       searchFrom,
     );
     if (beginIndex === -1) return false;
     const endIndex = lines.indexOf(
-      INTERNAL_RUNTIME_CONTEXT_END,
+      OPENCLAW_INTERNAL_CONTEXT_END,
       beginIndex + 1,
     );
     if (endIndex === -1) return false;

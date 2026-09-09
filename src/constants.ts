@@ -16,14 +16,6 @@ export const ROUTING_ADVISORY_HEADER =
   "Inferred intent and intent-matched skills (advisory, non-user input; load with `skill_view` if relevant):";
 export const ROUTING_ADVISORY_INTENT_ONLY_HEADER =
   "Inferred user intent from conversation (advisory, non-user input):";
-export const INTERNAL_RUNTIME_CONTEXT_BEGIN =
-  "<<<BEGIN_SKILL_HARNESS_CONTEXT>>>";
-export const INTERNAL_RUNTIME_CONTEXT_END = "<<<END_SKILL_HARNESS_CONTEXT>>>";
-export const UNTRUSTED_CONTEXT_HEADER =
-  "Skill Harness context (advisory, non-user input):";
-export const CANDIDATE_SKILLS_GUIDANCE =
-  "When relevant, load candidate skills with `skill_view` before proceeding:";
-export const USER_MESSAGE_BOUNDARY = INTERNAL_RUNTIME_CONTEXT_END;
 
 export const FALLBACK_INTENT_ID = "other";
 export const FALLBACK_INTENT: IntentDefinition = {

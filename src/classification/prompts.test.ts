@@ -4,18 +4,12 @@ import * as classification from "./index.js";
 import {
   buildRoutingContext,
   buildIntentionPrompt,
-  formatConfiguredSkills,
+  formatWorkingSetSkills,
   parseIntentionResult,
 } from "./prompts.js";
-import type {
-  IntentCatalogEntry,
-  IntentionResult,
-  RecentTurn,
-} from "../types.js";
+import type { IntentCatalogEntry, RecentTurn } from "../types.js";
 import {
   FALLBACK_INTENT_ID,
-  INTERNAL_RUNTIME_CONTEXT_BEGIN,
-  INTERNAL_RUNTIME_CONTEXT_END,
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
 } from "../constants.js";
@@ -189,8 +183,8 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("/private/SKILL.md");
     expect(result).not.toContain("/private/experience.md");
     expect(result.startsWith(ROUTING_ADVISORY_HEADER)).toBe(true);
-    expect(result).not.toContain(INTERNAL_RUNTIME_CONTEXT_BEGIN);
-    expect(result).not.toContain(INTERNAL_RUNTIME_CONTEXT_END);
+    expect(result).not.toContain("<<<BEGIN_SKILL_HARNESS_CONTEXT>>>");
+    expect(result).not.toContain("<<<END_SKILL_HARNESS_CONTEXT>>>");
     expect(result.endsWith("</skill_harness_plugin>")).toBe(true);
   });
 
@@ -272,9 +266,9 @@ describe("buildRoutingContext", () => {
   });
 });
 
-describe("formatConfiguredSkills", () => {
+describe("formatWorkingSetSkills", () => {
   it("uses working-set naming in the static prompt contract", () => {
-    const formatted = formatConfiguredSkills([
+    const formatted = formatWorkingSetSkills([
       {
         name: "working-set-skill",
         description: "A skill for working-set naming.",
@@ -288,8 +282,8 @@ describe("formatConfiguredSkills", () => {
     expect(formatted).not.toContain("<configured_skills>");
   });
 
-  it("escapes adversarial configured-skill descriptions", () => {
-    const formatted = formatConfiguredSkills([
+  it("escapes adversarial working-set skill descriptions", () => {
+    const formatted = formatWorkingSetSkills([
       {
         name: "adversarial-skill",
         description:
@@ -304,7 +298,7 @@ describe("formatConfiguredSkills", () => {
     expect(formatted).not.toContain("<path>");
   });
 
-  it("formats configured skills with name attribute and bare description without path", () => {
+  it("formats working-set skills with name attribute and bare description without path", () => {
     const skills = [
       {
         name: "test-skill",
@@ -312,7 +306,7 @@ describe("formatConfiguredSkills", () => {
         location: "/path/to/test-skill/SKILL.md",
       },
     ];
-    const formatted = formatConfiguredSkills(skills);
+    const formatted = formatWorkingSetSkills(skills);
     expect(formatted).toContain("<working_set_skills>");
     expect(formatted).toContain('  <skill name="test-skill">');
     expect(formatted).toContain("\n  </skill>");
@@ -321,8 +315,8 @@ describe("formatConfiguredSkills", () => {
   });
 
   it("returns empty string when skills list is empty or undefined", () => {
-    expect(formatConfiguredSkills([])).toBe("");
-    expect(formatConfiguredSkills(undefined)).toBe("");
+    expect(formatWorkingSetSkills([])).toBe("");
+    expect(formatWorkingSetSkills(undefined)).toBe("");
   });
 });
 

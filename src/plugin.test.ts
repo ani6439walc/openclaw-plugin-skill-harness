@@ -5,15 +5,12 @@ import * as path from "node:path";
 import type { OpenClawPluginApi } from "../api.js";
 import { logger } from "../api.js";
 import {
-  createConfiguredAgentSkillsResolver,
+  createWorkingSetSkillsResolver,
   createPlugin,
   extractConfiguredAgentIds,
   initializePluginDataRoot,
 } from "./plugin.js";
 import { IntentCatalog } from "./intents/index.js";
-import { IntentReviewLogWriter } from "./review/log-writer.js";
-import { SessionTracker } from "./session/index.js";
-import { StatsAggregator } from "./stats/index.js";
 
 const { createHookHandlersSpy } = vi.hoisted(() => ({
   createHookHandlersSpy: vi.fn(),
@@ -535,7 +532,7 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
     const deps = createHookHandlersSpy.mock.calls[0][0];
 
-    expect(await deps.getConfiguredAgentSkills("main")).toEqual([
+    expect(await deps.getWorkingSetSkills("main")).toEqual([
       "live-agent",
       "shared",
     ]);
@@ -569,11 +566,11 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
     const deps = createHookHandlersSpy.mock.calls[0][0];
 
-    expect(await deps.getConfiguredAgentSkills("main")).toEqual([
+    expect(await deps.getWorkingSetSkills("main")).toEqual([
       "live-agent",
       "shared",
     ]);
-    expect(await deps.getConfiguredAgentSkills("ＭＡＩＮ")).toEqual([
+    expect(await deps.getWorkingSetSkills("ＭＡＩＮ")).toEqual([
       "live-agent",
       "shared",
     ]);
@@ -607,9 +604,7 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
     const deps = createHookHandlersSpy.mock.calls[0][0];
 
-    expect(await deps.getConfiguredAgentSkills("main")).toEqual([
-      "skill-harness",
-    ]);
+    expect(await deps.getWorkingSetSkills("main")).toEqual(["skill-harness"]);
 
     runtimeConfig = {
       plugins: {
@@ -620,7 +615,7 @@ describe("createPlugin", () => {
         },
       },
     };
-    expect(await deps.getConfiguredAgentSkills("main")).toEqual([]);
+    expect(await deps.getWorkingSetSkills("main")).toEqual([]);
 
     runtimeConfig = {
       plugins: {
@@ -631,17 +626,17 @@ describe("createPlugin", () => {
         },
       },
     };
-    expect(await deps.getConfiguredAgentSkills("main")).toEqual([]);
+    expect(await deps.getWorkingSetSkills("main")).toEqual([]);
 
     runtimeFailure = true;
-    expect(await deps.getConfiguredAgentSkills("main")).toEqual([]);
+    expect(await deps.getWorkingSetSkills("main")).toEqual([]);
     expect(readFile).not.toHaveBeenCalled();
   });
 
   it("does not disclose the agent identifier when live working-set resolution fails", async () => {
     const privateAgentId = "private-agent/customer/path";
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
-    const resolve = createConfiguredAgentSkillsResolver(() => {
+    const resolve = createWorkingSetSkillsResolver(() => {
       const failure = new Error("runtime unavailable");
       failure.name = privateAgentId;
       throw failure;
@@ -650,14 +645,13 @@ describe("createPlugin", () => {
     await resolve(privateAgentId);
 
     const receipt = warn.mock.calls.find(
-      ([message]) =>
-        message === "failed to resolve live configured skill working set",
+      ([message]) => message === "failed to resolve live working-set skills",
     );
     expect(receipt).toEqual([
-      "failed to resolve live configured skill working set",
+      "failed to resolve live working-set skills",
       {
         errorType: "Error",
-        configuredSkillCount: 0,
+        workingSetSkillCount: 0,
       },
     ]);
     expect(JSON.stringify(receipt)).not.toContain(privateAgentId);

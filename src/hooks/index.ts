@@ -50,7 +50,7 @@ import {
 } from "../classification/index.js";
 import {
   buildRoutingContext,
-  formatConfiguredSkills,
+  formatWorkingSetSkills,
 } from "../classification/index.js";
 import {
   listAvailableSkills,
@@ -275,14 +275,14 @@ function toIntentProjectionTelemetry(params: {
 
 function toPromptBuildResult(
   prependContext?: string,
-  configuredSkillsXml?: string,
+  workingSetSkillsXml?: string,
   includeIntentContext = true,
 ): PluginHookBeforePromptBuildResult {
   const systemContext = includeIntentContext
     ? `${SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_INTENT_CONTEXT}`
     : SKILL_HARNESS_SYSTEM_CONTEXT;
-  const appendSystemContext = configuredSkillsXml
-    ? `${systemContext}\n\n${configuredSkillsXml}`
+  const appendSystemContext = workingSetSkillsXml
+    ? `${systemContext}\n\n${workingSetSkillsXml}`
     : systemContext;
   return {
     ...(prependContext ? { prependContext } : {}),
@@ -895,18 +895,18 @@ export function createHookHandlers(deps: HookDeps) {
     };
   }
 
-  async function resolveConfiguredSkillsXml(
+  async function resolveWorkingSetSkillsXml(
     agentId: string,
   ): Promise<string | undefined> {
     try {
-      let configuredSkillNames: string[] = [];
-      if (deps.getConfiguredAgentSkills) {
+      let workingSetSkillNames: string[] = [];
+      if (deps.getWorkingSetSkills) {
         try {
-          configuredSkillNames = await deps.getConfiguredAgentSkills(agentId);
+          workingSetSkillNames = await deps.getWorkingSetSkills(agentId);
         } catch (error) {
-          logger.warn("failed to retrieve configured agent skill names", {
+          logger.warn("failed to retrieve working-set agent skill names", {
             errorType: error instanceof Error ? "Error" : typeof error,
-            configuredSkillCount: 0,
+            workingSetSkillCount: 0,
           });
         }
       }
@@ -918,12 +918,12 @@ export function createHookHandlers(deps: HookDeps) {
           api,
           agentId,
           bundledSkillsDir,
-          skillNames: configuredSkillNames,
+          skillNames: workingSetSkillNames,
         });
       } catch (error) {
-        logger.warn("failed to resolve explicitly configured agent skills", {
+        logger.warn("failed to resolve working-set agent skills", {
           errorType: error instanceof Error ? "Error" : typeof error,
-          configuredSkillCount: configuredSkillNames.length,
+          workingSetSkillCount: workingSetSkillNames.length,
         });
       }
 
@@ -955,25 +955,25 @@ export function createHookHandlers(deps: HookDeps) {
       }
       if (!skills.length) {
         logger.info(
-          "no configured or workspace agent skills could be resolved",
-          { configuredSkillCount: 0 },
+          "no working-set or workspace agent skills could be resolved",
+          { workingSetSkillCount: 0 },
         );
         return undefined;
       }
-      const configuredSkillsXml = formatConfiguredSkills(skills);
-      logger.info("configured skills static context emitted", {
-        configuredSkillCount: skills.length,
-        staticHeader: configuredSkillsXml.includes("### Working set skills"),
-        configuredWrapper: configuredSkillsXml.includes("<working_set_skills>"),
-        configuredSkillTag: configuredSkillsXml.includes("<skill "),
+      const workingSetSkillsXml = formatWorkingSetSkills(skills);
+      logger.info("working-set skills static context emitted", {
+        workingSetSkillCount: skills.length,
+        staticHeader: workingSetSkillsXml.includes("### Working set skills"),
+        workingSetWrapper: workingSetSkillsXml.includes("<working_set_skills>"),
+        workingSetSkillTag: workingSetSkillsXml.includes("<skill "),
       });
-      return configuredSkillsXml;
+      return workingSetSkillsXml;
     } catch (error) {
       logger.warn(
-        "failed to resolve configured agent skills for prompt build",
+        "failed to resolve working-set agent skills for prompt build",
         {
           errorType: error instanceof Error ? "Error" : typeof error,
-          configuredSkillCount: 0,
+          workingSetSkillCount: 0,
         },
       );
       return undefined;
@@ -988,7 +988,7 @@ export function createHookHandlers(deps: HookDeps) {
     conversation: ReturnType<typeof limitConversationTurns>;
     availableIntents: readonly IntentCatalogEntry[];
     classification: PromptBuildClassification;
-    configuredSkillsXml?: string;
+    workingSetSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
     const { trigger, result, intentProjection } = params.classification;
     logger.debug("intention result", {
@@ -1007,7 +1007,7 @@ export function createHookHandlers(deps: HookDeps) {
     });
     const intent = findIntentEntry(params.availableIntents, result.intent);
     if (!intent) {
-      return toPromptBuildResult(undefined, params.configuredSkillsXml);
+      return toPromptBuildResult(undefined, params.workingSetSkillsXml);
     }
     const routingContext = await resolveRoutingContext({
       routing: params.routing,
@@ -1033,7 +1033,7 @@ export function createHookHandlers(deps: HookDeps) {
         intentMatchedSkills: routingContext.intentMatchedSkills,
         experiences: routingContext.experiences,
       }),
-      params.configuredSkillsXml,
+      params.workingSetSkillsXml,
     );
   }
 
@@ -1065,7 +1065,7 @@ export function createHookHandlers(deps: HookDeps) {
   ): Promise<PluginHookBeforePromptBuildResult | undefined> {
     let resolvedSessionKey = ctx.sessionKey;
     let staticContextEligible = false;
-    let configuredSkillsXml: string | undefined;
+    let workingSetSkillsXml: string | undefined;
     let intentContextEnabled = false;
     try {
       const routing = resolvePromptBuildIdentity(ctx);
@@ -1080,7 +1080,7 @@ export function createHookHandlers(deps: HookDeps) {
       staticContextEligible = true;
       refreshLiveConfigFromRuntime();
       const refreshedConfig = config();
-      configuredSkillsXml = await resolveConfiguredSkillsXml(
+      workingSetSkillsXml = await resolveWorkingSetSkillsXml(
         routing.effectiveAgentId,
       );
       intentContextEnabled = isEnabledForAgent(
@@ -1089,19 +1089,19 @@ export function createHookHandlers(deps: HookDeps) {
       );
 
       if (!intentContextEnabled) {
-        return toPromptBuildResult(undefined, configuredSkillsXml, false);
+        return toPromptBuildResult(undefined, workingSetSkillsXml, false);
       }
       if (!isPromptBuildChatAllowed(resolvedContext, resolvedSessionKey)) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       if (shouldSkipIntentAnalysis(resolvedContext)) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       if (isInternalUserTurn(event)) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       if (!isEligibleInteractiveSession(resolvedContext)) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
       const { latestUserMessage, historicalIntents, conversation } =
@@ -1113,13 +1113,13 @@ export function createHookHandlers(deps: HookDeps) {
         recentTurns: extractRecentTurns(event.messages),
       });
       if (!routing.association) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
       refreshIntents();
       if (catalog.count === 0) {
         logger.debug("no intents loaded; skipping intention scan.");
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
       logger.debug("before_prompt_build hook triggered", {
@@ -1163,7 +1163,7 @@ export function createHookHandlers(deps: HookDeps) {
             logger.debug(
               "intent resolution yielded no result; skipping routing context injection.",
             );
-            return toPromptBuildResult(undefined, configuredSkillsXml);
+            return toPromptBuildResult(undefined, workingSetSkillsXml);
           }
 
           return await handleResolvedIntentPromptBuild({
@@ -1174,19 +1174,19 @@ export function createHookHandlers(deps: HookDeps) {
             conversation,
             availableIntents,
             classification,
-            configuredSkillsXml,
+            workingSetSkillsXml,
           });
         },
       );
     } catch (err) {
       logger.warn("before_prompt_build hook error", {
         errorType: err instanceof Error ? "Error" : typeof err,
-        staticContextAvailable: Boolean(configuredSkillsXml),
+        staticContextAvailable: Boolean(workingSetSkillsXml),
       });
       return staticContextEligible
         ? toPromptBuildResult(
             undefined,
-            configuredSkillsXml,
+            workingSetSkillsXml,
             intentContextEnabled,
           )
         : undefined;

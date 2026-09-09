@@ -1,11 +1,49 @@
 import { describe, expect, it } from "vitest";
+import { ROUTING_ADVISORY_HEADER } from "../constants.js";
 import {
-  ROUTING_ADVISORY_HEADER,
-  UNTRUSTED_CONTEXT_HEADER,
-} from "../constants.js";
-import { extractRecentTurns } from "./conversation.js";
+  extractLatestUserMessage,
+  extractRecentTurns,
+} from "./conversation.js";
+
+const CURRENT_OPENCLAW_USER_MESSAGE = `[Wed 2026-09-09 23:19 GMT+8] Conversation info: ⟦openclaw:ctx⟧
+\`\`\`json
+{"sender":{"id":"user-1","name":"tester","username":"tester"}}
+\`\`\`
+
+現在 AGENTS.md 有哪一段寫你要先確認`;
+
+const OPENCLAW_INTERNAL_METADATA_MESSAGE = `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>
+Conversation info: ⟦openclaw:ctx⟧
+\`\`\`json
+{"chat_id":"user:1","message_id":"message-2","inbound_event_kind":"user_request"}
+\`\`\`
+<<<END_OPENCLAW_INTERNAL_CONTEXT>>>`;
 
 describe("extractRecentTurns", () => {
+  it("keeps the direct user turn when the next user entry is runtime metadata", () => {
+    const result = extractRecentTurns([
+      { role: "user", content: CURRENT_OPENCLAW_USER_MESSAGE },
+      { role: "user", content: OPENCLAW_INTERNAL_METADATA_MESSAGE },
+      { role: "assistant", content: "我會先讀取 AGENTS.md。" },
+    ]);
+
+    expect(result).toEqual([
+      { role: "user", text: "現在 AGENTS.md 有哪一段寫你要先確認" },
+      { role: "assistant", text: "我會先讀取 AGENTS.md。" },
+    ]);
+  });
+
+  it("ignores the runtime metadata user entry when finding the latest user message", () => {
+    const messages = [
+      { role: "user", content: CURRENT_OPENCLAW_USER_MESSAGE },
+      { role: "user", content: OPENCLAW_INTERNAL_METADATA_MESSAGE },
+    ];
+
+    expect(extractLatestUserMessage(messages)).toBe(
+      "現在 AGENTS.md 有哪一段寫你要先確認",
+    );
+  });
+
   it("extracts user and assistant text messages", () => {
     const result = extractRecentTurns([
       { role: "system", content: "ignore me" },

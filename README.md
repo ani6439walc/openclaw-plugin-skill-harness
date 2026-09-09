@@ -93,7 +93,7 @@ graph TD
   A[Agent turn] --> B[before_prompt_build]
   B --> C{Internal helper session?}
   C -->|Yes| Z[Continue without Skill Harness context]
-  C -->|No| D[Append fixed guidance and enriched configured skills]
+  C -->|No| D[Append fixed guidance and enriched working-set skills]
   D --> E{Chat and agent eligible external-user turn?}
   E -->|No| M[Continue with static context]
   E -->|Yes| F[Load config and runtime intents]
@@ -114,7 +114,7 @@ Eligible dynamic routing emits `plugin:skill-harness` parent lifecycle events: `
 The routing stages are:
 
 1. Resolve canonical agent and session identity, then exclude helper, generic subagent, Review, dreaming, and active-memory sessions from all injection.
-2. Append fixed skill-discovery guidance and enriched configured skills to every remaining agent turn.
+2. Append fixed skill-discovery guidance and enriched working-set skills to every remaining agent turn.
 3. Gate dynamic routing by configured agent, chat scope, external-user turn, and interactive-session status.
 4. Route via the 3-stage pipeline:
    - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{directRouteMinScore}$ (default `0.85`) routes directly as `qmd-keyword`, bypassing LLM classification.
@@ -128,7 +128,7 @@ Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness
 
 #### Context injection format
 
-**Static configured skills (appended to system context)**:
+**Static working-set skills (appended to system context)**:
 
 ```markdown
 ### Working set skills
@@ -247,7 +247,7 @@ Configure Skill Harness in `openclaw.json`:
 | `scope.agents`                                       | `["main"]`                     | OpenClaw agent IDs eligible for dynamic intent routing.                                                                                                                                                                                                                                                                   |
 | `scope.chatTypes`                                    | `["direct"]`                   | Chat types that may run dynamic routing (`"direct"`, `"group"`, `"channel"`, `"explicit"`).                                                                                                                                                                                                                               |
 | `scope.allowedChatIds` / `deniedChatIds`             | `[]`                           | Optional chat allow-list and deny-list for dynamic routing.                                                                                                                                                                                                                                                               |
-| `workingSetSkills.defaults` / `agents.<id>`          | `[]` / `{}`                    | Plugin-owned static configured-skill source. The resolved per-agent order is agent-specific entries followed by shared defaults; workspace-only skills append. Unknown or malformed members are rejected.                                                                                                                 |
+| `workingSetSkills.defaults` / `agents.<id>`          | `[]` / `{}`                    | Plugin-owned static working-set source. The resolved per-agent order is agent-specific entries followed by shared defaults; workspace-only skills append. Unknown or malformed members are rejected.                                                                                                                      |
 | `routing.thresholds.directRouteMinScore`             | `0.85`                         | Inclusive QMD score required for direct routing bypass in Step 1 and Step 2.                                                                                                                                                                                                                                              |
 | `routing.thresholds.minCandidateScore`               | `0.35`                         | Inclusive QMD score floor for classifier candidate projection in Step 3.                                                                                                                                                                                                                                                  |
 | `routing.classifier.model` / `modelFallback`         | unset                          | Scanner model and last-resort resolution fallback.                                                                                                                                                                                                                                                                        |
@@ -374,7 +374,7 @@ Skill Harness registers four runtime tools for agents to discover, search, view,
     - `query` (string, optional): Search query (at most 500 Unicode code points).
   - Searches at most six visible skills, returns at most three entries, caps each body at 2,000 code points, and caps all returned bodies at 5,000 code points. Reports unavailable requested skills separately and does not expose a catalog-wide experience inventory.
 
-`skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. Core visibility follows root precedence and disabled bundled-skill entries only; it is unchanged by this migration. Prompt-time automatic configured-skill injection is narrower and uses plugin-owned `workingSetSkills` plus workspace skills, not native OpenClaw agent skill lists.
+`skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. Core visibility follows root precedence and disabled bundled-skill entries only; it is unchanged by this migration. Prompt-time automatic working-set injection is narrower and uses plugin-owned `workingSetSkills` plus workspace skills, not native OpenClaw agent skill lists.
 
 ## Intent Review
 

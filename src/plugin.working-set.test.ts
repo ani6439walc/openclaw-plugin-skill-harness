@@ -144,7 +144,7 @@ describe("createPlugin working-set prompt integration", () => {
     expect(context).not.toContain("<available_skills>");
   });
 
-  it("injects a configured skill resolved from live runtime skill roots", async () => {
+  it("injects a working-set skill resolved from live runtime skill roots", async () => {
     const extraSkillsDir = path.join(stateDir, "runtime-extra-skills");
     const skillDir = path.join(extraSkillsDir, "runtime-root-skill");
     fs.mkdirSync(skillDir, { recursive: true });
@@ -178,7 +178,7 @@ describe("createPlugin working-set prompt integration", () => {
     expect(context).not.toContain("<available_skills>");
   });
 
-  it("filters a nonexistent configured skill from live runtime skill roots", async () => {
+  it("filters a nonexistent working-set skill from live runtime skill roots", async () => {
     const context = await invoke({
       runtimeConfig: {
         agents: { defaults: { skills: [] }, entries: { main: { skills: [] } } },
@@ -188,7 +188,7 @@ describe("createPlugin working-set prompt integration", () => {
             "skill-harness": {
               config: {
                 workingSetSkills: {
-                  agents: { main: ["nonexistent-configured-skill"] },
+                  agents: { main: ["nonexistent-working-set-skill"] },
                 },
               },
             },
