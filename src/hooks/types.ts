@@ -148,7 +148,7 @@ export type HookDeps = {
   classifier?: typeof runIntentionSubagent;
   reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
     Partial<Pick<IntentReviewLogWriter, "completedSkillEpochKeys">>;
-  getConfiguredAgentSkills?: (agentId: string) => string[] | Promise<string[]>;
+  getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;
 
   bundledSkillsDir?: string;
   dataRoot?: string;

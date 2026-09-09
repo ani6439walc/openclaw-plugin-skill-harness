@@ -12,7 +12,7 @@ const PLUGIN_ID = "skill-harness";
 
 interface RawSkillStats {
   usageTurns?: unknown;
-  recommendedTurns?: unknown;
+  intentMatchedTurns?: unknown;
   adoptedTurns?: unknown;
   adoptionRate?: unknown;
   lastUsedAt?: unknown;
@@ -22,12 +22,13 @@ interface RawSkillStats {
 }
 
 interface RawStatsFile {
+  schemaVersion?: unknown;
   skills?: unknown;
 }
 
 const DEFAULT_USAGE_STATS: SkillUsageStats = {
   usage_turns: 0,
-  recommended_turns: 0,
+  intent_matched_turns: 0,
   adopted_turns: 0,
   adoption_rate: 0,
   last_7_days_usage: 0,
@@ -52,7 +53,7 @@ function normalizeStats(raw: RawSkillStats | undefined): SkillUsageStats {
   if (!raw) return { ...DEFAULT_USAGE_STATS };
   const stats: SkillUsageStats = {
     usage_turns: numberValue(raw.usageTurns),
-    recommended_turns: numberValue(raw.recommendedTurns),
+    intent_matched_turns: numberValue(raw.intentMatchedTurns),
     adopted_turns: numberValue(raw.adoptedTurns),
     adoption_rate: numberValue(raw.adoptionRate),
     last_7_days_usage: numberValue(raw.last7DaysUsage),
@@ -87,6 +88,7 @@ export async function readSkillUsageStats(
   }
 
   if (
+    parsed.schemaVersion !== 6 ||
     !parsed.skills ||
     typeof parsed.skills !== "object" ||
     Array.isArray(parsed.skills)

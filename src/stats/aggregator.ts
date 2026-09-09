@@ -20,7 +20,7 @@ import { getOrCache } from "../singleton.js";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_RETENTION_MS = 90 * DAY_MS;
 const RECENT_WINDOW_MS = 7 * DAY_MS;
-const REVIEW_MIN_RECOMMENDATIONS = 5;
+const REVIEW_MIN_INTENT_MATCHES = 5;
 const REVIEW_ADOPTION_THRESHOLD = 0.7;
 const SKILL_PLACEMENT_MIN_OBSERVED_TURNS = 20;
 const MAX_PROJECTION_REASON_KEYS = 32;
@@ -50,10 +50,10 @@ type RecordedIntentResult = NonNullable<
   NonNullable<SessionState["intent"]>["result"]
 >;
 type RoutingCounts = {
-  recommendationTurns: number;
+  intentMatchedTurns: number;
   adoptedTurns: number;
   turnAdoptionRate: number;
-  recommendedSkillOpportunities: number;
+  intentMatchedSkillOpportunities: number;
   adoptedSkillOpportunities: number;
   skillAdoptionRate: number;
 };
@@ -69,7 +69,7 @@ type DailyIntentOutcomes = {
   toolAssistedTurns: number;
 };
 type DailySkillRouting = {
-  recommendedTurns: number;
+  intentMatchedTurns: number;
   adoptedTurns: number;
 };
 type LatencyBucket = (typeof LATENCY_BUCKETS)[number];
@@ -89,20 +89,14 @@ type DailyProjectionCounts = {
   fallbackReasons: CountMap;
 };
 
-type DailyBucketV1 = {
+type DailyBucket = {
   turns: number;
   erroredTurns: number;
   intents: CountMap;
   skills: CountMap;
   tools: CountMap;
   routing: DailyRoutingCounts;
-};
-
-type DailyBucketV3 = DailyBucketV1 & {
   projection: DailyProjectionCounts;
-};
-
-type DailyBucket = DailyBucketV3 & {
   intentOutcomes: Record<string, DailyIntentOutcomes>;
   intentRouting: Record<string, DailyRoutingCounts>;
   skillRouting: Record<string, DailySkillRouting>;
@@ -135,8 +129,6 @@ type IntentStats = {
   routeReasons: Record<IntentRouteReason, IntentRouteScoreStats>;
 };
 
-type LegacyIntentStats = Omit<IntentStats, "routeReasons">;
-
 interface SkillInventoryObservation extends SkillInventoryItem {
   winnerFingerprint: string;
   firstSeenAt: string;
@@ -145,7 +137,7 @@ interface SkillInventoryObservation extends SkillInventoryItem {
   lastSeenTurn: number;
   observedTurns: number;
   usageTurns: number;
-  recommendedTurns: number;
+  intentMatchedTurns: number;
 }
 
 interface AgentSkillInventoryObservation {
@@ -160,7 +152,7 @@ interface SkillInventoryStats {
   agents: Record<string, AgentSkillInventoryObservation>;
 }
 
-export type SkillPlacementReason = "low-adoption" | "zero-recommendation-usage";
+export type SkillPlacementReason = "low-adoption" | "zero-intent-match-usage";
 
 export interface SkillPlacementCandidate {
   epochKey: string;
@@ -172,12 +164,12 @@ export interface SkillPlacementCandidate {
   reason: SkillPlacementReason;
   observedTurns: number;
   usageTurns: number;
-  recommendedTurns: number;
+  intentMatchedTurns: number;
   adoptionRate?: number;
 }
 
 type Stats = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   createdAt: string;
   updatedAt: string;
   attribution: { startedAt: string };
@@ -198,7 +190,7 @@ type Stats = {
     string,
     {
       usageTurns: number;
-      recommendedTurns: number;
+      intentMatchedTurns: number;
       adoptedTurns: number;
       adoptionRate: number;
       lastUsedAt?: string;
@@ -226,37 +218,12 @@ type Stats = {
   processedEvents: Record<string, string>;
 };
 
-type ToolStatsV3 = Omit<Stats["tools"][string], "latencyHistogram">;
-
-type StatsV4 = Omit<Stats, "schemaVersion" | "intents"> & {
-  schemaVersion: 4;
-  intents: Record<string, LegacyIntentStats>;
-};
-
-type StatsV3 = Omit<
-  StatsV4,
-  "schemaVersion" | "attribution" | "daily" | "tools"
-> & {
-  schemaVersion: 3;
-  tools: Record<string, ToolStatsV3>;
-  daily: Record<string, DailyBucketV3>;
-};
-
-type StatsV2 = Omit<StatsV3, "schemaVersion" | "skillInventory"> & {
-  schemaVersion: 2;
-};
-
-type StatsV1 = Omit<StatsV2, "schemaVersion" | "projection" | "daily"> & {
-  schemaVersion: 1;
-  daily: Record<string, DailyBucketV1>;
-};
-
 function emptyRoutingCounts(): RoutingCounts {
   return {
-    recommendationTurns: 0,
+    intentMatchedTurns: 0,
     adoptedTurns: 0,
     turnAdoptionRate: 0,
-    recommendedSkillOpportunities: 0,
+    intentMatchedSkillOpportunities: 0,
     adoptedSkillOpportunities: 0,
     skillAdoptionRate: 0,
   };
@@ -282,7 +249,7 @@ function emptyDailyIntentOutcomes(): DailyIntentOutcomes {
 }
 
 function emptyDailySkillRouting(): DailySkillRouting {
-  return { recommendedTurns: 0, adoptedTurns: 0 };
+  return { intentMatchedTurns: 0, adoptedTurns: 0 };
 }
 
 function emptyLatencyHistogram(): LatencyHistogram {
@@ -314,7 +281,7 @@ function emptyProjectionStats(): ProjectionStats {
 
 function createStats(nowIso: string): Stats {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     createdAt: nowIso,
     updatedAt: nowIso,
     attribution: { startedAt: nowIso },
@@ -380,9 +347,9 @@ function createDailyBucket(): DailyBucket {
     skills: {},
     tools: {},
     routing: {
-      recommendationTurns: 0,
+      intentMatchedTurns: 0,
       adoptedTurns: 0,
-      recommendedSkillOpportunities: 0,
+      intentMatchedSkillOpportunities: 0,
       adoptedSkillOpportunities: 0,
     },
     projection: emptyDailyProjectionCounts(),
@@ -396,11 +363,11 @@ function createDailyBucket(): DailyBucket {
 function updateRoutingRates(routing: RoutingCounts): void {
   routing.turnAdoptionRate = rate(
     routing.adoptedTurns,
-    routing.recommendationTurns,
+    routing.intentMatchedTurns,
   );
   routing.skillAdoptionRate = rate(
     routing.adoptedSkillOpportunities,
-    routing.recommendedSkillOpportunities,
+    routing.intentMatchedSkillOpportunities,
   );
 }
 
@@ -431,7 +398,7 @@ function recomputeDerivedStats(stats: Stats, nowMs: number): void {
   }
 
   for (const [skillName, skill] of Object.entries(stats.skills)) {
-    skill.adoptionRate = rate(skill.adoptedTurns, skill.recommendedTurns);
+    skill.adoptionRate = rate(skill.adoptedTurns, skill.intentMatchedTurns);
     skill.last7DaysUsage = recentBuckets.reduce(
       (total, [, bucket]) =>
         total + (ownRecordValue(bucket.skills, skillName) ?? 0),
@@ -449,7 +416,7 @@ function recomputeDerivedStats(stats: Stats, nowMs: number): void {
             : "active";
     }
     skill.needsReview =
-      skill.recommendedTurns >= REVIEW_MIN_RECOMMENDATIONS &&
+      skill.intentMatchedTurns >= REVIEW_MIN_INTENT_MATCHES &&
       skill.adoptionRate < REVIEW_ADOPTION_THRESHOLD;
   }
 
@@ -610,13 +577,13 @@ function isSkillInventoryStats(value: unknown): value is SkillInventoryStats {
         isNonNegativeInteger(skill.lastSeenTurn) &&
         isNonNegativeInteger(skill.observedTurns) &&
         isNonNegativeInteger(skill.usageTurns) &&
-        isNonNegativeInteger(skill.recommendedTurns) &&
+        isNonNegativeInteger(skill.intentMatchedTurns) &&
         skill.firstSeenTurn > 0 &&
         skill.firstSeenTurn <= skill.lastSeenTurn &&
         skill.lastSeenTurn <= observedTurns &&
         skill.observedTurns === skill.lastSeenTurn - skill.firstSeenTurn + 1 &&
         skill.usageTurns <= skill.observedTurns &&
-        skill.recommendedTurns <= skill.observedTurns,
+        skill.intentMatchedTurns <= skill.observedTurns,
     );
   });
 }
@@ -631,17 +598,17 @@ function isUtcDateKey(value: string): boolean {
 }
 
 const ROUTING_FIELDS = [
-  "recommendationTurns",
+  "intentMatchedTurns",
   "adoptedTurns",
   "turnAdoptionRate",
-  "recommendedSkillOpportunities",
+  "intentMatchedSkillOpportunities",
   "adoptedSkillOpportunities",
   "skillAdoptionRate",
 ] as const;
 const DAILY_ROUTING_FIELDS = [
-  "recommendationTurns",
+  "intentMatchedTurns",
   "adoptedTurns",
-  "recommendedSkillOpportunities",
+  "intentMatchedSkillOpportunities",
   "adoptedSkillOpportunities",
 ] as const;
 const DAILY_PROJECTION_FIELDS = [
@@ -657,7 +624,7 @@ const DAILY_INTENT_OUTCOME_FIELDS = [
   "toolAssistedTurns",
 ] as const;
 const DAILY_SKILL_ROUTING_FIELDS = [
-  "recommendedTurns",
+  "intentMatchedTurns",
   "adoptedTurns",
 ] as const;
 
@@ -667,24 +634,6 @@ function isDailyProjectionCounts(
   return (
     hasNumbers(value, DAILY_PROJECTION_FIELDS) &&
     isBoundedProjectionReasonMap(value.fallbackReasons)
-  );
-}
-
-function isDailyBucketV1(value: unknown): value is DailyBucketV1 {
-  return (
-    hasNumbers(value, ["turns", "erroredTurns"]) &&
-    isCountMap(value.intents) &&
-    isCountMap(value.skills) &&
-    isCountMap(value.tools) &&
-    hasNumbers(value.routing, DAILY_ROUTING_FIELDS)
-  );
-}
-
-function isDailyBucketV3(value: unknown): value is DailyBucketV3 {
-  return (
-    isDailyBucketV1(value) &&
-    isRecord(value) &&
-    isDailyProjectionCounts((value as Record<string, unknown>).projection)
   );
 }
 
@@ -732,18 +681,20 @@ function isLatencyHistogram(value: unknown): value is LatencyHistogram {
 }
 
 function isDailyBucket(value: unknown): value is DailyBucket {
-  if (!isDailyBucketV3(value) || !isRecord(value)) return false;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
   return (
-    isBoundedDailyAttributionMap(
-      record.intentOutcomes,
-      isDailyIntentOutcomes,
-    ) &&
-    isBoundedDailyAttributionMap(record.intentRouting, (entry) =>
+    hasNumbers(value, ["turns", "erroredTurns"]) &&
+    isCountMap(value.intents) &&
+    isCountMap(value.skills) &&
+    isCountMap(value.tools) &&
+    hasNumbers(value.routing, DAILY_ROUTING_FIELDS) &&
+    isDailyProjectionCounts(value.projection) &&
+    isBoundedDailyAttributionMap(value.intentOutcomes, isDailyIntentOutcomes) &&
+    isBoundedDailyAttributionMap(value.intentRouting, (entry) =>
       hasNonNegativeIntegers(entry, DAILY_ROUTING_FIELDS),
     ) &&
-    isBoundedDailyAttributionMap(record.skillRouting, isDailySkillRouting) &&
-    isBoundedDailyAttributionMap(record.toolErrors, isNonNegativeInteger)
+    isBoundedDailyAttributionMap(value.skillRouting, isDailySkillRouting) &&
+    isBoundedDailyAttributionMap(value.toolErrors, isNonNegativeInteger)
   );
 }
 
@@ -765,10 +716,10 @@ function isProjectionStats(value: unknown): value is ProjectionStats {
   );
 }
 
-function assertStatsBase(
-  stats: unknown,
-): asserts stats is Stats | StatsV4 | StatsV3 | StatsV2 | StatsV1 {
-  if (!isRecord(stats)) throw new Error("unsupported or invalid stats schema");
+function assertStats(stats: unknown): asserts stats is Stats {
+  if (!isRecord(stats) || stats.schemaVersion !== 6) {
+    throw new Error("unsupported or invalid stats schema");
+  }
   if (
     !isIsoTimestamp(stats.createdAt) ||
     !isIsoTimestamp(stats.updatedAt) ||
@@ -810,7 +761,8 @@ function assertStatsBase(
         "toolAssistedTurns",
         "erroredTurns",
       ]) ||
-      !isIsoTimestamp(intent.lastSeenAt)
+      !isIsoTimestamp(intent.lastSeenAt) ||
+      !isIntentRouteReasons(intent.routeReasons)
     ) {
       throw new Error("unsupported or invalid stats schema");
     }
@@ -819,7 +771,7 @@ function assertStatsBase(
     if (
       !hasNumbers(skill, [
         "usageTurns",
-        "recommendedTurns",
+        "intentMatchedTurns",
         "adoptedTurns",
         "adoptionRate",
         "last7DaysUsage",
@@ -851,7 +803,8 @@ function assertStatsBase(
         "averageDurationMs",
         "last7DaysCalls",
       ]) ||
-      !isIsoTimestamp(tool.lastUsedAt)
+      !isIsoTimestamp(tool.lastUsedAt) ||
+      !isLatencyHistogram(tool.latencyHistogram)
     ) {
       throw new Error("unsupported or invalid stats schema");
     }
@@ -859,120 +812,16 @@ function assertStatsBase(
   if (!Object.values(stats.processedEvents).every(isIsoTimestamp)) {
     throw new Error("unsupported or invalid stats schema");
   }
-}
-
-function migrateStatsV1(stats: StatsV1): StatsV2 {
-  return {
-    ...stats,
-    schemaVersion: 2,
-    projection: emptyProjectionStats(),
-    daily: Object.fromEntries(
-      Object.entries(stats.daily).map(([date, bucket]) => [
-        date,
-        { ...bucket, projection: emptyDailyProjectionCounts() },
-      ]),
-    ),
-  };
-}
-
-function migrateStatsV2(stats: StatsV2, eventTime: string): StatsV3 {
-  return {
-    ...stats,
-    schemaVersion: 3,
-    skillInventory: { startedAt: eventTime, agents: {} },
-  };
-}
-
-function assertStatsV2(stats: StatsV2): void {
-  if (!isProjectionStats(stats.projection)) {
-    throw new Error("unsupported or invalid stats schema");
-  }
-  for (const bucket of Object.values(stats.daily)) {
-    if (
-      !isDailyBucketV1(bucket) ||
-      !isDailyProjectionCounts(bucket.projection)
-    ) {
-      throw new Error("unsupported or invalid stats schema");
-    }
-  }
-}
-
-function assertStatsV3(
-  stats: Pick<Stats, "projection" | "skillInventory"> & {
-    daily: Record<string, DailyBucketV3>;
-  },
-): void {
   if (
     !isProjectionStats(stats.projection) ||
-    !isSkillInventoryStats(stats.skillInventory)
+    !isSkillInventoryStats(stats.skillInventory) ||
+    !isRecord(stats.attribution) ||
+    !isIsoTimestamp(stats.attribution.startedAt)
   ) {
     throw new Error("unsupported or invalid stats schema");
   }
   for (const bucket of Object.values(stats.daily)) {
-    if (!isDailyBucketV3(bucket)) {
-      throw new Error("unsupported or invalid stats schema");
-    }
-  }
-}
-
-function migrateStatsV3(stats: StatsV3, eventTime: string): StatsV4 {
-  return {
-    ...stats,
-    schemaVersion: 4,
-    attribution: { startedAt: eventTime },
-    tools: Object.fromEntries(
-      Object.entries(stats.tools).map(([name, tool]) => [
-        name,
-        { ...tool, latencyHistogram: emptyLatencyHistogram() },
-      ]),
-    ),
-    daily: Object.fromEntries(
-      Object.entries(stats.daily).map(([date, bucket]) => [
-        date,
-        {
-          ...bucket,
-          intentOutcomes: {},
-          intentRouting: {},
-          skillRouting: {},
-          toolErrors: {},
-        },
-      ]),
-    ),
-  };
-}
-
-function migrateStatsV4(stats: StatsV4): Stats {
-  return {
-    ...stats,
-    schemaVersion: 5,
-    intents: Object.fromEntries(
-      Object.entries(stats.intents).map(([intentId, intent]) => [
-        intentId,
-        { ...intent, routeReasons: emptyIntentRouteReasons() },
-      ]),
-    ),
-  };
-}
-
-function assertStatsV4(stats: Stats | StatsV4): void {
-  if (!isIsoTimestamp(stats.attribution.startedAt)) {
-    throw new Error("unsupported or invalid stats schema");
-  }
-  for (const tool of Object.values(stats.tools)) {
-    if (!isLatencyHistogram(tool.latencyHistogram)) {
-      throw new Error("unsupported or invalid stats schema");
-    }
-  }
-  for (const bucket of Object.values(stats.daily)) {
     if (!isDailyBucket(bucket)) {
-      throw new Error("unsupported or invalid stats schema");
-    }
-  }
-}
-
-function assertStatsV5(stats: Stats): void {
-  for (const intent of Object.values(stats.intents)) {
-    if (!isIntentRouteReasons(intent.routeReasons)) {
       throw new Error("unsupported or invalid stats schema");
     }
   }
@@ -982,49 +831,7 @@ function loadStats(statsFilePath: string, eventTime: string): Stats {
   if (!fileExists(statsFilePath)) return createStats(eventTime);
 
   const stats = readJsonFile<unknown>(statsFilePath);
-  assertStatsBase(stats);
-  if (stats.schemaVersion === 1) {
-    for (const bucket of Object.values(stats.daily)) {
-      if (!isDailyBucketV1(bucket)) {
-        throw new Error("unsupported or invalid stats schema");
-      }
-    }
-    const migrated = migrateStatsV1(stats);
-    assertStatsV2(migrated);
-    return canonicalizeSkillStats(
-      migrateStatsV4(
-        migrateStatsV3(migrateStatsV2(migrated, eventTime), eventTime),
-      ),
-      eventTime,
-    );
-  }
-  if (stats.schemaVersion === 2) {
-    assertStatsV2(stats);
-    return canonicalizeSkillStats(
-      migrateStatsV4(
-        migrateStatsV3(migrateStatsV2(stats, eventTime), eventTime),
-      ),
-      eventTime,
-    );
-  }
-  if (stats.schemaVersion === 3) {
-    assertStatsV3(stats);
-    return canonicalizeSkillStats(
-      migrateStatsV4(migrateStatsV3(stats, eventTime)),
-      eventTime,
-    );
-  }
-  if (stats.schemaVersion === 4) {
-    assertStatsV3(stats);
-    assertStatsV4(stats);
-    return canonicalizeSkillStats(migrateStatsV4(stats), eventTime);
-  }
-  if (stats.schemaVersion !== 5) {
-    throw new Error("unsupported or invalid stats schema");
-  }
-  assertStatsV3(stats);
-  assertStatsV4(stats);
-  assertStatsV5(stats);
+  assertStats(stats);
   return canonicalizeSkillStats(stats, eventTime);
 }
 
@@ -1143,8 +950,8 @@ function canonicalizeSkillStats(stats: Stats, eventTime: string): Stats {
     setOwnRecordValue(canonical, key, {
       ...skill,
       usageTurns: (existing?.usageTurns ?? 0) + skill.usageTurns,
-      recommendedTurns:
-        (existing?.recommendedTurns ?? 0) + skill.recommendedTurns,
+      intentMatchedTurns:
+        (existing?.intentMatchedTurns ?? 0) + skill.intentMatchedTurns,
       adoptedTurns: (existing?.adoptedTurns ?? 0) + skill.adoptedTurns,
       ...(lastUsedAt ? { lastUsedAt } : {}),
     });
@@ -1166,19 +973,19 @@ function compareCanonicalSkillNames(left: string, right: string): number {
 function recordSkillStats(params: {
   stats: Stats;
   skillsUsed: string[];
-  recommendedSkills: string[];
+  intentMatchedSkills: string[];
   adoptedSkills: string[];
   eventTime: string;
 }): void {
-  const { stats, skillsUsed, recommendedSkills, adoptedSkills, eventTime } =
+  const { stats, skillsUsed, intentMatchedSkills, adoptedSkills, eventTime } =
     params;
-  for (const skillName of new Set([...skillsUsed, ...recommendedSkills])) {
+  for (const skillName of new Set([...skillsUsed, ...intentMatchedSkills])) {
     const skill = getOrCreateOwnRecordValue<Stats["skills"][string]>(
       stats.skills,
       skillName,
       () => ({
         usageTurns: 0,
-        recommendedTurns: 0,
+        intentMatchedTurns: 0,
         adoptedTurns: 0,
         adoptionRate: 0,
         last7DaysUsage: 0,
@@ -1190,7 +997,7 @@ function recordSkillStats(params: {
       skill.usageTurns += 1;
       skill.lastUsedAt = eventTime;
     }
-    skill.recommendedTurns += recommendedSkills.includes(skillName) ? 1 : 0;
+    skill.intentMatchedTurns += intentMatchedSkills.includes(skillName) ? 1 : 0;
     skill.adoptedTurns += adoptedSkills.includes(skillName) ? 1 : 0;
   }
 }
@@ -1198,19 +1005,19 @@ function recordSkillStats(params: {
 function incrementRoutingAdoption(
   routing: Pick<
     RoutingCounts,
-    | "recommendationTurns"
+    | "intentMatchedTurns"
     | "adoptedTurns"
-    | "recommendedSkillOpportunities"
+    | "intentMatchedSkillOpportunities"
     | "adoptedSkillOpportunities"
   >,
-  recommendedSkills: number,
+  intentMatchedSkills: number,
   adoptedSkills: number,
 ): void {
-  if (recommendedSkills === 0) return;
+  if (intentMatchedSkills === 0) return;
 
-  routing.recommendationTurns += 1;
+  routing.intentMatchedTurns += 1;
   routing.adoptedTurns += adoptedSkills > 0 ? 1 : 0;
-  routing.recommendedSkillOpportunities += recommendedSkills;
+  routing.intentMatchedSkillOpportunities += intentMatchedSkills;
   routing.adoptedSkillOpportunities += adoptedSkills;
 }
 
@@ -1411,7 +1218,7 @@ function recordDailyStats(params: {
   intentId: string;
   skillsUsed: string[];
   toolCalls: NonNullable<SessionState["toolCalls"]>;
-  recommendedSkills: string[];
+  intentMatchedSkills: string[];
   adoptedSkills: string[];
   errored: boolean;
   projection?: NonNullable<
@@ -1424,7 +1231,7 @@ function recordDailyStats(params: {
     intentId,
     skillsUsed,
     toolCalls,
-    recommendedSkills,
+    intentMatchedSkills,
     adoptedSkills,
     errored,
     projection,
@@ -1447,32 +1254,32 @@ function recordDailyStats(params: {
   outcomes.toolAssistedTurns += toolCalls.length > 0 ? 1 : 0;
   incrementRoutingAdoption(
     daily.routing,
-    recommendedSkills.length,
+    intentMatchedSkills.length,
     adoptedSkills.length,
   );
-  if (recommendedSkills.length > 0) {
+  if (intentMatchedSkills.length > 0) {
     incrementRoutingAdoption(
       getOrCreateBoundedDailyAttributionEntry(
         daily.intentRouting,
         intentId,
         () => ({
-          recommendationTurns: 0,
+          intentMatchedTurns: 0,
           adoptedTurns: 0,
-          recommendedSkillOpportunities: 0,
+          intentMatchedSkillOpportunities: 0,
           adoptedSkillOpportunities: 0,
         }),
       ),
-      recommendedSkills.length,
+      intentMatchedSkills.length,
       adoptedSkills.length,
     );
   }
-  for (const skillName of recommendedSkills) {
+  for (const skillName of intentMatchedSkills) {
     const skillRouting = getOrCreateBoundedDailyAttributionEntry(
       daily.skillRouting,
       skillName,
       emptyDailySkillRouting,
     );
-    skillRouting.recommendedTurns += 1;
+    skillRouting.intentMatchedTurns += 1;
     skillRouting.adoptedTurns += adoptedSkills.includes(skillName) ? 1 : 0;
   }
   for (const call of toolCalls) {
@@ -1488,9 +1295,9 @@ function createSkillInventoryObservation(params: {
   eventTime: string;
   agentTurn: number;
   used: boolean;
-  recommended: boolean;
+  intentMatched: boolean;
 }): SkillInventoryObservation {
-  const { skill, eventTime, agentTurn, used, recommended } = params;
+  const { skill, eventTime, agentTurn, used, intentMatched } = params;
   return {
     ...skill,
     firstSeenAt: eventTime,
@@ -1499,7 +1306,7 @@ function createSkillInventoryObservation(params: {
     lastSeenTurn: agentTurn,
     observedTurns: 1,
     usageTurns: used ? 1 : 0,
-    recommendedTurns: recommended ? 1 : 0,
+    intentMatchedTurns: intentMatched ? 1 : 0,
   };
 }
 
@@ -1560,7 +1367,7 @@ function recordSkillInventoryObservation(params: {
   agentId: string;
   skills: readonly (SkillInventoryItem & { winnerFingerprint: string })[];
   skillsUsed: readonly string[];
-  recommendedSkills: readonly string[];
+  intentMatchedSkills: readonly string[];
   eventTime: string;
 }): void {
   const agentId = params.agentId.trim();
@@ -1577,8 +1384,8 @@ function recordSkillInventoryObservation(params: {
   }
   const agentTurn = agent.observedTurns + 1;
   const used = new Set(params.skillsUsed.map((name) => name.toLowerCase()));
-  const recommended = new Set(
-    params.recommendedSkills.map((name) => name.toLowerCase()),
+  const intentMatched = new Set(
+    params.intentMatchedSkills.map((name) => name.toLowerCase()),
   );
   const seen = new Set<string>();
 
@@ -1604,7 +1411,7 @@ function recordSkillInventoryObservation(params: {
           eventTime: params.eventTime,
           agentTurn,
           used: used.has(key),
-          recommended: recommended.has(key),
+          intentMatched: intentMatched.has(key),
         }),
       );
       continue;
@@ -1613,7 +1420,7 @@ function recordSkillInventoryObservation(params: {
     previous.lastSeenTurn = agentTurn;
     previous.observedTurns += 1;
     previous.usageTurns += used.has(key) ? 1 : 0;
-    previous.recommendedTurns += recommended.has(key) ? 1 : 0;
+    previous.intentMatchedTurns += intentMatched.has(key) ? 1 : 0;
   }
 
   agent.lastObservedAt = params.eventTime;
@@ -1646,13 +1453,7 @@ export class StatsAggregator {
     if (!fileExists(statsFilePath)) return new Set();
     try {
       const stats = readJsonFile<unknown>(statsFilePath);
-      assertStatsBase(stats);
-      if (stats.schemaVersion !== 5) {
-        throw new Error("unsupported or invalid stats schema");
-      }
-      assertStatsV3(stats);
-      assertStatsV4(stats);
-      assertStatsV5(stats);
+      assertStats(stats);
       return new Set(Object.keys(stats.processedEvents));
     } catch (error) {
       logger.warn("failed to read processed stats events", {
@@ -1684,9 +1485,9 @@ export class StatsAggregator {
             globalSkill?.needsReview
               ? "low-adoption"
               : skill.observedTurns >= SKILL_PLACEMENT_MIN_OBSERVED_TURNS &&
-                  skill.recommendedTurns === 0 &&
+                  skill.intentMatchedTurns === 0 &&
                   skill.usageTurns === 0
-                ? "zero-recommendation-usage"
+                ? "zero-intent-match-usage"
                 : undefined;
           if (!reason) return [];
 
@@ -1705,7 +1506,7 @@ export class StatsAggregator {
               reason,
               observedTurns: skill.observedTurns,
               usageTurns: skill.usageTurns,
-              recommendedTurns: skill.recommendedTurns,
+              intentMatchedTurns: skill.intentMatchedTurns,
               ...(reason === "low-adoption"
                 ? { adoptionRate: globalSkill?.adoptionRate }
                 : {}),
@@ -1790,17 +1591,17 @@ export class StatsAggregator {
             ),
           ]
         : [];
-      const recommendedSkills = result
+      const intentMatchedSkills = result
         ? [
             ...new Set(
-              (state.intent?.recommendedSkills ?? []).map(canonicalIdentity),
+              (state.intent?.intentMatchedSkills ?? []).map(canonicalIdentity),
             ),
           ]
         : [];
 
       if (result) {
         const intentId = resolveIntentId(result.intent, intentDefinition);
-        const adoptedSkills = recommendedSkills.filter((skill) =>
+        const adoptedSkills = intentMatchedSkills.filter((skill) =>
           skillsUsed.includes(skill),
         );
         const toolCalls = state.toolCalls ?? [];
@@ -1828,14 +1629,14 @@ export class StatsAggregator {
         recordSkillStats({
           stats,
           skillsUsed,
-          recommendedSkills,
+          intentMatchedSkills,
           adoptedSkills,
           eventTime,
         });
-        if (recommendedSkills.length > 0) {
+        if (intentMatchedSkills.length > 0) {
           incrementRoutingAdoption(
             stats.routing,
-            recommendedSkills.length,
+            intentMatchedSkills.length,
             adoptedSkills.length,
           );
           incrementRoutingAdoption(
@@ -1844,7 +1645,7 @@ export class StatsAggregator {
               intentId,
               emptyRoutingCounts,
             ),
-            recommendedSkills.length,
+            intentMatchedSkills.length,
             adoptedSkills.length,
           );
         }
@@ -1856,7 +1657,7 @@ export class StatsAggregator {
           intentId,
           skillsUsed,
           toolCalls,
-          recommendedSkills,
+          intentMatchedSkills,
           adoptedSkills,
           errored,
           projection,
@@ -1877,7 +1678,7 @@ export class StatsAggregator {
           agentId: options.skillInventory.agentId,
           skills: options.skillInventory.skills,
           skillsUsed,
-          recommendedSkills,
+          intentMatchedSkills,
           eventTime,
         });
       }

@@ -13,6 +13,36 @@ import {
 
 describe("resolveConfig", () => {
   describe("default values", () => {
+    it("declares the working-set manifest contract with no configured default", () => {
+      const manifest = JSON.parse(
+        readFileSync(
+          new URL("../openclaw.plugin.json", import.meta.url),
+          "utf8",
+        ),
+      ) as {
+        configSchema: {
+          properties: Record<string, unknown>;
+        };
+      };
+
+      expect(manifest.configSchema.properties.workingSetSkills).toMatchObject({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          defaults: { type: "array", items: { type: "string" } },
+          agents: {
+            type: "object",
+            additionalProperties: { type: "array", items: { type: "string" } },
+          },
+        },
+      });
+      expect(resolveConfig({}).skills.search.collectionWeights).toEqual({
+        meta: 1,
+        body: 1,
+        references: 1,
+      });
+    });
+
     it("should use default values for empty config", () => {
       const result = resolveConfig({});
       expect(result.scope.agents).toEqual(["main"]);
@@ -96,6 +126,47 @@ describe("resolveConfig", () => {
         expect(result.routing.classifier.queryMode).toBe(DEFAULT_QUERY_MODE);
         expect(result.routing.classifier.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
       }
+    });
+  });
+
+  describe("workingSetSkills", () => {
+    it("canonicalizes agent and skill names and resolves agent-specific names before defaults", () => {
+      const result = resolveConfig({
+        workingSetSkills: {
+          defaults: [" Shared ", "general", "Ｓｈａｒｅｄ"],
+          agents: {
+            " Writer ": [" Draft ", "shared", "DRAFT"],
+          },
+        },
+      });
+
+      expect(result.workingSetSkills).toEqual({
+        defaults: ["shared", "general"],
+        agents: { writer: ["draft", "shared", "general"] },
+      });
+    });
+
+    it("rejects malformed working-set objects and colliding canonical agent IDs", () => {
+      expect(() =>
+        resolveConfig({ workingSetSkills: { agents: [] } }),
+      ).toThrow();
+      expect(() =>
+        resolveConfig({ workingSetSkills: { unexpected: [] } }),
+      ).toThrow();
+      expect(() =>
+        resolveConfig({
+          workingSetSkills: {
+            agents: { Writer: ["draft"], " writer ": ["review"] },
+          },
+        }),
+      ).toThrow();
+    });
+
+    it.each([
+      { defaults: ["shared", 42] },
+      { agents: { writer: ["draft", false] } },
+    ])("rejects malformed working-set list members", (workingSetSkills) => {
+      expect(() => resolveConfig({ workingSetSkills })).toThrow();
     });
   });
 

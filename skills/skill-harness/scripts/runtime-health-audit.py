@@ -70,18 +70,14 @@ def load_review_log(path: Path) -> dict[str, Any]:
 
 def load_stats(path: Path) -> dict[str, Any]:
     value = load_json(path)
-    if value.get("schemaVersion") not in (3, 4, 5):
-        raise ValueError(
-            f"{path} must be a supported schema-v3, schema-v4, or schema-v5 stats log"
-        )
+    if value.get("schemaVersion") != 6:
+        raise ValueError(f"{path} must be a current schema-v6 stats log")
     for field in ("summary", "routing", "projection"):
         require_object(value, field, path)
-    if value["schemaVersion"] >= 4:
-        attribution = require_object(value, "attribution", path)
-        if not isinstance(attribution.get("startedAt"), str):
-            raise ValueError(f"{path} has invalid attribution.startedAt")
-    if value["schemaVersion"] >= 5:
-        validate_route_reason_stats(value, path)
+    attribution = require_object(value, "attribution", path)
+    if not isinstance(attribution.get("startedAt"), str):
+        raise ValueError(f"{path} has invalid attribution.startedAt")
+    validate_route_reason_stats(value, path)
     return value
 
 
@@ -404,12 +400,6 @@ def skill_inventory_summary(stats: dict[str, Any]) -> dict[str, Any]:
 
 
 def stats_attribution(stats: dict[str, Any]) -> dict[str, Any]:
-    if stats["schemaVersion"] == 3:
-        return {
-            "status": "insufficient-historical-attribution",
-            "reason": "schema-v3 does not record daily intent, skill, or tool attribution",
-        }
-
     attribution = object_or_empty(stats.get("attribution"))
     started_at = attribution.get("startedAt")
     started_date = started_at[:10] if isinstance(started_at, str) else None
@@ -420,10 +410,10 @@ def stats_attribution(stats: dict[str, Any]) -> dict[str, Any]:
         if isinstance(date, str) and started_date is not None and date < started_date
     )
     return {
-        "status": "post-v4-window-only",
+        "status": "fresh-v6-window",
         "startedAt": started_at,
         "dailyBucketsBeforeAttribution": historical_days,
-        "note": "The attribution start date can contain pre-v4 turns before startedAt.",
+        "note": "Schema v6 begins a fresh telemetry cohort at startedAt.",
     }
 
 
@@ -462,13 +452,13 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
             low_adoption.append(
                 {
                     "skill": skill_name,
-                    "recommendedTurns": number(skill.get("recommendedTurns")),
+                    "intentMatchedTurns": number(skill.get("intentMatchedTurns")),
                     "adoptedTurns": number(skill.get("adoptedTurns")),
                     "adoptionRate": number(skill.get("adoptionRate")),
                     "lifecycle": lifecycle if isinstance(lifecycle, str) else "<invalid>",
                 }
             )
-    low_adoption.sort(key=lambda row: (-row["recommendedTurns"], row["skill"]))
+    low_adoption.sort(key=lambda row: (-row["intentMatchedTurns"], row["skill"]))
 
     tool_rows = []
     total_tool_calls = 0
@@ -523,10 +513,10 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
         "routing": {
             key: routing.get(key)
             for key in (
-                "recommendationTurns",
+                "intentMatchedTurns",
                 "adoptedTurns",
                 "turnAdoptionRate",
-                "recommendedSkillOpportunities",
+                "intentMatchedSkillOpportunities",
                 "adoptedSkillOpportunities",
                 "skillAdoptionRate",
             )
@@ -553,11 +543,7 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
             "lowConfidenceTurns": sum(row["lowConfidenceTurns"] for row in intent_rows),
             "topByTurns": intent_rows[:TOP_TARGETS],
             "routeReasonAttribution": {
-                "status": (
-                    "available"
-                    if stats["schemaVersion"] >= 5
-                    else "not-recorded-before-schema-v5"
-                ),
+                "status": "available",
                 "scoreMeaning": "selected route confidence; QMD routes use hit score",
                 "byIntent": route_reasons_by_intent,
             },
@@ -578,11 +564,7 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
             else 0,
             "topErrorTools": tool_rows[:TOP_TARGETS],
             "latencyHistogram": {
-                "status": (
-                    "unavailable"
-                    if stats["schemaVersion"] == 3
-                    else "post-v4-window-only"
-                ),
+                "status": "fresh-v6-window",
                 "toolCount": latency_histogram_tool_count,
                 "buckets": {
                     bucket: latency_histogram[bucket] for bucket in LATENCY_BUCKETS

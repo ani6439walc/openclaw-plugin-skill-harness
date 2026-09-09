@@ -103,7 +103,7 @@ function writeStats(
     "stats.json",
   );
   fs.mkdirSync(path.dirname(statsFile), { recursive: true });
-  fs.writeFileSync(statsFile, JSON.stringify({ schemaVersion: 1, skills }));
+  fs.writeFileSync(statsFile, JSON.stringify({ schemaVersion: 6, skills }));
 }
 
 async function runTool(tool: unknown, params: Record<string, unknown>) {
@@ -604,7 +604,7 @@ describe("registerSkillTools", () => {
     writeStats(path.join(tmp, "state"), {
       writer: {
         usageTurns: 3,
-        recommendedTurns: 5,
+        intentMatchedTurns: 5,
         adoptedTurns: 2,
         adoptionRate: 0.4,
         lastUsedAt: "2026-07-01T00:00:00.000Z",
@@ -646,7 +646,7 @@ describe("registerSkillTools", () => {
           name: "writer",
           usage_stats: {
             usage_turns: 3,
-            recommended_turns: 5,
+            intent_matched_turns: 5,
             adopted_turns: 2,
             adoption_rate: 0.4,
             last_used_at: "2026-07-01T00:00:00.000Z",
@@ -666,7 +666,7 @@ describe("registerSkillTools", () => {
       content: expect.stringContaining("# Writer"),
       usage_stats: {
         usage_turns: 3,
-        recommended_turns: 5,
+        intent_matched_turns: 5,
         adopted_turns: 2,
         adoption_rate: 0.4,
       },

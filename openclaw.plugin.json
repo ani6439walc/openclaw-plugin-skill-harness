@@ -55,6 +55,28 @@
         },
         "default": {}
       },
+      "workingSetSkills": {
+        "type": "object",
+        "description": "Plugin-owned static skill working sets. Agent-specific skills are listed before shared defaults.",
+        "additionalProperties": false,
+        "properties": {
+          "defaults": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "agents": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "routing": {
         "type": "object",
         "description": "Pre-turn dynamic intent routing thresholds and fallback classifier.",

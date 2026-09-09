@@ -14,6 +14,7 @@ const CONTENT_A = "c".repeat(64);
 const SAME_CONTENT = "d".repeat(64);
 const STABLE_WINNER = "e".repeat(64);
 const STABLE_CONTENT = "f".repeat(64);
+const TEST_NOW_MS = Date.parse("2026-06-12T00:01:00.000Z");
 
 describe("StatsAggregator", () => {
   let tempDir: string;
@@ -41,7 +42,7 @@ describe("StatsAggregator", () => {
           confidence: 0.75,
           complexity: "medium",
         },
-        recommendedSkills: ["git-master", "dev-lifecycle"],
+        intentMatchedSkills: ["git-master", "dev-lifecycle"],
       },
       skillsUsed: [{ name: "git-master", path: "/skills/git-master/SKILL.md" }],
       toolCalls: [
@@ -66,12 +67,14 @@ describe("StatsAggregator", () => {
   }
 
   beforeEach(() => {
+    vi.useFakeTimers({ now: TEST_NOW_MS });
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "stats-test-"));
     aggregator = StatsAggregator.create(tempDir);
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.useRealTimers();
   });
 
   describe("create", () => {
@@ -193,14 +196,14 @@ describe("StatsAggregator", () => {
       winnerFingerprint: string;
       fingerprint: string;
     }>;
-    recommendedSkills?: string[];
+    intentMatchedSkills?: string[];
     usedSkills?: string[];
   }): void {
     const {
       turn,
       agentId = "main",
       skills,
-      recommendedSkills = [],
+      intentMatchedSkills = [],
       usedSkills = [],
     } = params;
     const startMs = Date.parse("2026-06-11T00:00:00.000Z") + turn * 120_000;
@@ -214,7 +217,7 @@ describe("StatsAggregator", () => {
           confidence: 0.75,
           complexity: "medium",
         },
-        recommendedSkills,
+        intentMatchedSkills,
       },
       skillsUsed: usedSkills.map((name) => ({
         name,
@@ -250,11 +253,53 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const stats = readStats();
+    expect(stats.schemaVersion).toBe(6);
     expect(stats.summary.turns).toBe(1);
+    expect(stats.routing).toMatchObject({
+      intentMatchedTurns: 1,
+      adoptedTurns: 1,
+      intentMatchedSkillOpportunities: 2,
+      adoptedSkillOpportunities: 1,
+    });
+    expect(stats.skills["git-master"]).toMatchObject({
+      intentMatchedTurns: 1,
+      adoptedTurns: 1,
+    });
+    expect(JSON.stringify(stats)).not.toMatch(
+      /recommendedTurns|recommendationTurns|recommendedSkillOpportunities/,
+    );
     expect(Object.keys(stats.processedEvents)).toEqual([
       "new-session:2026-06-11T00:00:00.000Z",
     ]);
   });
+
+  it.each([1, 2, 3, 4, 5])(
+    "rejects schema v%s without rewriting its bytes",
+    (schemaVersion) => {
+      const statsFile = path.join(tempDir, "stats.json");
+      expect(aggregator.record("current-session", createState(), intent)).toBe(
+        true,
+      );
+      const legacy = readStats();
+      legacy.schemaVersion = schemaVersion;
+      const original = JSON.stringify(legacy);
+      fs.writeFileSync(statsFile, original);
+
+      expect(
+        aggregator.record(
+          "legacy-session",
+          createState({
+            timestamps: {
+              start: "2026-06-11T00:02:00.000Z",
+              end: "2026-06-11T00:03:00.000Z",
+            },
+          }),
+          intent,
+        ),
+      ).toBe(false);
+      expect(fs.readFileSync(statsFile, "utf8")).toBe(original);
+    },
+  );
 
   it("preflights incomplete and duplicate stats events", () => {
     expect(
@@ -314,7 +359,7 @@ describe("StatsAggregator", () => {
               confidence: 0.75,
               complexity: "medium",
             },
-            recommendedSkills: [],
+            intentMatchedSkills: [],
           },
           skillsUsed: [],
           timestamps: {
@@ -328,7 +373,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(5);
+    expect(stats.schemaVersion).toBe(6);
     expect(stats.skillInventory.startedAt).toBe("2026-06-11T00:01:00.000Z");
     expect(stats.skillInventory.agents["agent-a"]).toMatchObject({
       observedTurns: 1,
@@ -342,7 +387,7 @@ describe("StatsAggregator", () => {
           lastSeenTurn: 1,
           observedTurns: 1,
           usageTurns: 1,
-          recommendedTurns: 1,
+          intentMatchedTurns: 1,
         },
       },
     });
@@ -354,7 +399,7 @@ describe("StatsAggregator", () => {
           lastSeenTurn: 1,
           observedTurns: 1,
           usageTurns: 0,
-          recommendedTurns: 0,
+          intentMatchedTurns: 0,
         },
       },
     });
@@ -371,10 +416,10 @@ describe("StatsAggregator", () => {
     expect(aggregator.selectSkillPlacementCandidate("main")).toMatchObject({
       agentId: "main",
       name: "unused-skill",
-      reason: "zero-recommendation-usage",
+      reason: "zero-intent-match-usage",
       observedTurns: 20,
       usageTurns: 0,
-      recommendedTurns: 0,
+      intentMatchedTurns: 0,
     });
   });
 
@@ -397,7 +442,7 @@ describe("StatsAggregator", () => {
       recordInventoryTurn({
         turn,
         skills,
-        recommendedSkills: ["low-skill"],
+        intentMatchedSkills: ["low-skill"],
       });
     }
 
@@ -414,7 +459,7 @@ describe("StatsAggregator", () => {
       ),
     ).toMatchObject({
       name: "zero-skill",
-      reason: "zero-recommendation-usage",
+      reason: "zero-intent-match-usage",
     });
   });
 
@@ -431,7 +476,7 @@ describe("StatsAggregator", () => {
       recordInventoryTurn({
         turn,
         skills,
-        recommendedSkills: ["mixed-skill"],
+        intentMatchedSkills: ["mixed-skill"],
       });
     }
 
@@ -472,14 +517,14 @@ describe("StatsAggregator", () => {
       recordInventoryTurn({
         turn,
         skills,
-        recommendedSkills: ["mixed-skill"],
+        intentMatchedSkills: ["mixed-skill"],
       });
     }
     const existing = readStats();
     existing.skills["Mixed-Skill"] = { ...existing.skills["mixed-skill"] };
     existing.skills["mixed-skill"] = {
       ...existing.skills["mixed-skill"],
-      recommendedTurns: 1,
+      intentMatchedTurns: 1,
       needsReview: false,
     };
     const existingDay = existing.daily["2026-06-11"];
@@ -493,17 +538,17 @@ describe("StatsAggregator", () => {
     recordInventoryTurn({
       turn: 6,
       skills,
-      recommendedSkills: ["MIXED-SKILL"],
+      intentMatchedSkills: ["MIXED-SKILL"],
     });
 
     expect(aggregator.selectSkillPlacementCandidate("main")).toMatchObject({
       name: "Mixed-Skill",
       reason: "low-adoption",
-      recommendedTurns: 6,
+      intentMatchedTurns: 6,
     });
     const stats = readStats();
     expect(Object.keys(stats.skills)).toEqual(["mixed-skill"]);
-    expect(stats.skills["mixed-skill"].recommendedTurns).toBe(7);
+    expect(stats.skills["mixed-skill"].intentMatchedTurns).toBe(7);
     expect(stats.skills["mixed-skill"].last7DaysUsage).toBe(3);
     expect(stats.daily["2026-06-11"].skills).toEqual({ "mixed-skill": 3 });
   });
@@ -619,7 +664,7 @@ describe("StatsAggregator", () => {
   it("stores reserved skill aggregate keys without polluting Object.prototype", () => {
     const prototypeKeys = [
       "usageTurns",
-      "recommendedTurns",
+      "intentMatchedTurns",
       "adoptedTurns",
       "adoptionRate",
       "last7DaysUsage",
@@ -636,7 +681,7 @@ describe("StatsAggregator", () => {
     const state = createState();
     const reservedNames = ["__proto__", "constructor"];
     state.intent!.result!.intent = "__proto__";
-    state.intent!.recommendedSkills = reservedNames;
+    state.intent!.intentMatchedSkills = reservedNames;
     state.skillsUsed = reservedNames.map((name) => ({
       name,
       path: `/skills/${name}/SKILL.md`,
@@ -660,7 +705,7 @@ describe("StatsAggregator", () => {
         },
       });
       constructorIntent.intent!.result!.intent = "constructor";
-      constructorIntent.intent!.recommendedSkills = [];
+      constructorIntent.intent!.intentMatchedSkills = [];
       constructorIntent.skillsUsed = [];
       constructorIntent.toolCalls = [];
       expect(
@@ -677,7 +722,7 @@ describe("StatsAggregator", () => {
           end: "2026-06-12T00:01:00.000Z",
         },
       });
-      nextDay.intent!.recommendedSkills = ["ordinary-skill"];
+      nextDay.intent!.intentMatchedSkills = ["ordinary-skill"];
       nextDay.skillsUsed = [
         {
           name: "ordinary-skill",
@@ -702,7 +747,7 @@ describe("StatsAggregator", () => {
         expect(Object.hasOwn(stats.skills, name)).toBe(true);
         expect(stats.skills[name]).toMatchObject({
           usageTurns: 1,
-          recommendedTurns: 1,
+          intentMatchedTurns: 1,
           adoptedTurns: 1,
           last7DaysUsage: 1,
         });
@@ -756,7 +801,7 @@ describe("StatsAggregator", () => {
     [
       "recommendations beyond observed turns",
       (skill: Record<string, unknown>) => {
-        skill.recommendedTurns = 2;
+        skill.intentMatchedTurns = 2;
       },
     ],
     [
@@ -909,7 +954,7 @@ describe("StatsAggregator", () => {
           lastSeenTurn: 3,
           observedTurns: 1,
           usageTurns: 1,
-          recommendedTurns: 1,
+          intentMatchedTurns: 1,
         },
       },
     });
@@ -1002,7 +1047,7 @@ describe("StatsAggregator", () => {
             domain: "development",
             confidence,
           },
-          recommendedSkills: [],
+          intentMatchedSkills: [],
         },
         skillsUsed: undefined,
         toolCalls: undefined,
@@ -1030,7 +1075,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(5);
+    expect(stats.schemaVersion).toBe(6);
     expect(stats.intents["version-control"].routeReasons).toEqual({
       "qmd-keyword": {
         count: 2,
@@ -1064,7 +1109,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(5);
+    expect(stats.schemaVersion).toBe(6);
     expect(stats.attribution).toEqual({
       startedAt: "2026-06-11T00:01:00.000Z",
     });
@@ -1093,7 +1138,7 @@ describe("StatsAggregator", () => {
     });
     expect(stats.skills["git-master"]).toMatchObject({
       usageTurns: 1,
-      recommendedTurns: 1,
+      intentMatchedTurns: 1,
       adoptedTurns: 1,
       adoptionRate: 1,
       last7DaysUsage: 1,
@@ -1102,7 +1147,7 @@ describe("StatsAggregator", () => {
     });
     expect(stats.skills["dev-lifecycle"]).toMatchObject({
       usageTurns: 0,
-      recommendedTurns: 1,
+      intentMatchedTurns: 1,
       adoptedTurns: 0,
       adoptionRate: 0,
       last7DaysUsage: 0,
@@ -1110,17 +1155,17 @@ describe("StatsAggregator", () => {
       needsReview: false,
     });
     expect(stats.routing).toMatchObject({
-      recommendationTurns: 1,
+      intentMatchedTurns: 1,
       adoptedTurns: 1,
       turnAdoptionRate: 1,
-      recommendedSkillOpportunities: 2,
+      intentMatchedSkillOpportunities: 2,
       adoptedSkillOpportunities: 1,
       skillAdoptionRate: 0.5,
     });
     expect(stats.routing.byIntent["version-control"]).toMatchObject({
-      recommendationTurns: 1,
+      intentMatchedTurns: 1,
       adoptedTurns: 1,
-      recommendedSkillOpportunities: 2,
+      intentMatchedSkillOpportunities: 2,
       adoptedSkillOpportunities: 1,
     });
     expect(stats.tools.exec).toMatchObject({
@@ -1147,9 +1192,9 @@ describe("StatsAggregator", () => {
       skills: { "git-master": 1 },
       tools: { exec: 2 },
       routing: {
-        recommendationTurns: 1,
+        intentMatchedTurns: 1,
         adoptedTurns: 1,
-        recommendedSkillOpportunities: 2,
+        intentMatchedSkillOpportunities: 2,
         adoptedSkillOpportunities: 1,
       },
       intentOutcomes: {
@@ -1163,15 +1208,15 @@ describe("StatsAggregator", () => {
       },
       intentRouting: {
         "value:version-control": {
-          recommendationTurns: 1,
+          intentMatchedTurns: 1,
           adoptedTurns: 1,
-          recommendedSkillOpportunities: 2,
+          intentMatchedSkillOpportunities: 2,
           adoptedSkillOpportunities: 1,
         },
       },
       skillRouting: {
-        "value:git-master": { recommendedTurns: 1, adoptedTurns: 1 },
-        "value:dev-lifecycle": { recommendedTurns: 1, adoptedTurns: 0 },
+        "value:git-master": { intentMatchedTurns: 1, adoptedTurns: 1 },
+        "value:dev-lifecycle": { intentMatchedTurns: 1, adoptedTurns: 0 },
       },
       toolErrors: { "value:exec": 1 },
     });
@@ -1253,7 +1298,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(5);
+    expect(stats.schemaVersion).toBe(6);
     expect(stats.projection).toMatchObject({
       eligibleTurns: 2,
       projectedTurns: 1,
@@ -1365,201 +1410,7 @@ describe("StatsAggregator", () => {
     expect(reasons.other).toBe(3);
   });
 
-  it("migrates a valid v1 file without losing existing data", () => {
-    aggregator.record("legacy-session", createState(), intent);
-    const statsPath = path.join(tempDir, "stats.json");
-    const legacy = readStats();
-    legacy.schemaVersion = 1;
-    delete legacy.projection;
-    delete legacy.skillInventory;
-    for (const bucket of Object.values(legacy.daily) as Array<
-      Record<string, unknown>
-    >) {
-      delete bucket.projection;
-    }
-    fs.writeFileSync(statsPath, JSON.stringify(legacy));
-
-    expect(
-      aggregator.record(
-        "new-session",
-        createState({
-          timestamps: {
-            start: "2026-06-11T00:02:00.000Z",
-            end: "2026-06-11T00:03:00.000Z",
-          },
-        }),
-        intent,
-      ),
-    ).toBe(true);
-
-    const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(5);
-    expect(migrated.createdAt).toBe(legacy.createdAt);
-    expect(migrated.summary.turns).toBe(2);
-    expect(migrated.intents["version-control"].turns).toBe(2);
-    expect(migrated.processedEvents).toMatchObject(legacy.processedEvents);
-    expect(migrated.projection.eligibleTurns).toBe(0);
-    expect(migrated.daily["2026-06-11"].projection.eligibleTurns).toBe(0);
-    expect(migrated.skillInventory).toEqual({
-      startedAt: "2026-06-11T00:03:00.000Z",
-      agents: {},
-    });
-  });
-
-  it("migrates a valid v2 file without synthesizing inventory history", () => {
-    aggregator.record("existing-session", createState(), intent);
-    const statsPath = path.join(tempDir, "stats.json");
-    const legacy = readStats();
-    legacy.schemaVersion = 2;
-    delete legacy.skillInventory;
-    fs.writeFileSync(statsPath, JSON.stringify(legacy));
-
-    expect(
-      aggregator.record(
-        "new-session",
-        createState({
-          timestamps: {
-            start: "2026-06-11T00:02:00.000Z",
-            end: "2026-06-11T00:03:00.000Z",
-          },
-        }),
-        intent,
-      ),
-    ).toBe(true);
-
-    const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(5);
-    expect(migrated.createdAt).toBe(legacy.createdAt);
-    expect(migrated.summary.turns).toBe(2);
-    expect(migrated.intents["version-control"].turns).toBe(2);
-    expect(migrated.processedEvents).toMatchObject(legacy.processedEvents);
-    expect(migrated.skillInventory).toEqual({
-      startedAt: "2026-06-11T00:03:00.000Z",
-      agents: {},
-    });
-  });
-
-  it("migrates v3 without synthesizing historical daily attribution", () => {
-    const statsPath = path.join(tempDir, "stats.json");
-    expect(
-      aggregator.record(
-        "v3-session",
-        createState({
-          timestamps: {
-            start: "2026-06-10T00:00:00.000Z",
-            end: "2026-06-10T00:01:00.000Z",
-          },
-        }),
-        intent,
-        { nowMs: Date.parse("2026-06-11T00:02:00.000Z") },
-      ),
-    ).toBe(true);
-    const legacy = readStats();
-    legacy.schemaVersion = 3;
-    delete legacy.attribution;
-    for (const tool of Object.values(legacy.tools)) {
-      delete tool.latencyHistogram;
-    }
-    for (const bucket of Object.values(legacy.daily)) {
-      delete bucket.intentOutcomes;
-      delete bucket.intentRouting;
-      delete bucket.skillRouting;
-      delete bucket.toolErrors;
-    }
-    fs.writeFileSync(statsPath, JSON.stringify(legacy));
-
-    expect(
-      aggregator.record(
-        "v4-session",
-        createState({
-          timestamps: {
-            start: "2026-06-11T00:00:00.000Z",
-            end: "2026-06-11T00:01:00.000Z",
-          },
-        }),
-        intent,
-        { nowMs: Date.parse("2026-06-11T00:02:00.000Z") },
-      ),
-    ).toBe(true);
-
-    const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(5);
-    expect(migrated.attribution).toEqual({
-      startedAt: "2026-06-11T00:01:00.000Z",
-    });
-    expect(migrated.daily["2026-06-10"]).toMatchObject({
-      intentOutcomes: {},
-      intentRouting: {},
-      skillRouting: {},
-      toolErrors: {},
-    });
-    expect(migrated.daily["2026-06-11"].intentOutcomes).toEqual({
-      "value:version-control": {
-        turns: 1,
-        completedTurns: 1,
-        erroredTurns: 0,
-        skillAssistedTurns: 1,
-        toolAssistedTurns: 1,
-      },
-    });
-    expect(migrated.tools.exec.latencyHistogram).toMatchObject({
-      unknown: 0,
-      "100-499": 2,
-    });
-  });
-
-  it("migrates v4 without synthesizing historical route attribution", () => {
-    aggregator.record("v4-session", createState(), intent, {
-      nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
-    });
-    const statsPath = path.join(tempDir, "stats.json");
-    const legacy = readStats();
-    legacy.schemaVersion = 4;
-    for (const intentStats of Object.values(legacy.intents)) {
-      delete intentStats.routeReasons;
-    }
-    fs.writeFileSync(statsPath, JSON.stringify(legacy));
-
-    expect(
-      aggregator.record(
-        "v5-session",
-        createState({
-          intent: {
-            trigger: "qmd-keyword",
-            result: {
-              intent: "version-control",
-              reason: "test",
-              domain: "development",
-              confidence: 0.9,
-            },
-            recommendedSkills: [],
-          },
-          skillsUsed: undefined,
-          toolCalls: undefined,
-          timestamps: {
-            start: "2026-06-11T00:02:00.000Z",
-            end: "2026-06-11T00:03:00.000Z",
-          },
-        }),
-        intent,
-      ),
-    ).toBe(true);
-
-    const migrated = readStats();
-    expect(migrated.schemaVersion).toBe(5);
-    expect(migrated.intents["version-control"].routeReasons).toMatchObject({
-      "qmd-keyword": {
-        count: 1,
-        averageScore: 0.9,
-        minScore: 0.9,
-        maxScore: 0.9,
-      },
-      "qmd-hybrid": { count: 0 },
-      "llm-classifier": { count: 0 },
-    });
-  });
-
-  it("bounds each v4 daily attribution map with a host-owned other key", () => {
+  it("bounds each v6 daily attribution map with a host-owned other key", () => {
     const startMs = Date.parse("2026-06-11T00:00:00.000Z");
     for (let index = 0; index < 65; index += 1) {
       const start = new Date(startMs + index * 1000).toISOString();
@@ -1575,7 +1426,7 @@ describe("StatsAggregator", () => {
                 confidence: 0.9,
                 complexity: "low",
               },
-              recommendedSkills: [`skill-${index}`],
+              intentMatchedSkills: [`skill-${index}`],
             },
             skillsUsed: [],
             toolCalls: [
@@ -1603,8 +1454,8 @@ describe("StatsAggregator", () => {
       expect(Object.keys(map)).toHaveLength(64);
     }
     expect(daily.intentOutcomes.__other__.turns).toBe(2);
-    expect(daily.intentRouting.__other__.recommendationTurns).toBe(2);
-    expect(daily.skillRouting.__other__.recommendedTurns).toBe(2);
+    expect(daily.intentRouting.__other__.intentMatchedTurns).toBe(2);
+    expect(daily.skillRouting.__other__.intentMatchedTurns).toBe(2);
     expect(daily.toolErrors.__other__).toBe(2);
   });
 
@@ -1621,7 +1472,7 @@ describe("StatsAggregator", () => {
               confidence: 0.9,
               complexity: "low",
             },
-            recommendedSkills: ["__other__"],
+            intentMatchedSkills: ["__other__"],
           },
           skillsUsed: [
             { name: "__other__", path: "/skills/__other__/SKILL.md" },
@@ -1640,8 +1491,8 @@ describe("StatsAggregator", () => {
 
     const daily = readStats().daily["2026-06-11"];
     expect(daily.intentOutcomes["value:__other__"].turns).toBe(1);
-    expect(daily.intentRouting["value:__other__"].recommendationTurns).toBe(1);
-    expect(daily.skillRouting["value:__other__"].recommendedTurns).toBe(1);
+    expect(daily.intentRouting["value:__other__"].intentMatchedTurns).toBe(1);
+    expect(daily.skillRouting["value:__other__"].intentMatchedTurns).toBe(1);
     expect(daily.toolErrors["value:__other__"]).toBe(1);
     expect(daily.intentOutcomes.__other__).toBeUndefined();
     expect(daily.intentRouting.__other__).toBeUndefined();
@@ -1753,7 +1604,7 @@ describe("StatsAggregator", () => {
             confidence: 0.9,
             complexity: "medium",
           },
-          recommendedSkills: ["prompt-engineering-expert"],
+          intentMatchedSkills: ["prompt-engineering-expert"],
         },
         skillsUsed: [
           {
@@ -1767,14 +1618,14 @@ describe("StatsAggregator", () => {
 
     const stats = readStats();
     expect(stats.routing).toMatchObject({
-      recommendationTurns: 1,
+      intentMatchedTurns: 1,
       adoptedTurns: 1,
-      recommendedSkillOpportunities: 1,
+      intentMatchedSkillOpportunities: 1,
       adoptedSkillOpportunities: 1,
       skillAdoptionRate: 1,
     });
     expect(stats.skills["prompt-engineering-expert"]).toMatchObject({
-      recommendedTurns: 1,
+      intentMatchedTurns: 1,
       adoptedTurns: 1,
       needsReview: false,
     });
@@ -1837,7 +1688,7 @@ describe("StatsAggregator", () => {
     expect(stats.tools.exec).not.toHaveProperty("durationSamples");
   });
 
-  it("is idempotent and excludes intents without recommended skills from routing", () => {
+  it("is idempotent and excludes intents without intentMatched skills from routing", () => {
     const noSkillsIntent: IntentCatalogEntry = {
       id: "chat",
       definition: {
@@ -1866,7 +1717,7 @@ describe("StatsAggregator", () => {
 
     const stats = readStats();
     expect(stats.summary.turns).toBe(1);
-    expect(stats.routing.recommendationTurns).toBe(0);
+    expect(stats.routing.intentMatchedTurns).toBe(0);
   });
 
   it("prunes daily and processed events after 90 days while retaining all-time totals", () => {
@@ -1942,7 +1793,7 @@ describe("StatsAggregator", () => {
 
     const stats = readStats();
     expect(stats.skills["git-master"]).toMatchObject({
-      recommendedTurns: 5,
+      intentMatchedTurns: 5,
       adoptedTurns: 0,
       adoptionRate: 0,
       lifecycle: "never-used",

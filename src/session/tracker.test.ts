@@ -167,7 +167,7 @@ describe("SessionTracker", () => {
       expect(customTracker).toBeInstanceOf(SessionTracker);
     });
 
-    it("loads legacy session JSON while ignoring removed instruction text", () => {
+    it("drops retired session fields without copying recommended skills", () => {
       // Create sessions directory with a test file
       const sessionsDir = path.join(tempDir, "sessions");
       const removedLegacyField = ["instruction", "Text"].join("");
@@ -199,7 +199,13 @@ describe("SessionTracker", () => {
           .listRetainedSessions()
           .find((session) => session.sessionId === "existing-session-123")
           ?.current.intent,
-      ).toMatchObject({ recommendedSkills: ["existing-skill"] });
+      ).not.toHaveProperty("recommendedSkills");
+      expect(
+        loadedTracker
+          .listRetainedSessions()
+          .find((session) => session.sessionId === "existing-session-123")
+          ?.current.intent,
+      ).not.toHaveProperty("intentMatchedSkills");
       expect(
         loadedTracker
           .listRetainedSessions()
@@ -659,7 +665,7 @@ describe("SessionTracker", () => {
               confidence: 0.9,
               complexity: "low",
             },
-            recommendedSkills: ["skill-viewer", "tool-reference"],
+            intentMatchedSkills: ["skill-viewer", "tool-reference"],
           },
         },
       });
@@ -672,7 +678,7 @@ describe("SessionTracker", () => {
       );
       expect(saved.current.intent).toMatchObject({
         trigger: "llm-classifier",
-        recommendedSkills: ["skill-viewer", "tool-reference"],
+        intentMatchedSkills: ["skill-viewer", "tool-reference"],
         result: { intent: "tool-reference" },
       });
     });

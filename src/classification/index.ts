@@ -10,7 +10,7 @@ export {
 } from "./conversation.js";
 export {
   buildRoutingContext,
-  formatConfiguredSkills,
+  formatWorkingSetSkills,
   measureIntentCatalogCodePoints,
 } from "./prompts.js";
 export {

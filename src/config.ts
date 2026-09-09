@@ -17,9 +17,11 @@ import type {
   ResolvedSkillHarnessPluginConfig,
   ResolvedSkillSearchConfig,
   ResolvedSkillsConfig,
+  ResolvedWorkingSetSkillsConfig,
 } from "./types.js";
 import type { OpenClawConfig } from "../api.js";
 import { resolveQmdEndpoint } from "./qmd/provider-resolver.js";
+import { canonicalIdentity } from "./normalize.js";
 
 export function clampInt(
   value: number | undefined,
@@ -74,6 +76,11 @@ const DEFAULT_SKILLS: ResolvedSkillsConfig = {
   search: DEFAULT_SKILL_SEARCH,
 };
 
+const DEFAULT_WORKING_SET_SKILLS: ResolvedWorkingSetSkillsConfig = {
+  defaults: [],
+  agents: {},
+};
+
 const DEFAULT_QMD: ResolvedQmdConfig = {
   timeoutMs: DEFAULT_TIMEOUT_MS,
   indexRefreshIntervalSeconds: 300,
@@ -98,6 +105,7 @@ const DEFAULT_CONFIG: ResolvedSkillHarnessPluginConfig = {
   scope: DEFAULT_SCOPE,
   routing: DEFAULT_ROUTING,
   skills: DEFAULT_SKILLS,
+  workingSetSkills: DEFAULT_WORKING_SET_SKILLS,
   qmd: DEFAULT_QMD,
   review: DEFAULT_REVIEW,
 };
@@ -116,6 +124,12 @@ const StringListSchema = z
     ),
   ])
   .catch([]);
+
+const WorkingSetStringListSchema = z
+  .array(z.string())
+  .transform((values) => [
+    ...new Set(values.map(canonicalIdentity).filter(Boolean)),
+  ]);
 
 const stringListWithDefault = (fallback: string[]) =>
   StringListSchema.transform((values) =>
@@ -270,6 +284,61 @@ function resolveSkillsConfig(raw: unknown): ResolvedSkillsConfig {
   return SkillsSchema.parse(skills === undefined ? {} : skills);
 }
 
+const WorkingSetAgentsSchema = z
+  .record(z.string(), WorkingSetStringListSchema)
+  .transform((agents, context) => {
+    const canonicalAgents = new Map<string, string[]>();
+    for (const [agentId, skillNames] of Object.entries(agents)) {
+      const canonicalAgentId = canonicalIdentity(agentId);
+      if (!canonicalAgentId) {
+        context.addIssue({
+          code: "custom",
+          path: [agentId],
+          message: "workingSetSkills agent IDs must not be empty",
+        });
+        continue;
+      }
+      if (canonicalAgents.has(canonicalAgentId)) {
+        context.addIssue({
+          code: "custom",
+          path: [agentId],
+          message: `workingSetSkills agent ID collides with ${canonicalAgentId}`,
+        });
+        continue;
+      }
+      canonicalAgents.set(canonicalAgentId, skillNames);
+    }
+    return Object.fromEntries(canonicalAgents);
+  });
+
+const WorkingSetSkillsSchema = z
+  .object({
+    defaults: WorkingSetStringListSchema.optional().default([]),
+    agents: WorkingSetAgentsSchema.optional().default({}),
+  })
+  .strict()
+  .transform((value): ResolvedWorkingSetSkillsConfig => ({
+    defaults: value.defaults,
+    agents: Object.fromEntries(
+      Object.entries(value.agents).map(([agentId, skillNames]) => [
+        agentId,
+        [...new Set([...skillNames, ...value.defaults])],
+      ]),
+    ),
+  }));
+
+function resolveWorkingSetSkillsConfig(
+  raw: unknown,
+): ResolvedWorkingSetSkillsConfig {
+  const workingSetSkills =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>).workingSetSkills
+      : undefined;
+  return WorkingSetSkillsSchema.parse(
+    workingSetSkills === undefined ? {} : workingSetSkills,
+  );
+}
+
 const enabledSchema = z.boolean().catch(true);
 const ReviewSchema = z
   .object({
@@ -342,6 +411,7 @@ const SkillHarnessConfigSchema = z
     scope: ScopeSchema.optional().default(DEFAULT_SCOPE),
     routing: z.unknown().optional(),
     skills: z.unknown().optional(),
+    workingSetSkills: z.unknown().optional(),
     qmd: QmdSchema,
     review: ReviewSchema.optional().default(DEFAULT_REVIEW),
   })
@@ -349,6 +419,7 @@ const SkillHarnessConfigSchema = z
     scope: DEFAULT_SCOPE,
     routing: DEFAULT_ROUTING,
     skills: DEFAULT_SKILLS,
+    workingSetSkills: DEFAULT_WORKING_SET_SKILLS,
     qmd: DEFAULT_QMD,
     review: DEFAULT_REVIEW,
   });
@@ -360,6 +431,7 @@ export function resolveConfig(
   const resolved = SkillHarnessConfigSchema.parse(raw);
   const resolvedRouting = resolveRoutingConfig(raw);
   const resolvedSkills = resolveSkillsConfig(raw);
+  const resolvedWorkingSetSkills = resolveWorkingSetSkillsConfig(raw);
 
   const resolvedEmbedding = resolveQmdEndpoint(resolved.qmd.embedding, {
     ...options,
@@ -378,6 +450,7 @@ export function resolveConfig(
     scope: resolved.scope,
     routing: resolvedRouting,
     skills: resolvedSkills,
+    workingSetSkills: resolvedWorkingSetSkills,
     qmd: {
       timeoutMs,
       indexRefreshIntervalSeconds: clampInt(

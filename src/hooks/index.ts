@@ -50,7 +50,7 @@ import {
 } from "../classification/index.js";
 import {
   buildRoutingContext,
-  formatConfiguredSkills,
+  formatWorkingSetSkills,
 } from "../classification/index.js";
 import {
   listAvailableSkills,
@@ -275,14 +275,14 @@ function toIntentProjectionTelemetry(params: {
 
 function toPromptBuildResult(
   prependContext?: string,
-  configuredSkillsXml?: string,
+  workingSetSkillsXml?: string,
   includeIntentContext = true,
 ): PluginHookBeforePromptBuildResult {
   const systemContext = includeIntentContext
     ? `${SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_INTENT_CONTEXT}`
     : SKILL_HARNESS_SYSTEM_CONTEXT;
-  const appendSystemContext = configuredSkillsXml
-    ? `${systemContext}\n\n${configuredSkillsXml}`
+  const appendSystemContext = workingSetSkillsXml
+    ? `${systemContext}\n\n${workingSetSkillsXml}`
     : systemContext;
   return {
     ...(prependContext ? { prependContext } : {}),
@@ -822,7 +822,7 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     trigger: IntentTrigger;
     result?: IntentionResult;
-    recommendedSkills?: string[];
+    intentMatchedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): Promise<void> {
@@ -839,7 +839,7 @@ export function createHookHandlers(deps: HookDeps) {
             : {}),
           trigger: params.trigger,
           ...(params.result ? { result: params.result } : {}),
-          recommendedSkills: params.recommendedSkills,
+          intentMatchedSkills: params.intentMatchedSkills,
           ...(params.intentProjection
             ? { intentProjection: params.intentProjection }
             : {}),
@@ -854,7 +854,7 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     trigger: IntentTrigger;
     result: IntentionResult;
-    recommendedSkills?: string[];
+    intentMatchedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): Promise<void> {
@@ -863,7 +863,7 @@ export function createHookHandlers(deps: HookDeps) {
       latestUserMessage: params.latestUserMessage,
       trigger: params.trigger,
       result: params.result,
-      recommendedSkills: params.recommendedSkills,
+      intentMatchedSkills: params.intentMatchedSkills,
       intentProjection: params.intentProjection,
       conversation: params.conversation,
     });
@@ -874,7 +874,7 @@ export function createHookHandlers(deps: HookDeps) {
     result: IntentionResult;
     intent: IntentCatalogEntry;
   }): Promise<{
-    candidates: AvailableSkill[];
+    intentMatchedSkills: AvailableSkill[];
     experiences: ReturnType<SkillExperienceCatalog["listForSkills"]>;
   }> {
     const directSkills = await resolveAvailableSkills({
@@ -883,30 +883,30 @@ export function createHookHandlers(deps: HookDeps) {
       bundledSkillsDir,
       skillNames: params.intent.definition.skills ?? [],
     });
-    const candidates = directSkills.slice(0, 4);
+    const intentMatchedSkills = directSkills.slice(0, 4);
     const experiences = experienceCatalog
       ? experienceCatalog.listForSkills(
-          candidates.map((candidate) => candidate.name),
+          intentMatchedSkills.map((skill) => skill.name),
         )
       : [];
     return {
-      candidates,
+      intentMatchedSkills,
       experiences,
     };
   }
 
-  async function resolveConfiguredSkillsXml(
+  async function resolveWorkingSetSkillsXml(
     agentId: string,
   ): Promise<string | undefined> {
     try {
-      let configuredSkillNames: string[] = [];
-      if (deps.getConfiguredAgentSkills) {
+      let workingSetSkillNames: string[] = [];
+      if (deps.getWorkingSetSkills) {
         try {
-          configuredSkillNames = await deps.getConfiguredAgentSkills(agentId);
+          workingSetSkillNames = await deps.getWorkingSetSkills(agentId);
         } catch (error) {
-          logger.warn("failed to retrieve configured agent skill names", {
-            agentId,
-            error,
+          logger.warn("failed to retrieve working-set agent skill names", {
+            errorType: error instanceof Error ? "Error" : typeof error,
+            workingSetSkillCount: 0,
           });
         }
       }
@@ -918,13 +918,12 @@ export function createHookHandlers(deps: HookDeps) {
           api,
           agentId,
           bundledSkillsDir,
-          skillNames: configuredSkillNames,
+          skillNames: workingSetSkillNames,
         });
       } catch (error) {
-        logger.warn("failed to resolve explicitly configured agent skills", {
-          agentId,
-          configuredSkillNames,
-          error,
+        logger.warn("failed to resolve working-set agent skills", {
+          errorType: error instanceof Error ? "Error" : typeof error,
+          workingSetSkillCount: workingSetSkillNames.length,
         });
       }
 
@@ -939,8 +938,8 @@ export function createHookHandlers(deps: HookDeps) {
         });
       } catch (error) {
         logger.warn("failed to resolve workspace agent skills", {
-          agentId,
-          error,
+          errorType: error instanceof Error ? "Error" : typeof error,
+          workspaceSkillCount: 0,
         });
       }
 
@@ -956,25 +955,26 @@ export function createHookHandlers(deps: HookDeps) {
       }
       if (!skills.length) {
         logger.info(
-          "no configured or workspace agent skills could be resolved",
-          { agentId, configuredSkillNames },
+          "no working-set or workspace agent skills could be resolved",
+          { workingSetSkillCount: 0 },
         );
         return undefined;
       }
-      logger.info(
-        "resolved configured and workspace agent skills for prompt build",
-        {
-          agentId,
-          configuredSkillNames,
-          workspaceSkills: workspaceSkills.map((skill) => skill.name),
-          resolvedSkills: skills.map((s) => s.name),
-        },
-      );
-      return formatConfiguredSkills(skills);
+      const workingSetSkillsXml = formatWorkingSetSkills(skills);
+      logger.info("working-set skills static context emitted", {
+        workingSetSkillCount: skills.length,
+        staticHeader: workingSetSkillsXml.includes("### Working set skills"),
+        workingSetWrapper: workingSetSkillsXml.includes("<working_set_skills>"),
+        workingSetSkillTag: workingSetSkillsXml.includes("<skill "),
+      });
+      return workingSetSkillsXml;
     } catch (error) {
       logger.warn(
-        "failed to resolve configured agent skills for prompt build",
-        { error },
+        "failed to resolve working-set agent skills for prompt build",
+        {
+          errorType: error instanceof Error ? "Error" : typeof error,
+          workingSetSkillCount: 0,
+        },
       );
       return undefined;
     }
@@ -988,10 +988,13 @@ export function createHookHandlers(deps: HookDeps) {
     conversation: ReturnType<typeof limitConversationTurns>;
     availableIntents: readonly IntentCatalogEntry[];
     classification: PromptBuildClassification;
-    configuredSkillsXml?: string;
+    workingSetSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
     const { trigger, result, intentProjection } = params.classification;
-    logger.debug(`intention result (${trigger}): ${JSON.stringify(result)}`);
+    logger.debug("intention result", {
+      trigger,
+      intentResolved: Boolean(result.intent),
+    });
 
     await recordPromptBuildResult({
       ctx: params.ctx,
@@ -1004,7 +1007,7 @@ export function createHookHandlers(deps: HookDeps) {
     });
     const intent = findIntentEntry(params.availableIntents, result.intent);
     if (!intent) {
-      return toPromptBuildResult(undefined, params.configuredSkillsXml);
+      return toPromptBuildResult(undefined, params.workingSetSkillsXml);
     }
     const routingContext = await resolveRoutingContext({
       routing: params.routing,
@@ -1017,7 +1020,9 @@ export function createHookHandlers(deps: HookDeps) {
       latestUserMessage: params.latestUserMessage,
       trigger,
       result,
-      recommendedSkills: routingContext.candidates.map((skill) => skill.name),
+      intentMatchedSkills: routingContext.intentMatchedSkills.map(
+        (skill) => skill.name,
+      ),
       intentProjection,
       conversation: params.conversation,
     });
@@ -1025,10 +1030,10 @@ export function createHookHandlers(deps: HookDeps) {
       buildRoutingContext({
         result,
         guidance: intent.definition.guidance,
-        candidates: routingContext.candidates,
+        intentMatchedSkills: routingContext.intentMatchedSkills,
         experiences: routingContext.experiences,
       }),
-      params.configuredSkillsXml,
+      params.workingSetSkillsXml,
     );
   }
 
@@ -1060,7 +1065,7 @@ export function createHookHandlers(deps: HookDeps) {
   ): Promise<PluginHookBeforePromptBuildResult | undefined> {
     let resolvedSessionKey = ctx.sessionKey;
     let staticContextEligible = false;
-    let configuredSkillsXml: string | undefined;
+    let workingSetSkillsXml: string | undefined;
     let intentContextEnabled = false;
     try {
       const routing = resolvePromptBuildIdentity(ctx);
@@ -1073,33 +1078,32 @@ export function createHookHandlers(deps: HookDeps) {
       if (shouldSkipSkillSystemContext(resolvedContext)) return;
 
       staticContextEligible = true;
-      intentContextEnabled = isEnabledForAgent(
-        config(),
+      refreshLiveConfigFromRuntime();
+      const refreshedConfig = config();
+      workingSetSkillsXml = await resolveWorkingSetSkillsXml(
         routing.effectiveAgentId,
       );
-      configuredSkillsXml = await resolveConfiguredSkillsXml(
+      intentContextEnabled = isEnabledForAgent(
+        refreshedConfig,
         routing.effectiveAgentId,
       );
 
       if (!intentContextEnabled) {
-        return toPromptBuildResult(undefined, configuredSkillsXml, false);
+        return toPromptBuildResult(undefined, workingSetSkillsXml, false);
       }
       if (!isPromptBuildChatAllowed(resolvedContext, resolvedSessionKey)) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       if (shouldSkipIntentAnalysis(resolvedContext)) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       if (isInternalUserTurn(event)) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       if (!isEligibleInteractiveSession(resolvedContext)) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
-      // THEN refresh config and intents
-      refreshLiveConfigFromRuntime();
-      const refreshedConfig = config();
       const { latestUserMessage, historicalIntents, conversation } =
         buildConversationContext(event, ctx, refreshedConfig);
       routing.association = await prepareTrackingTurn({
@@ -1109,18 +1113,22 @@ export function createHookHandlers(deps: HookDeps) {
         recentTurns: extractRecentTurns(event.messages),
       });
       if (!routing.association) {
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
       refreshIntents();
       if (catalog.count === 0) {
         logger.debug("no intents loaded; skipping intention scan.");
-        return toPromptBuildResult(undefined, configuredSkillsXml);
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
-      logger.debug(
-        `before_prompt_build hook triggered, ctx: ${JSON.stringify(ctx)}`,
-      );
+      logger.debug("before_prompt_build hook triggered", {
+        hasSessionId: Boolean(ctx.sessionId),
+        hasSessionKey: Boolean(ctx.sessionKey),
+        hasRunId: Boolean(ctx.runId),
+        hasModelProviderId: Boolean(ctx.modelProviderId),
+        hasModelId: Boolean(ctx.modelId),
+      });
 
       const availableIntents = catalog.get();
 
@@ -1155,7 +1163,7 @@ export function createHookHandlers(deps: HookDeps) {
             logger.debug(
               "intent resolution yielded no result; skipping routing context injection.",
             );
-            return toPromptBuildResult(undefined, configuredSkillsXml);
+            return toPromptBuildResult(undefined, workingSetSkillsXml);
           }
 
           return await handleResolvedIntentPromptBuild({
@@ -1166,16 +1174,19 @@ export function createHookHandlers(deps: HookDeps) {
             conversation,
             availableIntents,
             classification,
-            configuredSkillsXml,
+            workingSetSkillsXml,
           });
         },
       );
     } catch (err) {
-      logger.warn("before_prompt_build hook error", { error: err });
+      logger.warn("before_prompt_build hook error", {
+        errorType: err instanceof Error ? "Error" : typeof err,
+        staticContextAvailable: Boolean(workingSetSkillsXml),
+      });
       return staticContextEligible
         ? toPromptBuildResult(
             undefined,
-            configuredSkillsXml,
+            workingSetSkillsXml,
             intentContextEnabled,
           )
         : undefined;
@@ -1822,16 +1833,18 @@ export function createHookHandlers(deps: HookDeps) {
     ctx: PluginHookAgentContext,
   ): Promise<void> {
     logger.info("onMessageSending hook triggered", {
-      ctxSessionId: ctx.sessionId,
-      ctxSessionKey: ctx.sessionKey,
-      ctxRunId: ctx.runId,
+      hasSessionId: Boolean(ctx.sessionId),
+      hasSessionKey: Boolean(ctx.sessionKey),
+      hasRunId: Boolean(ctx.runId),
     });
     const association = resolveAssociatedTurn({
       contextRunId: ctx.runId,
       sessionId: ctx.sessionId,
       sessionKey: ctx.sessionKey,
     });
-    logger.info("onMessageSending association resolved", { association });
+    logger.info("onMessageSending association resolved", {
+      associationResolved: Boolean(association),
+    });
     if (!association) return;
     const stagedEntries = toolFallbacks.listForAssociation(association);
     const stagedToolFallbacks = stagedEntries.map(
@@ -1851,7 +1864,9 @@ export function createHookHandlers(deps: HookDeps) {
       result: resultText || undefined,
       endedAt: new Date().toISOString(),
     });
-    logger.info("onMessageSending turn finalization result", { finalized });
+    logger.info("onMessageSending turn finalization result", {
+      finalizationStatus: finalized,
+    });
     if (finalized === "applied" || finalized === "already-finalized") {
       turnAssociations.markAssociationTerminal(association);
       toolFallbacks.markAssociationTerminal(association);

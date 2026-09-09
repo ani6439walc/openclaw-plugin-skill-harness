@@ -22,7 +22,7 @@ export function skillSourcePriority(source: SkillSource | undefined): number {
 
 export interface SkillUsageStats {
   usage_turns: number;
-  recommended_turns: number;
+  intent_matched_turns: number;
   adopted_turns: number;
   adoption_rate: number;
   last_used_at?: string;

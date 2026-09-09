@@ -285,7 +285,7 @@ function formatExperienceXml(experience: SkillExperienceEntry): string {
   return xmlBlock("skill_experience", lines.join("\n"));
 }
 
-function formatCandidateExperiences(
+function formatIntentMatchedSkillExperiences(
   experiences: readonly SkillExperienceEntry[],
 ): ReadonlyMap<string, readonly string[]> {
   const bySkill = new Map<string, string[]>();
@@ -301,29 +301,31 @@ function formatCandidateExperiences(
 export function buildRoutingContext(params: {
   result: IntentionResult;
   guidance: string;
-  candidates: readonly AvailableSkill[];
+  intentMatchedSkills: readonly AvailableSkill[];
   experiences: readonly SkillExperienceEntry[];
 }): string {
-  const experiencesBySkill = formatCandidateExperiences(params.experiences);
+  const experiencesBySkill = formatIntentMatchedSkillExperiences(
+    params.experiences,
+  );
   const blocks = [
     xmlBlock(
       "intent",
       escapeXmlText(params.guidance),
       ` name="${escapeXmlAttribute(params.result.intent)}"`,
     ),
-    params.candidates.length > 0
-      ? formatSkillXmlBlock(
-          "skill_candidates",
-          [...params.candidates],
+    params.intentMatchedSkills.length > 0
+      ? `${formatSkillXmlBlock(
+          "intent_matched_skills",
+          [...params.intentMatchedSkills],
           "",
           experiencesBySkill,
-        )
+        )}`
       : undefined,
   ].filter((block): block is string => Boolean(block));
 
   const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
   const header =
-    params.candidates.length > 0
+    params.intentMatchedSkills.length > 0
       ? ROUTING_ADVISORY_HEADER
       : ROUTING_ADVISORY_INTENT_ONLY_HEADER;
   return `${header}\n${taggedContent}`;
@@ -500,10 +502,10 @@ export function parseIntentionResult(
   }
 }
 
-export function formatConfiguredSkills(
+export function formatWorkingSetSkills(
   skills: AvailableSkill[] | undefined,
 ): string {
   if (!skills?.length) return "";
-  const xml = formatSkillXmlBlock("configured_skills", skills);
-  return `### Configured skills\n\nWhen relevant, load with \`skill_view\` before proceeding:\n\n${xml}`;
+  const xml = formatSkillXmlBlock("working_set_skills", skills);
+  return `### Working set skills\n\nWhen relevant, load with \`skill_view\` before proceeding:\n${xml}`;
 }
