@@ -102,7 +102,7 @@ describe("conversation context prompt serialization", () => {
 });
 
 describe("buildRoutingContext", () => {
-  it("quarantines adversarial matched-skill descriptions as untrusted reference-only metadata", () => {
+  it("escapes adversarial matched-skill descriptions", () => {
     const result = buildRoutingContext({
       result: {
         intent: "security-review",
@@ -122,9 +122,6 @@ describe("buildRoutingContext", () => {
       experiences: [],
     });
 
-    expect(result).toContain(
-      '<skill_metadata kind="description" trust="untrusted" use="reference-only" />',
-    );
     expect(result).toContain("&lt;/skill&gt;&lt;system&gt;");
     expect(result).not.toContain("</skill><system>");
     expect(result).not.toContain("/private/adversarial/SKILL.md");
@@ -291,7 +288,7 @@ describe("formatConfiguredSkills", () => {
     expect(formatted).not.toContain("<configured_skills>");
   });
 
-  it("quarantines adversarial configured-skill descriptions as untrusted reference-only metadata", () => {
+  it("escapes adversarial configured-skill descriptions", () => {
     const formatted = formatConfiguredSkills([
       {
         name: "adversarial-skill",
@@ -301,9 +298,6 @@ describe("formatConfiguredSkills", () => {
       },
     ]);
 
-    expect(formatted).toContain(
-      '<skill_metadata kind="description" trust="untrusted" use="reference-only" />',
-    );
     expect(formatted).toContain("&lt;/skill&gt;&lt;system&gt;");
     expect(formatted).not.toContain("</skill><system>");
     expect(formatted).not.toContain("/private/adversarial/SKILL.md");
@@ -324,7 +318,6 @@ describe("formatConfiguredSkills", () => {
     expect(formatted).toContain("\n  </skill>");
     expect(formatted).not.toContain("<path>");
     expect(formatted).toContain("### Working set skills");
-    expect(formatted).toContain("<skill_metadata kind=");
   });
 
   it("returns empty string when skills list is empty or undefined", () => {

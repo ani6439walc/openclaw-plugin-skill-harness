@@ -29,9 +29,6 @@ const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
 - Do not abbreviate technical names into unclear shorthand.
 - Do not omit required schema fields, safety constraints, ordering, or key qualifiers to make text shorter.`;
 
-const UNTRUSTED_SKILL_METADATA_MARKER =
-  '<skill_metadata kind="description" trust="untrusted" use="reference-only" />';
-
 function buildIntentCatalog(intents: readonly IntentCatalogEntry[]): string {
   const intentBlocks = intents
     .map((entry) => {
@@ -317,7 +314,7 @@ export function buildRoutingContext(params: {
       ` name="${escapeXmlAttribute(params.result.intent)}"`,
     ),
     params.intentMatchedSkills.length > 0
-      ? `${UNTRUSTED_SKILL_METADATA_MARKER}\n${formatSkillXmlBlock(
+      ? `${formatSkillXmlBlock(
           "intent_matched_skills",
           [...params.intentMatchedSkills],
           "",
@@ -510,5 +507,5 @@ export function formatConfiguredSkills(
 ): string {
   if (!skills?.length) return "";
   const xml = formatSkillXmlBlock("working_set_skills", skills);
-  return `### Working set skills\n\nWhen relevant, load with \`skill_view\` before proceeding:\n\n${UNTRUSTED_SKILL_METADATA_MARKER}\n${xml}`;
+  return `### Working set skills\n\nWhen relevant, load with \`skill_view\` before proceeding:\n${xml}`;
 }
