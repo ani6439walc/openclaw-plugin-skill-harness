@@ -84,7 +84,7 @@ Large skill catalogs create two practical problems:
 Skill Harness addresses both:
 
 1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, intent-matched skills, and intent-matched `<skill_experience>` metadata (identity and keywords only) nested under the matching `<skill>`. The fixed system context does not include the runtime skill inventory.
-2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes recommendations from actual adoption, can autonomously maintain runtime intent Markdown, and may create at most one validated experience for a currently visible skill observed in the completed turn. It does not train the base model or rewrite skill files.
+2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes routing observations from actual adoption, can autonomously maintain runtime intent Markdown, and may create at most one validated experience for a currently visible skill observed in the completed turn. It does not train the base model or rewrite skill files.
 
 ## How it works
 
@@ -106,6 +106,8 @@ graph TD
 ```
 
 Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<working_set_skills>` block is the ordered union of plugin-owned `workingSetSkills` and skills discovered from that agent's workspace `skills/` tree: the agent-specific working set precedes shared `defaults`, workspace-only skills append, and duplicate names retain their explicit-list position while resolving to the workspace-precedence skill content. Native OpenClaw `agents.*.skills` lists are not a plugin source after cutover. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `scope.agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid example/keyword retrieval with expansion, and candidate scoring for Step 3 fallback classification.
+
+The static cutover boundary is explicit: `plugins.entries.skill-harness.config.workingSetSkills` is the only plugin-owned static skill source. Keep `agents.defaults.skills` and `agents.entries.<id>.skills` empty when removing OpenClaw core's native automatic skill prompt; Skill Harness neither reads nor mutates those lists. Unknown or missing names in `workingSetSkills` are filtered when the prompt is built, while workspace-resolved skills are appended according to the precedence rules above.
 
 ### Architecture and routing contract
 
@@ -174,6 +176,7 @@ The prompt layout minimizes token consumption:
 - Redundant policy blocks and legacy headers are eliminated.
 - The renderer does not emit `<<<BEGIN_SKILL_HARNESS_CONTEXT>>>` or OpenClaw reserved delimiters; conversation sanitization treats those markers only as input boundaries.
 - `<intent_matched_skills>` nests intent-matched `<skill_experience>` identity and keyword metadata; full experience records can be retrieved on demand via `skill_experience`.
+- The renderer does not emit a `<skill_metadata>` wrapper or `<path>` elements. Skill descriptions and experience values are escaped before insertion, so skill files cannot create prompt-level XML tags.
 
 ## Basic configuration
 
@@ -274,6 +277,35 @@ This release requires `plugins.entries.skill-harness.config.qmd` before OpenClaw
 This release also removes `plugins.entries.skill-harness.config.instruction`. OpenClaw validates the strict plugin config schema before the plugin runtime loads, so a retained `instruction` block prevents the upgraded plugin from loading.
 
 After adding QMD, remove the entire legacy `instruction: { ... }` block from `plugins.entries.skill-harness.config`. There is no automatic migration or compatibility parser.
+
+### Static working-set migration
+
+Move static skill selections into the plugin-owned `workingSetSkills` block:
+
+```json5
+{
+  agents: {
+    defaults: { skills: [] },
+    entries: {
+      main: { skills: [] },
+    },
+  },
+  plugins: {
+    entries: {
+      "skill-harness": {
+        config: {
+          workingSetSkills: {
+            defaults: ["safe-default"],
+            agents: { main: ["agent-first"] },
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+The plugin resolves an agent-specific list before shared defaults, then appends workspace-only skills. It intentionally does not consume or rewrite OpenClaw's native `skills` lists. The plugin does not edit `openclaw.json` automatically; an operator should apply the cutover separately and validate only the affected JSON paths rather than gating on a whole-file hash, because formatting and unrelated live runtime fields may change during normal use.
 
 ## Runtime intents
 
@@ -425,7 +457,7 @@ Skill Harness keeps package files and runtime state separate. The paths below us
 | `~/.openclaw/plugins/skill-harness/stats.json`         | Fresh schema-v6 intent, route-reason score, intent-matched skill, tool, routing, projection, inventory, and daily telemetry. |
 | `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v8 Review outcomes, experience writes, and completed placement epochs; compatible v7 records migrate on load.         |
 
-Session cleanup preserves the ended main-session record and removes only expired session JSON plus embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json` artifacts. It does not delete root-level runtime state, intents, skills, unrelated transcripts, or package files. Retired intent-state fields such as `instructionText` are stripped when retained sessions are loaded; this cleanup never controls routing.
+Session cleanup preserves the ended main-session record and removes only expired session JSON plus embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json` artifacts. It does not delete root-level runtime state, intents, skills, unrelated transcripts, or package files. Retained session intent state uses `intentMatchedSkills`; retired fields such as `recommendedSkills` and unknown intent fields are discarded when sessions are loaded rather than copied into the current schema. This cleanup never controls routing.
 
 ### Interpreting observations
 
@@ -443,7 +475,13 @@ Schema v6 does not migrate or rewrite schema-v1 through schema-v5 files: older t
 
 Changing a live OpenClaw configuration is a separate, confirmation-gated operation. Prepare and validate a sealed migration batch first; before applying it, require explicit confirmation naming the batch, its precondition, the target `openclaw.json`, any conditional telemetry reset, Gateway restart impact, and rollback pair. Until that confirmation, do not edit native agent skill lists or runtime state. After the confirmed cutover, `workingSetSkills` is the plugin's only static source and the native lists are intentionally empty.
 
-Historical assembled prompt forms, including the retired candidate-skills header and `<skill_candidates>` wrapper, are recognized only by conversation sanitization so retained text cannot be reclassified as current context. They are not emitted by the current renderer.
+Retired candidate-skills headers and the `<skill_candidates>` wrapper are not emitted by the current renderer. Sanitization targets the current routing block and known OpenClaw runtime envelopes so retained runtime text cannot be reclassified as current user context.
+
+### Conversation-history sanitization
+
+Conversation history is sanitized at the message boundary before routing context is assembled. The sanitizer removes the current OpenClaw timestamp plus `Conversation info: ⟦openclaw:ctx⟧` fenced JSON envelope, the legacy `Sender (untrusted metadata)` form, Skill Harness routing blocks, active-memory blocks, and OpenClaw internal runtime delimiters. It also reduces an OpenClaw assembled-context envelope to the text after `</conversation_context>` and `Current user request:` when that form is present.
+
+The history extractor keeps role-tagged user and assistant messages separate. A user entry containing only runtime metadata sanitizes to empty and is ignored; its following assistant message can still complete the preceding external user turn. Inter-session or internal task-completion user entries and their following assistant payloads are excluded. Sanitization removes injected wrappers but does not emit them again, and the current renderer never writes `<skill_metadata>`.
 
 ## Development
 
@@ -508,6 +546,11 @@ hybrid search over intent `examples` and `keywords` with conversation expansion;
 projects candidate intents and invokes a single LLM intent classifier call only
 when no direct QMD match reaches the threshold. Every eligible normal agent still receives
 fixed skill-discovery context even when dynamic intent routing is skipped or fails.
+
+That fixed context is rendered from plugin-owned `workingSetSkills` plus workspace
+skills. Dynamic context records the selected `intentMatchedSkills` in the session and
+stats state; it does not reuse OpenClaw's native agent skill lists or emit a separate
+skill metadata wrapper.
 
 Intent Review is disabled by default; when enabled, its runtime intent edits are
 serialized so concurrent reviews cannot race on the runtime catalog.
