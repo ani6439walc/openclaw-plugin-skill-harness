@@ -106,7 +106,7 @@ describe("createPlugin working-set prompt integration", () => {
       pluginConfig: { scope: { agents: ["main"] } },
     });
 
-    expect(context).not.toContain("<configured_skills>");
+    expect(context).not.toContain("<working_set_skills>");
     expect(context).not.toContain('<skill name="static-known">');
     expect(context).not.toContain("native-default-must-not-load");
     expect(context).not.toContain("native-main-must-not-load");
@@ -138,8 +138,8 @@ describe("createPlugin working-set prompt integration", () => {
       },
     });
 
-    expect(context).toContain("### Configured skills");
-    expect(context).toContain("<configured_skills>");
+    expect(context).toContain("### Working set skills");
+    expect(context).toContain("<working_set_skills>");
     expect(context).toContain('<skill name="static-known">');
     expect(context).not.toContain("<available_skills>");
   });
@@ -172,8 +172,8 @@ describe("createPlugin working-set prompt integration", () => {
       },
     });
 
-    expect(context).toContain("### Configured skills");
-    expect(context).toContain("<configured_skills>");
+    expect(context).toContain("### Working set skills");
+    expect(context).toContain("<working_set_skills>");
     expect(context).toContain('<skill name="runtime-root-skill">');
     expect(context).not.toContain("<available_skills>");
   });
@@ -197,8 +197,8 @@ describe("createPlugin working-set prompt integration", () => {
       },
     });
 
-    expect(context).not.toContain("### Configured skills");
-    expect(context).not.toContain("<configured_skills>");
+    expect(context).not.toContain("### Working set skills");
+    expect(context).not.toContain("<working_set_skills>");
     expect(context).not.toContain('<skill name="');
   });
 
@@ -263,7 +263,7 @@ describe("createPlugin working-set prompt integration", () => {
         },
       });
 
-      expect(context).toContain("<configured_skills>");
+      expect(context).toContain("<working_set_skills>");
       expect(context).toContain('<skill name="runtime-skill">');
     },
   );

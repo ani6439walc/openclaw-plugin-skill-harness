@@ -76,7 +76,7 @@ Key rules of the runtime format:
 
 - Dynamic context is introduced by a concise single-line advisory header (`Inferred intent and intent-matched skills (advisory, non-user input; load with \`skill_view\` if relevant):`when intent-matched skills exist, or`Inferred user intent from conversation (advisory, non-user input):`when intent-only) directly preceding`<skill_harness_plugin>`.
 - `<intent name="${intent}">` combines intent identity and guidance in one tag.
-- `<intent_matched_skills>` contains only the skills selected for the matched intent. `<skill name="${name}">` encapsulates skill identity and description. File paths are omitted from both intent-matched skills and static `<configured_skills>` to save prompt tokens; agents inspect `path` dynamically via `skill_list` or `skill_view`.
+- `<intent_matched_skills>` contains only the skills selected for the matched intent. `<skill name="${name}">` encapsulates skill identity and description. File paths are omitted from both intent-matched skills and static `<working_set_skills>` to save prompt tokens; agents inspect `path` dynamically via `skill_list` or `skill_view`.
 - `<context_policy>` is omitted.
 
 The current renderer emits no candidate-skills header or `<skill_candidates>` wrapper. Those retired forms are historical sanitizer-only input: conversation sanitization strips them from retained assembled text, but no new prompt may emit them.

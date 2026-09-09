@@ -105,7 +105,7 @@ graph TD
   M --> N[Record stats and optionally review the completed turn]
 ```
 
-Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<configured_skills>` block is the ordered union of plugin-owned `workingSetSkills` and skills discovered from that agent's workspace `skills/` tree: the agent-specific working set precedes shared `defaults`, workspace-only skills append, and duplicate names retain their explicit-list position while resolving to the workspace-precedence skill content. Native OpenClaw `agents.*.skills` lists are not a plugin source after cutover. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `scope.agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid example/keyword retrieval with expansion, and candidate scoring for Step 3 fallback classification.
+Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<working_set_skills>` block is the ordered union of plugin-owned `workingSetSkills` and skills discovered from that agent's workspace `skills/` tree: the agent-specific working set precedes shared `defaults`, workspace-only skills append, and duplicate names retain their explicit-list position while resolving to the workspace-precedence skill content. Native OpenClaw `agents.*.skills` lists are not a plugin source after cutover. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `scope.agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid example/keyword retrieval with expansion, and candidate scoring for Step 3 fallback classification.
 
 ### Architecture and routing contract
 
@@ -131,15 +131,15 @@ Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness
 **Static configured skills (appended to system context)**:
 
 ```markdown
-### Configured skills
+### Working set skills
 
 When relevant, load with `skill_view` before proceeding:
 
-<configured_skills>
+<working_set_skills>
 <skill name="browser">
 Automate web browsing and interaction.
 </skill>
-</configured_skills>
+</working_set_skills>
 ```
 
 **Dynamic routing context (prepended before user message)**:
@@ -354,7 +354,7 @@ Skill Harness registers four runtime tools for agents to discover, search, view,
 - **`skill_list`**: Lists all available skills across bundled, workspace, and configured roots.
   - **Inputs**: None.
   - **Returns**: `{ skills: Array<{ name, description, path, source }> }`.
-  - **Note**: Because prompt injection (`<configured_skills>` and `<intent_matched_skills>`) omits file paths to conserve tokens, agents obtain the filesystem `path` through `skill_list` or view skill contents and reference files directly via `skill_view`.
+  - **Note**: Because prompt injection (`<working_set_skills>` and `<intent_matched_skills>`) omits file paths to conserve tokens, agents obtain the filesystem `path` through `skill_list` or view skill contents and reference files directly via `skill_view`.
 
 - **`skill_search`**: Hybrid semantic/lexical discovery over skill metadata, full bodies, and references via QMD.
   - **Inputs**:

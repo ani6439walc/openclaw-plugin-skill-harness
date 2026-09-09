@@ -509,6 +509,6 @@ export function formatConfiguredSkills(
   skills: AvailableSkill[] | undefined,
 ): string {
   if (!skills?.length) return "";
-  const xml = formatSkillXmlBlock("configured_skills", skills);
-  return `### Configured skills\n\nWhen relevant, load with \`skill_view\` before proceeding:\n\n${UNTRUSTED_SKILL_METADATA_MARKER}\n${xml}`;
+  const xml = formatSkillXmlBlock("working_set_skills", skills);
+  return `### Working set skills\n\nWhen relevant, load with \`skill_view\` before proceeding:\n\n${UNTRUSTED_SKILL_METADATA_MARKER}\n${xml}`;
 }

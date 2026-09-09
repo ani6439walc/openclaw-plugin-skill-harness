@@ -963,8 +963,8 @@ export function createHookHandlers(deps: HookDeps) {
       const configuredSkillsXml = formatConfiguredSkills(skills);
       logger.info("configured skills static context emitted", {
         configuredSkillCount: skills.length,
-        staticHeader: configuredSkillsXml.includes("### Configured skills"),
-        configuredWrapper: configuredSkillsXml.includes("<configured_skills>"),
+        staticHeader: configuredSkillsXml.includes("### Working set skills"),
+        configuredWrapper: configuredSkillsXml.includes("<working_set_skills>"),
         configuredSkillTag: configuredSkillsXml.includes("<skill "),
       });
       return configuredSkillsXml;

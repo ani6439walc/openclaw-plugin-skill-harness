@@ -276,6 +276,21 @@ describe("buildRoutingContext", () => {
 });
 
 describe("formatConfiguredSkills", () => {
+  it("uses working-set naming in the static prompt contract", () => {
+    const formatted = formatConfiguredSkills([
+      {
+        name: "working-set-skill",
+        description: "A skill for working-set naming.",
+        location: "/path/to/working-set-skill/SKILL.md",
+      },
+    ]);
+
+    expect(formatted).toContain("### Working set skills");
+    expect(formatted).toContain("<working_set_skills>");
+    expect(formatted).not.toContain("### Configured skills");
+    expect(formatted).not.toContain("<configured_skills>");
+  });
+
   it("quarantines adversarial configured-skill descriptions as untrusted reference-only metadata", () => {
     const formatted = formatConfiguredSkills([
       {
@@ -304,11 +319,11 @@ describe("formatConfiguredSkills", () => {
       },
     ];
     const formatted = formatConfiguredSkills(skills);
-    expect(formatted).toContain("<configured_skills>");
+    expect(formatted).toContain("<working_set_skills>");
     expect(formatted).toContain('  <skill name="test-skill">');
     expect(formatted).toContain("\n  </skill>");
     expect(formatted).not.toContain("<path>");
-    expect(formatted).toContain("### Configured skills");
+    expect(formatted).toContain("### Working set skills");
     expect(formatted).toContain("<skill_metadata kind=");
   });
 

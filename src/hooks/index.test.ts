@@ -2448,7 +2448,7 @@ describe("createHookHandlers internal turn guards", () => {
 
         expect(result?.prependContext).toBeUndefined();
         expect(systemContext).toContain(SKILL_HARNESS_SYSTEM_CONTEXT);
-        expect(systemContext).toContain("<configured_skills>");
+        expect(systemContext).toContain("<working_set_skills>");
         expect(systemContext).toContain('<skill name="static-scope">');
         expect(systemContext).toContain("Static scope workspace skill.");
         expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
@@ -4633,11 +4633,11 @@ Current user request: fresh clean request
     expect(result?.appendSystemContext).toContain(
       "### Using Skill Harness context",
     );
-    expect(result?.appendSystemContext).toContain("### Configured skills");
+    expect(result?.appendSystemContext).toContain("### Working set skills");
     expect(result?.appendSystemContext).toContain(
       "When relevant, load with `skill_view` before proceeding:",
     );
-    expect(result?.appendSystemContext).toContain("<configured_skills>");
+    expect(result?.appendSystemContext).toContain("<working_set_skills>");
     expect(result?.appendSystemContext).toContain(
       '<skill name="skill-harness">',
     );
@@ -4740,7 +4740,7 @@ Current user request: fresh clean request
     const systemContext = result?.appendSystemContext ?? "";
 
     expect(getConfiguredAgentSkills).toHaveBeenCalledWith("main");
-    expect(systemContext).toContain("<configured_skills>");
+    expect(systemContext).toContain("<working_set_skills>");
     expect(systemContext).toContain('<skill name="direct">');
     expect(systemContext).toContain("Direct workspace skill.");
     expect(systemContext).toContain('<skill name="nested">');
@@ -4827,8 +4827,8 @@ Current user request: fresh clean request
         "shared-default-v2",
         "workspace-only",
       ]);
-      expect(first?.appendSystemContext).toContain("### Configured skills");
-      expect(first?.appendSystemContext).toContain("<configured_skills>");
+      expect(first?.appendSystemContext).toContain("### Working set skills");
+      expect(first?.appendSystemContext).toContain("<working_set_skills>");
       expect(classifier).not.toHaveBeenCalled();
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -5231,7 +5231,7 @@ Current user request: fresh clean request
     expect(result?.appendSystemContext).not.toContain(
       "### Using Skill Harness context",
     );
-    expect(result?.appendSystemContext).toContain("<configured_skills>");
+    expect(result?.appendSystemContext).toContain("<working_set_skills>");
     expect(classifier).not.toHaveBeenCalled();
   });
 });
