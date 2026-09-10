@@ -42,6 +42,10 @@ describe("resolveConfig", () => {
             type: "boolean",
             default: true,
           },
+          suppressNativeSkillPrompt: {
+            type: "boolean",
+            default: true,
+          },
         },
       });
       expect(resolveConfig({}).skills.search.collectionWeights).toEqual({
@@ -153,6 +157,7 @@ describe("resolveConfig", () => {
         agents: { writer: ["draft", "shared", "general"] },
         includeWorkspaceSkills: true,
         includeWorkshopSkills: true,
+        suppressNativeSkillPrompt: true,
       });
     });
 
@@ -175,6 +180,17 @@ describe("resolveConfig", () => {
         resolveConfig({
           workingSetSkills: { includeWorkshopSkills: false },
         }).workingSetSkills.includeWorkshopSkills,
+      ).toBe(false);
+    });
+
+    it("resolves suppressNativeSkillPrompt with default true and respects boolean setting", () => {
+      expect(resolveConfig({}).workingSetSkills.suppressNativeSkillPrompt).toBe(
+        true,
+      );
+      expect(
+        resolveConfig({
+          workingSetSkills: { suppressNativeSkillPrompt: false },
+        }).workingSetSkills.suppressNativeSkillPrompt,
       ).toBe(false);
     });
 

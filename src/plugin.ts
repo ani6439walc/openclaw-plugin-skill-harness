@@ -18,6 +18,7 @@ import { IntentReviewLogWriter } from "./review/log-writer.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
 import { resolveSkillRoots } from "./skills/roots.js";
+import { suppressNativeSkillsOnStartup } from "./skills/suppress-native.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
 import { createIntentQmdIndex } from "./qmd/intent-index.js";
 import { createSkillQmdIndex } from "./qmd/skill-index.js";
@@ -322,6 +323,13 @@ export function createPlugin(
         scheduleSkillSearchIndex,
         bundledSkillsDir: deps.bundledSkillsDir,
       });
+
+      if (
+        canAccessRuntime &&
+        config.workingSetSkills.suppressNativeSkillPrompt
+      ) {
+        void suppressNativeSkillsOnStartup({ api });
+      }
     },
   });
 }
