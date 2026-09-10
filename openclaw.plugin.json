@@ -84,6 +84,16 @@
             "type": "boolean",
             "default": true,
             "description": "Alias for includeWorkspaceSkills: whether to automatically discover and append workspace-only skills to the static working set."
+          },
+          "includeWorkshopSkills": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to automatically discover and append agent-specific workshop skills (.openclaw/agents/<agentId>/agent/workshop-skills/) to the agent's static working set."
+          },
+          "autoLoadWorkshopSkills": {
+            "type": "boolean",
+            "default": true,
+            "description": "Alias for includeWorkshopSkills: whether to automatically discover and append agent-specific workshop skills to the static working set."
           }
         }
       },

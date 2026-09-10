@@ -947,6 +947,26 @@ export function createHookHandlers(deps: HookDeps) {
         }
       }
 
+      let workshopSkills: Awaited<ReturnType<typeof listAvailableSkills>> = [];
+      const includeWorkshopSkills =
+        deps.config?.().workingSetSkills?.includeWorkshopSkills ?? true;
+      if (includeWorkshopSkills) {
+        try {
+          workshopSkills = await listAvailableSkills({
+            api,
+            agentId,
+            bundledSkillsDir,
+            source: "workshop",
+            usageStats: {},
+          });
+        } catch (error) {
+          logger.warn("failed to resolve agent workshop skills", {
+            errorType: error instanceof Error ? "Error" : typeof error,
+            workshopSkillCount: 0,
+          });
+        }
+      }
+
       const skills = [...explicitSkills];
       const seen = new Set(
         explicitSkills.map((skill) => skill.name.trim().toLowerCase()),
@@ -957,9 +977,15 @@ export function createHookHandlers(deps: HookDeps) {
         skills.push(skill);
         seen.add(normalizedName);
       }
+      for (const skill of workshopSkills) {
+        const normalizedName = skill.name.trim().toLowerCase();
+        if (seen.has(normalizedName)) continue;
+        skills.push(skill);
+        seen.add(normalizedName);
+      }
       if (!skills.length) {
         logger.info(
-          "no working-set or workspace agent skills could be resolved",
+          "no working-set, workspace, or workshop agent skills could be resolved",
           { workingSetSkillCount: 0 },
         );
         return undefined;

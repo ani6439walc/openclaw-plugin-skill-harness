@@ -73,6 +73,7 @@ export type ResolvedWorkingSetSkillsConfig = {
   defaults: string[];
   agents: Record<string, string[]>;
   includeWorkspaceSkills: boolean;
+  includeWorkshopSkills: boolean;
 };
 
 export type ResolvedQmdConfig = {

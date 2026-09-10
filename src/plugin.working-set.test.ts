@@ -300,4 +300,41 @@ describe("createPlugin working-set prompt integration", () => {
     });
     expect(contextWithoutAutoLoad).not.toContain("workspace-skill");
   });
+
+  it("suppresses agent workshop skills when workingSetSkills.includeWorkshopSkills is false", async () => {
+    const workshopSkillDir = path.join(
+      stateDir,
+      "agents",
+      "main",
+      "agent",
+      "workshop-skills",
+      "agent-workshop-skill",
+    );
+    fs.mkdirSync(workshopSkillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workshopSkillDir, "SKILL.md"),
+      "---\nname: agent-workshop-skill\ndescription: Workshop fixture.\n---\n",
+      "utf8",
+    );
+
+    const contextWithAutoLoad = await invoke();
+    expect(contextWithAutoLoad).toContain(
+      '<skill name="agent-workshop-skill">',
+    );
+
+    const contextWithoutAutoLoad = await invoke({
+      runtimeConfig: {
+        plugins: {
+          entries: {
+            "skill-harness": {
+              config: {
+                workingSetSkills: { includeWorkshopSkills: false },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(contextWithoutAutoLoad).not.toContain("agent-workshop-skill");
+  });
 });

@@ -42,6 +42,14 @@ describe("resolveConfig", () => {
             type: "boolean",
             default: true,
           },
+          includeWorkshopSkills: {
+            type: "boolean",
+            default: true,
+          },
+          autoLoadWorkshopSkills: {
+            type: "boolean",
+            default: true,
+          },
         },
       });
       expect(resolveConfig({}).skills.search.collectionWeights).toEqual({
@@ -152,6 +160,7 @@ describe("resolveConfig", () => {
         defaults: ["shared", "general"],
         agents: { writer: ["draft", "shared", "general"] },
         includeWorkspaceSkills: true,
+        includeWorkshopSkills: true,
       });
     });
 
@@ -168,6 +177,22 @@ describe("resolveConfig", () => {
         resolveConfig({
           workingSetSkills: { autoLoadWorkspaceSkills: false },
         }).workingSetSkills.includeWorkspaceSkills,
+      ).toBe(false);
+    });
+
+    it("resolves includeWorkshopSkills with default true and respects boolean setting or alias", () => {
+      expect(resolveConfig({}).workingSetSkills.includeWorkshopSkills).toBe(
+        true,
+      );
+      expect(
+        resolveConfig({
+          workingSetSkills: { includeWorkshopSkills: false },
+        }).workingSetSkills.includeWorkshopSkills,
+      ).toBe(false);
+      expect(
+        resolveConfig({
+          workingSetSkills: { autoLoadWorkshopSkills: false },
+        }).workingSetSkills.includeWorkshopSkills,
       ).toBe(false);
     });
 

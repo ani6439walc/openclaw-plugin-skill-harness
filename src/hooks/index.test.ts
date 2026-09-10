@@ -4760,6 +4760,90 @@ Current user request: fresh clean request
     expect(systemContext).not.toContain("<working_set_skills>");
   });
 
+  it("automatically appends agent workshop skills when workingSetSkills.includeWorkshopSkills is default", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-workshop-skills-default-"),
+    );
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(stateDir, "agents", "main", "agent", "workshop-skills"),
+      "agent-workshop-skill",
+      "Workshop skill description.",
+    );
+    const getWorkingSetSkills = vi.fn().mockResolvedValue([]);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: {
+        workingSetSkills: { includeWorkspaceSkills: false },
+      },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getWorkingSetSkills,
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "unrelated message",
+        messages: [{ role: "user", content: "unrelated message" }],
+      } as never,
+      ctx,
+    );
+    const systemContext = result?.appendSystemContext ?? "";
+
+    expect(systemContext).toContain("<working_set_skills>");
+    expect(systemContext).toContain('<skill name="agent-workshop-skill">');
+    expect(systemContext).toContain("Workshop skill description.");
+  });
+
+  it("omits agent workshop skills when workingSetSkills.includeWorkshopSkills is false", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-suppress-workshop-skills-"),
+    );
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(stateDir, "agents", "main", "agent", "workshop-skills"),
+      "suppressed-workshop-skill",
+      "Workshop skill to suppress.",
+    );
+    const getWorkingSetSkills = vi.fn().mockResolvedValue([]);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: {
+        workingSetSkills: {
+          includeWorkspaceSkills: false,
+          includeWorkshopSkills: false,
+        },
+      },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getWorkingSetSkills,
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "unrelated message",
+        messages: [{ role: "user", content: "unrelated message" }],
+      } as never,
+      ctx,
+    );
+    const systemContext = result?.appendSystemContext ?? "";
+
+    expect(systemContext).not.toContain("suppressed-workshop-skill");
+    expect(systemContext).not.toContain("<working_set_skills>");
+  });
+
   it("refreshes the live agent-first working set before static injection for agents excluded from dynamic routing", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-live-working-set-refresh-"),

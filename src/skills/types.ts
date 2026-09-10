@@ -2,6 +2,7 @@ export const SKILL_SOURCE_ORDER = [
   "workspace",
   "project-agent",
   "personal-agent",
+  "workshop",
   "managed",
   "plugin",
   "bundled",
