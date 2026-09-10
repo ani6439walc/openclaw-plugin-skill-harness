@@ -267,4 +267,37 @@ describe("createPlugin working-set prompt integration", () => {
       expect(context).toContain('<skill name="runtime-skill">');
     },
   );
+
+  it("suppresses workspace skills when workingSetSkills.includeWorkspaceSkills is false", async () => {
+    const workspaceSkillDir = path.join(
+      stateDir,
+      "workspace",
+      "skills",
+      "workspace-skill",
+    );
+    fs.mkdirSync(workspaceSkillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceSkillDir, "SKILL.md"),
+      "---\nname: workspace-skill\ndescription: Workspace fixture.\n---\n",
+      "utf8",
+    );
+
+    const contextWithAutoLoad = await invoke();
+    expect(contextWithAutoLoad).toContain('<skill name="workspace-skill">');
+
+    const contextWithoutAutoLoad = await invoke({
+      runtimeConfig: {
+        plugins: {
+          entries: {
+            "skill-harness": {
+              config: {
+                workingSetSkills: { includeWorkspaceSkills: false },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(contextWithoutAutoLoad).not.toContain("workspace-skill");
+  });
 });

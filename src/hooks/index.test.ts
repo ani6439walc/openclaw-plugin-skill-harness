@@ -4720,6 +4720,46 @@ Current user request: fresh clean request
     expect(systemContext).toContain("Nested workspace skill.");
   });
 
+  it("omits workspace skills when workingSetSkills.includeWorkspaceSkills is false", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-suppress-workspace-skills-"),
+    );
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    writeSkill(
+      path.join(workspaceDir, "skills"),
+      "suppressed-workspace-skill",
+      "Workspace skill to suppress.",
+    );
+    const getWorkingSetSkills = vi.fn().mockResolvedValue([]);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: {
+        workingSetSkills: { includeWorkspaceSkills: false },
+      },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => stateDir },
+          agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+        } as never,
+      },
+      bundledSkillsDir: "",
+      getWorkingSetSkills,
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      {
+        prompt: "unrelated message",
+        messages: [{ role: "user", content: "unrelated message" }],
+      } as never,
+      ctx,
+    );
+    const systemContext = result?.appendSystemContext ?? "";
+
+    expect(systemContext).not.toContain("suppressed-workspace-skill");
+    expect(systemContext).not.toContain("<working_set_skills>");
+  });
+
   it("refreshes the live agent-first working set before static injection for agents excluded from dynamic routing", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-live-working-set-refresh-"),

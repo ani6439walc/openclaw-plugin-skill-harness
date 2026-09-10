@@ -928,19 +928,23 @@ export function createHookHandlers(deps: HookDeps) {
       }
 
       let workspaceSkills: Awaited<ReturnType<typeof listAvailableSkills>> = [];
-      try {
-        workspaceSkills = await listAvailableSkills({
-          api,
-          agentId,
-          bundledSkillsDir,
-          source: "workspace",
-          usageStats: {},
-        });
-      } catch (error) {
-        logger.warn("failed to resolve workspace agent skills", {
-          errorType: error instanceof Error ? "Error" : typeof error,
-          workspaceSkillCount: 0,
-        });
+      const includeWorkspaceSkills =
+        deps.config?.().workingSetSkills?.includeWorkspaceSkills ?? true;
+      if (includeWorkspaceSkills) {
+        try {
+          workspaceSkills = await listAvailableSkills({
+            api,
+            agentId,
+            bundledSkillsDir,
+            source: "workspace",
+            usageStats: {},
+          });
+        } catch (error) {
+          logger.warn("failed to resolve workspace agent skills", {
+            errorType: error instanceof Error ? "Error" : typeof error,
+            workspaceSkillCount: 0,
+          });
+        }
       }
 
       const skills = [...explicitSkills];

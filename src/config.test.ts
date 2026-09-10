@@ -34,6 +34,14 @@ describe("resolveConfig", () => {
             type: "object",
             additionalProperties: { type: "array", items: { type: "string" } },
           },
+          includeWorkspaceSkills: {
+            type: "boolean",
+            default: true,
+          },
+          autoLoadWorkspaceSkills: {
+            type: "boolean",
+            default: true,
+          },
         },
       });
       expect(resolveConfig({}).skills.search.collectionWeights).toEqual({
@@ -143,7 +151,24 @@ describe("resolveConfig", () => {
       expect(result.workingSetSkills).toEqual({
         defaults: ["shared", "general"],
         agents: { writer: ["draft", "shared", "general"] },
+        includeWorkspaceSkills: true,
       });
+    });
+
+    it("resolves includeWorkspaceSkills with default true and respects boolean setting or alias", () => {
+      expect(resolveConfig({}).workingSetSkills.includeWorkspaceSkills).toBe(
+        true,
+      );
+      expect(
+        resolveConfig({
+          workingSetSkills: { includeWorkspaceSkills: false },
+        }).workingSetSkills.includeWorkspaceSkills,
+      ).toBe(false);
+      expect(
+        resolveConfig({
+          workingSetSkills: { autoLoadWorkspaceSkills: false },
+        }).workingSetSkills.includeWorkspaceSkills,
+      ).toBe(false);
     });
 
     it("rejects malformed working-set objects and colliding canonical agent IDs", () => {

@@ -74,6 +74,16 @@
                 "type": "string"
               }
             }
+          },
+          "includeWorkspaceSkills": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to automatically discover and append workspace-only skills (<workspaceDir>/skills/) to the static working set."
+          },
+          "autoLoadWorkspaceSkills": {
+            "type": "boolean",
+            "default": true,
+            "description": "Alias for includeWorkspaceSkills: whether to automatically discover and append workspace-only skills to the static working set."
           }
         }
       },
