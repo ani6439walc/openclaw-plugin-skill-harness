@@ -38,15 +38,7 @@ describe("resolveConfig", () => {
             type: "boolean",
             default: true,
           },
-          autoLoadWorkspaceSkills: {
-            type: "boolean",
-            default: true,
-          },
           includeWorkshopSkills: {
-            type: "boolean",
-            default: true,
-          },
-          autoLoadWorkshopSkills: {
             type: "boolean",
             default: true,
           },
@@ -164,7 +156,7 @@ describe("resolveConfig", () => {
       });
     });
 
-    it("resolves includeWorkspaceSkills with default true and respects boolean setting or alias", () => {
+    it("resolves includeWorkspaceSkills with default true and respects boolean setting", () => {
       expect(resolveConfig({}).workingSetSkills.includeWorkspaceSkills).toBe(
         true,
       );
@@ -173,25 +165,15 @@ describe("resolveConfig", () => {
           workingSetSkills: { includeWorkspaceSkills: false },
         }).workingSetSkills.includeWorkspaceSkills,
       ).toBe(false);
-      expect(
-        resolveConfig({
-          workingSetSkills: { autoLoadWorkspaceSkills: false },
-        }).workingSetSkills.includeWorkspaceSkills,
-      ).toBe(false);
     });
 
-    it("resolves includeWorkshopSkills with default true and respects boolean setting or alias", () => {
+    it("resolves includeWorkshopSkills with default true and respects boolean setting", () => {
       expect(resolveConfig({}).workingSetSkills.includeWorkshopSkills).toBe(
         true,
       );
       expect(
         resolveConfig({
           workingSetSkills: { includeWorkshopSkills: false },
-        }).workingSetSkills.includeWorkshopSkills,
-      ).toBe(false);
-      expect(
-        resolveConfig({
-          workingSetSkills: { autoLoadWorkshopSkills: false },
         }).workingSetSkills.includeWorkshopSkills,
       ).toBe(false);
     });

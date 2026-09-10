@@ -318,9 +318,7 @@ const WorkingSetSkillsSchema = z
     defaults: WorkingSetStringListSchema.optional().default([]),
     agents: WorkingSetAgentsSchema.optional().default({}),
     includeWorkspaceSkills: z.boolean().optional(),
-    autoLoadWorkspaceSkills: z.boolean().optional(),
     includeWorkshopSkills: z.boolean().optional(),
-    autoLoadWorkshopSkills: z.boolean().optional(),
   })
   .strict()
   .transform((value): ResolvedWorkingSetSkillsConfig => ({
@@ -331,10 +329,8 @@ const WorkingSetSkillsSchema = z
         [...new Set([...skillNames, ...value.defaults])],
       ]),
     ),
-    includeWorkspaceSkills:
-      value.includeWorkspaceSkills ?? value.autoLoadWorkspaceSkills ?? true,
-    includeWorkshopSkills:
-      value.includeWorkshopSkills ?? value.autoLoadWorkshopSkills ?? true,
+    includeWorkspaceSkills: value.includeWorkspaceSkills ?? true,
+    includeWorkshopSkills: value.includeWorkshopSkills ?? true,
   }));
 
 function resolveWorkingSetSkillsConfig(
