@@ -9,6 +9,12 @@ export type ConfigMutateFn = (params: {
   afterWrite: { mode: "auto" } | "none" | "reload" | "restart";
 }) => Promise<unknown>;
 
+export interface OpenClawRuntimeWithConfig {
+  config?: {
+    mutateConfigFile?: ConfigMutateFn;
+  };
+}
+
 export interface SuppressNativeSkillsOptions {
   api: Pick<OpenClawPluginApi, "config"> & {
     runtime?: unknown;
@@ -19,7 +25,7 @@ export interface SuppressNativeSkillsOptions {
 /**
  * Checks if OpenClaw native skills are already completely suppressed:
  * 1. agents.defaults.skills is an empty array ([]).
- * 2. No agent in agents.entries has a defined skills property.
+ * 2. No agent in agents.entries has a defined non-empty skills property.
  */
 export function isNativeSkillsSuppressed(
   config: OpenClawConfig | undefined,
@@ -37,10 +43,15 @@ export function isNativeSkillsSuppressed(
       if (
         entry &&
         typeof entry === "object" &&
-        Object.hasOwn(entry, "skills") &&
-        (entry as { skills?: unknown }).skills !== undefined
+        Object.hasOwn(entry, "skills")
       ) {
-        return false;
+        const skills = (entry as { skills?: unknown }).skills;
+        if (
+          skills !== undefined &&
+          !(Array.isArray(skills) && skills.length === 0)
+        ) {
+          return false;
+        }
       }
     }
   }
@@ -69,9 +80,7 @@ export async function suppressNativeSkillsOnStartup(
   if (!mutateFn) {
     try {
       if (options.api.runtime && typeof options.api.runtime === "object") {
-        const runtimeObj = options.api.runtime as {
-          config?: { mutateConfigFile?: ConfigMutateFn };
-        };
+        const runtimeObj = options.api.runtime as OpenClawRuntimeWithConfig;
         mutateFn = runtimeObj.config?.mutateConfigFile;
       }
     } catch {

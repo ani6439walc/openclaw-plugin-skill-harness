@@ -25,7 +25,7 @@ describe("isNativeSkillsSuppressed", () => {
     ).toBe(false);
   });
 
-  it("returns false when any agent entry contains skills (even empty array)", () => {
+  it("returns false when any agent entry contains non-empty skills", () => {
     expect(
       isNativeSkillsSuppressed({
         agents: {
@@ -36,20 +36,9 @@ describe("isNativeSkillsSuppressed", () => {
         },
       } as OpenClawConfig),
     ).toBe(false);
-
-    expect(
-      isNativeSkillsSuppressed({
-        agents: {
-          defaults: { skills: [] },
-          entries: {
-            worker: { skills: [] },
-          },
-        },
-      } as OpenClawConfig),
-    ).toBe(false);
   });
 
-  it("returns true when agents.defaults.skills is [] and no entries have skills", () => {
+  it("returns true when agents.defaults.skills is [] and entries have no or empty skills", () => {
     expect(
       isNativeSkillsSuppressed({
         agents: {
@@ -64,6 +53,17 @@ describe("isNativeSkillsSuppressed", () => {
           defaults: { skills: [] },
           entries: {
             worker: { workspace: "/tmp/workspace" },
+          },
+        },
+      } as OpenClawConfig),
+    ).toBe(true);
+
+    expect(
+      isNativeSkillsSuppressed({
+        agents: {
+          defaults: { skills: [] },
+          entries: {
+            worker: { skills: [] },
           },
         },
       } as OpenClawConfig),
