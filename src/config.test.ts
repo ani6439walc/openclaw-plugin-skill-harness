@@ -34,6 +34,18 @@ describe("resolveConfig", () => {
             type: "object",
             additionalProperties: { type: "array", items: { type: "string" } },
           },
+          includeWorkspaceSkills: {
+            type: "boolean",
+            default: true,
+          },
+          includeWorkshopSkills: {
+            type: "boolean",
+            default: true,
+          },
+          suppressNativeSkillPrompt: {
+            type: "boolean",
+            default: true,
+          },
         },
       });
       expect(resolveConfig({}).skills.search.collectionWeights).toEqual({
@@ -143,7 +155,43 @@ describe("resolveConfig", () => {
       expect(result.workingSetSkills).toEqual({
         defaults: ["shared", "general"],
         agents: { writer: ["draft", "shared", "general"] },
+        includeWorkspaceSkills: true,
+        includeWorkshopSkills: true,
+        suppressNativeSkillPrompt: true,
       });
+    });
+
+    it("resolves includeWorkspaceSkills with default true and respects boolean setting", () => {
+      expect(resolveConfig({}).workingSetSkills.includeWorkspaceSkills).toBe(
+        true,
+      );
+      expect(
+        resolveConfig({
+          workingSetSkills: { includeWorkspaceSkills: false },
+        }).workingSetSkills.includeWorkspaceSkills,
+      ).toBe(false);
+    });
+
+    it("resolves includeWorkshopSkills with default true and respects boolean setting", () => {
+      expect(resolveConfig({}).workingSetSkills.includeWorkshopSkills).toBe(
+        true,
+      );
+      expect(
+        resolveConfig({
+          workingSetSkills: { includeWorkshopSkills: false },
+        }).workingSetSkills.includeWorkshopSkills,
+      ).toBe(false);
+    });
+
+    it("resolves suppressNativeSkillPrompt with default true and respects boolean setting", () => {
+      expect(resolveConfig({}).workingSetSkills.suppressNativeSkillPrompt).toBe(
+        true,
+      );
+      expect(
+        resolveConfig({
+          workingSetSkills: { suppressNativeSkillPrompt: false },
+        }).workingSetSkills.suppressNativeSkillPrompt,
+      ).toBe(false);
     });
 
     it("rejects malformed working-set objects and colliding canonical agent IDs", () => {

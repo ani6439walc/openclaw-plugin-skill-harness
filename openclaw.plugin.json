@@ -74,6 +74,21 @@
                 "type": "string"
               }
             }
+          },
+          "includeWorkspaceSkills": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to automatically discover and append workspace-only skills (<workspaceDir>/skills/) to the static working set."
+          },
+          "includeWorkshopSkills": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to automatically discover and append agent-specific workshop skills (.openclaw/agents/<agentId>/agent/workshop-skills/) to the agent's static working set."
+          },
+          "suppressNativeSkillPrompt": {
+            "type": "boolean",
+            "default": true,
+            "description": "When enabled, automatically ensures agents.defaults.skills is [] and removes agents.entries.*.skills in openclaw.json on startup to suppress duplicate native OpenClaw <available_skills> prompts."
           }
         }
       },

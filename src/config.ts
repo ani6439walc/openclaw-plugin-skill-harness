@@ -79,6 +79,9 @@ const DEFAULT_SKILLS: ResolvedSkillsConfig = {
 const DEFAULT_WORKING_SET_SKILLS: ResolvedWorkingSetSkillsConfig = {
   defaults: [],
   agents: {},
+  includeWorkspaceSkills: true,
+  includeWorkshopSkills: true,
+  suppressNativeSkillPrompt: true,
 };
 
 const DEFAULT_QMD: ResolvedQmdConfig = {
@@ -315,6 +318,9 @@ const WorkingSetSkillsSchema = z
   .object({
     defaults: WorkingSetStringListSchema.optional().default([]),
     agents: WorkingSetAgentsSchema.optional().default({}),
+    includeWorkspaceSkills: z.boolean().optional(),
+    includeWorkshopSkills: z.boolean().optional(),
+    suppressNativeSkillPrompt: z.boolean().optional(),
   })
   .strict()
   .transform((value): ResolvedWorkingSetSkillsConfig => ({
@@ -325,6 +331,9 @@ const WorkingSetSkillsSchema = z
         [...new Set([...skillNames, ...value.defaults])],
       ]),
     ),
+    includeWorkspaceSkills: value.includeWorkspaceSkills ?? true,
+    includeWorkshopSkills: value.includeWorkshopSkills ?? true,
+    suppressNativeSkillPrompt: value.suppressNativeSkillPrompt ?? true,
   }));
 
 function resolveWorkingSetSkillsConfig(

@@ -110,6 +110,23 @@ export function resolveSkillRoots(params: {
     normalizePath(path.join(homeDir, ".agents", "skills"), homeDir),
     "personal-agent",
   );
+  if (params.agentId) {
+    pushRoot(
+      roots,
+      seen,
+      normalizePath(
+        path.join(
+          stateDir,
+          "agents",
+          params.agentId,
+          "agent",
+          "workshop-skills",
+        ),
+        homeDir,
+      ),
+      "workshop",
+    );
+  }
   pushRoot(
     roots,
     seen,

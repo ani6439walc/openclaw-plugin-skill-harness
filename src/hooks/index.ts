@@ -927,35 +927,58 @@ export function createHookHandlers(deps: HookDeps) {
         });
       }
 
-      let workspaceSkills: Awaited<ReturnType<typeof listAvailableSkills>> = [];
-      try {
-        workspaceSkills = await listAvailableSkills({
-          api,
-          agentId,
-          bundledSkillsDir,
-          source: "workspace",
-          usageStats: {},
-        });
-      } catch (error) {
-        logger.warn("failed to resolve workspace agent skills", {
-          errorType: error instanceof Error ? "Error" : typeof error,
-          workspaceSkillCount: 0,
-        });
+      async function loadDiscoveredSkills(
+        source: "workspace" | "workshop",
+      ): Promise<Awaited<ReturnType<typeof listAvailableSkills>>> {
+        try {
+          return await listAvailableSkills({
+            api,
+            agentId,
+            bundledSkillsDir,
+            source,
+            usageStats: {},
+          });
+        } catch (error) {
+          logger.warn(
+            source === "workspace"
+              ? "failed to resolve workspace agent skills"
+              : "failed to resolve agent workshop skills",
+            {
+              errorType: error instanceof Error ? "Error" : typeof error,
+              [source === "workspace"
+                ? "workspaceSkillCount"
+                : "workshopSkillCount"]: 0,
+            },
+          );
+          return [];
+        }
       }
+
+      const includeWorkspaceSkills =
+        deps.config?.().workingSetSkills?.includeWorkspaceSkills ?? true;
+      const includeWorkshopSkills =
+        deps.config?.().workingSetSkills?.includeWorkshopSkills ?? true;
+
+      const [workspaceSkills, workshopSkills] = await Promise.all([
+        includeWorkspaceSkills ? loadDiscoveredSkills("workspace") : [],
+        includeWorkshopSkills ? loadDiscoveredSkills("workshop") : [],
+      ]);
 
       const skills = [...explicitSkills];
       const seen = new Set(
         explicitSkills.map((skill) => skill.name.trim().toLowerCase()),
       );
-      for (const skill of workspaceSkills) {
-        const normalizedName = skill.name.trim().toLowerCase();
-        if (seen.has(normalizedName)) continue;
-        skills.push(skill);
-        seen.add(normalizedName);
+      for (const discoveredSkills of [workspaceSkills, workshopSkills]) {
+        for (const skill of discoveredSkills) {
+          const normalizedName = skill.name.trim().toLowerCase();
+          if (seen.has(normalizedName)) continue;
+          skills.push(skill);
+          seen.add(normalizedName);
+        }
       }
       if (!skills.length) {
         logger.info(
-          "no working-set or workspace agent skills could be resolved",
+          "no working-set, workspace, or workshop agent skills could be resolved",
           { workingSetSkillCount: 0 },
         );
         return undefined;
