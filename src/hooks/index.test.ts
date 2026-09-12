@@ -1750,11 +1750,10 @@ description: Navigate Tokyo.
       current: {
         input: "wrong",
         intent: {
-          intent: "other",
+          intent: "unknown",
           reason: "same topic",
-          domain: "other",
+          domain: "unknown",
           confidence: 0.95,
-          complexity: "low" as const,
         },
         timestamps: { start: "2026-07-29T00:00:00.000Z" },
       },
@@ -3354,9 +3353,9 @@ describe("createHookHandlers topic switch flow", () => {
       history: {
         input: "hi",
         intent: "social-casual",
+        domain: "social",
         topic: "User is chatting casually.",
         confidence: 1,
-        complexity: "low" as const,
       },
       expected: {
         topicChangeReason: undefined,
@@ -3367,9 +3366,9 @@ describe("createHookHandlers topic switch flow", () => {
       history: {
         input: "fix this",
         intent: "coding",
+        domain: "coding",
         topic: "User is fixing code.",
         confidence: 0.8,
-        complexity: "medium" as const,
       },
       expected: {
         topicChangeReason: "match",
@@ -4402,12 +4401,11 @@ Current user request: fresh clean request
       complexity: "low" as const,
     };
     const classifier = vi.fn().mockResolvedValue({
-      intent: "other",
+      intent: "unknown",
       reason: "No catalog intent adequately explains the request",
       keywords: ["unclear", "request"],
       domain: "infra",
       confidence: 0.9,
-      complexity: "low" as const,
     });
     const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4418,7 +4416,7 @@ Current user request: fresh clean request
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    // "other" is not a catalog entry, so no guidance prepend is expected
+    // "unknown" is not a catalog entry, so no guidance prepend is expected
     expect(result?.prependContext).toBeUndefined();
     expect(record).toHaveBeenCalledWith(
       "session-1",
@@ -4426,8 +4424,8 @@ Current user request: fresh clean request
         current: expect.objectContaining({
           intent: expect.objectContaining({
             result: expect.objectContaining({
-              intent: "other",
-              domain: "other",
+              intent: "unknown",
+              domain: "unknown",
             }),
           }),
         }),

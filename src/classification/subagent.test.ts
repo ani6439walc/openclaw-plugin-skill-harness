@@ -237,9 +237,9 @@ describe("runIntentionSubagent", () => {
   });
 
   it("keeps the explicit fallback intent valid", async () => {
-    const { result, runEmbeddedAgent } = await runWithIntent("other");
+    const { result, runEmbeddedAgent } = await runWithIntent("unknown");
 
-    expect(result?.intent).toBe("other");
+    expect(result?.intent).toBe("unknown");
     expect(runEmbeddedAgent).toHaveBeenCalledOnce();
   });
 });

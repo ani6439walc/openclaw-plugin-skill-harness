@@ -301,6 +301,36 @@ describe("StatsAggregator", () => {
     },
   );
 
+  it("reads legacy schema v6 with otherTurns and otherRate seamlessly", () => {
+    const statsFile = path.join(tempDir, "stats.json");
+    expect(aggregator.record("compat-session", createState(), intent)).toBe(
+      true,
+    );
+    const raw = JSON.parse(fs.readFileSync(statsFile, "utf8"));
+    delete raw.summary.unknownTurns;
+    delete raw.summary.unknownRate;
+    raw.summary.otherTurns = 1;
+    raw.summary.otherRate = 0.5;
+    fs.writeFileSync(statsFile, JSON.stringify(raw));
+
+    expect(
+      aggregator.record(
+        "next-session",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(true);
+
+    const loaded = readStats();
+    expect(loaded.summary.unknownTurns).toBe(1);
+    expect(loaded.summary.otherTurns).toBeUndefined();
+  });
+
   it("preflights incomplete and duplicate stats events", () => {
     expect(
       aggregator.isRecordable("missing-start", createState({ timestamps: {} })),
@@ -1121,9 +1151,8 @@ describe("StatsAggregator", () => {
       toolAssistedTurns: 1,
       skillUsageCount: 1,
       toolCallCount: 2,
-      averageConfidence: 0.75,
-      otherTurns: 0,
-      otherRate: 0,
+      unknownTurns: 0,
+      unknownRate: 0,
     });
     expect(stats.summary).not.toHaveProperty("confidenceTotal");
     expect(stats.intents["version-control"]).toMatchObject({
@@ -1774,7 +1803,7 @@ describe("StatsAggregator", () => {
       createState({
         intent: {
           result: {
-            intent: "other",
+            intent: "unknown",
             reason: "test",
             confidence: 0.4,
             complexity: "low",
@@ -1799,8 +1828,8 @@ describe("StatsAggregator", () => {
       lifecycle: "never-used",
       needsReview: true,
     });
-    expect(stats.summary.otherTurns).toBe(1);
-    expect(stats.summary.otherRate).toBeCloseTo(1 / 6);
+    expect(stats.summary.unknownTurns).toBe(1);
+    expect(stats.summary.unknownRate).toBeCloseTo(1 / 6);
   });
 
   it("marks used skills stale after 30 days and archived after 90 days", () => {

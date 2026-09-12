@@ -30,7 +30,7 @@ const EMBEDDED_AGENT_SESSION_SUFFIXES = [
   ".session.trajectory.jsonl",
   ".session.trajectory-path.json",
 ];
-const DEFAULT_MIGRATED_DOMAIN = "other";
+const DEFAULT_MIGRATED_DOMAIN = "unknown";
 const trackerCache = new Map<string, SessionTracker>();
 const TOPIC_CHANGE_REASONS = new Set([
   "start",

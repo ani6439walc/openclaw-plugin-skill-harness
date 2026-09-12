@@ -498,17 +498,19 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
         "updatedAt": stats.get("updatedAt"),
         "attribution": stats_attribution(stats),
         "summary": {
-            key: summary.get(key)
-            for key in (
-                "turns",
-                "completedTurns",
-                "erroredTurns",
-                "skillAssistedTurns",
-                "toolAssistedTurns",
-                "averageConfidence",
-                "otherTurns",
-                "otherRate",
-            )
+            **{
+                key: summary.get(key)
+                for key in (
+                    "turns",
+                    "completedTurns",
+                    "erroredTurns",
+                    "skillAssistedTurns",
+                    "toolAssistedTurns",
+                    "averageConfidence",
+                )
+            },
+            "unknownTurns": summary.get("unknownTurns", summary.get("otherTurns")),
+            "unknownRate": summary.get("unknownRate", summary.get("otherRate")),
         },
         "routing": {
             key: routing.get(key)

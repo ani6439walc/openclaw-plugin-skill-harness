@@ -182,8 +182,8 @@ type Stats = {
     skillUsageCount: number;
     toolCallCount: number;
     averageConfidence: number;
-    otherTurns: number;
-    otherRate: number;
+    unknownTurns: number;
+    unknownRate: number;
   };
   intents: Record<string, IntentStats>;
   skills: Record<
@@ -294,8 +294,8 @@ function createStats(nowIso: string): Stats {
       skillUsageCount: 0,
       toolCallCount: 0,
       averageConfidence: 0,
-      otherTurns: 0,
-      otherRate: 0,
+      unknownTurns: 0,
+      unknownRate: 0,
     },
     intents: {},
     skills: {},
@@ -372,7 +372,10 @@ function updateRoutingRates(routing: RoutingCounts): void {
 }
 
 function recomputeDerivedStats(stats: Stats, nowMs: number): void {
-  stats.summary.otherRate = rate(stats.summary.otherTurns, stats.summary.turns);
+  stats.summary.unknownRate = rate(
+    stats.summary.unknownTurns,
+    stats.summary.turns,
+  );
   stats.projection.projectedRate = rate(
     stats.projection.projectedTurns,
     stats.projection.eligibleTurns,
@@ -720,6 +723,24 @@ function assertStats(stats: unknown): asserts stats is Stats {
   if (!isRecord(stats) || stats.schemaVersion !== 6) {
     throw new Error("unsupported or invalid stats schema");
   }
+  if (isRecord(stats.summary)) {
+    if (
+      !("unknownTurns" in stats.summary) &&
+      "otherTurns" in stats.summary &&
+      typeof stats.summary.otherTurns === "number"
+    ) {
+      stats.summary.unknownTurns = stats.summary.otherTurns;
+    }
+    if (
+      !("unknownRate" in stats.summary) &&
+      "otherRate" in stats.summary &&
+      typeof stats.summary.otherRate === "number"
+    ) {
+      stats.summary.unknownRate = stats.summary.otherRate;
+    }
+    delete stats.summary.otherTurns;
+    delete stats.summary.otherRate;
+  }
   if (
     !isIsoTimestamp(stats.createdAt) ||
     !isIsoTimestamp(stats.updatedAt) ||
@@ -732,8 +753,8 @@ function assertStats(stats: unknown): asserts stats is Stats {
       "skillUsageCount",
       "toolCallCount",
       "averageConfidence",
-      "otherTurns",
-      "otherRate",
+      "unknownTurns",
+      "unknownRate",
     ]) ||
     !isRecord(stats.intents) ||
     !isRecord(stats.skills) ||
@@ -857,7 +878,7 @@ function recordSummaryStats(params: {
   stats.summary.toolAssistedTurns += toolCallCount > 0 ? 1 : 0;
   stats.summary.skillUsageCount += skillsUsed.length;
   stats.summary.toolCallCount += toolCallCount;
-  stats.summary.otherTurns +=
+  stats.summary.unknownTurns +=
     intentId.toLowerCase() === FALLBACK_INTENT_ID ? 1 : 0;
 }
 

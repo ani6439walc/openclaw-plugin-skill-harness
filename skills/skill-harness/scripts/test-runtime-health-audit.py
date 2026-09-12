@@ -110,8 +110,8 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                         "skillUsageCount": 1,
                         "toolCallCount": 2,
                         "averageConfidence": 0.75,
-                        "otherTurns": 0,
-                        "otherRate": 0,
+                        "unknownTurns": 0,
+                        "unknownRate": 0,
                     },
                     "intents": {
                         "example": {

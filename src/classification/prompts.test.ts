@@ -204,9 +204,9 @@ describe("buildRoutingContext", () => {
 
     const empty = buildRoutingContext({
       result: {
-        intent: "other",
+        intent: "unknown",
         reason: "No exact match.",
-        domain: "other",
+        domain: "unknown",
         confidence: 0.5,
       },
       guidance: "Use only verified context.",
@@ -223,9 +223,9 @@ describe("buildRoutingContext", () => {
 
     const bounded = buildRoutingContext({
       result: {
-        intent: "other",
+        intent: "unknown",
         reason: "No exact match.",
-        domain: "other",
+        domain: "unknown",
         confidence: 0.5,
       },
       guidance: "Use only verified context.",
@@ -252,9 +252,9 @@ describe("buildRoutingContext", () => {
 
     const unmatched = buildRoutingContext({
       result: {
-        intent: "other",
+        intent: "unknown",
         reason: "No exact match.",
-        domain: "other",
+        domain: "unknown",
         confidence: 0.5,
       },
       guidance: "Use only verified context.",
@@ -367,7 +367,7 @@ describe("buildIntentionPrompt", () => {
     expect(codingIntent).toBeGreaterThan(catalogStart);
     expect(debuggingIntent).toBeGreaterThan(codingIntent);
     expect(catalogEnd).toBeGreaterThan(debuggingIntent);
-    expect(result).not.toContain('<intent domain="other" id="other">');
+    expect(result).not.toContain('<intent domain="unknown" id="unknown">');
     expect(result).not.toContain('<intent id="coding">');
     expect(result).not.toContain("name=");
   });
@@ -415,15 +415,15 @@ describe("buildIntentionPrompt", () => {
     expect(result).toContain("triggers:");
   });
 
-  it("defines other once as a schema fallback outside the catalog", () => {
+  it("defines unknown once as a schema fallback outside the catalog", () => {
     const result = buildIntentionPrompt({
       intents: [],
       latest: "hello",
     });
 
     expect(result).toContain(FALLBACK_INTENT_ID);
-    expect(result).not.toContain('<intent domain="other" id="other">');
-    expect(result.match(/"other"/g)).toHaveLength(3);
+    expect(result).not.toContain('<intent domain="unknown" id="unknown">');
+    expect(result.match(/"unknown"/g)).toHaveLength(3);
   });
 
   it("escapes catalog evidence and marks it as untrusted classification data", () => {
@@ -617,13 +617,17 @@ describe("parseIntentionResult", () => {
       complexity: "medium",
     });
 
-    const result = parseIntentionResult(raw, ["coding", "debugging", "other"]);
+    const result = parseIntentionResult(raw, [
+      "coding",
+      "debugging",
+      "unknown",
+    ]);
 
     expect(result).toBeDefined();
     expect(result!.intent).toBe("coding");
     expect(result!.reason).toBe("User wants to write code");
     expect(result!.keywords).toEqual(["sort", "array"]);
-    expect(result!.domain).toBe("other");
+    expect(result!.domain).toBe("unknown");
     expect(result!.topic).toBe(
       "User wants help writing code to sort an array.",
     );
@@ -655,17 +659,21 @@ describe("parseIntentionResult", () => {
 
   it("should parse when confidence is low", () => {
     const raw = JSON.stringify({
-      intent: "other",
+      intent: "unknown",
       reason: "Unable to confidently classify",
       keywords: ["unclear", "request"],
       topic: "User request is unclear and needs clarification.",
       confidence: 0.45,
     });
 
-    const result = parseIntentionResult(raw, ["coding", "debugging", "other"]);
+    const result = parseIntentionResult(raw, [
+      "coding",
+      "debugging",
+      "unknown",
+    ]);
 
     expect(result).toBeDefined();
-    expect(result!.intent).toBe("other");
+    expect(result!.intent).toBe("unknown");
     expect((result as Record<string, unknown>).suggestion).toBeUndefined();
   });
 
@@ -679,7 +687,7 @@ describe("parseIntentionResult", () => {
       complexity: "medium",
     });
 
-    const result = parseIntentionResult(raw, ["coding", "other"]);
+    const result = parseIntentionResult(raw, ["coding", "unknown"]);
 
     expect(result).toBeDefined();
     expect(result!.intent).toBe("coding");
@@ -691,7 +699,7 @@ describe("parseIntentionResult", () => {
       reason: "User wants code",
     });
 
-    const result = parseIntentionResult(raw, ["coding", "other"]);
+    const result = parseIntentionResult(raw, ["coding", "unknown"]);
 
     expect(result).toBeUndefined();
   });
@@ -706,7 +714,7 @@ describe("parseIntentionResult", () => {
       complexity: "medium",
     });
 
-    const result = parseIntentionResult(raw, ["coding", "other"]);
+    const result = parseIntentionResult(raw, ["coding", "unknown"]);
 
     expect(result).toBeUndefined();
   });

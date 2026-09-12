@@ -283,12 +283,12 @@ describe("SessionTracker", () => {
         expect.objectContaining({
           input: "same topic",
           intent: "chat",
-          domain: "other",
+          domain: "unknown",
         }),
         expect.objectContaining({
           input: "changed topic",
           intent: "coding",
-          domain: "other",
+          domain: "unknown",
           topicChangeReason: "change",
         }),
       ]);
@@ -325,7 +325,7 @@ describe("SessionTracker", () => {
 
         expect(
           loadedTracker.getCurrentState("legacy-locked")?.intent?.result,
-        ).toMatchObject({ domain: "other", topicChangeReason: "change" });
+        ).toMatchObject({ domain: "unknown", topicChangeReason: "change" });
         expect(durable.current.intent.result).toMatchObject({
           topicChanged: true,
         });

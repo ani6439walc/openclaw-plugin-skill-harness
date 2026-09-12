@@ -39,7 +39,7 @@ describe("checkReviewTriggers", () => {
         state({
           intent: {
             result: {
-              intent: "other",
+              intent: "unknown",
               reason: "unclear",
               confidence: 0.9,
               complexity: "high",
@@ -155,7 +155,7 @@ describe("checkReviewTriggers", () => {
         state({
           intent: {
             result: {
-              intent: "other",
+              intent: "unknown",
               reason: "unclear",
               confidence: 0.1,
               complexity: "medium",

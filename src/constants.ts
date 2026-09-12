@@ -17,11 +17,11 @@ export const ROUTING_ADVISORY_HEADER =
 export const ROUTING_ADVISORY_INTENT_ONLY_HEADER =
   "Inferred user intent from conversation (advisory, non-user input):";
 
-export const FALLBACK_INTENT_ID = "other";
+export const FALLBACK_INTENT_ID = "unknown";
 export const FALLBACK_INTENT: IntentDefinition = {
   triggers: [],
   examples: [],
-  domain: "other",
+  domain: "unknown",
   keywords: [],
   guidance:
     "No predefined intent detected. Main Agent should determine the user's true intent and choose an appropriate strategy.",
