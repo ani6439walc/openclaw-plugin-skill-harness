@@ -18,8 +18,6 @@ export type PipelineMetadata = {
   intent?: string;
   reason?: string;
   confidence?: number;
-  score?: number;
-  collection?: string;
   result?: string;
   error?: string;
   durationMs?: number;

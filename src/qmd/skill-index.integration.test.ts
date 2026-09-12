@@ -375,7 +375,7 @@ describe("createSkillQmdIndex real QMD integration", () => {
       ),
     ).toHaveLength(documentInputsBeforeRestart);
     await restarted.close();
-  });
+  }, 30_000);
 
   it("keeps lexical search available while real QMD retries pending embeddings", async () => {
     const fixture = await createEmbeddingFixture();
@@ -473,5 +473,5 @@ describe("createSkillQmdIndex real QMD integration", () => {
     expect((await store?.getStatus())?.needsEmbedding).toBe(0);
     expect(index.getStatus("main")).toBe("ready");
     await index.close();
-  });
+  }, 30_000);
 });

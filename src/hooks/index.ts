@@ -311,6 +311,83 @@ function findIntentDomain(
   );
 }
 
+function findMatchingKeywords(
+  message: string,
+  keywords: readonly string[],
+): string[] {
+  const normalizedMessage = message.toLowerCase();
+  const matched: string[] = [];
+  for (const keyword of keywords) {
+    const trimmed = keyword.trim();
+    if (!trimmed) continue;
+    const normalizedKeyword = trimmed.toLowerCase();
+    if (normalizedMessage.includes(normalizedKeyword)) {
+      matched.push(trimmed);
+    }
+  }
+  return matched;
+}
+
+export function buildKeywordRouteReason(params: {
+  intent: IntentCatalogEntry;
+  hit: QmdIntentHit;
+  query?: string;
+}): string {
+  const matchedKeywords = params.query
+    ? findMatchingKeywords(params.query, params.intent.definition.keywords)
+    : [];
+  const keywordDisplay =
+    matchedKeywords.length > 0
+      ? matchedKeywords.join(", ")
+      : params.intent.definition.keywords[0] || params.intent.id;
+  return `Keyword match: ${params.intent.id} (${keywordDisplay})`;
+}
+
+export function extractHybridSignals(explain: unknown): string {
+  if (explain && typeof explain === "object") {
+    const record = explain as Record<string, unknown>;
+    if (record.rrf && typeof record.rrf === "object") {
+      const rrf = record.rrf as Record<string, unknown>;
+      if (Array.isArray(rrf.contributions) && rrf.contributions.length > 0) {
+        const types = new Set<string>();
+        for (const c of rrf.contributions) {
+          if (
+            c &&
+            typeof c === "object" &&
+            typeof (c as Record<string, unknown>).queryType === "string"
+          ) {
+            types.add((c as Record<string, unknown>).queryType as string);
+          }
+        }
+        if (types.size > 0) {
+          const order = ["lex", "vec", "hyde", "original"];
+          const sorted = order.filter((t) => types.has(t));
+          for (const t of types) {
+            if (!sorted.includes(t)) sorted.push(t);
+          }
+          return sorted.join(",");
+        }
+      }
+    }
+    const hasVector =
+      Array.isArray(record.vectorScores) && record.vectorScores.length > 0;
+    const hasFts =
+      Array.isArray(record.ftsScores) && record.ftsScores.length > 0;
+    if (hasVector && hasFts) return "lex,vec";
+    if (hasVector) return "vec";
+    if (hasFts) return "lex";
+  }
+  return "lex,vec,hyde";
+}
+
+export function buildQmdRouteReason(params: {
+  intent: IntentCatalogEntry;
+  hit: QmdIntentHit;
+}): string {
+  const signals = extractHybridSignals(params.hit.explain);
+  return `QMD ${params.hit.collection} match: ${params.intent.id} (${signals})`;
+}
+
 function buildQmdIntentResult(params: {
   hit: QmdIntentHit;
   intent: IntentCatalogEntry;
@@ -318,7 +395,10 @@ function buildQmdIntentResult(params: {
 }): IntentionResult {
   return {
     intent: params.intent.id,
-    reason: `QMD ${params.hit.collection} match`,
+    reason: buildQmdRouteReason({
+      intent: params.intent,
+      hit: params.hit,
+    }),
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
     confidence: params.hit.score,
@@ -329,10 +409,15 @@ function buildKeywordIntentResult(params: {
   hit: QmdIntentHit;
   intent: IntentCatalogEntry;
   latestHistoricalIntent?: HistoricalIntentRecord;
+  latestUserMessage?: string;
 }): IntentionResult {
   return {
     intent: params.intent.id,
-    reason: `Keyword match: ${params.intent.id}`,
+    reason: buildKeywordRouteReason({
+      intent: params.intent,
+      hit: params.hit,
+      query: params.latestUserMessage,
+    }),
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
     confidence: params.hit.score,
@@ -580,6 +665,12 @@ export function createHookHandlers(deps: HookDeps) {
         roundToThreeDecimals(topKeywordHit.score) >=
           roundToThreeDecimals(keywordMinScore)
       ) {
+        const result = buildKeywordIntentResult({
+          hit: topKeywordHit,
+          intent: matchedKeywordIntent,
+          latestHistoricalIntent,
+          latestUserMessage: params.latestUserMessage,
+        });
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
@@ -587,15 +678,10 @@ export function createHookHandlers(deps: HookDeps) {
           "completed",
           {
             intent: matchedKeywordIntent.id,
-            score: topKeywordHit.score,
-            collection: topKeywordHit.collection,
+            confidence: topKeywordHit.score,
+            reason: result.reason,
           },
         );
-        const result = buildKeywordIntentResult({
-          hit: topKeywordHit,
-          intent: matchedKeywordIntent,
-          latestHistoricalIntent,
-        });
         return {
           trigger: "qmd-keyword",
           result,
@@ -610,8 +696,14 @@ export function createHookHandlers(deps: HookDeps) {
           ? { error: "QMD keyword index unavailable" }
           : topKeywordHit
             ? {
-                score: topKeywordHit.score,
-                collection: topKeywordHit.collection,
+                confidence: topKeywordHit.score,
+                reason: matchedKeywordIntent
+                  ? buildKeywordRouteReason({
+                      intent: matchedKeywordIntent,
+                      hit: topKeywordHit,
+                      query: params.latestUserMessage,
+                    })
+                  : topKeywordHit.collection,
               }
             : {},
       );
@@ -658,6 +750,11 @@ export function createHookHandlers(deps: HookDeps) {
           roundToThreeDecimals(hybridThresholds.directRouteMinScore) &&
         satisfiesMargin
       ) {
+        const result = buildQmdIntentResult({
+          hit: topHit,
+          intent: topIntent,
+          latestHistoricalIntent,
+        });
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
@@ -665,15 +762,10 @@ export function createHookHandlers(deps: HookDeps) {
           "completed",
           {
             intent: topIntent.id,
-            score: topHit.score,
-            collection: topHit.collection,
+            confidence: topHit.score,
+            reason: result.reason,
           },
         );
-        const result = buildQmdIntentResult({
-          hit: topHit,
-          intent: topIntent,
-          latestHistoricalIntent,
-        });
         return {
           trigger: "qmd-hybrid",
           result,
@@ -687,7 +779,15 @@ export function createHookHandlers(deps: HookDeps) {
         qmdHits === undefined
           ? { error: "QMD intent example/keyword index unavailable" }
           : topHit
-            ? { score: topHit.score, collection: topHit.collection }
+            ? {
+                confidence: topHit.score,
+                reason: topIntent
+                  ? buildQmdRouteReason({
+                      intent: topIntent,
+                      hit: topHit,
+                    })
+                  : topHit.collection,
+              }
             : {},
       );
     }

@@ -7,7 +7,10 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import {
+  buildKeywordRouteReason,
+  buildQmdRouteReason,
   createHookHandlers,
+  extractHybridSignals,
   formatConversationExpansionContext,
 } from "./index.js";
 import {
@@ -3439,10 +3442,21 @@ describe("createHookHandlers topic switch flow", () => {
           phase: "qmd-keyword",
           state: "completed",
           intent: "version-control",
-          score: 0.91,
+          confidence: 0.91,
+          reason: "Keyword match: version-control (commit)",
         }),
       }),
     );
+    expect(
+      emittedPipelineEvents(emitAgentEvent).find(
+        (entry) => entry.data.phase === "qmd-keyword",
+      )?.data,
+    ).not.toHaveProperty("score");
+    expect(
+      emittedPipelineEvents(emitAgentEvent).find(
+        (entry) => entry.data.phase === "qmd-keyword",
+      )?.data,
+    ).not.toHaveProperty("collection");
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -5462,5 +5476,113 @@ describe("formatConversationExpansionContext", () => {
     expect(result).toContain("- [user] turn 3");
     expect(result).toContain("- [assistant] turn 4");
     expect(result).toContain(`- [user] ${longText}`);
+  });
+
+  describe("route reason formatting", () => {
+    const testIntent: IntentCatalogEntry = {
+      id: "code-review",
+      definition: {
+        triggers: ["review"],
+        examples: ["review my pr"],
+        domain: "review",
+        keywords: ["pr", "code review", "git diff"],
+        guidance: "Perform a thorough review.",
+      },
+    };
+
+    it("formats keyword route reason matching single keyword from query", () => {
+      const reason = buildKeywordRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "code-review",
+          score: 0.95,
+          collection: "keywords",
+        },
+        query: "Please check this PR for me",
+      });
+      expect(reason).toBe("Keyword match: code-review (pr)");
+    });
+
+    it("formats keyword route reason matching multiple keywords from query", () => {
+      const reason = buildKeywordRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "code-review",
+          score: 0.95,
+          collection: "keywords",
+        },
+        query: "Please do a code review on this pr",
+      });
+      expect(reason).toBe("Keyword match: code-review (pr, code review)");
+    });
+
+    it("falls back to primary keyword when query does not directly contain defined keywords", () => {
+      const reason = buildKeywordRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "code-review",
+          score: 0.95,
+          collection: "keywords",
+        },
+        query: "Can you inspect my patch?",
+      });
+      expect(reason).toBe("Keyword match: code-review (pr)");
+    });
+
+    it("extracts hybrid signals from rrf contributions in order", () => {
+      const explain = {
+        rrf: {
+          contributions: [
+            { queryType: "hyde" },
+            { queryType: "lex" },
+            { queryType: "vec" },
+          ],
+        },
+      };
+      expect(extractHybridSignals(explain)).toBe("lex,vec,hyde");
+    });
+
+    it("extracts hybrid signals from vectorScores and ftsScores when rrf trace is absent", () => {
+      expect(
+        extractHybridSignals({
+          vectorScores: [0.8],
+          ftsScores: [0.5],
+        }),
+      ).toBe("lex,vec");
+      expect(
+        extractHybridSignals({
+          vectorScores: [0.8],
+          ftsScores: [],
+        }),
+      ).toBe("vec");
+      expect(
+        extractHybridSignals({
+          vectorScores: [],
+          ftsScores: [0.5],
+        }),
+      ).toBe("lex");
+    });
+
+    it("defaults hybrid signals to lex,vec,hyde when explain is empty", () => {
+      expect(extractHybridSignals(undefined)).toBe("lex,vec,hyde");
+      expect(extractHybridSignals({})).toBe("lex,vec,hyde");
+    });
+
+    it("formats QMD hybrid route reason with collection, intent, and signals", () => {
+      const reason = buildQmdRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "code-review",
+          score: 0.92,
+          collection: "examples",
+          explain: {
+            rrf: {
+              contributions: [{ queryType: "lex" }, { queryType: "vec" }],
+            },
+          },
+        },
+      });
+      expect(reason).toBe("QMD examples match: code-review (lex,vec)");
+    });
   });
 });
