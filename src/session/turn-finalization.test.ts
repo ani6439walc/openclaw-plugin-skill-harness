@@ -35,7 +35,6 @@ describe("SessionTracker exact-turn finalization", () => {
             reason: "test",
             domain: "coding",
             confidence: 1,
-            complexity: "low",
           },
         },
       },

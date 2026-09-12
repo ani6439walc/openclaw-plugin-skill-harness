@@ -764,7 +764,6 @@ description: Navigate Tokyo.
           intent: "version-control",
           reason: "test",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-06-11T00:00:00.000Z" },
@@ -854,7 +853,6 @@ description: Navigate Tokyo.
           intent: "version-control",
           reason: "test",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-06-11T00:00:00.000Z" },
@@ -897,7 +895,6 @@ description: Navigate Tokyo.
           intent: "skill-lifecycle",
           reason: "test",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       toolCalls: [{ toolCallId: "tool-a", name: "read", success: true }],
@@ -937,7 +934,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "agent-ops",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-07T10:22:10.674Z" },
@@ -984,7 +980,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "agent-ops",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -1030,7 +1025,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "agent-ops",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -1094,7 +1088,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "other",
           confidence: 0.5,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -1157,7 +1150,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "other",
           confidence: 0.5,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -1193,7 +1185,6 @@ description: Navigate Tokyo.
             reason: "test",
             domain: "other",
             confidence: 0.5,
-            complexity: "low" as const,
           },
         },
         timestamps: {},
@@ -1251,7 +1242,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "agent-ops",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-07T10:07:46.061Z" },
@@ -1310,7 +1300,6 @@ description: Navigate Tokyo.
           intent: "other",
           reason: "test",
           confidence: 0.2,
-          complexity: "high" as const,
         },
         toolCalls: Array.from({ length: 5 }, () => ({
           name: "exec",
@@ -1469,7 +1458,6 @@ description: Navigate Tokyo.
           intent: "other",
           reason: "test",
           confidence: 0.2,
-          complexity: "high" as const,
         },
         timestamps: { start: "2026-06-11T00:00:00.000Z" },
       },
@@ -1568,7 +1556,6 @@ description: Navigate Tokyo.
           intent: "other",
           reason: "test",
           confidence: 0.2,
-          complexity: "high" as const,
         },
         toolCalls: Array.from({ length: 5 }, () => ({ name: "exec" })),
         timestamps: { start: "2026-06-11T00:00:00.000Z" },
@@ -1876,7 +1863,6 @@ description: Navigate Tokyo.
           reason: "same topic",
           domain: "other",
           confidence: 0.95,
-          complexity: "low" as const,
         },
         timestamps: { start: "2026-07-29T00:00:00.000Z" },
       },
@@ -2615,7 +2601,6 @@ describe("createHookHandlers topic switch flow", () => {
         domain: "chat",
         changed: false,
         confidence: 0.9,
-        complexity: "medium" as const,
       });
     const topicChecker = params.topicChecker ?? vi.fn();
     const emitAgentEvent = emitHostAgentEvent;
@@ -2724,7 +2709,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "social-casual",
       reason: privateResult,
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const debug = vi.spyOn(logger, "debug").mockImplementation(() => undefined);
     const { handlers } = createTopicFlowHarness({
@@ -2815,7 +2799,6 @@ describe("createHookHandlers topic switch flow", () => {
       domain: "tools",
       changed: true,
       reason: "shift",
-      complexity: "medium" as const,
     });
     const classifier = vi.fn().mockResolvedValue({
       intent: "tool-reference",
@@ -2823,7 +2806,6 @@ describe("createHookHandlers topic switch flow", () => {
       keywords: ["inventory", "scan"],
       domain: "tools",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [
@@ -3494,7 +3476,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "User wants repository maintenance",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
@@ -3556,7 +3537,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "User wants repository maintenance",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const qmdIntentIndex = qmdIndex({
       topicHits: [],
@@ -3669,7 +3649,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "The request is repository maintenance.",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
@@ -3711,7 +3690,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "The request is repository maintenance.",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
@@ -3876,7 +3854,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "The request is repository maintenance.",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
@@ -3931,7 +3908,6 @@ describe("createHookHandlers topic switch flow", () => {
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
-        complexity: "low" as const,
       }),
       qmdIntentIndex: qmdIndex({
         topicHits: [
@@ -3996,7 +3972,6 @@ describe("createHookHandlers topic switch flow", () => {
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
-        complexity: "low" as const,
       }),
     });
 
@@ -4016,7 +3991,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "The request is about version control.",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4071,7 +4045,6 @@ describe("createHookHandlers topic switch flow", () => {
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
-        complexity: "low" as const,
       }),
       qmdIntentIndex: qmdIndex({
         topicHits: [
@@ -4112,7 +4085,6 @@ describe("createHookHandlers topic switch flow", () => {
       keywords: ["topic", "flow"],
       changed: true,
       // confidence intentionally omitted (undefined)
-      complexity: "medium" as const,
     });
     const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4158,7 +4130,6 @@ describe("createHookHandlers topic switch flow", () => {
       keywords: ["topic", "flow"],
       domain: "coding",
       confidence: 0.1,
-      complexity: "medium" as const,
     });
     const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4195,7 +4166,6 @@ describe("createHookHandlers topic switch flow", () => {
         domain: "coding",
         topicChangeReason: "start",
         confidence,
-        complexity: "medium" as const,
       });
       const { handlers } = createTopicFlowHarness({
         historicalIntents: [],
@@ -4256,7 +4226,6 @@ describe("createHookHandlers topic switch flow", () => {
       domain: "coding",
       topicChangeReason: "start",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers, record, ensureColdStart, commitPromptRecommendation } =
       createTopicFlowHarness({
@@ -4362,7 +4331,6 @@ Current user request: fresh clean request
       keywords: "deploy" as unknown as string[],
       domain: "infra",
       confidence: 0.95,
-      complexity: "medium" as const,
     });
     const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [
@@ -4404,7 +4372,6 @@ Current user request: fresh clean request
       domain: "git",
       changed: true,
       reason: "shift" as const,
-      complexity: "low" as const,
     };
     const classifier = vi.fn().mockResolvedValue({
       intent: "unknown",
@@ -4515,7 +4482,6 @@ Current user request: fresh clean request
       domain: "coding",
       topicChangeReason: "start",
       confidence: 0.95,
-      complexity: "medium" as const,
     });
     const { handlers, record, ensureColdStart, commitPromptRecommendation } =
       createTopicFlowHarness({
@@ -4655,7 +4621,6 @@ Current user request: fresh clean request
       intent: "version-control",
       reason: "The request is now about version control.",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [

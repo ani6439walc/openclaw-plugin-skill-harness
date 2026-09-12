@@ -208,7 +208,6 @@ describe("runIntentionSubagent", () => {
             keywords: ["allowed"],
             domain: "development",
             confidence: 0.9,
-            complexity: "low",
           }),
         },
       ],

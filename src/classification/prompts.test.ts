@@ -129,7 +129,6 @@ describe("buildRoutingContext", () => {
         reason: "User requested a diagram.",
         domain: "design",
         confidence: 0.95,
-        complexity: "medium",
       },
       guidance: "Render the selected skills with stable evidence.",
       intentMatchedSkills: [
@@ -600,7 +599,6 @@ describe("parseIntentionResult", () => {
       reason: "User wants to write code",
       keywords: [" Sort ", "Array", "sort"],
       confidence: 0.85,
-      complexity: "medium",
     });
 
     const result = parseIntentionResult(raw, [
@@ -664,7 +662,6 @@ describe("parseIntentionResult", () => {
       reason: "User wants code",
       keywords: ["code"],
       confidence: 0.8,
-      complexity: "medium",
     });
 
     const result = parseIntentionResult(raw, ["coding", "unknown"]);
@@ -690,7 +687,6 @@ describe("parseIntentionResult", () => {
       reason: "Some reason",
       keywords: ["unknown"],
       confidence: 0.8,
-      complexity: "medium",
     });
 
     const result = parseIntentionResult(raw, ["coding", "unknown"]);
@@ -704,7 +700,6 @@ describe("parseIntentionResult", () => {
       reason: "User wants code",
       keywords: ["code"],
       confidence: 1,
-      complexity: "low",
     });
 
     const result = parseIntentionResult(raw, ["coding"]);
@@ -718,7 +713,6 @@ describe("parseIntentionResult", () => {
       intent: "coding",
       reason: "User wants code",
       confidence: "invalid",
-      complexity: "low",
     });
 
     const result = parseIntentionResult(raw, ["coding"]);
@@ -731,7 +725,6 @@ describe("parseIntentionResult", () => {
       intent: "coding",
       reason: "User wants code",
       confidence: 1.5,
-      complexity: "low",
     });
 
     const result = parseIntentionResult(raw, ["coding"]);
@@ -745,7 +738,6 @@ describe("parseIntentionResult", () => {
       reason: "User wants code",
       keywords: ["code"],
       confidence: 0.7,
-      complexity: "low",
       suggestion: "   ",
     });
 
@@ -761,7 +753,6 @@ describe("parseIntentionResult", () => {
       reason: "User wants code",
       keywords: ["code"],
       confidence: 0.8,
-      complexity: "low",
       suggestion: "This should not reach downstream routing",
     });
 
@@ -773,7 +764,7 @@ describe("parseIntentionResult", () => {
 
   it("should parse JSON wrapped in ```json code block", () => {
     const raw =
-      '```json\n{"intent": "coding", "reason": "test", "keywords": ["code"], "confidence": 0.9, "complexity": "medium"}\n```';
+      '```json\n{"intent": "coding", "reason": "test", "keywords": ["code"], "confidence": 0.9}\n```';
     const result = parseIntentionResult(raw, ["coding"]);
     expect(result).toBeDefined();
     expect(result!.intent).toBe("coding");
@@ -781,7 +772,7 @@ describe("parseIntentionResult", () => {
 
   it("should parse JSON wrapped in ``` without json tag", () => {
     const raw =
-      '```\n{"intent": "coding", "reason": "test", "keywords": ["code"], "confidence": 0.9, "complexity": "low"}\n```';
+      '```\n{"intent": "coding", "reason": "test", "keywords": ["code"], "confidence": 0.9}\n```';
     const result = parseIntentionResult(raw, ["coding"]);
     expect(result).toBeDefined();
   });
