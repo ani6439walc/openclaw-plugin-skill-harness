@@ -31,9 +31,9 @@ const snapshot: ReviewSnapshot = {
     input: "No, use the existing helper",
     intent: {
       intent: "other",
+      domain: "other",
       reason: "unclear",
       confidence: 0.2,
-      complexity: "high",
     },
     routeProvenance: { trigger: "qmd-hybrid" },
     capabilityFit: {
@@ -579,7 +579,7 @@ describe("runReviewSubagent", () => {
   it("rejects a concurrent pair of deletes that would empty the catalog", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-race-"));
     tempRoots.push(root);
-    for (const id of ["a", "b"]) {
+    for (const id of ["alpha", "beta"]) {
       fs.writeFileSync(
         path.join(root, `${id}.md`),
         `---\ntriggers:\n  - ${id}\nexamples:\n  - ${id}\ndomain: other\nkeywords:\n  - ${id}\n---\nKeep ${id}.\n`,
@@ -595,7 +595,7 @@ describe("runReviewSubagent", () => {
       .fn()
       .mockImplementation(
         async ({ workspaceDir }: { workspaceDir: string }) => {
-          const target = invocation++ === 0 ? "a" : "b";
+          const target = invocation++ === 0 ? "alpha" : "beta";
           fs.rmSync(path.join(workspaceDir, `${target}.md`));
           arrived += 1;
           if (arrived === 2) releaseBarrier?.();

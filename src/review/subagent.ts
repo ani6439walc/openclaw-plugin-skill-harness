@@ -130,22 +130,57 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - A trigger firing is an opportunity to investigate, not evidence by itself. Do not invent evidence, import another trigger's criteria, or edit merely to increase the finding rate.
 - The target library shape is class-level routing definitions: strict classification frontmatter plus one plain-text guidance body. Do not create one-intent-per-session artifacts.
 
-### Target preference order
+### Target preference order and full CRUD authority
+- You have full CRUD (Create, Read, Update, Delete) authority over intent files and all their subfields (domain, triggers, examples, keywords, skills, guidance).
+- DO NOT treat intents as append-only. When existing triggers, examples, or keywords contain stale, bloated, repetitive, or anti-pattern entries, you MUST actively prune, edit, rewrite, or delete them to maintain high quality and conciseness.
 - Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, keywords, domain, or direct-skill improvements.
 - If the matched intent is absent or clearly wrong, prefer updating an existing class-level/umbrella intent from the Intent Catalog when catalog context is available and one intent already covers the broader task class.
-- Use only operations justified by the requested trigger's workflow. Prefer refine; create, split, merge, or delete only when that trigger's concrete evidence establishes the corresponding class-level boundary change.
+- Lifecycle operations are fully supported when justified by the requested trigger workflow and catalog evidence:
+  - refine: Perform full CRUD on an existing intent (updating guidance, pruning/adding keywords, refining examples, sharpening triggers).
+  - create: Create a new <intent>.md file when evidence establishes a durable new task class not covered by any catalog intent.
+  - split: When an existing intent has become overloaded across multiple distinct task classes, divide it by updating the source intent and creating one or more focused new intent files.
+  - merge: When two or more catalog intents have overlapping boundaries or duplicate coverage, consolidate them into one surviving intent and delete the redundant file(s).
+  - delete: When a catalog intent is obsolete, fully subsumed, or has no durable routing value, remove the file. Standalone delete removes exactly one existing intent supported by catalog evidence.
 - Do not create support files or propose references/templates/scripts. Preserve conversation-specific but reusable details only as concise routing metadata or guidance changes in the relevant intent Markdown.
 
 ### Intent shape and boundaries
 - Prefer the smallest maintainable boundary and the least disruptive operation allowed by the requested trigger workflow.
-- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and contains triggers[], examples[], one required domain, optional keywords metadata, and optional skills[].
-- Triggers describe the user goal and boundary; examples are realistic user messages; domain is the broad routing bucket.
-- keywords are exact/similarity routing phrases. Add or change them only when evidence shows a stable short phrase or a keyword misroute.
+- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and must strictly follow canonical YAML key order: domain, triggers, examples, keywords, skills (with skills placed last and strictly lowercase).
+- Frontmatter schema structure:
+  ---
+  domain: <broad routing bucket>
+  triggers:
+    - <3-5 high-level goal boundaries for Step 3 LLM classifier>
+  examples:
+    - <5-10 realistic, diverse user utterances for Step 2 QMD hybrid vector search>
+  keywords:
+    - <5-12 discriminative multi-character phrases for Step 1 QMD keyword BM25>
+  skills:
+    - <optional exact skill names, strictly lowercase>
+  ---
+  <One single-line plain-text routing guidance sentence.>
+
+### 3-Stage routing field responsibilities
+- Step 1 BM25 keywords: keywords[] must contain 5-12 discriminative, multi-character domain phrases or prefixed commands (e.g., 'git status', 'gcloud storage', 'review'). NEVER use single-character items (e.g., '好', '是', '對', '改') or ubiquitous generic words (e.g., '功能', '用途', 'retry', 'status') which create false-positive traps in BM25 search. Actively equip newly created or refined intents with high-quality keywords.
+- Step 2 QMD hybrid examples: examples[] must contain 5-10 diverse, realistic user utterances reflecting natural conversation habits (colloquial phrasing, mixed Traditional Chinese/English, short queries, questions) to ensure sufficient dense vector subspace coverage.
+- Step 3 LLM classifier triggers: triggers[] describe 3-5 concise high-level user goal boundaries.
+  - Positive definition first: focus triggers on what the intent IS and what user goals it satisfies.
+  - NEVER put lexical lists, command enumerations, or "User mentions keywords: ..." inside triggers[]. All lexical terms, CLI command strings, and specific jargon MUST be placed in keywords[] so Step 1 BM25 can index them.
+  - Strict NO cross-references rule: NEVER write "route to <other-intent>" or mention other intent IDs in triggers, examples, or guidance. Intents must remain strictly decoupled and orthogonal.
+  - Negative boundaries ("Excludes ...") must be high-level conceptual exclusions only (e.g., 'Excludes general praise or social reactions without instructions to proceed'). NEVER enumerate word blacklists or token bags (e.g., 'DO NOT match praise words like 讚, 太強了, 厲害'), which induce attention bias (Pink Elephant effect) in LLM classifiers.
 - Do not create one-session intent boundaries; prefer the smallest durable class-level boundary that can help future turns.
+
 ### Routing metadata and guidance
 - The complete Markdown body is the required host-owned guidance string. Keep it concise, task-class scoped, and limited to behavior that should apply whenever this intent routes.
 - Skill dependencies belong in frontmatter skills[]. Add only exact skill names that the intent should load or strongly prefer.
-- Keep the body as one plain-text guidance sentence: no headings, lists, fences, commands, paths, or extra sections. Keep durable tool, workflow, parameter, recovery, and pitfall lessons within that sentence only when they are truly intent-wide.
+- Guidance format rules (enforced strictly by validator):
+  - Exactly one line of plain text; must not exceed 300 Unicode code points.
+  - When starting with an ASCII letter, it must start with an uppercase letter.
+  - Must end with exactly one terminal delimiter ('.', '!', '?', '。', '！', '？') as the final code point.
+  - Must NOT contain Markdown prefixes (headings '#', lists '-', '*', numbered '1.', code fences).
+  - Must NOT start with shell command prefixes (e.g., '$', 'git', 'npm', 'pnpm', 'cd').
+  - Must NOT contain absolute or relative paths (e.g., '/home/...', '~/.openclaw/...', './...').
+  - Must NOT direct the agent to use, load, read, or invoke a skill.
 - Create an experience only when the requested trigger permits it and the snapshot supplies eligible observed-skill evidence.
 - If two existing intents appear to overlap, mention the overlap in the finding summary or suggestedChange. Do not perform broad consolidation unless the requested trigger and evidence justify a concrete class-level routing edit.
 

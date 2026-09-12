@@ -253,50 +253,53 @@ const HybridThresholdsSchema = z
   });
 
 const RoutingThresholdsSchema = z
-  .preprocess((raw) => {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-      return {};
-    }
-    const record = raw as Record<string, unknown>;
-    if ("keyword" in record || "hybrid" in record) {
+  .preprocess(
+    (raw) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return {};
+      }
+      const record = raw as Record<string, unknown>;
+      if ("keyword" in record || "hybrid" in record) {
+        return record;
+      }
+      const legacyDirect =
+        typeof record.directRouteMinScore === "number"
+          ? record.directRouteMinScore
+          : undefined;
+      const legacyMinCandidate =
+        typeof record.minCandidateScore === "number"
+          ? record.minCandidateScore
+          : undefined;
+      if (legacyDirect !== undefined || legacyMinCandidate !== undefined) {
+        return {
+          keyword: {
+            ...(legacyDirect !== undefined
+              ? { directRouteMinScore: legacyDirect }
+              : {}),
+          },
+          hybrid: {
+            ...(legacyDirect !== undefined
+              ? { directRouteMinScore: legacyDirect }
+              : {}),
+            ...(legacyMinCandidate !== undefined
+              ? { minCandidateScore: legacyMinCandidate }
+              : {}),
+          },
+        };
+      }
       return record;
-    }
-    const legacyDirect =
-      typeof record.directRouteMinScore === "number"
-        ? record.directRouteMinScore
-        : undefined;
-    const legacyMinCandidate =
-      typeof record.minCandidateScore === "number"
-        ? record.minCandidateScore
-        : undefined;
-    if (legacyDirect !== undefined || legacyMinCandidate !== undefined) {
-      return {
-        keyword: {
-          ...(legacyDirect !== undefined
-            ? { directRouteMinScore: legacyDirect }
-            : {}),
-        },
-        hybrid: {
-          ...(legacyDirect !== undefined
-            ? { directRouteMinScore: legacyDirect }
-            : {}),
-          ...(legacyMinCandidate !== undefined
-            ? { minCandidateScore: legacyMinCandidate }
-            : {}),
-        },
-      };
-    }
-    return record;
-  }, z
-    .object({
-      keyword: KeywordThresholdsSchema.optional().default(
-        DEFAULT_ROUTING.thresholds.keyword,
-      ),
-      hybrid: HybridThresholdsSchema.optional().default(
-        DEFAULT_ROUTING.thresholds.hybrid,
-      ),
-    })
-    .strict())
+    },
+    z
+      .object({
+        keyword: KeywordThresholdsSchema.optional().default(
+          DEFAULT_ROUTING.thresholds.keyword,
+        ),
+        hybrid: HybridThresholdsSchema.optional().default(
+          DEFAULT_ROUTING.thresholds.hybrid,
+        ),
+      })
+      .strict(),
+  )
   .default(DEFAULT_ROUTING.thresholds);
 
 const RoutingSchema = z

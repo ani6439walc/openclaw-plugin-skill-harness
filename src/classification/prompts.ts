@@ -84,10 +84,7 @@ function buildConversationContext(
 }
 
 function formatHistoricalIntentBlock(
-  intent: Pick<
-    HistoricalIntentRecord,
-    "intent" | "domain" | "keywords"
-  >,
+  intent: Pick<HistoricalIntentRecord, "intent" | "domain" | "keywords">,
 ): string {
   const payload: {
     intent: string;

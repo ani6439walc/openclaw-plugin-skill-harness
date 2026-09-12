@@ -644,8 +644,7 @@ export function createHookHandlers(deps: HookDeps) {
       const topIntent = topHit
         ? findIntentEntry(params.availableIntents, topHit.intentId)
         : undefined;
-      const hybridThresholds =
-        params.refreshedConfig.routing.thresholds.hybrid;
+      const hybridThresholds = params.refreshedConfig.routing.thresholds.hybrid;
       const scoreMargin =
         topHit && secondHit
           ? topHit.score - secondHit.score

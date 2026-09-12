@@ -5430,7 +5430,9 @@ describe("formatConversationExpansionContext", () => {
     expect(result).toContain(
       "not grounded in the query or conversation history",
     );
-    expect(result).toContain("Write search queries from the user's perspective");
+    expect(result).toContain(
+      "Write search queries from the user's perspective",
+    );
     expect(result).toContain(
       "Strictly preserve the user's primary language and script",
     );
