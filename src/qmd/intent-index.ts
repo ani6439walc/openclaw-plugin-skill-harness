@@ -604,7 +604,7 @@ export function createIntentQmdIndex(params: {
         const results = (await activeStore.search({
           query: boundQmdQuery(query),
           collections: [EXAMPLES_COLLECTION, KEYWORDS_COLLECTION],
-          includeHyde: false,
+          includeHyde: true,
           ...(expansionContext ? { expansionContext } : {}),
           rerank: false,
           limit: rawLimit,

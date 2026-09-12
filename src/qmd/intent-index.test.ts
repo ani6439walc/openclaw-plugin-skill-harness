@@ -564,7 +564,7 @@ describe("createIntentQmdIndex", () => {
     expect(search).toHaveBeenCalledWith({
       query: "add qmd",
       collections: ["intent-examples", "intent-keywords"],
-      includeHyde: false,
+      includeHyde: true,
       expansionContext:
         "domain=development; keywords=qmd,routing; topic=Add QMD routing",
       rerank: false,

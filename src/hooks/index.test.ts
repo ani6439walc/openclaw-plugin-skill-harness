@@ -5333,35 +5333,24 @@ Current user request: fresh clean request
 });
 
 describe("formatConversationExpansionContext", () => {
-  it("returns undefined when both conversation and historical intent are empty", () => {
+  it("returns undefined when conversation is empty, even if historical intent is present", () => {
     expect(formatConversationExpansionContext({})).toBeUndefined();
     expect(
       formatConversationExpansionContext({ conversation: [] }),
     ).toBeUndefined();
+    expect(
+      formatConversationExpansionContext({
+        latestHistoricalIntent: {
+          input: "where should I go",
+          intent: "travel-planning",
+          domain: "other",
+          topic: "seaside vacation",
+        },
+      }),
+    ).toBeUndefined();
   });
 
-  it("formats task context and routing state when only historical intent is present", () => {
-    const result = formatConversationExpansionContext({
-      latestHistoricalIntent: {
-        input: "where should I go",
-        intent: "travel-planning",
-        domain: "other",
-        topic: "seaside vacation",
-      },
-    });
-
-    expect(result).toBeDefined();
-    expect(result).toContain("[Task Context]");
-    expect(result).toContain(
-      "Stay faithful to the user's actual intent and topic",
-    );
-    expect(result).toContain("[Previous Routing State]");
-    expect(result).not.toContain("previous_intent=");
-    expect(result).toContain("previous_topic=seaside vacation");
-    expect(result).not.toContain("[Recent Dialogue]");
-  });
-
-  it("formats all dialogue turns across multiple turns without slicing to 3 or 120 chars", () => {
+  it("formats all conversation turns across multiple turns without slicing to 3 or 120 chars", () => {
     const longText = "a".repeat(200);
     const conversation = [
       { role: "user" as const, text: "turn 1" },
@@ -5376,7 +5365,21 @@ describe("formatConversationExpansionContext", () => {
     });
 
     expect(result).toBeDefined();
-    expect(result).toContain("[Task Context]");
+    expect(result).not.toContain("[Task Context]");
+    expect(result).toContain(
+      "You are expanding a query for conversational assistant skill & intent routing.",
+    );
+    expect(result).toContain(
+      "ongoing conversation: resolve pronouns, slang, abbreviations",
+    );
+    expect(result).toContain(
+      "not grounded in the query or conversation history",
+    );
+    expect(result).not.toContain("dialogue");
+    expect(result).not.toContain("[Previous Routing State]");
+    expect(result).not.toContain("previous_topic");
+    expect(result).not.toContain("[Recent Dialogue]");
+    expect(result).toContain("Recent conversation:");
     expect(result).toContain("- [user] turn 1");
     expect(result).toContain("- [assistant] turn 2");
     expect(result).toContain("- [user] turn 3");

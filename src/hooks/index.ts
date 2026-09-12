@@ -122,33 +122,20 @@ export function formatConversationExpansionContext(params: {
   conversation?: readonly RecentTurn[];
   latestHistoricalIntent?: HistoricalIntentRecord;
 }): string | undefined {
-  const hasIntent = Boolean(params.latestHistoricalIntent);
-  const hasTurns = Boolean(
-    params.conversation && params.conversation.length > 0,
-  );
-  if (!hasIntent && !hasTurns) {
+  if (!params.conversation || params.conversation.length === 0) {
     return undefined;
   }
 
   const sections: string[] = [
-    "[Task Context]\n" +
-      "You are expanding a query for conversational assistant skill & intent routing.\n" +
-      "- Ground the expansion in the ongoing dialogue: resolve pronouns, slang, abbreviations, and elliptical expressions using the conversation context.\n" +
-      "- Stay faithful to the user's actual intent and topic; do not introduce unrelated domains or invent scenarios not grounded in the query or dialogue history.",
+    "You are expanding a query for conversational assistant skill & intent routing.\n" +
+      "- Ground the expansion in the ongoing conversation: resolve pronouns, slang, abbreviations, and elliptical expressions using the conversation context.\n" +
+      "- Stay faithful to the user's actual intent and topic; do not introduce unrelated domains or invent scenarios not grounded in the query or conversation history.",
   ];
 
-  if (params.latestHistoricalIntent?.topic) {
-    sections.push(
-      `[Previous Routing State]\nprevious_topic=${params.latestHistoricalIntent.topic}`,
-    );
-  }
-
-  if (params.conversation?.length) {
-    const dialogLines = params.conversation
-      .map((t) => `- [${t.role}] ${t.text.trim()}`)
-      .join("\n");
-    sections.push(`[Recent Dialogue]\n${dialogLines}`);
-  }
+  const conversationLines = params.conversation
+    .map((t) => `- [${t.role}] ${t.text.trim()}`)
+    .join("\n");
+  sections.push(`Recent conversation:\n${conversationLines}`);
 
   return sections.join("\n\n");
 }
