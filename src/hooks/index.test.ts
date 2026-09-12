@@ -5419,19 +5419,10 @@ Current user request: fresh clean request
 });
 
 describe("formatConversationExpansionContext", () => {
-  it("returns undefined when conversation is empty, even if historical intent is present", () => {
+  it("returns undefined when conversation is empty", () => {
     expect(formatConversationExpansionContext({})).toBeUndefined();
     expect(
       formatConversationExpansionContext({ conversation: [] }),
-    ).toBeUndefined();
-    expect(
-      formatConversationExpansionContext({
-        latestHistoricalIntent: {
-          input: "where should I go",
-          intent: "travel-planning",
-          domain: "unknown",
-        },
-      }),
     ).toBeUndefined();
   });
 

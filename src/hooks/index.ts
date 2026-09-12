@@ -116,7 +116,6 @@ const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
 
 export function formatConversationExpansionContext(params: {
   conversation?: readonly RecentTurn[];
-  latestHistoricalIntent?: HistoricalIntentRecord;
 }): string | undefined {
   if (!params.conversation || params.conversation.length === 0) {
     return undefined;
@@ -391,7 +390,6 @@ export function buildQmdRouteReason(params: {
 function buildQmdIntentResult(params: {
   hit: QmdIntentHit;
   intent: IntentCatalogEntry;
-  latestHistoricalIntent?: HistoricalIntentRecord;
 }): IntentionResult {
   return {
     intent: params.intent.id,
@@ -408,7 +406,6 @@ function buildQmdIntentResult(params: {
 function buildKeywordIntentResult(params: {
   hit: QmdIntentHit;
   intent: IntentCatalogEntry;
-  latestHistoricalIntent?: HistoricalIntentRecord;
   latestUserMessage?: string;
 }): IntentionResult {
   return {
@@ -638,9 +635,6 @@ export function createHookHandlers(deps: HookDeps) {
     modelRef: { provider: string; model: string } | undefined;
     availableIntents: readonly IntentCatalogEntry[];
   }): Promise<PromptBuildClassification | undefined> {
-    const latestHistoricalIntent =
-      params.historicalIntents[params.historicalIntents.length - 1];
-
     // Step 1: QMD Keyword Search (BM25 searchLex)
     let keywordHits: QmdIntentHit[] | undefined;
     if (qmdIntentIndex) {
@@ -668,7 +662,6 @@ export function createHookHandlers(deps: HookDeps) {
         const result = buildKeywordIntentResult({
           hit: topKeywordHit,
           intent: matchedKeywordIntent,
-          latestHistoricalIntent,
           latestUserMessage: params.latestUserMessage,
         });
         emitPipelineEvent(
@@ -722,7 +715,6 @@ export function createHookHandlers(deps: HookDeps) {
       const limits = getQmdCandidateLimits(params.availableIntents.length);
       const expansionContext = formatConversationExpansionContext({
         conversation: params.conversation,
-        latestHistoricalIntent,
       });
       qmdHits = await qmdIntentIndex.searchIntentExamplesAndKeywords({
         query: params.latestUserMessage,
@@ -753,7 +745,6 @@ export function createHookHandlers(deps: HookDeps) {
         const result = buildQmdIntentResult({
           hit: topHit,
           intent: topIntent,
-          latestHistoricalIntent,
         });
         emitPipelineEvent(
           params.ctx,

@@ -378,6 +378,7 @@ Route this request.
         frontmatter: `keywords:
   - "a"
   - "好"
+  - "b "
   - "valid"
 `,
       }),
@@ -387,6 +388,7 @@ Route this request.
       expect.arrayContaining([
         "short-keywords.md: keyword must contain at least 2 characters: a",
         "short-keywords.md: keyword must contain at least 2 characters: 好",
+        "short-keywords.md: keyword must contain at least 2 characters: b",
       ]),
     );
   });
