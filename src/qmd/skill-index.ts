@@ -1076,8 +1076,8 @@ export function createSkillQmdIndex(params: {
 
       const { skills } = config();
       const collectionWeights = skills?.search?.collectionWeights ?? {
-        meta: 1,
-        body: 1,
+        meta: 3,
+        body: 2,
         references: 1,
       };
       const candidateLimit = Math.max(limit, DEFAULT_CANDIDATE_LIMIT);

@@ -203,13 +203,23 @@ describe("skill-harness manifest", () => {
     const weights =
       manifest.configSchema.properties.skills.properties.search.properties
         .collectionWeights.properties;
-    for (const key of ["meta", "body", "references"]) {
-      expect(weights[key]).toMatchObject({
-        type: "number",
-        exclusiveMinimum: 0,
-        default: 1,
-        description: expect.any(String),
-      });
-    }
+    expect(weights.meta).toMatchObject({
+      type: "number",
+      exclusiveMinimum: 0,
+      default: 3,
+      description: expect.any(String),
+    });
+    expect(weights.body).toMatchObject({
+      type: "number",
+      exclusiveMinimum: 0,
+      default: 2,
+      description: expect.any(String),
+    });
+    expect(weights.references).toMatchObject({
+      type: "number",
+      exclusiveMinimum: 0,
+      default: 1,
+      description: expect.any(String),
+    });
   });
 });

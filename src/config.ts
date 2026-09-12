@@ -76,7 +76,7 @@ const DEFAULT_ROUTING: ResolvedRoutingConfig = {
 };
 
 const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
-  collectionWeights: { meta: 1, body: 1, references: 1 },
+  collectionWeights: { meta: 3, body: 2, references: 1 },
 };
 
 const DEFAULT_SKILLS: ResolvedSkillsConfig = {

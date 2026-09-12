@@ -215,8 +215,8 @@ Configure Skill Harness in `openclaw.json`:
           skills: {
             search: {
               collectionWeights: {
-                meta: 1,
-                body: 1,
+                meta: 3,
+                body: 2,
                 references: 1,
               },
             },
@@ -260,7 +260,7 @@ Configure Skill Harness in `openclaw.json`:
 | `routing.classifier.thinking`                        | `"medium"`                     | Intent-classifier thinking level.                                                                                                                                                                                                                                                                                         |
 | `routing.classifier.queryMode` / `contextWindow`     | `"recent"` / unset             | Scanner context and its limits.                                                                                                                                                                                                                                                                                           |
 | `routing.classifier.timeoutMs`                       | `5000`                         | Intent-classifier time budget in milliseconds.                                                                                                                                                                                                                                                                            |
-| `skills.search.collectionWeights`                    | `1/1/1`                        | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.                                                                                                                                                                                                                        |
+| `skills.search.collectionWeights`                    | `3/2/1`                        | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.                                                                                                                                                                                                                        |
 | `qmd.embedding` / `expansion`                        | required                       | Remote endpoint and model for mandatory QMD hybrid routing. Supports OpenClaw `provider/model` syntax (e.g. `bifrost/text-embedding-3-small`) to auto-resolve `baseUrl` and `apiKey` from OpenClaw's `models.providers`. Explicit `baseUrl` and `apiKey` remain supported. `embedding.dimension` defaults to `1536`.      |
 | `qmd.timeoutMs`                                      | `routing.classifier.timeoutMs` | Per-request QMD embedding and expansion timeout.                                                                                                                                                                                                                                                                          |
 | `qmd.indexRefreshIntervalSeconds`                    | `300`                          | Seconds between source checks for QMD intent and skill indexes; `0` disables subsequent automatic checks. A completed intent index is reopened read-only after Gateway restart when its persisted catalog and QMD configuration fingerprint still matches; stale, incomplete, or unreadable state rebuilds automatically. |

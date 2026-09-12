@@ -49,8 +49,8 @@ describe("resolveConfig", () => {
         },
       });
       expect(resolveConfig({}).skills.search.collectionWeights).toEqual({
-        meta: 1,
-        body: 1,
+        meta: 3,
+        body: 2,
         references: 1,
       });
     });
@@ -92,8 +92,8 @@ describe("resolveConfig", () => {
       );
 
       expect(result.skills.search.collectionWeights).toEqual({
-        meta: 1,
-        body: 1,
+        meta: 3,
+        body: 2,
         references: 1,
       });
 
@@ -488,7 +488,7 @@ describe("resolveConfig", () => {
         };
       };
       expect(resolveConfig({}).skills.search).toEqual({
-        collectionWeights: { meta: 1, body: 1, references: 1 },
+        collectionWeights: { meta: 3, body: 2, references: 1 },
       });
       expect(resolveConfig({}).qmd.indexRefreshIntervalSeconds).toBe(300);
       expect(resolveConfig({}).qmd.embedding.dimension).toBe(1536);
@@ -503,7 +503,7 @@ describe("resolveConfig", () => {
       expect(
         manifest.configSchema.properties.skills?.properties.search?.properties
           .collectionWeights?.properties.meta.default,
-      ).toBe(1);
+      ).toBe(3);
     });
 
     it("accepts custom skills.search collection weights", () => {
