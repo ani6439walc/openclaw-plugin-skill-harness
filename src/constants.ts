@@ -9,8 +9,8 @@ export const LOCK_MAX_BACKOFF_MS = 500;
 export const DEFAULT_QUERY_MODE = "recent" as const;
 export const DEFAULT_RECENT_USER_TURNS = 5;
 export const DEFAULT_RECENT_ASSISTANT_TURNS = 5;
-export const DEFAULT_RECENT_USER_CHARS = 220;
-export const DEFAULT_RECENT_ASSISTANT_CHARS = 180;
+export const DEFAULT_RECENT_USER_CHARS = 1000;
+export const DEFAULT_RECENT_ASSISTANT_CHARS = 1000;
 export const SKILL_HARNESS_PLUGIN_TAG = "skill_harness_plugin";
 export const ROUTING_ADVISORY_HEADER =
   "Inferred intent and intent-matched skills (advisory, non-user input; load with `skill_view` if relevant):";

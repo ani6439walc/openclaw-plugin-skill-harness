@@ -168,14 +168,14 @@ const ScopeSchema = z
 const UserContextWindowSchema = z
   .object({
     turns: boundedInt(DEFAULT_RECENT_USER_TURNS, 0, 20),
-    chars: boundedInt(DEFAULT_RECENT_USER_CHARS, 40, 1000),
+    chars: boundedInt(DEFAULT_RECENT_USER_CHARS, 40, 2000),
   })
   .catch(DEFAULT_CONTEXT_WINDOW.user);
 
 const AssistantContextWindowSchema = z
   .object({
     turns: boundedInt(DEFAULT_RECENT_ASSISTANT_TURNS, 0, 10),
-    chars: boundedInt(DEFAULT_RECENT_ASSISTANT_CHARS, 40, 1000),
+    chars: boundedInt(DEFAULT_RECENT_ASSISTANT_CHARS, 40, 2000),
   })
   .catch(DEFAULT_CONTEXT_WINDOW.assistant);
 

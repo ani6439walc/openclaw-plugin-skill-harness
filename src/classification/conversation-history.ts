@@ -3,6 +3,12 @@ import type {
   HistoricalIntentRecord,
   RecentTurn,
 } from "../types.js";
+import {
+  DEFAULT_RECENT_USER_TURNS,
+  DEFAULT_RECENT_USER_CHARS,
+  DEFAULT_RECENT_ASSISTANT_TURNS,
+  DEFAULT_RECENT_ASSISTANT_CHARS,
+} from "../constants.js";
 
 function normalizeTurnText(text: string): string {
   return text.trim().replace(/\s+/g, " ");
@@ -65,8 +71,14 @@ export function limitConversationTurns(
   allTurns: RecentTurn[],
   queryMode: "message" | "recent" | "full",
   cWindow: ContextWindow = {
-    user: { turns: 5, chars: 220 },
-    assistant: { turns: 5, chars: 180 },
+    user: {
+      turns: DEFAULT_RECENT_USER_TURNS,
+      chars: DEFAULT_RECENT_USER_CHARS,
+    },
+    assistant: {
+      turns: DEFAULT_RECENT_ASSISTANT_TURNS,
+      chars: DEFAULT_RECENT_ASSISTANT_CHARS,
+    },
   },
 ): RecentTurn[] {
   if (queryMode === "message") return [];

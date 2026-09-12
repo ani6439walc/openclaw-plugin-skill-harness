@@ -129,7 +129,9 @@ export function formatConversationExpansionContext(params: {
   const sections: string[] = [
     "You are expanding a query for conversational assistant skill & intent routing.\n" +
       "- Ground the expansion in the ongoing conversation: resolve pronouns, slang, abbreviations, and elliptical expressions using the conversation context.\n" +
-      "- Stay faithful to the user's actual intent and topic; do not introduce unrelated domains or invent scenarios not grounded in the query or conversation history.",
+      "- Stay faithful to the user's actual intent and topic; do not introduce unrelated domains or invent scenarios not grounded in the query or conversation history.\n" +
+      "- Write search queries from the user's perspective (search query or direct question); do not write third-person descriptions of the user (avoid '使用者...', 'User asks...').\n" +
+      "- Strictly preserve the user's primary language and script (e.g. Traditional Chinese queries must produce Traditional Chinese expansions; never translate into English unless the user query is English).",
   ];
 
   const conversationLines = params.conversation

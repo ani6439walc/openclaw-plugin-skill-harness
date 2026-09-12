@@ -51,8 +51,8 @@ describe("skill-harness manifest", () => {
             chars: {
               type: "integer",
               minimum: 40,
-              maximum: 1000,
-              default: 220,
+              maximum: 2000,
+              default: 1000,
             },
           },
         },
@@ -64,8 +64,8 @@ describe("skill-harness manifest", () => {
             chars: {
               type: "integer",
               minimum: 40,
-              maximum: 1000,
-              default: 180,
+              maximum: 2000,
+              default: 1000,
             },
           },
         },

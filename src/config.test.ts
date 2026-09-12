@@ -758,7 +758,7 @@ describe("resolveConfig", () => {
       );
     });
 
-    it("should clamp contextWindow.user.chars within bounds (40-1000)", () => {
+    it("should clamp contextWindow.user.chars within bounds (40-2000)", () => {
       const lowResult = resolveConfig({
         routing: {
           classifier: {
@@ -775,7 +775,7 @@ describe("resolveConfig", () => {
           },
         },
       });
-      expect(highResult.routing.classifier.contextWindow.user.chars).toBe(1000);
+      expect(highResult.routing.classifier.contextWindow.user.chars).toBe(2000);
 
       const validResult = resolveConfig({
         routing: {
@@ -787,7 +787,7 @@ describe("resolveConfig", () => {
       expect(validResult.routing.classifier.contextWindow.user.chars).toBe(500);
     });
 
-    it("should clamp contextWindow.assistant.chars within bounds (40-1000)", () => {
+    it("should clamp contextWindow.assistant.chars within bounds (40-2000)", () => {
       const lowResult = resolveConfig({
         routing: {
           classifier: {
@@ -802,12 +802,12 @@ describe("resolveConfig", () => {
       const highResult = resolveConfig({
         routing: {
           classifier: {
-            contextWindow: { user: {}, assistant: { chars: 2000 } } as never,
+            contextWindow: { user: {}, assistant: { chars: 5000 } } as never,
           },
         },
       });
       expect(highResult.routing.classifier.contextWindow.assistant.chars).toBe(
-        1000,
+        2000,
       );
 
       const validResult = resolveConfig({

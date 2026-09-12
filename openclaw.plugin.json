@@ -178,8 +178,8 @@
                       "chars": {
                         "type": "integer",
                         "minimum": 40,
-                        "maximum": 1000,
-                        "default": 220
+                        "maximum": 2000,
+                        "default": 1000
                       }
                     }
                   },
@@ -196,8 +196,8 @@
                       "chars": {
                         "type": "integer",
                         "minimum": 40,
-                        "maximum": 1000,
-                        "default": 180
+                        "maximum": 2000,
+                        "default": 1000
                       }
                     }
                   }

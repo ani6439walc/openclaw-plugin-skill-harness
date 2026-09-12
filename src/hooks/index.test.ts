@@ -5375,6 +5375,10 @@ describe("formatConversationExpansionContext", () => {
     expect(result).toContain(
       "not grounded in the query or conversation history",
     );
+    expect(result).toContain("Write search queries from the user's perspective");
+    expect(result).toContain(
+      "Strictly preserve the user's primary language and script",
+    );
     expect(result).not.toContain("dialogue");
     expect(result).not.toContain("[Previous Routing State]");
     expect(result).not.toContain("previous_topic");
