@@ -1,5 +1,6 @@
 import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { logger } from "../../api.js";
+import { roundToDecimals } from "../normalize.js";
 import type { IntentTrigger } from "../types.js";
 import type { PluginHookAgentContext } from "./types.js";
 
@@ -44,18 +45,31 @@ export function emitPipelineEvent(
     return;
   }
 
+  const confidence =
+    typeof metadata.confidence === "number" &&
+    !Number.isNaN(metadata.confidence)
+      ? roundToDecimals(metadata.confidence, 2)
+      : undefined;
+
   try {
+    const rawData: Record<string, unknown> = {
+      kind: SKILL_HARNESS_EVENT_KIND,
+      phase,
+      state,
+      sessionKey,
+      ...metadata,
+    };
+    if (confidence !== undefined) {
+      rawData.confidence = confidence;
+    } else if ("confidence" in metadata) {
+      delete rawData.confidence;
+    }
+
     emitHostAgentEvent({
       runId,
       sessionKey,
       stream: SKILL_HARNESS_EVENT_STREAM,
-      data: cleanPipelineEventData({
-        kind: SKILL_HARNESS_EVENT_KIND,
-        phase,
-        state,
-        sessionKey,
-        ...metadata,
-      }),
+      data: cleanPipelineEventData(rawData),
     });
   } catch (err) {
     logger.warn("failed to emit skill-harness pipeline event", {

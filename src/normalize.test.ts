@@ -3,7 +3,9 @@ import {
   canonicalIdentity,
   normalizeForComparison,
   normalizeForKeyword,
+  roundToDecimals,
   roundToThreeDecimals,
+  roundToTwoDecimals,
 } from "./normalize.js";
 
 describe("normalization helpers", () => {
@@ -36,5 +38,21 @@ describe("normalization helpers", () => {
     expect(roundToThreeDecimals(smallDiff) >= roundToThreeDecimals(0.08)).toBe(
       false,
     );
+  });
+
+  it("rounds numeric values to specified decimal places (default: 2)", () => {
+    expect(roundToDecimals(0.7688711881637573)).toBe(0.77);
+    expect(roundToDecimals(0.7688711881637573, 1)).toBe(0.8);
+    expect(roundToDecimals(0.7688711881637573, 3)).toBe(0.769);
+    expect(roundToDecimals(0.7688711881637573, 4)).toBe(0.7689);
+    expect(roundToDecimals(12.3456, 0)).toBe(12);
+  });
+
+  it("rounds numeric confidence to 2 decimal places via wrapper", () => {
+    expect(roundToTwoDecimals(0.7688711881637573)).toBe(0.77);
+    expect(roundToTwoDecimals(0.954)).toBe(0.95);
+    expect(roundToTwoDecimals(0.955)).toBe(0.96);
+    expect(roundToTwoDecimals(1)).toBe(1);
+    expect(roundToTwoDecimals(0)).toBe(0);
   });
 });

@@ -31,9 +31,25 @@ export function normalizeForKeyword(value: string): string {
 }
 
 /**
+ * Round a numeric value to a specified number of decimal places (default: 2)
+ * with Number.EPSILON to mitigate IEEE 754 floating-point inaccuracies.
+ */
+export function roundToDecimals(value: number, decimals: number = 2): number {
+  const factor = 10 ** decimals;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+/**
+ * Round a numeric score or confidence to 2 decimal places.
+ */
+export function roundToTwoDecimals(value: number): number {
+  return roundToDecimals(value, 2);
+}
+
+/**
  * Round a numeric score or margin to 3 decimal places to avoid IEEE 754 floating-point inaccuracies
  * during threshold comparisons.
  */
 export function roundToThreeDecimals(value: number): number {
-  return Math.round((value + Number.EPSILON) * 1000) / 1000;
+  return roundToDecimals(value, 3);
 }
