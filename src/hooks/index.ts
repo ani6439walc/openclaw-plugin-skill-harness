@@ -1,12 +1,8 @@
-import { normalizeForKeyword } from "../normalize.js";
+import { roundToThreeDecimals } from "../normalize.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
-import {
-  defaultTracker,
-  extractSkillInfo,
-  resolveTurnEventId,
-} from "../session/index.js";
+import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
@@ -576,11 +572,13 @@ export function createHookHandlers(deps: HookDeps) {
       const matchedKeywordIntent = topKeywordHit
         ? findIntentEntry(params.availableIntents, topKeywordHit.intentId)
         : undefined;
+      const keywordMinScore =
+        params.refreshedConfig.routing.thresholds.keyword.directRouteMinScore;
       if (
         topKeywordHit &&
         matchedKeywordIntent &&
-        topKeywordHit.score >=
-          params.refreshedConfig.routing.thresholds.keyword.directRouteMinScore
+        roundToThreeDecimals(topKeywordHit.score) >=
+          roundToThreeDecimals(keywordMinScore)
       ) {
         emitPipelineEvent(
           params.ctx,
@@ -650,11 +648,14 @@ export function createHookHandlers(deps: HookDeps) {
           ? topHit.score - secondHit.score
           : (topHit?.score ?? 0);
       const satisfiesMargin =
-        !secondHit || scoreMargin >= hybridThresholds.directRouteMinMargin;
+        !secondHit ||
+        roundToThreeDecimals(scoreMargin) >=
+          roundToThreeDecimals(hybridThresholds.directRouteMinMargin);
       if (
         topHit &&
         topIntent &&
-        topHit.score >= hybridThresholds.directRouteMinScore &&
+        roundToThreeDecimals(topHit.score) >=
+          roundToThreeDecimals(hybridThresholds.directRouteMinScore) &&
         satisfiesMargin
       ) {
         emitPipelineEvent(

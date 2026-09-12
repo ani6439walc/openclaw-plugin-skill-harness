@@ -100,6 +100,25 @@ describe("projectQmdIntentCandidates", () => {
     ]);
   });
 
+  it("accounts for floating-point inaccuracy by rounding to 3 decimal places", () => {
+    const result = projectQmdIntentCandidates({
+      intents: catalog,
+      qmdHits: [
+        {
+          intentId: "version-control",
+          score: 0.39999999999999997, // IEEE 754 precision artifact of 0.4
+          collection: "intent-examples-and-keywords",
+        },
+      ],
+      histories: [],
+      minCandidateScore: 0.4,
+    });
+
+    expect(result.effectiveIntents.map((entry) => entry.id)).toEqual([
+      "version-control",
+    ]);
+  });
+
   it("derives dynamic QMD limits without a fixed catalog-size cutoff", () => {
     expect(getQmdCandidateLimits(1)).toEqual({
       smallK: 1,

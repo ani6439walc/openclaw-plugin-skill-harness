@@ -29,3 +29,11 @@ export function normalizeForComparison(value: string): string {
 export function normalizeForKeyword(value: string): string {
   return value.normalize("NFKC").replace(/\s+/gu, "").toLowerCase();
 }
+
+/**
+ * Round a numeric score or margin to 3 decimal places to avoid IEEE 754 floating-point inaccuracies
+ * during threshold comparisons.
+ */
+export function roundToThreeDecimals(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1000) / 1000;
+}

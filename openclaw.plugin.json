@@ -253,22 +253,25 @@
               "collectionWeights": {
                 "type": "object",
                 "additionalProperties": false,
-                "description": "Relative weights for weighted RRF across skill collections. Defaults to 1 for each collection.",
+                "description": "Relative weights (positive floats or integers, e.g. 1.5, 0.8) for weighted RRF across skill collections. Defaults to 1 for each collection.",
                 "properties": {
                   "meta": {
                     "type": "number",
                     "exclusiveMinimum": 0,
-                    "default": 1
+                    "default": 1,
+                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-meta collection."
                   },
                   "body": {
                     "type": "number",
                     "exclusiveMinimum": 0,
-                    "default": 1
+                    "default": 1,
+                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-body collection."
                   },
                   "references": {
                     "type": "number",
                     "exclusiveMinimum": 0,
-                    "default": 1
+                    "default": 1,
+                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-references collection."
                   }
                 }
               }

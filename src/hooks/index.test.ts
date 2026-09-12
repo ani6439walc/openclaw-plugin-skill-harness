@@ -3810,6 +3810,57 @@ describe("createHookHandlers topic switch flow", () => {
     expect(result).toBeDefined();
   });
 
+  it("satisfies directRouteMinMargin even when JavaScript floating-point subtraction has rounding errors", async () => {
+    const classifier = vi.fn();
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      configRaw: {
+        routing: {
+          thresholds: {
+            hybrid: {
+              directRouteMinScore: 0.9,
+              directRouteMinMargin: 0.08,
+              minCandidateScore: 0.4,
+            },
+          },
+        },
+      },
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The request is repository maintenance.",
+        keywords: ["repository"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.94,
+            collection: "intent-examples-and-keywords",
+          },
+          {
+            intentId: "general-chat",
+            score: 0.86,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    // In JS: 0.94 - 0.86 = 0.07999999999999996 (< 0.08 without 3-decimal rounding)
+    // With roundToThreeDecimals: 0.08 >= 0.08 -> direct route!
+    expect(classifier).not.toHaveBeenCalled();
+    expect(result).toBeDefined();
+  });
+
   it("uses the configured candidate score floor before projecting QMD hits", async () => {
     const operationsIntent: IntentCatalogEntry = {
       id: "deployment",

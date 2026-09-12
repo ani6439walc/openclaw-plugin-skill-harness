@@ -198,4 +198,18 @@ describe("skill-harness manifest", () => {
       description: expect.any(String),
     });
   });
+
+  it("declares collectionWeights supporting positive floating-point numbers", () => {
+    const weights =
+      manifest.configSchema.properties.skills.properties.search.properties
+        .collectionWeights.properties;
+    for (const key of ["meta", "body", "references"]) {
+      expect(weights[key]).toMatchObject({
+        type: "number",
+        exclusiveMinimum: 0,
+        default: 1,
+        description: expect.any(String),
+      });
+    }
+  });
 });

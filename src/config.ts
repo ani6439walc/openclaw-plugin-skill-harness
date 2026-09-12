@@ -7,6 +7,7 @@ import {
   DEFAULT_RECENT_USER_CHARS,
   DEFAULT_RECENT_ASSISTANT_CHARS,
 } from "./constants.js";
+import { roundToThreeDecimals } from "./normalize.js";
 import type {
   ContextWindow,
   ResolvedClassifierConfig,
@@ -242,7 +243,10 @@ const HybridThresholdsSchema = z
   .strict()
   .default(DEFAULT_ROUTING.thresholds.hybrid)
   .superRefine((hybrid, context) => {
-    if (hybrid.minCandidateScore > hybrid.directRouteMinScore) {
+    if (
+      roundToThreeDecimals(hybrid.minCandidateScore) >
+      roundToThreeDecimals(hybrid.directRouteMinScore)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["minCandidateScore"],
