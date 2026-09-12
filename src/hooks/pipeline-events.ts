@@ -14,13 +14,10 @@ export type PipelineMetadata = {
   basis?: string;
   domain?: string;
   keywords?: string[];
-  topic?: string;
   changed?: boolean;
   intent?: string;
   reason?: string;
   confidence?: number;
-  score?: number;
-  collection?: string;
   result?: string;
   error?: string;
   durationMs?: number;

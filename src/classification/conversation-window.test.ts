@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { limitConversationTurns } from "./conversation.js";
+import {
+  DEFAULT_RECENT_USER_CHARS,
+  DEFAULT_RECENT_ASSISTANT_CHARS,
+} from "../constants.js";
 
 describe("applyQueryFilters", () => {
   const turns = [
@@ -45,8 +49,8 @@ describe("applyQueryFilters", () => {
 
   it("counts complete recent-mode role caps in Unicode code points", () => {
     for (const [role, limit] of [
-      ["user", 220],
-      ["assistant", 180],
+      ["user", DEFAULT_RECENT_USER_CHARS],
+      ["assistant", DEFAULT_RECENT_ASSISTANT_CHARS],
     ] as const) {
       const exact = limitConversationTurns(
         [{ role, text: "😀".repeat(limit) }],

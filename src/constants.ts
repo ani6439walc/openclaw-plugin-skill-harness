@@ -9,19 +9,19 @@ export const LOCK_MAX_BACKOFF_MS = 500;
 export const DEFAULT_QUERY_MODE = "recent" as const;
 export const DEFAULT_RECENT_USER_TURNS = 5;
 export const DEFAULT_RECENT_ASSISTANT_TURNS = 5;
-export const DEFAULT_RECENT_USER_CHARS = 220;
-export const DEFAULT_RECENT_ASSISTANT_CHARS = 180;
+export const DEFAULT_RECENT_USER_CHARS = 1000;
+export const DEFAULT_RECENT_ASSISTANT_CHARS = 1000;
 export const SKILL_HARNESS_PLUGIN_TAG = "skill_harness_plugin";
 export const ROUTING_ADVISORY_HEADER =
   "Inferred intent and intent-matched skills (advisory, non-user input; load with `skill_view` if relevant):";
 export const ROUTING_ADVISORY_INTENT_ONLY_HEADER =
   "Inferred user intent from conversation (advisory, non-user input):";
 
-export const FALLBACK_INTENT_ID = "other";
+export const FALLBACK_INTENT_ID = "unknown";
 export const FALLBACK_INTENT: IntentDefinition = {
   triggers: [],
   examples: [],
-  domain: "other",
+  domain: "unknown",
   keywords: [],
   guidance:
     "No predefined intent detected. Main Agent should determine the user's true intent and choose an appropriate strategy.",

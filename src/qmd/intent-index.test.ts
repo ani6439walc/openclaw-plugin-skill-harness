@@ -564,7 +564,7 @@ describe("createIntentQmdIndex", () => {
     expect(search).toHaveBeenCalledWith({
       query: "add qmd",
       collections: ["intent-examples", "intent-keywords"],
-      includeHyde: false,
+      includeHyde: true,
       expansionContext:
         "domain=development; keywords=qmd,routing; topic=Add QMD routing",
       rerank: false,
@@ -589,6 +589,70 @@ describe("createIntentQmdIndex", () => {
       collection: "intent-keywords",
       limit: 1,
     });
+  });
+
+  it("extracts genuine semantic scores from QMD explain and deduplicates by highest score", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const search = vi.fn().mockResolvedValue([
+      {
+        body: "---\nintent_id: weak-match\n---\nsomething vague",
+        score: 1.0,
+        explain: {
+          vectorScores: [0.45],
+          ftsScores: [0.2],
+        },
+      },
+      {
+        body: "---\nintent_id: strong-match\n---\nexact match chunk 1",
+        score: 0.5,
+        explain: {
+          vectorScores: [0.72],
+        },
+      },
+      {
+        body: "---\nintent_id: strong-match\n---\nexact match chunk 2",
+        score: 0.33,
+        explain: {
+          vectorScores: [0.89],
+        },
+      },
+    ]);
+    const createStore = vi
+      .fn()
+      .mockResolvedValue(createStoreDouble({ search }));
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+
+    index.schedule(catalog);
+    await waitForReady(index);
+    const hits = await index.searchIntentExamplesAndKeywords({
+      query: "exact match",
+      rawLimit: 5,
+    });
+
+    expect(hits).toEqual([
+      {
+        intentId: "strong-match",
+        score: 0.89,
+        collection: "intent-examples-and-keywords",
+        explain: {
+          vectorScores: [0.89],
+        },
+      },
+      {
+        intentId: "weak-match",
+        score: 0.45,
+        collection: "intent-examples-and-keywords",
+        explain: {
+          vectorScores: [0.45],
+          ftsScores: [0.2],
+        },
+      },
+    ]);
   });
 
   it("bounds long intent queries before remote embedding", async () => {

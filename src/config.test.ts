@@ -49,8 +49,8 @@ describe("resolveConfig", () => {
         },
       });
       expect(resolveConfig({}).skills.search.collectionWeights).toEqual({
-        meta: 1,
-        body: 1,
+        meta: 3,
+        body: 2,
         references: 1,
       });
     });
@@ -63,8 +63,14 @@ describe("resolveConfig", () => {
       expect(result.scope.deniedChatIds).toEqual([]);
 
       expect(result.routing.thresholds).toEqual({
-        directRouteMinScore: 0.85,
-        minCandidateScore: 0.35,
+        keyword: {
+          directRouteMinScore: 0.85,
+        },
+        hybrid: {
+          directRouteMinScore: 0.9,
+          directRouteMinMargin: 0.08,
+          minCandidateScore: 0.4,
+        },
       });
 
       expect(result.routing.classifier.queryMode).toBe(DEFAULT_QUERY_MODE);
@@ -86,8 +92,8 @@ describe("resolveConfig", () => {
       );
 
       expect(result.skills.search.collectionWeights).toEqual({
-        meta: 1,
-        body: 1,
+        meta: 3,
+        body: 2,
         references: 1,
       });
 
@@ -221,24 +227,58 @@ describe("resolveConfig", () => {
   describe("routing & thresholds", () => {
     it("resolves default routing thresholds when routing is omitted", () => {
       expect(resolveConfig({}).routing.thresholds).toEqual({
-        directRouteMinScore: 0.85,
-        minCandidateScore: 0.35,
+        keyword: {
+          directRouteMinScore: 0.85,
+        },
+        hybrid: {
+          directRouteMinScore: 0.9,
+          directRouteMinMargin: 0.08,
+          minCandidateScore: 0.4,
+        },
       });
     });
 
-    it("accepts independent routing thresholds", () => {
+    it("accepts nested routing thresholds", () => {
       expect(
         resolveConfig({
           routing: {
             thresholds: {
-              directRouteMinScore: 0.9,
-              minCandidateScore: 0.2,
+              keyword: { directRouteMinScore: 0.8 },
+              hybrid: {
+                directRouteMinScore: 0.95,
+                directRouteMinMargin: 0.05,
+                minCandidateScore: 0.3,
+              },
             },
           },
         }).routing.thresholds,
       ).toEqual({
-        directRouteMinScore: 0.9,
-        minCandidateScore: 0.2,
+        keyword: { directRouteMinScore: 0.8 },
+        hybrid: {
+          directRouteMinScore: 0.95,
+          directRouteMinMargin: 0.05,
+          minCandidateScore: 0.3,
+        },
+      });
+    });
+
+    it("migrates legacy flat routing thresholds backwards-compatibly", () => {
+      expect(
+        resolveConfig({
+          routing: {
+            thresholds: {
+              directRouteMinScore: 0.92,
+              minCandidateScore: 0.5,
+            } as never,
+          },
+        }).routing.thresholds,
+      ).toEqual({
+        keyword: { directRouteMinScore: 0.92 },
+        hybrid: {
+          directRouteMinScore: 0.92,
+          directRouteMinMargin: 0.08,
+          minCandidateScore: 0.5,
+        },
       });
     });
 
@@ -248,8 +288,10 @@ describe("resolveConfig", () => {
         resolveConfig({
           routing: {
             thresholds: {
-              directRouteMinScore: 0.3,
-              minCandidateScore: 0.7,
+              hybrid: {
+                directRouteMinScore: 0.3,
+                minCandidateScore: 0.7,
+              },
             },
           },
         }),
@@ -273,7 +315,10 @@ describe("resolveConfig", () => {
             routing?: {
               properties: {
                 thresholds: {
-                  properties: Record<string, { default?: number }>;
+                  properties: Record<
+                    string,
+                    { properties: Record<string, { default?: number }> }
+                  >;
                 };
               };
             };
@@ -297,7 +342,7 @@ describe("resolveConfig", () => {
       ).not.toHaveProperty("rerank");
       expect(
         manifest.configSchema.properties.routing?.properties.thresholds
-          .properties.directRouteMinScore.default,
+          .properties.keyword.properties.directRouteMinScore.default,
       ).toBe(0.85);
       for (const endpoint of ["embedding", "expansion"]) {
         expect(
@@ -443,7 +488,7 @@ describe("resolveConfig", () => {
         };
       };
       expect(resolveConfig({}).skills.search).toEqual({
-        collectionWeights: { meta: 1, body: 1, references: 1 },
+        collectionWeights: { meta: 3, body: 2, references: 1 },
       });
       expect(resolveConfig({}).qmd.indexRefreshIntervalSeconds).toBe(300);
       expect(resolveConfig({}).qmd.embedding.dimension).toBe(1536);
@@ -458,7 +503,7 @@ describe("resolveConfig", () => {
       expect(
         manifest.configSchema.properties.skills?.properties.search?.properties
           .collectionWeights?.properties.meta.default,
-      ).toBe(1);
+      ).toBe(3);
     });
 
     it("accepts custom skills.search collection weights", () => {
@@ -758,7 +803,7 @@ describe("resolveConfig", () => {
       );
     });
 
-    it("should clamp contextWindow.user.chars within bounds (40-1000)", () => {
+    it("should clamp contextWindow.user.chars within bounds (40-2000)", () => {
       const lowResult = resolveConfig({
         routing: {
           classifier: {
@@ -775,7 +820,7 @@ describe("resolveConfig", () => {
           },
         },
       });
-      expect(highResult.routing.classifier.contextWindow.user.chars).toBe(1000);
+      expect(highResult.routing.classifier.contextWindow.user.chars).toBe(2000);
 
       const validResult = resolveConfig({
         routing: {
@@ -787,7 +832,7 @@ describe("resolveConfig", () => {
       expect(validResult.routing.classifier.contextWindow.user.chars).toBe(500);
     });
 
-    it("should clamp contextWindow.assistant.chars within bounds (40-1000)", () => {
+    it("should clamp contextWindow.assistant.chars within bounds (40-2000)", () => {
       const lowResult = resolveConfig({
         routing: {
           classifier: {
@@ -802,12 +847,12 @@ describe("resolveConfig", () => {
       const highResult = resolveConfig({
         routing: {
           classifier: {
-            contextWindow: { user: {}, assistant: { chars: 2000 } } as never,
+            contextWindow: { user: {}, assistant: { chars: 5000 } } as never,
           },
         },
       });
       expect(highResult.routing.classifier.contextWindow.assistant.chars).toBe(
-        1000,
+        2000,
       );
 
       const validResult = resolveConfig({

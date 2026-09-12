@@ -7,7 +7,10 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import {
+  buildKeywordRouteReason,
+  buildQmdRouteReason,
   createHookHandlers,
+  extractHybridSignals,
   formatConversationExpansionContext,
 } from "./index.js";
 import {
@@ -764,7 +767,6 @@ description: Navigate Tokyo.
           intent: "version-control",
           reason: "test",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-06-11T00:00:00.000Z" },
@@ -854,7 +856,6 @@ description: Navigate Tokyo.
           intent: "version-control",
           reason: "test",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-06-11T00:00:00.000Z" },
@@ -897,7 +898,6 @@ description: Navigate Tokyo.
           intent: "skill-lifecycle",
           reason: "test",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       toolCalls: [{ toolCallId: "tool-a", name: "read", success: true }],
@@ -937,7 +937,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "agent-ops",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-07T10:22:10.674Z" },
@@ -984,7 +983,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "agent-ops",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -1030,7 +1028,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "agent-ops",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -1094,7 +1091,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "other",
           confidence: 0.5,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -1157,7 +1153,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "other",
           confidence: 0.5,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -1193,7 +1188,6 @@ description: Navigate Tokyo.
             reason: "test",
             domain: "other",
             confidence: 0.5,
-            complexity: "low" as const,
           },
         },
         timestamps: {},
@@ -1251,7 +1245,6 @@ description: Navigate Tokyo.
           reason: "test",
           domain: "agent-ops",
           confidence: 0.9,
-          complexity: "low" as const,
         },
       },
       timestamps: { start: "2026-07-07T10:07:46.061Z" },
@@ -1310,7 +1303,6 @@ description: Navigate Tokyo.
           intent: "other",
           reason: "test",
           confidence: 0.2,
-          complexity: "high" as const,
         },
         toolCalls: Array.from({ length: 5 }, () => ({
           name: "exec",
@@ -1469,7 +1461,6 @@ description: Navigate Tokyo.
           intent: "other",
           reason: "test",
           confidence: 0.2,
-          complexity: "high" as const,
         },
         timestamps: { start: "2026-06-11T00:00:00.000Z" },
       },
@@ -1568,7 +1559,6 @@ description: Navigate Tokyo.
           intent: "other",
           reason: "test",
           confidence: 0.2,
-          complexity: "high" as const,
         },
         toolCalls: Array.from({ length: 5 }, () => ({ name: "exec" })),
         timestamps: { start: "2026-06-11T00:00:00.000Z" },
@@ -1750,11 +1740,10 @@ description: Navigate Tokyo.
       current: {
         input: "wrong",
         intent: {
-          intent: "other",
+          intent: "unknown",
           reason: "same topic",
-          domain: "other",
+          domain: "unknown",
           confidence: 0.95,
-          complexity: "low" as const,
         },
         timestamps: { start: "2026-07-29T00:00:00.000Z" },
       },
@@ -1877,7 +1866,6 @@ description: Navigate Tokyo.
           reason: "same topic",
           domain: "other",
           confidence: 0.95,
-          complexity: "low" as const,
         },
         timestamps: { start: "2026-07-29T00:00:00.000Z" },
       },
@@ -2613,12 +2601,9 @@ describe("createHookHandlers topic switch flow", () => {
         intent: "social-casual",
         reason: "User is chatting",
         keywords: ["topic", "flow"],
-        topic: "User is chatting casually.",
         domain: "chat",
         changed: false,
-        topicChangeReason: "start",
         confidence: 0.9,
-        complexity: "medium" as const,
       });
     const topicChecker = params.topicChecker ?? vi.fn();
     const emitAgentEvent = emitHostAgentEvent;
@@ -2727,7 +2712,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "social-casual",
       reason: privateResult,
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const debug = vi.spyOn(logger, "debug").mockImplementation(() => undefined);
     const { handlers } = createTopicFlowHarness({
@@ -2818,17 +2802,13 @@ describe("createHookHandlers topic switch flow", () => {
       domain: "tools",
       changed: true,
       reason: "shift",
-      complexity: "medium" as const,
     });
     const classifier = vi.fn().mockResolvedValue({
       intent: "tool-reference",
       reason: "inventory request",
       keywords: ["inventory", "scan"],
-      topic: "User wants inventory scanning.",
       domain: "tools",
-      topicChangeReason: "shift",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [
@@ -2836,9 +2816,7 @@ describe("createHookHandlers topic switch flow", () => {
           input: rawHistorical,
           intent: "tool-reference",
           domain: "tools",
-          topic: "User requests skill-harness explanation.",
           keywords: ["skill-harness", "explanation"],
-          topicChangeReason: "start",
         },
       ],
       configRaw: { instruction: { enabled: false } },
@@ -2869,12 +2847,9 @@ describe("createHookHandlers topic switch flow", () => {
         current: expect.objectContaining({
           input: "進入 inventory 模式先 scan吧",
           intent: expect.objectContaining({
-            input: [
-              expect.objectContaining({
-                role: "user",
-                text: "進入 inventory 模式先 scan吧",
-              }),
-            ],
+            result: expect.objectContaining({
+              intent: "tool-reference",
+            }),
           }),
         }),
       }),
@@ -3072,9 +3047,6 @@ describe("createHookHandlers topic switch flow", () => {
         current: expect.objectContaining({
           input: "謝謝",
           intent: expect.objectContaining({
-            input: expect.arrayContaining([
-              expect.objectContaining({ role: "user", text: "謝謝" }),
-            ]),
             trigger: "qmd-keyword",
             result: expect.objectContaining({
               intent: "social-casual",
@@ -3348,36 +3320,16 @@ describe("createHookHandlers topic switch flow", () => {
     expect(record.mock.calls[0][1].current.intent).not.toHaveProperty("result");
   });
 
-  it.each([
-    {
-      name: "same-topic",
-      history: {
-        input: "hi",
-        intent: "social-casual",
-        topic: "User is chatting casually.",
-        confidence: 1,
-        complexity: "low" as const,
-      },
-      expected: {
-        topicChangeReason: undefined,
-      },
-    },
-    {
-      name: "match",
-      history: {
-        input: "fix this",
-        intent: "coding",
-        topic: "User is fixing code.",
-        confidence: 0.8,
-        complexity: "medium" as const,
-      },
-      expected: {
-        topicChangeReason: "match",
-      },
-    },
-  ])("marks exact keyword matches as $name", async ({ history, expected }) => {
+  it("routes exact keyword matches regardless of session history", async () => {
     const { handlers, record } = createTopicFlowHarness({
-      historicalIntents: [history],
+      historicalIntents: [
+        {
+          input: "fix this",
+          intent: "coding",
+          domain: "coding",
+          confidence: 0.8,
+        },
+      ],
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -3395,7 +3347,9 @@ describe("createHookHandlers topic switch flow", () => {
       expect.objectContaining({
         current: expect.objectContaining({
           intent: expect.objectContaining({
-            result: expect.objectContaining(expected),
+            result: expect.objectContaining({
+              intent: "social-casual",
+            }),
           }),
         }),
       }),
@@ -3488,10 +3442,21 @@ describe("createHookHandlers topic switch flow", () => {
           phase: "qmd-keyword",
           state: "completed",
           intent: "version-control",
-          score: 0.91,
+          confidence: 0.91,
+          reason: "Keyword match: version-control (commit)",
         }),
       }),
     );
+    expect(
+      emittedPipelineEvents(emitAgentEvent).find(
+        (entry) => entry.data.phase === "qmd-keyword",
+      )?.data,
+    ).not.toHaveProperty("score");
+    expect(
+      emittedPipelineEvents(emitAgentEvent).find(
+        (entry) => entry.data.phase === "qmd-keyword",
+      )?.data,
+    ).not.toHaveProperty("collection");
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -3525,7 +3490,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "User wants repository maintenance",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
@@ -3587,7 +3551,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "User wants repository maintenance",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const qmdIntentIndex = qmdIndex({
       topicHits: [],
@@ -3700,7 +3663,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "The request is repository maintenance.",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
@@ -3737,6 +3699,160 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).toHaveBeenCalledOnce();
   });
 
+  it("drops to classifier when hybrid top hits violate directRouteMinMargin", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "The request is repository maintenance.",
+      confidence: 0.9,
+    });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      configRaw: {
+        routing: {
+          thresholds: {
+            hybrid: {
+              directRouteMinScore: 0.9,
+              directRouteMinMargin: 0.08,
+              minCandidateScore: 0.4,
+            },
+          },
+        },
+      },
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The request is repository maintenance.",
+        keywords: ["repository"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.93,
+            collection: "intent-examples-and-keywords",
+          },
+          {
+            intentId: "general-chat",
+            score: 0.91,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    // Margin is 0.93 - 0.91 = 0.02, which is < 0.08, so classifier must be invoked!
+    expect(classifier).toHaveBeenCalledOnce();
+  });
+
+  it("direct routes when hybrid top hit satisfies both directRouteMinScore and directRouteMinMargin", async () => {
+    const classifier = vi.fn();
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      configRaw: {
+        routing: {
+          thresholds: {
+            hybrid: {
+              directRouteMinScore: 0.9,
+              directRouteMinMargin: 0.08,
+              minCandidateScore: 0.4,
+            },
+          },
+        },
+      },
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The request is repository maintenance.",
+        keywords: ["repository"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.93,
+            collection: "intent-examples-and-keywords",
+          },
+          {
+            intentId: "general-chat",
+            score: 0.81,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    // Margin is 0.93 - 0.81 = 0.12 >= 0.08 and score 0.93 >= 0.90 -> direct route!
+    expect(classifier).not.toHaveBeenCalled();
+    expect(result).toBeDefined();
+  });
+
+  it("satisfies directRouteMinMargin even when JavaScript floating-point subtraction has rounding errors", async () => {
+    const classifier = vi.fn();
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      configRaw: {
+        routing: {
+          thresholds: {
+            hybrid: {
+              directRouteMinScore: 0.9,
+              directRouteMinMargin: 0.08,
+              minCandidateScore: 0.4,
+            },
+          },
+        },
+      },
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The request is repository maintenance.",
+        keywords: ["repository"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.94,
+            collection: "intent-examples-and-keywords",
+          },
+          {
+            intentId: "general-chat",
+            score: 0.86,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    // In JS: 0.94 - 0.86 = 0.07999999999999996 (< 0.08 without 3-decimal rounding)
+    // With roundToThreeDecimals: 0.08 >= 0.08 -> direct route!
+    expect(classifier).not.toHaveBeenCalled();
+    expect(result).toBeDefined();
+  });
+
   it("uses the configured candidate score floor before projecting QMD hits", async () => {
     const operationsIntent: IntentCatalogEntry = {
       id: "deployment",
@@ -3752,7 +3868,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "The request is repository maintenance.",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
@@ -3807,7 +3922,6 @@ describe("createHookHandlers topic switch flow", () => {
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
-        complexity: "low" as const,
       }),
       qmdIntentIndex: qmdIndex({
         topicHits: [
@@ -3841,7 +3955,6 @@ describe("createHookHandlers topic switch flow", () => {
             result: expect.objectContaining({
               intent: "version-control",
               domain: "git",
-              topicChangeReason: "start",
             }),
           }),
         }),
@@ -3873,7 +3986,6 @@ describe("createHookHandlers topic switch flow", () => {
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
-        complexity: "low" as const,
       }),
     });
 
@@ -3893,7 +4005,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "version-control",
       reason: "The request is about version control.",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
@@ -3948,7 +4059,6 @@ describe("createHookHandlers topic switch flow", () => {
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
-        complexity: "low" as const,
       }),
       qmdIntentIndex: qmdIndex({
         topicHits: [
@@ -3987,11 +4097,8 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "coding",
       reason: "User wants implementation",
       keywords: ["topic", "flow"],
-      topic: "User wants implementation help for the topic flow.",
       changed: true,
-      topicChangeReason: "start",
       // confidence intentionally omitted (undefined)
-      complexity: "medium" as const,
     });
     const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4010,16 +4117,9 @@ describe("createHookHandlers topic switch flow", () => {
         current: expect.objectContaining({
           input: "implement topic checker",
           intent: expect.objectContaining({
-            input: expect.arrayContaining([
-              expect.objectContaining({
-                role: "user",
-                text: "implement topic checker",
-              }),
-            ]),
             trigger: "llm-classifier",
             result: expect.objectContaining({
               intent: "coding",
-              topicChangeReason: "start",
             }),
           }),
         }),
@@ -4042,11 +4142,8 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "coding",
       reason: "User wants implementation",
       keywords: ["topic", "flow"],
-      topic: "User wants implementation help for the topic flow.",
       domain: "coding",
-      topicChangeReason: "start",
       confidence: 0.1,
-      complexity: "medium" as const,
     });
     const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4083,7 +4180,6 @@ describe("createHookHandlers topic switch flow", () => {
         domain: "coding",
         topicChangeReason: "start",
         confidence,
-        complexity: "medium" as const,
       });
       const { handlers } = createTopicFlowHarness({
         historicalIntents: [],
@@ -4144,7 +4240,6 @@ describe("createHookHandlers topic switch flow", () => {
       domain: "coding",
       topicChangeReason: "start",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers, record, ensureColdStart, commitPromptRecommendation } =
       createTopicFlowHarness({
@@ -4196,7 +4291,6 @@ Current user request: previous clean request
           input: legacyInput,
           intent: "social-casual",
           domain: "chat",
-          topic: "Previous clean request.",
         },
       ],
     });
@@ -4251,7 +4345,6 @@ Current user request: fresh clean request
       keywords: "deploy" as unknown as string[],
       domain: "infra",
       confidence: 0.95,
-      complexity: "medium" as const,
     });
     const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [
@@ -4259,10 +4352,8 @@ Current user request: fresh clean request
           input: "plan topic checker",
           intent: "coding",
           keywords: ["topic", "checker"],
-          topic: "topic / checker",
           domain: "coding",
           confidence: 0.8,
-          complexity: "medium",
         },
       ],
       intents: [versionControlIntent],
@@ -4295,15 +4386,13 @@ Current user request: fresh clean request
       domain: "git",
       changed: true,
       reason: "shift" as const,
-      complexity: "low" as const,
     };
     const classifier = vi.fn().mockResolvedValue({
-      intent: "other",
+      intent: "unknown",
       reason: "No catalog intent adequately explains the request",
       keywords: ["unclear", "request"],
       domain: "infra",
       confidence: 0.9,
-      complexity: "low" as const,
     });
     const { handlers, record } = createTopicFlowHarness({
       historicalIntents: [],
@@ -4314,7 +4403,7 @@ Current user request: fresh clean request
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    // "other" is not a catalog entry, so no guidance prepend is expected
+    // "unknown" is not a catalog entry, so no guidance prepend is expected
     expect(result?.prependContext).toBeUndefined();
     expect(record).toHaveBeenCalledWith(
       "session-1",
@@ -4322,8 +4411,8 @@ Current user request: fresh clean request
         current: expect.objectContaining({
           intent: expect.objectContaining({
             result: expect.objectContaining({
-              intent: "other",
-              domain: "other",
+              intent: "unknown",
+              domain: "unknown",
             }),
           }),
         }),
@@ -4407,7 +4496,6 @@ Current user request: fresh clean request
       domain: "coding",
       topicChangeReason: "start",
       confidence: 0.95,
-      complexity: "medium" as const,
     });
     const { handlers, record, ensureColdStart, commitPromptRecommendation } =
       createTopicFlowHarness({
@@ -4547,7 +4635,6 @@ Current user request: fresh clean request
       intent: "version-control",
       reason: "The request is now about version control.",
       confidence: 0.9,
-      complexity: "medium" as const,
     });
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [
@@ -4555,7 +4642,6 @@ Current user request: fresh clean request
           input: "plan topic checker",
           intent: "social-casual",
           domain: "chat",
-          topic: "topic / checker",
           confidence: 0.9,
         },
       ],
@@ -5333,35 +5419,14 @@ Current user request: fresh clean request
 });
 
 describe("formatConversationExpansionContext", () => {
-  it("returns undefined when both conversation and historical intent are empty", () => {
+  it("returns undefined when conversation is empty", () => {
     expect(formatConversationExpansionContext({})).toBeUndefined();
     expect(
       formatConversationExpansionContext({ conversation: [] }),
     ).toBeUndefined();
   });
 
-  it("formats task context and routing state when only historical intent is present", () => {
-    const result = formatConversationExpansionContext({
-      latestHistoricalIntent: {
-        input: "where should I go",
-        intent: "travel-planning",
-        domain: "other",
-        topic: "seaside vacation",
-      },
-    });
-
-    expect(result).toBeDefined();
-    expect(result).toContain("[Task Context]");
-    expect(result).toContain(
-      "Stay faithful to the user's actual intent and topic",
-    );
-    expect(result).toContain("[Previous Routing State]");
-    expect(result).not.toContain("previous_intent=");
-    expect(result).toContain("previous_topic=seaside vacation");
-    expect(result).not.toContain("[Recent Dialogue]");
-  });
-
-  it("formats all dialogue turns across multiple turns without slicing to 3 or 120 chars", () => {
+  it("formats all conversation turns across multiple turns without slicing to 3 or 120 chars", () => {
     const longText = "a".repeat(200);
     const conversation = [
       { role: "user" as const, text: "turn 1" },
@@ -5376,11 +5441,139 @@ describe("formatConversationExpansionContext", () => {
     });
 
     expect(result).toBeDefined();
-    expect(result).toContain("[Task Context]");
+    expect(result).not.toContain("[Task Context]");
+    expect(result).toContain(
+      "You are expanding a query for conversational assistant skill & intent routing.",
+    );
+    expect(result).toContain(
+      "ongoing conversation: resolve pronouns, slang, abbreviations",
+    );
+    expect(result).toContain(
+      "not grounded in the query or conversation history",
+    );
+    expect(result).toContain(
+      "Write search queries from the user's perspective",
+    );
+    expect(result).toContain(
+      "Strictly preserve the user's primary language and script",
+    );
+    expect(result).not.toContain("dialogue");
+    expect(result).not.toContain("[Previous Routing State]");
+    expect(result).not.toContain("previous_topic");
+    expect(result).not.toContain("[Recent Dialogue]");
+    expect(result).toContain("Recent conversation:");
     expect(result).toContain("- [user] turn 1");
     expect(result).toContain("- [assistant] turn 2");
     expect(result).toContain("- [user] turn 3");
     expect(result).toContain("- [assistant] turn 4");
     expect(result).toContain(`- [user] ${longText}`);
+  });
+
+  describe("route reason formatting", () => {
+    const testIntent: IntentCatalogEntry = {
+      id: "code-review",
+      definition: {
+        triggers: ["review"],
+        examples: ["review my pr"],
+        domain: "review",
+        keywords: ["pr", "code review", "git diff"],
+        guidance: "Perform a thorough review.",
+      },
+    };
+
+    it("formats keyword route reason matching single keyword from query", () => {
+      const reason = buildKeywordRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "code-review",
+          score: 0.95,
+          collection: "keywords",
+        },
+        query: "Please check this PR for me",
+      });
+      expect(reason).toBe("Keyword match: code-review (pr)");
+    });
+
+    it("formats keyword route reason matching multiple keywords from query", () => {
+      const reason = buildKeywordRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "code-review",
+          score: 0.95,
+          collection: "keywords",
+        },
+        query: "Please do a code review on this pr",
+      });
+      expect(reason).toBe("Keyword match: code-review (pr, code review)");
+    });
+
+    it("falls back to primary keyword when query does not directly contain defined keywords", () => {
+      const reason = buildKeywordRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "code-review",
+          score: 0.95,
+          collection: "keywords",
+        },
+        query: "Can you inspect my patch?",
+      });
+      expect(reason).toBe("Keyword match: code-review (pr)");
+    });
+
+    it("extracts hybrid signals from rrf contributions in order", () => {
+      const explain = {
+        rrf: {
+          contributions: [
+            { queryType: "hyde" },
+            { queryType: "lex" },
+            { queryType: "vec" },
+          ],
+        },
+      };
+      expect(extractHybridSignals(explain)).toBe("lex,vec,hyde");
+    });
+
+    it("extracts hybrid signals from vectorScores and ftsScores when rrf trace is absent", () => {
+      expect(
+        extractHybridSignals({
+          vectorScores: [0.8],
+          ftsScores: [0.5],
+        }),
+      ).toBe("lex,vec");
+      expect(
+        extractHybridSignals({
+          vectorScores: [0.8],
+          ftsScores: [],
+        }),
+      ).toBe("vec");
+      expect(
+        extractHybridSignals({
+          vectorScores: [],
+          ftsScores: [0.5],
+        }),
+      ).toBe("lex");
+    });
+
+    it("defaults hybrid signals to lex,vec,hyde when explain is empty", () => {
+      expect(extractHybridSignals(undefined)).toBe("lex,vec,hyde");
+      expect(extractHybridSignals({})).toBe("lex,vec,hyde");
+    });
+
+    it("formats QMD hybrid route reason with collection, intent, and signals", () => {
+      const reason = buildQmdRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "code-review",
+          score: 0.92,
+          collection: "examples",
+          explain: {
+            rrf: {
+              contributions: [{ queryType: "lex" }, { queryType: "vec" }],
+            },
+          },
+        },
+      });
+      expect(reason).toBe("QMD examples match: code-review (lex,vec)");
+    });
   });
 });

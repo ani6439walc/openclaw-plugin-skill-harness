@@ -11,7 +11,6 @@ function state(overrides: Partial<SessionState> = {}): SessionState {
         intent: "CODE_REVIEW",
         reason: "test",
         confidence: 0.9,
-        complexity: "medium",
       },
     },
     ...overrides,
@@ -39,10 +38,9 @@ describe("checkReviewTriggers", () => {
         state({
           intent: {
             result: {
-              intent: "other",
+              intent: "unknown",
               reason: "unclear",
               confidence: 0.9,
-              complexity: "high",
             },
           },
         }),
@@ -59,7 +57,6 @@ describe("checkReviewTriggers", () => {
               intent: "CODE_REVIEW",
               reason: "weak match",
               confidence: 0.49,
-              complexity: "medium",
             },
           },
         }),
@@ -76,7 +73,6 @@ describe("checkReviewTriggers", () => {
               intent: "CODE_REVIEW",
               reason: "threshold match",
               confidence: 0.5,
-              complexity: "medium",
             },
           },
         }),
@@ -155,10 +151,9 @@ describe("checkReviewTriggers", () => {
         state({
           intent: {
             result: {
-              intent: "other",
+              intent: "unknown",
               reason: "unclear",
               confidence: 0.1,
-              complexity: "medium",
             },
           },
           toolCalls: Array.from({ length: 5 }, (_, index) => ({

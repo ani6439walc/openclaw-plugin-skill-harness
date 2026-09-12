@@ -371,6 +371,28 @@ Route this request.
     );
   });
 
+  it("rejects single-character keywords with length less than 2", () => {
+    write(
+      "short-keywords.md",
+      intentMarkdown({
+        frontmatter: `keywords:
+  - "a"
+  - "好"
+  - "b "
+  - "valid"
+`,
+      }),
+    );
+
+    expect(errors()).toEqual(
+      expect.arrayContaining([
+        "short-keywords.md: keyword must contain at least 2 characters: a",
+        "short-keywords.md: keyword must contain at least 2 characters: 好",
+        "short-keywords.md: keyword must contain at least 2 characters: b",
+      ]),
+    );
+  });
+
   it("rejects duplicate IDs, duplicate canonical skills, path-like skills, and missing targets deterministically", () => {
     write(
       "ALPHA.md",

@@ -1,12 +1,8 @@
-import { normalizeForKeyword } from "../normalize.js";
+import { roundToThreeDecimals } from "../normalize.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
-import {
-  defaultTracker,
-  extractSkillInfo,
-  resolveTurnEventId,
-} from "../session/index.js";
+import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
@@ -120,35 +116,23 @@ const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
 
 export function formatConversationExpansionContext(params: {
   conversation?: readonly RecentTurn[];
-  latestHistoricalIntent?: HistoricalIntentRecord;
 }): string | undefined {
-  const hasIntent = Boolean(params.latestHistoricalIntent);
-  const hasTurns = Boolean(
-    params.conversation && params.conversation.length > 0,
-  );
-  if (!hasIntent && !hasTurns) {
+  if (!params.conversation || params.conversation.length === 0) {
     return undefined;
   }
 
   const sections: string[] = [
-    "[Task Context]\n" +
-      "You are expanding a query for conversational assistant skill & intent routing.\n" +
-      "- Ground the expansion in the ongoing dialogue: resolve pronouns, slang, abbreviations, and elliptical expressions using the conversation context.\n" +
-      "- Stay faithful to the user's actual intent and topic; do not introduce unrelated domains or invent scenarios not grounded in the query or dialogue history.",
+    "You are expanding a query for conversational assistant skill & intent routing.\n" +
+      "- Ground the expansion in the ongoing conversation: resolve pronouns, slang, abbreviations, and elliptical expressions using the conversation context.\n" +
+      "- Stay faithful to the user's actual intent and context; do not introduce unrelated domains or invent scenarios not grounded in the query or conversation history.\n" +
+      "- Write search queries from the user's perspective (search query or direct question); do not write third-person descriptions of the user (avoid '使用者...', 'User asks...').\n" +
+      "- Strictly preserve the user's primary language and script (e.g. Traditional Chinese queries must produce Traditional Chinese expansions; never translate into English unless the user query is English).",
   ];
 
-  if (params.latestHistoricalIntent?.topic) {
-    sections.push(
-      `[Previous Routing State]\nprevious_topic=${params.latestHistoricalIntent.topic}`,
-    );
-  }
-
-  if (params.conversation?.length) {
-    const dialogLines = params.conversation
-      .map((t) => `- [${t.role}] ${t.text.trim()}`)
-      .join("\n");
-    sections.push(`[Recent Dialogue]\n${dialogLines}`);
-  }
+  const conversationLines = params.conversation
+    .map((t) => `- [${t.role}] ${t.text.trim()}`)
+    .join("\n");
+  sections.push(`Recent conversation:\n${conversationLines}`);
 
   return sections.join("\n\n");
 }
@@ -326,25 +310,95 @@ function findIntentDomain(
   );
 }
 
+function findMatchingKeywords(
+  message: string,
+  keywords: readonly string[],
+): string[] {
+  const normalizedMessage = message.toLowerCase();
+  const matched: string[] = [];
+  for (const keyword of keywords) {
+    const trimmed = keyword.trim();
+    if (!trimmed) continue;
+    const normalizedKeyword = trimmed.toLowerCase();
+    if (normalizedMessage.includes(normalizedKeyword)) {
+      matched.push(trimmed);
+    }
+  }
+  return matched;
+}
+
+export function buildKeywordRouteReason(params: {
+  intent: IntentCatalogEntry;
+  hit: QmdIntentHit;
+  query?: string;
+}): string {
+  const matchedKeywords = params.query
+    ? findMatchingKeywords(params.query, params.intent.definition.keywords)
+    : [];
+  const keywordDisplay =
+    matchedKeywords.length > 0
+      ? matchedKeywords.join(", ")
+      : params.intent.definition.keywords[0] || params.intent.id;
+  return `Keyword match: ${params.intent.id} (${keywordDisplay})`;
+}
+
+export function extractHybridSignals(explain: unknown): string {
+  if (explain && typeof explain === "object") {
+    const record = explain as Record<string, unknown>;
+    if (record.rrf && typeof record.rrf === "object") {
+      const rrf = record.rrf as Record<string, unknown>;
+      if (Array.isArray(rrf.contributions) && rrf.contributions.length > 0) {
+        const types = new Set<string>();
+        for (const c of rrf.contributions) {
+          if (
+            c &&
+            typeof c === "object" &&
+            typeof (c as Record<string, unknown>).queryType === "string"
+          ) {
+            types.add((c as Record<string, unknown>).queryType as string);
+          }
+        }
+        if (types.size > 0) {
+          const order = ["lex", "vec", "hyde", "original"];
+          const sorted = order.filter((t) => types.has(t));
+          for (const t of types) {
+            if (!sorted.includes(t)) sorted.push(t);
+          }
+          return sorted.join(",");
+        }
+      }
+    }
+    const hasVector =
+      Array.isArray(record.vectorScores) && record.vectorScores.length > 0;
+    const hasFts =
+      Array.isArray(record.ftsScores) && record.ftsScores.length > 0;
+    if (hasVector && hasFts) return "lex,vec";
+    if (hasVector) return "vec";
+    if (hasFts) return "lex";
+  }
+  return "lex,vec,hyde";
+}
+
+export function buildQmdRouteReason(params: {
+  intent: IntentCatalogEntry;
+  hit: QmdIntentHit;
+}): string {
+  const signals = extractHybridSignals(params.hit.explain);
+  return `QMD ${params.hit.collection} match: ${params.intent.id} (${signals})`;
+}
+
 function buildQmdIntentResult(params: {
   hit: QmdIntentHit;
   intent: IntentCatalogEntry;
-  latestHistoricalIntent?: HistoricalIntentRecord;
 }): IntentionResult {
-  const sameIntent =
-    resolveIntentId(params.latestHistoricalIntent?.intent) ===
-    params.intent.id.toLowerCase();
   return {
     intent: params.intent.id,
-    reason: `QMD ${params.hit.collection} match`,
+    reason: buildQmdRouteReason({
+      intent: params.intent,
+      hit: params.hit,
+    }),
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
-    topic: `QMD match for ${params.intent.id}.`,
-    topicChangeReason: !params.latestHistoricalIntent
-      ? "start"
-      : sameIntent
-        ? undefined
-        : "match",
     confidence: params.hit.score,
   };
 }
@@ -352,22 +406,17 @@ function buildQmdIntentResult(params: {
 function buildKeywordIntentResult(params: {
   hit: QmdIntentHit;
   intent: IntentCatalogEntry;
-  latestHistoricalIntent?: HistoricalIntentRecord;
+  latestUserMessage?: string;
 }): IntentionResult {
-  const sameIntent =
-    resolveIntentId(params.latestHistoricalIntent?.intent) ===
-    params.intent.id.toLowerCase();
   return {
     intent: params.intent.id,
-    reason: `Keyword match: ${params.intent.id}`,
+    reason: buildKeywordRouteReason({
+      intent: params.intent,
+      hit: params.hit,
+      query: params.latestUserMessage,
+    }),
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
-    topic: `Keyword match for ${params.intent.id}.`,
-    topicChangeReason: !params.latestHistoricalIntent
-      ? "start"
-      : sameIntent
-        ? undefined
-        : "match",
     confidence: params.hit.score,
   };
 }
@@ -586,9 +635,6 @@ export function createHookHandlers(deps: HookDeps) {
     modelRef: { provider: string; model: string } | undefined;
     availableIntents: readonly IntentCatalogEntry[];
   }): Promise<PromptBuildClassification | undefined> {
-    const latestHistoricalIntent =
-      params.historicalIntents[params.historicalIntents.length - 1];
-
     // Step 1: QMD Keyword Search (BM25 searchLex)
     let keywordHits: QmdIntentHit[] | undefined;
     if (qmdIntentIndex) {
@@ -605,12 +651,19 @@ export function createHookHandlers(deps: HookDeps) {
       const matchedKeywordIntent = topKeywordHit
         ? findIntentEntry(params.availableIntents, topKeywordHit.intentId)
         : undefined;
+      const keywordMinScore =
+        params.refreshedConfig.routing.thresholds.keyword.directRouteMinScore;
       if (
         topKeywordHit &&
         matchedKeywordIntent &&
-        topKeywordHit.score >=
-          params.refreshedConfig.routing.thresholds.directRouteMinScore
+        roundToThreeDecimals(topKeywordHit.score) >=
+          roundToThreeDecimals(keywordMinScore)
       ) {
+        const result = buildKeywordIntentResult({
+          hit: topKeywordHit,
+          intent: matchedKeywordIntent,
+          latestUserMessage: params.latestUserMessage,
+        });
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
@@ -618,15 +671,10 @@ export function createHookHandlers(deps: HookDeps) {
           "completed",
           {
             intent: matchedKeywordIntent.id,
-            score: topKeywordHit.score,
-            collection: topKeywordHit.collection,
+            confidence: topKeywordHit.score,
+            reason: result.reason,
           },
         );
-        const result = buildKeywordIntentResult({
-          hit: topKeywordHit,
-          intent: matchedKeywordIntent,
-          latestHistoricalIntent,
-        });
         return {
           trigger: "qmd-keyword",
           result,
@@ -641,8 +689,14 @@ export function createHookHandlers(deps: HookDeps) {
           ? { error: "QMD keyword index unavailable" }
           : topKeywordHit
             ? {
-                score: topKeywordHit.score,
-                collection: topKeywordHit.collection,
+                confidence: topKeywordHit.score,
+                reason: matchedKeywordIntent
+                  ? buildKeywordRouteReason({
+                      intent: matchedKeywordIntent,
+                      hit: topKeywordHit,
+                      query: params.latestUserMessage,
+                    })
+                  : topKeywordHit.collection,
               }
             : {},
       );
@@ -661,7 +715,6 @@ export function createHookHandlers(deps: HookDeps) {
       const limits = getQmdCandidateLimits(params.availableIntents.length);
       const expansionContext = formatConversationExpansionContext({
         conversation: params.conversation,
-        latestHistoricalIntent,
       });
       qmdHits = await qmdIntentIndex.searchIntentExamplesAndKeywords({
         query: params.latestUserMessage,
@@ -669,15 +722,30 @@ export function createHookHandlers(deps: HookDeps) {
         ...(expansionContext ? { expansionContext } : {}),
       });
       topHit = qmdHits?.[0];
+      const secondHit = qmdHits?.[1];
       const topIntent = topHit
         ? findIntentEntry(params.availableIntents, topHit.intentId)
         : undefined;
+      const hybridThresholds = params.refreshedConfig.routing.thresholds.hybrid;
+      const scoreMargin =
+        topHit && secondHit
+          ? topHit.score - secondHit.score
+          : (topHit?.score ?? 0);
+      const satisfiesMargin =
+        !secondHit ||
+        roundToThreeDecimals(scoreMargin) >=
+          roundToThreeDecimals(hybridThresholds.directRouteMinMargin);
       if (
         topHit &&
         topIntent &&
-        topHit.score >=
-          params.refreshedConfig.routing.thresholds.directRouteMinScore
+        roundToThreeDecimals(topHit.score) >=
+          roundToThreeDecimals(hybridThresholds.directRouteMinScore) &&
+        satisfiesMargin
       ) {
+        const result = buildQmdIntentResult({
+          hit: topHit,
+          intent: topIntent,
+        });
         emitPipelineEvent(
           params.ctx,
           params.resolvedSessionKey,
@@ -685,15 +753,10 @@ export function createHookHandlers(deps: HookDeps) {
           "completed",
           {
             intent: topIntent.id,
-            score: topHit.score,
-            collection: topHit.collection,
+            confidence: topHit.score,
+            reason: result.reason,
           },
         );
-        const result = buildQmdIntentResult({
-          hit: topHit,
-          intent: topIntent,
-          latestHistoricalIntent,
-        });
         return {
           trigger: "qmd-hybrid",
           result,
@@ -707,7 +770,15 @@ export function createHookHandlers(deps: HookDeps) {
         qmdHits === undefined
           ? { error: "QMD intent example/keyword index unavailable" }
           : topHit
-            ? { score: topHit.score, collection: topHit.collection }
+            ? {
+                confidence: topHit.score,
+                reason: topIntent
+                  ? buildQmdRouteReason({
+                      intent: topIntent,
+                      hit: topHit,
+                    })
+                  : topHit.collection,
+              }
             : {},
       );
     }
@@ -725,7 +796,7 @@ export function createHookHandlers(deps: HookDeps) {
         qmdHits,
         histories: params.historicalIntents,
         minCandidateScore:
-          params.refreshedConfig.routing.thresholds.minCandidateScore,
+          params.refreshedConfig.routing.thresholds.hybrid.minCandidateScore,
       });
     } catch (error) {
       logger.warn("intent candidate projection failed; using full catalog", {
@@ -834,9 +905,6 @@ export function createHookHandlers(deps: HookDeps) {
       data: {
         input: params.latestUserMessage,
         intent: {
-          ...(params.result?.topicChangeReason
-            ? { input: params.conversation }
-            : {}),
           trigger: params.trigger,
           ...(params.result ? { result: params.result } : {}),
           intentMatchedSkills: params.intentMatchedSkills,

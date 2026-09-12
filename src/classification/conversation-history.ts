@@ -3,6 +3,12 @@ import type {
   HistoricalIntentRecord,
   RecentTurn,
 } from "../types.js";
+import {
+  DEFAULT_RECENT_USER_TURNS,
+  DEFAULT_RECENT_USER_CHARS,
+  DEFAULT_RECENT_ASSISTANT_TURNS,
+  DEFAULT_RECENT_ASSISTANT_CHARS,
+} from "../constants.js";
 
 function normalizeTurnText(text: string): string {
   return text.trim().replace(/\s+/g, " ");
@@ -48,13 +54,9 @@ export function attachHistoricalIntents(
     if (!record) continue;
     const historicalIntent: RecentTurn["historicalIntent"] = {
       intent: record.intent,
-      domain: record.domain ?? "other",
+      domain: record.domain ?? "unknown",
     };
     if (record.keywords?.length) historicalIntent.keywords = record.keywords;
-    if (record.topic) historicalIntent.topic = record.topic;
-    if (record.topicChangeReason) {
-      historicalIntent.topicChangeReason = record.topicChangeReason;
-    }
     turn.historicalIntent = historicalIntent;
   }
 
@@ -65,8 +67,14 @@ export function limitConversationTurns(
   allTurns: RecentTurn[],
   queryMode: "message" | "recent" | "full",
   cWindow: ContextWindow = {
-    user: { turns: 5, chars: 220 },
-    assistant: { turns: 5, chars: 180 },
+    user: {
+      turns: DEFAULT_RECENT_USER_TURNS,
+      chars: DEFAULT_RECENT_USER_CHARS,
+    },
+    assistant: {
+      turns: DEFAULT_RECENT_ASSISTANT_TURNS,
+      chars: DEFAULT_RECENT_ASSISTANT_CHARS,
+    },
   },
 ): RecentTurn[] {
   if (queryMode === "message") return [];

@@ -102,19 +102,49 @@
             "description": "QMD-score thresholds for dynamic intent routing.",
             "additionalProperties": false,
             "properties": {
-              "directRouteMinScore": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.85,
-                "description": "Inclusive QMD score required for direct routing bypass."
+              "keyword": {
+                "type": "object",
+                "description": "Step 1 QMD keyword routing thresholds.",
+                "additionalProperties": false,
+                "properties": {
+                  "directRouteMinScore": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.85,
+                    "description": "Inclusive BM25 score required for keyword direct routing bypass."
+                  }
+                },
+                "default": {}
               },
-              "minCandidateScore": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.35,
-                "description": "Inclusive QMD score required to consider an intent candidate."
+              "hybrid": {
+                "type": "object",
+                "description": "Step 2 QMD hybrid routing thresholds.",
+                "additionalProperties": false,
+                "properties": {
+                  "directRouteMinScore": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.9,
+                    "description": "Inclusive semantic score required for hybrid direct routing bypass."
+                  },
+                  "directRouteMinMargin": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.08,
+                    "description": "Minimum score margin between #1 and #2 candidates required for hybrid direct routing."
+                  },
+                  "minCandidateScore": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.4,
+                    "description": "Inclusive semantic score required to consider an intent candidate."
+                  }
+                },
+                "default": {}
               }
             },
             "default": {}
@@ -178,8 +208,8 @@
                       "chars": {
                         "type": "integer",
                         "minimum": 40,
-                        "maximum": 1000,
-                        "default": 220
+                        "maximum": 2000,
+                        "default": 1000
                       }
                     }
                   },
@@ -196,8 +226,8 @@
                       "chars": {
                         "type": "integer",
                         "minimum": 40,
-                        "maximum": 1000,
-                        "default": 180
+                        "maximum": 2000,
+                        "default": 1000
                       }
                     }
                   }
@@ -223,22 +253,25 @@
               "collectionWeights": {
                 "type": "object",
                 "additionalProperties": false,
-                "description": "Relative weights for weighted RRF across skill collections. Defaults to 1 for each collection.",
+                "description": "Relative weights (positive floats or integers, e.g. 1.5, 0.8) for weighted RRF across skill collections. Defaults to meta: 3, body: 2, references: 1.",
                 "properties": {
                   "meta": {
                     "type": "number",
                     "exclusiveMinimum": 0,
-                    "default": 1
+                    "default": 3,
+                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-meta collection."
                   },
                   "body": {
                     "type": "number",
                     "exclusiveMinimum": 0,
-                    "default": 1
+                    "default": 2,
+                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-body collection."
                   },
                   "references": {
                     "type": "number",
                     "exclusiveMinimum": 0,
-                    "default": 1
+                    "default": 1,
+                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-references collection."
                   }
                 }
               }

@@ -439,6 +439,13 @@ export function validateRoutingIntentDirectory(
             `${file}: keywords must be an array containing only non-empty strings`,
           );
         } else {
+          for (const keyword of parsedKeywords) {
+            if (Array.from(keyword.trim()).length < 2) {
+              fileErrors.push(
+                `${file}: keyword must contain at least 2 characters: ${keyword}`,
+              );
+            }
+          }
           keywords = parsedKeywords;
         }
       }

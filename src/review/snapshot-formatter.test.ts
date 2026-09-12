@@ -13,7 +13,6 @@ const snapshot: ReviewSnapshot = {
       domain: "other",
       confidence: 0.2,
       reason: "fallback",
-      complexity: "low",
     },
     routeProvenance: { trigger: "qmd-keyword" },
     toolCalls: [{ name: "read", params: { path: "x" }, success: true }],

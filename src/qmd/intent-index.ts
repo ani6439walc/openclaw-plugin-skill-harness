@@ -276,12 +276,31 @@ function intentIdFromPath(
   return match?.[1]?.trim();
 }
 
+function extractSemanticScore(result: QmdResult): number {
+  const explain = result.explain as Record<string, unknown> | undefined;
+  if (explain && typeof explain === "object") {
+    const rawVectorScores = Array.isArray(explain.vectorScores)
+      ? explain.vectorScores.filter(
+          (s): s is number => typeof s === "number" && Number.isFinite(s),
+        )
+      : [];
+    const rawFtsScores = Array.isArray(explain.ftsScores)
+      ? explain.ftsScores.filter(
+          (s): s is number => typeof s === "number" && Number.isFinite(s),
+        )
+      : [];
+    if (rawVectorScores.length > 0 || rawFtsScores.length > 0) {
+      return Math.max(...rawVectorScores, ...rawFtsScores);
+    }
+  }
+  return result.score;
+}
+
 function parseHits(
   results: readonly QmdResult[],
   collection: string,
 ): QmdIntentHit[] {
-  const hits: QmdIntentHit[] = [];
-  const seen = new Set<string>();
+  const hitByIntent = new Map<string, QmdIntentHit>();
   for (const result of results) {
     if (!Number.isFinite(result.score)) continue;
     let intentId: string | undefined;
@@ -310,16 +329,18 @@ function parseHits(
 
     if (!intentId) continue;
     const normalizedId = intentId.toLowerCase();
-    if (seen.has(normalizedId)) continue;
-    seen.add(normalizedId);
-    hits.push({
-      intentId,
-      score: result.score,
-      collection,
-      ...(result.explain === undefined ? {} : { explain: result.explain }),
-    });
+    const score = extractSemanticScore(result);
+    const existing = hitByIntent.get(normalizedId);
+    if (!existing || score > existing.score) {
+      hitByIntent.set(normalizedId, {
+        intentId,
+        score,
+        collection,
+        ...(result.explain === undefined ? {} : { explain: result.explain }),
+      });
+    }
   }
-  return hits;
+  return [...hitByIntent.values()].sort((a, b) => b.score - a.score);
 }
 
 function parseLexHits(
@@ -604,7 +625,7 @@ export function createIntentQmdIndex(params: {
         const results = (await activeStore.search({
           query: boundQmdQuery(query),
           collections: [EXAMPLES_COLLECTION, KEYWORDS_COLLECTION],
-          includeHyde: false,
+          includeHyde: true,
           ...(expansionContext ? { expansionContext } : {}),
           rerank: false,
           limit: rawLimit,

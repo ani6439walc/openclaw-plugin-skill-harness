@@ -144,8 +144,8 @@ describe("SessionTracker", () => {
             result: {
               intent: "chat",
               reason: "test",
+              domain: "chat",
               confidence: 0.9,
-              complexity: "low",
             },
           },
           timestamps: { start: "2026-07-07T11:00:00.000Z" },
@@ -256,7 +256,6 @@ describe("SessionTracker", () => {
                   topicChanged: false,
                   topicChangeReason: "same-topic",
                   confidence: 0.8,
-                  complexity: "low",
                 },
               },
             },
@@ -269,7 +268,6 @@ describe("SessionTracker", () => {
                 reason: "changed",
                 topicChanged: true,
                 confidence: 0.9,
-                complexity: "medium",
               },
             },
           },
@@ -283,15 +281,20 @@ describe("SessionTracker", () => {
         expect.objectContaining({
           input: "same topic",
           intent: "chat",
-          domain: "other",
+          domain: "unknown",
         }),
         expect.objectContaining({
           input: "changed topic",
           intent: "coding",
-          domain: "other",
-          topicChangeReason: "change",
+          domain: "unknown",
         }),
       ]);
+      expect(
+        loadedTracker.getCurrentState("legacy-topic")?.intent?.result,
+      ).not.toHaveProperty("topicChanged");
+      expect(
+        loadedTracker.getCurrentState("legacy-topic")?.intent?.result,
+      ).not.toHaveProperty("topicChangeReason");
       expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
@@ -310,7 +313,6 @@ describe("SessionTracker", () => {
                 reason: "changed",
                 topicChanged: true,
                 confidence: 0.9,
-                complexity: "medium",
               },
             },
           },
@@ -325,7 +327,13 @@ describe("SessionTracker", () => {
 
         expect(
           loadedTracker.getCurrentState("legacy-locked")?.intent?.result,
-        ).toMatchObject({ domain: "other", topicChangeReason: "change" });
+        ).toMatchObject({ domain: "unknown" });
+        expect(
+          loadedTracker.getCurrentState("legacy-locked")?.intent?.result,
+        ).not.toHaveProperty("topicChanged");
+        expect(
+          loadedTracker.getCurrentState("legacy-locked")?.intent?.result,
+        ).not.toHaveProperty("topicChangeReason");
         expect(durable.current.intent.result).toMatchObject({
           topicChanged: true,
         });
@@ -335,7 +343,7 @@ describe("SessionTracker", () => {
       }
     });
 
-    it("migrates legacy topic reason names to short names in memory", () => {
+    it("strips legacy topic fields in memory on load", () => {
       const sessionsDir = path.join(tempDir, "sessions");
       fs.mkdirSync(sessionsDir, { recursive: true });
       const filePath = path.join(sessionsDir, "legacy-reasons.json");
@@ -350,9 +358,9 @@ describe("SessionTracker", () => {
                 intent: "coding",
                 reason: "changed",
                 domain: "coding",
+                topic: "legacy topic string",
                 topicChangeReason: "keyword-delta",
                 confidence: 0.9,
-                complexity: "medium",
               },
             },
           },
@@ -364,7 +372,20 @@ describe("SessionTracker", () => {
 
       expect(
         loadedTracker.getHistoricalIntentRecords("legacy-reasons"),
-      ).toEqual([expect.objectContaining({ topicChangeReason: "shift" })]);
+      ).toEqual([
+        {
+          input: "changed topic",
+          intent: "coding",
+          domain: "coding",
+          confidence: 0.9,
+        },
+      ]);
+      expect(
+        loadedTracker.getCurrentState("legacy-reasons")?.intent?.result,
+      ).not.toHaveProperty("topic");
+      expect(
+        loadedTracker.getCurrentState("legacy-reasons")?.intent?.result,
+      ).not.toHaveProperty("topicChangeReason");
       expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
@@ -663,7 +684,6 @@ describe("SessionTracker", () => {
               reason: "User wants to read a skill",
               domain: "agent-ops",
               confidence: 0.9,
-              complexity: "low",
             },
             intentMatchedSkills: ["skill-viewer", "tool-reference"],
           },
@@ -693,7 +713,6 @@ describe("SessionTracker", () => {
               reason: "test",
               domain: "agent-ops",
               confidence: 0.9,
-              complexity: "low",
             },
           },
           timestamps: { start: "2026-07-06T15:33:50.743Z" },
@@ -708,7 +727,6 @@ describe("SessionTracker", () => {
               reason: "test",
               domain: "agent-ops",
               confidence: 0.95,
-              complexity: "low",
             },
           },
           timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -732,7 +750,6 @@ describe("SessionTracker", () => {
               reason: "test",
               domain: "agent-ops",
               confidence: 0.9,
-              complexity: "low",
             },
           },
           timestamps: { start: "2026-07-06T15:47:27.004Z" },
@@ -747,7 +764,6 @@ describe("SessionTracker", () => {
               reason: "test",
               domain: "agent-ops",
               confidence: 0.95,
-              complexity: "low",
             },
           },
           timestamps: { start: "2026-07-06T16:14:33.056Z" },
@@ -832,7 +848,6 @@ describe("SessionTracker", () => {
               reason: "test reasoning",
               intent: "test-intent",
               confidence: 0.9,
-              complexity: "low",
             },
           },
           toolCalls: [
@@ -868,7 +883,6 @@ describe("SessionTracker", () => {
         reason: "test reasoning",
         intent: "test-intent",
         confidence: 0.9,
-        complexity: "low",
       });
       expect(parsed.current.toolCalls).toHaveLength(1);
       expect(parsed.current.toolCalls[0].name).toBe("testTool");
@@ -1029,7 +1043,6 @@ describe("SessionTracker", () => {
               intent: "test",
               reason: "test reason",
               confidence: 0.9,
-              complexity: "low",
             },
           },
         },
@@ -1051,7 +1064,6 @@ describe("SessionTracker", () => {
               intent: "test",
               reason: "test reason",
               confidence: 0.9,
-              complexity: "low",
             },
           },
         },
@@ -1074,7 +1086,6 @@ describe("SessionTracker", () => {
               intent: "chat",
               reason: "first turn",
               confidence: 0.9,
-              complexity: "low",
             },
           },
           timestamps: { start: "2026-07-07T10:00:00.000Z" },
@@ -1090,7 +1101,6 @@ describe("SessionTracker", () => {
               intent: "chat",
               reason: "second turn",
               confidence: 0.9,
-              complexity: "low",
             },
           },
           timestamps: { start: "2026-07-07T10:01:00.000Z" },
@@ -1180,7 +1190,6 @@ describe("SessionTracker", () => {
                 intent: sessionId,
                 reason: "test",
                 confidence: 1,
-                complexity: "low",
               },
             },
           },
@@ -1536,7 +1545,6 @@ describe("SessionTracker", () => {
               intent: "test",
               reason: "test reason",
               confidence: 0.9,
-              complexity: "low",
             },
           },
         },
@@ -1552,10 +1560,7 @@ describe("SessionTracker", () => {
             result: {
               intent: "coding",
               reason: "Topic unchanged; inherited previous intent",
-              topicChanged: false,
-              topicChangeReason: "same-topic",
               confidence: 0.8,
-              complexity: "medium",
             },
           },
         },
@@ -1584,7 +1589,6 @@ describe("SessionTracker", () => {
               intent: "test",
               reason: "test reason",
               confidence: 0.9,
-              complexity: "low",
             },
           },
         },
@@ -1606,8 +1610,6 @@ describe("SessionTracker", () => {
                 reason: "test",
                 keywords: ["plan", "change"],
                 domain: "planning",
-                topic: "plan / change",
-                topicChangeReason: "shift",
                 confidence: 0.8,
               },
             },
@@ -1618,7 +1620,7 @@ describe("SessionTracker", () => {
               result: {
                 intent: "MISSING_INPUT",
                 reason: "test",
-                domain: "other",
+                domain: "unknown",
                 confidence: 0.8,
               },
             },
@@ -1643,8 +1645,6 @@ describe("SessionTracker", () => {
           intent: "PLANNING",
           domain: "planning",
           keywords: ["plan", "change"],
-          topic: "plan / change",
-          topicChangeReason: "shift",
           confidence: 0.8,
         },
         {
@@ -1660,7 +1660,7 @@ describe("SessionTracker", () => {
       expect(tracker.getHistoricalIntentRecords("missing-session")).toEqual([]);
     });
 
-    it("should preserve match topic change metadata", async () => {
+    it("should preserve keyword exact match metadata", async () => {
       await persistSessionFixture(tracker, "match-session", {
         current: {
           input: "hi",
@@ -1670,10 +1670,7 @@ describe("SessionTracker", () => {
               reason: "Fast Path A1 keyword exact match: hi",
               keywords: ["hi"],
               domain: "chat",
-              topic: "Fast-path exact match for social-casual.",
-              topicChangeReason: "match",
               confidence: 1,
-              complexity: "low",
             },
           },
         },
@@ -1685,7 +1682,6 @@ describe("SessionTracker", () => {
           intent: "social-casual",
           domain: "chat",
           keywords: ["hi"],
-          topicChangeReason: "match",
         }),
       ]);
     });
@@ -1701,7 +1697,6 @@ describe("SessionTracker", () => {
               intent: "CHAT",
               reason: "test",
               confidence: 0.9,
-              complexity: "low",
             },
           },
         },
@@ -1728,7 +1723,6 @@ describe("SessionTracker", () => {
                   intent: "CODE_REVIEW",
                   reason: "test",
                   confidence: 0.9,
-                  complexity: "medium",
                 },
               },
               toolCalls: [
@@ -1830,7 +1824,6 @@ Current user request: ${request}
               reason: "test",
               domain: "development",
               confidence: 0.9,
-              complexity: "low",
             },
           },
           timestamps: { start: "2026-07-20T00:00:00.000Z" },
@@ -1845,7 +1838,6 @@ Current user request: ${request}
               reason: "test",
               domain: "development",
               confidence: 0.9,
-              complexity: "low",
             },
           },
           timestamps: { start: "2026-07-20T00:01:00.000Z" },
@@ -1884,7 +1876,6 @@ Current user request: ${request}
               reason: "test",
               domain: "development",
               confidence: 0.9,
-              complexity: "low",
             },
             intentProjection: {
               decision: "projected",

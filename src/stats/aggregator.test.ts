@@ -40,7 +40,6 @@ describe("StatsAggregator", () => {
           intent: "version-control",
           reason: "test",
           confidence: 0.75,
-          complexity: "medium",
         },
         intentMatchedSkills: ["git-master", "dev-lifecycle"],
       },
@@ -215,7 +214,6 @@ describe("StatsAggregator", () => {
           reason: "test",
           domain: "git",
           confidence: 0.75,
-          complexity: "medium",
         },
         intentMatchedSkills,
       },
@@ -301,6 +299,36 @@ describe("StatsAggregator", () => {
     },
   );
 
+  it("reads legacy schema v6 with otherTurns and otherRate seamlessly", () => {
+    const statsFile = path.join(tempDir, "stats.json");
+    expect(aggregator.record("compat-session", createState(), intent)).toBe(
+      true,
+    );
+    const raw = JSON.parse(fs.readFileSync(statsFile, "utf8"));
+    delete raw.summary.unknownTurns;
+    delete raw.summary.unknownRate;
+    raw.summary.otherTurns = 1;
+    raw.summary.otherRate = 0.5;
+    fs.writeFileSync(statsFile, JSON.stringify(raw));
+
+    expect(
+      aggregator.record(
+        "next-session",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(true);
+
+    const loaded = readStats();
+    expect(loaded.summary.unknownTurns).toBe(1);
+    expect(loaded.summary.otherTurns).toBeUndefined();
+  });
+
   it("preflights incomplete and duplicate stats events", () => {
     expect(
       aggregator.isRecordable("missing-start", createState({ timestamps: {} })),
@@ -357,7 +385,6 @@ describe("StatsAggregator", () => {
               reason: "test",
               domain: "git",
               confidence: 0.75,
-              complexity: "medium",
             },
             intentMatchedSkills: [],
           },
@@ -1121,9 +1148,8 @@ describe("StatsAggregator", () => {
       toolAssistedTurns: 1,
       skillUsageCount: 1,
       toolCallCount: 2,
-      averageConfidence: 0.75,
-      otherTurns: 0,
-      otherRate: 0,
+      unknownTurns: 0,
+      unknownRate: 0,
     });
     expect(stats.summary).not.toHaveProperty("confidenceTotal");
     expect(stats.intents["version-control"]).toMatchObject({
@@ -1231,7 +1257,6 @@ describe("StatsAggregator", () => {
             intent: "version-control",
             reason: "projected",
             confidence: 0.9,
-            complexity: "medium",
           },
           intentProjection: {
             decision: "projected",
@@ -1265,7 +1290,6 @@ describe("StatsAggregator", () => {
             intent: "version-control",
             reason: "fallback",
             confidence: 0.7,
-            complexity: "medium",
           },
           intentProjection: {
             decision: "full-fallback",
@@ -1378,7 +1402,6 @@ describe("StatsAggregator", () => {
               intent: "version-control",
               reason: "fallback",
               confidence: 0.7,
-              complexity: "medium",
             },
             intentProjection: {
               decision: "full-fallback",
@@ -1424,7 +1447,6 @@ describe("StatsAggregator", () => {
                 intent: `intent-${index}`,
                 reason: "test",
                 confidence: 0.9,
-                complexity: "low",
               },
               intentMatchedSkills: [`skill-${index}`],
             },
@@ -1470,7 +1492,6 @@ describe("StatsAggregator", () => {
               reason: "test",
               domain: "test",
               confidence: 0.9,
-              complexity: "low",
             },
             intentMatchedSkills: ["__other__"],
           },
@@ -1602,7 +1623,6 @@ describe("StatsAggregator", () => {
             intent: "prompt-engineering",
             reason: "test",
             confidence: 0.9,
-            complexity: "medium",
           },
           intentMatchedSkills: ["prompt-engineering-expert"],
         },
@@ -1664,7 +1684,6 @@ describe("StatsAggregator", () => {
             intent: "version-control",
             reason: "test",
             confidence: 0.25,
-            complexity: "low",
           },
         },
         toolCalls: [{ name: "exec", params: {}, durationMs: 50 }],
@@ -1705,7 +1724,6 @@ describe("StatsAggregator", () => {
           intent: "chat",
           reason: "test",
           confidence: 0.9,
-          complexity: "low",
         },
       },
       skillsUsed: undefined,
@@ -1774,10 +1792,9 @@ describe("StatsAggregator", () => {
       createState({
         intent: {
           result: {
-            intent: "other",
+            intent: "unknown",
             reason: "test",
             confidence: 0.4,
-            complexity: "low",
           },
         },
         skillsUsed: undefined,
@@ -1799,8 +1816,8 @@ describe("StatsAggregator", () => {
       lifecycle: "never-used",
       needsReview: true,
     });
-    expect(stats.summary.otherTurns).toBe(1);
-    expect(stats.summary.otherRate).toBeCloseTo(1 / 6);
+    expect(stats.summary.unknownTurns).toBe(1);
+    expect(stats.summary.unknownRate).toBeCloseTo(1 / 6);
   });
 
   it("marks used skills stale after 30 days and archived after 90 days", () => {

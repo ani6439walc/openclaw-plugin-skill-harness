@@ -51,8 +51,8 @@ describe("skill-harness manifest", () => {
             chars: {
               type: "integer",
               minimum: 40,
-              maximum: 1000,
-              default: 220,
+              maximum: 2000,
+              default: 1000,
             },
           },
         },
@@ -64,8 +64,8 @@ describe("skill-harness manifest", () => {
             chars: {
               type: "integer",
               minimum: 40,
-              maximum: 1000,
-              default: 180,
+              maximum: 2000,
+              default: 1000,
             },
           },
         },
@@ -158,5 +158,68 @@ describe("skill-harness manifest", () => {
       "remove the entire legacy `instruction: { ... }` block",
     );
     expect(readme).toContain("no automatic migration or compatibility parser");
+  });
+
+  it("matches the runtime thresholds schema for keyword and hybrid routing", () => {
+    const thresholds =
+      manifest.configSchema.properties.routing.properties.thresholds;
+    expect(
+      thresholds.properties.keyword.properties.directRouteMinScore,
+    ).toEqual({
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.85,
+      description: expect.any(String),
+    });
+    expect(thresholds.properties.hybrid.properties.directRouteMinScore).toEqual(
+      {
+        type: "number",
+        minimum: 0,
+        maximum: 1,
+        default: 0.9,
+        description: expect.any(String),
+      },
+    );
+    expect(
+      thresholds.properties.hybrid.properties.directRouteMinMargin,
+    ).toEqual({
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.08,
+      description: expect.any(String),
+    });
+    expect(thresholds.properties.hybrid.properties.minCandidateScore).toEqual({
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.4,
+      description: expect.any(String),
+    });
+  });
+
+  it("declares collectionWeights supporting positive floating-point numbers", () => {
+    const weights =
+      manifest.configSchema.properties.skills.properties.search.properties
+        .collectionWeights.properties;
+    expect(weights.meta).toMatchObject({
+      type: "number",
+      exclusiveMinimum: 0,
+      default: 3,
+      description: expect.any(String),
+    });
+    expect(weights.body).toMatchObject({
+      type: "number",
+      exclusiveMinimum: 0,
+      default: 2,
+      description: expect.any(String),
+    });
+    expect(weights.references).toMatchObject({
+      type: "number",
+      exclusiveMinimum: 0,
+      default: 1,
+      description: expect.any(String),
+    });
   });
 });
