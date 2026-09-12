@@ -133,14 +133,12 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 ### Target preference order and full CRUD authority
 - You have full CRUD (Create, Read, Update, Delete) authority over intent files and all their subfields (domain, triggers, examples, keywords, skills, guidance).
 - DO NOT treat intents as append-only. When existing triggers, examples, or keywords contain stale, bloated, repetitive, or anti-pattern entries, you MUST actively prune, edit, rewrite, or delete them to maintain high quality and conciseness.
-- Prefer updating the currently matched intent when it covers the newly learned task class. It is the active routing artifact and should absorb small guidance, trigger, keywords, domain, or direct-skill improvements.
-- If the matched intent is absent or clearly wrong, prefer updating an existing class-level/umbrella intent from the Intent Catalog when catalog context is available and one intent already covers the broader task class.
-- Lifecycle operations are fully supported when justified by the requested trigger workflow and catalog evidence:
-  - refine: Perform full CRUD on an existing intent (updating guidance, pruning/adding keywords, refining examples, sharpening triggers).
-  - create: Create a new <intent>.md file when evidence establishes a durable new task class not covered by any catalog intent.
-  - split: When an existing intent has become overloaded across multiple distinct task classes, divide it by updating the source intent and creating one or more focused new intent files.
-  - merge: When two or more catalog intents have overlapping boundaries or duplicate coverage, consolidate them into one surviving intent and delete the redundant file(s).
-  - delete: When a catalog intent is obsolete, fully subsumed, or has no durable routing value, remove the file. Standalone delete removes exactly one existing intent supported by catalog evidence.
+- Refine-First Hierarchy (Avoid Frivolous Creates):
+  1. Priority 1 (Refine existing intent): Before proposing a new intent, always check if the turn's user goal fits under an existing umbrella or related intent in the Intent Catalog. If so, refine that intent by adding the turn's phrasing/keywords to its examples and keywords. Never create a new intent when an existing intent can be refined to accommodate the task class.
+  2. Priority 2 (Merge overlapping intents): When routing uncertainty or catalog inspection reveals two intents with colliding boundaries or redundant capabilities, actively merge them into one cohesive intent and remove the redundant file.
+  3. Priority 3 (Split overloaded intents): When an intent has grown to conflate multiple distinct, unrelated task classes, split it into two or more focused intents.
+  4. Last Resort (Create new intent): Only create a brand new <intent>.md file when the evidence establishes a truly novel, durable task class that cannot reasonably be absorbed by any existing catalog intent.
+- Standalone delete: When a catalog intent is obsolete, fully subsumed, or dead, remove the file. Standalone delete removes exactly one existing intent supported by catalog evidence.
 - Do not create support files or propose references/templates/scripts. Preserve conversation-specific but reusable details only as concise routing metadata or guidance changes in the relevant intent Markdown.
 
 ### Intent shape and boundaries
@@ -182,7 +180,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
   - Must NOT contain absolute or relative paths (e.g., '/home/...', '~/.openclaw/...', './...').
   - Must NOT direct the agent to use, load, read, or invoke a skill.
 - Create an experience only when the requested trigger permits it and the snapshot supplies eligible observed-skill evidence.
-- If two existing intents appear to overlap, mention the overlap in the finding summary or suggestedChange. Do not perform broad consolidation unless the requested trigger and evidence justify a concrete class-level routing edit.
+- Active deduplication & merge mandate: When inspecting the Intent Catalog, if two or more intents have overlapping boundaries, duplicate coverage, or semantic collisions, DO NOT merely mention it in text. Actively perform a merge operation: consolidate the best examples, keywords, and triggers into the single best surviving intent, and delete the redundant intent file(s). A compact, cohesive catalog routes faster and more reliably than a fragmented, bloated catalog.
 
 ### Recordability filter
 - The core question is whether the lesson will save future time.
@@ -499,8 +497,8 @@ export function buildReviewPrompt(
     ? `You may create at most one new skill experience only for these observed, currently visible skills: ${experienceSkillNames.join(", ")}. Create it at experiences/<skill>/<entry-id>.md with strict skill, summary, and keywords frontmatter plus a non-empty reusable Markdown body. Do not modify or delete existing experiences. A positive experience must set targetKind="skill-experience" and targetExperienceIds to exactly ["<skill>/<entry-id>"].`
     : "Skill experience writes are unavailable for this review: no eligible observed skill and execution-evidence trigger are both present.";
   const catalogGuidance = includeIntentCatalog
-    ? `Use the Intent Catalog section only to detect coverage gaps, overlaps, and boundary collisions.
-If matchedIntent is absent, propose a new intent only when the evidence is not already covered by intentCatalog.`
+    ? `Use the Intent Catalog section to detect refine opportunities, coverage gaps, overlaps, and boundary collisions.
+If matchedIntent is absent or fallback, first seek to refine an existing catalog intent by adding the turn's examples/keywords; propose a new intent only when the task class is genuinely novel and cannot be absorbed by any existing catalog intent. When observing overlapping or colliding intents, actively propose a merge to consolidate them.`
     : `The Intent Catalog section is omitted for these triggers to keep the review focused on matched intent evidence. Do not perform catalog-wide boundary analysis.
 If matchedIntent is absent, return hasFinding=false unless the requested trigger can be judged from current-turn evidence without catalog context.`;
   const triggerPrompts = triggers
