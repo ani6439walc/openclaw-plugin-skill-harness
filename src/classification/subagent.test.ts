@@ -206,7 +206,6 @@ describe("runIntentionSubagent", () => {
             intent,
             reason: "The request matches the selected intent.",
             keywords: ["allowed"],
-            topic: "Allowed work",
             domain: "development",
             confidence: 0.9,
             complexity: "low",

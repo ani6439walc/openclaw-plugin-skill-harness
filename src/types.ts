@@ -156,8 +156,6 @@ export type IntentionResult = {
   reason: string;
   keywords?: string[];
   domain: string;
-  topic?: string;
-  topicChangeReason?: "start" | "marker" | "shift" | "change" | "match";
   confidence: number;
 };
 
@@ -173,7 +171,7 @@ export type AvailableSkill = {
 
 export type HistoricalIntent = Pick<
   IntentionResult,
-  "intent" | "domain" | "keywords" | "topic" | "topicChangeReason"
+  "intent" | "domain" | "keywords"
 > &
   Partial<Pick<IntentionResult, "confidence">>;
 

@@ -129,7 +129,7 @@ export function formatConversationExpansionContext(params: {
   const sections: string[] = [
     "You are expanding a query for conversational assistant skill & intent routing.\n" +
       "- Ground the expansion in the ongoing conversation: resolve pronouns, slang, abbreviations, and elliptical expressions using the conversation context.\n" +
-      "- Stay faithful to the user's actual intent and topic; do not introduce unrelated domains or invent scenarios not grounded in the query or conversation history.\n" +
+      "- Stay faithful to the user's actual intent and context; do not introduce unrelated domains or invent scenarios not grounded in the query or conversation history.\n" +
       "- Write search queries from the user's perspective (search query or direct question); do not write third-person descriptions of the user (avoid '使用者...', 'User asks...').\n" +
       "- Strictly preserve the user's primary language and script (e.g. Traditional Chinese queries must produce Traditional Chinese expansions; never translate into English unless the user query is English).",
   ];
@@ -320,20 +320,11 @@ function buildQmdIntentResult(params: {
   intent: IntentCatalogEntry;
   latestHistoricalIntent?: HistoricalIntentRecord;
 }): IntentionResult {
-  const sameIntent =
-    resolveIntentId(params.latestHistoricalIntent?.intent) ===
-    params.intent.id.toLowerCase();
   return {
     intent: params.intent.id,
     reason: `QMD ${params.hit.collection} match`,
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
-    topic: `QMD match for ${params.intent.id}.`,
-    topicChangeReason: !params.latestHistoricalIntent
-      ? "start"
-      : sameIntent
-        ? undefined
-        : "match",
     confidence: params.hit.score,
   };
 }
@@ -343,20 +334,11 @@ function buildKeywordIntentResult(params: {
   intent: IntentCatalogEntry;
   latestHistoricalIntent?: HistoricalIntentRecord;
 }): IntentionResult {
-  const sameIntent =
-    resolveIntentId(params.latestHistoricalIntent?.intent) ===
-    params.intent.id.toLowerCase();
   return {
     intent: params.intent.id,
     reason: `Keyword match: ${params.intent.id}`,
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
-    topic: `Keyword match for ${params.intent.id}.`,
-    topicChangeReason: !params.latestHistoricalIntent
-      ? "start"
-      : sameIntent
-        ? undefined
-        : "match",
     confidence: params.hit.score,
   };
 }
@@ -832,9 +814,6 @@ export function createHookHandlers(deps: HookDeps) {
       data: {
         input: params.latestUserMessage,
         intent: {
-          ...(params.result?.topicChangeReason
-            ? { input: params.conversation }
-            : {}),
           trigger: params.trigger,
           ...(params.result ? { result: params.result } : {}),
           intentMatchedSkills: params.intentMatchedSkills,

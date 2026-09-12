@@ -17,7 +17,6 @@ describe("attachHistoricalIntents", () => {
         input: "Plan the release",
         intent: "PLANNING",
         domain: "planning",
-        topicChangeReason: "shift",
       },
     ];
 
@@ -28,7 +27,6 @@ describe("attachHistoricalIntents", () => {
         historicalIntent: {
           intent: "PLANNING",
           domain: "planning",
-          topicChangeReason: "shift",
         },
       },
       { role: "assistant", text: "Here is a plan" },
@@ -45,21 +43,21 @@ describe("attachHistoricalIntents", () => {
       { role: "user", text: "same message" },
     ];
     const records: HistoricalIntentRecord[] = [
-      { input: " same message ", intent: "FIRST", domain: "other" },
-      { input: "same\nmessage", intent: "SECOND", domain: "other" },
+      { input: " same message ", intent: "FIRST", domain: "unknown" },
+      { input: "same\nmessage", intent: "SECOND", domain: "unknown" },
     ];
 
     expect(attachHistoricalIntents(conversation, records)).toEqual([
       {
         role: "user",
         text: "same message",
-        historicalIntent: { intent: "FIRST", domain: "other" },
+        historicalIntent: { intent: "FIRST", domain: "unknown" },
       },
       { role: "assistant", text: "first reply" },
       {
         role: "user",
         text: "same   message",
-        historicalIntent: { intent: "SECOND", domain: "other" },
+        historicalIntent: { intent: "SECOND", domain: "unknown" },
       },
       { role: "assistant", text: "second reply" },
       { role: "user", text: "same message" },
@@ -77,8 +75,7 @@ describe("attachHistoricalIntents", () => {
         {
           input: "A long historical user message",
           intent: "RESEARCH",
-          keywords: ["historical", "topic"],
-          topic: "historical / topic",
+          keywords: ["historical", "feature"],
           domain: "research",
         },
       ],
@@ -95,8 +92,7 @@ describe("attachHistoricalIntents", () => {
       historicalIntent: {
         intent: "RESEARCH",
         domain: "research",
-        keywords: ["historical", "topic"],
-        topic: "historical / topic",
+        keywords: ["historical", "feature"],
       },
     });
   });
@@ -111,8 +107,6 @@ describe("attachHistoricalIntents", () => {
         input: "好累想睡了",
         intent: "chat",
         domain: "chat",
-        topic: "User is tired and wants to sleep.",
-        topicChangeReason: "shift",
       },
     ];
 
@@ -127,8 +121,6 @@ describe("attachHistoricalIntents", () => {
         historicalIntent: {
           intent: "chat",
           domain: "chat",
-          topic: "User is tired and wants to sleep.",
-          topicChangeReason: "shift",
         },
       },
       { role: "assistant", text: "快去睡吧" },
@@ -145,12 +137,12 @@ describe("attachHistoricalIntents", () => {
       {
         input: "好累想睡了",
         intent: "chat",
-        domain: "other",
+        domain: "unknown",
       },
       {
         input: "不然這三個 幫我看看",
         intent: "prompt-engineering",
-        domain: "other",
+        domain: "unknown",
       },
     ];
 
@@ -162,7 +154,7 @@ describe("attachHistoricalIntents", () => {
       {
         role: "user",
         text: "好累想睡了",
-        historicalIntent: { intent: "chat", domain: "other" },
+        historicalIntent: { intent: "chat", domain: "unknown" },
       },
       { role: "assistant", text: "快去睡吧" },
       { role: "user", text: "不然這三個 幫我看看" },

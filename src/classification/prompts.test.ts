@@ -41,7 +41,6 @@ describe("conversation context prompt serialization", () => {
         historicalIntent: {
           intent: "coding",
           domain: "coding",
-          topic: "Implementing the feature.",
           keywords: ["feature", "implement"],
         },
       },
@@ -52,9 +51,7 @@ describe("conversation context prompt serialization", () => {
         historicalIntent: {
           intent: "documentation",
           domain: "docs",
-          topic: "Updating documentation.",
           keywords: ["update", "documentation"],
-          topicChangeReason: "shift",
         },
       },
       { role: "assistant", text: "I will inspect the relevant README." },
@@ -67,31 +64,24 @@ describe("conversation context prompt serialization", () => {
     const context = conversationContextFrom(intentClassifierPrompt);
     expect(context).toContain("<conversation_context>");
     expect(context).toContain("</conversation_context>");
-    expect(context.match(/<topic_segment index="\d+">/g)).toHaveLength(2);
+    expect(context).not.toContain("<topic_segment");
+    expect(context).not.toContain("<topic_boundary");
     expect(context.match(/<historical_intent>/g)).toHaveLength(2);
     expect(context.match(/^\s+\[(?:user|assistant)\] /gm)).toHaveLength(4);
     const historicalIntentPayloads = [
       ...context.matchAll(/<historical_intent>(.*?)<\/historical_intent>/g),
     ].map((match) => JSON.parse(match[1] ?? ""));
     expect(historicalIntentPayloads).toHaveLength(2);
-    expect(historicalIntentPayloads[0]).toMatchObject({
+    expect(historicalIntentPayloads[0]).toEqual({
       intent: "coding",
       domain: "coding",
       keywords: ["feature", "implement"],
     });
-    expect(historicalIntentPayloads[1]).toMatchObject({
+    expect(historicalIntentPayloads[1]).toEqual({
       intent: "documentation",
       domain: "docs",
       keywords: ["update", "documentation"],
-      reason: "shift",
     });
-    expect(historicalIntentPayloads[0].topic).toEqual(expect.any(String));
-    expect(historicalIntentPayloads[1].topic).toEqual(expect.any(String));
-    const topicBoundary = context.match(
-      /<topic_boundary>(.*?)<\/topic_boundary>/,
-    )?.[1];
-    expect(topicBoundary).toBeDefined();
-    expect(JSON.parse(topicBoundary ?? "")).toMatchObject({ reason: "shift" });
   });
 });
 
@@ -477,11 +467,10 @@ describe("buildIntentionPrompt", () => {
     });
 
     expect(result).toContain("<conversation_context>");
-    expect(result).toContain('<topic_segment index="1">');
+    expect(result).not.toContain("<topic_segment");
     expect(result).not.toContain('<turn role="user">');
     expect(result).toContain("<historical_intent>");
-    expect(result.match(/<historical_intent>/g)).toHaveLength(1);
-    expect(result).not.toContain("\n  <historical_intent>{");
+    expect(result).toContain("\n  <historical_intent>{");
     expect(result).not.toContain("<historical_intent>\n");
     const historicalIntent = result.match(
       /<historical_intent>(.*?)<\/historical_intent>/,
@@ -538,7 +527,7 @@ describe("buildIntentionPrompt", () => {
       result.match(/^\s*-\s+"([^"]+)":/gm)?.map((match) => {
         return match.trim().match(/^[- ]+"([^"]+)":/)?.[1];
       }),
-    ).toEqual(["intent", "reason", "confidence", "keywords", "topic"]);
+    ).toEqual(["intent", "reason", "confidence", "keywords"]);
     const outputShape = result.match(
       /\{\n  "intent": "[^"]+",\n  "reason": "[^"]+",\n  "confidence": \{\{NUMBER_0_TO_1\}\}\n\}/,
     )?.[0];
@@ -568,9 +557,7 @@ describe("buildIntentionPrompt", () => {
           historicalIntent: {
             intent: "social-casual",
             domain: "conversation-flow",
-            topic: "User making a brief casual remark.",
             keywords: ["過太爽", "casual"],
-            topicChangeReason: "shift",
           },
         },
       ],
@@ -612,7 +599,6 @@ describe("parseIntentionResult", () => {
       intent: "coding",
       reason: "User wants to write code",
       keywords: [" Sort ", "Array", "sort"],
-      topic: "User wants help writing code to sort an array.",
       confidence: 0.85,
       complexity: "medium",
     });
@@ -628,9 +614,6 @@ describe("parseIntentionResult", () => {
     expect(result!.reason).toBe("User wants to write code");
     expect(result!.keywords).toEqual(["sort", "array"]);
     expect(result!.domain).toBe("unknown");
-    expect(result!.topic).toBe(
-      "User wants help writing code to sort an array.",
-    );
     expect(result!.confidence).toBe(0.85);
   });
 
@@ -639,7 +622,6 @@ describe("parseIntentionResult", () => {
       intent: "memory-lookup (Memory Lookup)",
       reason: "User asked to recall previous conversation topic",
       keywords: ["memory", "conversation"],
-      topic: "User is asking to recall a previous conversation.",
       confidence: 0.9,
     });
 
@@ -662,7 +644,6 @@ describe("parseIntentionResult", () => {
       intent: "unknown",
       reason: "Unable to confidently classify",
       keywords: ["unclear", "request"],
-      topic: "User request is unclear and needs clarification.",
       confidence: 0.45,
     });
 
@@ -682,7 +663,6 @@ describe("parseIntentionResult", () => {
       intent: "CODING",
       reason: "User wants code",
       keywords: ["code"],
-      topic: "User wants help with code.",
       confidence: 0.8,
       complexity: "medium",
     });
@@ -709,7 +689,6 @@ describe("parseIntentionResult", () => {
       intent: "unknown-intent",
       reason: "Some reason",
       keywords: ["unknown"],
-      topic: "User request does not match a known intent.",
       confidence: 0.8,
       complexity: "medium",
     });
@@ -724,7 +703,6 @@ describe("parseIntentionResult", () => {
       intent: "coding",
       reason: "User wants code",
       keywords: ["code"],
-      topic: "User wants help with code.",
       confidence: 1,
       complexity: "low",
     });
@@ -766,7 +744,6 @@ describe("parseIntentionResult", () => {
       intent: "coding",
       reason: "User wants code",
       keywords: ["code"],
-      topic: "User wants help with code.",
       confidence: 0.7,
       complexity: "low",
       suggestion: "   ",
@@ -783,7 +760,6 @@ describe("parseIntentionResult", () => {
       intent: "coding",
       reason: "User wants code",
       keywords: ["code"],
-      topic: "User wants help with code.",
       confidence: 0.8,
       complexity: "low",
       suggestion: "This should not reach downstream routing",
@@ -797,7 +773,7 @@ describe("parseIntentionResult", () => {
 
   it("should parse JSON wrapped in ```json code block", () => {
     const raw =
-      '```json\n{"intent": "coding", "reason": "test", "keywords": ["code"], "topic": "User wants help with code.", "confidence": 0.9, "complexity": "medium"}\n```';
+      '```json\n{"intent": "coding", "reason": "test", "keywords": ["code"], "confidence": 0.9, "complexity": "medium"}\n```';
     const result = parseIntentionResult(raw, ["coding"]);
     expect(result).toBeDefined();
     expect(result!.intent).toBe("coding");
@@ -805,7 +781,7 @@ describe("parseIntentionResult", () => {
 
   it("should parse JSON wrapped in ``` without json tag", () => {
     const raw =
-      '```\n{"intent": "coding", "reason": "test", "keywords": ["code"], "topic": "User wants help with code.", "confidence": 0.9, "complexity": "low"}\n```';
+      '```\n{"intent": "coding", "reason": "test", "keywords": ["code"], "confidence": 0.9, "complexity": "low"}\n```';
     const result = parseIntentionResult(raw, ["coding"]);
     expect(result).toBeDefined();
   });
@@ -832,7 +808,6 @@ describe("parseIntentionResult", () => {
       intent: "coding",
       reason: "test",
       keywords: ["code"],
-      topic: "User wants help with code.",
       confidence: 0.9,
     });
     const result = parseIntentionResult(raw, ["coding"]);

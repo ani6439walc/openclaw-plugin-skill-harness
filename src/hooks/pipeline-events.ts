@@ -14,7 +14,6 @@ export type PipelineMetadata = {
   basis?: string;
   domain?: string;
   keywords?: string[];
-  topic?: string;
   changed?: boolean;
   intent?: string;
   reason?: string;

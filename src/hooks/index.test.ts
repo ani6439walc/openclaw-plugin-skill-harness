@@ -2612,10 +2612,8 @@ describe("createHookHandlers topic switch flow", () => {
         intent: "social-casual",
         reason: "User is chatting",
         keywords: ["topic", "flow"],
-        topic: "User is chatting casually.",
         domain: "chat",
         changed: false,
-        topicChangeReason: "start",
         confidence: 0.9,
         complexity: "medium" as const,
       });
@@ -2823,9 +2821,7 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "tool-reference",
       reason: "inventory request",
       keywords: ["inventory", "scan"],
-      topic: "User wants inventory scanning.",
       domain: "tools",
-      topicChangeReason: "shift",
       confidence: 0.9,
       complexity: "medium" as const,
     });
@@ -2835,9 +2831,7 @@ describe("createHookHandlers topic switch flow", () => {
           input: rawHistorical,
           intent: "tool-reference",
           domain: "tools",
-          topic: "User requests skill-harness explanation.",
           keywords: ["skill-harness", "explanation"],
-          topicChangeReason: "start",
         },
       ],
       configRaw: { instruction: { enabled: false } },
@@ -2868,12 +2862,9 @@ describe("createHookHandlers topic switch flow", () => {
         current: expect.objectContaining({
           input: "進入 inventory 模式先 scan吧",
           intent: expect.objectContaining({
-            input: [
-              expect.objectContaining({
-                role: "user",
-                text: "進入 inventory 模式先 scan吧",
-              }),
-            ],
+            result: expect.objectContaining({
+              intent: "tool-reference",
+            }),
           }),
         }),
       }),
@@ -3071,9 +3062,6 @@ describe("createHookHandlers topic switch flow", () => {
         current: expect.objectContaining({
           input: "謝謝",
           intent: expect.objectContaining({
-            input: expect.arrayContaining([
-              expect.objectContaining({ role: "user", text: "謝謝" }),
-            ]),
             trigger: "qmd-keyword",
             result: expect.objectContaining({
               intent: "social-casual",
@@ -3347,36 +3335,16 @@ describe("createHookHandlers topic switch flow", () => {
     expect(record.mock.calls[0][1].current.intent).not.toHaveProperty("result");
   });
 
-  it.each([
-    {
-      name: "same-topic",
-      history: {
-        input: "hi",
-        intent: "social-casual",
-        domain: "social",
-        topic: "User is chatting casually.",
-        confidence: 1,
-      },
-      expected: {
-        topicChangeReason: undefined,
-      },
-    },
-    {
-      name: "match",
-      history: {
-        input: "fix this",
-        intent: "coding",
-        domain: "coding",
-        topic: "User is fixing code.",
-        confidence: 0.8,
-      },
-      expected: {
-        topicChangeReason: "match",
-      },
-    },
-  ])("marks exact keyword matches as $name", async ({ history, expected }) => {
+  it("routes exact keyword matches regardless of session history", async () => {
     const { handlers, record } = createTopicFlowHarness({
-      historicalIntents: [history],
+      historicalIntents: [
+        {
+          input: "fix this",
+          intent: "coding",
+          domain: "coding",
+          confidence: 0.8,
+        },
+      ],
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -3394,7 +3362,9 @@ describe("createHookHandlers topic switch flow", () => {
       expect.objectContaining({
         current: expect.objectContaining({
           intent: expect.objectContaining({
-            result: expect.objectContaining(expected),
+            result: expect.objectContaining({
+              intent: "social-casual",
+            }),
           }),
         }),
       }),
@@ -3944,7 +3914,6 @@ describe("createHookHandlers topic switch flow", () => {
             result: expect.objectContaining({
               intent: "version-control",
               domain: "git",
-              topicChangeReason: "start",
             }),
           }),
         }),
@@ -4090,9 +4059,7 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "coding",
       reason: "User wants implementation",
       keywords: ["topic", "flow"],
-      topic: "User wants implementation help for the topic flow.",
       changed: true,
-      topicChangeReason: "start",
       // confidence intentionally omitted (undefined)
       complexity: "medium" as const,
     });
@@ -4113,16 +4080,9 @@ describe("createHookHandlers topic switch flow", () => {
         current: expect.objectContaining({
           input: "implement topic checker",
           intent: expect.objectContaining({
-            input: expect.arrayContaining([
-              expect.objectContaining({
-                role: "user",
-                text: "implement topic checker",
-              }),
-            ]),
             trigger: "llm-classifier",
             result: expect.objectContaining({
               intent: "coding",
-              topicChangeReason: "start",
             }),
           }),
         }),
@@ -4145,9 +4105,7 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "coding",
       reason: "User wants implementation",
       keywords: ["topic", "flow"],
-      topic: "User wants implementation help for the topic flow.",
       domain: "coding",
-      topicChangeReason: "start",
       confidence: 0.1,
       complexity: "medium" as const,
     });
@@ -4299,7 +4257,6 @@ Current user request: previous clean request
           input: legacyInput,
           intent: "social-casual",
           domain: "chat",
-          topic: "Previous clean request.",
         },
       ],
     });
@@ -4362,10 +4319,8 @@ Current user request: fresh clean request
           input: "plan topic checker",
           intent: "coding",
           keywords: ["topic", "checker"],
-          topic: "topic / checker",
           domain: "coding",
           confidence: 0.8,
-          complexity: "medium",
         },
       ],
       intents: [versionControlIntent],
@@ -4657,7 +4612,6 @@ Current user request: fresh clean request
           input: "plan topic checker",
           intent: "social-casual",
           domain: "chat",
-          topic: "topic / checker",
           confidence: 0.9,
         },
       ],
@@ -5445,8 +5399,7 @@ describe("formatConversationExpansionContext", () => {
         latestHistoricalIntent: {
           input: "where should I go",
           intent: "travel-planning",
-          domain: "other",
-          topic: "seaside vacation",
+          domain: "unknown",
         },
       }),
     ).toBeUndefined();
