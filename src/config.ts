@@ -62,8 +62,14 @@ const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
   thresholds: {
-    directRouteMinScore: 0.85,
-    minCandidateScore: 0.35,
+    keyword: {
+      directRouteMinScore: 0.85,
+    },
+    hybrid: {
+      directRouteMinScore: 0.9,
+      directRouteMinMargin: 0.08,
+      minCandidateScore: 0.4,
+    },
   },
   classifier: DEFAULT_CLASSIFIER,
 };
@@ -212,20 +218,31 @@ const ClassifierSchema = z
 const RoutingScoreSchema = (fallback: number) =>
   z.number().min(0).max(1).optional().default(fallback);
 
-const RoutingThresholdsSchema = z
+const KeywordThresholdsSchema = z
   .object({
     directRouteMinScore: RoutingScoreSchema(
-      DEFAULT_ROUTING.thresholds.directRouteMinScore,
-    ),
-    minCandidateScore: RoutingScoreSchema(
-      DEFAULT_ROUTING.thresholds.minCandidateScore,
+      DEFAULT_ROUTING.thresholds.keyword.directRouteMinScore,
     ),
   })
   .strict()
-  .default(DEFAULT_ROUTING.thresholds)
-  .superRefine((thresholds, context) => {
-    const { directRouteMinScore, minCandidateScore } = thresholds;
-    if (minCandidateScore > directRouteMinScore) {
+  .default(DEFAULT_ROUTING.thresholds.keyword);
+
+const HybridThresholdsSchema = z
+  .object({
+    directRouteMinScore: RoutingScoreSchema(
+      DEFAULT_ROUTING.thresholds.hybrid.directRouteMinScore,
+    ),
+    directRouteMinMargin: RoutingScoreSchema(
+      DEFAULT_ROUTING.thresholds.hybrid.directRouteMinMargin,
+    ),
+    minCandidateScore: RoutingScoreSchema(
+      DEFAULT_ROUTING.thresholds.hybrid.minCandidateScore,
+    ),
+  })
+  .strict()
+  .default(DEFAULT_ROUTING.thresholds.hybrid)
+  .superRefine((hybrid, context) => {
+    if (hybrid.minCandidateScore > hybrid.directRouteMinScore) {
       context.addIssue({
         code: "custom",
         path: ["minCandidateScore"],
@@ -234,6 +251,53 @@ const RoutingThresholdsSchema = z
       });
     }
   });
+
+const RoutingThresholdsSchema = z
+  .preprocess((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return {};
+    }
+    const record = raw as Record<string, unknown>;
+    if ("keyword" in record || "hybrid" in record) {
+      return record;
+    }
+    const legacyDirect =
+      typeof record.directRouteMinScore === "number"
+        ? record.directRouteMinScore
+        : undefined;
+    const legacyMinCandidate =
+      typeof record.minCandidateScore === "number"
+        ? record.minCandidateScore
+        : undefined;
+    if (legacyDirect !== undefined || legacyMinCandidate !== undefined) {
+      return {
+        keyword: {
+          ...(legacyDirect !== undefined
+            ? { directRouteMinScore: legacyDirect }
+            : {}),
+        },
+        hybrid: {
+          ...(legacyDirect !== undefined
+            ? { directRouteMinScore: legacyDirect }
+            : {}),
+          ...(legacyMinCandidate !== undefined
+            ? { minCandidateScore: legacyMinCandidate }
+            : {}),
+        },
+      };
+    }
+    return record;
+  }, z
+    .object({
+      keyword: KeywordThresholdsSchema.optional().default(
+        DEFAULT_ROUTING.thresholds.keyword,
+      ),
+      hybrid: HybridThresholdsSchema.optional().default(
+        DEFAULT_ROUTING.thresholds.hybrid,
+      ),
+    })
+    .strict())
+  .default(DEFAULT_ROUTING.thresholds);
 
 const RoutingSchema = z
   .object({

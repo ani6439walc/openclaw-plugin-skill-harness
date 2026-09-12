@@ -598,7 +598,7 @@ export function createHookHandlers(deps: HookDeps) {
         topKeywordHit &&
         matchedKeywordIntent &&
         topKeywordHit.score >=
-          params.refreshedConfig.routing.thresholds.directRouteMinScore
+          params.refreshedConfig.routing.thresholds.keyword.directRouteMinScore
       ) {
         emitPipelineEvent(
           params.ctx,
@@ -658,14 +658,23 @@ export function createHookHandlers(deps: HookDeps) {
         ...(expansionContext ? { expansionContext } : {}),
       });
       topHit = qmdHits?.[0];
+      const secondHit = qmdHits?.[1];
       const topIntent = topHit
         ? findIntentEntry(params.availableIntents, topHit.intentId)
         : undefined;
+      const hybridThresholds =
+        params.refreshedConfig.routing.thresholds.hybrid;
+      const scoreMargin =
+        topHit && secondHit
+          ? topHit.score - secondHit.score
+          : (topHit?.score ?? 0);
+      const satisfiesMargin =
+        !secondHit || scoreMargin >= hybridThresholds.directRouteMinMargin;
       if (
         topHit &&
         topIntent &&
-        topHit.score >=
-          params.refreshedConfig.routing.thresholds.directRouteMinScore
+        topHit.score >= hybridThresholds.directRouteMinScore &&
+        satisfiesMargin
       ) {
         emitPipelineEvent(
           params.ctx,
@@ -714,7 +723,7 @@ export function createHookHandlers(deps: HookDeps) {
         qmdHits,
         histories: params.historicalIntents,
         minCandidateScore:
-          params.refreshedConfig.routing.thresholds.minCandidateScore,
+          params.refreshedConfig.routing.thresholds.hybrid.minCandidateScore,
       });
     } catch (error) {
       logger.warn("intent candidate projection failed; using full catalog", {

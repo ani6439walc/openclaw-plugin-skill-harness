@@ -3737,6 +3737,110 @@ describe("createHookHandlers topic switch flow", () => {
     expect(classifier).toHaveBeenCalledOnce();
   });
 
+  it("drops to classifier when hybrid top hits violate directRouteMinMargin", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "The request is repository maintenance.",
+      confidence: 0.9,
+      complexity: "medium" as const,
+    });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      configRaw: {
+        routing: {
+          thresholds: {
+            hybrid: {
+              directRouteMinScore: 0.9,
+              directRouteMinMargin: 0.08,
+              minCandidateScore: 0.4,
+            },
+          },
+        },
+      },
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The request is repository maintenance.",
+        keywords: ["repository"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.93,
+            collection: "intent-examples-and-keywords",
+          },
+          {
+            intentId: "general-chat",
+            score: 0.91,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    // Margin is 0.93 - 0.91 = 0.02, which is < 0.08, so classifier must be invoked!
+    expect(classifier).toHaveBeenCalledOnce();
+  });
+
+  it("direct routes when hybrid top hit satisfies both directRouteMinScore and directRouteMinMargin", async () => {
+    const classifier = vi.fn();
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      configRaw: {
+        routing: {
+          thresholds: {
+            hybrid: {
+              directRouteMinScore: 0.9,
+              directRouteMinMargin: 0.08,
+              minCandidateScore: 0.4,
+            },
+          },
+        },
+      },
+      classifier,
+      topicChecker: vi.fn().mockResolvedValue({
+        basis: "The request is repository maintenance.",
+        keywords: ["repository"],
+        topic: "User wants repository maintenance.",
+        domain: "git",
+        changed: true,
+        reason: "start" as const,
+        confidence: 0.9,
+      }),
+      qmdIntentIndex: qmdIndex({
+        topicHits: [],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.93,
+            collection: "intent-examples-and-keywords",
+          },
+          {
+            intentId: "general-chat",
+            score: 0.81,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    // Margin is 0.93 - 0.81 = 0.12 >= 0.08 and score 0.93 >= 0.90 -> direct route!
+    expect(classifier).not.toHaveBeenCalled();
+    expect(result).toBeDefined();
+  });
+
   it("uses the configured candidate score floor before projecting QMD hits", async () => {
     const operationsIntent: IntentCatalogEntry = {
       id: "deployment",

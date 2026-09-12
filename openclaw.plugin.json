@@ -102,19 +102,49 @@
             "description": "QMD-score thresholds for dynamic intent routing.",
             "additionalProperties": false,
             "properties": {
-              "directRouteMinScore": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.85,
-                "description": "Inclusive QMD score required for direct routing bypass."
+              "keyword": {
+                "type": "object",
+                "description": "Step 1 QMD keyword routing thresholds.",
+                "additionalProperties": false,
+                "properties": {
+                  "directRouteMinScore": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.85,
+                    "description": "Inclusive BM25 score required for keyword direct routing bypass."
+                  }
+                },
+                "default": {}
               },
-              "minCandidateScore": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.35,
-                "description": "Inclusive QMD score required to consider an intent candidate."
+              "hybrid": {
+                "type": "object",
+                "description": "Step 2 QMD hybrid routing thresholds.",
+                "additionalProperties": false,
+                "properties": {
+                  "directRouteMinScore": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.9,
+                    "description": "Inclusive semantic score required for hybrid direct routing bypass."
+                  },
+                  "directRouteMinMargin": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.08,
+                    "description": "Minimum score margin between #1 and #2 candidates required for hybrid direct routing."
+                  },
+                  "minCandidateScore": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.4,
+                    "description": "Inclusive semantic score required to consider an intent candidate."
+                  }
+                },
+                "default": {}
               }
             },
             "default": {}

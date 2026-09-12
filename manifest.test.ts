@@ -159,4 +159,37 @@ describe("skill-harness manifest", () => {
     );
     expect(readme).toContain("no automatic migration or compatibility parser");
   });
+
+  it("matches the runtime thresholds schema for keyword and hybrid routing", () => {
+    const thresholds =
+      manifest.configSchema.properties.routing.properties.thresholds;
+    expect(thresholds.properties.keyword.properties.directRouteMinScore).toEqual({
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.85,
+      description: expect.any(String),
+    });
+    expect(thresholds.properties.hybrid.properties.directRouteMinScore).toEqual({
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.9,
+      description: expect.any(String),
+    });
+    expect(thresholds.properties.hybrid.properties.directRouteMinMargin).toEqual({
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.08,
+      description: expect.any(String),
+    });
+    expect(thresholds.properties.hybrid.properties.minCandidateScore).toEqual({
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.4,
+      description: expect.any(String),
+    });
+  });
 });

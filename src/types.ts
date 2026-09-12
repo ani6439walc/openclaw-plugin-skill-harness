@@ -51,8 +51,14 @@ export type ResolvedClassifierConfig = {
 
 export type ResolvedRoutingConfig = {
   thresholds: {
-    directRouteMinScore: number;
-    minCandidateScore: number;
+    keyword: {
+      directRouteMinScore: number;
+    };
+    hybrid: {
+      directRouteMinScore: number;
+      directRouteMinMargin: number;
+      minCandidateScore: number;
+    };
   };
   classifier: ResolvedClassifierConfig;
 };
