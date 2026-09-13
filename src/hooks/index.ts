@@ -331,15 +331,17 @@ export function buildKeywordRouteReason(params: {
   intent: IntentCatalogEntry;
   hit: QmdIntentHit;
   query?: string;
+  directRouteMinScore: number;
 }): string {
   const matchedKeywords = params.query
     ? findMatchingKeywords(params.query, params.intent.definition.keywords)
     : [];
-  const keywordDisplay =
-    matchedKeywords.length > 0
-      ? matchedKeywords.join(", ")
-      : params.intent.definition.keywords[0] || params.intent.id;
-  return `Keyword match: ${params.intent.id} (${keywordDisplay})`;
+  const matchedDisplay =
+    matchedKeywords.length > 0 ? matchedKeywords.join(", ") : "none";
+  const score = roundToThreeDecimals(params.hit.score);
+  const threshold = roundToThreeDecimals(params.directRouteMinScore);
+  const outcome = score >= threshold ? "routed" : "below-threshold";
+  return `Keyword match: ${params.intent.id} (matched: ${matchedDisplay}; score: ${score}; threshold: ${threshold}; ${outcome})`;
 }
 
 export function extractHybridSignals(explain: unknown): string {
@@ -407,6 +409,7 @@ function buildKeywordIntentResult(params: {
   hit: QmdIntentHit;
   intent: IntentCatalogEntry;
   latestUserMessage?: string;
+  directRouteMinScore: number;
 }): IntentionResult {
   return {
     intent: params.intent.id,
@@ -414,6 +417,7 @@ function buildKeywordIntentResult(params: {
       intent: params.intent,
       hit: params.hit,
       query: params.latestUserMessage,
+      directRouteMinScore: params.directRouteMinScore,
     }),
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
@@ -447,6 +451,7 @@ export function createHookHandlers(deps: HookDeps) {
     deps.reviewLogWriter ??
     new IntentReviewLogWriter(deps.dataRoot ?? packageRoot);
   const bundledSkillsDir = deps.bundledSkillsDir;
+  const nativeBundledSkillsDir = deps.nativeBundledSkillsDir;
   const sharedRoots = () => deps.getSharedRoots?.() ?? [];
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
@@ -664,6 +669,7 @@ export function createHookHandlers(deps: HookDeps) {
           hit: topKeywordHit,
           intent: matchedKeywordIntent,
           latestUserMessage: params.latestUserMessage,
+          directRouteMinScore: keywordMinScore,
         });
         emitPipelineEvent(
           params.ctx,
@@ -687,7 +693,10 @@ export function createHookHandlers(deps: HookDeps) {
         "qmd-keyword",
         keywordHits === undefined ? "failed" : "completed",
         keywordHits === undefined
-          ? { error: "QMD keyword index unavailable" }
+          ? {
+              error: "QMD keyword index unavailable",
+              reason: "Keyword search unavailable",
+            }
           : topKeywordHit
             ? {
                 confidence: topKeywordHit.score,
@@ -696,10 +705,11 @@ export function createHookHandlers(deps: HookDeps) {
                       intent: matchedKeywordIntent,
                       hit: topKeywordHit,
                       query: params.latestUserMessage,
+                      directRouteMinScore: keywordMinScore,
                     })
-                  : topKeywordHit.collection,
+                  : `Keyword match: ${topKeywordHit.intentId} (matched: unavailable; score: ${roundToThreeDecimals(topKeywordHit.score)}; threshold: ${roundToThreeDecimals(keywordMinScore)}; unrecognized-intent)`,
               }
-            : {},
+            : { reason: "Keyword match: none" },
       );
     }
 
@@ -950,6 +960,7 @@ export function createHookHandlers(deps: HookDeps) {
       api,
       agentId: params.routing.effectiveAgentId,
       bundledSkillsDir,
+      nativeBundledSkillsDir: await nativeBundledSkillsDir,
       sharedRoots: sharedRoots(),
       skillNames: params.intent.definition.skills ?? [],
     });
@@ -988,6 +999,7 @@ export function createHookHandlers(deps: HookDeps) {
           api,
           agentId,
           bundledSkillsDir,
+          nativeBundledSkillsDir: await nativeBundledSkillsDir,
           sharedRoots: sharedRoots(),
           skillNames: workingSetSkillNames,
         });
@@ -1006,6 +1018,7 @@ export function createHookHandlers(deps: HookDeps) {
             api,
             agentId,
             bundledSkillsDir,
+            nativeBundledSkillsDir: await nativeBundledSkillsDir,
             sharedRoots: sharedRoots(),
             source,
             usageStats: {},
@@ -1476,6 +1489,7 @@ export function createHookHandlers(deps: HookDeps) {
           api,
           agentId,
           bundledSkillsDir,
+          nativeBundledSkillsDir: await nativeBundledSkillsDir,
           sharedRoots: sharedRoots(),
         });
         if (skills) skillInventory = { agentId, skills };
@@ -1512,6 +1526,7 @@ export function createHookHandlers(deps: HookDeps) {
             api,
             agentId,
             bundledSkillsDir,
+            nativeBundledSkillsDir: await nativeBundledSkillsDir,
             sharedRoots: sharedRoots(),
             skillNames: [...new Set(availableSkillNames)],
           })
@@ -1521,6 +1536,7 @@ export function createHookHandlers(deps: HookDeps) {
           api,
           agentId,
           bundledSkillsDir,
+          nativeBundledSkillsDir: await nativeBundledSkillsDir,
           sharedRoots: sharedRoots(),
         })
       : undefined;
@@ -1586,6 +1602,7 @@ export function createHookHandlers(deps: HookDeps) {
               api,
               agentId: params.agentId,
               bundledSkillsDir,
+              nativeBundledSkillsDir: await nativeBundledSkillsDir,
               sharedRoots: sharedRoots(),
             });
             allowedExperienceSkills = (inventory ?? [])

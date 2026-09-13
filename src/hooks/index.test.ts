@@ -2771,6 +2771,7 @@ describe("createHookHandlers topic switch flow", () => {
         score: number;
         collection: string;
       }>;
+      keywordSearchUnavailable?: boolean;
       hybridHits?: Array<{
         intentId: string;
         score: number;
@@ -2780,7 +2781,11 @@ describe("createHookHandlers topic switch flow", () => {
   ) {
     const keywordHits = params.keywordHits ?? params.topicHits ?? [];
     return {
-      searchKeywords: vi.fn().mockResolvedValue(keywordHits),
+      searchKeywords: vi
+        .fn()
+        .mockResolvedValue(
+          params.keywordSearchUnavailable ? undefined : keywordHits,
+        ),
       searchTopicKeywords: vi.fn().mockResolvedValue(params.topicHits ?? []),
       searchIntentExamplesAndKeywords: vi
         .fn()
@@ -3410,7 +3415,7 @@ describe("createHookHandlers topic switch flow", () => {
         intents: [intent, versionControlIntent],
         topicChecker: vi.fn().mockResolvedValue(topicContext),
         qmdIntentIndex: qmdIndex({
-          topicHits: [
+          keywordHits: [
             {
               intentId: "version-control",
               score: 0.91,
@@ -3443,7 +3448,8 @@ describe("createHookHandlers topic switch flow", () => {
           state: "completed",
           intent: "version-control",
           confidence: 0.91,
-          reason: "Keyword match: version-control (commit)",
+          reason:
+            "Keyword match: version-control (matched: none; score: 0.91; threshold: 0.85; routed)",
         }),
       }),
     );
@@ -3534,6 +3540,80 @@ describe("createHookHandlers topic switch flow", () => {
     )) {
       expect(event.data).not.toHaveProperty("error");
     }
+    const keywordEvent = qmdEvents.find(
+      (event) =>
+        event.data.phase === "qmd-keyword" && event.data.state === "completed",
+    );
+    expect(keywordEvent?.data).toEqual(
+      expect.objectContaining({ reason: "Keyword match: none" }),
+    );
+    expect(keywordEvent?.data).not.toHaveProperty("confidence");
+  });
+
+  it("records unavailable keyword search without a confidence", async () => {
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      qmdIntentIndex: qmdIndex({ keywordSearchUnavailable: true }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    const keywordEvent = emittedPipelineEvents(emitAgentEvent).find(
+      (entry) =>
+        entry.data.phase === "qmd-keyword" && entry.data.state === "failed",
+    );
+    expect(keywordEvent?.data).toEqual(
+      expect.objectContaining({
+        error: "QMD keyword index unavailable",
+        reason: "Keyword search unavailable",
+      }),
+    );
+    expect(keywordEvent?.data).not.toHaveProperty("confidence");
+  });
+
+  it("records below-threshold keyword matches without routing", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "User wants repository maintenance",
+      confidence: 0.9,
+    });
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      classifier,
+      qmdIntentIndex: qmdIndex({
+        keywordHits: [
+          {
+            intentId: "version-control",
+            score: 0.84,
+            collection: "intent-keywords",
+          },
+        ],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "please commit this",
+        messages: [{ role: "user", content: "please commit this" }],
+      } as never,
+      ctx,
+    );
+
+    expect(classifier).toHaveBeenCalledOnce();
+    expect(
+      emittedPipelineEvents(emitAgentEvent).find(
+        (event) =>
+          event.data.phase === "qmd-keyword" &&
+          event.data.state === "completed",
+      )?.data,
+    ).toEqual(
+      expect.objectContaining({
+        confidence: 0.84,
+        reason:
+          "Keyword match: version-control (matched: commit; score: 0.84; threshold: 0.85; below-threshold)",
+      }),
+    );
   });
 
   it("uses QMD-ranked candidates for the classifier and records its manifest", async () => {
@@ -3928,7 +4008,7 @@ describe("createHookHandlers topic switch flow", () => {
           {
             intentId: "version-control",
             score: 0.91,
-            collection: "intent-topic-keywords-git",
+            collection: "intent-keywords",
           },
         ],
       }),
@@ -5489,9 +5569,12 @@ describe("formatConversationExpansionContext", () => {
           score: 0.95,
           collection: "keywords",
         },
+        directRouteMinScore: 0.85,
         query: "Please check this PR for me",
       });
-      expect(reason).toBe("Keyword match: code-review (pr)");
+      expect(reason).toBe(
+        "Keyword match: code-review (matched: pr; score: 0.95; threshold: 0.85; routed)",
+      );
     });
 
     it("formats keyword route reason matching multiple keywords from query", () => {
@@ -5502,12 +5585,15 @@ describe("formatConversationExpansionContext", () => {
           score: 0.95,
           collection: "keywords",
         },
+        directRouteMinScore: 0.85,
         query: "Please do a code review on this pr",
       });
-      expect(reason).toBe("Keyword match: code-review (pr, code review)");
+      expect(reason).toBe(
+        "Keyword match: code-review (matched: pr, code review; score: 0.95; threshold: 0.85; routed)",
+      );
     });
 
-    it("falls back to primary keyword when query does not directly contain defined keywords", () => {
+    it("reports no literal keyword when the query does not contain defined keywords", () => {
       const reason = buildKeywordRouteReason({
         intent: testIntent,
         hit: {
@@ -5515,9 +5601,12 @@ describe("formatConversationExpansionContext", () => {
           score: 0.95,
           collection: "keywords",
         },
+        directRouteMinScore: 0.85,
         query: "Can you inspect my patch?",
       });
-      expect(reason).toBe("Keyword match: code-review (pr)");
+      expect(reason).toBe(
+        "Keyword match: code-review (matched: none; score: 0.95; threshold: 0.85; routed)",
+      );
     });
 
     it("extracts hybrid signals from rrf contributions in order", () => {
