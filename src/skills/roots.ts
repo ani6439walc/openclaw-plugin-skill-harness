@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -20,38 +20,52 @@ function readSkillLoadConfig(
   return load as Record<string, unknown>;
 }
 
-function isSkillsDirectory(directory: string): boolean {
+async function isSkillsDirectory(directory: string): Promise<boolean> {
   try {
-    return fs
-      .readdirSync(directory, { withFileTypes: true })
-      .some(
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    return (
+      entries.some(
         (entry) =>
-          (!entry.name.startsWith(".") &&
-            entry.isFile() &&
-            entry.name.endsWith(".md")) ||
-          (!entry.name.startsWith(".") &&
-            entry.isDirectory() &&
-            fs.existsSync(path.join(directory, entry.name, "SKILL.md"))),
-      );
+          !entry.name.startsWith(".") &&
+          entry.isFile() &&
+          entry.name.endsWith(".md"),
+      ) ||
+      (
+        await Promise.all(
+          entries
+            .filter(
+              (entry) => !entry.name.startsWith(".") && entry.isDirectory(),
+            )
+            .map(async (entry) => {
+              try {
+                await fs.access(path.join(directory, entry.name, "SKILL.md"));
+                return true;
+              } catch {
+                return false;
+              }
+            }),
+        )
+      ).some(Boolean)
+    );
   } catch {
     return false;
   }
 }
 
-function findOpenClawPackageRoot(
+async function findOpenClawPackageRoot(
   startPath: string | undefined,
-): string | undefined {
+): Promise<string | undefined> {
   if (!startPath) return;
   let directory: string;
   try {
-    directory = path.dirname(fs.realpathSync(startPath));
+    directory = path.dirname(await fs.realpath(startPath));
   } catch {
     directory = path.dirname(path.resolve(startPath));
   }
   for (let depth = 0; depth < 12; depth += 1) {
     try {
       const packageJson = JSON.parse(
-        fs.readFileSync(path.join(directory, "package.json"), "utf8"),
+        await fs.readFile(path.join(directory, "package.json"), "utf8"),
       ) as { name?: unknown };
       if (packageJson.name === "openclaw") return directory;
     } catch {
@@ -63,21 +77,23 @@ function findOpenClawPackageRoot(
   }
 }
 
-export function resolveOpenClawBundledSkillsDir(
+export async function resolveOpenClawBundledSkillsDir(
   params: {
     argv1?: string;
     env?: NodeJS.ProcessEnv;
   } = {},
-): string | undefined {
+): Promise<string | undefined> {
   const env = params.env ?? process.env;
   const override = env.OPENCLAW_BUNDLED_SKILLS_DIR?.trim();
   if (override) return override;
 
-  const packageRoot = findOpenClawPackageRoot(params.argv1 ?? process.argv[1]);
+  const packageRoot = await findOpenClawPackageRoot(
+    params.argv1 ?? process.argv[1],
+  );
   const gatewaySkillsDir = packageRoot
     ? path.join(packageRoot, "skills")
     : undefined;
-  if (gatewaySkillsDir && isSkillsDirectory(gatewaySkillsDir)) {
+  if (gatewaySkillsDir && (await isSkillsDirectory(gatewaySkillsDir))) {
     return gatewaySkillsDir;
   }
 
@@ -87,7 +103,9 @@ export function resolveOpenClawBundledSkillsDir(
       "..",
       "skills",
     );
-    return isSkillsDirectory(packageSkillsDir) ? packageSkillsDir : undefined;
+    return (await isSkillsDirectory(packageSkillsDir))
+      ? packageSkillsDir
+      : undefined;
   } catch {
     return;
   }
@@ -138,7 +156,7 @@ export function resolveSkillRoots(params: {
   const nativeBundledSkillsDir =
     params.nativeBundledSkillsDir === ""
       ? undefined
-      : (params.nativeBundledSkillsDir ?? resolveOpenClawBundledSkillsDir());
+      : params.nativeBundledSkillsDir;
   const bundledSkillsDir =
     params.bundledSkillsDir === "" ? undefined : params.bundledSkillsDir;
   const roots: SkillRoot[] = [];

@@ -27,6 +27,7 @@ export interface RegisterSkillToolsOptions {
   qmdSkillIndex?: SkillQmdIndex;
   scheduleSkillSearchIndex?: (agentId: string) => void;
   bundledSkillsDir?: string;
+  nativeBundledSkillsDir?: Promise<string | undefined>;
   getSharedRoots?: () => readonly string[];
 }
 
@@ -149,6 +150,7 @@ export function registerSkillTools(
             agentId,
             intents: options.getIntents?.(agentId),
             bundledSkillsDir: options.bundledSkillsDir,
+            nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
             sharedRoots: options.getSharedRoots?.(),
           });
           const relatedSkills = showRelated
@@ -269,6 +271,7 @@ export function registerSkillTools(
             agentId,
             intents: options.getIntents?.(agentId),
             bundledSkillsDir: options.bundledSkillsDir,
+            nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
             sharedRoots: options.getSharedRoots?.(),
           });
           const relatedSkills = showRelated
@@ -383,6 +386,7 @@ export function registerSkillTools(
               filePath: optionalStringParam(params, "file_path"),
               intents: options.getIntents?.(agentId),
               bundledSkillsDir: options.bundledSkillsDir,
+              nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
               sharedRoots: options.getSharedRoots?.(),
             }),
           );
@@ -464,6 +468,7 @@ export function registerSkillTools(
             api,
             agentId,
             bundledSkillsDir: options.bundledSkillsDir,
+            nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
             sharedRoots: options.getSharedRoots?.(),
           });
           const visibleNames = new Set(

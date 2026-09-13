@@ -98,6 +98,18 @@ describe("createPlugin", () => {
     ).toEqual(["skill_list", "skill_search", "skill_view", "skill_experience"]);
   });
 
+  it("resolves the bundled OpenClaw root once during plugin initialization", async () => {
+    const api = createApi();
+
+    createPlugin(api).register(api);
+
+    const deps = createHookHandlersSpy.mock.calls[0]?.[0] as {
+      nativeBundledSkillsDir?: Promise<string | undefined>;
+    };
+    expect(deps.nativeBundledSkillsDir).toBeInstanceOf(Promise);
+    await expect(deps.nativeBundledSkillsDir).resolves.toBeDefined();
+  });
+
   it("registers the session_end hook", () => {
     const api = createApi();
 

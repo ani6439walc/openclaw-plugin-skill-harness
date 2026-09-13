@@ -146,17 +146,17 @@ describe("resolveSkillRoots", () => {
 });
 
 describe("resolveOpenClawBundledSkillsDir", () => {
-  it("prefers OPENCLAW_BUNDLED_SKILLS_DIR", () => {
+  it("prefers OPENCLAW_BUNDLED_SKILLS_DIR", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-skills-"));
     writeSkillRoot(root);
-    expect(
+    await expect(
       resolveOpenClawBundledSkillsDir({
         env: { OPENCLAW_BUNDLED_SKILLS_DIR: root },
       }),
-    ).toBe(root);
+    ).resolves.toBe(root);
   });
 
-  it("finds a gateway source checkout from argv1", () => {
+  it("finds a gateway source checkout from argv1", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-root-"));
     fs.writeFileSync(
       path.join(root, "package.json"),
@@ -164,11 +164,11 @@ describe("resolveOpenClawBundledSkillsDir", () => {
     );
     fs.writeFileSync(path.join(root, "openclaw.mjs"), "");
     writeSkillRoot(path.join(root, "skills"));
-    expect(
+    await expect(
       resolveOpenClawBundledSkillsDir({
         argv1: path.join(root, "openclaw.mjs"),
         env: {},
       }),
-    ).toBe(path.join(root, "skills"));
+    ).resolves.toBe(path.join(root, "skills"));
   });
 });

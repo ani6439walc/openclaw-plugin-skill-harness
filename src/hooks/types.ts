@@ -151,6 +151,7 @@ export type HookDeps = {
   getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;
 
   bundledSkillsDir?: string;
+  nativeBundledSkillsDir?: Promise<string | undefined>;
   getSharedRoots?: () => readonly string[];
   dataRoot?: string;
   turnAssociations?: TurnAssociationRegistry;
