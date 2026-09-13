@@ -3448,8 +3448,7 @@ describe("createHookHandlers topic switch flow", () => {
           state: "completed",
           intent: "version-control",
           confidence: 0.91,
-          reason:
-            "Keyword match: version-control (matched: none; score: 0.91; threshold: 0.85; routed)",
+          reason: "matched: none; threshold: 0.85",
         }),
       }),
     );
@@ -3545,7 +3544,7 @@ describe("createHookHandlers topic switch flow", () => {
         event.data.phase === "qmd-keyword" && event.data.state === "completed",
     );
     expect(keywordEvent?.data).toEqual(
-      expect.objectContaining({ reason: "Keyword match: none" }),
+      expect.objectContaining({ result: "none" }),
     );
     expect(keywordEvent?.data).not.toHaveProperty("confidence");
   });
@@ -3565,7 +3564,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(keywordEvent?.data).toEqual(
       expect.objectContaining({
         error: "QMD keyword index unavailable",
-        reason: "Keyword search unavailable",
+        result: "none",
       }),
     );
     expect(keywordEvent?.data).not.toHaveProperty("confidence");
@@ -3610,8 +3609,8 @@ describe("createHookHandlers topic switch flow", () => {
     ).toEqual(
       expect.objectContaining({
         confidence: 0.84,
-        reason:
-          "Keyword match: version-control (matched: commit; score: 0.84; threshold: 0.85; below-threshold)",
+        reason: "matched: commit; threshold: 0.85",
+        result: "below-threshold",
       }),
     );
   });
@@ -3736,6 +3735,152 @@ describe("createHookHandlers topic switch flow", () => {
         }),
       }),
     );
+  });
+
+  it("reports a direct hybrid route with its score and margin thresholds", async () => {
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      classifier: vi.fn(),
+      qmdIntentIndex: qmdIndex({
+        keywordHits: [],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.93,
+            collection: "intent-examples-and-keywords",
+          },
+          {
+            intentId: "general-chat",
+            score: 0.81,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(
+      emittedPipelineEvents(emitAgentEvent).find(
+        (entry) =>
+          entry.data.phase === "qmd-hybrid" && entry.data.state === "completed",
+      )?.data,
+    ).toEqual(
+      expect.objectContaining({
+        intent: "version-control",
+        confidence: 0.93,
+        reason: "signals: lex,vec,hyde; threshold: 0.9; margin: 0.12/0.08",
+        result: "routed",
+      }),
+    );
+  });
+
+  it("reports every rejected hybrid threshold outcome", async () => {
+    const scenarios = [
+      {
+        score: 0.89,
+        secondScore: 0.7,
+        result: "below-score-threshold",
+        margin: "0.19/0.08",
+      },
+      {
+        score: 0.93,
+        secondScore: 0.91,
+        result: "below-margin-threshold",
+        margin: "0.02/0.08",
+      },
+      {
+        score: 0.89,
+        secondScore: 0.87,
+        result: "below-score-and-margin-threshold",
+        margin: "0.02/0.08",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const { handlers, emitAgentEvent } = createTopicFlowHarness({
+        historicalIntents: [],
+        intents: [intent, versionControlIntent],
+        qmdIntentIndex: qmdIndex({
+          keywordHits: [],
+          hybridHits: [
+            {
+              intentId: "version-control",
+              score: scenario.score,
+              collection: "intent-examples-and-keywords",
+            },
+            {
+              intentId: "general-chat",
+              score: scenario.secondScore,
+              collection: "intent-examples-and-keywords",
+            },
+          ],
+        }),
+      });
+
+      await handlers.onBeforePromptBuild(event, ctx);
+
+      expect(
+        emittedPipelineEvents(emitAgentEvent).find(
+          (entry) =>
+            entry.data.phase === "qmd-hybrid" &&
+            entry.data.state === "completed",
+        )?.data,
+      ).toEqual(
+        expect.objectContaining({
+          intent: "version-control",
+          confidence: scenario.score,
+          reason: `signals: lex,vec,hyde; threshold: 0.9; margin: ${scenario.margin}`,
+          result: scenario.result,
+        }),
+      );
+    }
+  });
+
+  it("reports unmatched and unrecognized hybrid searches", async () => {
+    const noHit = createTopicFlowHarness({
+      historicalIntents: [],
+      qmdIntentIndex: qmdIndex({ keywordHits: [], hybridHits: [] }),
+    });
+    await noHit.handlers.onBeforePromptBuild(event, ctx);
+    const noHitEvent = emittedPipelineEvents(noHit.emitAgentEvent).find(
+      (entry) =>
+        entry.data.phase === "qmd-hybrid" && entry.data.state === "completed",
+    );
+    expect(noHitEvent?.data).toEqual(
+      expect.objectContaining({ result: "none" }),
+    );
+    expect(noHitEvent?.data).not.toHaveProperty("confidence");
+
+    const unrecognized = createTopicFlowHarness({
+      historicalIntents: [],
+      qmdIntentIndex: qmdIndex({
+        keywordHits: [],
+        hybridHits: [
+          {
+            intentId: "removed-intent",
+            score: 0.93,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+    await unrecognized.handlers.onBeforePromptBuild(event, ctx);
+    const unrecognizedEvent = emittedPipelineEvents(
+      unrecognized.emitAgentEvent,
+    ).find(
+      (entry) =>
+        entry.data.phase === "qmd-hybrid" && entry.data.state === "completed",
+    );
+    expect(unrecognizedEvent?.data).toEqual(
+      expect.objectContaining({
+        confidence: 0.93,
+        result: "unrecognized-intent",
+      }),
+    );
+    expect(unrecognizedEvent?.data).not.toHaveProperty("intent");
+    expect(unrecognizedEvent?.data).not.toHaveProperty("reason");
   });
 
   it("uses the configured direct QMD score threshold for example/keyword routing", async () => {
@@ -4636,6 +4781,18 @@ Current user request: fresh clean request
     );
     expect(JSON.stringify(emittedPipelineEvents(emitAgentEvent))).not.toContain(
       "classifier string failure",
+    );
+    expect(
+      emittedPipelineEvents(emitAgentEvent).find(
+        (entry) =>
+          entry.data.phase === "llm-classifier" &&
+          entry.data.state === "failed",
+      )?.data,
+    ).toEqual(
+      expect.objectContaining({
+        error: "classifier execution failed",
+        result: "none",
+      }),
     );
     expect(record).toHaveBeenCalledWith(
       "session-1",
@@ -5572,9 +5729,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinScore: 0.85,
         query: "Please check this PR for me",
       });
-      expect(reason).toBe(
-        "Keyword match: code-review (matched: pr; score: 0.95; threshold: 0.85; routed)",
-      );
+      expect(reason).toBe("matched: pr; threshold: 0.85");
     });
 
     it("formats keyword route reason matching multiple keywords from query", () => {
@@ -5588,9 +5743,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinScore: 0.85,
         query: "Please do a code review on this pr",
       });
-      expect(reason).toBe(
-        "Keyword match: code-review (matched: pr, code review; score: 0.95; threshold: 0.85; routed)",
-      );
+      expect(reason).toBe("matched: pr, code review; threshold: 0.85");
     });
 
     it("reports no literal keyword when the query does not contain defined keywords", () => {
@@ -5604,9 +5757,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinScore: 0.85,
         query: "Can you inspect my patch?",
       });
-      expect(reason).toBe(
-        "Keyword match: code-review (matched: none; score: 0.95; threshold: 0.85; routed)",
-      );
+      expect(reason).toBe("matched: none; threshold: 0.85");
     });
 
     it("extracts hybrid signals from rrf contributions in order", () => {
@@ -5661,8 +5812,13 @@ describe("formatConversationExpansionContext", () => {
             },
           },
         },
+        directRouteMinScore: 0.9,
+        scoreMargin: 0.12,
+        directRouteMinMargin: 0.08,
       });
-      expect(reason).toBe("QMD examples match: code-review (lex,vec)");
+      expect(reason).toBe(
+        "signals: lex,vec; threshold: 0.9; margin: 0.12/0.08",
+      );
     });
   });
 });

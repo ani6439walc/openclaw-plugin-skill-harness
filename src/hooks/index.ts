@@ -338,10 +338,8 @@ export function buildKeywordRouteReason(params: {
     : [];
   const matchedDisplay =
     matchedKeywords.length > 0 ? matchedKeywords.join(", ") : "none";
-  const score = roundToThreeDecimals(params.hit.score);
   const threshold = roundToThreeDecimals(params.directRouteMinScore);
-  const outcome = score >= threshold ? "routed" : "below-threshold";
-  return `Keyword match: ${params.intent.id} (matched: ${matchedDisplay}; score: ${score}; threshold: ${threshold}; ${outcome})`;
+  return `matched: ${matchedDisplay}; threshold: ${threshold}`;
 }
 
 export function extractHybridSignals(explain: unknown): string {
@@ -384,20 +382,32 @@ export function extractHybridSignals(explain: unknown): string {
 export function buildQmdRouteReason(params: {
   intent: IntentCatalogEntry;
   hit: QmdIntentHit;
+  directRouteMinScore: number;
+  scoreMargin: number;
+  directRouteMinMargin: number;
 }): string {
   const signals = extractHybridSignals(params.hit.explain);
-  return `QMD ${params.hit.collection} match: ${params.intent.id} (${signals})`;
+  const threshold = roundToThreeDecimals(params.directRouteMinScore);
+  const margin = roundToThreeDecimals(params.scoreMargin);
+  const minimumMargin = roundToThreeDecimals(params.directRouteMinMargin);
+  return `signals: ${signals}; threshold: ${threshold}; margin: ${margin}/${minimumMargin}`;
 }
 
 function buildQmdIntentResult(params: {
   hit: QmdIntentHit;
   intent: IntentCatalogEntry;
+  directRouteMinScore: number;
+  scoreMargin: number;
+  directRouteMinMargin: number;
 }): IntentionResult {
   return {
     intent: params.intent.id,
     reason: buildQmdRouteReason({
       intent: params.intent,
       hit: params.hit,
+      directRouteMinScore: params.directRouteMinScore,
+      scoreMargin: params.scoreMargin,
+      directRouteMinMargin: params.directRouteMinMargin,
     }),
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
@@ -680,6 +690,7 @@ export function createHookHandlers(deps: HookDeps) {
             intent: matchedKeywordIntent.id,
             confidence: topKeywordHit.score,
             reason: result.reason,
+            result: "routed",
           },
         );
         return {
@@ -695,21 +706,25 @@ export function createHookHandlers(deps: HookDeps) {
         keywordHits === undefined
           ? {
               error: "QMD keyword index unavailable",
-              reason: "Keyword search unavailable",
+              result: "none",
             }
           : topKeywordHit
-            ? {
-                confidence: topKeywordHit.score,
-                reason: matchedKeywordIntent
-                  ? buildKeywordRouteReason({
-                      intent: matchedKeywordIntent,
-                      hit: topKeywordHit,
-                      query: params.latestUserMessage,
-                      directRouteMinScore: keywordMinScore,
-                    })
-                  : `Keyword match: ${topKeywordHit.intentId} (matched: unavailable; score: ${roundToThreeDecimals(topKeywordHit.score)}; threshold: ${roundToThreeDecimals(keywordMinScore)}; unrecognized-intent)`,
-              }
-            : { reason: "Keyword match: none" },
+            ? matchedKeywordIntent
+              ? {
+                  confidence: topKeywordHit.score,
+                  reason: buildKeywordRouteReason({
+                    intent: matchedKeywordIntent,
+                    hit: topKeywordHit,
+                    query: params.latestUserMessage,
+                    directRouteMinScore: keywordMinScore,
+                  }),
+                  result: "below-threshold",
+                }
+              : {
+                  confidence: topKeywordHit.score,
+                  result: "unrecognized-intent",
+                }
+            : { result: "none" },
       );
     }
 
@@ -756,6 +771,9 @@ export function createHookHandlers(deps: HookDeps) {
         const result = buildQmdIntentResult({
           hit: topHit,
           intent: topIntent,
+          directRouteMinScore: hybridThresholds.directRouteMinScore,
+          scoreMargin,
+          directRouteMinMargin: hybridThresholds.directRouteMinMargin,
         });
         emitPipelineEvent(
           params.ctx,
@@ -766,6 +784,7 @@ export function createHookHandlers(deps: HookDeps) {
             intent: topIntent.id,
             confidence: topHit.score,
             reason: result.reason,
+            result: "routed",
           },
         );
         return {
@@ -779,18 +798,35 @@ export function createHookHandlers(deps: HookDeps) {
         "qmd-hybrid",
         qmdHits === undefined ? "failed" : "completed",
         qmdHits === undefined
-          ? { error: "QMD intent example/keyword index unavailable" }
+          ? {
+              error: "QMD intent example/keyword index unavailable",
+              result: "none",
+            }
           : topHit
-            ? {
-                confidence: topHit.score,
-                reason: topIntent
-                  ? buildQmdRouteReason({
-                      intent: topIntent,
-                      hit: topHit,
-                    })
-                  : topHit.collection,
-              }
-            : {},
+            ? topIntent
+              ? {
+                  intent: topIntent.id,
+                  confidence: topHit.score,
+                  reason: buildQmdRouteReason({
+                    intent: topIntent,
+                    hit: topHit,
+                    directRouteMinScore: hybridThresholds.directRouteMinScore,
+                    scoreMargin,
+                    directRouteMinMargin: hybridThresholds.directRouteMinMargin,
+                  }),
+                  result:
+                    roundToThreeDecimals(topHit.score) <
+                    roundToThreeDecimals(hybridThresholds.directRouteMinScore)
+                      ? satisfiesMargin
+                        ? "below-score-threshold"
+                        : "below-score-and-margin-threshold"
+                      : "below-margin-threshold",
+                }
+              : {
+                  confidence: topHit.score,
+                  result: "unrecognized-intent",
+                }
+            : { result: "none" },
       );
     }
 
@@ -856,6 +892,16 @@ export function createHookHandlers(deps: HookDeps) {
         dataRoot: deps.dataRoot,
       });
     } catch (error) {
+      emitPipelineEvent(
+        params.ctx,
+        params.resolvedSessionKey,
+        "llm-classifier",
+        "failed",
+        {
+          error: "classifier execution failed",
+          result: "none",
+        },
+      );
       await recordPromptBuildSession({
         association: params.association,
         latestUserMessage: params.latestUserMessage,
