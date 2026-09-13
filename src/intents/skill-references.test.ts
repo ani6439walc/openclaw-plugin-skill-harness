@@ -34,7 +34,7 @@ function writeOpenClawSkillEntries(
 }
 
 describe("skill catalog", () => {
-  it("loads selected skills from workspace, personal, plugin, and bundled roots", async () => {
+  it("loads selected skills from workspace, personal, and plugin roots", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -71,6 +71,7 @@ describe("skill catalog", () => {
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
+        nativeBundledSkillsDir: "",
         skillNames: [
           "agent-orchestration",
           "analysis",
@@ -138,6 +139,7 @@ describe("skill catalog", () => {
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
+        nativeBundledSkillsDir: "",
         skillNames: ["frontmatter-skill"],
       }),
     ).toEqual([
@@ -154,45 +156,52 @@ describe("skill catalog", () => {
     ]);
   });
 
-  it("filters disabled bundled skill entries from OpenClaw config", async () => {
+  it("filters disabled bundled skills without filtering plugin skills", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-skills-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
-    const bundled = path.join(tmp, "bundled");
-    const disabledBundledDir = path.join(bundled, "disabled-bundled");
+    const nativeBundled = path.join(tmp, "native");
+    const pluginPackageSkills = path.join(tmp, "plugin-package-skills");
+    const disabledBundledDir = path.join(nativeBundled, "disabled-bundled");
 
     writeOpenClawSkillEntries(state, {
       "disabled-bundled": { enabled: false },
       "disabled-frontmatter": { enabled: false },
       "enabled-bundled": { enabled: true },
+      "disabled-plugin-skill": { enabled: false },
     });
     writeSkill(
       path.join(workspace, "skills"),
       "disabled-bundled",
       "Workspace copy remains available.",
     );
-    writeSkill(bundled, "disabled-bundled", "Disabled bundled skill.");
+    writeSkill(nativeBundled, "disabled-bundled", "Disabled bundled skill.");
     writeSkillAt(
       path.join(disabledBundledDir, "nested"),
       "nested-disabled",
       "Nested disabled bundled skill.",
     );
     writeSkill(
-      bundled,
+      nativeBundled,
       "disabled-frontmatter",
       "Disabled by frontmatter name.",
     );
     writeSkillAt(
-      path.join(bundled, "category", "package"),
+      path.join(nativeBundled, "category", "package"),
       "disabled-frontmatter",
       "Disabled by frontmatter name.",
     );
     writeSkillAt(
-      path.join(bundled, "category", "package", "child"),
+      path.join(nativeBundled, "category", "package", "child"),
       "nested-enabled",
       "Nested skill inside disabled package.",
     );
-    writeSkill(bundled, "enabled-bundled", "Enabled bundled skill.");
+    writeSkill(nativeBundled, "enabled-bundled", "Enabled bundled skill.");
+    writeSkill(
+      pluginPackageSkills,
+      "disabled-plugin-skill",
+      "Plugin skill remains available.",
+    );
 
     const api = {
       config: {},
@@ -208,7 +217,8 @@ describe("skill catalog", () => {
         await resolveAvailableSkills({
           api,
           agentId: "main",
-          bundledSkillsDir: bundled,
+          bundledSkillsDir: pluginPackageSkills,
+          nativeBundledSkillsDir: nativeBundled,
           cacheTtlMs: 0,
           skillNames: [
             "disabled-bundled",
@@ -216,6 +226,7 @@ describe("skill catalog", () => {
             "nested-disabled",
             "nested-enabled",
             "enabled-bundled",
+            "disabled-plugin-skill",
           ],
         }),
       ).toEqual([
@@ -232,7 +243,7 @@ describe("skill catalog", () => {
         {
           name: "nested-enabled",
           location: path.join(
-            bundled,
+            nativeBundled,
             "category",
             "package",
             "child",
@@ -242,8 +253,17 @@ describe("skill catalog", () => {
         },
         {
           name: "enabled-bundled",
-          location: path.join(bundled, "enabled-bundled", "SKILL.md"),
+          location: path.join(nativeBundled, "enabled-bundled", "SKILL.md"),
           description: "Enabled bundled skill.",
+        },
+        {
+          name: "disabled-plugin-skill",
+          location: path.join(
+            pluginPackageSkills,
+            "disabled-plugin-skill",
+            "SKILL.md",
+          ),
+          description: "Plugin skill remains available.",
         },
       ]);
 
@@ -295,6 +315,7 @@ describe("skill catalog", () => {
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
+        nativeBundledSkillsDir: "",
         skillNames: [
           "deep-workspace",
           "deep-state",
@@ -401,6 +422,7 @@ describe("skill catalog", () => {
         api,
         agentId: "main",
         bundledSkillsDir: bundled,
+        nativeBundledSkillsDir: "",
         skillNames: ["symlink-dir-skill", "symlink-file-skill"],
       }),
     ).toEqual([

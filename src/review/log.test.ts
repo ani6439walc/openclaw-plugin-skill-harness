@@ -25,6 +25,28 @@ describe("review log", () => {
     ).toThrow();
   });
 
+  it("rejects retired native skill epochs", () => {
+    expect(() =>
+      parseReviewLogV8({
+        schemaVersion: 8,
+        createdAt: "2026-06-11T00:00:00.000Z",
+        updatedAt: "2026-06-11T00:00:00.000Z",
+        processedEvents: {},
+        reviewedSkillEpochs: {
+          ["a".repeat(64)]: {
+            agentId: "main",
+            skillName: "skill-harness",
+            source: "native",
+            reason: "low-adoption",
+            completedAt: "2026-06-11T00:00:00.000Z",
+            outcome: "nofinding",
+            eventId: "event",
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
   it("accepts a reviewer-owned standalone delete operation", () => {
     const parsed = parseReviewLogV8({
       schemaVersion: 8,

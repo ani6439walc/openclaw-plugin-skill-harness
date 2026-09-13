@@ -17,7 +17,10 @@ import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
-import { resolveSkillRoots } from "./skills/roots.js";
+import {
+  resolveOpenClawBundledSkillsDir,
+  resolveSkillRoots,
+} from "./skills/roots.js";
 import { suppressNativeSkillsOnStartup } from "./skills/suppress-native.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
 import { createIntentQmdIndex } from "./qmd/intent-index.js";
@@ -194,6 +197,7 @@ export function createPlugin(
       initializePluginDataRoot({ dataRoot });
 
       const bundledSkillsDir = path.join(defaultPackageRoot, "skills");
+      const nativeBundledSkillsDir = resolveOpenClawBundledSkillsDir();
       const catalog = IntentCatalog.create(dataRoot);
       const experienceCatalog = new SkillExperienceCatalog(dataRoot);
       const qmdIntentIndex = createIntentQmdIndex({
@@ -240,18 +244,23 @@ export function createPlugin(
         const normalizedAgentId = canonicalIdentity(agentId);
         if (!normalizedAgentId || normalizedAgentId === "defaults") return;
         knownAgentIds.add(normalizedAgentId);
-        void listAvailableSkills({
-          api,
-          agentId: normalizedAgentId,
-          intents: catalog.get(),
-        })
-          .then((skills) => {
+        void nativeBundledSkillsDir
+          .then(async (resolvedNativeBundledSkillsDir) => {
+            const skills = await listAvailableSkills({
+              api,
+              agentId: normalizedAgentId,
+              intents: catalog.get(),
+              nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
+              sharedRoots: config.skills.sharedRoots,
+            });
             qmdSkillIndex.schedule(normalizedAgentId, {
               skills,
               sourceRoots: resolveSkillRoots({
                 api,
                 agentId: normalizedAgentId,
                 bundledSkillsDir,
+                nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
+                sharedRoots: config.skills.sharedRoots,
               }).map((root) => root.path),
             });
           })
@@ -296,6 +305,8 @@ export function createPlugin(
         qmdSkillIndex,
 
         bundledSkillsDir,
+        nativeBundledSkillsDir,
+        getSharedRoots: () => config.skills.sharedRoots,
         dataRoot,
       };
 
@@ -322,13 +333,21 @@ export function createPlugin(
         qmdSkillIndex,
         scheduleSkillSearchIndex,
         bundledSkillsDir: deps.bundledSkillsDir,
+        nativeBundledSkillsDir: deps.nativeBundledSkillsDir,
+        getSharedRoots: () => config.skills.sharedRoots,
       });
 
       if (
         canAccessRuntime &&
-        config.workingSetSkills.suppressNativeSkillPrompt
+        (config.workingSetSkills.suppressNativeSkillPrompt ||
+          config.skills.suppressNativeExtraDirs)
       ) {
-        void suppressNativeSkillsOnStartup({ api });
+        void suppressNativeSkillsOnStartup({
+          api,
+          suppressNativeSkillPrompt:
+            config.workingSetSkills.suppressNativeSkillPrompt,
+          suppressNativeExtraDirs: config.skills.suppressNativeExtraDirs,
+        });
       }
     },
   });

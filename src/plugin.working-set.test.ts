@@ -157,11 +157,12 @@ describe("createPlugin working-set prompt integration", () => {
     const context = await invoke({
       runtimeConfig: {
         agents: { defaults: { skills: [] }, entries: { main: { skills: [] } } },
-        skills: { load: { extraDirs: [extraSkillsDir] } },
+        skills: { load: { extraDirs: [] } },
         plugins: {
           entries: {
             "skill-harness": {
               config: {
+                skills: { sharedRoots: [extraSkillsDir] },
                 workingSetSkills: {
                   agents: { main: ["runtime-root-skill"] },
                 },

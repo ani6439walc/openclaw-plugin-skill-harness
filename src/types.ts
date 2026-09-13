@@ -73,6 +73,8 @@ export type ResolvedSkillSearchConfig = {
 
 export type ResolvedSkillsConfig = {
   search: ResolvedSkillSearchConfig;
+  sharedRoots: string[];
+  suppressNativeExtraDirs: boolean;
 };
 
 export type ResolvedWorkingSetSkillsConfig = {

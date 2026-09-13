@@ -1,12 +1,12 @@
 export const SKILL_SOURCE_ORDER = [
+  "workshop",
   "workspace",
   "project-agent",
   "personal-agent",
-  "workshop",
   "managed",
+  "shared",
   "plugin",
   "bundled",
-  "extra",
 ] as const;
 
 export type SkillSource = (typeof SKILL_SOURCE_ORDER)[number];
@@ -71,6 +71,8 @@ export interface SkillResolutionParams {
   api: import("../../api.js").OpenClawPluginApi;
   agentId: string;
   bundledSkillsDir?: string;
+  nativeBundledSkillsDir?: string;
+  sharedRoots?: readonly string[];
   intents?: readonly import("../types.js").IntentCatalogEntry[];
   cacheTtlMs?: number;
   nowMs?: number;

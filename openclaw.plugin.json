@@ -245,6 +245,19 @@
         "description": "Skill dispatch and search configuration.",
         "additionalProperties": false,
         "properties": {
+          "sharedRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Absolute local skill directories intentionally shared with every agent. Agent-local roots retain precedence."
+          },
+          "suppressNativeExtraDirs": {
+            "type": "boolean",
+            "default": true,
+            "description": "When enabled, normalizes OpenClaw skills.load.extraDirs to [] on startup because Skill Harness uses skills.sharedRoots instead."
+          },
           "search": {
             "type": "object",
             "description": "Skill search QMD collection weights.",
