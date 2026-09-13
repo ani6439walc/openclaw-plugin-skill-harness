@@ -83,7 +83,7 @@ describe("skill indexer", () => {
     ).not.toBe(first?.find((skill) => skill.name === "raw-bytes")?.fingerprint);
   });
 
-  it("fingerprints the resolved precedence winner independently of content", async () => {
+  it("fingerprints the resolved shared-root winner independently of content", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
     const workspaceDir = path.join(tmp, "workspace");
     const stateDir = path.join(tmp, "state");
@@ -93,27 +93,25 @@ describe("skill indexer", () => {
     writeSkillAt(path.join(secondRoot, "shared"), "shared", "Same content.");
 
     const first = await resolveSkillInventory({
-      api: createApi(stateDir, workspaceDir, {
-        skills: { load: { extraDirs: [firstRoot, secondRoot] } },
-      }),
+      api: createApi(stateDir, workspaceDir),
       agentId: "main",
       bundledSkillsDir: "",
+      sharedRoots: [firstRoot, secondRoot],
       cacheTtlMs: 0,
       homeDir: path.join(tmp, "home"),
     });
     const second = await resolveSkillInventory({
-      api: createApi(stateDir, workspaceDir, {
-        skills: { load: { extraDirs: [secondRoot, firstRoot] } },
-      }),
+      api: createApi(stateDir, workspaceDir),
       agentId: "main",
       bundledSkillsDir: "",
+      sharedRoots: [secondRoot, firstRoot],
       cacheTtlMs: 0,
       homeDir: path.join(tmp, "home"),
     });
 
     const firstShared = first?.find((skill) => skill.name === "shared");
     const secondShared = second?.find((skill) => skill.name === "shared");
-    expect(firstShared?.source).toBe("extra");
+    expect(firstShared?.source).toBe("shared");
     expect(firstShared?.fingerprint).toBe(secondShared?.fingerprint);
     expect(firstShared?.winnerFingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(secondShared?.winnerFingerprint).not.toBe(
@@ -320,6 +318,7 @@ describe("skill indexer", () => {
       api,
       agentId: "main",
       bundledSkillsDir,
+      nativeBundledSkillsDir: "",
       cacheTtlMs: 0,
       homeDir,
       intents,
@@ -332,10 +331,10 @@ describe("skill indexer", () => {
       ["project-skill", "project-agent"],
       ["personal-skill", "personal-agent"],
       ["managed-skill", "managed"],
+      ["aaa-bundled-skill", "plugin"],
+      ["bundled-skill", "plugin"],
       ["plugin-skill", "plugin"],
-      ["aaa-bundled-skill", "bundled"],
-      ["bundled-skill", "bundled"],
-      ["zzz-bundled-skill", "bundled"],
+      ["zzz-bundled-skill", "plugin"],
     ]);
     expect(skills.find((skill) => skill.name === "shared-skill")).toMatchObject(
       { description: "Workspace wins.", domains: ["workspace-domain"] },
@@ -428,5 +427,64 @@ describe("skill indexer", () => {
       ],
     ]);
     warnSpy.mockRestore();
+  });
+
+  it("gives an agent workshop skill precedence over workspace and shared roots", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const sharedRoot = path.join(tmp, "shared");
+    const api = createApi(stateDir, workspaceDir);
+    writeSkillAt(
+      path.join(
+        stateDir,
+        "agents",
+        "main",
+        "agent",
+        "workshop-skills",
+        "shared",
+      ),
+      "shared-skill",
+      "Workshop wins.",
+    );
+    writeSkillAt(
+      path.join(workspaceDir, "skills", "shared"),
+      "shared-skill",
+      "Workspace loses.",
+    );
+    writeSkillAt(
+      path.join(sharedRoot, "shared"),
+      "shared-skill",
+      "Shared loses.",
+    );
+    writeSkillAt(
+      path.join(sharedRoot, "cross-agent"),
+      "cross-agent-skill",
+      "Visible to every agent.",
+    );
+
+    const mainSkills = await listAvailableSkills({
+      api,
+      agentId: "main",
+      bundledSkillsDir: "",
+      sharedRoots: [sharedRoot],
+      cacheTtlMs: 0,
+      homeDir: path.join(tmp, "home"),
+    });
+    const otherSkills = await listAvailableSkills({
+      api,
+      agentId: "other",
+      bundledSkillsDir: "",
+      sharedRoots: [sharedRoot],
+      cacheTtlMs: 0,
+      homeDir: path.join(tmp, "home"),
+    });
+
+    expect(
+      mainSkills.find((skill) => skill.name === "shared-skill"),
+    ).toMatchObject({ source: "workshop", description: "Workshop wins." });
+    expect(
+      otherSkills.find((skill) => skill.name === "cross-agent-skill"),
+    ).toMatchObject({ source: "shared" });
   });
 });

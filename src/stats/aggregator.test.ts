@@ -161,7 +161,7 @@ describe("StatsAggregator", () => {
     agentId: string,
     skills: Array<{
       name: string;
-      source: "workspace" | "extra";
+      source: "workspace" | "shared";
       winnerFingerprint: string;
       fingerprint: string;
     }>,
@@ -191,7 +191,7 @@ describe("StatsAggregator", () => {
     agentId?: string;
     skills: Array<{
       name: string;
-      source: "workspace" | "extra";
+      source: "workspace" | "shared";
       winnerFingerprint: string;
       fingerprint: string;
     }>;
@@ -460,7 +460,7 @@ describe("StatsAggregator", () => {
       },
       {
         name: "low-skill",
-        source: "extra" as const,
+        source: "shared" as const,
         winnerFingerprint: WINNER_B,
         fingerprint: SAME_CONTENT,
       },
@@ -590,7 +590,7 @@ describe("StatsAggregator", () => {
       },
       {
         name: "z-skill",
-        source: "extra" as const,
+        source: "shared" as const,
         winnerFingerprint: WINNER_B,
         fingerprint: SAME_CONTENT,
       },
@@ -935,6 +935,43 @@ describe("StatsAggregator", () => {
     expect(fs.readFileSync(statsPath, "utf-8")).toBe(original);
   });
 
+  it("rejects retired native inventory sources without rewriting stats", () => {
+    const statsPath = path.join(tempDir, "stats.json");
+    expect(
+      aggregator.record(
+        "seed",
+        createState(),
+        intent,
+        inventoryOptions("main", [
+          {
+            name: "plugin-skill",
+            source: "plugin",
+            winnerFingerprint: WINNER_A,
+            fingerprint: CONTENT_A,
+          },
+        ]),
+      ),
+    ).toBe(true);
+    const stats = readStats();
+    stats.skillInventory.agents.main.skills["plugin-skill"].source = "native";
+    const original = JSON.stringify(stats);
+    fs.writeFileSync(statsPath, original);
+
+    expect(
+      aggregator.record(
+        "next",
+        createState({
+          timestamps: {
+            start: "2026-06-11T00:02:00.000Z",
+            end: "2026-06-11T00:03:00.000Z",
+          },
+        }),
+        intent,
+      ),
+    ).toBe(false);
+    expect(fs.readFileSync(statsPath, "utf8")).toBe(original);
+  });
+
   it("restarts a skill observation epoch after interrupted visibility", () => {
     const skill = {
       name: "git-master",
@@ -991,7 +1028,7 @@ describe("StatsAggregator", () => {
     const firstInventory = [
       {
         name: "git-master",
-        source: "extra" as const,
+        source: "shared" as const,
         winnerFingerprint: WINNER_A,
         fingerprint: SAME_CONTENT,
       },

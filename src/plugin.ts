@@ -244,6 +244,7 @@ export function createPlugin(
           api,
           agentId: normalizedAgentId,
           intents: catalog.get(),
+          sharedRoots: config.skills.sharedRoots,
         })
           .then((skills) => {
             qmdSkillIndex.schedule(normalizedAgentId, {
@@ -252,6 +253,7 @@ export function createPlugin(
                 api,
                 agentId: normalizedAgentId,
                 bundledSkillsDir,
+                sharedRoots: config.skills.sharedRoots,
               }).map((root) => root.path),
             });
           })
@@ -296,6 +298,7 @@ export function createPlugin(
         qmdSkillIndex,
 
         bundledSkillsDir,
+        getSharedRoots: () => config.skills.sharedRoots,
         dataRoot,
       };
 
@@ -322,13 +325,20 @@ export function createPlugin(
         qmdSkillIndex,
         scheduleSkillSearchIndex,
         bundledSkillsDir: deps.bundledSkillsDir,
+        getSharedRoots: () => config.skills.sharedRoots,
       });
 
       if (
         canAccessRuntime &&
-        config.workingSetSkills.suppressNativeSkillPrompt
+        (config.workingSetSkills.suppressNativeSkillPrompt ||
+          config.skills.suppressNativeExtraDirs)
       ) {
-        void suppressNativeSkillsOnStartup({ api });
+        void suppressNativeSkillsOnStartup({
+          api,
+          suppressNativeSkillPrompt:
+            config.workingSetSkills.suppressNativeSkillPrompt,
+          suppressNativeExtraDirs: config.skills.suppressNativeExtraDirs,
+        });
       }
     },
   });

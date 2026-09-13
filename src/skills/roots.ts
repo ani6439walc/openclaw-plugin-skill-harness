@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -19,22 +20,77 @@ function readSkillLoadConfig(
   return load as Record<string, unknown>;
 }
 
-function normalizePath(input: string, homeDir: string): string | undefined {
-  const trimmed = input.trim();
-  if (!trimmed) return;
-  const expanded =
-    trimmed === "~" || trimmed.startsWith(`~${path.sep}`)
-      ? path.join(homeDir, trimmed.slice(2))
-      : trimmed;
-  return path.resolve(expanded);
+function isSkillsDirectory(directory: string): boolean {
+  try {
+    return fs
+      .readdirSync(directory, { withFileTypes: true })
+      .some(
+        (entry) =>
+          (!entry.name.startsWith(".") &&
+            entry.isFile() &&
+            entry.name.endsWith(".md")) ||
+          (!entry.name.startsWith(".") &&
+            entry.isDirectory() &&
+            fs.existsSync(path.join(directory, entry.name, "SKILL.md"))),
+      );
+  } catch {
+    return false;
+  }
 }
 
-function readExtraSkillDirs(config: unknown): string[] {
-  const extraDirs = readSkillLoadConfig(config)?.extraDirs;
-  if (!Array.isArray(extraDirs)) return [];
-  return extraDirs.filter(
-    (entry): entry is string => typeof entry === "string",
-  );
+function findOpenClawPackageRoot(
+  startPath: string | undefined,
+): string | undefined {
+  if (!startPath) return;
+  let directory: string;
+  try {
+    directory = path.dirname(fs.realpathSync(startPath));
+  } catch {
+    directory = path.dirname(path.resolve(startPath));
+  }
+  for (let depth = 0; depth < 12; depth += 1) {
+    try {
+      const packageJson = JSON.parse(
+        fs.readFileSync(path.join(directory, "package.json"), "utf8"),
+      ) as { name?: unknown };
+      if (packageJson.name === "openclaw") return directory;
+    } catch {
+      // Keep searching ancestors.
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return;
+    directory = parent;
+  }
+}
+
+export function resolveOpenClawBundledSkillsDir(
+  params: {
+    argv1?: string;
+    env?: NodeJS.ProcessEnv;
+  } = {},
+): string | undefined {
+  const env = params.env ?? process.env;
+  const override = env.OPENCLAW_BUNDLED_SKILLS_DIR?.trim();
+  if (override) return override;
+
+  const packageRoot = findOpenClawPackageRoot(params.argv1 ?? process.argv[1]);
+  const gatewaySkillsDir = packageRoot
+    ? path.join(packageRoot, "skills")
+    : undefined;
+  if (gatewaySkillsDir && isSkillsDirectory(gatewaySkillsDir)) {
+    return gatewaySkillsDir;
+  }
+
+  try {
+    const packageSkillsDir = path.join(
+      path.dirname(require.resolve("openclaw")),
+      "..",
+      "skills",
+    );
+    return isSkillsDirectory(packageSkillsDir) ? packageSkillsDir : undefined;
+  } catch {
+    return;
+  }
 }
 
 export function resolveSkillIndexCacheTtlMs(config: unknown): number {
@@ -49,14 +105,6 @@ export function resolveSkillIndexCacheTtlMs(config: unknown): number {
     return DEFAULT_SKILL_INDEX_CACHE_TTL_MS;
   }
   return Math.floor(debounceMs);
-}
-
-function defaultBundledSkillsDir(): string | undefined {
-  try {
-    return path.join(path.dirname(require.resolve("openclaw")), "..", "skills");
-  } catch {
-    return;
-  }
 }
 
 function pushRoot(
@@ -76,6 +124,8 @@ export function resolveSkillRoots(params: {
   api: OpenClawPluginApi;
   agentId: string;
   bundledSkillsDir?: string;
+  nativeBundledSkillsDir?: string;
+  sharedRoots?: readonly string[];
   homeDir?: string;
 }): SkillRoot[] {
   const homeDir = params.homeDir ?? os.homedir();
@@ -85,70 +135,43 @@ export function resolveSkillRoots(params: {
     params.agentId,
     process.env,
   );
-  const bundledSkillsDir =
-    params.bundledSkillsDir === ""
+  const nativeBundledSkillsDir =
+    params.nativeBundledSkillsDir === ""
       ? undefined
-      : (params.bundledSkillsDir ?? defaultBundledSkillsDir());
+      : (params.nativeBundledSkillsDir ?? resolveOpenClawBundledSkillsDir());
+  const bundledSkillsDir =
+    params.bundledSkillsDir === "" ? undefined : params.bundledSkillsDir;
   const roots: SkillRoot[] = [];
   const seen = new Set<string>();
 
+  if (params.agentId) {
+    pushRoot(
+      roots,
+      seen,
+      path.join(stateDir, "agents", params.agentId, "agent", "workshop-skills"),
+      "workshop",
+    );
+  }
+  pushRoot(roots, seen, path.join(workspaceDir, "skills"), "workspace");
   pushRoot(
     roots,
     seen,
-    normalizePath(path.join(workspaceDir, "skills"), homeDir),
-    "workspace",
-  );
-  pushRoot(
-    roots,
-    seen,
-    normalizePath(path.join(workspaceDir, ".agents", "skills"), homeDir),
+    path.join(workspaceDir, ".agents", "skills"),
     "project-agent",
   );
   pushRoot(
     roots,
     seen,
-    normalizePath(path.join(homeDir, ".agents", "skills"), homeDir),
+    path.join(homeDir, ".agents", "skills"),
     "personal-agent",
   );
-  if (params.agentId) {
-    pushRoot(
-      roots,
-      seen,
-      normalizePath(
-        path.join(
-          stateDir,
-          "agents",
-          params.agentId,
-          "agent",
-          "workshop-skills",
-        ),
-        homeDir,
-      ),
-      "workshop",
-    );
+  pushRoot(roots, seen, path.join(stateDir, "skills"), "managed");
+  for (const sharedRoot of params.sharedRoots ?? []) {
+    pushRoot(roots, seen, sharedRoot, "shared");
   }
-  pushRoot(
-    roots,
-    seen,
-    normalizePath(path.join(stateDir, "skills"), homeDir),
-    "managed",
-  );
-  pushRoot(
-    roots,
-    seen,
-    normalizePath(path.join(stateDir, "plugin-skills"), homeDir),
-    "plugin",
-  );
-  pushRoot(
-    roots,
-    seen,
-    bundledSkillsDir ? normalizePath(bundledSkillsDir, homeDir) : undefined,
-    "bundled",
-  );
-
-  for (const extraDir of readExtraSkillDirs(params.api.config)) {
-    pushRoot(roots, seen, normalizePath(extraDir, homeDir), "extra");
-  }
+  pushRoot(roots, seen, path.join(stateDir, "plugin-skills"), "plugin");
+  pushRoot(roots, seen, nativeBundledSkillsDir, "bundled");
+  pushRoot(roots, seen, bundledSkillsDir, "plugin");
 
   return roots;
 }

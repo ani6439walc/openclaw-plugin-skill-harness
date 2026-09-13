@@ -978,6 +978,7 @@ function canonicalizeSkillStats(stats: Stats, eventTime: string): Stats {
     });
   }
   stats.skills = canonical;
+
   for (const bucket of Object.values(stats.daily)) {
     bucket.skills = canonicalizeCountMap(bucket.skills);
   }

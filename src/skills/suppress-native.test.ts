@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../api.js";
 import {
+  isNativeExtraDirsSuppressed,
   isNativeSkillsSuppressed,
   suppressNativeSkillsOnStartup,
 } from "./suppress-native.js";
@@ -17,7 +18,6 @@ describe("isNativeSkillsSuppressed", () => {
         agents: { defaults: {} },
       } as OpenClawConfig),
     ).toBe(false);
-
     expect(
       isNativeSkillsSuppressed({
         agents: { defaults: { skills: ["alpha"] } },
@@ -30,40 +30,20 @@ describe("isNativeSkillsSuppressed", () => {
       isNativeSkillsSuppressed({
         agents: {
           defaults: { skills: [] },
-          entries: {
-            worker: { skills: ["alpha"] },
-          },
+          entries: { worker: { skills: ["alpha"] } },
         },
       } as OpenClawConfig),
     ).toBe(false);
   });
 
-  it("returns true when agents.defaults.skills is [] and entries have no or empty skills", () => {
-    expect(
-      isNativeSkillsSuppressed({
-        agents: {
-          defaults: { skills: [] },
-        },
-      } as OpenClawConfig),
-    ).toBe(true);
-
+  it("accepts empty inherited and agent skill lists", () => {
     expect(
       isNativeSkillsSuppressed({
         agents: {
           defaults: { skills: [] },
           entries: {
             worker: { workspace: "/tmp/workspace" },
-          },
-        },
-      } as OpenClawConfig),
-    ).toBe(true);
-
-    expect(
-      isNativeSkillsSuppressed({
-        agents: {
-          defaults: { skills: [] },
-          entries: {
-            worker: { skills: [] },
+            helper: { skills: [] },
           },
         },
       } as OpenClawConfig),
@@ -71,17 +51,34 @@ describe("isNativeSkillsSuppressed", () => {
   });
 });
 
+describe("isNativeExtraDirsSuppressed", () => {
+  it("requires an explicit empty extraDirs list", () => {
+    expect(isNativeExtraDirsSuppressed(undefined)).toBe(false);
+    expect(
+      isNativeExtraDirsSuppressed({
+        skills: { load: { extraDirs: ["/srv/skills"] } },
+      } as OpenClawConfig),
+    ).toBe(false);
+    expect(
+      isNativeExtraDirsSuppressed({
+        skills: { load: { extraDirs: [] } },
+      } as OpenClawConfig),
+    ).toBe(true);
+  });
+});
+
 describe("suppressNativeSkillsOnStartup", () => {
-  it("does not invoke mutation if already suppressed", async () => {
+  it("does not invoke mutation when requested normalization is already complete", async () => {
     const mutateConfigFile = vi.fn();
     const result = await suppressNativeSkillsOnStartup({
       api: {
         config: {
-          agents: {
-            defaults: { skills: [] },
-          },
+          agents: { defaults: { skills: [] } },
+          skills: { load: { extraDirs: [] } },
         } as OpenClawConfig,
       },
+      suppressNativeSkillPrompt: true,
+      suppressNativeExtraDirs: true,
       mutateConfigFile,
     });
 
@@ -89,23 +86,45 @@ describe("suppressNativeSkillsOnStartup", () => {
     expect(mutateConfigFile).not.toHaveBeenCalled();
   });
 
-  it("applies mutation when unsuppressed and cleans draft correctly", async () => {
+  it("preserves the legacy default of suppressing prompt skills", async () => {
+    let capturedDraft: OpenClawConfig | undefined;
+    const mutateConfigFile = vi.fn(async (params) => {
+      const draft = {
+        agents: { defaults: { skills: ["legacy"] } },
+      } as unknown as OpenClawConfig;
+      await params.mutate(draft);
+      capturedDraft = draft;
+    });
+
+    const result = await suppressNativeSkillsOnStartup({
+      api: {
+        config: {
+          agents: { defaults: { skills: ["legacy"] } },
+        } as OpenClawConfig,
+      },
+      mutateConfigFile,
+    });
+
+    expect(result).toBe(true);
+    expect(capturedDraft?.agents?.defaults?.skills).toEqual([]);
+  });
+
+  it("normalizes prompt lists and extra directories atomically", async () => {
     let capturedDraft: OpenClawConfig | undefined;
     const mutateConfigFile = vi.fn(async (params) => {
       const draft = {
         agents: {
-          defaults: {
-            skills: ["legacy-skill"],
-            model: "anthropic/claude-3-5",
-          },
+          defaults: { skills: ["legacy-skill"], model: "anthropic/claude-3-5" },
           entries: {
-            main: {
-              skills: ["main-skill"],
-              workspace: "/tmp/main",
-            },
-            subagent: {
-              workspace: "/tmp/sub",
-            },
+            main: { skills: ["main-skill"], workspace: "/tmp/main" },
+            subagent: { workspace: "/tmp/sub" },
+          },
+        },
+        skills: {
+          load: {
+            extraDirs: ["/legacy/skills"],
+            watch: true,
+            watchDebounceMs: 1_000,
           },
         },
       } as unknown as OpenClawConfig;
@@ -116,11 +135,12 @@ describe("suppressNativeSkillsOnStartup", () => {
     const result = await suppressNativeSkillsOnStartup({
       api: {
         config: {
-          agents: {
-            defaults: { skills: ["legacy-skill"] },
-          },
+          agents: { defaults: { skills: ["legacy-skill"] } },
+          skills: { load: { extraDirs: ["/legacy/skills"] } },
         } as OpenClawConfig,
       },
+      suppressNativeSkillPrompt: true,
+      suppressNativeExtraDirs: true,
       mutateConfigFile,
     });
 
@@ -131,16 +151,14 @@ describe("suppressNativeSkillsOnStartup", () => {
     });
     expect(capturedDraft?.agents?.defaults?.skills).toEqual([]);
     expect(capturedDraft?.agents?.defaults?.model).toBe("anthropic/claude-3-5");
-    expect(
-      (capturedDraft?.agents?.entries?.main as { skills?: unknown })?.skills,
-    ).toBeUndefined();
+    expect(capturedDraft?.agents?.entries?.main).not.toHaveProperty("skills");
     expect(capturedDraft?.agents?.entries?.main?.workspace).toBe("/tmp/main");
-    expect(capturedDraft?.agents?.entries?.subagent?.workspace).toBe(
-      "/tmp/sub",
-    );
+    expect(capturedDraft?.skills?.load?.extraDirs).toEqual([]);
+    expect(capturedDraft?.skills?.load?.watch).toBe(true);
+    expect(capturedDraft?.skills?.load?.watchDebounceMs).toBe(1_000);
   });
 
-  it("handles empty draft safely by initializing agents and defaults", async () => {
+  it("normalizes only extra directories without creating agents", async () => {
     let capturedDraft: OpenClawConfig | undefined;
     const mutateConfigFile = vi.fn(async (params) => {
       const draft = {} as OpenClawConfig;
@@ -149,45 +167,44 @@ describe("suppressNativeSkillsOnStartup", () => {
     });
 
     const result = await suppressNativeSkillsOnStartup({
-      api: {
-        config: {} as OpenClawConfig,
-      },
+      api: { config: {} as OpenClawConfig },
+      suppressNativeSkillPrompt: false,
+      suppressNativeExtraDirs: true,
       mutateConfigFile,
     });
 
     expect(result).toBe(true);
-    expect(capturedDraft?.agents?.defaults?.skills).toEqual([]);
+    expect(capturedDraft?.agents).toBeUndefined();
+    expect(capturedDraft?.skills?.load?.extraDirs).toEqual([]);
   });
 
-  it("fails open and returns false without throwing when mutation fails", async () => {
+  it("fails open when mutation fails", async () => {
     const mutateConfigFile = vi
       .fn()
       .mockRejectedValue(new Error("EACCES: permission denied"));
 
-    const result = await suppressNativeSkillsOnStartup({
-      api: {
-        config: {
-          agents: { defaults: { skills: ["legacy"] } },
-        } as OpenClawConfig,
-      },
-      mutateConfigFile,
-    });
-
-    expect(result).toBe(false);
+    await expect(
+      suppressNativeSkillsOnStartup({
+        api: {
+          config: {
+            skills: { load: { extraDirs: ["/legacy/skills"] } },
+          } as OpenClawConfig,
+        },
+        suppressNativeSkillPrompt: false,
+        suppressNativeExtraDirs: true,
+        mutateConfigFile,
+      }),
+    ).resolves.toBe(false);
   });
 
-  it("prefers api.runtime.config.mutateConfigFile when options.mutateConfigFile is omitted", async () => {
+  it("uses the runtime mutation API when no override is supplied", async () => {
     const mutateConfigFile = vi.fn().mockResolvedValue(undefined);
     const result = await suppressNativeSkillsOnStartup({
       api: {
         config: {
           agents: { defaults: { skills: ["legacy"] } },
         } as OpenClawConfig,
-        runtime: {
-          config: {
-            mutateConfigFile,
-          },
-        },
+        runtime: { config: { mutateConfigFile } },
       },
     });
 
