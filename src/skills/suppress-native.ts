@@ -52,7 +52,10 @@ export function isNativeExtraDirsSuppressed(
   config: OpenClawConfig | undefined,
 ): boolean {
   const extraDirs = config?.skills?.load?.extraDirs;
-  return Array.isArray(extraDirs) && extraDirs.length === 0;
+  return (
+    extraDirs === undefined ||
+    (Array.isArray(extraDirs) && extraDirs.length === 0)
+  );
 }
 
 function needsNormalization(

@@ -52,8 +52,9 @@ describe("isNativeSkillsSuppressed", () => {
 });
 
 describe("isNativeExtraDirsSuppressed", () => {
-  it("requires an explicit empty extraDirs list", () => {
-    expect(isNativeExtraDirsSuppressed(undefined)).toBe(false);
+  it("treats an unset extraDirs list as suppressed", () => {
+    expect(isNativeExtraDirsSuppressed(undefined)).toBe(true);
+    expect(isNativeExtraDirsSuppressed({} as OpenClawConfig)).toBe(true);
     expect(
       isNativeExtraDirsSuppressed({
         skills: { load: { extraDirs: ["/srv/skills"] } },
@@ -158,14 +159,8 @@ describe("suppressNativeSkillsOnStartup", () => {
     expect(capturedDraft?.skills?.load?.watchDebounceMs).toBe(1_000);
   });
 
-  it("normalizes only extra directories without creating agents", async () => {
-    let capturedDraft: OpenClawConfig | undefined;
-    const mutateConfigFile = vi.fn(async (params) => {
-      const draft = {} as OpenClawConfig;
-      await params.mutate(draft);
-      capturedDraft = draft;
-    });
-
+  it("does not write an unset extraDirs list", async () => {
+    const mutateConfigFile = vi.fn();
     const result = await suppressNativeSkillsOnStartup({
       api: { config: {} as OpenClawConfig },
       suppressNativeSkillPrompt: false,
@@ -173,9 +168,8 @@ describe("suppressNativeSkillsOnStartup", () => {
       mutateConfigFile,
     });
 
-    expect(result).toBe(true);
-    expect(capturedDraft?.agents).toBeUndefined();
-    expect(capturedDraft?.skills?.load?.extraDirs).toEqual([]);
+    expect(result).toBe(false);
+    expect(mutateConfigFile).not.toHaveBeenCalled();
   });
 
   it("fails open when mutation fails", async () => {
