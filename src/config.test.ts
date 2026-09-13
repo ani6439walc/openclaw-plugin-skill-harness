@@ -147,6 +147,30 @@ describe("resolveConfig", () => {
     });
   });
 
+  describe("skills", () => {
+    it("resolves absolute shared roots in configured order and removes duplicates", () => {
+      expect(
+        resolveConfig({
+          skills: {
+            sharedRoots: [" /srv/skills ", "/srv/skills", "/opt/shared-skills"],
+          },
+        }).skills,
+      ).toMatchObject({
+        sharedRoots: ["/srv/skills", "/opt/shared-skills"],
+        suppressNativeExtraDirs: true,
+      });
+    });
+
+    it("rejects relative and tilde shared roots", () => {
+      expect(() =>
+        resolveConfig({ skills: { sharedRoots: ["skills"] } }),
+      ).toThrow();
+      expect(() =>
+        resolveConfig({ skills: { sharedRoots: ["~/skills"] } }),
+      ).toThrow();
+    });
+  });
+
   describe("workingSetSkills", () => {
     it("canonicalizes agent and skill names and resolves agent-specific names before defaults", () => {
       const result = resolveConfig({

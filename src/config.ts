@@ -1,3 +1,4 @@
+import path from "node:path";
 import { z } from "zod";
 import {
   DEFAULT_QUERY_MODE,
@@ -81,6 +82,8 @@ const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
 
 const DEFAULT_SKILLS: ResolvedSkillsConfig = {
   search: DEFAULT_SKILL_SEARCH,
+  sharedRoots: [],
+  suppressNativeExtraDirs: true,
 };
 
 const DEFAULT_WORKING_SET_SKILLS: ResolvedWorkingSetSkillsConfig = {
@@ -344,10 +347,39 @@ const SkillSearchSchema = z
   })
   .default(DEFAULT_SKILL_SEARCH);
 
+const SharedSkillRootsSchema = z
+  .array(z.string())
+  .optional()
+  .default([])
+  .transform((roots, context) => {
+    const seen = new Set<string>();
+    const normalizedRoots: string[] = [];
+    for (const [index, root] of roots.entries()) {
+      const normalized = root.trim();
+      if (!normalized || !path.isAbsolute(normalized)) {
+        context.addIssue({
+          code: "custom",
+          path: [index],
+          message:
+            "skills.sharedRoots entries must be non-empty absolute paths",
+        });
+        continue;
+      }
+      const resolved = path.resolve(normalized);
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+      normalizedRoots.push(resolved);
+    }
+    return normalizedRoots;
+  });
+
 const SkillsSchema = z
   .object({
     search: SkillSearchSchema.optional().default(DEFAULT_SKILL_SEARCH),
+    sharedRoots: SharedSkillRootsSchema,
+    suppressNativeExtraDirs: z.boolean().optional().default(true),
   })
+  .strict()
   .default(DEFAULT_SKILLS);
 
 function resolveSkillsConfig(raw: unknown): ResolvedSkillsConfig {
