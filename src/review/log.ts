@@ -186,6 +186,7 @@ const ProcessedEventRecordSchema = z
   })
   .strict()
   .transform((record): ProcessedEventRecord => record);
+
 const ReviewedSkillEpochSchema = z
   .object({
     agentId: z.string().trim().min(1),

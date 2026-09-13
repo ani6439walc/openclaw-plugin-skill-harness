@@ -107,7 +107,22 @@ graph TD
 
 Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<working_set_skills>` block is the ordered union of plugin-owned `workingSetSkills` and skills discovered from that agent's workspace `skills/` tree: the agent-specific working set precedes shared `defaults`, workspace-only skills append, and duplicate names retain their explicit-list position while resolving to the workspace-precedence skill content. Native OpenClaw `agents.*.skills` lists are not a plugin source after cutover. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `scope.agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid example/keyword retrieval with expansion, and candidate scoring for Step 3 fallback classification.
 
-The static cutover boundary is explicit: `plugins.entries.skill-harness.config.workingSetSkills` is the only plugin-owned static skill source. Keep `agents.defaults.skills` and `agents.entries.<id>.skills` empty when removing OpenClaw core's native automatic skill prompt; Skill Harness neither reads nor mutates those lists. Unknown or missing names in `workingSetSkills` are filtered when the prompt is built, while workspace-resolved skills are appended according to the precedence rules above.
+### Skill discovery directories and precedence
+
+Every agent resolves the following skill roots in order; unavailable directories are simply skipped:
+
+1. **Workshop** — `~/.openclaw/agents/<agentId>/agent/workshop-skills/`
+2. **Workspace** — `<agent workspace>/skills/`
+3. **Project agent** — `<agent workspace>/.agents/skills/`
+4. **Personal agent** — `~/.agents/skills/`
+5. **Managed** — `~/.openclaw/skills/`
+6. **Shared** — each configured `plugins.entries.skill-harness.config.skills.sharedRoots` directory, in configured order
+7. **Plugin** — `~/.openclaw/plugin-skills/` (OpenClaw-generated plugin links), then the Skill Harness package's `skills/` fallback
+8. **Bundled** — OpenClaw's built-in skills directory, resolved from `OPENCLAW_BUNDLED_SKILLS_DIR`, the running Gateway checkout, or the installed `openclaw` package
+
+If the same skill name appears in more than one directory, the **first directory above wins**. Within one root, discovery is alphabetical; shared roots override plugin and bundled skills, plugin links win over the Skill Harness package fallback, and bundled OpenClaw skills win over that fallback. Shared roots are visible to every agent but never grant access to another agent's workspace or workshop tree. Built-in bundled skills include `gifgrep` and `meme-maker`.
+
+The static cutover boundary is explicit: `plugins.entries.skill-harness.config.workingSetSkills` is the only plugin-owned static skill source. By default startup normalizes `agents.defaults.skills` to `[]`, removes `agents.entries.<id>.skills`, and clears `skills.load.extraDirs`; configure intentionally shared directories with `plugins.entries.skill-harness.config.skills.sharedRoots` instead. Unknown or missing names in `workingSetSkills` are filtered when the prompt is built, while workspace-resolved skills are appended according to the precedence rules above.
 
 ### Architecture and routing contract
 
@@ -260,6 +275,8 @@ Configure Skill Harness in `openclaw.json`:
 | `routing.classifier.thinking`                        | `"medium"`                     | Intent-classifier thinking level.                                                                                                                                                                                                                                                                                         |
 | `routing.classifier.queryMode` / `contextWindow`     | `"recent"` / unset             | Scanner context and its limits.                                                                                                                                                                                                                                                                                           |
 | `routing.classifier.timeoutMs`                       | `5000`                         | Intent-classifier time budget in milliseconds.                                                                                                                                                                                                                                                                            |
+| `skills.sharedRoots`                                 | `[]`                           | Absolute local skill directories intentionally shared with every agent. They are resolved after agent-local, plugin, and bundled roots; duplicate names retain the higher-precedence root.                                                                                                                                |
+| `skills.suppressNativeExtraDirs`                     | `true`                         | On startup, clears OpenClaw `skills.load.extraDirs`; migrate intentionally shared paths to `skills.sharedRoots`.                                                                                                                                                                                                          |
 | `skills.search.collectionWeights`                    | `3/2/1`                        | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.                                                                                                                                                                                                                        |
 | `qmd.embedding` / `expansion`                        | required                       | Remote endpoint and model for mandatory QMD hybrid routing. Supports OpenClaw `provider/model` syntax (e.g. `bifrost/text-embedding-3-small`) to auto-resolve `baseUrl` and `apiKey` from OpenClaw's `models.providers`. Explicit `baseUrl` and `apiKey` remain supported. `embedding.dimension` defaults to `1536`.      |
 | `qmd.timeoutMs`                                      | `routing.classifier.timeoutMs` | Per-request QMD embedding and expansion timeout.                                                                                                                                                                                                                                                                          |
@@ -308,7 +325,7 @@ Move static skill selections into the plugin-owned `workingSetSkills` block:
 }
 ```
 
-The plugin resolves an agent-specific list before shared defaults, then appends workspace-only skills. It intentionally does not consume or rewrite OpenClaw's native `skills` lists. The plugin does not edit `openclaw.json` automatically; an operator should apply the cutover separately and validate only the affected JSON paths rather than gating on a whole-file hash, because formatting and unrelated live runtime fields may change during normal use.
+The plugin resolves an agent-specific list before shared defaults, then appends workspace-only skills. By default startup applies this cutover to `openclaw.json`: it empties `agents.defaults.skills`, removes every `agents.entries.<id>.skills`, and empties `skills.load.extraDirs`. Move directories that should be visible to every agent to `plugins.entries.skill-harness.config.skills.sharedRoots`; agent-local workspace and workshop directories remain automatic and retain precedence.
 
 ## Runtime intents
 

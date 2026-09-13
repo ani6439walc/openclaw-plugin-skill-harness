@@ -447,6 +447,7 @@ export function createHookHandlers(deps: HookDeps) {
     deps.reviewLogWriter ??
     new IntentReviewLogWriter(deps.dataRoot ?? packageRoot);
   const bundledSkillsDir = deps.bundledSkillsDir;
+  const sharedRoots = () => deps.getSharedRoots?.() ?? [];
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
   const recordedToolCalls = new Set<string>();
@@ -949,6 +950,7 @@ export function createHookHandlers(deps: HookDeps) {
       api,
       agentId: params.routing.effectiveAgentId,
       bundledSkillsDir,
+      sharedRoots: sharedRoots(),
       skillNames: params.intent.definition.skills ?? [],
     });
     const intentMatchedSkills = directSkills.slice(0, 4);
@@ -986,6 +988,7 @@ export function createHookHandlers(deps: HookDeps) {
           api,
           agentId,
           bundledSkillsDir,
+          sharedRoots: sharedRoots(),
           skillNames: workingSetSkillNames,
         });
       } catch (error) {
@@ -1003,6 +1006,7 @@ export function createHookHandlers(deps: HookDeps) {
             api,
             agentId,
             bundledSkillsDir,
+            sharedRoots: sharedRoots(),
             source,
             usageStats: {},
           });
@@ -1472,6 +1476,7 @@ export function createHookHandlers(deps: HookDeps) {
           api,
           agentId,
           bundledSkillsDir,
+          sharedRoots: sharedRoots(),
         });
         if (skills) skillInventory = { agentId, skills };
       } catch (error) {
@@ -1507,11 +1512,17 @@ export function createHookHandlers(deps: HookDeps) {
             api,
             agentId,
             bundledSkillsDir,
+            sharedRoots: sharedRoots(),
             skillNames: [...new Set(availableSkillNames)],
           })
         : [];
     const skillInventory = skillPlacementCandidate
-      ? await skillInventoryResolver({ api, agentId, bundledSkillsDir })
+      ? await skillInventoryResolver({
+          api,
+          agentId,
+          bundledSkillsDir,
+          sharedRoots: sharedRoots(),
+        })
       : undefined;
     const selectedPlacementSkill = skillPlacementCandidate
       ? await resolveSelectedPlacementSkill(
@@ -1575,6 +1586,7 @@ export function createHookHandlers(deps: HookDeps) {
               api,
               agentId: params.agentId,
               bundledSkillsDir,
+              sharedRoots: sharedRoots(),
             });
             allowedExperienceSkills = (inventory ?? [])
               .map((skill) => skill.name.trim().toLowerCase())

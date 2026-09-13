@@ -19,13 +19,14 @@ export interface SuppressNativeSkillsOptions {
   api: Pick<OpenClawPluginApi, "config"> & {
     runtime?: unknown;
   };
+  suppressNativeSkillPrompt?: boolean;
+  suppressNativeExtraDirs?: boolean;
   mutateConfigFile?: ConfigMutateFn;
 }
 
 /**
- * Checks if OpenClaw native skills are already completely suppressed:
- * 1. agents.defaults.skills is an empty array ([]).
- * 2. No agent in agents.entries has a defined non-empty skills property.
+ * Checks whether OpenClaw's automatic prompt skill lists are suppressed:
+ * agents.defaults.skills is [] and agent entries carry no non-empty list.
  */
 export function isNativeSkillsSuppressed(
   config: OpenClawConfig | undefined,
@@ -33,46 +34,57 @@ export function isNativeSkillsSuppressed(
   if (!config) return false;
 
   const defaultsSkills = config.agents?.defaults?.skills;
-  const isDefaultsEmpty =
-    Array.isArray(defaultsSkills) && defaultsSkills.length === 0;
-  if (!isDefaultsEmpty) return false;
-
-  const entries = config.agents?.entries;
-  if (entries && typeof entries === "object") {
-    for (const entry of Object.values(entries)) {
-      if (
-        entry &&
-        typeof entry === "object" &&
-        Object.hasOwn(entry, "skills")
-      ) {
-        const skills = (entry as { skills?: unknown }).skills;
-        if (
-          skills !== undefined &&
-          !(Array.isArray(skills) && skills.length === 0)
-        ) {
-          return false;
-        }
-      }
-    }
+  if (!Array.isArray(defaultsSkills) || defaultsSkills.length !== 0) {
+    return false;
   }
 
+  for (const entry of Object.values(config.agents?.entries ?? {})) {
+    if (!entry || typeof entry !== "object" || !("skills" in entry)) {
+      continue;
+    }
+    const listedSkills = entry.skills;
+    if (!Array.isArray(listedSkills) || listedSkills.length !== 0) return false;
+  }
   return true;
 }
 
+export function isNativeExtraDirsSuppressed(
+  config: OpenClawConfig | undefined,
+): boolean {
+  const extraDirs = config?.skills?.load?.extraDirs;
+  return Array.isArray(extraDirs) && extraDirs.length === 0;
+}
+
+function needsNormalization(
+  config: OpenClawConfig | undefined,
+  options: Required<
+    Pick<
+      SuppressNativeSkillsOptions,
+      "suppressNativeSkillPrompt" | "suppressNativeExtraDirs"
+    >
+  >,
+): boolean {
+  return (
+    (options.suppressNativeSkillPrompt && !isNativeSkillsSuppressed(config)) ||
+    (options.suppressNativeExtraDirs && !isNativeExtraDirsSuppressed(config))
+  );
+}
+
 /**
- * Idempotently mutates openclaw.json on startup to suppress OpenClaw core's
- * automatic <available_skills> prompt:
- * - Sets agents.defaults.skills to []
- * - Removes skills from all agents.entries.*
- *
- * If already suppressed, exits immediately without modifying disk.
- * If mutation fails (e.g. read-only filesystem), catches the error and logs a
- * warning (fail-open).
+ * Idempotently normalizes the OpenClaw-native skill configuration that Skill
+ * Harness replaces: automatic prompt skill lists and/or extra discovery roots.
  */
 export async function suppressNativeSkillsOnStartup(
   options: SuppressNativeSkillsOptions,
 ): Promise<boolean> {
-  if (isNativeSkillsSuppressed(options.api.config)) {
+  const suppressNativeSkillPrompt = options.suppressNativeSkillPrompt ?? true;
+  const suppressNativeExtraDirs = options.suppressNativeExtraDirs ?? false;
+  if (
+    !needsNormalization(options.api.config, {
+      suppressNativeSkillPrompt,
+      suppressNativeExtraDirs,
+    })
+  ) {
     return false;
   }
 
@@ -84,41 +96,40 @@ export async function suppressNativeSkillsOnStartup(
         mutateFn = runtimeObj.config?.mutateConfigFile;
       }
     } catch {
-      // Runtime may be guarded or throw during inspection
+      // Runtime may be guarded or throw during inspection.
     }
   }
-  if (!mutateFn) {
-    return false;
-  }
+  if (!mutateFn) return false;
 
   try {
     await mutateFn({
       afterWrite: { mode: "auto" },
       mutate: (draft: OpenClawConfig) => {
-        const agents = (draft.agents ??= {});
-        const defaults = (agents.defaults ??= {});
-        defaults.skills = [];
+        if (suppressNativeSkillPrompt) {
+          const agents = (draft.agents ??= {});
+          const defaults = (agents.defaults ??= {});
+          defaults.skills = [];
 
-        if (agents.entries && typeof agents.entries === "object") {
-          for (const entry of Object.values(agents.entries)) {
+          for (const entry of Object.values(agents.entries ?? {})) {
             if (entry && typeof entry === "object") {
               delete (entry as Record<string, unknown>).skills;
             }
           }
         }
+
+        if (suppressNativeExtraDirs) {
+          const skills = (draft.skills ??= {});
+          const load = (skills.load ??= {});
+          load.extraDirs = [];
+        }
       },
     });
-    logger.info(
-      "successfully suppressed native OpenClaw skills configuration in openclaw.json",
-    );
+    logger.info("successfully normalized native OpenClaw skills configuration");
     return true;
   } catch (error) {
-    logger.warn(
-      "failed to suppress native skills configuration in openclaw.json",
-      {
-        error: error instanceof Error ? error.message : String(error),
-      },
-    );
+    logger.warn("failed to normalize native OpenClaw skills configuration", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 }

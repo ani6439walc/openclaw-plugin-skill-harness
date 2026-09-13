@@ -27,6 +27,7 @@ export interface RegisterSkillToolsOptions {
   qmdSkillIndex?: SkillQmdIndex;
   scheduleSkillSearchIndex?: (agentId: string) => void;
   bundledSkillsDir?: string;
+  getSharedRoots?: () => readonly string[];
 }
 
 function jsonToolResult(data: unknown) {
@@ -148,6 +149,7 @@ export function registerSkillTools(
             agentId,
             intents: options.getIntents?.(agentId),
             bundledSkillsDir: options.bundledSkillsDir,
+            sharedRoots: options.getSharedRoots?.(),
           });
           const relatedSkills = showRelated
             ? relatedSkillsBySkillName(skills)
@@ -267,6 +269,7 @@ export function registerSkillTools(
             agentId,
             intents: options.getIntents?.(agentId),
             bundledSkillsDir: options.bundledSkillsDir,
+            sharedRoots: options.getSharedRoots?.(),
           });
           const relatedSkills = showRelated
             ? relatedSkillsBySkillName(inventory)
@@ -380,6 +383,7 @@ export function registerSkillTools(
               filePath: optionalStringParam(params, "file_path"),
               intents: options.getIntents?.(agentId),
               bundledSkillsDir: options.bundledSkillsDir,
+              sharedRoots: options.getSharedRoots?.(),
             }),
           );
         },
@@ -456,7 +460,12 @@ export function registerSkillTools(
             });
           }
 
-          const inventory = await listAvailableSkills({ api, agentId });
+          const inventory = await listAvailableSkills({
+            api,
+            agentId,
+            bundledSkillsDir: options.bundledSkillsDir,
+            sharedRoots: options.getSharedRoots?.(),
+          });
           const visibleNames = new Set(
             canonicalSkillNames(inventory.map((skill) => skill.name)),
           );
