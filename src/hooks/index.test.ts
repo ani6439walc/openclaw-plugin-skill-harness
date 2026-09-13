@@ -3448,7 +3448,7 @@ describe("createHookHandlers topic switch flow", () => {
           state: "completed",
           intent: "version-control",
           confidence: 0.91,
-          reason: "matched: none; threshold: 0.85",
+          reason: "matched: none; confidence: 0.91/0.85",
         }),
       }),
     );
@@ -3609,7 +3609,7 @@ describe("createHookHandlers topic switch flow", () => {
     ).toEqual(
       expect.objectContaining({
         confidence: 0.84,
-        reason: "matched: commit; threshold: 0.85",
+        reason: "matched: commit; confidence: 0.84/0.85",
         result: "below-threshold",
       }),
     );
@@ -3770,7 +3770,8 @@ describe("createHookHandlers topic switch flow", () => {
       expect.objectContaining({
         intent: "version-control",
         confidence: 0.93,
-        reason: "signals: lex,vec,hyde; threshold: 0.9; margin: 0.12/0.08",
+        reason:
+          "signals: lex,vec,hyde; confidence: 0.93/0.9; margin: 0.12/0.08",
         result: "routed",
       }),
     );
@@ -3831,7 +3832,7 @@ describe("createHookHandlers topic switch flow", () => {
         expect.objectContaining({
           intent: "version-control",
           confidence: scenario.score,
-          reason: `signals: lex,vec,hyde; threshold: 0.9; margin: ${scenario.margin}`,
+          reason: `signals: lex,vec,hyde; confidence: ${scenario.score}/0.9; margin: ${scenario.margin}`,
           result: scenario.result,
         }),
       );
@@ -5729,7 +5730,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinScore: 0.85,
         query: "Please check this PR for me",
       });
-      expect(reason).toBe("matched: pr; threshold: 0.85");
+      expect(reason).toBe("matched: pr; confidence: 0.95/0.85");
     });
 
     it("formats keyword route reason matching multiple keywords from query", () => {
@@ -5743,7 +5744,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinScore: 0.85,
         query: "Please do a code review on this pr",
       });
-      expect(reason).toBe("matched: pr, code review; threshold: 0.85");
+      expect(reason).toBe("matched: pr, code review; confidence: 0.95/0.85");
     });
 
     it("reports no literal keyword when the query does not contain defined keywords", () => {
@@ -5757,7 +5758,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinScore: 0.85,
         query: "Can you inspect my patch?",
       });
-      expect(reason).toBe("matched: none; threshold: 0.85");
+      expect(reason).toBe("matched: none; confidence: 0.95/0.85");
     });
 
     it("extracts hybrid signals from rrf contributions in order", () => {
@@ -5817,7 +5818,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinMargin: 0.08,
       });
       expect(reason).toBe(
-        "signals: lex,vec; threshold: 0.9; margin: 0.12/0.08",
+        "signals: lex,vec; confidence: 0.92/0.9; margin: 0.12/0.08",
       );
     });
   });

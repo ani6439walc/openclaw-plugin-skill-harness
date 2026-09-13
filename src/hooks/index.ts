@@ -338,8 +338,9 @@ export function buildKeywordRouteReason(params: {
     : [];
   const matchedDisplay =
     matchedKeywords.length > 0 ? matchedKeywords.join(", ") : "none";
+  const score = roundToThreeDecimals(params.hit.score);
   const threshold = roundToThreeDecimals(params.directRouteMinScore);
-  return `matched: ${matchedDisplay}; threshold: ${threshold}`;
+  return `matched: ${matchedDisplay}; confidence: ${score}/${threshold}`;
 }
 
 export function extractHybridSignals(explain: unknown): string {
@@ -390,7 +391,8 @@ export function buildQmdRouteReason(params: {
   const threshold = roundToThreeDecimals(params.directRouteMinScore);
   const margin = roundToThreeDecimals(params.scoreMargin);
   const minimumMargin = roundToThreeDecimals(params.directRouteMinMargin);
-  return `signals: ${signals}; threshold: ${threshold}; margin: ${margin}/${minimumMargin}`;
+  const score = roundToThreeDecimals(params.hit.score);
+  return `signals: ${signals}; confidence: ${score}/${threshold}; margin: ${margin}/${minimumMargin}`;
 }
 
 function buildQmdIntentResult(params: {
