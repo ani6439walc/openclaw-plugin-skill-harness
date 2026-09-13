@@ -705,7 +705,7 @@ export function createHookHandlers(deps: HookDeps) {
         keywordHits === undefined ? "failed" : "completed",
         keywordHits === undefined
           ? {
-              error: "QMD keyword index unavailable",
+              error: "keyword index unavailable",
               result: "none",
             }
           : topKeywordHit
@@ -799,7 +799,7 @@ export function createHookHandlers(deps: HookDeps) {
         qmdHits === undefined ? "failed" : "completed",
         qmdHits === undefined
           ? {
-              error: "QMD intent example/keyword index unavailable",
+              error: "example/keyword index unavailable",
               result: "none",
             }
           : topHit

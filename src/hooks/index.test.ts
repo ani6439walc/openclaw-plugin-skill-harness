@@ -3563,7 +3563,7 @@ describe("createHookHandlers topic switch flow", () => {
     );
     expect(keywordEvent?.data).toEqual(
       expect.objectContaining({
-        error: "QMD keyword index unavailable",
+        error: "keyword index unavailable",
         result: "none",
       }),
     );
