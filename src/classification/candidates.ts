@@ -5,7 +5,7 @@ import type {
   IntentProjectionSupportReason,
 } from "../types.js";
 import type { QmdIntentHit } from "../qmd/intent-index.js";
-import { roundToThreeDecimals } from "../normalize.js";
+import { roundToTwoDecimals } from "../normalize.js";
 
 export type {
   IntentProjectionSelectionReason,
@@ -95,9 +95,9 @@ export function projectQmdIntentCandidates(params: {
   const intents = [...params.intents];
   if (intents.length === 0) return fullCatalogResult(intents, "empty-catalog");
   if (!params.qmdHits) return fullCatalogResult(intents, "qmd-unavailable");
-  const minCandidateScore = roundToThreeDecimals(params.minCandidateScore);
+  const minCandidateScore = roundToTwoDecimals(params.minCandidateScore);
   const trustedHits = params.qmdHits
-    .filter((hit) => roundToThreeDecimals(hit.score) >= minCandidateScore)
+    .filter((hit) => roundToTwoDecimals(hit.score) >= minCandidateScore)
     .sort((a, b) => b.score - a.score);
   if (trustedHits.length === 0) {
     return fullCatalogResult(intents, "qmd-no-trusted-recall");

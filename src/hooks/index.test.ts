@@ -3939,7 +3939,7 @@ describe("createHookHandlers topic switch flow", () => {
           thresholds: {
             hybrid: {
               directRouteMinScore: 0.9,
-              directRouteMinMargin: 0.08,
+              directRouteMinMargin: 0.09,
               minCandidateScore: 0.4,
             },
           },
@@ -4038,7 +4038,7 @@ describe("createHookHandlers topic switch flow", () => {
           thresholds: {
             hybrid: {
               directRouteMinScore: 0.9,
-              directRouteMinMargin: 0.08,
+              directRouteMinMargin: 0.09,
               minCandidateScore: 0.4,
             },
           },
@@ -4059,12 +4059,12 @@ describe("createHookHandlers topic switch flow", () => {
         hybridHits: [
           {
             intentId: "version-control",
-            score: 0.94,
+            score: 0.95,
             collection: "intent-examples-and-keywords",
           },
           {
             intentId: "general-chat",
-            score: 0.86,
+            score: 0.861,
             collection: "intent-examples-and-keywords",
           },
         ],
@@ -4073,8 +4073,8 @@ describe("createHookHandlers topic switch flow", () => {
 
     const result = await handlers.onBeforePromptBuild(event, ctx);
 
-    // In JS: 0.94 - 0.86 = 0.07999999999999996 (< 0.08 without 3-decimal rounding)
-    // With roundToThreeDecimals: 0.08 >= 0.08 -> direct route!
+    // Raw margin is 0.089, which displays as 0.09 and satisfies the configured 0.09.
+    // Routing comparisons use the same two-decimal confidence precision as events.
     expect(classifier).not.toHaveBeenCalled();
     expect(result).toBeDefined();
   });

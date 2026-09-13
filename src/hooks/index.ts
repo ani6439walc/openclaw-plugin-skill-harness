@@ -1,4 +1,4 @@
-import { roundToThreeDecimals } from "../normalize.js";
+import { roundToTwoDecimals } from "../normalize.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
@@ -338,8 +338,8 @@ export function buildKeywordRouteReason(params: {
     : [];
   const matchedDisplay =
     matchedKeywords.length > 0 ? matchedKeywords.join(", ") : "none";
-  const score = roundToThreeDecimals(params.hit.score);
-  const threshold = roundToThreeDecimals(params.directRouteMinScore);
+  const score = roundToTwoDecimals(params.hit.score);
+  const threshold = roundToTwoDecimals(params.directRouteMinScore);
   return `matched: ${matchedDisplay}; confidence: ${score}/${threshold}`;
 }
 
@@ -388,10 +388,10 @@ export function buildQmdRouteReason(params: {
   directRouteMinMargin: number;
 }): string {
   const signals = extractHybridSignals(params.hit.explain);
-  const threshold = roundToThreeDecimals(params.directRouteMinScore);
-  const margin = roundToThreeDecimals(params.scoreMargin);
-  const minimumMargin = roundToThreeDecimals(params.directRouteMinMargin);
-  const score = roundToThreeDecimals(params.hit.score);
+  const threshold = roundToTwoDecimals(params.directRouteMinScore);
+  const margin = roundToTwoDecimals(params.scoreMargin);
+  const minimumMargin = roundToTwoDecimals(params.directRouteMinMargin);
+  const score = roundToTwoDecimals(params.hit.score);
   return `signals: ${signals}; confidence: ${score}/${threshold}; margin: ${margin}/${minimumMargin}`;
 }
 
@@ -674,8 +674,8 @@ export function createHookHandlers(deps: HookDeps) {
       if (
         topKeywordHit &&
         matchedKeywordIntent &&
-        roundToThreeDecimals(topKeywordHit.score) >=
-          roundToThreeDecimals(keywordMinScore)
+        roundToTwoDecimals(topKeywordHit.score) >=
+          roundToTwoDecimals(keywordMinScore)
       ) {
         const result = buildKeywordIntentResult({
           hit: topKeywordHit,
@@ -761,13 +761,13 @@ export function createHookHandlers(deps: HookDeps) {
           : (topHit?.score ?? 0);
       const satisfiesMargin =
         !secondHit ||
-        roundToThreeDecimals(scoreMargin) >=
-          roundToThreeDecimals(hybridThresholds.directRouteMinMargin);
+        roundToTwoDecimals(scoreMargin) >=
+          roundToTwoDecimals(hybridThresholds.directRouteMinMargin);
       if (
         topHit &&
         topIntent &&
-        roundToThreeDecimals(topHit.score) >=
-          roundToThreeDecimals(hybridThresholds.directRouteMinScore) &&
+        roundToTwoDecimals(topHit.score) >=
+          roundToTwoDecimals(hybridThresholds.directRouteMinScore) &&
         satisfiesMargin
       ) {
         const result = buildQmdIntentResult({
@@ -817,8 +817,8 @@ export function createHookHandlers(deps: HookDeps) {
                     directRouteMinMargin: hybridThresholds.directRouteMinMargin,
                   }),
                   result:
-                    roundToThreeDecimals(topHit.score) <
-                    roundToThreeDecimals(hybridThresholds.directRouteMinScore)
+                    roundToTwoDecimals(topHit.score) <
+                    roundToTwoDecimals(hybridThresholds.directRouteMinScore)
                       ? satisfiesMargin
                         ? "below-score-threshold"
                         : "below-score-and-margin-threshold"

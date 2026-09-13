@@ -100,7 +100,7 @@ describe("projectQmdIntentCandidates", () => {
     ]);
   });
 
-  it("accounts for floating-point inaccuracy by rounding to 3 decimal places", () => {
+  it("accounts for floating-point inaccuracy by rounding to 2 decimal places", () => {
     const result = projectQmdIntentCandidates({
       intents: catalog,
       qmdHits: [
@@ -112,6 +112,25 @@ describe("projectQmdIntentCandidates", () => {
       ],
       histories: [],
       minCandidateScore: 0.4,
+    });
+
+    expect(result.effectiveIntents.map((entry) => entry.id)).toEqual([
+      "version-control",
+    ]);
+  });
+
+  it("uses two-decimal score precision for the candidate floor", () => {
+    const result = projectQmdIntentCandidates({
+      intents: catalog,
+      qmdHits: [
+        {
+          intentId: "version-control",
+          score: 0.401,
+          collection: "intent-examples-and-keywords",
+        },
+      ],
+      histories: [],
+      minCandidateScore: 0.404,
     });
 
     expect(result.effectiveIntents.map((entry) => entry.id)).toEqual([
