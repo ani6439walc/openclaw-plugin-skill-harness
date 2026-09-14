@@ -566,6 +566,7 @@ describe("createSkillQmdIndex", () => {
             {
               body: `---\nskill: travel-planning\nkind: meta\npath: meta.md\n---\nPlan trips`,
               score: 0.4,
+              explain: { vectorScores: [0.41], ftsScores: [0.72] },
             },
           ];
         }
@@ -574,6 +575,7 @@ describe("createSkillQmdIndex", () => {
             {
               body: `---\nskill: code-review\nkind: body\npath: SKILL.md\n---\nCheck diffs carefully.`,
               score: 0.9,
+              explain: { vectorScores: [0.86] },
             },
           ];
         }
@@ -582,6 +584,7 @@ describe("createSkillQmdIndex", () => {
             {
               body: `---\nskill: travel-planning\nkind: reference\npath: references/airports.md\n---\nAirport codes`,
               score: 0.95,
+              explain: { ftsScores: [0.93] },
             },
           ];
         }
@@ -608,6 +611,7 @@ describe("createSkillQmdIndex", () => {
       query: "airport trip planning",
       limit: 5,
       includeEvidence: true,
+      expansionContext: "Recent conversation: airport preferences",
     });
 
     expect(createStore).toHaveBeenCalled();
@@ -618,9 +622,12 @@ describe("createSkillQmdIndex", () => {
         rerank: false,
         includeHyde: false,
         minScore: 0,
+        expansionContext: "Recent conversation: airport preferences",
       }),
     );
-    expect(hits?.[0]?.name).toBe("travel-planning");
+    expect(hits?.[0]).toEqual(
+      expect.objectContaining({ name: "travel-planning", semanticScore: 0.93 }),
+    );
     expect(hits?.[0]?.evidence?.length).toBeGreaterThan(0);
     expect(hits?.some((hit) => hit.name === "code-review")).toBe(true);
 

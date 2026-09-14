@@ -48,6 +48,7 @@ export type SkillQmdEvidence = {
 export type SkillQmdSearchHit = {
   name: string;
   score: number;
+  semanticScore?: number;
   evidence?: SkillQmdEvidence[];
 };
 
@@ -60,6 +61,7 @@ export interface SkillQmdIndex {
     query: string;
     limit: number;
     includeEvidence?: boolean;
+    expansionContext?: string;
   }): Promise<SkillQmdSearchHit[] | undefined>;
   getStatus(agentId: string): SkillQmdIndexStatus;
   close(): Promise<void>;
@@ -479,6 +481,23 @@ function hitId(
   hit: Pick<SearchHit, "skillName" | "collection" | "path">,
 ): string {
   return `${hit.skillName}\u0000${hit.collection}\u0000${hit.path}`;
+}
+function deriveSemanticScore(explain: unknown): number | undefined {
+  if (!explain || typeof explain !== "object") return undefined;
+  let max = Number.NEGATIVE_INFINITY;
+  let found = false;
+  const record = explain as Record<string, unknown>;
+  const sources = [record.vectorScores, record.ftsScores];
+  for (const source of sources) {
+    if (!Array.isArray(source)) continue;
+    for (const value of source) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        if (value > max) max = value;
+        found = true;
+      }
+    }
+  }
+  return found ? max : undefined;
 }
 
 function parseStoreHits(params: {
@@ -1064,7 +1083,7 @@ export function createSkillQmdIndex(params: {
     schedule(agentId, input) {
       scheduleLocked(normalizeAgentId(agentId), input);
     },
-    async search({ agentId, query, limit, includeEvidence }) {
+    async search({ agentId, query, limit, includeEvidence, expansionContext }) {
       await initialization;
       const normalizedAgentId = normalizeAgentId(agentId);
       const agent = agents.get(normalizedAgentId);
@@ -1098,6 +1117,7 @@ export function createSkillQmdIndex(params: {
               rerank: false,
               includeHyde: false,
               minScore: 0,
+              ...(expansionContext === undefined ? {} : { expansionContext }),
             });
             const ranked = parseStoreHits({
               results: results as Array<{
@@ -1134,7 +1154,11 @@ export function createSkillQmdIndex(params: {
         }
         const bestBySkill = new Map<
           string,
-          { score: number; evidence: SkillQmdEvidence[] }
+          {
+            score: number;
+            semanticScore?: number;
+            evidence: SkillQmdEvidence[];
+          }
         >();
         for (const fusedHit of fused) {
           const hit = hitById.get(fusedHit.id);
@@ -1146,15 +1170,26 @@ export function createSkillQmdIndex(params: {
             ...(hit.snippet ? { snippet: hit.snippet } : {}),
             ...(hit.explain === undefined ? {} : { explain: hit.explain }),
           };
+          const evidenceSemanticScore = deriveSemanticScore(hit.explain);
           const existing = bestBySkill.get(hit.skillName);
           if (!existing) {
             bestBySkill.set(hit.skillName, {
               score: fusedHit.score,
+              ...(evidenceSemanticScore === undefined
+                ? {}
+                : { semanticScore: evidenceSemanticScore }),
               evidence: [evidence],
             });
           } else {
             if (fusedHit.score > existing.score)
               existing.score = fusedHit.score;
+            if (
+              evidenceSemanticScore !== undefined &&
+              (existing.semanticScore === undefined ||
+                evidenceSemanticScore > existing.semanticScore)
+            ) {
+              existing.semanticScore = evidenceSemanticScore;
+            }
             existing.evidence.push(evidence);
             existing.evidence.sort((left, right) => right.score - left.score);
             if (existing.evidence.length > MAX_EVIDENCE_PER_SKILL) {
@@ -1166,6 +1201,9 @@ export function createSkillQmdIndex(params: {
           .map(([name, value]) => ({
             name,
             score: value.score,
+            ...(value.semanticScore === undefined
+              ? {}
+              : { semanticScore: value.semanticScore }),
             ...(includeEvidence ? { evidence: value.evidence } : {}),
           }))
           .sort((left, right) => {
