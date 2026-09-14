@@ -7,9 +7,15 @@ import type { PluginHookAgentContext } from "./types.js";
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
-export type PipelinePhase = "pipeline" | IntentTrigger;
+export type PipelinePhase = "pipeline" | "skill-candidate-pool" | IntentTrigger;
 
 export type PipelineState = "started" | "completed" | "failed";
+
+export type SkillCandidatePoolFallbackReason =
+  | "name-channel-unavailable"
+  | "retrieval-timeout"
+  | "retrieval-unavailable"
+  | "empty-pool";
 
 export type PipelineMetadata = {
   basis?: string;
@@ -22,6 +28,12 @@ export type PipelineMetadata = {
   result?: string;
   error?: string;
   durationMs?: number;
+  nameCandidates?: number;
+  retrievalCandidates?: number;
+  poolSize?: number;
+  injectedCount?: number;
+  injectedSkills?: string[];
+  fallbackReason?: SkillCandidatePoolFallbackReason;
 };
 
 function cleanPipelineEventData(

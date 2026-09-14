@@ -1,4 +1,4 @@
-import { roundToTwoDecimals } from "../normalize.js";
+import { roundToThreeDecimals, roundToTwoDecimals } from "../normalize.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
@@ -58,6 +58,8 @@ import { experiencesPath, intentsPath, packageRoot } from "../file-utils.js";
 import type { QmdIntentHit } from "../qmd/intent-index.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
+import { matchAvailableSkillNames } from "../skills/name-index.js";
+import { selectSkillCandidates, type SkillDiscoveryCandidate } from "../skills/candidate-pool.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
@@ -458,6 +460,7 @@ export function createHookHandlers(deps: HookDeps) {
     deps.experienceCatalog ??
     (deps.dataRoot ? new SkillExperienceCatalog(deps.dataRoot) : undefined);
   const qmdIntentIndex = deps.qmdIntentIndex;
+  const qmdSkillIndex = deps.qmdSkillIndex;
 
   const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
     deps.reviewLogWriter ??
@@ -1024,6 +1027,123 @@ export function createHookHandlers(deps: HookDeps) {
     };
   }
 
+  async function discoverInputMatchedSkills(params: {
+    ctx: PluginHookAgentContext;
+    routing: PromptBuildIdentity;
+    refreshedConfig: ResolvedSkillHarnessPluginConfig;
+    latestUserMessage: string;
+    conversation: ReturnType<typeof limitConversationTurns>;
+    intents: readonly IntentCatalogEntry[];
+  }): Promise<AvailableSkill[]> {
+    const policy = params.refreshedConfig.routing.skillCandidates;
+    if (!policy) return [];
+    if (!policy.enabled) return [];
+    const startedAtMs = Date.now();
+    let nameCandidates: SkillDiscoveryCandidate[] = [];
+    let retrievalCandidates: SkillDiscoveryCandidate[] = [];
+    let fallbackReason:
+      | "name-channel-unavailable"
+      | "retrieval-timeout"
+      | "retrieval-unavailable"
+      | "empty-pool"
+      | undefined;
+    try {
+      const visibleSkills = await listAvailableSkills({
+        api,
+        agentId: params.routing.effectiveAgentId,
+        intents: params.intents,
+        bundledSkillsDir,
+        nativeBundledSkillsDir: await nativeBundledSkillsDir,
+        sharedRoots: sharedRoots(),
+        usageStats: {},
+      });
+      if (policy.nameMatch.enabled) {
+        try {
+          nameCandidates = matchAvailableSkillNames({
+            skills: visibleSkills,
+            input: params.latestUserMessage,
+            options: policy.nameMatch,
+          });
+        } catch (error) {
+          fallbackReason = "name-channel-unavailable";
+          logger.warn("skill name candidate matching failed", { error });
+        }
+      }
+      if (policy.search.enabled && qmdSkillIndex) {
+        const expansionContext = formatConversationExpansionContext({
+          conversation: params.conversation,
+        });
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          const search = qmdSkillIndex.search({
+            agentId: params.routing.effectiveAgentId,
+            query: params.latestUserMessage,
+            limit: policy.maxPoolSize,
+            includeEvidence: false,
+            ...(expansionContext ? { expansionContext } : {}),
+          });
+          const timeout = new Promise<"timeout">((resolve) => {
+            timer = setTimeout(() => resolve("timeout"), policy.search.timeoutMs) as unknown as NodeJS.Timeout;
+          });
+          const outcome = await Promise.race([
+            search.then((hits) => ({ hits })),
+            timeout,
+          ]);
+          if (outcome === "timeout") {
+            fallbackReason = "retrieval-timeout";
+          } else if (outcome.hits === undefined) {
+            fallbackReason = "retrieval-unavailable";
+          } else {
+            retrievalCandidates = outcome.hits.flatMap((hit) =>
+              hit.semanticScore !== undefined &&
+              roundToThreeDecimals(hit.semanticScore) >=
+                roundToThreeDecimals(policy.search.minCandidateScore)
+                ? [{ skillName: hit.name, score: hit.semanticScore, source: "direct-retrieval" as const }]
+                : [],
+            );
+          }
+        } catch (error) {
+          fallbackReason = "retrieval-unavailable";
+          logger.warn("skill candidate retrieval failed", { error });
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+      } else if (policy.search.enabled) {
+        fallbackReason = "retrieval-unavailable";
+      }
+      const selection = selectSkillCandidates({
+        visibleSkills,
+        candidates: [...nameCandidates, ...retrievalCandidates],
+        options: policy,
+      });
+      if (selection.selectedSkills.length === 0 && !fallbackReason) {
+        fallbackReason = "empty-pool";
+      }
+      emitPipelineEvent(params.ctx, params.routing.resolvedSessionKey, "skill-candidate-pool", "completed", {
+        nameCandidates: nameCandidates.length,
+        retrievalCandidates: retrievalCandidates.length,
+        poolSize: selection.pool.length,
+        injectedCount: selection.selectedSkills.length,
+        injectedSkills: selection.selectedSkills.map((skill) => skill.name),
+        ...(fallbackReason ? { fallbackReason } : {}),
+        durationMs: Math.max(0, Date.now() - startedAtMs),
+      });
+      return [...selection.selectedSkills];
+    } catch (error) {
+      logger.warn("skill candidate discovery failed", { error });
+      emitPipelineEvent(params.ctx, params.routing.resolvedSessionKey, "skill-candidate-pool", "failed", {
+        nameCandidates: nameCandidates.length,
+        retrievalCandidates: retrievalCandidates.length,
+        poolSize: 0,
+        injectedCount: 0,
+        injectedSkills: [],
+        fallbackReason: fallbackReason ?? "empty-pool",
+        durationMs: Math.max(0, Date.now() - startedAtMs),
+      });
+      return [];
+    }
+  }
+
   async function resolveWorkingSetSkillsXml(
     agentId: string,
   ): Promise<string | undefined> {
@@ -1170,6 +1290,14 @@ export function createHookHandlers(deps: HookDeps) {
       result,
       intent,
     });
+    const inputMatchedSkills = await discoverInputMatchedSkills({
+      ctx: params.ctx,
+      routing: params.routing,
+      refreshedConfig: params.refreshedConfig,
+      latestUserMessage: params.latestUserMessage,
+      conversation: params.conversation,
+      intents: params.availableIntents,
+    });
     await recordPromptBuildResult({
       ctx: params.ctx,
       routing: params.routing,
@@ -1188,6 +1316,7 @@ export function createHookHandlers(deps: HookDeps) {
         guidance: intent.definition.guidance,
         intentMatchedSkills: routingContext.intentMatchedSkills,
         experiences: routingContext.experiences,
+        inputMatchedSkills,
       }),
       params.workingSetSkillsXml,
     );
