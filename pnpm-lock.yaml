@@ -15,8 +15,8 @@ importers:
         specifier: 4.0.3
         version: 4.0.3
       openclaw:
-        specifier: 2026.9.3
-        version: 2026.9.3
+        specifier: 2026.9.4
+        version: 2026.9.4
       typebox:
         specifier: 1.3.18
         version: 1.3.18
@@ -478,8 +478,8 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@openclaw/ai@2026.9.3':
-    resolution: {integrity: sha512-nJLVeQwmmu2RHihHl1j0OYtSzFC8SZIYol6cf1g9PDI/y5eTm0m2muWoGCFtRitftwx+vuWN6LkKZfjWViCU4w==}
+  '@openclaw/ai@2026.9.4':
+    resolution: {integrity: sha512-OglePy7EiejsiMy2cqq4lGHijdt3RP29Phi90CdispR/h/k85hpYgC8/8kFPUgkxgy7i65gYELzrhai03D37pg==}
     engines: {node: '>=22.19.0'}
 
   '@openclaw/fs-safe-darwin-arm64@0.8.5':
@@ -532,8 +532,8 @@ packages:
     resolution: {integrity: sha512-MAuWVgZ+DZhakzfrbyn2NOKsZop3ES2ITeVCoAaDNb/NIxF45hAzYDXmp2G8W10CE/HGasL97QMC0+iBZNzHUQ==}
     engines: {node: '>=22'}
 
-  '@openclaw/proxyline@0.3.11':
-    resolution: {integrity: sha512-XDlrrQE0fapfTpqCBK9WB+U4W+/0lsrRIXI2nZ74W/lWMF+X4T5t2dfj8Ms250Th4qjnNi6WuSX5OZJqyLoZ3g==}
+  '@openclaw/proxyline@0.3.12':
+    resolution: {integrity: sha512-KPUvtLgORF0NWxiuUPwHBuxYhUsFgxnOm8+XkDR0on236lnfMF44A5BnOvBkeDV8wrBaGHs/rQ8kt1tB4WNhmw==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
       undici: '>=8.5.0 <9'
@@ -1910,8 +1910,8 @@ packages:
       zod:
         optional: true
 
-  openclaw@2026.9.3:
-    resolution: {integrity: sha512-CzDHMeHdnjlIZ76ZyBb1lvLO4H/yBIMYXupFGGBN87x0853y3hg5nLAnKfxSKqLzqhbUKqy9ebDRAWWV4t8aew==}
+  openclaw@2026.9.4:
+    resolution: {integrity: sha512-lTQpEEe1Xm3u2PCHaPEr+vP8paGk1vLdHuzdItsNToaLI6hAqRVvgJYg+GxukJhETJp4tPy/S1Gftl4KuB8n7A==}
     engines: {node: '>=24.16.0 <25 || >=26.1.0'}
     hasBin: true
 
@@ -2997,7 +2997,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
-  '@openclaw/ai@2026.9.3(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(undici@8.10.2)(ws@8.21.3)(zod@4.4.3)':
+  '@openclaw/ai@2026.9.4(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(undici@8.10.2)(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@anthropic-ai/sdk': 0.120.0(zod@4.4.3)
       '@google/genai': 2.19.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))
@@ -3053,7 +3053,7 @@ snapshots:
       '@openclaw/fs-safe-win32-x64-msvc': 0.8.5
       jszip: 3.10.1
 
-  '@openclaw/proxyline@0.3.11(undici@8.10.2)':
+  '@openclaw/proxyline@0.3.12(undici@8.10.2)':
     dependencies:
       undici: 8.10.2
 
@@ -3646,7 +3646,7 @@ snapshots:
       is-plain-obj: 4.1.0
       is-stream: 4.0.1
       npm-run-path: 6.0.0
-      pretty-ms: 9.3.0
+      pretty-ms: 9.3.1
       signal-exit: 4.1.0
       strip-final-newline: 4.0.0
       which-command: 0.1.0
@@ -3726,9 +3726,9 @@ snapshots:
     dependencies:
       reusify: 1.1.0
 
-  fdir@6.5.0(picomatch@4.0.5):
+  fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
-      picomatch: 4.0.5
+      picomatch: 4.0.7
 
   fetch-blob@3.2.0:
     dependencies:
@@ -4305,7 +4305,7 @@ snapshots:
       ws: 8.21.3
       zod: 4.4.3
 
-  openclaw@2026.9.3:
+  openclaw@2026.9.4:
     dependencies:
       '@agentclientprotocol/sdk': 1.4.0(zod@4.4.3)
       '@anthropic-ai/sdk': 0.120.0(zod@4.4.3)
@@ -4320,9 +4320,9 @@ snapshots:
       '@mistralai/mistralai': 2.6.4
       '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
       '@mozilla/readability': 0.6.0
-      '@openclaw/ai': 2026.9.3(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(undici@8.10.2)(ws@8.21.3)(zod@4.4.3)
+      '@openclaw/ai': 2026.9.4(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(undici@8.10.2)(ws@8.21.3)(zod@4.4.3)
       '@openclaw/fs-safe': 0.8.5
-      '@openclaw/proxyline': 0.3.11(undici@8.10.2)
+      '@openclaw/proxyline': 0.3.12(undici@8.10.2)
       '@silvia-odwyer/photon-node': 0.3.4
       '@trycua/cua-driver': 0.22.2
       acorn: 8.18.0
@@ -4819,8 +4819,8 @@ snapshots:
 
   tinyglobby@0.2.17:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.5)
-      picomatch: 4.0.5
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
 
   to-regex-range@5.0.1:
     dependencies:
@@ -4908,7 +4908,7 @@ snapshots:
   vite@8.0.16(@types/node@25.9.2)(jiti@2.7.0)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.32.0
-      picomatch: 4.0.5
+      picomatch: 4.0.7
       postcss: 8.5.15
       rolldown: 1.0.3
       tinyglobby: 0.2.17

@@ -2,7 +2,7 @@
   "name": "skill-harness",
   "displayName": "Skill Harness",
   "description": "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
-  "version": "2026.9.1",
+  "version": "2026.9.4",
   "packageManager": "pnpm@11.22.0",
   "type": "module",
   "license": "MIT",
@@ -58,7 +58,7 @@
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "openclaw": "2026.9.3"
+    "openclaw": "2026.9.4"
   },
   "devDependencies": {
     "typescript": "6.0.3",
