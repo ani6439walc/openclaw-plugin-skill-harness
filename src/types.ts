@@ -48,6 +48,27 @@ export type ResolvedClassifierConfig = {
   queryMode: "message" | "recent" | "full";
   contextWindow: ContextWindow;
 };
+export type ResolvedSkillCandidateSearchConfig = {
+  enabled: boolean;
+  minCandidateScore: number;
+  timeoutMs: number;
+};
+
+export type ResolvedSkillCandidateNameMatchConfig = {
+  enabled: boolean;
+  maxEditDistance: number;
+  minJaccardScore: number;
+  genericTokens: string[];
+};
+
+export type ResolvedSkillCandidatesConfig = {
+  enabled: boolean;
+  search: ResolvedSkillCandidateSearchConfig;
+  nameMatch: ResolvedSkillCandidateNameMatchConfig;
+  maxPoolSize: number;
+  maxInjectedSkills: number;
+  minInjectionScore: number;
+};
 
 export type ResolvedRoutingConfig = {
   thresholds: {
@@ -61,6 +82,7 @@ export type ResolvedRoutingConfig = {
     };
   };
   classifier: ResolvedClassifierConfig;
+  skillCandidates: ResolvedSkillCandidatesConfig;
 };
 
 export type ResolvedSkillSearchConfig = {
