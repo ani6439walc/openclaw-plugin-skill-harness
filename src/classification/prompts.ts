@@ -245,15 +245,39 @@ function formatIntentMatchedSkillExperiences(
   return bySkill;
 }
 
+const ROUTING_ADVISORY_INTENT_AND_INPUT_HEADER =
+  "Inferred intent and input-matched skills (advisory, non-user input; load with `skill_view` if relevant):";
+const ROUTING_ADVISORY_ALL_HEADER =
+  "Inferred intent, intent-matched skills, and input-matched skills (advisory, non-user input; load with `skill_view` if relevant):";
+
+export function formatInputMatchedSkills(
+  skills: readonly AvailableSkill[],
+): string {
+  if (skills.length === 0) return "";
+  return formatSkillXmlBlock("input_matched_skills", [...skills], "");
+}
+
+function selectAdvisoryHeader(
+  hasIntentMatched: boolean,
+  hasInputMatched: boolean,
+): string {
+  if (hasIntentMatched && hasInputMatched) return ROUTING_ADVISORY_ALL_HEADER;
+  if (hasIntentMatched) return ROUTING_ADVISORY_HEADER;
+  if (hasInputMatched) return ROUTING_ADVISORY_INTENT_AND_INPUT_HEADER;
+  return ROUTING_ADVISORY_INTENT_ONLY_HEADER;
+}
+
 export function buildRoutingContext(params: {
   result: IntentionResult;
   guidance: string;
   intentMatchedSkills: readonly AvailableSkill[];
   experiences: readonly SkillExperienceEntry[];
+  inputMatchedSkills?: readonly AvailableSkill[];
 }): string {
   const experiencesBySkill = formatIntentMatchedSkillExperiences(
     params.experiences,
   );
+  const inputMatched = params.inputMatchedSkills ?? [];
   const blocks = [
     xmlBlock(
       "intent",
@@ -268,13 +292,14 @@ export function buildRoutingContext(params: {
           experiencesBySkill,
         )}`
       : undefined,
+    inputMatched.length > 0 ? formatInputMatchedSkills(inputMatched) : undefined,
   ].filter((block): block is string => Boolean(block));
 
   const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
-  const header =
-    params.intentMatchedSkills.length > 0
-      ? ROUTING_ADVISORY_HEADER
-      : ROUTING_ADVISORY_INTENT_ONLY_HEADER;
+  const header = selectAdvisoryHeader(
+    params.intentMatchedSkills.length > 0,
+    inputMatched.length > 0,
+  );
   return `${header}\n${taggedContent}`;
 }
 
