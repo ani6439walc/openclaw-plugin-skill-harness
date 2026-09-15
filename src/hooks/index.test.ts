@@ -2664,10 +2664,12 @@ describe("createHookHandlers topic switch flow", () => {
               : hits;
           },
         ),
-      searchIntentExamplesAndKeywords: vi.fn().mockImplementation(
-        async ({ includeRawResults }: { includeRawResults?: boolean }) =>
-          includeRawResults ? { hits: [], rawResults: [] } : [],
-      ),
+      searchIntentExamplesAndKeywords: vi
+        .fn()
+        .mockImplementation(
+          async ({ includeRawResults }: { includeRawResults?: boolean }) =>
+            includeRawResults ? { hits: [], rawResults: [] } : [],
+        ),
     };
     const qmdIntentIndex = params.qmdIntentIndex ?? defaultQmdIntentIndex;
     const handlers = createHookHandlers({
@@ -2818,23 +2820,27 @@ describe("createHookHandlers topic switch flow", () => {
         ...(hit.explain === undefined ? {} : { explain: hit.explain }),
       }));
     return {
-      searchKeywords: vi.fn().mockImplementation(
-        async ({ includeRawResults }: { includeRawResults?: boolean }) =>
-          params.keywordSearchUnavailable
-            ? undefined
-            : includeRawResults
-              ? { hits: keywordHits, rawResults: rawResults(keywordHits) }
-              : keywordHits,
-      ),
+      searchKeywords: vi
+        .fn()
+        .mockImplementation(
+          async ({ includeRawResults }: { includeRawResults?: boolean }) =>
+            params.keywordSearchUnavailable
+              ? undefined
+              : includeRawResults
+                ? { hits: keywordHits, rawResults: rawResults(keywordHits) }
+                : keywordHits,
+        ),
       searchTopicKeywords: vi.fn().mockResolvedValue(params.topicHits ?? []),
-      searchIntentExamplesAndKeywords: vi.fn().mockImplementation(
-        async ({ includeRawResults }: { includeRawResults?: boolean }) => {
-          const hybridHits = params.hybridHits ?? [];
-          return includeRawResults
-            ? { hits: hybridHits, rawResults: rawResults(hybridHits) }
-            : hybridHits;
-        },
-      ),
+      searchIntentExamplesAndKeywords: vi
+        .fn()
+        .mockImplementation(
+          async ({ includeRawResults }: { includeRawResults?: boolean }) => {
+            const hybridHits = params.hybridHits ?? [];
+            return includeRawResults
+              ? { hits: hybridHits, rawResults: rawResults(hybridHits) }
+              : hybridHits;
+          },
+        ),
     };
   }
 
@@ -3598,7 +3604,9 @@ describe("createHookHandlers topic switch flow", () => {
           state: "completed",
           searchEvidence: expect.objectContaining({
             hits: [hybridHit],
-            rawResults: [expect.objectContaining({ explain: hybridHit.explain })],
+            rawResults: [
+              expect.objectContaining({ explain: hybridHit.explain }),
+            ],
           }),
         }),
       }),

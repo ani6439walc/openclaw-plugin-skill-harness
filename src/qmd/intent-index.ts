@@ -65,12 +65,20 @@ export interface IntentQmdIndex {
     rawLimit: number;
     expansionContext?: string;
     includeRawResults?: T;
-  }): Promise<T extends true ? QmdIntentSearchEvidence | undefined : QmdIntentHit[] | undefined>;
+  }): Promise<
+    T extends true
+      ? QmdIntentSearchEvidence | undefined
+      : QmdIntentHit[] | undefined
+  >;
   searchKeywords<T extends boolean = false>(params: {
     query: string;
     limit?: number;
     includeRawResults?: T;
-  }): Promise<T extends true ? QmdIntentSearchEvidence | undefined : QmdIntentHit[] | undefined>;
+  }): Promise<
+    T extends true
+      ? QmdIntentSearchEvidence | undefined
+      : QmdIntentHit[] | undefined
+  >;
   getStatus(): QmdIntentIndexStatus;
   close(): Promise<void>;
 }
@@ -648,9 +656,9 @@ export function createIntentQmdIndex(params: {
           explain: true,
         })) as unknown as QmdRawSearchResult[];
         const hits = parseHits(results, "intent-examples-and-keywords");
-        return (includeRawResults ? { hits, rawResults: results } : hits) as T extends true
-          ? QmdIntentSearchEvidence
-          : QmdIntentHit[];
+        return (
+          includeRawResults ? { hits, rawResults: results } : hits
+        ) as T extends true ? QmdIntentSearchEvidence : QmdIntentHit[];
       } catch (error) {
         logger.warn("QMD intent example/keyword search failed", { error });
         return;
@@ -678,9 +686,9 @@ export function createIntentQmdIndex(params: {
           limit,
         })) as QmdLexResult[];
         const hits = parseLexHits(results, KEYWORDS_COLLECTION);
-        return (includeRawResults ? { hits, rawResults: results } : hits) as T extends true
-          ? QmdIntentSearchEvidence
-          : QmdIntentHit[];
+        return (
+          includeRawResults ? { hits, rawResults: results } : hits
+        ) as T extends true ? QmdIntentSearchEvidence : QmdIntentHit[];
       } catch (error) {
         return;
       }

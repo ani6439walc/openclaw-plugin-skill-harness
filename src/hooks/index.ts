@@ -791,12 +791,14 @@ export function createHookHandlers(deps: HookDeps) {
       const expansionContext = formatConversationExpansionContext({
         conversation: params.conversation,
       });
-      const hybridSearch = await qmdIntentIndex.searchIntentExamplesAndKeywords({
-        query: params.latestUserMessage,
-        rawLimit: limits.rawLimit,
-        ...(expansionContext ? { expansionContext } : {}),
-        includeRawResults: true,
-      });
+      const hybridSearch = await qmdIntentIndex.searchIntentExamplesAndKeywords(
+        {
+          query: params.latestUserMessage,
+          rawLimit: limits.rawLimit,
+          ...(expansionContext ? { expansionContext } : {}),
+          includeRawResults: true,
+        },
+      );
       qmdHits = hybridSearch?.hits;
       hybridRawResults = hybridSearch?.rawResults;
       topHit = qmdHits?.[0];
@@ -1387,7 +1389,8 @@ export function createHookHandlers(deps: HookDeps) {
     classification: PromptBuildClassification;
     workingSetSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
-    const { trigger, result, intentProjection, routingEvidence } = params.classification;
+    const { trigger, result, intentProjection, routingEvidence } =
+      params.classification;
     logger.debug("intention result", {
       trigger,
       intentResolved: Boolean(result.intent),

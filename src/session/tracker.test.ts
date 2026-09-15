@@ -207,7 +207,8 @@ describe("SessionTracker", () => {
                   ],
                   rawResults: [
                     {
-                      filepath: "/snapshot/intent-keywords/version-control-0.md",
+                      filepath:
+                        "/snapshot/intent-keywords/version-control-0.md",
                       score: 0.79,
                     },
                   ],
@@ -234,7 +235,8 @@ describe("SessionTracker", () => {
                   outcome: "below-threshold",
                   directRouteMinScore: 0.9,
                   directRouteMinMargin: 0.08,
-                  expansionContext: "Recent conversation: [user] please commit this",
+                  expansionContext:
+                    "Recent conversation: [user] please commit this",
                 },
               },
             },
