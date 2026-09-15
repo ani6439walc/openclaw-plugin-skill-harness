@@ -32,6 +32,22 @@ describe("selectSkillCandidates", () => {
     ]);
   });
 
+  it("sorts canonical identity ties without re-normalizing candidate names", () => {
+    const result = selectSkillCandidates({
+      visibleSkills: skills,
+      candidates: [
+        { skillName: "BETA", score: 0.6, source: "name-match" },
+        { skillName: "ALPHA", score: 0.6, source: "name-match" },
+      ],
+      options: { maxPoolSize: 12, maxInjectedSkills: 4, minInjectionScore: 0 },
+    });
+
+    expect(result.pool.map((candidate) => candidate.skillName)).toEqual([
+      "alpha",
+      "beta",
+    ]);
+  });
+
   it("applies pool and injection limits with the injection threshold", () => {
     const result = selectSkillCandidates({
       visibleSkills: skills,

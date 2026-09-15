@@ -8,7 +8,7 @@ import {
   DEFAULT_RECENT_USER_CHARS,
   DEFAULT_RECENT_ASSISTANT_CHARS,
 } from "./constants.js";
-import { roundToTwoDecimals } from "./normalize.js";
+import { roundToDecimals } from "./normalize.js";
 import type {
   ContextWindow,
   ResolvedClassifierConfig,
@@ -261,8 +261,8 @@ const HybridThresholdsSchema = z
   .default(DEFAULT_ROUTING.thresholds.hybrid)
   .superRefine((hybrid, context) => {
     if (
-      roundToTwoDecimals(hybrid.minCandidateScore) >
-      roundToTwoDecimals(hybrid.directRouteMinScore)
+      roundToDecimals(hybrid.minCandidateScore, 2) >
+      roundToDecimals(hybrid.directRouteMinScore, 2)
     ) {
       context.addIssue({
         code: "custom",

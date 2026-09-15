@@ -2546,6 +2546,7 @@ describe("createHookHandlers topic switch flow", () => {
       searchIntentExamplesAndKeywords: ReturnType<typeof vi.fn>;
       searchTopicKeywords: ReturnType<typeof vi.fn>;
     };
+    qmdSkillIndex?: { search: ReturnType<typeof vi.fn> };
     turnAssociations?: TurnAssociationRegistry;
     ensureColdStart?: ReturnType<typeof vi.fn>;
     commitPromptRecommendation?: ReturnType<typeof vi.fn>;
@@ -2671,6 +2672,7 @@ describe("createHookHandlers topic switch flow", () => {
       getWorkingSetSkills: params.getWorkingSetSkills,
       experienceCatalog: params.experienceCatalog,
       qmdIntentIndex: qmdIntentIndex as never,
+      qmdSkillIndex: params.qmdSkillIndex as never,
     });
 
     return {
@@ -4436,6 +4438,49 @@ describe("createHookHandlers topic switch flow", () => {
     expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe(
       "pipeline:completed",
     );
+  });
+
+  it("continues prompt construction after a timed-out skill search rejects", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-skill-search-timeout-"),
+    );
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    writeSkill(path.join(workspace, "skills"), "review", "Review code.");
+    const search = vi.fn(
+      () =>
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("late failure")), 150),
+        ),
+    );
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: {
+        routing: {
+          skillCandidates: {
+            nameMatch: { enabled: false },
+            search: { timeoutMs: 100 },
+          },
+        },
+      },
+      qmdSkillIndex: { search },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => state },
+          agent: { resolveAgentWorkspaceDir: () => workspace },
+        },
+      } as unknown as Partial<OpenClawPluginApi>,
+    });
+
+    try {
+      const result = await handlers.onBeforePromptBuild(event, ctx);
+      await new Promise((resolve) => setTimeout(resolve, 175));
+
+      expect(result?.prependContext).toContain('<intent name="social-casual">');
+      expect(search).toHaveBeenCalledOnce();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("includes declared intent-matched skills in routing context", async () => {

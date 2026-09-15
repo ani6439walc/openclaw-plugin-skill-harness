@@ -47,15 +47,13 @@ export function selectSkillCandidates(params: {
       });
     }
   }
-  const pool = [...deduped.values()]
+  const pool = [...deduped.entries()]
     .sort(
-      (left, right) =>
+      ([leftIdentity, left], [rightIdentity, right]) =>
         right.score - left.score ||
-        canonicalIdentity(left.skillName).localeCompare(
-          canonicalIdentity(right.skillName),
-          "en",
-        ),
+        leftIdentity.localeCompare(rightIdentity, "en"),
     )
+    .map(([, candidate]) => candidate)
     .slice(0, params.options.maxPoolSize);
   const selectedSkills = pool
     .filter((candidate) => candidate.score >= params.options.minInjectionScore)

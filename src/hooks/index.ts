@@ -1,4 +1,4 @@
-import { roundToTwoDecimals } from "../normalize.js";
+import { roundToDecimals } from "../normalize.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
@@ -343,8 +343,8 @@ export function buildKeywordRouteReason(params: {
     : [];
   const matchedDisplay =
     matchedKeywords.length > 0 ? matchedKeywords.join(", ") : "none";
-  const score = roundToTwoDecimals(params.hit.score);
-  const threshold = roundToTwoDecimals(params.directRouteMinScore);
+  const score = roundToDecimals(params.hit.score, 2);
+  const threshold = roundToDecimals(params.directRouteMinScore, 2);
   return `matched: ${matchedDisplay}; confidence: ${score}/${threshold}`;
 }
 
@@ -393,10 +393,10 @@ export function buildQmdRouteReason(params: {
   directRouteMinMargin: number;
 }): string {
   const signals = extractHybridSignals(params.hit.explain);
-  const threshold = roundToTwoDecimals(params.directRouteMinScore);
-  const margin = roundToTwoDecimals(params.scoreMargin);
-  const minimumMargin = roundToTwoDecimals(params.directRouteMinMargin);
-  const score = roundToTwoDecimals(params.hit.score);
+  const threshold = roundToDecimals(params.directRouteMinScore, 2);
+  const margin = roundToDecimals(params.scoreMargin, 2);
+  const minimumMargin = roundToDecimals(params.directRouteMinMargin, 2);
+  const score = roundToDecimals(params.hit.score, 2);
   return `signals: ${signals}; confidence: ${score}/${threshold}; margin: ${margin}/${minimumMargin}`;
 }
 
@@ -680,8 +680,8 @@ export function createHookHandlers(deps: HookDeps) {
       if (
         topKeywordHit &&
         matchedKeywordIntent &&
-        roundToTwoDecimals(topKeywordHit.score) >=
-          roundToTwoDecimals(keywordMinScore)
+        roundToDecimals(topKeywordHit.score, 2) >=
+          roundToDecimals(keywordMinScore, 2)
       ) {
         const result = buildKeywordIntentResult({
           hit: topKeywordHit,
@@ -767,13 +767,13 @@ export function createHookHandlers(deps: HookDeps) {
           : (topHit?.score ?? 0);
       const satisfiesMargin =
         !secondHit ||
-        roundToTwoDecimals(scoreMargin) >=
-          roundToTwoDecimals(hybridThresholds.directRouteMinMargin);
+        roundToDecimals(scoreMargin, 2) >=
+          roundToDecimals(hybridThresholds.directRouteMinMargin, 2);
       if (
         topHit &&
         topIntent &&
-        roundToTwoDecimals(topHit.score) >=
-          roundToTwoDecimals(hybridThresholds.directRouteMinScore) &&
+        roundToDecimals(topHit.score, 2) >=
+          roundToDecimals(hybridThresholds.directRouteMinScore, 2) &&
         satisfiesMargin
       ) {
         const result = buildQmdIntentResult({
@@ -823,8 +823,8 @@ export function createHookHandlers(deps: HookDeps) {
                     directRouteMinMargin: hybridThresholds.directRouteMinMargin,
                   }),
                   result:
-                    roundToTwoDecimals(topHit.score) <
-                    roundToTwoDecimals(hybridThresholds.directRouteMinScore)
+                    roundToDecimals(topHit.score, 2) <
+                    roundToDecimals(hybridThresholds.directRouteMinScore, 2)
                       ? satisfiesMargin
                         ? "below-score-threshold"
                         : "below-score-and-margin-threshold"
@@ -1060,6 +1060,19 @@ export function createHookHandlers(deps: HookDeps) {
         sharedRoots: sharedRoots(),
         usageStats: {},
       });
+      const expansionContext = formatConversationExpansionContext({
+        conversation: params.conversation,
+      });
+      const search =
+        policy.search.enabled && qmdSkillIndex
+          ? qmdSkillIndex.search({
+              agentId: params.routing.effectiveAgentId,
+              query: params.latestUserMessage,
+              limit: policy.maxPoolSize,
+              includeEvidence: false,
+              ...(expansionContext ? { expansionContext } : {}),
+            })
+          : undefined;
       if (policy.nameMatch.enabled) {
         try {
           nameCandidates = matchAvailableSkillNames({
@@ -1072,19 +1085,9 @@ export function createHookHandlers(deps: HookDeps) {
           logger.warn("skill name candidate matching failed", { error });
         }
       }
-      if (policy.search.enabled && qmdSkillIndex) {
-        const expansionContext = formatConversationExpansionContext({
-          conversation: params.conversation,
-        });
+      if (search) {
         let timer: NodeJS.Timeout | undefined;
         try {
-          const search = qmdSkillIndex.search({
-            agentId: params.routing.effectiveAgentId,
-            query: params.latestUserMessage,
-            limit: policy.maxPoolSize,
-            includeEvidence: false,
-            ...(expansionContext ? { expansionContext } : {}),
-          });
           const timeout = new Promise<"timeout">((resolve) => {
             timer = setTimeout(
               () => resolve("timeout"),
@@ -1092,18 +1095,20 @@ export function createHookHandlers(deps: HookDeps) {
             ) as unknown as NodeJS.Timeout;
           });
           const outcome = await Promise.race([
-            search.then((hits) => ({ hits })),
+            search.then((hits) => ({ hits })).catch((error) => ({ error })),
             timeout,
           ]);
           if (outcome === "timeout") {
             fallbackReason = "retrieval-timeout";
+          } else if ("error" in outcome) {
+            throw outcome.error;
           } else if (outcome.hits === undefined) {
             fallbackReason = "retrieval-unavailable";
           } else {
             retrievalCandidates = outcome.hits.flatMap((hit) =>
               hit.semanticScore !== undefined &&
-              roundToTwoDecimals(hit.semanticScore) >=
-                roundToTwoDecimals(policy.search.minCandidateScore)
+              roundToDecimals(hit.semanticScore, 2) >=
+                roundToDecimals(policy.search.minCandidateScore, 2)
                 ? [
                     {
                       skillName: hit.name,

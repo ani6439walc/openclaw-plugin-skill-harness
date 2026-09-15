@@ -16,12 +16,28 @@ describe("skill name matching", () => {
     expect(extractEnglishSegments("幫我 code 的 review")).toBe("code review");
   });
 
-  it("normalizes stop words on names and input", () => {
+  it("normalizes stop words while retaining short technical tokens", () => {
     expect(tokenizeNameText("code-review-and-quality")).toEqual([
       "code",
       "review",
       "quality",
     ]);
+    expect(tokenizeNameText("js-ui-s3-and-db")).toEqual([
+      "js",
+      "ui",
+      "s3",
+      "db",
+    ]);
+  });
+
+  it("matches skills made only of short technical tokens", () => {
+    expect(
+      matchAvailableSkillNames({
+        skills: [{ name: "js-ui", description: "JavaScript UI", location: "" }],
+        input: "js ui",
+        options,
+      }),
+    ).toEqual([expect.objectContaining({ skillName: "js-ui", score: 1 })]);
   });
 
   it("matches token typos using classic Levenshtein", () => {

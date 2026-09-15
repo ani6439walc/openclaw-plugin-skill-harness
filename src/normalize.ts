@@ -38,10 +38,3 @@ export function roundToDecimals(value: number, decimals: number = 2): number {
   const factor = 10 ** decimals;
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
-
-/**
- * Round a numeric score or confidence to 2 decimal places.
- */
-export function roundToTwoDecimals(value: number): number {
-  return roundToDecimals(value, 2);
-}

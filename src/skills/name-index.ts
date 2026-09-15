@@ -1,4 +1,4 @@
-import { canonicalIdentity } from "../normalize.js";
+import { canonicalIdentity, roundToDecimals } from "../normalize.js";
 import type { AvailableSkill } from "./types.js";
 
 const STOP_WORDS = new Set([
@@ -63,7 +63,7 @@ export function tokenizeNameText(text: string): string[] {
   return text
     .split(/[\s_-]+/u)
     .map((token) => token.trim().toLowerCase())
-    .filter((token) => Array.from(token).length >= 3 && !STOP_WORDS.has(token))
+    .filter((token) => !STOP_WORDS.has(token))
     .filter((token) => !seen.has(token) && (seen.add(token), true));
 }
 
@@ -78,8 +78,9 @@ function boundedLevenshtein(
 ): number | undefined {
   if (Math.abs(left.length - right.length) > limit) return;
   let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  let current = Array<number>(right.length + 1);
   for (let row = 1; row <= left.length; row += 1) {
-    const current = [row];
+    current[0] = row;
     let minimum = row;
     for (let column = 1; column <= right.length; column += 1) {
       const value = Math.min(
@@ -87,11 +88,11 @@ function boundedLevenshtein(
         current[column - 1]! + 1,
         previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1),
       );
-      current.push(value);
+      current[column] = value;
       minimum = Math.min(minimum, value);
     }
     if (minimum > limit) return;
-    previous = current;
+    [previous, current] = [current, previous];
   }
   return previous[right.length]! <= limit ? previous[right.length] : undefined;
 }
@@ -114,9 +115,7 @@ export function matchSkillNames(params: {
   if (!inputTokens.length) return [];
   if (
     inputTokens.length === 1 &&
-    new Set(
-      params.options.genericTokens.map((token) => token.trim().toLowerCase()),
-    ).has(inputTokens[0]!)
+    params.options.genericTokens.includes(inputTokens[0]!)
   )
     return [];
 
@@ -146,8 +145,8 @@ export function matchSkillNames(params: {
     }
     const score =
       matched.size / (inputTokens.length + tokens.length - matched.size);
-    const rounded = Math.round(score * 1_000) / 1_000;
-    return rounded >= Math.round(params.options.minJaccardScore * 1_000) / 1_000
+    const rounded = roundToDecimals(score, 3);
+    return rounded >= roundToDecimals(params.options.minJaccardScore, 3)
       ? [{ skillName: skill.name, score, source: "name-match" as const }]
       : [];
   });
