@@ -61,6 +61,25 @@ describe("skill name matching", () => {
     ).toEqual([]);
   });
 
+  it("requires exact matches for short technical tokens", () => {
+    expect(
+      matchAvailableSkillNames({
+        skills: [{ name: "db", description: "Database", location: "" }],
+        input: "ui",
+        options,
+      }),
+    ).toEqual([]);
+    expect(
+      matchAvailableSkillNames({
+        skills: [
+          { name: "typescript", description: "TypeScript", location: "" },
+        ],
+        input: "typescrpt",
+        options,
+      }),
+    ).toEqual([expect.objectContaining({ skillName: "typescript" })]);
+  });
+
   it("matches skills made only of short technical tokens", () => {
     expect(
       matchAvailableSkillNames({

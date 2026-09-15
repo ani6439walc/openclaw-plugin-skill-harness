@@ -130,11 +130,13 @@ export function matchSkillNames(params: {
         continue;
       }
       const options = [...available].flatMap((nameToken) => {
-        const distance = boundedLevenshtein(
-          letters(inputToken),
-          letters(nameToken),
+        const input = letters(inputToken);
+        const name = letters(nameToken);
+        const limit = Math.min(
+          Math.max(Math.min(input.length, name.length) - 2, 0),
           params.options.maxEditDistance,
         );
+        const distance = boundedLevenshtein(input, name, limit);
         return distance === undefined ? [] : [{ nameToken, distance }];
       });
       const minimum = Math.min(...options.map((option) => option.distance));
