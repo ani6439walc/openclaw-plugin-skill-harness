@@ -70,7 +70,10 @@ function resolveFirstModelRef(
   for (const ref of refs) {
     if (!ref) continue;
     try {
-      const parsed = parseModelRef(ref, DEFAULT_PROVIDER);
+      const parsed = parseModelRef(ref, DEFAULT_PROVIDER, {
+        allowManifestNormalization: false,
+        allowPluginNormalization: false,
+      });
       if (parsed) return { provider: parsed.provider, model: parsed.model };
     } catch (err) {
       logger.debug("skipping invalid model ref", { error: err, modelRef: ref });
@@ -208,6 +211,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     ...buildEmbeddedSubagentRunDefaults(),
     modelRun: true,
     promptMode: "none" as const,
+    sessionPersistence: "detached" as const,
     toolsAllow: [],
     disableTools: true,
     thinkLevel: params.params.config.routing.classifier.thinking,

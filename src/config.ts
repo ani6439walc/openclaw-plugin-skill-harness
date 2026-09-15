@@ -8,7 +8,7 @@ import {
   DEFAULT_RECENT_USER_CHARS,
   DEFAULT_RECENT_ASSISTANT_CHARS,
 } from "./constants.js";
-import { roundToThreeDecimals } from "./normalize.js";
+import { roundToDecimals } from "./normalize.js";
 import type {
   ContextWindow,
   ResolvedClassifierConfig,
@@ -16,6 +16,7 @@ import type {
   ResolvedReviewConfig,
   ResolvedRoutingConfig,
   ResolvedScopeConfig,
+  ResolvedSkillCandidatesConfig,
   ResolvedSkillHarnessPluginConfig,
   ResolvedSkillSearchConfig,
   ResolvedSkillsConfig,
@@ -62,11 +63,23 @@ const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
   contextWindow: DEFAULT_CONTEXT_WINDOW,
 };
 
+const DEFAULT_SKILL_CANDIDATES: ResolvedSkillCandidatesConfig = {
+  enabled: true,
+  search: { enabled: true, minCandidateScore: 0.6, timeoutMs: 2000 },
+  nameMatch: {
+    enabled: true,
+    maxEditDistance: 2,
+    minJaccardScore: 0.5,
+    genericTokens: [],
+  },
+  maxPoolSize: 12,
+  maxInjectedSkills: 4,
+  minInjectionScore: 0.3,
+};
+
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
   thresholds: {
-    keyword: {
-      directRouteMinScore: 0.85,
-    },
+    keyword: { directRouteMinScore: 0.85 },
     hybrid: {
       directRouteMinScore: 0.9,
       directRouteMinMargin: 0.08,
@@ -74,6 +87,7 @@ const DEFAULT_ROUTING: ResolvedRoutingConfig = {
     },
   },
   classifier: DEFAULT_CLASSIFIER,
+  skillCandidates: DEFAULT_SKILL_CANDIDATES,
 };
 
 const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
@@ -247,8 +261,8 @@ const HybridThresholdsSchema = z
   .default(DEFAULT_ROUTING.thresholds.hybrid)
   .superRefine((hybrid, context) => {
     if (
-      roundToThreeDecimals(hybrid.minCandidateScore) >
-      roundToThreeDecimals(hybrid.directRouteMinScore)
+      roundToDecimals(hybrid.minCandidateScore, 2) >
+      roundToDecimals(hybrid.directRouteMinScore, 2)
     ) {
       context.addIssue({
         code: "custom",
@@ -309,12 +323,79 @@ const RoutingThresholdsSchema = z
   )
   .default(DEFAULT_ROUTING.thresholds);
 
+const GenericTokensSchema = z
+  .array(z.string())
+  .optional()
+  .default([])
+  .transform((tokens) => [
+    ...new Set(
+      tokens.map((token) => token.trim().toLowerCase()).filter(Boolean),
+    ),
+  ]);
+
+const SkillCandidatesSearchSchema = z
+  .object({
+    enabled: z.boolean().optional().default(true),
+    minCandidateScore: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.6),
+    timeoutMs: z.number().int().min(100).max(60_000).optional().default(2000),
+  })
+  .strict()
+  .optional()
+  .default(DEFAULT_SKILL_CANDIDATES.search);
+
+const SkillCandidatesNameMatchSchema = z
+  .object({
+    enabled: z.boolean().optional().default(true),
+    maxEditDistance: z.number().int().min(0).max(2).optional().default(2),
+    minJaccardScore: z.number().finite().min(0).max(1).optional().default(0.5),
+    genericTokens: GenericTokensSchema,
+  })
+  .strict()
+  .optional()
+  .default(DEFAULT_SKILL_CANDIDATES.nameMatch);
+
+const SkillCandidatesSchema = z
+  .object({
+    enabled: z.boolean().optional().default(true),
+    search: SkillCandidatesSearchSchema,
+    nameMatch: SkillCandidatesNameMatchSchema,
+    maxPoolSize: z.number().int().min(1).max(64).optional().default(12),
+    maxInjectedSkills: z.number().int().min(0).max(4).optional().default(4),
+    minInjectionScore: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.3),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.maxInjectedSkills > value.maxPoolSize) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "maxInjectedSkills must be <= maxPoolSize",
+      });
+    }
+  })
+  .optional()
+  .default(DEFAULT_SKILL_CANDIDATES);
+
 const RoutingSchema = z
   .object({
     thresholds: RoutingThresholdsSchema.optional().default(
       DEFAULT_ROUTING.thresholds,
     ),
     classifier: ClassifierSchema.optional().default(DEFAULT_CLASSIFIER),
+    skillCandidates: SkillCandidatesSchema.optional().default(
+      DEFAULT_SKILL_CANDIDATES,
+    ),
   })
   .strict();
 

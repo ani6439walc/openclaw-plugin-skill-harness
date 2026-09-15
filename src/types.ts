@@ -48,6 +48,27 @@ export type ResolvedClassifierConfig = {
   queryMode: "message" | "recent" | "full";
   contextWindow: ContextWindow;
 };
+export type ResolvedSkillCandidateSearchConfig = {
+  enabled: boolean;
+  minCandidateScore: number;
+  timeoutMs: number;
+};
+
+export type ResolvedSkillCandidateNameMatchConfig = {
+  enabled: boolean;
+  maxEditDistance: number;
+  minJaccardScore: number;
+  genericTokens: string[];
+};
+
+export type ResolvedSkillCandidatesConfig = {
+  enabled: boolean;
+  search: ResolvedSkillCandidateSearchConfig;
+  nameMatch: ResolvedSkillCandidateNameMatchConfig;
+  maxPoolSize: number;
+  maxInjectedSkills: number;
+  minInjectionScore: number;
+};
 
 export type ResolvedRoutingConfig = {
   thresholds: {
@@ -61,6 +82,7 @@ export type ResolvedRoutingConfig = {
     };
   };
   classifier: ResolvedClassifierConfig;
+  skillCandidates: ResolvedSkillCandidatesConfig;
 };
 
 export type ResolvedSkillSearchConfig = {
@@ -132,6 +154,43 @@ export type IntentProjectionSupportReason =
   | "authorized-history"
   | "exact-evidence"
   | "qmd-retrieval";
+
+export type IntentRoutingSearchHit = {
+  intentId: string;
+  score: number;
+  collection: string;
+  explain?: unknown;
+};
+
+export type IntentRoutingRawSearchResult = {
+  filepath?: string;
+  file?: string;
+  displayPath?: string;
+  body?: string;
+  score: number;
+  explain?: unknown;
+};
+
+export type IntentRoutingSearchEvidence = {
+  query: string;
+  hits?: IntentRoutingSearchHit[];
+  rawResults?: IntentRoutingRawSearchResult[];
+  outcome:
+    | "routed"
+    | "below-threshold"
+    | "below-margin-threshold"
+    | "below-score-and-margin-threshold"
+    | "unrecognized-intent"
+    | "none"
+    | "unavailable";
+  directRouteMinScore: number;
+  directRouteMinMargin?: number;
+};
+
+export type IntentRoutingEvidence = {
+  keyword?: IntentRoutingSearchEvidence;
+  hybrid?: IntentRoutingSearchEvidence & { expansionContext?: string };
+};
 
 export type IntentProjectionTelemetry = {
   decision: "projected" | "full-fallback";

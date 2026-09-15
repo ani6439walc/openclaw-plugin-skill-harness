@@ -142,6 +142,7 @@ describe("buildIntentionEmbeddedRunParams", () => {
     });
 
     expect(result).not.toHaveProperty("sessionFile");
+    expect(result.sessionPersistence).toBe("detached");
   });
 
   it("uses dataRoot paths when provided", () => {

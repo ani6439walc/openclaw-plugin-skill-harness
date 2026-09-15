@@ -90,7 +90,7 @@ export type ReviewedSkillEpoch = {
   eventId: string;
 };
 
-export type ReviewLogV8 = {
+export type ReviewLog = {
   schemaVersion: 8;
   createdAt: string;
   updatedAt: string;
@@ -198,7 +198,7 @@ const ReviewedSkillEpochSchema = z
     eventId: z.string().trim().min(1),
   })
   .strict();
-export const ReviewLogV8Schema = z
+export const ReviewLogSchema = z
   .object({
     schemaVersion: z.literal(8),
     createdAt: z.string(),
@@ -210,9 +210,9 @@ export const ReviewLogV8Schema = z
     ),
   })
   .strict()
-  .transform((log): ReviewLogV8 => log);
+  .transform((log): ReviewLog => log);
 
-export function createReviewLogV8(nowIso: string): ReviewLogV8 {
+export function createReviewLog(nowIso: string): ReviewLog {
   return {
     schemaVersion: 8,
     createdAt: nowIso,
@@ -222,108 +222,11 @@ export function createReviewLogV8(nowIso: string): ReviewLogV8 {
   };
 }
 
-const legacyTriggerMap: Record<string, ReviewTrigger> = {
-  "successful-pattern": "intent-health-check",
-  "satisfaction-check": "intent-health-check",
-  "behavior-fix": "intent-health-check",
-  "entity-context": "intent-health-check",
-  "missing-intent": "routing-uncertainty",
-  "weak-intent": "routing-uncertainty",
-  "skill-candidate": "capability-fit",
-  "process-gap": "capability-fit",
-  "skill-placement": "capability-fit",
-};
-function migrateLegacyTrigger(value: unknown): ReviewTrigger | undefined {
-  return typeof value === "string"
-    ? (legacyTriggerMap[value] ??
-        (REVIEW_TRIGGER_TYPES.includes(value as ReviewTrigger)
-          ? (value as ReviewTrigger)
-          : undefined))
-    : undefined;
+export function parseReviewLog(raw: unknown): ReviewLog {
+  return ReviewLogSchema.parse(raw);
 }
-function migrateLegacyRecord(value: unknown): ProcessedEventRecord | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  const record = value as Record<string, unknown>;
-  const triggers = Array.isArray(record.triggers)
-    ? record.triggers
-        .map(migrateLegacyTrigger)
-        .filter((trigger): trigger is ReviewTrigger => Boolean(trigger))
-    : [];
-  if (
-    !triggers.length ||
-    typeof record.processedAt !== "string" ||
-    typeof record.changeCount !== "number" ||
-    !PROCESSED_EVENT_OUTCOMES.includes(record.outcome as ProcessedEventOutcome)
-  )
-    return;
-  const next: ProcessedEventRecord = {
-    processedAt: record.processedAt,
-    triggers: [...new Set(triggers)],
-    changeCount: record.changeCount,
-    outcome: record.outcome as ProcessedEventOutcome,
-  };
-  if (
-    record.source &&
-    typeof record.source === "object" &&
-    !Array.isArray(record.source)
-  )
-    next.source = record.source as ReviewSource;
-  for (const field of [
-    "changedIntentIds",
-    "changedExperienceIds",
-    "validationErrors",
-  ] as const)
-    if (
-      Array.isArray(record[field]) &&
-      record[field].every((item) => typeof item === "string")
-    )
-      next[field] = [...record[field]];
-  next.noFindingReasonCounts = normalizedCounts(
-    record.noFindingReasonCounts,
-    NO_FINDING_REASON_CODES,
-  );
-  next.schemaRejectionReasonCounts = normalizedCounts(
-    record.schemaRejectionReasonCounts,
-    SCHEMA_REJECTION_REASON_CODES,
-  );
-  return next;
-}
-export function migrateReviewLogV7(raw: unknown): ReviewLogV8 | undefined {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
-  const log = raw as Record<string, unknown>;
-  if (
-    log.schemaVersion !== 7 ||
-    typeof log.createdAt !== "string" ||
-    typeof log.updatedAt !== "string" ||
-    !log.processedEvents ||
-    typeof log.processedEvents !== "object" ||
-    Array.isArray(log.processedEvents) ||
-    !log.reviewedSkillEpochs ||
-    typeof log.reviewedSkillEpochs !== "object" ||
-    Array.isArray(log.reviewedSkillEpochs)
-  )
-    return;
-  const processedEvents: Record<string, ProcessedEventRecord> = {};
-  for (const [eventId, record] of Object.entries(
-    log.processedEvents as Record<string, unknown>,
-  )) {
-    const migrated = migrateLegacyRecord(record);
-    if (migrated) processedEvents[eventId] = migrated;
-  }
-  const candidate = {
-    schemaVersion: 8 as const,
-    createdAt: log.createdAt,
-    updatedAt: log.updatedAt,
-    processedEvents,
-    reviewedSkillEpochs: log.reviewedSkillEpochs,
-  };
-  return ReviewLogV8Schema.safeParse(candidate).data;
-}
-export function parseReviewLogV8(raw: unknown): ReviewLogV8 {
-  return ReviewLogV8Schema.parse(raw);
-}
-export function pruneReviewLogV8Events(
-  log: ReviewLogV8,
+export function pruneReviewLogEvents(
+  log: ReviewLog,
   nowMs: number = Date.now(),
 ): void {
   const oldestAcceptedTime = Math.min(

@@ -236,6 +236,102 @@
               }
             },
             "default": {}
+          },
+          "skillCandidates": {
+            "type": "object",
+            "description": "Prompt-build input-matched skill candidate policy. It does not change skill_search tool results.",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Enable input-matched skill discovery and advisory prompt injection."
+              },
+              "search": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Direct SkillRouter retrieval used only while building prompt candidates.",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable direct retrieval for prompt candidates."
+                  },
+                  "minCandidateScore": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.6,
+                    "description": "Inclusive semantic-evidence score required for a retrieved skill to enter the candidate pool."
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 60000,
+                    "default": 2000,
+                    "description": "Maximum milliseconds for prompt-build retrieval, including query expansion."
+                  }
+                },
+                "default": {}
+              },
+              "nameMatch": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Deterministic latest-request skill-name matching.",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable skill-name candidate matching."
+                  },
+                  "maxEditDistance": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2,
+                    "default": 2,
+                    "description": "Maximum classic Levenshtein distance for a name token typo."
+                  },
+                  "minJaccardScore": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.5,
+                    "description": "Inclusive typo-aware token-set Jaccard score required for a name candidate."
+                  },
+                  "genericTokens": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "Tokens that suppress only a one-token name-match request after normalization."
+                  }
+                },
+                "default": {}
+              },
+              "maxPoolSize": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64,
+                "default": 12,
+                "description": "Maximum candidates retained before injection filtering."
+              },
+              "maxInjectedSkills": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4,
+                "default": 4,
+                "description": "Maximum input-matched skills injected into advisory context."
+              },
+              "minInjectionScore": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.3,
+                "description": "Inclusive candidate score required for input-matched injection."
+              }
+            },
+            "default": {}
           }
         },
         "default": {}

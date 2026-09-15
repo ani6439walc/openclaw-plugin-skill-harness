@@ -7,6 +7,7 @@ import type {
   IntentionResult,
   IntentTrigger,
   IntentProjectionTelemetry,
+  IntentRoutingEvidence,
   HistoricalIntentRecord,
 } from "../types.js";
 import type { ReviewSnapshot, ReviewState } from "../review/types.js";
@@ -55,6 +56,7 @@ export interface IntentState {
   result?: IntentionResult;
   intentMatchedSkills?: string[];
   intentProjection?: IntentProjectionTelemetry;
+  routingEvidence?: IntentRoutingEvidence;
 }
 
 export interface SessionState {
@@ -219,62 +221,52 @@ function createReviewState(
   };
 }
 
-function migrateIntentionResult(result: IntentionResult): boolean {
-  const record = result as IntentionResult & Record<string, unknown>;
-  let changed = false;
-
-  if (typeof record.domain !== "string" || !record.domain.trim()) {
-    result.domain = DEFAULT_MIGRATED_DOMAIN;
-    changed = true;
-  }
-
-  if (record.topic !== undefined) {
-    delete record.topic;
-    changed = true;
-  }
-  if (record.topicChanged !== undefined) {
-    delete record.topicChanged;
-    changed = true;
-  }
-  if (record.topicChangeReason !== undefined) {
-    delete record.topicChangeReason;
-    changed = true;
-  }
-
-  return changed;
-}
-
-const PERSISTED_INTENT_STATE_FIELDS = new Set<keyof IntentState>([
-  "input",
-  "trigger",
-  "result",
-  "intentMatchedSkills",
-  "intentProjection",
+const RETIRED_INTENT_STATE_FIELDS = new Set([
+  "instructionText",
+  "recommendedSkills",
+]);
+const RETIRED_INTENTION_RESULT_FIELDS = new Set([
+  "topic",
+  "topicChanged",
+  "topicChangeReason",
 ]);
 
-function stripUnknownIntentStateFields(state: SessionState): boolean {
-  if (!state.intent) return false;
-
-  const unknownFields = Object.keys(state.intent).filter(
-    (field) => !PERSISTED_INTENT_STATE_FIELDS.has(field as keyof IntentState),
+function isCurrentSessionState(value: unknown): value is SessionState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  if (state.intent === undefined) return true;
+  if (
+    state.intent === null ||
+    typeof state.intent !== "object" ||
+    Array.isArray(state.intent)
+  )
+    return false;
+  const intent = state.intent as Record<string, unknown>;
+  if (
+    Object.keys(intent).some((field) => RETIRED_INTENT_STATE_FIELDS.has(field))
+  )
+    return false;
+  const result = intent.result;
+  return !(
+    result &&
+    typeof result === "object" &&
+    !Array.isArray(result) &&
+    Object.keys(result).some((field) =>
+      RETIRED_INTENTION_RESULT_FIELDS.has(field),
+    )
   );
-  if (unknownFields.length === 0) return false;
-
-  const record = state.intent as Record<string, unknown>;
-  for (const field of unknownFields) {
-    delete record[field];
-  }
-  return true;
 }
 
-function migrateSessionData(sessionData: SessionData): boolean {
-  let changed = false;
-  for (const state of [sessionData.current, ...(sessionData.history ?? [])]) {
-    if (stripUnknownIntentStateFields(state)) changed = true;
-    const result = state.intent?.result;
-    if (result && migrateIntentionResult(result)) changed = true;
-  }
-  return changed;
+function isCurrentSessionData(value: unknown): value is SessionData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const session = value as Record<string, unknown>;
+  if (typeof session.sessionId !== "string" || !session.sessionId) return false;
+  if (!isCurrentSessionState(session.current)) return false;
+  return (
+    session.history === undefined ||
+    (Array.isArray(session.history) &&
+      session.history.every(isCurrentSessionState))
+  );
 }
 
 export function extractSkillInfo(
@@ -449,6 +441,9 @@ function mergeSessionState(
     if (data.intent.intentProjection !== undefined) {
       current.intent.intentProjection = data.intent.intentProjection;
     }
+    if (data.intent.routingEvidence !== undefined) {
+      current.intent.routingEvidence = data.intent.routingEvidence;
+    }
   }
   if (data.result !== undefined) current.result = data.result;
   if (data.error !== undefined) current.error = data.error;
@@ -494,8 +489,8 @@ export class SessionTracker {
       const filePath = path.join(sessionsDir, file);
       try {
         if (fs.statSync(filePath).mtimeMs < cutoffMs) continue;
-        const sessionData: SessionData = readJsonFile<SessionData>(filePath);
-        migrateSessionData(sessionData);
+        const sessionData = readJsonFile<unknown>(filePath);
+        if (!isCurrentSessionData(sessionData)) continue;
         this.sessionData.set(sessionData.sessionId, sessionData);
       } catch (err) {
         logger.warn("failed to load session file", {
@@ -537,9 +532,10 @@ export class SessionTracker {
     const locked = await withFileLock(
       filePath,
       async () => {
-        const durable = fileExists(filePath)
-          ? readJsonFile<SessionData>(filePath)
+        const persisted = fileExists(filePath)
+          ? readJsonFile<unknown>(filePath)
           : this.sessionData.get(params.sessionId);
+        const durable = isCurrentSessionData(persisted) ? persisted : undefined;
         const draft = durable
           ? structuredClone(durable)
           : ({

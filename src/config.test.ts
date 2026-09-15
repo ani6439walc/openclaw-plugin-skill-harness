@@ -1015,6 +1015,70 @@ describe("resolveConfig", () => {
     });
   });
 
+  describe("skillCandidates", () => {
+    it("resolves the complete default policy for legacy routing config", () => {
+      expect(resolveConfig({}).routing.skillCandidates).toEqual({
+        enabled: true,
+        search: { enabled: true, minCandidateScore: 0.6, timeoutMs: 2000 },
+        nameMatch: {
+          enabled: true,
+          maxEditDistance: 2,
+          minJaccardScore: 0.5,
+          genericTokens: [],
+        },
+        maxPoolSize: 12,
+        maxInjectedSkills: 4,
+        minInjectionScore: 0.3,
+      });
+    });
+
+    it("accepts valid partial candidate routing configuration", () => {
+      const policy = resolveConfig({
+        routing: {
+          skillCandidates: {
+            enabled: false,
+            search: { minCandidateScore: 0.7, timeoutMs: 250 },
+            nameMatch: {
+              maxEditDistance: 1,
+              minJaccardScore: 0.75,
+              genericTokens: ["Code", "code", "  Review  "],
+            },
+            maxPoolSize: 20,
+            maxInjectedSkills: 3,
+            minInjectionScore: 0.4,
+          },
+        },
+      }).routing.skillCandidates;
+
+      expect(policy).toEqual({
+        enabled: false,
+        search: { enabled: true, minCandidateScore: 0.7, timeoutMs: 250 },
+        nameMatch: {
+          enabled: true,
+          maxEditDistance: 1,
+          minJaccardScore: 0.75,
+          genericTokens: ["code", "review"],
+        },
+        maxPoolSize: 20,
+        maxInjectedSkills: 3,
+        minInjectionScore: 0.4,
+      });
+    });
+
+    it("rejects invalid candidate policy boundaries and cross-field values", () => {
+      for (const skillCandidates of [
+        { search: { timeoutMs: 99 } },
+        { nameMatch: { maxEditDistance: 3 } },
+        { maxPoolSize: 65 },
+        { maxInjectedSkills: 5 },
+        { maxPoolSize: 2, maxInjectedSkills: 3 },
+        { minInjectionScore: Number.NaN },
+      ]) {
+        expect(() => resolveConfig({ routing: { skillCandidates } })).toThrow();
+      }
+    });
+  });
+
   describe("contextWindow partial overrides", () => {
     it("should support missing nested config and partial overrides", () => {
       const emptyNested = resolveConfig({

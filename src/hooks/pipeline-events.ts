@@ -1,15 +1,25 @@
 import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { logger } from "../../api.js";
 import { roundToDecimals } from "../normalize.js";
-import type { IntentTrigger } from "../types.js";
+import type {
+  IntentRoutingEvidence,
+  IntentRoutingSearchEvidence,
+  IntentTrigger,
+} from "../types.js";
 import type { PluginHookAgentContext } from "./types.js";
 
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
-export type PipelinePhase = "pipeline" | IntentTrigger;
+export type PipelinePhase = "pipeline" | "skill-candidate-pool" | IntentTrigger;
 
 export type PipelineState = "started" | "completed" | "failed";
+
+export type SkillCandidatePoolFallbackReason =
+  | "name-channel-unavailable"
+  | "retrieval-timeout"
+  | "retrieval-unavailable"
+  | "empty-pool";
 
 export type PipelineMetadata = {
   basis?: string;
@@ -22,6 +32,14 @@ export type PipelineMetadata = {
   result?: string;
   error?: string;
   durationMs?: number;
+  nameCandidates?: number;
+  retrievalCandidates?: number;
+  poolSize?: number;
+  injectedCount?: number;
+  injectedSkills?: string[];
+  fallbackReason?: SkillCandidatePoolFallbackReason;
+  searchEvidence?: IntentRoutingSearchEvidence;
+  routingEvidence?: IntentRoutingEvidence;
 };
 
 function cleanPipelineEventData(

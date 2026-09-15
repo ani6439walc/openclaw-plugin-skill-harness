@@ -167,52 +167,120 @@ describe("SessionTracker", () => {
       expect(customTracker).toBeInstanceOf(SessionTracker);
     });
 
-    it("drops retired session fields without copying recommended skills", () => {
-      // Create sessions directory with a test file
-      const sessionsDir = path.join(tempDir, "sessions");
-      const removedLegacyField = ["instruction", "Text"].join("");
-      fs.mkdirSync(sessionsDir, { recursive: true });
+    it("persists complete routing evidence with the classified turn", async () => {
+      const prepared = await tracker.preparePromptTurn({
+        sessionId: "routing-evidence",
+        agentId: "test-agent",
+        input: "please commit this",
+        startedAt: "2026-07-07T11:00:00.000Z",
+      });
+      expect(prepared.status).toBe("applied");
+      if (prepared.status !== "applied") return;
 
-      const testSession = {
-        sessionId: "existing-session-123",
+      const hybridExplain = {
+        vectorScores: [0.55],
+        ftsScores: [0.21],
+        rrf: { contributions: [{ queryType: "vec", rank: 1 }] },
+      };
+      await expect(
+        tracker.mergeTurnAndPersist({
+          sessionId: "routing-evidence",
+          expectedTurnKey: prepared.identity.turnKey,
+          data: {
+            intent: {
+              trigger: "llm-classifier",
+              result: {
+                intent: "version-control",
+                reason: "User requests repository maintenance.",
+                domain: "git",
+                confidence: 0.9,
+              },
+              routingEvidence: {
+                keyword: {
+                  query: "please commit this",
+                  hits: [
+                    {
+                      intentId: "version-control",
+                      score: 0.79,
+                      collection: "intent-keywords",
+                    },
+                  ],
+                  rawResults: [
+                    {
+                      filepath:
+                        "/snapshot/intent-keywords/version-control-0.md",
+                      score: 0.79,
+                    },
+                  ],
+                  outcome: "below-threshold",
+                  directRouteMinScore: 0.85,
+                },
+                hybrid: {
+                  query: "please commit this",
+                  hits: [
+                    {
+                      intentId: "version-control",
+                      score: 0.55,
+                      collection: "intent-examples-and-keywords",
+                      explain: hybridExplain,
+                    },
+                  ],
+                  rawResults: [
+                    {
+                      body: "---\nintent_id: version-control\n---\nplease commit this",
+                      score: 0.55,
+                      explain: hybridExplain,
+                    },
+                  ],
+                  outcome: "below-threshold",
+                  directRouteMinScore: 0.9,
+                  directRouteMinMargin: 0.08,
+                  expansionContext:
+                    "Recent conversation: [user] please commit this",
+                },
+              },
+            },
+          },
+        }),
+      ).resolves.toBe("applied");
+
+      const persisted = JSON.parse(
+        fs.readFileSync(sessionsPath("routing-evidence.json", tempDir), "utf8"),
+      );
+      expect(persisted.current.intent.routingEvidence).toEqual(
+        expect.objectContaining({
+          hybrid: expect.objectContaining({
+            rawResults: [expect.objectContaining({ explain: hybridExplain })],
+          }),
+        }),
+      );
+    });
+
+    it("ignores a legacy session instead of migrating it", () => {
+      const sessionsDir = path.join(tempDir, "sessions");
+      fs.mkdirSync(sessionsDir, { recursive: true });
+      const filePath = path.join(sessionsDir, "legacy.json");
+      const legacy = JSON.stringify({
+        sessionId: "legacy",
         current: {
-          input: "existing test prompt",
+          input: "old prompt",
           intent: {
-            [removedLegacyField]: "legacy writer output",
             recommendedSkills: ["existing-skill"],
-            result: { intentions: [] },
+            result: {
+              intent: "chat",
+              reason: "old",
+              topicChanged: false,
+              confidence: 0.8,
+            },
           },
         },
-      };
-      fs.writeFileSync(
-        path.join(sessionsDir, "existing-session-123.json"),
-        JSON.stringify(testSession),
-      );
-      const filePath = path.join(sessionsDir, "existing-session-123.json");
-      const originalBytes = fs.readFileSync(filePath, "utf8");
+      });
+      fs.writeFileSync(filePath, legacy);
 
-      // Create new tracker - should load existing session
       const loadedTracker = SessionTracker.create(tempDir);
-      expect(loadedTracker.hasIntentData("existing-session-123")).toBe(true);
-      expect(
-        loadedTracker
-          .listRetainedSessions()
-          .find((session) => session.sessionId === "existing-session-123")
-          ?.current.intent,
-      ).not.toHaveProperty("recommendedSkills");
-      expect(
-        loadedTracker
-          .listRetainedSessions()
-          .find((session) => session.sessionId === "existing-session-123")
-          ?.current.intent,
-      ).not.toHaveProperty("intentMatchedSkills");
-      expect(
-        loadedTracker
-          .listRetainedSessions()
-          .find((session) => session.sessionId === "existing-session-123")
-          ?.current.intent,
-      ).not.toHaveProperty(removedLegacyField);
-      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
+
+      expect(loadedTracker.getCurrentState("legacy")).toBeUndefined();
+      expect(fs.readFileSync(filePath, "utf8")).toBe(legacy);
     });
 
     it("excludes expired on-disk sessions from retained snapshots after restart", () => {
@@ -236,157 +304,6 @@ describe("SessionTracker", () => {
           .listRetainedSessions()
           .map((session) => session.sessionId),
       ).not.toContain("expired");
-    });
-
-    it("migrates legacy topic metadata and missing domain in memory on load", () => {
-      const sessionsDir = path.join(tempDir, "sessions");
-      fs.mkdirSync(sessionsDir, { recursive: true });
-      const filePath = path.join(sessionsDir, "legacy-topic.json");
-      fs.writeFileSync(
-        filePath,
-        JSON.stringify({
-          sessionId: "legacy-topic",
-          history: [
-            {
-              input: "same topic",
-              intent: {
-                result: {
-                  intent: "chat",
-                  reason: "same",
-                  topicChanged: false,
-                  topicChangeReason: "same-topic",
-                  confidence: 0.8,
-                },
-              },
-            },
-          ],
-          current: {
-            input: "changed topic",
-            intent: {
-              result: {
-                intent: "coding",
-                reason: "changed",
-                topicChanged: true,
-                confidence: 0.9,
-              },
-            },
-          },
-        }),
-      );
-
-      const originalBytes = fs.readFileSync(filePath, "utf8");
-      const loadedTracker = SessionTracker.create(tempDir);
-
-      expect(loadedTracker.getHistoricalIntentRecords("legacy-topic")).toEqual([
-        expect.objectContaining({
-          input: "same topic",
-          intent: "chat",
-          domain: "unknown",
-        }),
-        expect.objectContaining({
-          input: "changed topic",
-          intent: "coding",
-          domain: "unknown",
-        }),
-      ]);
-      expect(
-        loadedTracker.getCurrentState("legacy-topic")?.intent?.result,
-      ).not.toHaveProperty("topicChanged");
-      expect(
-        loadedTracker.getCurrentState("legacy-topic")?.intent?.result,
-      ).not.toHaveProperty("topicChangeReason");
-      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
-    });
-
-    it("does not overwrite a locked legacy session while loading its in-memory migration", () => {
-      const sessionsDir = path.join(tempDir, "sessions");
-      fs.mkdirSync(sessionsDir, { recursive: true });
-      const filePath = sessionsPath("legacy-locked.json", tempDir);
-      fs.writeFileSync(
-        filePath,
-        JSON.stringify({
-          sessionId: "legacy-locked",
-          current: {
-            intent: {
-              result: {
-                intent: "coding",
-                reason: "changed",
-                topicChanged: true,
-                confidence: 0.9,
-              },
-            },
-          },
-        }),
-      );
-      const lockPath = `${filePath}.lock`;
-      fs.mkdirSync(lockPath);
-
-      try {
-        const loadedTracker = SessionTracker.create(tempDir);
-        const durable = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-
-        expect(
-          loadedTracker.getCurrentState("legacy-locked")?.intent?.result,
-        ).toMatchObject({ domain: "unknown" });
-        expect(
-          loadedTracker.getCurrentState("legacy-locked")?.intent?.result,
-        ).not.toHaveProperty("topicChanged");
-        expect(
-          loadedTracker.getCurrentState("legacy-locked")?.intent?.result,
-        ).not.toHaveProperty("topicChangeReason");
-        expect(durable.current.intent.result).toMatchObject({
-          topicChanged: true,
-        });
-        expect(durable.current.intent.result).not.toHaveProperty("domain");
-      } finally {
-        fs.rmSync(lockPath, { recursive: true, force: true });
-      }
-    });
-
-    it("strips legacy topic fields in memory on load", () => {
-      const sessionsDir = path.join(tempDir, "sessions");
-      fs.mkdirSync(sessionsDir, { recursive: true });
-      const filePath = path.join(sessionsDir, "legacy-reasons.json");
-      fs.writeFileSync(
-        filePath,
-        JSON.stringify({
-          sessionId: "legacy-reasons",
-          current: {
-            input: "changed topic",
-            intent: {
-              result: {
-                intent: "coding",
-                reason: "changed",
-                domain: "coding",
-                topic: "legacy topic string",
-                topicChangeReason: "keyword-delta",
-                confidence: 0.9,
-              },
-            },
-          },
-        }),
-      );
-
-      const originalBytes = fs.readFileSync(filePath, "utf8");
-      const loadedTracker = SessionTracker.create(tempDir);
-
-      expect(
-        loadedTracker.getHistoricalIntentRecords("legacy-reasons"),
-      ).toEqual([
-        {
-          input: "changed topic",
-          intent: "coding",
-          domain: "coding",
-          confidence: 0.9,
-        },
-      ]);
-      expect(
-        loadedTracker.getCurrentState("legacy-reasons")?.intent?.result,
-      ).not.toHaveProperty("topic");
-      expect(
-        loadedTracker.getCurrentState("legacy-reasons")?.intent?.result,
-      ).not.toHaveProperty("topicChangeReason");
-      expect(fs.readFileSync(filePath, "utf8")).toBe(originalBytes);
     });
 
     it("should skip corrupted JSON files and log warning", () => {

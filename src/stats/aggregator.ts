@@ -723,24 +723,6 @@ function assertStats(stats: unknown): asserts stats is Stats {
   if (!isRecord(stats) || stats.schemaVersion !== 6) {
     throw new Error("unsupported or invalid stats schema");
   }
-  if (isRecord(stats.summary)) {
-    if (
-      !("unknownTurns" in stats.summary) &&
-      "otherTurns" in stats.summary &&
-      typeof stats.summary.otherTurns === "number"
-    ) {
-      stats.summary.unknownTurns = stats.summary.otherTurns;
-    }
-    if (
-      !("unknownRate" in stats.summary) &&
-      "otherRate" in stats.summary &&
-      typeof stats.summary.otherRate === "number"
-    ) {
-      stats.summary.unknownRate = stats.summary.otherRate;
-    }
-    delete stats.summary.otherTurns;
-    delete stats.summary.otherRate;
-  }
   if (
     !isIsoTimestamp(stats.createdAt) ||
     !isIsoTimestamp(stats.updatedAt) ||
@@ -850,10 +832,13 @@ function assertStats(stats: unknown): asserts stats is Stats {
 
 function loadStats(statsFilePath: string, eventTime: string): Stats {
   if (!fileExists(statsFilePath)) return createStats(eventTime);
-
-  const stats = readJsonFile<unknown>(statsFilePath);
-  assertStats(stats);
-  return canonicalizeSkillStats(stats, eventTime);
+  try {
+    const stats = readJsonFile<unknown>(statsFilePath);
+    assertStats(stats);
+    return canonicalizeSkillStats(stats, eventTime);
+  } catch {
+    return createStats(eventTime);
+  }
 }
 
 function recordSummaryStats(params: {

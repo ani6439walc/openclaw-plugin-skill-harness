@@ -271,49 +271,39 @@ describe("StatsAggregator", () => {
     ]);
   });
 
-  it.each([1, 2, 3, 4, 5])(
-    "rejects schema v%s without rewriting its bytes",
-    (schemaVersion) => {
-      const statsFile = path.join(tempDir, "stats.json");
-      expect(aggregator.record("current-session", createState(), intent)).toBe(
-        true,
-      );
-      const legacy = readStats();
-      legacy.schemaVersion = schemaVersion;
-      const original = JSON.stringify(legacy);
-      fs.writeFileSync(statsFile, original);
-
-      expect(
-        aggregator.record(
-          "legacy-session",
-          createState({
-            timestamps: {
-              start: "2026-06-11T00:02:00.000Z",
-              end: "2026-06-11T00:03:00.000Z",
-            },
-          }),
-          intent,
-        ),
-      ).toBe(false);
-      expect(fs.readFileSync(statsFile, "utf8")).toBe(original);
-    },
-  );
-
-  it("reads legacy schema v6 with otherTurns and otherRate seamlessly", () => {
+  it("replaces a legacy stats file with a fresh v6 window", () => {
     const statsFile = path.join(tempDir, "stats.json");
-    expect(aggregator.record("compat-session", createState(), intent)).toBe(
+    fs.writeFileSync(
+      statsFile,
+      JSON.stringify({
+        schemaVersion: 5,
+        processedEvents: { "old-turn": "old" },
+      }),
+    );
+
+    expect(aggregator.record("new-session", createState(), intent)).toBe(true);
+
+    const stats = readStats();
+    expect(stats.schemaVersion).toBe(6);
+    expect(stats.summary.turns).toBe(1);
+    expect(stats.processedEvents).not.toHaveProperty("old-turn");
+  });
+
+  it("replaces v6 aliases with a fresh v6 window", () => {
+    const statsFile = path.join(tempDir, "stats.json");
+    expect(aggregator.record("current-session", createState(), intent)).toBe(
       true,
     );
-    const raw = JSON.parse(fs.readFileSync(statsFile, "utf8"));
-    delete raw.summary.unknownTurns;
-    delete raw.summary.unknownRate;
-    raw.summary.otherTurns = 1;
-    raw.summary.otherRate = 0.5;
-    fs.writeFileSync(statsFile, JSON.stringify(raw));
+    const legacy = readStats();
+    delete legacy.summary.unknownTurns;
+    delete legacy.summary.unknownRate;
+    legacy.summary.otherTurns = 1;
+    legacy.summary.otherRate = 0.5;
+    fs.writeFileSync(statsFile, JSON.stringify(legacy));
 
     expect(
       aggregator.record(
-        "next-session",
+        "new-session",
         createState({
           timestamps: {
             start: "2026-06-11T00:02:00.000Z",
@@ -324,9 +314,10 @@ describe("StatsAggregator", () => {
       ),
     ).toBe(true);
 
-    const loaded = readStats();
-    expect(loaded.summary.unknownTurns).toBe(1);
-    expect(loaded.summary.otherTurns).toBeUndefined();
+    const stats = readStats();
+    expect(stats.summary.turns).toBe(1);
+    expect(stats.summary.unknownTurns).toBe(0);
+    expect(stats).not.toHaveProperty("summary.otherTurns");
   });
 
   it("preflights incomplete and duplicate stats events", () => {
@@ -870,8 +861,8 @@ describe("StatsAggregator", () => {
         }),
         intent,
       ),
-    ).toBe(false);
-    expect(fs.readFileSync(statsPath, "utf-8")).toBe(original);
+    ).toBe(true);
+    expect(readStats().schemaVersion).toBe(6);
   });
 
   it.each([
@@ -931,8 +922,8 @@ describe("StatsAggregator", () => {
         }),
         intent,
       ),
-    ).toBe(false);
-    expect(fs.readFileSync(statsPath, "utf-8")).toBe(original);
+    ).toBe(true);
+    expect(readStats().schemaVersion).toBe(6);
   });
 
   it("rejects retired native inventory sources without rewriting stats", () => {
@@ -968,8 +959,8 @@ describe("StatsAggregator", () => {
         }),
         intent,
       ),
-    ).toBe(false);
-    expect(fs.readFileSync(statsPath, "utf8")).toBe(original);
+    ).toBe(true);
+    expect(readStats().schemaVersion).toBe(6);
   });
 
   it("restarts a skill observation epoch after interrupted visibility", () => {
@@ -1585,8 +1576,8 @@ describe("StatsAggregator", () => {
         }),
         intent,
       ),
-    ).toBe(false);
-    expect(fs.readFileSync(statsPath, "utf-8")).toBe(serialized);
+    ).toBe(true);
+    expect(readStats().schemaVersion).toBe(6);
   });
 
   it.each([
@@ -1630,8 +1621,8 @@ describe("StatsAggregator", () => {
         }),
         intent,
       ),
-    ).toBe(false);
-    expect(fs.readFileSync(statsPath, "utf-8")).toBe(serialized);
+    ).toBe(true);
+    expect(readStats().schemaVersion).toBe(6);
   });
 
   it("counts recorded injected candidates instead of parsing intent prose", () => {
@@ -1900,7 +1891,7 @@ describe("StatsAggregator", () => {
     expect(stats.skills["stale-skill"].lifecycle).toBe("stale");
   });
 
-  it("skips incomplete events and preserves corrupt or invalid stats files", () => {
+  it("skips incomplete events and replaces invalid stats files", () => {
     expect(aggregator.record("missing-intent", {})).toBe(false);
     expect(
       aggregator.record("missing-start", createState({ timestamps: {} })),
@@ -1910,12 +1901,12 @@ describe("StatsAggregator", () => {
     const statsPath = path.join(tempDir, "stats.json");
     fs.writeFileSync(statsPath, "{ broken");
 
-    expect(aggregator.record("session-1", createState(), intent)).toBe(false);
-    expect(fs.readFileSync(statsPath, "utf-8")).toBe("{ broken");
+    expect(aggregator.record("session-1", createState(), intent)).toBe(true);
+    expect(readStats().schemaVersion).toBe(6);
 
     fs.writeFileSync(statsPath, "{}");
-    expect(aggregator.record("session-2", createState(), intent)).toBe(false);
-    expect(fs.readFileSync(statsPath, "utf-8")).toBe("{}");
+    expect(aggregator.record("session-2", createState(), intent)).toBe(true);
+    expect(readStats().schemaVersion).toBe(6);
 
     const malformedNestedStats = {
       schemaVersion: 1,
@@ -1928,10 +1919,8 @@ describe("StatsAggregator", () => {
       processedEvents: {},
     };
     fs.writeFileSync(statsPath, JSON.stringify(malformedNestedStats));
-    expect(aggregator.record("session-3", createState(), intent)).toBe(false);
-    expect(JSON.parse(fs.readFileSync(statsPath, "utf-8"))).toEqual(
-      malformedNestedStats,
-    );
+    expect(aggregator.record("session-3", createState(), intent)).toBe(true);
+    expect(readStats().schemaVersion).toBe(6);
 
     const malformedV2Stats = {
       ...malformedNestedStats,
@@ -1939,10 +1928,8 @@ describe("StatsAggregator", () => {
       projection: {},
     };
     fs.writeFileSync(statsPath, JSON.stringify(malformedV2Stats));
-    expect(aggregator.record("session-4", createState(), intent)).toBe(false);
-    expect(JSON.parse(fs.readFileSync(statsPath, "utf-8"))).toEqual(
-      malformedV2Stats,
-    );
+    expect(aggregator.record("session-4", createState(), intent)).toBe(true);
+    expect(readStats().schemaVersion).toBe(6);
   });
 
   describe("getAcceptedTurnCount", () => {
@@ -1961,13 +1948,13 @@ describe("StatsAggregator", () => {
     it("returns undefined for malformed stats files", () => {
       const statsPath = path.join(tempDir, "stats.json");
       fs.writeFileSync(statsPath, "{ broken json");
-      expect(aggregator.getAcceptedTurnCount()).toBeUndefined();
+      expect(aggregator.getAcceptedTurnCount()).toBe(0);
     });
 
     it("returns undefined for stats with invalid schema", () => {
       const statsPath = path.join(tempDir, "stats.json");
       fs.writeFileSync(statsPath, JSON.stringify({ schemaVersion: 999 }));
-      expect(aggregator.getAcceptedTurnCount()).toBeUndefined();
+      expect(aggregator.getAcceptedTurnCount()).toBe(0);
     });
   });
 });
