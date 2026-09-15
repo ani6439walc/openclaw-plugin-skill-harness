@@ -45,11 +45,3 @@ export function roundToDecimals(value: number, decimals: number = 2): number {
 export function roundToTwoDecimals(value: number): number {
   return roundToDecimals(value, 2);
 }
-
-/**
- * Round a numeric score or margin to 3 decimal places to avoid IEEE 754 floating-point inaccuracies
- * during threshold comparisons.
- */
-export function roundToThreeDecimals(value: number): number {
-  return roundToDecimals(value, 3);
-}

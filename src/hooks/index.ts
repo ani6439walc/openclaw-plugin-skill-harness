@@ -1,4 +1,4 @@
-import { roundToThreeDecimals, roundToTwoDecimals } from "../normalize.js";
+import { roundToTwoDecimals } from "../normalize.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
@@ -1096,8 +1096,8 @@ export function createHookHandlers(deps: HookDeps) {
           } else {
             retrievalCandidates = outcome.hits.flatMap((hit) =>
               hit.semanticScore !== undefined &&
-              roundToThreeDecimals(hit.semanticScore) >=
-                roundToThreeDecimals(policy.search.minCandidateScore)
+              roundToTwoDecimals(hit.semanticScore) >=
+                roundToTwoDecimals(policy.search.minCandidateScore)
                 ? [{ skillName: hit.name, score: hit.semanticScore, source: "direct-retrieval" as const }]
                 : [],
             );
