@@ -211,6 +211,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     ...buildEmbeddedSubagentRunDefaults(),
     modelRun: true,
     promptMode: "none" as const,
+    sessionPersistence: "detached" as const,
     toolsAllow: [],
     disableTools: true,
     thinkLevel: params.params.config.routing.classifier.thinking,
