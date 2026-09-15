@@ -1,4 +1,5 @@
 import { roundToDecimals } from "../normalize.js";
+import type { InputSkillDiscovery } from "../session/index.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
@@ -1049,6 +1050,7 @@ export function createHookHandlers(deps: HookDeps) {
     intentMatchedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     routingEvidence?: IntentRoutingEvidence;
+    inputSkillDiscovery?: InputSkillDiscovery;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): Promise<void> {
     if (!params.association) return;
@@ -1068,6 +1070,9 @@ export function createHookHandlers(deps: HookDeps) {
           ...(params.routingEvidence
             ? { routingEvidence: params.routingEvidence }
             : {}),
+          ...(params.inputSkillDiscovery
+            ? { inputSkillDiscovery: params.inputSkillDiscovery }
+            : {}),
         },
       },
     });
@@ -1082,6 +1087,7 @@ export function createHookHandlers(deps: HookDeps) {
     intentMatchedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
     routingEvidence?: IntentRoutingEvidence;
+    inputSkillDiscovery?: InputSkillDiscovery;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): Promise<void> {
     await recordPromptBuildSession({
@@ -1092,6 +1098,7 @@ export function createHookHandlers(deps: HookDeps) {
       intentMatchedSkills: params.intentMatchedSkills,
       intentProjection: params.intentProjection,
       routingEvidence: params.routingEvidence,
+      inputSkillDiscovery: params.inputSkillDiscovery,
       conversation: params.conversation,
     });
   }
@@ -1131,13 +1138,26 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     conversation: ReturnType<typeof limitConversationTurns>;
     intents: readonly IntentCatalogEntry[];
-  }): Promise<AvailableSkill[]> {
+  }): Promise<{ skills: AvailableSkill[]; telemetry: InputSkillDiscovery }> {
     const policy = params.refreshedConfig.routing.skillCandidates;
-    if (!policy) return [];
-    if (!policy.enabled) return [];
+    if (!policy || !policy.enabled) {
+      return {
+        skills: [],
+        telemetry: {
+          nameCandidates: 0,
+          retrievalAttempted: false,
+          retrievalCandidates: 0,
+          retrievalSemanticScores: [],
+          candidateCount: 0,
+          injectedSkills: [],
+          durationMs: 0,
+        },
+      };
+    }
     const startedAtMs = Date.now();
     let nameCandidates: SkillDiscoveryCandidate[] = [];
     let retrievalCandidates: SkillDiscoveryCandidate[] = [];
+    let retrievalSemanticScores: number[] = [];
     let fallbackReason:
       | "name-channel-unavailable"
       | "retrieval-timeout"
@@ -1162,7 +1182,7 @@ export function createHookHandlers(deps: HookDeps) {
           ? qmdSkillIndex.search({
               agentId: params.routing.effectiveAgentId,
               query: params.latestUserMessage,
-              limit: policy.maxPoolSize,
+              limit: policy.maxInjectedSkills,
               includeEvidence: false,
               ...(expansionContext ? { expansionContext } : {}),
             })
@@ -1199,6 +1219,9 @@ export function createHookHandlers(deps: HookDeps) {
           } else if (outcome.hits === undefined) {
             fallbackReason = "retrieval-unavailable";
           } else {
+            retrievalSemanticScores = outcome.hits.flatMap((hit) =>
+              hit.semanticScore === undefined ? [] : [hit.semanticScore],
+            );
             retrievalCandidates = outcome.hits.flatMap((hit) =>
               hit.semanticScore !== undefined &&
               roundToDecimals(hit.semanticScore, 2) >=
@@ -1230,40 +1253,89 @@ export function createHookHandlers(deps: HookDeps) {
       if (selection.selectedSkills.length === 0 && !fallbackReason) {
         fallbackReason = "empty-pool";
       }
+      const injectedCandidates = selection.pool
+        .filter((candidate) =>
+          selection.selectedSkills.some(
+            (skill) => skill.name === candidate.skillName,
+          ),
+        )
+        .map((candidate) => ({
+          name: candidate.skillName,
+          source: candidate.source,
+        }));
       emitPipelineEvent(
         params.ctx,
         params.routing.resolvedSessionKey,
-        "skill-candidate-pool",
+        "skill-match",
         "completed",
         {
           nameCandidates: nameCandidates.length,
           retrievalCandidates: retrievalCandidates.length,
-          poolSize: selection.pool.length,
+          candidateCount: selection.pool.length,
           injectedCount: selection.selectedSkills.length,
           injectedSkills: selection.selectedSkills.map((skill) => skill.name),
+          reason:
+            [
+              ...new Set(
+                injectedCandidates.map((candidate) => candidate.source),
+              ),
+            ]
+              .map((source) =>
+                source === "name-match" ? "name-match" : "qmd-search",
+              )
+              .join(",") || "none",
+          result:
+            selection.selectedSkills.map((skill) => skill.name).join(",") ||
+            "none",
           ...(fallbackReason ? { fallbackReason } : {}),
           durationMs: Math.max(0, Date.now() - startedAtMs),
         },
       );
-      return [...selection.selectedSkills];
+      return {
+        skills: [...selection.selectedSkills],
+        telemetry: {
+          nameCandidates: nameCandidates.length,
+          retrievalAttempted: policy.search.enabled,
+          retrievalCandidates: retrievalCandidates.length,
+          retrievalSemanticScores,
+          candidateCount: selection.pool.length,
+          injectedSkills: injectedCandidates,
+          ...(fallbackReason ? { fallbackReason } : {}),
+          durationMs: Math.max(0, Date.now() - startedAtMs),
+        },
+      };
     } catch (error) {
       logger.warn("skill candidate discovery failed", { error });
       emitPipelineEvent(
         params.ctx,
         params.routing.resolvedSessionKey,
-        "skill-candidate-pool",
+        "skill-match",
         "failed",
         {
           nameCandidates: nameCandidates.length,
           retrievalCandidates: retrievalCandidates.length,
-          poolSize: 0,
+          candidateCount: 0,
           injectedCount: 0,
           injectedSkills: [],
+          reason: "none",
+          result: "none",
           fallbackReason: fallbackReason ?? "empty-pool",
           durationMs: Math.max(0, Date.now() - startedAtMs),
         },
       );
-      return [];
+      return {
+        skills: [],
+        telemetry: {
+          nameCandidates: nameCandidates.length,
+          retrievalAttempted: policy.search.enabled,
+          retrievalCandidates: retrievalCandidates.length,
+          retrievalSemanticScores,
+          candidateCount: 0,
+          injectedSkills: [],
+          fallbackReason: fallbackReason ?? "empty-pool",
+          durationMs: Math.max(0, Date.now() - startedAtMs),
+        },
+      };
     }
   }
 
@@ -1415,7 +1487,7 @@ export function createHookHandlers(deps: HookDeps) {
       result,
       intent,
     });
-    const inputMatchedSkills = await discoverInputMatchedSkills({
+    const inputSkillMatch = await discoverInputMatchedSkills({
       ctx: params.ctx,
       routing: params.routing,
       refreshedConfig: params.refreshedConfig,
@@ -1432,6 +1504,7 @@ export function createHookHandlers(deps: HookDeps) {
       intentMatchedSkills: routingContext.intentMatchedSkills.map(
         (skill) => skill.name,
       ),
+      inputSkillDiscovery: inputSkillMatch.telemetry,
       intentProjection,
       routingEvidence,
       conversation: params.conversation,
@@ -1442,7 +1515,7 @@ export function createHookHandlers(deps: HookDeps) {
         guidance: intent.definition.guidance,
         intentMatchedSkills: routingContext.intentMatchedSkills,
         experiences: routingContext.experiences,
-        inputMatchedSkills,
+        inputMatchedSkills: inputSkillMatch.skills,
       }),
       params.workingSetSkillsXml,
     );

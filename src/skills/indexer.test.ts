@@ -32,7 +32,7 @@ function writeStats(
     "stats.json",
   );
   fs.mkdirSync(path.dirname(statsFile), { recursive: true });
-  fs.writeFileSync(statsFile, JSON.stringify({ schemaVersion: 6, skills }));
+  fs.writeFileSync(statsFile, JSON.stringify({ schemaVersion: 7, skills }));
 }
 
 function createApi(

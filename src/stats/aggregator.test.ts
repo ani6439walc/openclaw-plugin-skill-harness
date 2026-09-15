@@ -36,6 +36,18 @@ describe("StatsAggregator", () => {
     return {
       input: "commit this",
       intent: {
+        inputSkillDiscovery: {
+          nameCandidates: 1,
+          retrievalAttempted: true,
+          retrievalCandidates: 2,
+          retrievalSemanticScores: [0.72, 0.91],
+          candidateCount: 2,
+          injectedSkills: [
+            { name: "git-master", source: "name-match" },
+            { name: "dev-lifecycle", source: "direct-retrieval" },
+          ],
+          durationMs: 12,
+        },
         result: {
           intent: "version-control",
           reason: "test",
@@ -251,7 +263,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(6);
+    expect(stats.schemaVersion).toBe(7);
     expect(stats.summary.turns).toBe(1);
     expect(stats.routing).toMatchObject({
       intentMatchedTurns: 1,
@@ -263,6 +275,28 @@ describe("StatsAggregator", () => {
       intentMatchedTurns: 1,
       adoptedTurns: 1,
     });
+    expect(stats.skillDiscovery).toEqual({
+      turns: 1,
+      nameMatch: { matchedTurns: 1, candidates: 1, injectedSkills: 1 },
+      qmdSearch: {
+        attemptedTurns: 1,
+        matchedTurns: 1,
+        candidates: 2,
+        semanticScore: { count: 2, average: 0.815, min: 0.72, max: 0.91 },
+        injectedSkills: 1,
+      },
+      pool: {
+        nonEmptyTurns: 1,
+        candidates: 2,
+        injectedTurns: 1,
+        injectedSkills: 2,
+      },
+      fallbackReasons: {},
+      durationMs: { count: 1, average: 12, min: 12, max: 12 },
+    });
+    expect(stats.daily["2026-06-11"].skillDiscovery).toEqual(
+      stats.skillDiscovery,
+    );
     expect(JSON.stringify(stats)).not.toMatch(
       /recommendedTurns|recommendationTurns|recommendedSkillOpportunities/,
     );
@@ -271,12 +305,12 @@ describe("StatsAggregator", () => {
     ]);
   });
 
-  it("replaces a legacy stats file with a fresh v6 window", () => {
+  it("replaces a schema v6 stats file with a fresh v7 window", () => {
     const statsFile = path.join(tempDir, "stats.json");
     fs.writeFileSync(
       statsFile,
       JSON.stringify({
-        schemaVersion: 5,
+        schemaVersion: 6,
         processedEvents: { "old-turn": "old" },
       }),
     );
@@ -284,12 +318,12 @@ describe("StatsAggregator", () => {
     expect(aggregator.record("new-session", createState(), intent)).toBe(true);
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(6);
+    expect(stats.schemaVersion).toBe(7);
     expect(stats.summary.turns).toBe(1);
     expect(stats.processedEvents).not.toHaveProperty("old-turn");
   });
 
-  it("replaces v6 aliases with a fresh v6 window", () => {
+  it("replaces v6 aliases with a fresh v7 window", () => {
     const statsFile = path.join(tempDir, "stats.json");
     expect(aggregator.record("current-session", createState(), intent)).toBe(
       true,
@@ -391,7 +425,7 @@ describe("StatsAggregator", () => {
     ).toBe(true);
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(6);
+    expect(stats.schemaVersion).toBe(7);
     expect(stats.skillInventory.startedAt).toBe("2026-06-11T00:01:00.000Z");
     expect(stats.skillInventory.agents["agent-a"]).toMatchObject({
       observedTurns: 1,
@@ -862,7 +896,7 @@ describe("StatsAggregator", () => {
         intent,
       ),
     ).toBe(true);
-    expect(readStats().schemaVersion).toBe(6);
+    expect(readStats().schemaVersion).toBe(7);
   });
 
   it.each([
@@ -923,7 +957,7 @@ describe("StatsAggregator", () => {
         intent,
       ),
     ).toBe(true);
-    expect(readStats().schemaVersion).toBe(6);
+    expect(readStats().schemaVersion).toBe(7);
   });
 
   it("rejects retired native inventory sources without rewriting stats", () => {
@@ -960,7 +994,7 @@ describe("StatsAggregator", () => {
         intent,
       ),
     ).toBe(true);
-    expect(readStats().schemaVersion).toBe(6);
+    expect(readStats().schemaVersion).toBe(7);
   });
 
   it("restarts a skill observation epoch after interrupted visibility", () => {
@@ -1130,7 +1164,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(6);
+    expect(stats.schemaVersion).toBe(7);
     expect(stats.intents["version-control"].routeReasons).toEqual({
       "qmd-keyword": {
         count: 2,
@@ -1164,7 +1198,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(6);
+    expect(stats.schemaVersion).toBe(7);
     expect(stats.attribution).toEqual({
       startedAt: "2026-06-11T00:01:00.000Z",
     });
@@ -1350,7 +1384,7 @@ describe("StatsAggregator", () => {
     );
 
     const stats = readStats();
-    expect(stats.schemaVersion).toBe(6);
+    expect(stats.schemaVersion).toBe(7);
     expect(stats.projection).toMatchObject({
       eligibleTurns: 2,
       projectedTurns: 1,
@@ -1577,7 +1611,7 @@ describe("StatsAggregator", () => {
         intent,
       ),
     ).toBe(true);
-    expect(readStats().schemaVersion).toBe(6);
+    expect(readStats().schemaVersion).toBe(7);
   });
 
   it.each([
@@ -1622,7 +1656,7 @@ describe("StatsAggregator", () => {
         intent,
       ),
     ).toBe(true);
-    expect(readStats().schemaVersion).toBe(6);
+    expect(readStats().schemaVersion).toBe(7);
   });
 
   it("counts recorded injected candidates instead of parsing intent prose", () => {
@@ -1902,11 +1936,11 @@ describe("StatsAggregator", () => {
     fs.writeFileSync(statsPath, "{ broken");
 
     expect(aggregator.record("session-1", createState(), intent)).toBe(true);
-    expect(readStats().schemaVersion).toBe(6);
+    expect(readStats().schemaVersion).toBe(7);
 
     fs.writeFileSync(statsPath, "{}");
     expect(aggregator.record("session-2", createState(), intent)).toBe(true);
-    expect(readStats().schemaVersion).toBe(6);
+    expect(readStats().schemaVersion).toBe(7);
 
     const malformedNestedStats = {
       schemaVersion: 1,
@@ -1920,7 +1954,7 @@ describe("StatsAggregator", () => {
     };
     fs.writeFileSync(statsPath, JSON.stringify(malformedNestedStats));
     expect(aggregator.record("session-3", createState(), intent)).toBe(true);
-    expect(readStats().schemaVersion).toBe(6);
+    expect(readStats().schemaVersion).toBe(7);
 
     const malformedV2Stats = {
       ...malformedNestedStats,
@@ -1929,7 +1963,7 @@ describe("StatsAggregator", () => {
     };
     fs.writeFileSync(statsPath, JSON.stringify(malformedV2Stats));
     expect(aggregator.record("session-4", createState(), intent)).toBe(true);
-    expect(readStats().schemaVersion).toBe(6);
+    expect(readStats().schemaVersion).toBe(7);
   });
 
   describe("getAcceptedTurnCount", () => {

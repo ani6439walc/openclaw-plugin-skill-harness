@@ -9,6 +9,7 @@ export {
   shouldSkipSkillSystemContext,
 } from "./guards.js";
 export type {
+  InputSkillDiscovery,
   IntentState,
   PromptTurnIdentity,
   PromptTurnPrepareResult,

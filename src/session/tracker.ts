@@ -50,6 +50,24 @@ export interface ToolResultFallback {
   durationMs?: number;
 }
 
+export type InputSkillDiscovery = {
+  nameCandidates: number;
+  retrievalAttempted: boolean;
+  retrievalCandidates: number;
+  retrievalSemanticScores: number[];
+  candidateCount: number;
+  injectedSkills: Array<{
+    name: string;
+    source: "name-match" | "direct-retrieval";
+  }>;
+  fallbackReason?:
+    | "name-channel-unavailable"
+    | "retrieval-timeout"
+    | "retrieval-unavailable"
+    | "empty-pool";
+  durationMs: number;
+};
+
 export interface IntentState {
   input?: RecentTurn[];
   trigger?: IntentTrigger;
@@ -57,6 +75,7 @@ export interface IntentState {
   intentMatchedSkills?: string[];
   intentProjection?: IntentProjectionTelemetry;
   routingEvidence?: IntentRoutingEvidence;
+  inputSkillDiscovery?: InputSkillDiscovery;
 }
 
 export interface SessionState {
@@ -443,6 +462,9 @@ function mergeSessionState(
     }
     if (data.intent.routingEvidence !== undefined) {
       current.intent.routingEvidence = data.intent.routingEvidence;
+    }
+    if (data.intent.inputSkillDiscovery !== undefined) {
+      current.intent.inputSkillDiscovery = data.intent.inputSkillDiscovery;
     }
   }
   if (data.result !== undefined) current.result = data.result;

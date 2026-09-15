@@ -70,9 +70,9 @@ def load_review_log(path: Path) -> dict[str, Any]:
 
 def load_stats(path: Path) -> dict[str, Any]:
     value = load_json(path)
-    if value.get("schemaVersion") != 6:
-        raise ValueError(f"{path} must be a current schema-v6 stats log")
-    for field in ("summary", "routing", "projection"):
+    if value.get("schemaVersion") != 7:
+        raise ValueError(f"{path} must be a current schema-v7 stats log")
+    for field in ("summary", "routing", "projection", "skillDiscovery"):
         require_object(value, field, path)
     attribution = require_object(value, "attribution", path)
     if not isinstance(attribution.get("startedAt"), str):
@@ -410,10 +410,22 @@ def stats_attribution(stats: dict[str, Any]) -> dict[str, Any]:
         if isinstance(date, str) and started_date is not None and date < started_date
     )
     return {
-        "status": "fresh-v6-window",
+        "status": "fresh-v7-window",
         "startedAt": started_at,
         "dailyBucketsBeforeAttribution": historical_days,
-        "note": "Schema v6 begins a fresh telemetry cohort at startedAt.",
+        "note": "Schema v7 begins a fresh telemetry cohort at startedAt.",
+    }
+
+
+def skill_discovery_summary(stats: dict[str, Any]) -> dict[str, Any]:
+    discovery = require_object(stats, "skillDiscovery", Path("stats.json"))
+    return {
+        "turns": number(discovery.get("turns")),
+        "nameMatch": discovery.get("nameMatch"),
+        "qmdSearch": discovery.get("qmdSearch"),
+        "pool": discovery.get("pool"),
+        "fallbackReasons": discovery.get("fallbackReasons"),
+        "durationMs": discovery.get("durationMs"),
     }
 
 
@@ -523,6 +535,7 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
                 "skillAdoptionRate",
             )
         },
+        "skillDiscovery": skill_discovery_summary(stats),
         "projection": {
             key: projection.get(key)
             for key in (
@@ -566,7 +579,7 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
             else 0,
             "topErrorTools": tool_rows[:TOP_TARGETS],
             "latencyHistogram": {
-                "status": "fresh-v6-window",
+                "status": "fresh-v7-window",
                 "toolCount": latency_histogram_tool_count,
                 "buckets": {
                     bucket: latency_histogram[bucket] for bucket in LATENCY_BUCKETS

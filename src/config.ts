@@ -72,7 +72,6 @@ const DEFAULT_SKILL_CANDIDATES: ResolvedSkillCandidatesConfig = {
     minJaccardScore: 0.5,
     genericTokens: [],
   },
-  maxPoolSize: 12,
   maxInjectedSkills: 4,
   minInjectionScore: 0.3,
 };
@@ -365,7 +364,6 @@ const SkillCandidatesSchema = z
     enabled: z.boolean().optional().default(true),
     search: SkillCandidatesSearchSchema,
     nameMatch: SkillCandidatesNameMatchSchema,
-    maxPoolSize: z.number().int().min(1).max(64).optional().default(12),
     maxInjectedSkills: z.number().int().min(0).max(4).optional().default(4),
     minInjectionScore: z
       .number()
@@ -376,14 +374,6 @@ const SkillCandidatesSchema = z
       .default(0.3),
   })
   .strict()
-  .superRefine((value, context) => {
-    if (value.maxInjectedSkills > value.maxPoolSize) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "maxInjectedSkills must be <= maxPoolSize",
-      });
-    }
-  })
   .optional()
   .default(DEFAULT_SKILL_CANDIDATES);
 

@@ -88,7 +88,7 @@ export async function readSkillUsageStats(
   }
 
   if (
-    parsed.schemaVersion !== 6 ||
+    parsed.schemaVersion !== 7 ||
     !parsed.skills ||
     typeof parsed.skills !== "object" ||
     Array.isArray(parsed.skills)

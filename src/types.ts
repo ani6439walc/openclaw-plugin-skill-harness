@@ -65,7 +65,6 @@ export type ResolvedSkillCandidatesConfig = {
   enabled: boolean;
   search: ResolvedSkillCandidateSearchConfig;
   nameMatch: ResolvedSkillCandidateNameMatchConfig;
-  maxPoolSize: number;
   maxInjectedSkills: number;
   minInjectionScore: number;
 };

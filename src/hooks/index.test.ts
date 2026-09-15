@@ -4613,6 +4613,60 @@ describe("createHookHandlers topic switch flow", () => {
     );
   });
 
+  it("records skill match methods and injected names", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-skill-match-event-"),
+    );
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    writeSkill(path.join(workspace, "skills"), "review", "Review code.");
+    const search = vi
+      .fn()
+      .mockResolvedValue([{ name: "review", score: 0.7, semanticScore: 0.9 }]);
+    const { handlers, emitAgentEvent, record } = createTopicFlowHarness({
+      historicalIntents: [],
+      qmdSkillIndex: { search },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => state },
+          agent: { resolveAgentWorkspaceDir: () => workspace },
+        },
+      } as unknown as Partial<OpenClawPluginApi>,
+    });
+    try {
+      const result = await handlers.onBeforePromptBuild(event, ctx);
+      expect(result?.prependContext).toContain("<input_matched_skills>");
+      const skillMatchEvent = emittedPipelineEvents(emitAgentEvent).find(
+        (entry) =>
+          entry.data.phase === "skill-match" &&
+          entry.data.state === "completed",
+      );
+      expect(skillMatchEvent?.data).toEqual(
+        expect.objectContaining({ reason: "qmd-search", result: "review" }),
+      );
+      expect(record).toHaveBeenLastCalledWith(
+        "session-1",
+        expect.objectContaining({
+          current: expect.objectContaining({
+            intent: expect.objectContaining({
+              inputSkillDiscovery: expect.objectContaining({
+                nameCandidates: 0,
+                retrievalAttempted: true,
+                retrievalCandidates: 1,
+                retrievalSemanticScores: [0.9],
+                injectedSkills: [
+                  { name: "review", source: "direct-retrieval" },
+                ],
+              }),
+            }),
+          }),
+        }),
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("continues prompt construction after a timed-out skill search rejects", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-skill-search-timeout-"),

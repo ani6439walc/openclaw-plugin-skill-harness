@@ -26,7 +26,7 @@ python3 skills/skill-harness/scripts/runtime-health-audit.py \
 
 The script resolves the standard data root automatically. Use `--data-root` only for an intentionally nonstandard layout.
 
-It reads and validates schema-v8 `review.json` and the current schema-v6 `stats.json`. Stats schema v6 is a fresh telemetry cohort and older stats schemas are rejected without migration. It records SHA-256 values for both before loading, rereads them afterward, and refuses to produce a mixed-state report if either changed. QMD is read once through a read-only SQLite connection and is reported as an observed point-in-time state; its active background build is not pinned or hashed. Session files are intentionally not hashed or snapshotted; treat the report as an observed window, not an immutable whole-runtime snapshot.
+It reads and validates schema-v8 `review.json` and the current schema-v7 `stats.json`. Stats schema v7 is a fresh telemetry cohort and older stats schemas are rejected without migration. It records SHA-256 values for both before loading, rereads them afterward, and refuses to produce a mixed-state report if either changed. QMD is read once through a read-only SQLite connection and is reported as an observed point-in-time state; its active background build is not pinned or hashed. Session files are intentionally not hashed or snapshotted; treat the report as an observed window, not an immutable whole-runtime snapshot.
 
 The managed intent snapshot lives under `<dataRoot>/qmd/intents/`: searchable plain-text documents are in `examples/` and `keywords/`, identity sidecars end in `.md.identity.yml` and are ignored by QMD collections, and `intent-routing.sqlite` plus `intent-routing.json` are colocated with the snapshot.
 
@@ -34,7 +34,7 @@ Completion criterion: report `reportOnly` is true, all privacy flags are false, 
 
 ## Check structural health before interpreting trends
 
-1. `review` must have schema version 8; `stats` must have schema version 6. Stop on another version; do not migrate or hand-edit it during an audit.
+1. `review` must have schema version 8; `stats` must have schema version 7. Stop on another version; do not migrate or hand-edit it during an audit.
 2. `sessions.invalidSessionFiles`, `sessions.sessionsMissingCurrent`, and `sessions.sessionsWithInvalidHistory` must be zero. A nonzero value is a persistence/shape issue, not a routing-quality signal.
 3. `qmd.databaseStatus` should be `ready`, `integrityCheck` should be `ok`, and `leaseActive` should be false before treating QMD direct routes as healthy. `indexedDocuments` and `indexedVectors` should match.
 4. `review.json` records only the post-turn triggers `intent-health-check`, `routing-uncertainty`, and `capability-fit`. Live routing remains `qmd-keyword → qmd-hybrid → llm-classifier` and is independent of review.

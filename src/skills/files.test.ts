@@ -58,7 +58,7 @@ function writeStats(stateDir: string): void {
   fs.writeFileSync(
     statsFile,
     JSON.stringify({
-      schemaVersion: 6,
+      schemaVersion: 7,
       skills: {
         writer: {
           usageTurns: 9,

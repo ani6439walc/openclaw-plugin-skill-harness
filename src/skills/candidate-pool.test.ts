@@ -17,7 +17,6 @@ describe("selectSkillCandidates", () => {
         { skillName: "hidden", score: 1, source: "name-match" },
       ],
       options: {
-        maxPoolSize: 12,
         maxInjectedSkills: 4,
         minInjectionScore: 0.3,
       },
@@ -39,7 +38,7 @@ describe("selectSkillCandidates", () => {
         { skillName: "BETA", score: 0.6, source: "name-match" },
         { skillName: "ALPHA", score: 0.6, source: "name-match" },
       ],
-      options: { maxPoolSize: 12, maxInjectedSkills: 4, minInjectionScore: 0 },
+      options: { maxInjectedSkills: 4, minInjectionScore: 0 },
     });
 
     expect(result.pool.map((candidate) => candidate.skillName)).toEqual([
@@ -48,16 +47,19 @@ describe("selectSkillCandidates", () => {
     ]);
   });
 
-  it("applies pool and injection limits with the injection threshold", () => {
+  it("preserves all deduplicated candidates while limiting injected skills", () => {
     const result = selectSkillCandidates({
       visibleSkills: skills,
       candidates: [
         { skillName: "alpha", score: 0.9, source: "name-match" },
         { skillName: "beta", score: 0.2, source: "direct-retrieval" },
       ],
-      options: { maxPoolSize: 1, maxInjectedSkills: 1, minInjectionScore: 0.3 },
+      options: { maxInjectedSkills: 1, minInjectionScore: 0.1 },
     });
-    expect(result.pool).toHaveLength(1);
+    expect(result.pool.map((candidate) => candidate.skillName)).toEqual([
+      "alpha",
+      "beta",
+    ]);
     expect(result.selectedSkills.map((skill) => skill.name)).toEqual(["alpha"]);
   });
 });

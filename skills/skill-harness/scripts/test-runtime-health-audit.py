@@ -97,7 +97,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         (self.root / "stats.json").write_text(
             json.dumps(
                 {
-                    "schemaVersion": 6,
+                    "schemaVersion": 7,
                     "createdAt": "2026-08-01T00:00:00.000Z",
                     "updatedAt": "2026-08-01T00:02:00.000Z",
                     "attribution": {"startedAt": "2026-08-01T00:00:00.000Z"},
@@ -177,6 +177,20 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                                 "5000+": 0,
                             },
                         }
+                    },
+                    "skillDiscovery": {
+                        "turns": 2,
+                        "nameMatch": {"matchedTurns": 1, "candidates": 1, "injectedSkills": 1},
+                        "qmdSearch": {
+                            "attemptedTurns": 2,
+                            "matchedTurns": 1,
+                            "candidates": 2,
+                            "semanticScore": {"count": 2, "average": 0.8, "min": 0.7, "max": 0.9},
+                            "injectedSkills": 1,
+                        },
+                        "pool": {"nonEmptyTurns": 1, "candidates": 2, "injectedTurns": 1, "injectedSkills": 2},
+                        "fallbackReasons": {"empty-pool": 1},
+                        "durationMs": {"count": 2, "average": 10, "min": 8, "max": 12},
                     },
                     "projection": {
                         "eligibleTurns": 1,
@@ -312,7 +326,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         )
         self.assertEqual(set(report["provenance"]["stateSha256"]), {"review.json", "stats.json"})
         stats = report["runtime"]["stats"]
-        self.assertEqual(stats["attribution"]["status"], "fresh-v6-window")
+        self.assertEqual(stats["attribution"]["status"], "fresh-v7-window")
         self.assertNotIn("routingEffectiveness", stats)
         self.assertNotIn("projectionEfficiency", stats)
         self.assertEqual(stats["routing"]["turnAdoptionRate"], 0.5)
@@ -329,7 +343,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(stats["skillLifecycle"]["lowAdoptionCohort"], [{"skill": "example-skill", "intentMatchedTurns": 2, "adoptedTurns": 1, "adoptionRate": 0.5, "lifecycle": "active"}])
         self.assertEqual(stats["toolReliability"]["errorCalls"], 1)
         self.assertEqual(stats["toolReliability"]["errorRate"], 0.5)
-        self.assertEqual(stats["toolReliability"]["latencyHistogram"]["status"], "fresh-v6-window")
+        self.assertEqual(stats["toolReliability"]["latencyHistogram"]["status"], "fresh-v7-window")
         self.assertEqual(stats["dataHealth"]["dailyBucketCount"], 1)
         self.assertEqual(stats["dataHealth"]["statsUpdatedAt"], "2026-08-01T00:02:00.000Z")
         self.assertEqual(stats["dataHealth"]["retainedProcessedEventCount"], 1)
@@ -357,7 +371,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
     def test_reports_v6_route_scores_and_attribution_boundary(self) -> None:
         stats_path = self.root / "stats.json"
         stats = json.loads(stats_path.read_text(encoding="utf-8"))
-        stats["schemaVersion"] = 6
+        stats["schemaVersion"] = 7
         stats["attribution"] = {"startedAt": "2026-08-01T00:02:00.000Z"}
         stats["intents"]["example"]["routeReasons"] = {
             "qmd-keyword": {
@@ -408,7 +422,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
 
         report = self.run_audit()
         runtime_stats = report["runtime"]["stats"]
-        self.assertEqual(runtime_stats["attribution"]["status"], "fresh-v6-window")
+        self.assertEqual(runtime_stats["attribution"]["status"], "fresh-v7-window")
         self.assertEqual(runtime_stats["attribution"]["startedAt"], "2026-08-01T00:02:00.000Z")
         self.assertEqual(runtime_stats["attribution"]["dailyBucketsBeforeAttribution"], 0)
         self.assertEqual(
@@ -458,7 +472,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
             },
         )
         self.assertEqual(runtime_stats["toolReliability"]["latencyHistogram"], {
-            "status": "fresh-v6-window",
+            "status": "fresh-v7-window",
             "toolCount": 1,
             "buckets": {
                 "unknown": 0,
@@ -494,7 +508,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("schema-v6", result.stderr)
+        self.assertIn("schema-v7", result.stderr)
 
 
 if __name__ == "__main__":

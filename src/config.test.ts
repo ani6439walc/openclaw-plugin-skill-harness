@@ -147,6 +147,16 @@ describe("resolveConfig", () => {
     });
   });
 
+  describe("skill candidates", () => {
+    it("does not retain an independent candidate pool cap", () => {
+      const candidates = resolveConfig({}).routing.skillCandidates;
+      expect(candidates).not.toHaveProperty("maxPoolSize");
+      expect(() =>
+        resolveConfig({ routing: { skillCandidates: { maxPoolSize: 12 } } }),
+      ).toThrow();
+    });
+  });
+
   describe("skills", () => {
     it("resolves absolute shared roots in configured order and removes duplicates", () => {
       expect(
@@ -1026,7 +1036,6 @@ describe("resolveConfig", () => {
           minJaccardScore: 0.5,
           genericTokens: [],
         },
-        maxPoolSize: 12,
         maxInjectedSkills: 4,
         minInjectionScore: 0.3,
       });
@@ -1043,7 +1052,6 @@ describe("resolveConfig", () => {
               minJaccardScore: 0.75,
               genericTokens: ["Code", "code", "  Review  "],
             },
-            maxPoolSize: 20,
             maxInjectedSkills: 3,
             minInjectionScore: 0.4,
           },
@@ -1059,7 +1067,6 @@ describe("resolveConfig", () => {
           minJaccardScore: 0.75,
           genericTokens: ["code", "review"],
         },
-        maxPoolSize: 20,
         maxInjectedSkills: 3,
         minInjectionScore: 0.4,
       });
@@ -1069,9 +1076,7 @@ describe("resolveConfig", () => {
       for (const skillCandidates of [
         { search: { timeoutMs: 99 } },
         { nameMatch: { maxEditDistance: 3 } },
-        { maxPoolSize: 65 },
         { maxInjectedSkills: 5 },
-        { maxPoolSize: 2, maxInjectedSkills: 3 },
         { minInjectionScore: Number.NaN },
       ]) {
         expect(() => resolveConfig({ routing: { skillCandidates } })).toThrow();

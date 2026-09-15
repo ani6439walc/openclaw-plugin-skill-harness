@@ -10,7 +10,6 @@ export type SkillDiscoveryCandidate = {
 };
 
 export type CandidatePoolOptions = {
-  maxPoolSize: number;
   maxInjectedSkills: number;
   minInjectionScore: number;
 };
@@ -53,8 +52,7 @@ export function selectSkillCandidates(params: {
         right.score - left.score ||
         leftIdentity.localeCompare(rightIdentity, "en"),
     )
-    .map(([, candidate]) => candidate)
-    .slice(0, params.options.maxPoolSize);
+    .map(([, candidate]) => candidate);
   const selectedSkills = pool
     .filter((candidate) => candidate.score >= params.options.minInjectionScore)
     .slice(0, params.options.maxInjectedSkills)

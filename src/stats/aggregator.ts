@@ -89,6 +89,37 @@ type DailyProjectionCounts = {
   fallbackReasons: CountMap;
 };
 
+type ScoreStats = {
+  count: number;
+  average: number;
+  min: number;
+  max: number;
+};
+
+type SkillDiscoveryStats = {
+  turns: number;
+  nameMatch: {
+    matchedTurns: number;
+    candidates: number;
+    injectedSkills: number;
+  };
+  qmdSearch: {
+    attemptedTurns: number;
+    matchedTurns: number;
+    candidates: number;
+    semanticScore: ScoreStats;
+    injectedSkills: number;
+  };
+  pool: {
+    nonEmptyTurns: number;
+    candidates: number;
+    injectedTurns: number;
+    injectedSkills: number;
+  };
+  fallbackReasons: CountMap;
+  durationMs: ScoreStats;
+};
+
 type DailyBucket = {
   turns: number;
   erroredTurns: number;
@@ -101,6 +132,7 @@ type DailyBucket = {
   intentRouting: Record<string, DailyRoutingCounts>;
   skillRouting: Record<string, DailySkillRouting>;
   toolErrors: CountMap;
+  skillDiscovery: SkillDiscoveryStats;
 };
 
 type ProjectionStats = DailyProjectionCounts & {
@@ -169,7 +201,7 @@ export interface SkillPlacementCandidate {
 }
 
 type Stats = {
-  schemaVersion: 6;
+  schemaVersion: 7;
   createdAt: string;
   updatedAt: string;
   attribution: { startedAt: string };
@@ -213,6 +245,7 @@ type Stats = {
     }
   >;
   projection: ProjectionStats;
+  skillDiscovery: SkillDiscoveryStats;
   skillInventory: SkillInventoryStats;
   daily: Record<string, DailyBucket>;
   processedEvents: Record<string, string>;
@@ -263,6 +296,32 @@ function emptyLatencyHistogram(): LatencyHistogram {
   };
 }
 
+function emptyScoreStats(): ScoreStats {
+  return { count: 0, average: 0, min: 1, max: 0 };
+}
+
+function emptySkillDiscoveryStats(): SkillDiscoveryStats {
+  return {
+    turns: 0,
+    nameMatch: { matchedTurns: 0, candidates: 0, injectedSkills: 0 },
+    qmdSearch: {
+      attemptedTurns: 0,
+      matchedTurns: 0,
+      candidates: 0,
+      semanticScore: emptyScoreStats(),
+      injectedSkills: 0,
+    },
+    pool: {
+      nonEmptyTurns: 0,
+      candidates: 0,
+      injectedTurns: 0,
+      injectedSkills: 0,
+    },
+    fallbackReasons: {},
+    durationMs: emptyScoreStats(),
+  };
+}
+
 function emptyProjectionStats(): ProjectionStats {
   return {
     ...emptyDailyProjectionCounts(),
@@ -281,7 +340,7 @@ function emptyProjectionStats(): ProjectionStats {
 
 function createStats(nowIso: string): Stats {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     createdAt: nowIso,
     updatedAt: nowIso,
     attribution: { startedAt: nowIso },
@@ -302,6 +361,7 @@ function createStats(nowIso: string): Stats {
     routing: { ...emptyRoutingCounts(), byIntent: {} },
     tools: {},
     projection: emptyProjectionStats(),
+    skillDiscovery: emptySkillDiscoveryStats(),
     skillInventory: { startedAt: nowIso, agents: {} },
     daily: {},
     processedEvents: {},
@@ -357,6 +417,7 @@ function createDailyBucket(): DailyBucket {
     intentRouting: {},
     skillRouting: {},
     toolErrors: {},
+    skillDiscovery: emptySkillDiscoveryStats(),
   };
 }
 
@@ -692,12 +753,44 @@ function isDailyBucket(value: unknown): value is DailyBucket {
     isCountMap(value.tools) &&
     hasNumbers(value.routing, DAILY_ROUTING_FIELDS) &&
     isDailyProjectionCounts(value.projection) &&
+    isSkillDiscoveryStats(value.skillDiscovery) &&
     isBoundedDailyAttributionMap(value.intentOutcomes, isDailyIntentOutcomes) &&
     isBoundedDailyAttributionMap(value.intentRouting, (entry) =>
       hasNonNegativeIntegers(entry, DAILY_ROUTING_FIELDS),
     ) &&
     isBoundedDailyAttributionMap(value.skillRouting, isDailySkillRouting) &&
     isBoundedDailyAttributionMap(value.toolErrors, isNonNegativeInteger)
+  );
+}
+
+function isScoreStats(value: unknown): value is ScoreStats {
+  return hasNumbers(value, ["count", "average", "min", "max"]);
+}
+
+function isSkillDiscoveryStats(value: unknown): value is SkillDiscoveryStats {
+  return (
+    isRecord(value) &&
+    hasNumbers(value, ["turns"]) &&
+    hasNumbers(value.nameMatch, [
+      "matchedTurns",
+      "candidates",
+      "injectedSkills",
+    ]) &&
+    hasNumbers(value.qmdSearch, [
+      "attemptedTurns",
+      "matchedTurns",
+      "candidates",
+      "injectedSkills",
+    ]) &&
+    isScoreStats(value.qmdSearch.semanticScore) &&
+    hasNumbers(value.pool, [
+      "nonEmptyTurns",
+      "candidates",
+      "injectedTurns",
+      "injectedSkills",
+    ]) &&
+    isCountMap(value.fallbackReasons) &&
+    isScoreStats(value.durationMs)
   );
 }
 
@@ -720,7 +813,7 @@ function isProjectionStats(value: unknown): value is ProjectionStats {
 }
 
 function assertStats(stats: unknown): asserts stats is Stats {
-  if (!isRecord(stats) || stats.schemaVersion !== 6) {
+  if (!isRecord(stats) || stats.schemaVersion !== 7) {
     throw new Error("unsupported or invalid stats schema");
   }
   if (
@@ -742,6 +835,7 @@ function assertStats(stats: unknown): asserts stats is Stats {
     !isRecord(stats.skills) ||
     !isRecord(stats.routing) ||
     !isRecord(stats.tools) ||
+    !isSkillDiscoveryStats(stats.skillDiscovery) ||
     !isRecord(stats.daily) ||
     !isRecord(stats.processedEvents)
   ) {
@@ -1100,6 +1194,47 @@ function incrementBoundedReason(counts: CountMap, reason: string): void {
   increment(counts, normalized);
 }
 
+function recordScore(stats: ScoreStats, value: number): void {
+  if (stats.count === 0) {
+    stats.count = 1;
+    stats.average = value;
+    stats.min = value;
+    stats.max = value;
+    return;
+  }
+  stats.average = rate(stats.average * stats.count + value, stats.count + 1);
+  stats.count += 1;
+  stats.min = Math.min(stats.min, value);
+  stats.max = Math.max(stats.max, value);
+}
+
+function recordSkillDiscoveryStats(
+  target: SkillDiscoveryStats,
+  discovery: NonNullable<
+    NonNullable<SessionState["intent"]>["inputSkillDiscovery"]
+  >,
+): void {
+  target.turns += 1;
+  target.nameMatch.candidates += discovery.nameCandidates;
+  target.nameMatch.matchedTurns += discovery.nameCandidates > 0 ? 1 : 0;
+  target.qmdSearch.attemptedTurns += discovery.retrievalAttempted ? 1 : 0;
+  target.qmdSearch.candidates += discovery.retrievalCandidates;
+  target.qmdSearch.matchedTurns += discovery.retrievalCandidates > 0 ? 1 : 0;
+  for (const score of discovery.retrievalSemanticScores)
+    recordScore(target.qmdSearch.semanticScore, score);
+  target.pool.candidates += discovery.candidateCount;
+  target.pool.nonEmptyTurns += discovery.candidateCount > 0 ? 1 : 0;
+  target.pool.injectedTurns += discovery.injectedSkills.length > 0 ? 1 : 0;
+  target.pool.injectedSkills += discovery.injectedSkills.length;
+  for (const skill of discovery.injectedSkills) {
+    if (skill.source === "name-match") target.nameMatch.injectedSkills += 1;
+    else target.qmdSearch.injectedSkills += 1;
+  }
+  if (discovery.fallbackReason)
+    incrementBoundedReason(target.fallbackReasons, discovery.fallbackReason);
+  recordScore(target.durationMs, discovery.durationMs);
+}
+
 function recordProjectionStats(
   stats: Stats,
   projection: NonNullable<
@@ -1231,6 +1366,9 @@ function recordDailyStats(params: {
   projection?: NonNullable<
     NonNullable<SessionState["intent"]>["intentProjection"]
   >;
+  inputSkillDiscovery?: NonNullable<
+    NonNullable<SessionState["intent"]>["inputSkillDiscovery"]
+  >;
 }): void {
   const {
     stats,
@@ -1242,6 +1380,7 @@ function recordDailyStats(params: {
     adoptedSkills,
     errored,
     projection,
+    inputSkillDiscovery,
   } = params;
   const daily = getOrCreateOwnRecordValue(stats.daily, date, createDailyBucket);
   daily.turns += 1;
@@ -1295,6 +1434,8 @@ function recordDailyStats(params: {
     }
   }
   if (projection) recordDailyProjectionStats(daily, projection);
+  if (inputSkillDiscovery)
+    recordSkillDiscoveryStats(daily.skillDiscovery, inputSkillDiscovery);
 }
 
 function createSkillInventoryObservation(params: {
@@ -1658,6 +1799,10 @@ export class StatsAggregator {
         }
         recordToolStats({ stats, toolCalls, toolNames, eventTime });
         if (projection) recordProjectionStats(stats, projection);
+        const inputSkillDiscovery = state.intent?.inputSkillDiscovery;
+        if (inputSkillDiscovery) {
+          recordSkillDiscoveryStats(stats.skillDiscovery, inputSkillDiscovery);
+        }
         recordDailyStats({
           stats,
           date,
@@ -1668,6 +1813,7 @@ export class StatsAggregator {
           adoptedSkills,
           errored,
           projection,
+          inputSkillDiscovery,
         });
       } else if (projection) {
         recordProjectionStats(stats, projection);
