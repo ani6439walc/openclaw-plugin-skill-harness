@@ -16,6 +16,17 @@ describe("skill name matching", () => {
     expect(extractEnglishSegments("幫我 code 的 review")).toBe("code review");
   });
 
+  it("normalizes Latin accents before extracting name tokens", () => {
+    expect(extractEnglishSegments("café")).toBe("cafe");
+    expect(
+      matchAvailableSkillNames({
+        skills: [{ name: "café-guide", description: "Cafe", location: "" }],
+        input: "cafe guide",
+        options,
+      }),
+    ).toEqual([expect.objectContaining({ skillName: "café-guide", score: 1 })]);
+  });
+
   it("preserves technical punctuation before tokenization", () => {
     expect(extractEnglishSegments("請用 c++ 或 c#")).toBe("c++ c#");
   });

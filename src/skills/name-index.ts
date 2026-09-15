@@ -53,6 +53,8 @@ type IndexedSkill = { skill: AvailableSkill; tokens: string[] };
 
 export function extractEnglishSegments(text: string): string {
   return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
     .replace(/[^A-Za-z0-9_\-\s+#]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
