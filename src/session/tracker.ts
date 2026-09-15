@@ -7,6 +7,7 @@ import type {
   IntentionResult,
   IntentTrigger,
   IntentProjectionTelemetry,
+  IntentRoutingEvidence,
   HistoricalIntentRecord,
 } from "../types.js";
 import type { ReviewSnapshot, ReviewState } from "../review/types.js";
@@ -55,6 +56,7 @@ export interface IntentState {
   result?: IntentionResult;
   intentMatchedSkills?: string[];
   intentProjection?: IntentProjectionTelemetry;
+  routingEvidence?: IntentRoutingEvidence;
 }
 
 export interface SessionState {
@@ -448,6 +450,9 @@ function mergeSessionState(
     }
     if (data.intent.intentProjection !== undefined) {
       current.intent.intentProjection = data.intent.intentProjection;
+    }
+    if (data.intent.routingEvidence !== undefined) {
+      current.intent.routingEvidence = data.intent.routingEvidence;
     }
   }
   if (data.result !== undefined) current.result = data.result;

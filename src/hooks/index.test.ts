@@ -2626,29 +2626,48 @@ describe("createHookHandlers topic switch flow", () => {
     const defaultQmdIntentIndex = {
       searchKeywords: vi
         .fn()
-        .mockImplementation(async ({ query }: { query: string }) => {
-          const normalizedQuery = query.toLowerCase().replace(/\s+/g, "");
-          const matched = intents.find((entry) =>
-            entry.definition.keywords.some((k) => {
-              const normalizedK = k.toLowerCase().replace(/\s+/g, "");
-              return (
-                normalizedQuery === normalizedK ||
-                normalizedQuery.includes(normalizedK)
-              );
-            }),
-          );
-          if (matched) {
-            return [
-              {
-                intentId: matched.id,
-                score: 0.95,
-                collection: "intent-keywords",
-              },
-            ];
-          }
-          return [];
-        }),
-      searchIntentExamplesAndKeywords: vi.fn().mockResolvedValue([]),
+        .mockImplementation(
+          async ({
+            query,
+            includeRawResults,
+          }: {
+            query: string;
+            includeRawResults?: boolean;
+          }) => {
+            const normalizedQuery = query.toLowerCase().replace(/\s+/g, "");
+            const matched = intents.find((entry) =>
+              entry.definition.keywords.some((k) => {
+                const normalizedK = k.toLowerCase().replace(/\s+/g, "");
+                return (
+                  normalizedQuery === normalizedK ||
+                  normalizedQuery.includes(normalizedK)
+                );
+              }),
+            );
+            const hits = matched
+              ? [
+                  {
+                    intentId: matched.id,
+                    score: 0.95,
+                    collection: "intent-keywords",
+                  },
+                ]
+              : [];
+            return includeRawResults
+              ? {
+                  hits,
+                  rawResults: hits.map((hit) => ({
+                    filepath: `/snapshot/${hit.collection}/${hit.intentId}-0.md`,
+                    score: hit.score,
+                  })),
+                }
+              : hits;
+          },
+        ),
+      searchIntentExamplesAndKeywords: vi.fn().mockImplementation(
+        async ({ includeRawResults }: { includeRawResults?: boolean }) =>
+          includeRawResults ? { hits: [], rawResults: [] } : [],
+      ),
     };
     const qmdIntentIndex = params.qmdIntentIndex ?? defaultQmdIntentIndex;
     const handlers = createHookHandlers({
@@ -2767,31 +2786,55 @@ describe("createHookHandlers topic switch flow", () => {
         intentId: string;
         score: number;
         collection: string;
+        explain?: unknown;
       }>;
       keywordHits?: Array<{
         intentId: string;
         score: number;
         collection: string;
+        explain?: unknown;
       }>;
       keywordSearchUnavailable?: boolean;
       hybridHits?: Array<{
         intentId: string;
         score: number;
         collection: string;
+        explain?: unknown;
       }>;
     } = {},
   ) {
     const keywordHits = params.keywordHits ?? params.topicHits ?? [];
+    const rawResults = (
+      hits: readonly {
+        intentId: string;
+        score: number;
+        collection: string;
+        explain?: unknown;
+      }[],
+    ) =>
+      hits.map((hit) => ({
+        filepath: `/snapshot/${hit.collection}/${hit.intentId}-0.md`,
+        score: hit.score,
+        ...(hit.explain === undefined ? {} : { explain: hit.explain }),
+      }));
     return {
-      searchKeywords: vi
-        .fn()
-        .mockResolvedValue(
-          params.keywordSearchUnavailable ? undefined : keywordHits,
-        ),
+      searchKeywords: vi.fn().mockImplementation(
+        async ({ includeRawResults }: { includeRawResults?: boolean }) =>
+          params.keywordSearchUnavailable
+            ? undefined
+            : includeRawResults
+              ? { hits: keywordHits, rawResults: rawResults(keywordHits) }
+              : keywordHits,
+      ),
       searchTopicKeywords: vi.fn().mockResolvedValue(params.topicHits ?? []),
-      searchIntentExamplesAndKeywords: vi
-        .fn()
-        .mockResolvedValue(params.hybridHits ?? []),
+      searchIntentExamplesAndKeywords: vi.fn().mockImplementation(
+        async ({ includeRawResults }: { includeRawResults?: boolean }) => {
+          const hybridHits = params.hybridHits ?? [];
+          return includeRawResults
+            ? { hits: hybridHits, rawResults: rawResults(hybridHits) }
+            : hybridHits;
+        },
+      ),
     };
   }
 
@@ -3490,6 +3533,128 @@ describe("createHookHandlers topic switch flow", () => {
     for (const entry of completedQmdEvents) {
       expect(entry.data).not.toHaveProperty("complexity");
     }
+  });
+
+  it("persists complete QMD retrieval evidence before classifier fallback", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      reason: "User wants repository maintenance",
+      confidence: 0.9,
+    });
+    const keywordHit = {
+      intentId: "version-control",
+      score: 0.79,
+      collection: "intent-keywords",
+    };
+    const hybridHit = {
+      intentId: "version-control",
+      score: 0.55,
+      collection: "intent-examples-and-keywords",
+      explain: {
+        vectorScores: [0.55],
+        ftsScores: [0.21],
+        rrf: { contributions: [{ queryType: "vec", rank: 1 }] },
+      },
+    };
+    const { handlers, record } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      classifier,
+      qmdIntentIndex: qmdIndex({
+        keywordHits: [keywordHit],
+        hybridHits: [hybridHit],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(
+      {
+        prompt: "please commit this",
+        messages: [{ role: "user", content: "please commit this" }],
+      } as never,
+      ctx,
+    );
+
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "qmd-keyword",
+          state: "completed",
+          searchEvidence: expect.objectContaining({
+            hits: [keywordHit],
+            rawResults: [
+              {
+                filepath: "/snapshot/intent-keywords/version-control-0.md",
+                score: 0.79,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "qmd-hybrid",
+          state: "completed",
+          searchEvidence: expect.objectContaining({
+            hits: [hybridHit],
+            rawResults: [expect.objectContaining({ explain: hybridHit.explain })],
+          }),
+        }),
+      }),
+    );
+    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phase: "llm-classifier",
+          state: "completed",
+          routingEvidence: expect.objectContaining({
+            keyword: expect.objectContaining({ hits: [keywordHit] }),
+            hybrid: expect.objectContaining({ hits: [hybridHit] }),
+          }),
+        }),
+      }),
+    );
+    expect(record).toHaveBeenLastCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          intent: expect.objectContaining({
+            trigger: "llm-classifier",
+            routingEvidence: {
+              keyword: {
+                query: "please commit this",
+                hits: [keywordHit],
+                rawResults: [
+                  {
+                    filepath: "/snapshot/intent-keywords/version-control-0.md",
+                    score: 0.79,
+                  },
+                ],
+                outcome: "below-threshold",
+                directRouteMinScore: 0.85,
+              },
+              hybrid: {
+                query: "please commit this",
+                hits: [hybridHit],
+                rawResults: [
+                  {
+                    filepath:
+                      "/snapshot/intent-examples-and-keywords/version-control-0.md",
+                    score: 0.55,
+                    explain: hybridHit.explain,
+                  },
+                ],
+                outcome: "below-threshold",
+                directRouteMinScore: 0.9,
+                directRouteMinMargin: 0.08,
+                expansionContext: expect.any(String),
+              },
+            },
+          }),
+        }),
+      }),
+    );
   });
 
   it("records empty QMD results as completed searches without index errors", async () => {

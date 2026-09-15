@@ -167,6 +167,93 @@ describe("SessionTracker", () => {
       expect(customTracker).toBeInstanceOf(SessionTracker);
     });
 
+    it("persists complete routing evidence with the classified turn", async () => {
+      const prepared = await tracker.preparePromptTurn({
+        sessionId: "routing-evidence",
+        agentId: "test-agent",
+        input: "please commit this",
+        startedAt: "2026-07-07T11:00:00.000Z",
+      });
+      expect(prepared.status).toBe("applied");
+      if (prepared.status !== "applied") return;
+
+      const hybridExplain = {
+        vectorScores: [0.55],
+        ftsScores: [0.21],
+        rrf: { contributions: [{ queryType: "vec", rank: 1 }] },
+      };
+      await expect(
+        tracker.mergeTurnAndPersist({
+          sessionId: "routing-evidence",
+          expectedTurnKey: prepared.identity.turnKey,
+          data: {
+            intent: {
+              trigger: "llm-classifier",
+              result: {
+                intent: "version-control",
+                reason: "User requests repository maintenance.",
+                domain: "git",
+                confidence: 0.9,
+              },
+              routingEvidence: {
+                keyword: {
+                  query: "please commit this",
+                  hits: [
+                    {
+                      intentId: "version-control",
+                      score: 0.79,
+                      collection: "intent-keywords",
+                    },
+                  ],
+                  rawResults: [
+                    {
+                      filepath: "/snapshot/intent-keywords/version-control-0.md",
+                      score: 0.79,
+                    },
+                  ],
+                  outcome: "below-threshold",
+                  directRouteMinScore: 0.85,
+                },
+                hybrid: {
+                  query: "please commit this",
+                  hits: [
+                    {
+                      intentId: "version-control",
+                      score: 0.55,
+                      collection: "intent-examples-and-keywords",
+                      explain: hybridExplain,
+                    },
+                  ],
+                  rawResults: [
+                    {
+                      body: "---\nintent_id: version-control\n---\nplease commit this",
+                      score: 0.55,
+                      explain: hybridExplain,
+                    },
+                  ],
+                  outcome: "below-threshold",
+                  directRouteMinScore: 0.9,
+                  directRouteMinMargin: 0.08,
+                  expansionContext: "Recent conversation: [user] please commit this",
+                },
+              },
+            },
+          },
+        }),
+      ).resolves.toBe("applied");
+
+      const persisted = JSON.parse(
+        fs.readFileSync(sessionsPath("routing-evidence.json", tempDir), "utf8"),
+      );
+      expect(persisted.current.intent.routingEvidence).toEqual(
+        expect.objectContaining({
+          hybrid: expect.objectContaining({
+            rawResults: [expect.objectContaining({ explain: hybridExplain })],
+          }),
+        }),
+      );
+    });
+
     it("drops retired session fields without copying recommended skills", () => {
       // Create sessions directory with a test file
       const sessionsDir = path.join(tempDir, "sessions");

@@ -55,7 +55,10 @@ import {
 } from "../intents/index.js";
 import { FALLBACK_INTENT, FALLBACK_INTENT_ID } from "../constants.js";
 import { experiencesPath, intentsPath, packageRoot } from "../file-utils.js";
-import type { QmdIntentHit } from "../qmd/intent-index.js";
+import type {
+  QmdIntentHit,
+  QmdIntentSearchEvidence,
+} from "../qmd/intent-index.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
 import { matchAvailableSkillNames } from "../skills/name-index.js";
@@ -67,6 +70,7 @@ import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
   IntentProjectionTelemetry,
+  IntentRoutingEvidence,
   IntentTrigger,
   IntentionResult,
 } from "../types.js";
@@ -446,6 +450,7 @@ type PromptBuildClassification = {
   trigger: IntentTrigger;
   result: IntentionResult;
   intentProjection?: IntentProjectionTelemetry;
+  routingEvidence?: IntentRoutingEvidence;
 };
 
 export function createHookHandlers(deps: HookDeps) {
@@ -661,6 +666,8 @@ export function createHookHandlers(deps: HookDeps) {
   }): Promise<PromptBuildClassification | undefined> {
     // Step 1: QMD Keyword Search (BM25 searchLex)
     let keywordHits: QmdIntentHit[] | undefined;
+    let keywordRawResults: QmdIntentSearchEvidence["rawResults"] | undefined;
+    let routingEvidence: IntentRoutingEvidence | undefined;
     if (qmdIntentIndex) {
       emitPipelineEvent(
         params.ctx,
@@ -668,15 +675,40 @@ export function createHookHandlers(deps: HookDeps) {
         "qmd-keyword",
         "started",
       );
-      keywordHits = await qmdIntentIndex.searchKeywords({
+      const keywordSearch = await qmdIntentIndex.searchKeywords({
         query: params.latestUserMessage,
+        includeRawResults: true,
       });
+      keywordHits = keywordSearch?.hits;
+      keywordRawResults = keywordSearch?.rawResults;
       const topKeywordHit = keywordHits?.[0];
       const matchedKeywordIntent = topKeywordHit
         ? findIntentEntry(params.availableIntents, topKeywordHit.intentId)
         : undefined;
       const keywordMinScore =
         params.refreshedConfig.routing.thresholds.keyword.directRouteMinScore;
+      const keywordOutcome =
+        keywordHits === undefined
+          ? "unavailable"
+          : !topKeywordHit
+            ? "none"
+            : !matchedKeywordIntent
+              ? "unrecognized-intent"
+              : roundToDecimals(topKeywordHit.score, 2) >=
+                  roundToDecimals(keywordMinScore, 2)
+                ? "routed"
+                : "below-threshold";
+      routingEvidence = {
+        keyword: {
+          query: params.latestUserMessage,
+          ...(keywordHits === undefined ? {} : { hits: keywordHits }),
+          ...(keywordRawResults === undefined
+            ? {}
+            : { rawResults: keywordRawResults }),
+          outcome: keywordOutcome,
+          directRouteMinScore: keywordMinScore,
+        },
+      };
       if (
         topKeywordHit &&
         matchedKeywordIntent &&
@@ -699,11 +731,13 @@ export function createHookHandlers(deps: HookDeps) {
             confidence: topKeywordHit.score,
             reason: result.reason,
             result: "routed",
+            searchEvidence: routingEvidence.keyword,
           },
         );
         return {
           trigger: "qmd-keyword",
           result,
+          routingEvidence,
         };
       }
       emitPipelineEvent(
@@ -715,6 +749,7 @@ export function createHookHandlers(deps: HookDeps) {
           ? {
               error: "keyword index unavailable",
               result: "none",
+              searchEvidence: routingEvidence.keyword,
             }
           : topKeywordHit
             ? matchedKeywordIntent
@@ -727,17 +762,23 @@ export function createHookHandlers(deps: HookDeps) {
                     directRouteMinScore: keywordMinScore,
                   }),
                   result: "below-threshold",
+                  searchEvidence: routingEvidence.keyword,
                 }
               : {
                   confidence: topKeywordHit.score,
                   result: "unrecognized-intent",
+                  searchEvidence: routingEvidence.keyword,
                 }
-            : { result: "none" },
+            : {
+                result: "none",
+                searchEvidence: routingEvidence.keyword,
+              },
       );
     }
 
     // Step 2: QMD Hybrid Search (Examples & Keywords) with Context Expansion
     let qmdHits: QmdIntentHit[] | undefined;
+    let hybridRawResults: QmdIntentSearchEvidence["rawResults"] | undefined;
     let topHit: QmdIntentHit | undefined;
     if (qmdIntentIndex) {
       emitPipelineEvent(
@@ -750,11 +791,14 @@ export function createHookHandlers(deps: HookDeps) {
       const expansionContext = formatConversationExpansionContext({
         conversation: params.conversation,
       });
-      qmdHits = await qmdIntentIndex.searchIntentExamplesAndKeywords({
+      const hybridSearch = await qmdIntentIndex.searchIntentExamplesAndKeywords({
         query: params.latestUserMessage,
         rawLimit: limits.rawLimit,
         ...(expansionContext ? { expansionContext } : {}),
+        includeRawResults: true,
       });
+      qmdHits = hybridSearch?.hits;
+      hybridRawResults = hybridSearch?.rawResults;
       topHit = qmdHits?.[0];
       const secondHit = qmdHits?.[1];
       const topIntent = topHit
@@ -769,6 +813,35 @@ export function createHookHandlers(deps: HookDeps) {
         !secondHit ||
         roundToDecimals(scoreMargin, 2) >=
           roundToDecimals(hybridThresholds.directRouteMinMargin, 2);
+      const hybridOutcome =
+        qmdHits === undefined
+          ? "unavailable"
+          : !topHit
+            ? "none"
+            : !topIntent
+              ? "unrecognized-intent"
+              : roundToDecimals(topHit.score, 2) <
+                  roundToDecimals(hybridThresholds.directRouteMinScore, 2)
+                ? satisfiesMargin
+                  ? "below-threshold"
+                  : "below-score-and-margin-threshold"
+                : !satisfiesMargin
+                  ? "below-margin-threshold"
+                  : "routed";
+      routingEvidence = {
+        ...routingEvidence,
+        hybrid: {
+          query: params.latestUserMessage,
+          ...(qmdHits === undefined ? {} : { hits: qmdHits }),
+          ...(hybridRawResults === undefined
+            ? {}
+            : { rawResults: hybridRawResults }),
+          outcome: hybridOutcome,
+          directRouteMinScore: hybridThresholds.directRouteMinScore,
+          directRouteMinMargin: hybridThresholds.directRouteMinMargin,
+          ...(expansionContext ? { expansionContext } : {}),
+        },
+      };
       if (
         topHit &&
         topIntent &&
@@ -793,11 +866,13 @@ export function createHookHandlers(deps: HookDeps) {
             confidence: topHit.score,
             reason: result.reason,
             result: "routed",
+            searchEvidence: routingEvidence.hybrid,
           },
         );
         return {
           trigger: "qmd-hybrid",
           result,
+          routingEvidence,
         };
       }
       emitPipelineEvent(
@@ -809,6 +884,7 @@ export function createHookHandlers(deps: HookDeps) {
           ? {
               error: "example/keyword index unavailable",
               result: "none",
+              searchEvidence: routingEvidence.hybrid,
             }
           : topHit
             ? topIntent
@@ -829,12 +905,17 @@ export function createHookHandlers(deps: HookDeps) {
                         ? "below-score-threshold"
                         : "below-score-and-margin-threshold"
                       : "below-margin-threshold",
+                  searchEvidence: routingEvidence.hybrid,
                 }
               : {
                   confidence: topHit.score,
                   result: "unrecognized-intent",
+                  searchEvidence: routingEvidence.hybrid,
                 }
-            : { result: "none" },
+            : {
+                result: "none",
+                searchEvidence: routingEvidence.hybrid,
+              },
       );
     }
 
@@ -908,6 +989,7 @@ export function createHookHandlers(deps: HookDeps) {
         {
           error: "classifier execution failed",
           result: "none",
+          routingEvidence,
         },
       );
       await recordPromptBuildSession({
@@ -915,6 +997,7 @@ export function createHookHandlers(deps: HookDeps) {
         latestUserMessage: params.latestUserMessage,
         trigger: "llm-classifier",
         intentProjection,
+        routingEvidence,
         conversation: params.conversation,
       });
       throw error;
@@ -930,8 +1013,9 @@ export function createHookHandlers(deps: HookDeps) {
             intent: result.intent,
             reason: result.reason,
             confidence: result.confidence,
+            routingEvidence,
           }
-        : { error: "classifier returned no result" },
+        : { error: "classifier returned no result", routingEvidence },
     );
 
     if (!result) {
@@ -940,6 +1024,7 @@ export function createHookHandlers(deps: HookDeps) {
         latestUserMessage: params.latestUserMessage,
         trigger: "llm-classifier",
         intentProjection,
+        routingEvidence,
         conversation: params.conversation,
       });
       return;
@@ -950,6 +1035,7 @@ export function createHookHandlers(deps: HookDeps) {
       trigger: "llm-classifier",
       result,
       intentProjection,
+      routingEvidence,
     };
   }
 
@@ -960,6 +1046,7 @@ export function createHookHandlers(deps: HookDeps) {
     result?: IntentionResult;
     intentMatchedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
+    routingEvidence?: IntentRoutingEvidence;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): Promise<void> {
     if (!params.association) return;
@@ -976,6 +1063,9 @@ export function createHookHandlers(deps: HookDeps) {
           ...(params.intentProjection
             ? { intentProjection: params.intentProjection }
             : {}),
+          ...(params.routingEvidence
+            ? { routingEvidence: params.routingEvidence }
+            : {}),
         },
       },
     });
@@ -989,6 +1079,7 @@ export function createHookHandlers(deps: HookDeps) {
     result: IntentionResult;
     intentMatchedSkills?: string[];
     intentProjection?: IntentProjectionTelemetry;
+    routingEvidence?: IntentRoutingEvidence;
     conversation: ReturnType<typeof limitConversationTurns>;
   }): Promise<void> {
     await recordPromptBuildSession({
@@ -998,6 +1089,7 @@ export function createHookHandlers(deps: HookDeps) {
       result: params.result,
       intentMatchedSkills: params.intentMatchedSkills,
       intentProjection: params.intentProjection,
+      routingEvidence: params.routingEvidence,
       conversation: params.conversation,
     });
   }
@@ -1295,7 +1387,7 @@ export function createHookHandlers(deps: HookDeps) {
     classification: PromptBuildClassification;
     workingSetSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
-    const { trigger, result, intentProjection } = params.classification;
+    const { trigger, result, intentProjection, routingEvidence } = params.classification;
     logger.debug("intention result", {
       trigger,
       intentResolved: Boolean(result.intent),
@@ -1308,6 +1400,7 @@ export function createHookHandlers(deps: HookDeps) {
       trigger,
       result,
       intentProjection,
+      routingEvidence,
       conversation: params.conversation,
     });
     const intent = findIntentEntry(params.availableIntents, result.intent);
@@ -1337,6 +1430,7 @@ export function createHookHandlers(deps: HookDeps) {
         (skill) => skill.name,
       ),
       intentProjection,
+      routingEvidence,
       conversation: params.conversation,
     });
     return toPromptBuildResult(

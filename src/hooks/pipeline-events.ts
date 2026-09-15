@@ -1,7 +1,7 @@
 import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { logger } from "../../api.js";
 import { roundToDecimals } from "../normalize.js";
-import type { IntentTrigger } from "../types.js";
+import type { IntentRoutingEvidence, IntentRoutingSearchEvidence, IntentTrigger } from "../types.js";
 import type { PluginHookAgentContext } from "./types.js";
 
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
@@ -34,6 +34,8 @@ export type PipelineMetadata = {
   injectedCount?: number;
   injectedSkills?: string[];
   fallbackReason?: SkillCandidatePoolFallbackReason;
+  searchEvidence?: IntentRoutingSearchEvidence;
+  routingEvidence?: IntentRoutingEvidence;
 };
 
 function cleanPipelineEventData(

@@ -591,6 +591,68 @@ describe("createIntentQmdIndex", () => {
     });
   });
 
+  it("returns complete raw QMD results when routing diagnostics request them", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const keywordRaw = {
+      filepath: "/snapshot/keywords/implementation-0.md",
+      score: 0.91,
+    };
+    const hybridRaw = {
+      body: "---\nintent_id: implementation\n---\nadd a QMD fastpath",
+      score: 0.73,
+      explain: {
+        vectorScores: [0.73],
+        ftsScores: [0.41],
+        rrf: { contributions: [{ queryType: "vec", rank: 1 }] },
+      },
+    };
+    const search = vi.fn().mockResolvedValue([hybridRaw]);
+    const searchLex = vi.fn().mockResolvedValue([keywordRaw]);
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi
+        .fn()
+        .mockResolvedValue(createStoreDouble({ search, searchLex })),
+    });
+
+    index.schedule(catalog);
+    await waitForReady(index);
+
+    await expect(
+      index.searchKeywords({ query: "implement", includeRawResults: true }),
+    ).resolves.toEqual({
+      hits: [
+        {
+          intentId: "implementation",
+          score: 0.91,
+          collection: "intent-keywords",
+        },
+      ],
+      rawResults: [keywordRaw],
+    });
+    await expect(
+      index.searchIntentExamplesAndKeywords({
+        query: "add qmd",
+        rawLimit: 1,
+        includeRawResults: true,
+      }),
+    ).resolves.toEqual({
+      hits: [
+        {
+          intentId: "implementation",
+          score: 0.73,
+          collection: "intent-examples-and-keywords",
+          explain: hybridRaw.explain,
+        },
+      ],
+      rawResults: [hybridRaw],
+    });
+
+    await index.close();
+  });
+
   it("extracts genuine semantic scores from QMD explain and deduplicates by highest score", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
     roots.push(root);

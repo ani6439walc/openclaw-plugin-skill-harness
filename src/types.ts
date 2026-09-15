@@ -155,6 +155,43 @@ export type IntentProjectionSupportReason =
   | "exact-evidence"
   | "qmd-retrieval";
 
+export type IntentRoutingSearchHit = {
+  intentId: string;
+  score: number;
+  collection: string;
+  explain?: unknown;
+};
+
+export type IntentRoutingRawSearchResult = {
+  filepath?: string;
+  file?: string;
+  displayPath?: string;
+  body?: string;
+  score: number;
+  explain?: unknown;
+};
+
+export type IntentRoutingSearchEvidence = {
+  query: string;
+  hits?: IntentRoutingSearchHit[];
+  rawResults?: IntentRoutingRawSearchResult[];
+  outcome:
+    | "routed"
+    | "below-threshold"
+    | "below-margin-threshold"
+    | "below-score-and-margin-threshold"
+    | "unrecognized-intent"
+    | "none"
+    | "unavailable";
+  directRouteMinScore: number;
+  directRouteMinMargin?: number;
+};
+
+export type IntentRoutingEvidence = {
+  keyword?: IntentRoutingSearchEvidence;
+  hybrid?: IntentRoutingSearchEvidence & { expansionContext?: string };
+};
+
 export type IntentProjectionTelemetry = {
   decision: "projected" | "full-fallback";
   effectiveInput: "projected" | "full-fallback";
