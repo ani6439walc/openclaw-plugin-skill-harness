@@ -9,11 +9,10 @@ import {
 import type { ReviewFinding, ReviewSource } from "./types.js";
 import type { SkillPlacementCandidate } from "../stats/aggregator.js";
 import {
-  createReviewLogV8,
-  ReviewLogV8Schema,
-  migrateReviewLogV7,
-  parseReviewLogV8,
-  pruneReviewLogV8Events,
+  createReviewLog,
+  ReviewLogSchema,
+  parseReviewLog,
+  pruneReviewLogEvents,
   type AppliedReviewChange,
   type NoFindingReasonCounts,
   type ProcessedEventOutcome,
@@ -51,11 +50,9 @@ function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
 
 function readReviewLog(raw: unknown, nowIso: string) {
   try {
-    return { log: parseReviewLogV8(raw), migrated: false };
+    return parseReviewLog(raw);
   } catch {
-    const migrated = migrateReviewLogV7(raw);
-    if (!migrated) throw new Error("invalid review log");
-    return { log: migrated, migrated: true };
+    return createReviewLog(nowIso);
   }
 }
 
@@ -71,7 +68,7 @@ export class IntentReviewLogWriter {
           readReviewLog(
             readJsonFile<unknown>(logPath),
             new Date().toISOString(),
-          ).log.reviewedSkillEpochs,
+          ).reviewedSkillEpochs,
         ),
       );
     } catch (error) {
@@ -104,11 +101,15 @@ export class IntentReviewLogWriter {
     const result = await withFileLock(logPath, async () => {
       try {
         const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
-        const existing = fileExists(logPath)
-          ? readReviewLog(readJsonFile<unknown>(logPath), nowIso)
-          : { log: createReviewLogV8(nowIso), migrated: false };
-        const log = existing.log;
-        pruneReviewLogV8Events(log, options.nowMs ?? Date.now());
+        let log = createReviewLog(nowIso);
+        if (fileExists(logPath)) {
+          try {
+            log = readReviewLog(readJsonFile<unknown>(logPath), nowIso);
+          } catch {
+            // Invalid runtime state starts a fresh review window.
+          }
+        }
+        pruneReviewLogEvents(log, options.nowMs ?? Date.now());
         if (Object.hasOwn(log.processedEvents, eventId)) return false;
 
         const changes = findings.map(appliedChangeFromFinding);
@@ -171,7 +172,7 @@ export class IntentReviewLogWriter {
         log.updatedAt = nowIso;
         return safeWriteJson(
           logPath,
-          ReviewLogV8Schema.parse(log),
+          ReviewLogSchema.parse(log),
           "failed to write v8 intent review log",
         );
       } catch (error) {

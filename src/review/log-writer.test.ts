@@ -56,7 +56,7 @@ describe("IntentReviewLogWriter", () => {
     });
   });
 
-  it("migrates a v7 log before recording a new event", async () => {
+  it("replaces a legacy review log before recording a new event", async () => {
     const logPath = path.join(root, "review.json");
     fs.writeFileSync(
       logPath,
@@ -64,16 +64,8 @@ describe("IntentReviewLogWriter", () => {
         schemaVersion: 7,
         createdAt: "2026-06-01T00:00:00.000Z",
         updatedAt: "2026-06-01T00:00:00.000Z",
-        processedEvents: {
-          prior: {
-            processedAt: "2026-06-01T00:00:00.000Z",
-            triggers: ["weak-intent"],
-            changeCount: 0,
-            outcome: "nofinding",
-          },
-        },
+        processedEvents: { prior: {} },
         reviewedSkillEpochs: {},
-        historicalKeywordAudits: {},
       }),
     );
 
@@ -84,24 +76,24 @@ describe("IntentReviewLogWriter", () => {
     ).toBe(true);
     const persisted = JSON.parse(fs.readFileSync(logPath, "utf8"));
     expect(persisted).toMatchObject({ schemaVersion: 8 });
-    expect(persisted.processedEvents.prior.triggers).toEqual([
-      "routing-uncertainty",
-    ]);
+    expect(persisted.processedEvents).not.toHaveProperty("prior");
     expect(persisted.processedEvents.next.triggers).toEqual([
       "intent-health-check",
     ]);
-    expect(persisted).not.toHaveProperty("historicalKeywordAudits");
   });
 
-  it.each(["{ broken", JSON.stringify({ schemaVersion: 5 })])(
-    "fails open without changing invalid review.json",
-    async (original) => {
-      const logPath = path.join(root, "review.json");
-      fs.writeFileSync(logPath, original);
-      await expect(writer.record("event-1", source, [])).resolves.toBe(false);
-      expect(fs.readFileSync(logPath, "utf8")).toBe(original);
-    },
-  );
+  it.each([
+    ["malformed", "{ broken"],
+    ["unsupported schema", JSON.stringify({ schemaVersion: 5 })],
+  ])("replaces %s review.json with a fresh v8 log", async (_name, original) => {
+    const logPath = path.join(root, "review.json");
+    fs.writeFileSync(logPath, original);
+    await expect(writer.record("event-1", source, [])).resolves.toBe(true);
+    expect(JSON.parse(fs.readFileSync(logPath, "utf8"))).toMatchObject({
+      schemaVersion: 8,
+      processedEvents: { "event-1": expect.any(Object) },
+    });
+  });
 
   it("preserves skill-placement epoch idempotency", async () => {
     const candidate = {
