@@ -482,7 +482,7 @@ function hitId(
 ): string {
   return `${hit.skillName}\u0000${hit.collection}\u0000${hit.path}`;
 }
-function deriveSemanticScore(explain: unknown): number | undefined {
+function deriveEvidenceScore(explain: unknown): number | undefined {
   if (!explain || typeof explain !== "object") return undefined;
   let max = Number.NEGATIVE_INFINITY;
   let found = false;
@@ -1170,7 +1170,7 @@ export function createSkillQmdIndex(params: {
             ...(hit.snippet ? { snippet: hit.snippet } : {}),
             ...(hit.explain === undefined ? {} : { explain: hit.explain }),
           };
-          const evidenceSemanticScore = deriveSemanticScore(hit.explain);
+          const evidenceSemanticScore = deriveEvidenceScore(hit.explain);
           const existing = bestBySkill.get(hit.skillName);
           if (!existing) {
             bestBySkill.set(hit.skillName, {

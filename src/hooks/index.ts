@@ -1180,13 +1180,13 @@ export function createHookHandlers(deps: HookDeps) {
         }
       }
       if (search) {
-        let timer: NodeJS.Timeout | undefined;
+        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           const timeout = new Promise<"timeout">((resolve) => {
             timer = setTimeout(
               () => resolve("timeout"),
               policy.search.timeoutMs,
-            ) as unknown as NodeJS.Timeout;
+            );
           });
           const outcome = await Promise.race([
             search.then((hits) => ({ hits })).catch((error) => ({ error })),

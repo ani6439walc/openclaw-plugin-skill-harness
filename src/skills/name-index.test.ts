@@ -30,6 +30,37 @@ describe("skill name matching", () => {
     ]);
   });
 
+  it("rejects empty tokens from non-English input", () => {
+    expect(tokenizeNameText("")).toEqual([]);
+    expect(tokenizeNameText(extractEnglishSegments("幫我看看這個"))).toEqual(
+      [],
+    );
+    expect(
+      matchAvailableSkillNames({
+        skills: [{ name: "go", description: "Go", location: "" }],
+        input: "幫我看看這個",
+        options,
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps technical token characters meaningful during typo matching", () => {
+    expect(
+      matchAvailableSkillNames({
+        skills: [{ name: "s3", description: "S3", location: "" }],
+        input: "s2",
+        options: { ...options, maxEditDistance: 0 },
+      }),
+    ).toEqual([]);
+    expect(
+      matchAvailableSkillNames({
+        skills: [{ name: "c++", description: "C++", location: "" }],
+        input: "c#",
+        options: { ...options, maxEditDistance: 0 },
+      }),
+    ).toEqual([]);
+  });
+
   it("matches skills made only of short technical tokens", () => {
     expect(
       matchAvailableSkillNames({

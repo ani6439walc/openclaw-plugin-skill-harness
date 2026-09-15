@@ -63,12 +63,13 @@ export function tokenizeNameText(text: string): string[] {
   return text
     .split(/[\s_-]+/u)
     .map((token) => token.trim().toLowerCase())
+    .filter(Boolean)
     .filter((token) => !STOP_WORDS.has(token))
     .filter((token) => !seen.has(token) && (seen.add(token), true));
 }
 
 function letters(value: string): string {
-  return value.replace(/[^a-z]/giu, "").toLowerCase();
+  return value.replace(/[^a-z0-9+#]/giu, "").toLowerCase();
 }
 
 function boundedLevenshtein(
