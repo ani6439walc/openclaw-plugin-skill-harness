@@ -16,13 +16,20 @@ describe("selectSkillCandidates", () => {
         { skillName: "beta", score: 0.8, source: "direct-retrieval" },
         { skillName: "hidden", score: 1, source: "name-match" },
       ],
-      options: { maxPoolSize: 12, maxInjectedSkills: 4, minInjectionScore: 0.3 },
+      options: {
+        maxPoolSize: 12,
+        maxInjectedSkills: 4,
+        minInjectionScore: 0.3,
+      },
     });
     expect(result.pool).toEqual([
       expect.objectContaining({ skillName: "beta", score: 0.8 }),
       expect.objectContaining({ skillName: "alpha", score: 0.6 }),
     ]);
-    expect(result.selectedSkills.map((skill) => skill.name)).toEqual(["beta", "alpha"]);
+    expect(result.selectedSkills.map((skill) => skill.name)).toEqual([
+      "beta",
+      "alpha",
+    ]);
   });
 
   it("applies pool and injection limits with the injection threshold", () => {

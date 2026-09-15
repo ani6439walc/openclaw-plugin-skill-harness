@@ -327,14 +327,22 @@ const GenericTokensSchema = z
   .array(z.string())
   .optional()
   .default([])
-  .transform((tokens) =>
-    [...new Set(tokens.map((token) => token.trim().toLowerCase()).filter(Boolean))],
-  );
+  .transform((tokens) => [
+    ...new Set(
+      tokens.map((token) => token.trim().toLowerCase()).filter(Boolean),
+    ),
+  ]);
 
 const SkillCandidatesSearchSchema = z
   .object({
     enabled: z.boolean().optional().default(true),
-    minCandidateScore: z.number().finite().min(0).max(1).optional().default(0.6),
+    minCandidateScore: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.6),
     timeoutMs: z.number().int().min(100).max(60_000).optional().default(2000),
   })
   .strict()
@@ -359,7 +367,13 @@ const SkillCandidatesSchema = z
     nameMatch: SkillCandidatesNameMatchSchema,
     maxPoolSize: z.number().int().min(1).max(64).optional().default(12),
     maxInjectedSkills: z.number().int().min(0).max(4).optional().default(4),
-    minInjectionScore: z.number().finite().min(0).max(1).optional().default(0.3),
+    minInjectionScore: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.3),
   })
   .strict()
   .superRefine((value, context) => {

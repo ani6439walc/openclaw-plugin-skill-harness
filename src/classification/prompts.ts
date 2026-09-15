@@ -292,7 +292,9 @@ export function buildRoutingContext(params: {
           experiencesBySkill,
         )}`
       : undefined,
-    inputMatched.length > 0 ? formatInputMatchedSkills(inputMatched) : undefined,
+    inputMatched.length > 0
+      ? formatInputMatchedSkills(inputMatched)
+      : undefined,
   ].filter((block): block is string => Boolean(block));
 
   const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));

@@ -2,9 +2,39 @@ import { canonicalIdentity } from "../normalize.js";
 import type { AvailableSkill } from "./types.js";
 
 const STOP_WORDS = new Set([
-  "the", "a", "an", "is", "are", "was", "were", "to", "for", "in", "on",
-  "at", "by", "of", "and", "or", "not", "with", "using", "use", "help", "me",
-  "my", "please", "can", "how", "do", "i", "it", "this", "that", "from", "about",
+  "the",
+  "a",
+  "an",
+  "is",
+  "are",
+  "was",
+  "were",
+  "to",
+  "for",
+  "in",
+  "on",
+  "at",
+  "by",
+  "of",
+  "and",
+  "or",
+  "not",
+  "with",
+  "using",
+  "use",
+  "help",
+  "me",
+  "my",
+  "please",
+  "can",
+  "how",
+  "do",
+  "i",
+  "it",
+  "this",
+  "that",
+  "from",
+  "about",
 ]);
 
 export type NameMatchOptions = {
@@ -22,7 +52,10 @@ export type SkillNameCandidate = {
 type IndexedSkill = { skill: AvailableSkill; tokens: string[] };
 
 export function extractEnglishSegments(text: string): string {
-  return text.replace(/[^A-Za-z0-9_\-\s]+/g, " ").replace(/\s+/g, " ").trim();
+  return text
+    .replace(/[^A-Za-z0-9_\-\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function tokenizeNameText(text: string): string[] {
@@ -38,7 +71,11 @@ function letters(value: string): string {
   return value.replace(/[^a-z]/giu, "").toLowerCase();
 }
 
-function boundedLevenshtein(left: string, right: string, limit: number): number | undefined {
+function boundedLevenshtein(
+  left: string,
+  right: string,
+  limit: number,
+): number | undefined {
   if (Math.abs(left.length - right.length) > limit) return;
   let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
   for (let row = 1; row <= left.length; row += 1) {
@@ -59,7 +96,9 @@ function boundedLevenshtein(left: string, right: string, limit: number): number 
   return previous[right.length]! <= limit ? previous[right.length] : undefined;
 }
 
-export function buildSkillNameIndex(skills: readonly AvailableSkill[]): readonly IndexedSkill[] {
+export function buildSkillNameIndex(
+  skills: readonly AvailableSkill[],
+): readonly IndexedSkill[] {
   return skills.flatMap((skill) => {
     const tokens = tokenizeNameText(skill.name);
     return tokens.length ? [{ skill, tokens }] : [];
@@ -75,8 +114,11 @@ export function matchSkillNames(params: {
   if (!inputTokens.length) return [];
   if (
     inputTokens.length === 1 &&
-    new Set(params.options.genericTokens.map((token) => token.trim().toLowerCase())).has(inputTokens[0]!)
-  ) return [];
+    new Set(
+      params.options.genericTokens.map((token) => token.trim().toLowerCase()),
+    ).has(inputTokens[0]!)
+  )
+    return [];
 
   return params.index.flatMap(({ skill, tokens }) => {
     const available = new Set(tokens);
@@ -88,7 +130,11 @@ export function matchSkillNames(params: {
         continue;
       }
       const options = [...available].flatMap((nameToken) => {
-        const distance = boundedLevenshtein(letters(inputToken), letters(nameToken), params.options.maxEditDistance);
+        const distance = boundedLevenshtein(
+          letters(inputToken),
+          letters(nameToken),
+          params.options.maxEditDistance,
+        );
         return distance === undefined ? [] : [{ nameToken, distance }];
       });
       const minimum = Math.min(...options.map((option) => option.distance));
@@ -98,7 +144,8 @@ export function matchSkillNames(params: {
         matched.add(closest[0]!.nameToken);
       }
     }
-    const score = matched.size / (inputTokens.length + tokens.length - matched.size);
+    const score =
+      matched.size / (inputTokens.length + tokens.length - matched.size);
     const rounded = Math.round(score * 1_000) / 1_000;
     return rounded >= Math.round(params.options.minJaccardScore * 1_000) / 1_000
       ? [{ skillName: skill.name, score, source: "name-match" as const }]
@@ -111,7 +158,10 @@ export function matchAvailableSkillNames(params: {
   input: string;
   options: NameMatchOptions;
 }): SkillNameCandidate[] {
-  return matchSkillNames({ ...params, index: buildSkillNameIndex(params.skills) });
+  return matchSkillNames({
+    ...params,
+    index: buildSkillNameIndex(params.skills),
+  });
 }
 
 export function canonicalSkillName(value: string): string | undefined {

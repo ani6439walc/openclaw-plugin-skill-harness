@@ -59,7 +59,10 @@ import type { QmdIntentHit } from "../qmd/intent-index.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
 import { matchAvailableSkillNames } from "../skills/name-index.js";
-import { selectSkillCandidates, type SkillDiscoveryCandidate } from "../skills/candidate-pool.js";
+import {
+  selectSkillCandidates,
+  type SkillDiscoveryCandidate,
+} from "../skills/candidate-pool.js";
 import type {
   HistoricalIntentRecord,
   IntentCatalogEntry,
@@ -1083,7 +1086,10 @@ export function createHookHandlers(deps: HookDeps) {
             ...(expansionContext ? { expansionContext } : {}),
           });
           const timeout = new Promise<"timeout">((resolve) => {
-            timer = setTimeout(() => resolve("timeout"), policy.search.timeoutMs) as unknown as NodeJS.Timeout;
+            timer = setTimeout(
+              () => resolve("timeout"),
+              policy.search.timeoutMs,
+            ) as unknown as NodeJS.Timeout;
           });
           const outcome = await Promise.race([
             search.then((hits) => ({ hits })),
@@ -1098,7 +1104,13 @@ export function createHookHandlers(deps: HookDeps) {
               hit.semanticScore !== undefined &&
               roundToTwoDecimals(hit.semanticScore) >=
                 roundToTwoDecimals(policy.search.minCandidateScore)
-                ? [{ skillName: hit.name, score: hit.semanticScore, source: "direct-retrieval" as const }]
+                ? [
+                    {
+                      skillName: hit.name,
+                      score: hit.semanticScore,
+                      source: "direct-retrieval" as const,
+                    },
+                  ]
                 : [],
             );
           }
@@ -1119,27 +1131,39 @@ export function createHookHandlers(deps: HookDeps) {
       if (selection.selectedSkills.length === 0 && !fallbackReason) {
         fallbackReason = "empty-pool";
       }
-      emitPipelineEvent(params.ctx, params.routing.resolvedSessionKey, "skill-candidate-pool", "completed", {
-        nameCandidates: nameCandidates.length,
-        retrievalCandidates: retrievalCandidates.length,
-        poolSize: selection.pool.length,
-        injectedCount: selection.selectedSkills.length,
-        injectedSkills: selection.selectedSkills.map((skill) => skill.name),
-        ...(fallbackReason ? { fallbackReason } : {}),
-        durationMs: Math.max(0, Date.now() - startedAtMs),
-      });
+      emitPipelineEvent(
+        params.ctx,
+        params.routing.resolvedSessionKey,
+        "skill-candidate-pool",
+        "completed",
+        {
+          nameCandidates: nameCandidates.length,
+          retrievalCandidates: retrievalCandidates.length,
+          poolSize: selection.pool.length,
+          injectedCount: selection.selectedSkills.length,
+          injectedSkills: selection.selectedSkills.map((skill) => skill.name),
+          ...(fallbackReason ? { fallbackReason } : {}),
+          durationMs: Math.max(0, Date.now() - startedAtMs),
+        },
+      );
       return [...selection.selectedSkills];
     } catch (error) {
       logger.warn("skill candidate discovery failed", { error });
-      emitPipelineEvent(params.ctx, params.routing.resolvedSessionKey, "skill-candidate-pool", "failed", {
-        nameCandidates: nameCandidates.length,
-        retrievalCandidates: retrievalCandidates.length,
-        poolSize: 0,
-        injectedCount: 0,
-        injectedSkills: [],
-        fallbackReason: fallbackReason ?? "empty-pool",
-        durationMs: Math.max(0, Date.now() - startedAtMs),
-      });
+      emitPipelineEvent(
+        params.ctx,
+        params.routing.resolvedSessionKey,
+        "skill-candidate-pool",
+        "failed",
+        {
+          nameCandidates: nameCandidates.length,
+          retrievalCandidates: retrievalCandidates.length,
+          poolSize: 0,
+          injectedCount: 0,
+          injectedSkills: [],
+          fallbackReason: fallbackReason ?? "empty-pool",
+          durationMs: Math.max(0, Date.now() - startedAtMs),
+        },
+      );
       return [];
     }
   }

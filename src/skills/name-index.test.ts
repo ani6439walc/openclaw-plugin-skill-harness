@@ -17,7 +17,11 @@ describe("skill name matching", () => {
   });
 
   it("normalizes stop words on names and input", () => {
-    expect(tokenizeNameText("code-review-and-quality")).toEqual(["code", "review", "quality"]);
+    expect(tokenizeNameText("code-review-and-quality")).toEqual([
+      "code",
+      "review",
+      "quality",
+    ]);
   });
 
   it("matches token typos using classic Levenshtein", () => {
@@ -27,12 +31,27 @@ describe("skill name matching", () => {
       options,
     });
     expect(candidates).toEqual([
-      expect.objectContaining({ skillName: "code-review-and-quality", score: 2 / 3 }),
+      expect.objectContaining({
+        skillName: "code-review-and-quality",
+        score: 2 / 3,
+      }),
     ]);
   });
 
   it("rejects configured generic single-token input but permits multi-token input", () => {
-    expect(matchAvailableSkillNames({ skills, input: "review", options: { ...options, genericTokens: ["review"] } })).toEqual([]);
-    expect(matchAvailableSkillNames({ skills, input: "code review", options: { ...options, genericTokens: ["review"] } })).toHaveLength(1);
+    expect(
+      matchAvailableSkillNames({
+        skills,
+        input: "review",
+        options: { ...options, genericTokens: ["review"] },
+      }),
+    ).toEqual([]);
+    expect(
+      matchAvailableSkillNames({
+        skills,
+        input: "code review",
+        options: { ...options, genericTokens: ["review"] },
+      }),
+    ).toHaveLength(1);
   });
 });

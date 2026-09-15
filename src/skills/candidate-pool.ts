@@ -26,19 +26,36 @@ export function selectSkillCandidates(params: {
   options: CandidatePoolOptions;
 }): CandidatePoolResult {
   const visible = new Map(
-    params.visibleSkills.map((skill) => [canonicalIdentity(skill.name), skill] as const),
+    params.visibleSkills.map(
+      (skill) => [canonicalIdentity(skill.name), skill] as const,
+    ),
   );
   const deduped = new Map<string, SkillDiscoveryCandidate>();
   for (const candidate of params.candidates) {
     const identity = canonicalIdentity(candidate.skillName);
-    if (!identity || !visible.has(identity) || !Number.isFinite(candidate.score)) continue;
+    if (
+      !identity ||
+      !visible.has(identity) ||
+      !Number.isFinite(candidate.score)
+    )
+      continue;
     const existing = deduped.get(identity);
     if (!existing || candidate.score > existing.score) {
-      deduped.set(identity, { ...candidate, skillName: visible.get(identity)!.name });
+      deduped.set(identity, {
+        ...candidate,
+        skillName: visible.get(identity)!.name,
+      });
     }
   }
   const pool = [...deduped.values()]
-    .sort((left, right) => right.score - left.score || canonicalIdentity(left.skillName).localeCompare(canonicalIdentity(right.skillName), "en"))
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        canonicalIdentity(left.skillName).localeCompare(
+          canonicalIdentity(right.skillName),
+          "en",
+        ),
+    )
     .slice(0, params.options.maxPoolSize);
   const selectedSkills = pool
     .filter((candidate) => candidate.score >= params.options.minInjectionScore)
