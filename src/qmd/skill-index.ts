@@ -1117,6 +1117,7 @@ export function createSkillQmdIndex(params: {
               rerank: false,
               includeHyde: false,
               minScore: 0,
+              explain: true,
               ...(expansionContext === undefined ? {} : { expansionContext }),
             });
             const ranked = parseStoreHits({

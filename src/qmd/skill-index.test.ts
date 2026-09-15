@@ -622,6 +622,7 @@ describe("createSkillQmdIndex", () => {
         rerank: false,
         includeHyde: false,
         minScore: 0,
+        explain: true,
         expansionContext: "Recent conversation: airport preferences",
       }),
     );

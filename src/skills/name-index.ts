@@ -53,7 +53,7 @@ type IndexedSkill = { skill: AvailableSkill; tokens: string[] };
 
 export function extractEnglishSegments(text: string): string {
   return text
-    .replace(/[^A-Za-z0-9_\-\s]+/g, " ")
+    .replace(/[^A-Za-z0-9_\-\s+#]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -78,8 +78,11 @@ function boundedLevenshtein(
   limit: number,
 ): number | undefined {
   if (Math.abs(left.length - right.length) > limit) return;
-  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  let previous = Array<number>(right.length + 1);
   let current = Array<number>(right.length + 1);
+  for (let column = 0; column <= right.length; column += 1) {
+    previous[column] = column;
+  }
   for (let row = 1; row <= left.length; row += 1) {
     current[0] = row;
     let minimum = row;

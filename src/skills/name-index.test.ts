@@ -16,6 +16,10 @@ describe("skill name matching", () => {
     expect(extractEnglishSegments("幫我 code 的 review")).toBe("code review");
   });
 
+  it("preserves technical punctuation before tokenization", () => {
+    expect(extractEnglishSegments("請用 c++ 或 c#")).toBe("c++ c#");
+  });
+
   it("normalizes stop words while retaining short technical tokens", () => {
     expect(tokenizeNameText("code-review-and-quality")).toEqual([
       "code",
