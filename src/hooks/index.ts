@@ -13,7 +13,7 @@ import type {
   SelectedPlacementSkill,
   SkillPlacementReviewCandidate,
 } from "../review/types.js";
-import { enqueueReview } from "../review/queue.js";
+import { createIntentReviewScheduler } from "../review/scheduler.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -574,7 +574,6 @@ export function createHookHandlers(deps: HookDeps) {
   const statsAggregator = deps.statsAggregator ?? defaultStatsAggregator;
   const skillInventoryResolver =
     deps.skillInventoryResolver ?? resolveSkillInventory;
-  const enqueueReviewTask = deps.reviewQueue?.enqueue ?? enqueueReview;
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier ?? runIntentionSubagent;
   const clock = deps.clock ?? (() => new Date());
@@ -596,6 +595,95 @@ export function createHookHandlers(deps: HookDeps) {
   const pendingSkillEpochKeys = new Set<string>();
   const turnAssociations =
     deps.turnAssociations ?? new TurnAssociationRegistry();
+
+  const reviewScheduler =
+    deps.reviewScheduler ??
+    createIntentReviewScheduler({
+      isSystemActive: (candidate) => {
+        const sessionKey = candidate.sessionKey ?? candidate.ctx.sessionKey;
+        return turnAssociations.resolveSession(sessionKey) !== undefined;
+      },
+    });
+
+  reviewScheduler.setRunner(async (candidate, abortSignal) => {
+    try {
+      const observedSkillNames = new Set(
+        (candidate.snapshot.current.skillsUsed ?? []).map((skill) =>
+          skill.name.trim().toLowerCase(),
+        ),
+      );
+      let allowedExperienceSkills: string[] = [];
+      try {
+        const inventory = await skillInventoryResolver({
+          api,
+          agentId: candidate.agentId,
+          bundledSkillsDir,
+          nativeBundledSkillsDir: await nativeBundledSkillsDir,
+          sharedRoots: sharedRoots(),
+        });
+        allowedExperienceSkills = (inventory ?? [])
+          .map((skill) => skill.name.trim().toLowerCase())
+          .filter((skill) => observedSkillNames.has(skill));
+      } catch (error) {
+        logger.warn("failed to resolve review experience skill inventory", {
+          error,
+        });
+      }
+      const reviewResult = await reviewer({
+        api,
+        config: candidate.resolvedConfig,
+        agentId: candidate.agentId,
+        intentDirectory: intentsPath(deps.dataRoot ?? "."),
+        experienceDirectory: experiencesPath(deps.dataRoot ?? "."),
+        allowedExperienceSkills,
+        sessionKey: candidate.ctx.sessionKey ?? candidate.snapshot.sessionKey,
+        messageProvider: candidate.ctx.messageProvider,
+        modelRef: candidate.modelRef,
+        snapshot: candidate.snapshot,
+        triggers: candidate.triggers,
+        dataRoot: deps.dataRoot,
+        abortSignal,
+      });
+      if (!reviewResult || abortSignal.aborted) return;
+      await reviewLogWriter.record(
+        candidate.snapshot.eventId,
+        {
+          sessionId: candidate.snapshot.sessionId,
+          sessionKey: candidate.snapshot.sessionKey,
+          agentId: candidate.snapshot.agentId,
+          turnStart: candidate.snapshot.current.timestamps!.start!,
+        },
+        reviewResult.findings,
+        {
+          triggers: candidate.triggers,
+          outcome: reviewResult.outcome,
+          changedIntentIds: reviewResult.changedIntentIds,
+          changedExperienceIds: reviewResult.changedExperienceIds,
+          validationErrors: reviewResult.validationErrors,
+          noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+          schemaRejectionReasonCounts: reviewResult.schemaRejectionReasonCounts,
+          skillPlacementCandidate: candidate.skillPlacementCandidate,
+        },
+      );
+      if (reviewResult.changedIntentIds?.length) {
+        refreshIntents({
+          rebuildQmd: reviewResult.routingSurfaceChanged === true,
+        });
+      }
+    } finally {
+      if (candidate.skillPlacementCandidate) {
+        pendingSkillEpochKeys.delete(
+          candidate.skillPlacementCandidate.epochKey,
+        );
+      }
+    }
+  });
+
+  reviewScheduler.setOnDiscard((candidate) => {
+    if (candidate.skillPlacementCandidate) {
+      pendingSkillEpochKeys.delete(candidate.skillPlacementCandidate.epochKey);
+    }
+  });
 
   interface PromptBuildIdentity {
     effectiveAgentId: string;
@@ -1983,80 +2071,16 @@ export function createHookHandlers(deps: HookDeps) {
     skillPlacementCandidate?: SkillPlacementReviewCandidate;
   }): boolean {
     try {
-      enqueueReviewTask(async () => {
-        try {
-          const observedSkillNames = new Set(
-            (params.snapshot.current.skillsUsed ?? []).map((skill) =>
-              skill.name.trim().toLowerCase(),
-            ),
-          );
-          let allowedExperienceSkills: string[] = [];
-          try {
-            const inventory = await skillInventoryResolver({
-              api,
-              agentId: params.agentId,
-              bundledSkillsDir,
-              nativeBundledSkillsDir: await nativeBundledSkillsDir,
-              sharedRoots: sharedRoots(),
-            });
-            allowedExperienceSkills = (inventory ?? [])
-              .map((skill) => skill.name.trim().toLowerCase())
-              .filter((skill) => observedSkillNames.has(skill));
-          } catch (error) {
-            logger.warn("failed to resolve review experience skill inventory", {
-              error,
-            });
-          }
-          const reviewResult = await reviewer({
-            api,
-            config: params.resolvedConfig,
-            agentId: params.agentId,
-            intentDirectory: intentsPath(deps.dataRoot ?? "."),
-            experienceDirectory: experiencesPath(deps.dataRoot ?? "."),
-            allowedExperienceSkills,
-            sessionKey: params.ctx.sessionKey ?? params.snapshot.sessionKey,
-            messageProvider: params.ctx.messageProvider,
-            modelRef: params.modelRef,
-            snapshot: params.snapshot,
-            triggers: params.triggers,
-            dataRoot: deps.dataRoot,
-          });
-          if (!reviewResult) return;
-          await reviewLogWriter.record(
-            params.snapshot.eventId,
-            {
-              sessionId: params.snapshot.sessionId,
-              sessionKey: params.snapshot.sessionKey,
-              agentId: params.snapshot.agentId,
-              turnStart: params.snapshot.current.timestamps!.start!,
-            },
-            reviewResult.findings,
-            {
-              triggers: params.triggers,
-              outcome: reviewResult.outcome,
-              changedIntentIds: reviewResult.changedIntentIds,
-              changedExperienceIds: reviewResult.changedExperienceIds,
-              validationErrors: reviewResult.validationErrors,
-              noFindingReasonCounts: reviewResult.noFindingReasonCounts,
-              schemaRejectionReasonCounts:
-                reviewResult.schemaRejectionReasonCounts,
-              skillPlacementCandidate: params.skillPlacementCandidate,
-            },
-          );
-          if (reviewResult.changedIntentIds?.length) {
-            refreshIntents({
-              rebuildQmd: reviewResult.routingSurfaceChanged === true,
-            });
-          }
-        } finally {
-          if (params.skillPlacementCandidate) {
-            pendingSkillEpochKeys.delete(
-              params.skillPlacementCandidate.epochKey,
-            );
-          }
-        }
+      return reviewScheduler.schedule({
+        agentId: params.agentId,
+        sessionKey: params.ctx.sessionKey ?? params.snapshot.sessionKey,
+        ctx: params.ctx,
+        resolvedConfig: params.resolvedConfig,
+        modelRef: params.modelRef,
+        snapshot: params.snapshot,
+        triggers: params.triggers,
+        skillPlacementCandidate: params.skillPlacementCandidate,
       });
-      return true;
     } catch (error) {
       logger.warn("failed to enqueue Intent Review", { error });
       return false;
@@ -2420,5 +2444,6 @@ export function createHookHandlers(deps: HookDeps) {
     onMessageSending,
     onAgentEnd,
     onSessionEnd,
+    reviewScheduler,
   };
 }

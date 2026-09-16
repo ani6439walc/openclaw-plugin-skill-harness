@@ -8,6 +8,10 @@ import type {
   ReviewSubagentResult,
   runReviewSubagent,
 } from "../review/subagent.js";
+import type {
+  IntentReviewScheduler,
+  ReviewSchedulerLike,
+} from "../review/scheduler.js";
 import type { runIntentionSubagent } from "../classification/index.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
@@ -141,7 +145,7 @@ export type HookDeps = {
   experienceCatalog?: SkillExperienceCatalog;
   qmdIntentIndex?: IntentQmdIndex;
   qmdSkillIndex?: SkillQmdIndex;
-  reviewQueue?: { enqueue(task: () => Promise<void>): void };
+  reviewScheduler?: IntentReviewScheduler | ReviewSchedulerLike;
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],
   ) => Promise<ReviewSubagentResult | undefined>;

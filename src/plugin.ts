@@ -15,6 +15,7 @@ import { IntentCatalog } from "./intents/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
+import { createIntentReviewScheduler } from "./review/scheduler.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
 import {
@@ -291,6 +292,19 @@ export function createPlugin(
         timer.unref();
       };
 
+      const reviewScheduler = createIntentReviewScheduler();
+
+      const registerLifecycle =
+        (api as any).lifecycle?.registerRuntimeLifecycle ??
+        (api as any).registerRuntimeLifecycle;
+      if (typeof registerLifecycle === "function") {
+        registerLifecycle.call((api as any).lifecycle ?? api, {
+          id: "skill-harness-review-scheduler",
+          dispose: () => reviewScheduler.dispose(),
+          cleanup: () => reviewScheduler.dispose(),
+        });
+      }
+
       const deps: HookDeps = {
         api: runtimeConfigApi,
         config: () => config,
@@ -300,6 +314,7 @@ export function createPlugin(
         tracker,
         statsAggregator,
         reviewLogWriter,
+        reviewScheduler,
         getWorkingSetSkills,
         qmdIntentIndex,
         qmdSkillIndex,
