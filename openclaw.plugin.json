@@ -14,83 +14,124 @@
     "additionalProperties": false,
     "required": ["qmd"],
     "properties": {
-      "scope": {
+      "qmd": {
         "type": "object",
-        "description": "Session, chat, and agent filtering.",
+        "description": "Required QMD remote services for mandatory hybrid intent routing and skill search. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
         "additionalProperties": false,
         "properties": {
-          "agents": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Agent IDs eligible for intention scanning.",
-            "default": ["main"]
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 60000,
+            "description": "QMD remote embedding and query-expansion request budget in milliseconds. Defaults to timeoutMs."
           },
-          "chatTypes": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": ["direct", "group", "channel", "explicit"]
-            },
-            "description": "Which chat types are eligible.",
-            "default": ["direct"]
-          },
-          "allowedChatIds": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Allow-list of chat IDs.",
-            "default": []
-          },
-          "deniedChatIds": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Deny-list of chat IDs.",
-            "default": []
-          }
-        },
-        "default": {}
-      },
-      "workingSetSkills": {
-        "type": "object",
-        "description": "Plugin-owned static skill working sets. Agent-specific skills are listed before shared defaults.",
-        "additionalProperties": false,
-        "properties": {
-          "defaults": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "agents": {
+          "embedding": {
             "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "type": "string"
+            "additionalProperties": false,
+            "required": ["model"],
+            "properties": {
+              "baseUrl": {
+                "type": "string",
+                "description": "Optional base URL for OpenAI-compatible embeddings. If omitted, resolved from the OpenClaw provider prefix in model."
+              },
+              "model": {
+                "type": "string",
+                "description": "Embedding model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/text-embedding-3-small')."
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "Optional API key for embeddings. If omitted, resolved from the OpenClaw provider or environment."
+              },
+              "dimension": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1536,
+                "description": "Embedding vector dimension. Defaults to 1536."
               }
             }
           },
-          "includeWorkspaceSkills": {
-            "type": "boolean",
-            "default": true,
-            "description": "Whether to automatically discover and append workspace-only skills (<workspaceDir>/skills/) to the static working set."
+          "expansion": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model"],
+            "properties": {
+              "baseUrl": {
+                "type": "string",
+                "description": "Optional base URL for OpenAI-compatible expansion. If omitted, resolved from the OpenClaw provider prefix in model."
+              },
+              "model": {
+                "type": "string",
+                "description": "Expansion model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/gpt-4o-mini')."
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "Optional API key for expansion. If omitted, resolved from the OpenClaw provider or environment."
+              }
+            }
           },
-          "includeWorkshopSkills": {
-            "type": "boolean",
-            "default": true,
-            "description": "Whether to automatically discover and append agent-specific workshop skills (.openclaw/agents/<agentId>/agent/workshop-skills/) to the agent's static working set."
-          },
-          "suppressNativeSkillPrompt": {
-            "type": "boolean",
-            "default": true,
-            "description": "When enabled, automatically ensures agents.defaults.skills is [] and removes agents.entries.*.skills in openclaw.json on startup to suppress duplicate native OpenClaw <available_skills> prompts."
+          "indexRefreshIntervalSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "default": 300,
+            "description": "Seconds between source checks for QMD intent and skill index refreshes; 0 disables subsequent automatic checks."
           }
-        }
+        },
+        "required": ["embedding", "expansion"]
+      },
+      "skills": {
+        "type": "object",
+        "description": "Skill dispatch and search configuration.",
+        "additionalProperties": false,
+        "properties": {
+          "sharedRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Absolute local skill directories intentionally shared with every agent. Agent-local roots retain precedence."
+          },
+          "suppressNativeExtraDirs": {
+            "type": "boolean",
+            "default": true,
+            "description": "When enabled, normalizes OpenClaw skills.load.extraDirs to [] on startup because Skill Harness uses skills.sharedRoots instead."
+          },
+          "search": {
+            "type": "object",
+            "description": "Skill search QMD collection weights.",
+            "additionalProperties": false,
+            "properties": {
+              "collectionWeights": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Relative weights (positive floats or integers, e.g. 1.5, 0.8) for weighted RRF across skill collections. Defaults to meta: 3, body: 2, references: 1.",
+                "properties": {
+                  "meta": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": 3,
+                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-meta collection."
+                  },
+                  "body": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": 2,
+                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-body collection."
+                  },
+                  "references": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": 1,
+                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-references collection."
+                  }
+                }
+              }
+            },
+            "default": {}
+          }
+        },
+        "default": {}
       },
       "routing": {
         "type": "object",
@@ -318,125 +359,6 @@
         },
         "default": {}
       },
-      "skills": {
-        "type": "object",
-        "description": "Skill dispatch and search configuration.",
-        "additionalProperties": false,
-        "properties": {
-          "sharedRoots": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "default": [],
-            "description": "Absolute local skill directories intentionally shared with every agent. Agent-local roots retain precedence."
-          },
-          "suppressNativeExtraDirs": {
-            "type": "boolean",
-            "default": true,
-            "description": "When enabled, normalizes OpenClaw skills.load.extraDirs to [] on startup because Skill Harness uses skills.sharedRoots instead."
-          },
-          "search": {
-            "type": "object",
-            "description": "Skill search QMD collection weights.",
-            "additionalProperties": false,
-            "properties": {
-              "collectionWeights": {
-                "type": "object",
-                "additionalProperties": false,
-                "description": "Relative weights (positive floats or integers, e.g. 1.5, 0.8) for weighted RRF across skill collections. Defaults to meta: 3, body: 2, references: 1.",
-                "properties": {
-                  "meta": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                    "default": 3,
-                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-meta collection."
-                  },
-                  "body": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                    "default": 2,
-                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-body collection."
-                  },
-                  "references": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                    "default": 1,
-                    "description": "Relative RRF weight (positive float or integer, e.g. 1.5, 0.8) for the skill-references collection."
-                  }
-                }
-              }
-            },
-            "default": {}
-          }
-        },
-        "default": {}
-      },
-      "qmd": {
-        "type": "object",
-        "description": "Required QMD remote services for mandatory hybrid intent routing and skill search. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
-        "additionalProperties": false,
-        "properties": {
-          "timeoutMs": {
-            "type": "integer",
-            "minimum": 1000,
-            "maximum": 60000,
-            "description": "QMD remote embedding and query-expansion request budget in milliseconds. Defaults to timeoutMs."
-          },
-          "embedding": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["model"],
-            "properties": {
-              "baseUrl": {
-                "type": "string",
-                "description": "Optional base URL for OpenAI-compatible embeddings. If omitted, resolved from the OpenClaw provider prefix in model."
-              },
-              "model": {
-                "type": "string",
-                "description": "Embedding model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/text-embedding-3-small')."
-              },
-              "apiKey": {
-                "type": "string",
-                "description": "Optional API key for embeddings. If omitted, resolved from the OpenClaw provider or environment."
-              },
-              "dimension": {
-                "type": "integer",
-                "minimum": 1,
-                "default": 1536,
-                "description": "Embedding vector dimension. Defaults to 1536."
-              }
-            }
-          },
-          "expansion": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["model"],
-            "properties": {
-              "baseUrl": {
-                "type": "string",
-                "description": "Optional base URL for OpenAI-compatible expansion. If omitted, resolved from the OpenClaw provider prefix in model."
-              },
-              "model": {
-                "type": "string",
-                "description": "Expansion model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/gpt-4o-mini')."
-              },
-              "apiKey": {
-                "type": "string",
-                "description": "Optional API key for expansion. If omitted, resolved from the OpenClaw provider or environment."
-              }
-            }
-          },
-          "indexRefreshIntervalSeconds": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 86400,
-            "default": 300,
-            "description": "Seconds between source checks for QMD intent and skill index refreshes; 0 disables subsequent automatic checks."
-          }
-        },
-        "required": ["embedding", "expansion"]
-      },
       "review": {
         "type": "object",
         "description": "Optional asynchronous post-turn Intent Review. It can update future runtime intents but never participates in the current route decision.",
@@ -539,6 +461,84 @@
           }
         },
         "default": {}
+      },
+      "scope": {
+        "type": "object",
+        "description": "Session, chat, and agent filtering.",
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Agent IDs eligible for intention scanning.",
+            "default": ["main"]
+          },
+          "chatTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["direct", "group", "channel", "explicit"]
+            },
+            "description": "Which chat types are eligible.",
+            "default": ["direct"]
+          },
+          "allowedChatIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Allow-list of chat IDs.",
+            "default": []
+          },
+          "deniedChatIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Deny-list of chat IDs.",
+            "default": []
+          }
+        },
+        "default": {}
+      },
+      "workingSetSkills": {
+        "type": "object",
+        "description": "Plugin-owned static skill working sets. Agent-specific skills are listed before shared defaults.",
+        "additionalProperties": false,
+        "properties": {
+          "defaults": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "agents": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "includeWorkspaceSkills": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to automatically discover and append workspace-only skills (<workspaceDir>/skills/) to the static working set."
+          },
+          "includeWorkshopSkills": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to automatically discover and append agent-specific workshop skills (.openclaw/agents/<agentId>/agent/workshop-skills/) to the agent's static working set."
+          },
+          "suppressNativeSkillPrompt": {
+            "type": "boolean",
+            "default": true,
+            "description": "When enabled, automatically ensures agents.defaults.skills is [] and removes agents.entries.*.skills in openclaw.json on startup to suppress duplicate native OpenClaw <available_skills> prompts."
+          }
+        }
       }
     }
   }
