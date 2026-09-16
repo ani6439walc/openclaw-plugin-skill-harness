@@ -252,11 +252,6 @@
                 "additionalProperties": false,
                 "description": "Direct SkillRouter retrieval used only while building prompt candidates.",
                 "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable direct retrieval for prompt candidates."
-                  },
                   "minCandidateScore": {
                     "type": "number",
                     "minimum": 0,
@@ -268,8 +263,7 @@
                     "type": "integer",
                     "minimum": 100,
                     "maximum": 60000,
-                    "default": 2000,
-                    "description": "Maximum milliseconds for prompt-build retrieval, including query expansion."
+                    "description": "Optional millisecond override for prompt-build retrieval, including query expansion. Defaults to qmd.timeoutMs."
                   }
                 },
                 "default": {}
@@ -279,11 +273,6 @@
                 "additionalProperties": false,
                 "description": "Deterministic latest-request skill-name matching.",
                 "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable skill-name candidate matching."
-                  },
                   "maxEditDistance": {
                     "type": "integer",
                     "minimum": 0,

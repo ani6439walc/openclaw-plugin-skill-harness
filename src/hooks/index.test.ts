@@ -4685,7 +4685,6 @@ describe("createHookHandlers topic switch flow", () => {
       configRaw: {
         routing: {
           skillCandidates: {
-            nameMatch: { enabled: false },
             search: { timeoutMs: 100 },
           },
         },

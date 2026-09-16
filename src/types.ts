@@ -49,13 +49,11 @@ export type ResolvedClassifierConfig = {
   contextWindow: ContextWindow;
 };
 export type ResolvedSkillCandidateSearchConfig = {
-  enabled: boolean;
   minCandidateScore: number;
   timeoutMs: number;
 };
 
 export type ResolvedSkillCandidateNameMatchConfig = {
-  enabled: boolean;
   maxEditDistance: number;
   minJaccardScore: number;
   genericTokens: string[];

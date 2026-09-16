@@ -1177,27 +1177,24 @@ export function createHookHandlers(deps: HookDeps) {
       const expansionContext = formatConversationExpansionContext({
         conversation: params.conversation,
       });
-      const search =
-        policy.search.enabled && qmdSkillIndex
-          ? qmdSkillIndex.search({
-              agentId: params.routing.effectiveAgentId,
-              query: params.latestUserMessage,
-              limit: policy.maxInjectedSkills,
-              includeEvidence: false,
-              ...(expansionContext ? { expansionContext } : {}),
-            })
-          : undefined;
-      if (policy.nameMatch.enabled) {
-        try {
-          nameCandidates = matchAvailableSkillNames({
-            skills: visibleSkills,
-            input: params.latestUserMessage,
-            options: policy.nameMatch,
-          });
-        } catch (error) {
-          fallbackReason = "name-channel-unavailable";
-          logger.warn("skill name candidate matching failed", { error });
-        }
+      const search = qmdSkillIndex
+        ? qmdSkillIndex.search({
+            agentId: params.routing.effectiveAgentId,
+            query: params.latestUserMessage,
+            limit: policy.maxInjectedSkills,
+            includeEvidence: false,
+            ...(expansionContext ? { expansionContext } : {}),
+          })
+        : undefined;
+      try {
+        nameCandidates = matchAvailableSkillNames({
+          skills: visibleSkills,
+          input: params.latestUserMessage,
+          options: policy.nameMatch,
+        });
+      } catch (error) {
+        fallbackReason = "name-channel-unavailable";
+        logger.warn("skill name candidate matching failed", { error });
       }
       if (search) {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1242,7 +1239,7 @@ export function createHookHandlers(deps: HookDeps) {
         } finally {
           if (timer !== undefined) clearTimeout(timer);
         }
-      } else if (policy.search.enabled) {
+      } else {
         fallbackReason = "retrieval-unavailable";
       }
       const selection = selectSkillCandidates({
@@ -1295,7 +1292,7 @@ export function createHookHandlers(deps: HookDeps) {
         skills: [...selection.selectedSkills],
         telemetry: {
           nameCandidates: nameCandidates.length,
-          retrievalAttempted: policy.search.enabled,
+          retrievalAttempted: true,
           retrievalCandidates: retrievalCandidates.length,
           retrievalSemanticScores,
           candidateCount: selection.pool.length,
@@ -1327,7 +1324,7 @@ export function createHookHandlers(deps: HookDeps) {
         skills: [],
         telemetry: {
           nameCandidates: nameCandidates.length,
-          retrievalAttempted: policy.search.enabled,
+          retrievalAttempted: true,
           retrievalCandidates: retrievalCandidates.length,
           retrievalSemanticScores,
           candidateCount: 0,

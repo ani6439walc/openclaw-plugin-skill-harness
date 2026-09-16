@@ -97,7 +97,7 @@ describe("resolveConfig", () => {
         references: 1,
       });
 
-      expect(result.qmd.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+      expect(result.qmd.timeoutMs).toBe(15_000);
       expect(result.qmd.indexRefreshIntervalSeconds).toBe(300);
       expect(result.qmd.embedding).toEqual({
         baseUrl: "",
@@ -389,7 +389,7 @@ describe("resolveConfig", () => {
       );
     });
 
-    it("uses the scanner timeout by default and accepts inline remote credentials", () => {
+    it("uses the QMD timeout by default and accepts inline remote credentials", () => {
       const result = resolveConfig({
         routing: {
           classifier: {
@@ -412,7 +412,7 @@ describe("resolveConfig", () => {
       });
 
       expect(result.qmd).toEqual({
-        timeoutMs: 8_000,
+        timeoutMs: 15_000,
         indexRefreshIntervalSeconds: 300,
         embedding: {
           baseUrl: "https://embedding.example.test/v1",
@@ -1029,9 +1029,8 @@ describe("resolveConfig", () => {
     it("resolves the complete default policy for legacy routing config", () => {
       expect(resolveConfig({}).routing.skillCandidates).toEqual({
         enabled: true,
-        search: { enabled: true, minCandidateScore: 0.6, timeoutMs: 2000 },
+        search: { minCandidateScore: 0.6, timeoutMs: 15_000 },
         nameMatch: {
-          enabled: true,
           maxEditDistance: 2,
           minJaccardScore: 0.5,
           genericTokens: [],
@@ -1039,6 +1038,18 @@ describe("resolveConfig", () => {
         maxInjectedSkills: 4,
         minInjectionScore: 0.3,
       });
+    });
+
+    it("inherits qmd timeout for candidate retrieval unless overridden", () => {
+      const inherited = resolveConfig({ qmd: { timeoutMs: 12_000 } });
+      expect(inherited.qmd.timeoutMs).toBe(12_000);
+      expect(inherited.routing.skillCandidates.search.timeoutMs).toBe(12_000);
+
+      const overridden = resolveConfig({
+        qmd: { timeoutMs: 12_000 },
+        routing: { skillCandidates: { search: { timeoutMs: 250 } } },
+      });
+      expect(overridden.routing.skillCandidates.search.timeoutMs).toBe(250);
     });
 
     it("accepts valid partial candidate routing configuration", () => {
@@ -1060,9 +1071,8 @@ describe("resolveConfig", () => {
 
       expect(policy).toEqual({
         enabled: false,
-        search: { enabled: true, minCandidateScore: 0.7, timeoutMs: 250 },
+        search: { minCandidateScore: 0.7, timeoutMs: 250 },
         nameMatch: {
-          enabled: true,
           maxEditDistance: 1,
           minJaccardScore: 0.75,
           genericTokens: ["code", "review"],

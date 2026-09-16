@@ -65,9 +65,8 @@ const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
 
 const DEFAULT_SKILL_CANDIDATES: ResolvedSkillCandidatesConfig = {
   enabled: true,
-  search: { enabled: true, minCandidateScore: 0.6, timeoutMs: 2000 },
+  search: { minCandidateScore: 0.6, timeoutMs: undefined as never },
   nameMatch: {
-    enabled: true,
     maxEditDistance: 2,
     minJaccardScore: 0.5,
     genericTokens: [],
@@ -108,7 +107,7 @@ const DEFAULT_WORKING_SET_SKILLS: ResolvedWorkingSetSkillsConfig = {
 };
 
 const DEFAULT_QMD: ResolvedQmdConfig = {
-  timeoutMs: DEFAULT_TIMEOUT_MS,
+  timeoutMs: 15_000,
   indexRefreshIntervalSeconds: 300,
   embedding: { baseUrl: "", model: "", dimension: 1536 },
   expansion: { baseUrl: "", model: "" },
@@ -334,7 +333,6 @@ const GenericTokensSchema = z
 
 const SkillCandidatesSearchSchema = z
   .object({
-    enabled: z.boolean().optional().default(true),
     minCandidateScore: z
       .number()
       .finite()
@@ -342,7 +340,7 @@ const SkillCandidatesSearchSchema = z
       .max(1)
       .optional()
       .default(0.6),
-    timeoutMs: z.number().int().min(100).max(60_000).optional().default(2000),
+    timeoutMs: z.number().int().min(100).max(60_000).optional(),
   })
   .strict()
   .optional()
@@ -350,7 +348,6 @@ const SkillCandidatesSearchSchema = z
 
 const SkillCandidatesNameMatchSchema = z
   .object({
-    enabled: z.boolean().optional().default(true),
     maxEditDistance: z.number().int().min(0).max(2).optional().default(2),
     minJaccardScore: z.number().finite().min(0).max(1).optional().default(0.5),
     genericTokens: GenericTokensSchema,
@@ -389,12 +386,28 @@ const RoutingSchema = z
   })
   .strict();
 
-function resolveRoutingConfig(raw: unknown): ResolvedRoutingConfig {
+function resolveRoutingConfig(
+  raw: unknown,
+  qmdTimeoutMs: number,
+): ResolvedRoutingConfig {
   const routing =
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>).routing
       : undefined;
-  return RoutingSchema.parse(routing === undefined ? {} : routing);
+  const resolved = RoutingSchema.parse(routing === undefined ? {} : routing);
+  return {
+    ...resolved,
+    skillCandidates: {
+      ...resolved.skillCandidates,
+      search: {
+        ...resolved.skillCandidates.search,
+        timeoutMs:
+          resolved.skillCandidates.search.timeoutMs === undefined
+            ? qmdTimeoutMs
+            : resolved.skillCandidates.search.timeoutMs,
+      },
+    },
+  };
 }
 
 const SkillSearchSchema = z
@@ -612,7 +625,6 @@ export function resolveConfig(
   options?: { openClawConfig?: OpenClawConfig; env?: NodeJS.ProcessEnv },
 ): ResolvedSkillHarnessPluginConfig {
   const resolved = SkillHarnessConfigSchema.parse(raw);
-  const resolvedRouting = resolveRoutingConfig(raw);
   const resolvedSkills = resolveSkillsConfig(raw);
   const resolvedWorkingSetSkills = resolveWorkingSetSkillsConfig(raw);
 
@@ -624,10 +636,11 @@ export function resolveConfig(
 
   const timeoutMs = clampInt(
     resolved.qmd.timeoutMs,
-    resolvedRouting.classifier.timeoutMs,
+    DEFAULT_QMD.timeoutMs,
     1_000,
     60_000,
   );
+  const resolvedRouting = resolveRoutingConfig(raw, timeoutMs);
 
   return {
     scope: resolved.scope,
