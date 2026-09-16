@@ -284,6 +284,8 @@ describe("StatsAggregator", () => {
         candidates: 2,
         semanticScore: { count: 2, average: 0.815, min: 0.72, max: 0.91 },
         injectedSkills: 1,
+        collections: { meta: 0, body: 0, references: 0 },
+        injectedCollections: { meta: 0, body: 0, references: 0 },
       },
       pool: {
         nonEmptyTurns: 1,
@@ -303,6 +305,42 @@ describe("StatsAggregator", () => {
     expect(Object.keys(stats.processedEvents)).toEqual([
       "new-session:2026-06-11T00:00:00.000Z",
     ]);
+  });
+
+  it("aggregates retrievalCollections and injectedCollections accurately", () => {
+    const state = createState();
+    state.intent!.inputSkillDiscovery = {
+      nameCandidates: 1,
+      retrievalAttempted: true,
+      retrievalCandidates: 3,
+      retrievalSemanticScores: [0.85, 0.75, 0.65],
+      candidateCount: 4,
+      injectedSkills: [
+        {
+          name: "weather",
+          source: "direct-retrieval",
+          collections: ["meta", "body"],
+          topCollection: "meta",
+        },
+      ],
+      retrievalCollections: { meta: 2, body: 2, references: 1 },
+      injectedCollections: { meta: 1, body: 1, references: 0 },
+      durationMs: 15,
+    };
+
+    expect(aggregator.record("turn-coll", state, intent)).toBe(true);
+
+    const stats = readStats();
+    expect(stats.skillDiscovery.qmdSearch.collections).toEqual({
+      meta: 2,
+      body: 2,
+      references: 1,
+    });
+    expect(stats.skillDiscovery.qmdSearch.injectedCollections).toEqual({
+      meta: 1,
+      body: 1,
+      references: 0,
+    });
   });
 
   it("replaces a schema v6 stats file with a fresh v7 window", () => {

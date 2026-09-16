@@ -38,6 +38,9 @@ export type PipelineMetadata = {
   injectedCount?: number;
   injectedSkills?: string[];
   fallbackReason?: SkillCandidatePoolFallbackReason;
+  collectionHits?: Partial<Record<"meta" | "body" | "references", number>>;
+  injectedCollections?: Partial<Record<"meta" | "body" | "references", number>>;
+  explain?: string;
   searchEvidence?: IntentRoutingSearchEvidence;
   routingEvidence?: IntentRoutingEvidence;
 };

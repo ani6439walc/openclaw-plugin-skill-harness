@@ -1,5 +1,8 @@
 import { roundToDecimals } from "../normalize.js";
-import type { InputSkillDiscovery } from "../session/index.js";
+import type {
+  InputSkillDiscovery,
+  SkillCollectionKind,
+} from "../session/index.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
 import { defaultCatalog } from "../intents/index.js";
@@ -1240,6 +1243,17 @@ export function createHookHandlers(deps: HookDeps) {
     };
   }
 
+  function normalizeSkillCollection(
+    collection: string,
+  ): SkillCollectionKind | undefined {
+    const norm = collection.trim().toLowerCase();
+    if (norm === "skill-meta" || norm === "meta") return "meta";
+    if (norm === "skill-body" || norm === "body") return "body";
+    if (norm === "skill-references" || norm === "references")
+      return "references";
+    return undefined;
+  }
+
   async function discoverInputMatchedSkills(params: {
     ctx: PluginHookAgentContext;
     routing: PromptBuildIdentity;
@@ -1259,6 +1273,8 @@ export function createHookHandlers(deps: HookDeps) {
           retrievalSemanticScores: [],
           candidateCount: 0,
           injectedSkills: [],
+          retrievalCollections: { meta: 0, body: 0, references: 0 },
+          injectedCollections: { meta: 0, body: 0, references: 0 },
           durationMs: 0,
         },
       };
@@ -1291,7 +1307,7 @@ export function createHookHandlers(deps: HookDeps) {
             agentId: params.routing.effectiveAgentId,
             query: params.latestUserMessage,
             limit: policy.maxInjectedSkills,
-            includeEvidence: false,
+            includeEvidence: true,
             ...(expansionContext ? { expansionContext } : {}),
           })
         : undefined;
@@ -1300,7 +1316,11 @@ export function createHookHandlers(deps: HookDeps) {
           skills: visibleSkills,
           input: params.latestUserMessage,
           options: policy.nameMatch,
-        });
+        }).map((candidate) => ({
+          ...candidate,
+          collections: ["meta" as const],
+          topCollection: "meta" as const,
+        }));
       } catch (error) {
         fallbackReason = "name-channel-unavailable";
         logger.warn("skill name candidate matching failed", { error });
@@ -1328,19 +1348,36 @@ export function createHookHandlers(deps: HookDeps) {
             retrievalSemanticScores = outcome.hits.flatMap((hit) =>
               hit.semanticScore === undefined ? [] : [hit.semanticScore],
             );
-            retrievalCandidates = outcome.hits.flatMap((hit) =>
-              hit.semanticScore !== undefined &&
-              roundToDecimals(hit.semanticScore, 2) >=
-                roundToDecimals(policy.search.minCandidateScore, 2)
-                ? [
-                    {
-                      skillName: hit.name,
-                      score: hit.semanticScore,
-                      source: "direct-retrieval" as const,
-                    },
-                  ]
-                : [],
-            );
+            retrievalCandidates = outcome.hits.flatMap((hit) => {
+              if (
+                hit.semanticScore === undefined ||
+                roundToDecimals(hit.semanticScore, 2) <
+                  roundToDecimals(policy.search.minCandidateScore, 2)
+              ) {
+                return [];
+              }
+              const collections = [
+                ...new Set(
+                  (hit.evidence ?? [])
+                    .map((e) => normalizeSkillCollection(e.collection))
+                    .filter((c): c is SkillCollectionKind => c !== undefined),
+                ),
+              ];
+              const topCollection = hit.evidence?.[0]
+                ? normalizeSkillCollection(hit.evidence[0].collection)
+                : collections[0];
+
+              return [
+                {
+                  skillName: hit.name,
+                  score: hit.semanticScore,
+                  source: "direct-retrieval" as const,
+                  collections: collections.length > 0 ? collections : undefined,
+                  topCollection,
+                  evidence: hit.evidence,
+                },
+              ];
+            });
           }
         } catch (error) {
           fallbackReason = "retrieval-unavailable";
@@ -1359,16 +1396,56 @@ export function createHookHandlers(deps: HookDeps) {
       if (selection.selectedSkills.length === 0 && !fallbackReason) {
         fallbackReason = "empty-pool";
       }
+      const retrievalCollections: Record<SkillCollectionKind, number> = {
+        meta: 0,
+        body: 0,
+        references: 0,
+      };
+      for (const candidate of retrievalCandidates) {
+        for (const col of candidate.collections ?? []) {
+          retrievalCollections[col] += 1;
+        }
+      }
+
+      const injectedCollections: Record<SkillCollectionKind, number> = {
+        meta: 0,
+        body: 0,
+        references: 0,
+      };
       const injectedCandidates = selection.pool
         .filter((candidate) =>
           selection.selectedSkills.some(
             (skill) => skill.name === candidate.skillName,
           ),
         )
-        .map((candidate) => ({
-          name: candidate.skillName,
-          source: candidate.source,
-        }));
+        .map((candidate) => {
+          for (const col of candidate.collections ?? []) {
+            injectedCollections[col] += 1;
+          }
+          return {
+            name: candidate.skillName,
+            source: candidate.source,
+            collections: candidate.collections,
+            topCollection: candidate.topCollection,
+          };
+        });
+
+      const explainSummary = injectedCandidates
+        .map((candidate) => {
+          const matched = selection.pool.find(
+            (p) => p.skillName === candidate.name,
+          );
+          const cols = candidate.collections?.join(",") ?? "none";
+          const top = candidate.topCollection
+            ? ` via ${candidate.topCollection}`
+            : "";
+          const score = matched
+            ? ` (score ${roundToDecimals(matched.score, 2)})`
+            : "";
+          return `${candidate.name} [${candidate.source}${top}: ${cols}${score}]`;
+        })
+        .join("; ");
+
       emitPipelineEvent(
         params.ctx,
         params.routing.resolvedSessionKey,
@@ -1391,6 +1468,9 @@ export function createHookHandlers(deps: HookDeps) {
               )
               .join(",") || "none",
           result: selection.selectedSkills.map((skill) => skill.name),
+          collectionHits: retrievalCollections,
+          injectedCollections,
+          explain: explainSummary || "none",
           ...(fallbackReason ? { fallbackReason } : {}),
           durationMs: Math.max(0, Date.now() - startedAtMs),
         },
@@ -1404,6 +1484,8 @@ export function createHookHandlers(deps: HookDeps) {
           retrievalSemanticScores,
           candidateCount: selection.pool.length,
           injectedSkills: injectedCandidates,
+          retrievalCollections,
+          injectedCollections,
           ...(fallbackReason ? { fallbackReason } : {}),
           durationMs: Math.max(0, Date.now() - startedAtMs),
         },

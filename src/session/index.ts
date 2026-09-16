@@ -15,6 +15,7 @@ export type {
   PromptTurnPrepareResult,
   SessionData,
   SessionState,
+  SkillCollectionKind,
   SkillRecord,
   ToolResultFallback,
 } from "./tracker.js";

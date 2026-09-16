@@ -4435,6 +4435,83 @@ describe("createHookHandlers topic switch flow", () => {
     }
   });
 
+  it("collects collection hits and explain details when evidence is provided", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-skill-match-evidence-"),
+    );
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    writeSkill(path.join(workspace, "skills"), "review", "Review code.");
+    const search = vi.fn().mockResolvedValue([
+      {
+        name: "review",
+        score: 0.85,
+        semanticScore: 0.92,
+        evidence: [
+          { collection: "skill-meta", path: "review/SKILL.md", score: 0.85 },
+          { collection: "skill-body", path: "review/SKILL.md", score: 0.72 },
+        ],
+      },
+    ]);
+    const { handlers, emitAgentEvent, record } = createTopicFlowHarness({
+      historicalIntents: [],
+      qmdSkillIndex: { search },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => state },
+          agent: { resolveAgentWorkspaceDir: () => workspace },
+        },
+      } as unknown as Partial<OpenClawPluginApi>,
+    });
+    try {
+      await handlers.onBeforePromptBuild(event, ctx);
+      expect(search).toHaveBeenCalledWith(
+        expect.objectContaining({ includeEvidence: true }),
+      );
+
+      const skillMatchEvent = emittedPipelineEvents(emitAgentEvent).find(
+        (entry) =>
+          entry.data.phase === "skill-match" &&
+          entry.data.state === "completed",
+      );
+      expect(skillMatchEvent?.data).toEqual(
+        expect.objectContaining({
+          reason: "qmd-search",
+          result: ["review"],
+          collectionHits: { meta: 1, body: 1, references: 0 },
+          injectedCollections: { meta: 1, body: 1, references: 0 },
+          explain: expect.stringContaining(
+            "review [direct-retrieval via meta: meta,body",
+          ),
+        }),
+      );
+
+      expect(record).toHaveBeenLastCalledWith(
+        "session-1",
+        expect.objectContaining({
+          current: expect.objectContaining({
+            intent: expect.objectContaining({
+              inputSkillDiscovery: expect.objectContaining({
+                retrievalCollections: { meta: 1, body: 1, references: 0 },
+                injectedCollections: { meta: 1, body: 1, references: 0 },
+                injectedSkills: [
+                  {
+                    name: "review",
+                    source: "direct-retrieval",
+                    collections: ["meta", "body"],
+                    topCollection: "meta",
+                  },
+                ],
+              }),
+            }),
+          }),
+        }),
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("continues prompt construction after a timed-out skill search rejects", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-skill-search-timeout-"),

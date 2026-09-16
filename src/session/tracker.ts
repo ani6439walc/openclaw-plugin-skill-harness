@@ -50,6 +50,8 @@ export interface ToolResultFallback {
   durationMs?: number;
 }
 
+export type SkillCollectionKind = "meta" | "body" | "references";
+
 export type InputSkillDiscovery = {
   nameCandidates: number;
   retrievalAttempted: boolean;
@@ -59,7 +61,11 @@ export type InputSkillDiscovery = {
   injectedSkills: Array<{
     name: string;
     source: "name-match" | "direct-retrieval";
+    collections?: SkillCollectionKind[];
+    topCollection?: SkillCollectionKind;
   }>;
+  retrievalCollections?: Record<SkillCollectionKind, number>;
+  injectedCollections?: Record<SkillCollectionKind, number>;
   fallbackReason?:
     | "name-channel-unavailable"
     | "retrieval-timeout"

@@ -1,5 +1,7 @@
 import { canonicalIdentity } from "../normalize.js";
 import type { AvailableSkill } from "./types.js";
+import type { SkillQmdEvidence } from "../qmd/skill-index.js";
+import type { SkillCollectionKind } from "../session/tracker.js";
 
 export type SkillDiscoverySource = "name-match" | "direct-retrieval";
 
@@ -7,6 +9,9 @@ export type SkillDiscoveryCandidate = {
   skillName: string;
   score: number;
   source: SkillDiscoverySource;
+  collections?: SkillCollectionKind[];
+  topCollection?: SkillCollectionKind;
+  evidence?: SkillQmdEvidence[];
 };
 
 export type CandidatePoolOptions = {

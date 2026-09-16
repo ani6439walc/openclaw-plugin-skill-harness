@@ -62,4 +62,22 @@ describe("selectSkillCandidates", () => {
     ]);
     expect(result.selectedSkills.map((skill) => skill.name)).toEqual(["alpha"]);
   });
+
+  it("preserves collections and topCollection metadata on selected candidates", () => {
+    const result = selectSkillCandidates({
+      visibleSkills: skills,
+      candidates: [
+        {
+          skillName: "alpha",
+          score: 0.9,
+          source: "direct-retrieval",
+          collections: ["meta", "body"],
+          topCollection: "meta",
+        },
+      ],
+      options: { maxInjectedSkills: 1, minInjectionScore: 0.1 },
+    });
+    expect(result.pool[0].collections).toEqual(["meta", "body"]);
+    expect(result.pool[0].topCollection).toBe("meta");
+  });
 });

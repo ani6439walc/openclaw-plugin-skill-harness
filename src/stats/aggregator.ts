@@ -109,6 +109,16 @@ type SkillDiscoveryStats = {
     candidates: number;
     semanticScore: ScoreStats;
     injectedSkills: number;
+    collections: {
+      meta: number;
+      body: number;
+      references: number;
+    };
+    injectedCollections: {
+      meta: number;
+      body: number;
+      references: number;
+    };
   };
   pool: {
     nonEmptyTurns: number;
@@ -310,6 +320,8 @@ function emptySkillDiscoveryStats(): SkillDiscoveryStats {
       candidates: 0,
       semanticScore: emptyScoreStats(),
       injectedSkills: 0,
+      collections: { meta: 0, body: 0, references: 0 },
+      injectedCollections: { meta: 0, body: 0, references: 0 },
     },
     pool: {
       nonEmptyTurns: 0,
@@ -768,30 +780,55 @@ function isScoreStats(value: unknown): value is ScoreStats {
 }
 
 function isSkillDiscoveryStats(value: unknown): value is SkillDiscoveryStats {
-  return (
-    isRecord(value) &&
-    hasNumbers(value, ["turns"]) &&
-    hasNumbers(value.nameMatch, [
+  if (
+    !isRecord(value) ||
+    !hasNumbers(value, ["turns"]) ||
+    !hasNumbers(value.nameMatch, [
       "matchedTurns",
       "candidates",
       "injectedSkills",
-    ]) &&
-    hasNumbers(value.qmdSearch, [
+    ]) ||
+    !hasNumbers(value.qmdSearch, [
       "attemptedTurns",
       "matchedTurns",
       "candidates",
       "injectedSkills",
-    ]) &&
-    isScoreStats(value.qmdSearch.semanticScore) &&
-    hasNumbers(value.pool, [
+    ]) ||
+    !isScoreStats(value.qmdSearch.semanticScore) ||
+    !hasNumbers(value.pool, [
       "nonEmptyTurns",
       "candidates",
       "injectedTurns",
       "injectedSkills",
-    ]) &&
-    isCountMap(value.fallbackReasons) &&
-    isScoreStats(value.durationMs)
-  );
+    ]) ||
+    !isCountMap(value.fallbackReasons) ||
+    !isScoreStats(value.durationMs)
+  ) {
+    return false;
+  }
+  const qmd = value.qmdSearch as Record<string, unknown>;
+  if (
+    qmd.collections &&
+    !hasNumbers(qmd.collections, ["meta", "body", "references"])
+  ) {
+    return false;
+  }
+  if (
+    qmd.injectedCollections &&
+    !hasNumbers(qmd.injectedCollections, ["meta", "body", "references"])
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function ensureSkillDiscoveryCollections(target: SkillDiscoveryStats): void {
+  if (!target.qmdSearch.collections) {
+    target.qmdSearch.collections = { meta: 0, body: 0, references: 0 };
+  }
+  if (!target.qmdSearch.injectedCollections) {
+    target.qmdSearch.injectedCollections = { meta: 0, body: 0, references: 0 };
+  }
 }
 
 function isProjectionStats(value: unknown): value is ProjectionStats {
@@ -921,7 +958,9 @@ function assertStats(stats: unknown): asserts stats is Stats {
     if (!isDailyBucket(bucket)) {
       throw new Error("unsupported or invalid stats schema");
     }
+    ensureSkillDiscoveryCollections(bucket.skillDiscovery);
   }
+  ensureSkillDiscoveryCollections(stats.skillDiscovery);
 }
 
 function loadStats(statsFilePath: string, eventTime: string): Stats {
@@ -1214,6 +1253,7 @@ function recordSkillDiscoveryStats(
     NonNullable<SessionState["intent"]>["inputSkillDiscovery"]
   >,
 ): void {
+  ensureSkillDiscoveryCollections(target);
   target.turns += 1;
   target.nameMatch.candidates += discovery.nameCandidates;
   target.nameMatch.matchedTurns += discovery.nameCandidates > 0 ? 1 : 0;
@@ -1222,6 +1262,22 @@ function recordSkillDiscoveryStats(
   target.qmdSearch.matchedTurns += discovery.retrievalCandidates > 0 ? 1 : 0;
   for (const score of discovery.retrievalSemanticScores)
     recordScore(target.qmdSearch.semanticScore, score);
+  if (discovery.retrievalCollections) {
+    target.qmdSearch.collections.meta +=
+      discovery.retrievalCollections.meta ?? 0;
+    target.qmdSearch.collections.body +=
+      discovery.retrievalCollections.body ?? 0;
+    target.qmdSearch.collections.references +=
+      discovery.retrievalCollections.references ?? 0;
+  }
+  if (discovery.injectedCollections) {
+    target.qmdSearch.injectedCollections.meta +=
+      discovery.injectedCollections.meta ?? 0;
+    target.qmdSearch.injectedCollections.body +=
+      discovery.injectedCollections.body ?? 0;
+    target.qmdSearch.injectedCollections.references +=
+      discovery.injectedCollections.references ?? 0;
+  }
   target.pool.candidates += discovery.candidateCount;
   target.pool.nonEmptyTurns += discovery.candidateCount > 0 ? 1 : 0;
   target.pool.injectedTurns += discovery.injectedSkills.length > 0 ? 1 : 0;
