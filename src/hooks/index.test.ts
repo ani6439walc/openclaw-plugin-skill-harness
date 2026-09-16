@@ -51,6 +51,28 @@ function createHandlers(
   } as never);
 }
 
+function createMockReviewScheduler() {
+  let runner:
+    ((candidate: any, signal: AbortSignal) => Promise<void>) | undefined;
+  const schedule = vi.fn((_candidate: any) => true);
+  return {
+    schedule,
+    setRunner: vi.fn((r: any) => {
+      runner = r;
+    }),
+    setOnDiscard: vi.fn(),
+    flush: async (callIndex?: number) => {
+      const call =
+        callIndex !== undefined
+          ? schedule.mock.calls[callIndex]?.[0]
+          : schedule.mock.calls.at(-1)?.[0];
+      if (call && runner) {
+        await runner(call, new AbortController().signal);
+      }
+    },
+  };
+}
+
 describe("createHookHandlers tracking guards", () => {
   function bindAssociation(
     registry: TurnAssociationRegistry,
@@ -686,7 +708,7 @@ description: Navigate Tokyo.
     const mergeTurnAndPersist = vi.fn().mockResolvedValue("retryable-failure");
     const finalizeTurnFromAgentEnd = vi.fn();
     const recordStats = vi.spyOn(defaultStatsAggregator, "record");
-    const reviewQueue = vi.fn();
+    const reviewScheduler = createMockReviewScheduler();
     const handlers = createHandlers(
       {},
       {
@@ -696,7 +718,7 @@ description: Navigate Tokyo.
           mergeTurnAndPersist,
           finalizeTurnFromAgentEnd,
         },
-        reviewQueue: { enqueue: reviewQueue },
+        reviewScheduler,
       },
     );
     const startedAt = performance.now();
@@ -718,7 +740,7 @@ description: Navigate Tokyo.
     );
     expect(finalizeTurnFromAgentEnd).not.toHaveBeenCalled();
     expect(recordStats).not.toHaveBeenCalled();
-    expect(reviewQueue).not.toHaveBeenCalled();
+    expect(reviewScheduler.schedule).not.toHaveBeenCalled();
     expect(toolFallbacks.get("tool-a")).toBeDefined();
   });
 
@@ -1349,7 +1371,7 @@ description: Navigate Tokyo.
       path.join(skillDir, "SKILL.md"),
       "---\nname: analysis\ndescription: Break down unclear tasks.\n---\n",
     );
-    const enqueue = vi.fn();
+    const reviewScheduler = createMockReviewScheduler();
     const refreshIntents = vi.fn();
     const reviewer = vi.fn().mockResolvedValue({
       findings: [],
@@ -1384,7 +1406,7 @@ description: Navigate Tokyo.
         }),
       refreshLiveConfigFromRuntime: vi.fn(),
       refreshIntents,
-      reviewQueue: { enqueue },
+      reviewScheduler,
       reviewer,
       reviewLogWriter,
       dataRoot: tmp,
@@ -1396,10 +1418,10 @@ description: Navigate Tokyo.
       agentId: "main",
     });
 
-    expect(enqueue).toHaveBeenCalledOnce();
+    expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
     expect(selectPlacement).not.toHaveBeenCalled();
     expect(reviewer).not.toHaveBeenCalled();
-    await enqueue.mock.calls[0][0]();
+    await reviewScheduler.flush();
     expect(reviewer).toHaveBeenCalledWith(
       expect.objectContaining({
         snapshot: expect.objectContaining({
@@ -1481,7 +1503,7 @@ description: Navigate Tokyo.
     );
     vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
     vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
-    const enqueue = vi.fn();
+    const reviewScheduler = createMockReviewScheduler();
     const refreshIntents = vi.fn();
     const reviewer = vi
       .fn()
@@ -1518,7 +1540,7 @@ description: Navigate Tokyo.
         }),
       refreshLiveConfigFromRuntime: vi.fn(),
       refreshIntents,
-      reviewQueue: { enqueue },
+      reviewScheduler,
       reviewer,
       reviewLogWriter,
       dataRoot: fs.mkdtempSync(path.join(os.tmpdir(), "hook-routing-refresh-")),
@@ -1529,7 +1551,7 @@ description: Navigate Tokyo.
       sessionId: snapshot.sessionId,
       agentId: "main",
     });
-    await enqueue.mock.calls[0][0]();
+    await reviewScheduler.flush(0);
     expect(refreshIntents).toHaveBeenCalledWith({ rebuildQmd: true });
 
     bindAssociation(turnAssociations, {
@@ -1541,7 +1563,7 @@ description: Navigate Tokyo.
       sessionId: snapshot.sessionId,
       agentId: "main",
     });
-    await enqueue.mock.calls[1][0]();
+    await reviewScheduler.flush(1);
     expect(refreshIntents).toHaveBeenLastCalledWith({ rebuildQmd: false });
   });
 
@@ -1612,7 +1634,10 @@ description: Navigate Tokyo.
       outcome: "applied" as const,
       changedExperienceIds: ["analysis/corrected-workflow"],
     });
-    const queued: Array<Array<() => Promise<void>>> = [[], []];
+    const reviewSchedulers = [
+      createMockReviewScheduler(),
+      createMockReviewScheduler(),
+    ];
 
     try {
       const roots = [firstRoot, secondRoot];
@@ -1638,9 +1663,7 @@ description: Navigate Tokyo.
             }),
           refreshLiveConfigFromRuntime: vi.fn(),
           refreshIntents: vi.fn(),
-          reviewQueue: {
-            enqueue: (task) => queued[index]?.push(task),
-          },
+          reviewScheduler: reviewSchedulers[index],
           reviewer,
           skillInventoryResolver: vi.fn().mockResolvedValue([]),
           dataRoot,
@@ -1652,10 +1675,10 @@ description: Navigate Tokyo.
         });
       }
 
-      expect(queued[0]).toHaveLength(1);
-      expect(queued[1]).toHaveLength(1);
-      await queued[0]?.[0]?.();
-      await queued[1]?.[0]?.();
+      expect(reviewSchedulers[0].schedule).toHaveBeenCalledOnce();
+      expect(reviewSchedulers[1].schedule).toHaveBeenCalledOnce();
+      await reviewSchedulers[0].flush();
+      await reviewSchedulers[1].flush();
 
       for (const dataRoot of roots) {
         const persisted = JSON.parse(
@@ -1779,7 +1802,7 @@ description: Navigate Tokyo.
       .spyOn(defaultStatsAggregator, "selectSkillPlacementCandidate")
       .mockReturnValue(candidate);
     vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
-    const enqueue = vi.fn();
+    const reviewScheduler = createMockReviewScheduler();
     const reviewer = vi.fn().mockResolvedValue({
       findings: [],
       outcome: "nofinding" as const,
@@ -1819,7 +1842,7 @@ description: Navigate Tokyo.
         }),
       refreshLiveConfigFromRuntime: vi.fn(),
       refreshIntents: vi.fn(),
-      reviewQueue: { enqueue },
+      reviewScheduler,
       reviewer,
       reviewLogWriter: {
         completedSkillEpochKeys: vi.fn(() => new Set<string>()),
@@ -1834,8 +1857,8 @@ description: Navigate Tokyo.
       agentId: "ctx-agent",
     });
 
-    expect(enqueue).toHaveBeenCalledOnce();
-    await enqueue.mock.calls[0][0]();
+    expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
+    await reviewScheduler.flush();
     expect(reviewer).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: "ctx-agent",
@@ -1850,7 +1873,7 @@ description: Navigate Tokyo.
       agentId: "ctx-agent",
     });
     expect(selectCandidate).toHaveBeenCalledTimes(2);
-    expect(enqueue).toHaveBeenCalledTimes(2);
+    expect(reviewScheduler.schedule).toHaveBeenCalledTimes(2);
   });
 
   it("enqueues one skill-placement review from the persisted agent inventory", async () => {
@@ -1939,7 +1962,7 @@ description: Navigate Tokyo.
     candidate.fingerprint = createHash("sha256")
       .update(fs.readFileSync(skillFile))
       .digest("hex");
-    const enqueue = vi.fn();
+    const reviewScheduler = createMockReviewScheduler();
     const reviewer = vi
       .fn()
       .mockRejectedValueOnce(new Error("reviewer failed"))
@@ -2007,7 +2030,7 @@ description: Navigate Tokyo.
         }),
       refreshLiveConfigFromRuntime: vi.fn(),
       refreshIntents: vi.fn(),
-      reviewQueue: { enqueue },
+      reviewScheduler,
       reviewer,
       reviewLogWriter,
       skillInventoryResolver: vi.fn().mockImplementation(async () => [
@@ -2036,25 +2059,25 @@ description: Navigate Tokyo.
       "persisted-agent",
       new Set<string>(),
     );
-    expect(enqueue).not.toHaveBeenCalled();
+    expect(reviewScheduler.schedule).not.toHaveBeenCalled();
     await handlers.onAgentEnd({ messages: [], runId: "run-c" } as never, {
       sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
-    expect(enqueue).toHaveBeenCalledOnce();
-    await expect(enqueue.mock.calls[0][0]()).rejects.toThrow("reviewer failed");
+    expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
+    await expect(reviewScheduler.flush(0)).rejects.toThrow("reviewer failed");
     await handlers.onAgentEnd({ messages: [], runId: "run-d" } as never, {
       sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
-    expect(enqueue).toHaveBeenCalledTimes(2);
-    await enqueue.mock.calls[1][0]();
+    expect(reviewScheduler.schedule).toHaveBeenCalledTimes(2);
+    await reviewScheduler.flush(1);
     await handlers.onAgentEnd({ messages: [], runId: "run-e" } as never, {
       sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
-    expect(enqueue).toHaveBeenCalledTimes(3);
-    await enqueue.mock.calls[2][0]();
+    expect(reviewScheduler.schedule).toHaveBeenCalledTimes(3);
+    await reviewScheduler.flush(2);
     expect(reviewer).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: "persisted-agent",
@@ -2096,7 +2119,7 @@ description: Navigate Tokyo.
       sessionId: snapshot.sessionId,
       agentId: "ctx-agent",
     });
-    expect(enqueue).toHaveBeenCalledTimes(3);
+    expect(reviewScheduler.schedule).toHaveBeenCalledTimes(3);
   });
 });
 

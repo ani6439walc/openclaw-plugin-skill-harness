@@ -36,6 +36,7 @@ import {
   extractEmbeddedRunError,
   formatEmbeddedError,
   isGatewayDrainingError,
+  runDetachedFromWorkScope,
 } from "../subagent-runtime.js";
 import { withFileLock } from "../file-utils.js";
 import { extractPayloadText } from "../classification/index.js";
@@ -1401,6 +1402,7 @@ export async function runReviewSubagent(params: {
   snapshot: ReviewSnapshot;
   triggers: readonly ReviewTrigger[];
   dataRoot?: string;
+  abortSignal?: AbortSignal;
 }): Promise<ReviewSubagentResult> {
   const runId = `skill-harness-review-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const suffix = crypto
@@ -1434,30 +1436,33 @@ export async function runReviewSubagent(params: {
     [...allowedExperienceSkills],
   );
   try {
-    const result = await params.api.runtime.agent.runEmbeddedAgent({
-      sessionId: runId,
-      sessionKey,
-      agentId: params.agentId,
-      messageProvider: params.messageProvider,
-      config: withReviewWorkspaceOnlyFsPolicy(
-        params.api.config,
-        params.agentId,
-      ),
-      prompt,
-      provider: params.modelRef.provider,
-      model: params.modelRef.model,
-      timeoutMs: params.config.review.timeoutSeconds * 1_000,
-      runId,
-      workspaceDir,
-      agentDir: workspaceDir,
-      ...buildEmbeddedSubagentRunDefaults(),
-      modelRun: false,
-      promptMode: "minimal",
-      sessionPersistence: "detached",
-      toolsAllow: buildReviewToolsAllow(),
-      disableTools: false,
-      thinkLevel: params.config.review.thinking,
-    });
+    const result = await runDetachedFromWorkScope(() =>
+      params.api.runtime.agent.runEmbeddedAgent({
+        sessionId: runId,
+        sessionKey,
+        agentId: params.agentId,
+        messageProvider: params.messageProvider,
+        config: withReviewWorkspaceOnlyFsPolicy(
+          params.api.config,
+          params.agentId,
+        ),
+        prompt,
+        provider: params.modelRef.provider,
+        model: params.modelRef.model,
+        timeoutMs: params.config.review.timeoutSeconds * 1_000,
+        runId,
+        workspaceDir,
+        agentDir: workspaceDir,
+        ...buildEmbeddedSubagentRunDefaults(),
+        modelRun: false,
+        promptMode: "minimal",
+        sessionPersistence: "detached",
+        toolsAllow: buildReviewToolsAllow(),
+        disableTools: false,
+        thinkLevel: params.config.review.thinking,
+        abortSignal: params.abortSignal,
+      }),
+    );
     const embeddedError = extractEmbeddedRunError(result);
     if (embeddedError) {
       logger.warn("review subagent returned an error", {
@@ -1803,7 +1808,10 @@ export async function runReviewSubagent(params: {
         : {}),
     };
   } catch (err) {
-    if (!isGatewayDrainingError(err)) {
+    const isAbort =
+      params.abortSignal?.aborted ||
+      (err instanceof Error && err.name === "AbortError");
+    if (!isGatewayDrainingError(err) && !isAbort) {
       logger.warn("review subagent error", {
         error: formatEmbeddedError(err) ?? String(err),
         modelRef: params.modelRef,
