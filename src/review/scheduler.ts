@@ -119,6 +119,8 @@ export class IntentReviewScheduler {
         this.notifyDiscard(existing.candidate);
       }
       existing.candidate = candidate;
+      this.pendingBySession.delete(key);
+      this.pendingBySession.set(key, existing);
       this.arm(key, existing, this.idleDelayMs);
       return true;
     }
@@ -149,74 +151,91 @@ export class IntentReviewScheduler {
 
     const generation = ++pending.generation;
     const timerCallback = () => {
-      if (this.disposed) {
-        return;
-      }
-      if (
-        this.pendingBySession.get(key) !== pending ||
-        pending.generation !== generation
-      ) {
-        return;
-      }
-      pending.timer = undefined;
+      try {
+        if (this.disposed) {
+          return;
+        }
+        if (
+          this.pendingBySession.get(key) !== pending ||
+          pending.generation !== generation
+        ) {
+          return;
+        }
+        pending.timer = undefined;
 
-      if (this.deps.isDraining?.() ?? isGatewayDraining()) {
-        this.pendingBySession.delete(key);
-        this.notifyDiscard(pending.candidate);
-        this.checkIdle();
-        return;
-      }
-
-      void Promise.resolve(
-        this.deps.isSystemActive
-          ? this.deps.isSystemActive(pending.candidate)
-          : false,
-      )
-        .then(async (active) => {
-          if (this.disposed) {
-            return;
-          }
-          if (
-            this.pendingBySession.get(key) !== pending ||
-            pending.generation !== generation
-          ) {
-            return;
-          }
-
-          if (active || this.reviewInFlight) {
-            this.arm(key, pending, this.retryIdleMs);
-            return;
-          }
-
-          this.reviewInFlight = true;
+        if (this.deps.isDraining?.() ?? isGatewayDraining()) {
           this.pendingBySession.delete(key);
-
-          try {
-            if (this.runner) {
-              await runDetachedFromWorkScope(() =>
-                this.runner!(pending.candidate, this.abortController.signal),
-              );
-            }
-          } catch (error) {
-            logger.warn("background intent review execution failed", { error });
-          } finally {
-            this.reviewInFlight = false;
-            this.checkIdle();
-          }
-        })
-        .catch((error: unknown) => {
-          logger.warn("background intent review liveness check failed", {
-            error,
-          });
-          if (
-            this.pendingBySession.get(key) === pending &&
-            pending.generation === generation
-          ) {
-            this.pendingBySession.delete(key);
-            this.notifyDiscard(pending.candidate);
-          }
+          this.notifyDiscard(pending.candidate);
           this.checkIdle();
+          return;
+        }
+
+        void Promise.resolve()
+          .then(() =>
+            this.deps.isSystemActive
+              ? this.deps.isSystemActive(pending.candidate)
+              : false,
+          )
+          .then(async (active) => {
+            if (this.disposed) {
+              return;
+            }
+            if (
+              this.pendingBySession.get(key) !== pending ||
+              pending.generation !== generation
+            ) {
+              return;
+            }
+
+            if (active || this.reviewInFlight) {
+              this.arm(key, pending, this.retryIdleMs);
+              return;
+            }
+
+            this.reviewInFlight = true;
+            this.pendingBySession.delete(key);
+
+            try {
+              if (this.runner) {
+                await runDetachedFromWorkScope(() =>
+                  this.runner!(pending.candidate, this.abortController.signal),
+                );
+              }
+            } catch (error) {
+              logger.warn("background intent review execution failed", {
+                error,
+              });
+            } finally {
+              this.reviewInFlight = false;
+              this.checkIdle();
+            }
+          })
+          .catch((error: unknown) => {
+            logger.warn("background intent review liveness check failed", {
+              error,
+            });
+            if (
+              this.pendingBySession.get(key) === pending &&
+              pending.generation === generation
+            ) {
+              this.pendingBySession.delete(key);
+              this.notifyDiscard(pending.candidate);
+            }
+            this.checkIdle();
+          });
+      } catch (error) {
+        logger.warn("unexpected error in background review timer callback", {
+          error,
         });
+        if (
+          this.pendingBySession.get(key) === pending &&
+          pending.generation === generation
+        ) {
+          this.pendingBySession.delete(key);
+          this.notifyDiscard(pending.candidate);
+        }
+        this.checkIdle();
+      }
     };
 
     const timer = runDetachedFromWorkScope(() =>

@@ -372,6 +372,91 @@ describe("IntentReviewScheduler", () => {
     scheduler.clear();
   });
 
+  it("freshens LRU order when updating an existing session so active sessions are not prematurely evicted", async () => {
+    const discardedEventIds: string[] = [];
+    const executed: string[] = [];
+
+    const scheduler = new IntentReviewScheduler({
+      idleDelayMs: 40,
+      maxPending: 2,
+      onDiscard: (candidate) => {
+        discardedEventIds.push(candidate.snapshot.eventId);
+      },
+      runReview: async (candidate) => {
+        executed.push(candidate.snapshot.sessionId);
+      },
+    });
+
+    const c1 = createMockCandidate({
+      sessionKey: "agent:main:sess-1",
+      snapshot: {
+        ...createMockCandidate().snapshot,
+        sessionId: "sess-1",
+        eventId: "turn-1",
+      },
+    });
+    const c2 = createMockCandidate({
+      sessionKey: "agent:main:sess-2",
+      snapshot: {
+        ...createMockCandidate().snapshot,
+        sessionId: "sess-2",
+        eventId: "turn-sess-2",
+      },
+    });
+
+    // sess-1 first, then sess-2
+    scheduler.schedule(c1);
+    scheduler.schedule(c2);
+
+    // Freshen sess-1 with a new turn
+    const c1Updated = createMockCandidate({
+      sessionKey: "agent:main:sess-1",
+      snapshot: {
+        ...createMockCandidate().snapshot,
+        sessionId: "sess-1",
+        eventId: "turn-2",
+      },
+    });
+    scheduler.schedule(c1Updated);
+    expect(discardedEventIds).toEqual(["turn-1"]);
+
+    // Now sess-2 is the oldest (LRU). Adding sess-3 should evict sess-2, NOT sess-1
+    const c3 = createMockCandidate({
+      sessionKey: "agent:main:sess-3",
+      snapshot: {
+        ...createMockCandidate().snapshot,
+        sessionId: "sess-3",
+        eventId: "turn-sess-3",
+      },
+    });
+    scheduler.schedule(c3);
+
+    expect(discardedEventIds).toEqual(["turn-1", "turn-sess-2"]);
+
+    await scheduler.waitForIdle();
+    expect(executed).toEqual(["sess-1", "sess-3"]);
+  });
+
+  it("safely catches synchronous errors from isSystemActive without uncaughtException", async () => {
+    const discarded: string[] = [];
+    const scheduler = new IntentReviewScheduler({
+      idleDelayMs: 10,
+      isSystemActive: () => {
+        throw new TypeError("synchronous type error in active check");
+      },
+      onDiscard: (candidate) => {
+        discarded.push(candidate.snapshot.sessionId);
+      },
+    });
+
+    const c1 = createMockCandidate();
+    scheduler.schedule(c1);
+
+    await scheduler.waitForIdle();
+    expect(discarded).toEqual(["sess-1"]);
+    expect(scheduler.getPendingCount()).toBe(0);
+  });
+
   it("waitForIdle resolves immediately when nothing is pending or in flight", async () => {
     const scheduler = new IntentReviewScheduler();
     await expect(scheduler.waitForIdle()).resolves.toBeUndefined();
