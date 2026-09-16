@@ -665,23 +665,42 @@ export function createHookHandlers(deps: HookDeps) {
     modelRef: { provider: string; model: string } | undefined;
     availableIntents: readonly IntentCatalogEntry[];
   }): Promise<PromptBuildClassification | undefined> {
+    const startedAtMs = Date.now();
+    const failures: string[] = [];
+    const emitIntentMatch = (
+      trigger: IntentTrigger,
+      result: IntentionResult,
+    ): void => {
+      emitPipelineEvent(
+        params.ctx,
+        params.resolvedSessionKey,
+        "intent-match",
+        "completed",
+        {
+          intent: result.intent,
+          confidence: result.confidence,
+          reason: `${trigger}: ${result.reason}`,
+          durationMs: Math.max(0, Date.now() - startedAtMs),
+        },
+      );
+    };
+
     // Step 1: QMD Keyword Search (BM25 searchLex)
     let keywordHits: QmdIntentHit[] | undefined;
     let keywordRawResults: QmdIntentSearchEvidence["rawResults"] | undefined;
     let routingEvidence: IntentRoutingEvidence | undefined;
     if (qmdIntentIndex) {
-      emitPipelineEvent(
-        params.ctx,
-        params.resolvedSessionKey,
-        "qmd-keyword",
-        "started",
-      );
-      const keywordSearch = await qmdIntentIndex.searchKeywords({
-        query: params.latestUserMessage,
-        includeRawResults: true,
-      });
-      keywordHits = keywordSearch?.hits;
-      keywordRawResults = keywordSearch?.rawResults;
+      try {
+        const keywordSearch = await qmdIntentIndex.searchKeywords({
+          query: params.latestUserMessage,
+          includeRawResults: true,
+        });
+        keywordHits = keywordSearch?.hits;
+        keywordRawResults = keywordSearch?.rawResults;
+      } catch (error) {
+        failures.push("qmd-keyword: keyword index unavailable");
+        logger.warn("keyword intent search failed", { error });
+      }
       const topKeywordHit = keywordHits?.[0];
       const matchedKeywordIntent = topKeywordHit
         ? findIntentEntry(params.availableIntents, topKeywordHit.intentId)
@@ -722,59 +741,12 @@ export function createHookHandlers(deps: HookDeps) {
           latestUserMessage: params.latestUserMessage,
           directRouteMinScore: keywordMinScore,
         });
-        emitPipelineEvent(
-          params.ctx,
-          params.resolvedSessionKey,
-          "qmd-keyword",
-          "completed",
-          {
-            intent: matchedKeywordIntent.id,
-            confidence: topKeywordHit.score,
-            reason: result.reason,
-            result: "routed",
-            searchEvidence: routingEvidence.keyword,
-          },
-        );
-        return {
-          trigger: "qmd-keyword",
-          result,
-          routingEvidence,
-        };
+        emitIntentMatch("qmd-keyword", result);
+        return { trigger: "qmd-keyword", result, routingEvidence };
       }
-      emitPipelineEvent(
-        params.ctx,
-        params.resolvedSessionKey,
-        "qmd-keyword",
-        keywordHits === undefined ? "failed" : "completed",
-        keywordHits === undefined
-          ? {
-              error: "keyword index unavailable",
-              result: "none",
-              searchEvidence: routingEvidence.keyword,
-            }
-          : topKeywordHit
-            ? matchedKeywordIntent
-              ? {
-                  confidence: topKeywordHit.score,
-                  reason: buildKeywordRouteReason({
-                    intent: matchedKeywordIntent,
-                    hit: topKeywordHit,
-                    query: params.latestUserMessage,
-                    directRouteMinScore: keywordMinScore,
-                  }),
-                  result: "below-threshold",
-                  searchEvidence: routingEvidence.keyword,
-                }
-              : {
-                  confidence: topKeywordHit.score,
-                  result: "unrecognized-intent",
-                  searchEvidence: routingEvidence.keyword,
-                }
-            : {
-                result: "none",
-                searchEvidence: routingEvidence.keyword,
-              },
-      );
+      if (keywordHits === undefined && failures.length === 0) {
+        failures.push("qmd-keyword: keyword index unavailable");
+      }
     }
 
     // Step 2: QMD Hybrid Search (Examples & Keywords) with Context Expansion
@@ -782,26 +754,24 @@ export function createHookHandlers(deps: HookDeps) {
     let hybridRawResults: QmdIntentSearchEvidence["rawResults"] | undefined;
     let topHit: QmdIntentHit | undefined;
     if (qmdIntentIndex) {
-      emitPipelineEvent(
-        params.ctx,
-        params.resolvedSessionKey,
-        "qmd-hybrid",
-        "started",
-      );
       const limits = getQmdCandidateLimits(params.availableIntents.length);
       const expansionContext = formatConversationExpansionContext({
         conversation: params.conversation,
       });
-      const hybridSearch = await qmdIntentIndex.searchIntentExamplesAndKeywords(
-        {
-          query: params.latestUserMessage,
-          rawLimit: limits.rawLimit,
-          ...(expansionContext ? { expansionContext } : {}),
-          includeRawResults: true,
-        },
-      );
-      qmdHits = hybridSearch?.hits;
-      hybridRawResults = hybridSearch?.rawResults;
+      try {
+        const hybridSearch =
+          await qmdIntentIndex.searchIntentExamplesAndKeywords({
+            query: params.latestUserMessage,
+            rawLimit: limits.rawLimit,
+            ...(expansionContext ? { expansionContext } : {}),
+            includeRawResults: true,
+          });
+        qmdHits = hybridSearch?.hits;
+        hybridRawResults = hybridSearch?.rawResults;
+      } catch (error) {
+        failures.push("qmd-hybrid: example/keyword index unavailable");
+        logger.warn("hybrid intent search failed", { error });
+      }
       topHit = qmdHits?.[0];
       const secondHit = qmdHits?.[1];
       const topIntent = topHit
@@ -859,73 +829,16 @@ export function createHookHandlers(deps: HookDeps) {
           scoreMargin,
           directRouteMinMargin: hybridThresholds.directRouteMinMargin,
         });
-        emitPipelineEvent(
-          params.ctx,
-          params.resolvedSessionKey,
-          "qmd-hybrid",
-          "completed",
-          {
-            intent: topIntent.id,
-            confidence: topHit.score,
-            reason: result.reason,
-            result: "routed",
-            searchEvidence: routingEvidence.hybrid,
-          },
-        );
-        return {
-          trigger: "qmd-hybrid",
-          result,
-          routingEvidence,
-        };
+        emitIntentMatch("qmd-hybrid", result);
+        return { trigger: "qmd-hybrid", result, routingEvidence };
       }
-      emitPipelineEvent(
-        params.ctx,
-        params.resolvedSessionKey,
-        "qmd-hybrid",
-        qmdHits === undefined ? "failed" : "completed",
-        qmdHits === undefined
-          ? {
-              error: "example/keyword index unavailable",
-              result: "none",
-              searchEvidence: routingEvidence.hybrid,
-            }
-          : topHit
-            ? topIntent
-              ? {
-                  intent: topIntent.id,
-                  confidence: topHit.score,
-                  reason: buildQmdRouteReason({
-                    intent: topIntent,
-                    hit: topHit,
-                    directRouteMinScore: hybridThresholds.directRouteMinScore,
-                    scoreMargin,
-                    directRouteMinMargin: hybridThresholds.directRouteMinMargin,
-                  }),
-                  result:
-                    roundToDecimals(topHit.score, 2) <
-                    roundToDecimals(hybridThresholds.directRouteMinScore, 2)
-                      ? satisfiesMargin
-                        ? "below-score-threshold"
-                        : "below-score-and-margin-threshold"
-                      : "below-margin-threshold",
-                  searchEvidence: routingEvidence.hybrid,
-                }
-              : {
-                  confidence: topHit.score,
-                  result: "unrecognized-intent",
-                  searchEvidence: routingEvidence.hybrid,
-                }
-            : {
-                result: "none",
-                searchEvidence: routingEvidence.hybrid,
-              },
-      );
+      if (qmdHits === undefined && failures.length < 2) {
+        failures.push("qmd-hybrid: example/keyword index unavailable");
+      }
     }
 
     // Step 3: Fallback Intent Classifier
-    if (!params.modelRef) {
-      return;
-    }
+    if (!params.modelRef) return;
 
     const projectionStartedAtMs = Date.now();
     let projection: IntentProjection;
@@ -961,12 +874,6 @@ export function createHookHandlers(deps: HookDeps) {
       durationMs: Math.max(0, Date.now() - projectionStartedAtMs),
     });
 
-    emitPipelineEvent(
-      params.ctx,
-      params.resolvedSessionKey,
-      "llm-classifier",
-      "started",
-    );
     let result: IntentionResult | undefined;
     try {
       result = await classifier({
@@ -984,44 +891,26 @@ export function createHookHandlers(deps: HookDeps) {
         dataRoot: deps.dataRoot,
       });
     } catch (error) {
-      emitPipelineEvent(
-        params.ctx,
-        params.resolvedSessionKey,
-        "llm-classifier",
-        "failed",
-        {
-          error: "classifier execution failed",
-          result: "none",
-          routingEvidence,
-        },
-      );
-      await recordPromptBuildSession({
-        association: params.association,
-        latestUserMessage: params.latestUserMessage,
-        trigger: "llm-classifier",
-        intentProjection,
-        routingEvidence,
-        conversation: params.conversation,
-      });
-      throw error;
+      failures.push("llm-classifier: classifier execution failed");
+      logger.warn("intent classifier failed", { error });
     }
 
-    emitPipelineEvent(
-      params.ctx,
-      params.resolvedSessionKey,
-      "llm-classifier",
-      result ? "completed" : "failed",
-      result
-        ? {
-            intent: result.intent,
-            reason: result.reason,
-            confidence: result.confidence,
-            routingEvidence,
-          }
-        : { error: "classifier returned no result", routingEvidence },
-    );
-
     if (!result) {
+      if (!failures.some((failure) => failure.startsWith("llm-classifier:"))) {
+        failures.push("llm-classifier: classifier returned no result");
+      }
+      if (failures.length === 3) {
+        emitPipelineEvent(
+          params.ctx,
+          params.resolvedSessionKey,
+          "intent-match",
+          "failed",
+          {
+            error: failures.join("; "),
+            durationMs: Math.max(0, Date.now() - startedAtMs),
+          },
+        );
+      }
       await recordPromptBuildSession({
         association: params.association,
         latestUserMessage: params.latestUserMessage,
@@ -1034,6 +923,7 @@ export function createHookHandlers(deps: HookDeps) {
     }
 
     result.domain = findIntentDomain(params.availableIntents, result.intent);
+    emitIntentMatch("llm-classifier", result);
     return {
       trigger: "llm-classifier",
       result,

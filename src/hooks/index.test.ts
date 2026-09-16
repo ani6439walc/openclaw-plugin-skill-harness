@@ -2803,6 +2803,7 @@ describe("createHookHandlers topic switch flow", () => {
         collection: string;
         explain?: unknown;
       }>;
+      hybridSearchUnavailable?: boolean;
     } = {},
   ) {
     const keywordHits = params.keywordHits ?? params.topicHits ?? [];
@@ -2835,6 +2836,7 @@ describe("createHookHandlers topic switch flow", () => {
         .fn()
         .mockImplementation(
           async ({ includeRawResults }: { includeRawResults?: boolean }) => {
+            if (params.hybridSearchUnavailable) return undefined;
             const hybridHits = params.hybridHits ?? [];
             return includeRawResults
               ? { hits: hybridHits, rawResults: rawResults(hybridHits) }
@@ -2950,7 +2952,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(topicChecker).not.toHaveBeenCalled();
     expect(classifier).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "qmd-keyword:completed",
+      "intent-match:completed",
     );
     expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
     expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe(
@@ -2962,7 +2964,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(
       emittedPipelineEvents(emitAgentEvent).find(
         (entry) =>
-          entry.data.phase === "qmd-keyword" &&
+          entry.data.phase === "intent-match" &&
           entry.data.state === "completed",
       )?.data,
     ).not.toHaveProperty("complexity");
@@ -3338,7 +3340,7 @@ describe("createHookHandlers topic switch flow", () => {
     );
   });
 
-  it("emits classifier no-result failures with only an error", async () => {
+  it("does not emit an intent event when the classifier returns no result", async () => {
     const { handlers, emitAgentEvent, record } = createTopicFlowHarness({
       historicalIntents: [],
       topicChecker: vi.fn().mockResolvedValue(undefined),
@@ -3347,17 +3349,10 @@ describe("createHookHandlers topic switch flow", () => {
 
     await handlers.onBeforePromptBuild(event, ctx);
 
-    const failedEvent = emittedPipelineEvents(emitAgentEvent).find(
-      (event) =>
-        event.data.phase === "llm-classifier" && event.data.state === "failed",
+    const intentEvents = emittedPipelineEvents(emitAgentEvent).filter(
+      (event) => event.data.phase === "intent-match",
     );
-    expect(failedEvent?.data).toEqual(
-      expect.objectContaining({
-        error: "classifier returned no result",
-      }),
-    );
-    expect(failedEvent?.data).not.toHaveProperty("reason");
-    expect(failedEvent?.data).not.toHaveProperty("result");
+    expect(intentEvents).toHaveLength(0);
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -3489,30 +3484,20 @@ describe("createHookHandlers topic switch flow", () => {
     );
     expect(result?.appendSystemContext).toBe(SKILL_HARNESS_SYSTEM_CONTEXT);
     expect(classifier).not.toHaveBeenCalled();
-    expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "qmd-keyword:completed",
+    const intentMatchEvent = emittedPipelineEvents(emitAgentEvent).find(
+      (entry) => entry.data.phase === "intent-match",
     );
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+    expect(intentMatchEvent?.data).toEqual(
       expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "qmd-keyword",
-          state: "completed",
-          intent: "version-control",
-          confidence: 0.91,
-          reason: "matched: none; confidence: 0.91/0.85",
-        }),
+        state: "completed",
+        intent: "version-control",
+        confidence: 0.91,
+        reason: "qmd-keyword: matched: none; confidence: 0.91/0.85",
       }),
     );
-    expect(
-      emittedPipelineEvents(emitAgentEvent).find(
-        (entry) => entry.data.phase === "qmd-keyword",
-      )?.data,
-    ).not.toHaveProperty("score");
-    expect(
-      emittedPipelineEvents(emitAgentEvent).find(
-        (entry) => entry.data.phase === "qmd-keyword",
-      )?.data,
-    ).not.toHaveProperty("collection");
+    expect(intentMatchEvent?.data).not.toHaveProperty("trigger");
+    expect(intentMatchEvent?.data).not.toHaveProperty("domain");
+    expect(intentMatchEvent?.data).not.toHaveProperty("searchEvidence");
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
@@ -3531,17 +3516,10 @@ describe("createHookHandlers topic switch flow", () => {
     expect(
       record.mock.calls[0]?.[1].current?.intent?.result,
     ).not.toHaveProperty("complexity");
-    const completedQmdEvents = emittedPipelineEvents(emitAgentEvent).filter(
-      (entry) =>
-        entry.data.phase === "qmd-keyword" && entry.data.state === "completed",
-    );
-    expect(completedQmdEvents.length).toBeGreaterThan(0);
-    for (const entry of completedQmdEvents) {
-      expect(entry.data).not.toHaveProperty("complexity");
-    }
+    expect(intentMatchEvent?.data).not.toHaveProperty("complexity");
   });
 
-  it("persists complete QMD retrieval evidence before classifier fallback", async () => {
+  it("does not expose QMD retrieval evidence in classifier intent events", async () => {
     const classifier = vi.fn().mockResolvedValue({
       intent: "version-control",
       reason: "User wants repository maintenance",
@@ -3556,13 +3534,8 @@ describe("createHookHandlers topic switch flow", () => {
       intentId: "version-control",
       score: 0.55,
       collection: "intent-examples-and-keywords",
-      explain: {
-        vectorScores: [0.55],
-        ftsScores: [0.21],
-        rrf: { contributions: [{ queryType: "vec", rank: 1 }] },
-      },
     };
-    const { handlers, record } = createTopicFlowHarness({
+    const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [intent, versionControlIntent],
       classifier,
@@ -3572,220 +3545,63 @@ describe("createHookHandlers topic switch flow", () => {
       }),
     });
 
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "please commit this",
-        messages: [{ role: "user", content: "please commit this" }],
-      } as never,
-      ctx,
-    );
+    await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "qmd-keyword",
-          state: "completed",
-          searchEvidence: expect.objectContaining({
-            hits: [keywordHit],
-            rawResults: [
-              {
-                filepath: "/snapshot/intent-keywords/version-control-0.md",
-                score: 0.79,
-              },
-            ],
-          }),
-        }),
-      }),
+    const intentMatchEvent = emittedPipelineEvents(emitAgentEvent).find(
+      (entry) => entry.data.phase === "intent-match",
     );
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
+    expect(intentMatchEvent?.data).toEqual(
       expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "qmd-hybrid",
-          state: "completed",
-          searchEvidence: expect.objectContaining({
-            hits: [hybridHit],
-            rawResults: [
-              expect.objectContaining({ explain: hybridHit.explain }),
-            ],
-          }),
-        }),
-      }),
-    );
-    expect(emittedPipelineEvents(emitAgentEvent)).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phase: "llm-classifier",
-          state: "completed",
-          routingEvidence: expect.objectContaining({
-            keyword: expect.objectContaining({ hits: [keywordHit] }),
-            hybrid: expect.objectContaining({ hits: [hybridHit] }),
-          }),
-        }),
-      }),
-    );
-    expect(record).toHaveBeenLastCalledWith(
-      "session-1",
-      expect.objectContaining({
-        current: expect.objectContaining({
-          intent: expect.objectContaining({
-            trigger: "llm-classifier",
-            routingEvidence: {
-              keyword: {
-                query: "please commit this",
-                hits: [keywordHit],
-                rawResults: [
-                  {
-                    filepath: "/snapshot/intent-keywords/version-control-0.md",
-                    score: 0.79,
-                  },
-                ],
-                outcome: "below-threshold",
-                directRouteMinScore: 0.85,
-              },
-              hybrid: {
-                query: "please commit this",
-                hits: [hybridHit],
-                rawResults: [
-                  {
-                    filepath:
-                      "/snapshot/intent-examples-and-keywords/version-control-0.md",
-                    score: 0.55,
-                    explain: hybridHit.explain,
-                  },
-                ],
-                outcome: "below-threshold",
-                directRouteMinScore: 0.9,
-                directRouteMinMargin: 0.08,
-                expansionContext: expect.any(String),
-              },
-            },
-          }),
-        }),
-      }),
-    );
-  });
-
-  it("records empty QMD results as completed searches without index errors", async () => {
-    const classifier = vi.fn().mockResolvedValue({
-      intent: "version-control",
-      reason: "User wants repository maintenance",
-      confidence: 0.9,
-    });
-    const { handlers, emitAgentEvent } = createTopicFlowHarness({
-      historicalIntents: [],
-      intents: [intent, versionControlIntent],
-      classifier,
-      topicChecker: vi.fn().mockResolvedValue({
-        basis:
-          "The latest request is repository maintenance in the git domain.",
-        keywords: ["repository", "maintenance"],
-        topic: "User wants repository maintenance.",
-        domain: "git",
-        changed: true,
-        reason: "start" as const,
+        state: "completed",
+        intent: "version-control",
         confidence: 0.9,
+        reason: "llm-classifier: User wants repository maintenance",
       }),
-      qmdIntentIndex: qmdIndex({ topicHits: [], hybridHits: [] }),
-    });
-
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "maintain this repository",
-        messages: [{ role: "user", content: "maintain this repository" }],
-      } as never,
-      ctx,
     );
-
-    expect(classifier).toHaveBeenCalledOnce();
-    const qmdEvents = emittedPipelineEvents(emitAgentEvent).filter(
-      (entry) =>
-        entry.data.phase === "qmd-keyword" || entry.data.phase === "qmd-hybrid",
-    );
-    expect(
-      qmdEvents.map((event) => `${event.data.phase}:${event.data.state}`),
-    ).toEqual([
-      "qmd-keyword:started",
-      "qmd-keyword:completed",
-      "qmd-hybrid:started",
-      "qmd-hybrid:completed",
-    ]);
-    for (const event of qmdEvents.filter(
-      (event) => event.data.state === "completed",
-    )) {
-      expect(event.data).not.toHaveProperty("error");
-    }
-    const keywordEvent = qmdEvents.find(
-      (event) =>
-        event.data.phase === "qmd-keyword" && event.data.state === "completed",
-    );
-    expect(keywordEvent?.data).toEqual(
-      expect.objectContaining({ result: "none" }),
-    );
-    expect(keywordEvent?.data).not.toHaveProperty("confidence");
+    expect(intentMatchEvent?.data).not.toHaveProperty("routingEvidence");
+    expect(record).toHaveBeenCalled();
   });
 
-  it("records unavailable keyword search without a confidence", async () => {
+  it("does not emit intent events for normal unmatched QMD searches", async () => {
+    const classifier = vi.fn().mockResolvedValue(undefined);
     const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
-      qmdIntentIndex: qmdIndex({ keywordSearchUnavailable: true }),
+      classifier,
+      qmdIntentIndex: qmdIndex({ keywordHits: [], hybridHits: [] }),
     });
 
     await handlers.onBeforePromptBuild(event, ctx);
 
-    const keywordEvent = emittedPipelineEvents(emitAgentEvent).find(
-      (entry) =>
-        entry.data.phase === "qmd-keyword" && entry.data.state === "failed",
-    );
-    expect(keywordEvent?.data).toEqual(
-      expect.objectContaining({
-        error: "keyword index unavailable",
-        result: "none",
-      }),
-    );
-    expect(keywordEvent?.data).not.toHaveProperty("confidence");
-  });
-
-  it("records below-threshold keyword matches without routing", async () => {
-    const classifier = vi.fn().mockResolvedValue({
-      intent: "version-control",
-      reason: "User wants repository maintenance",
-      confidence: 0.9,
-    });
-    const { handlers, emitAgentEvent } = createTopicFlowHarness({
-      historicalIntents: [],
-      intents: [intent, versionControlIntent],
-      classifier,
-      qmdIntentIndex: qmdIndex({
-        keywordHits: [
-          {
-            intentId: "version-control",
-            score: 0.84,
-            collection: "intent-keywords",
-          },
-        ],
-      }),
-    });
-
-    await handlers.onBeforePromptBuild(
-      {
-        prompt: "please commit this",
-        messages: [{ role: "user", content: "please commit this" }],
-      } as never,
-      ctx,
-    );
-
     expect(classifier).toHaveBeenCalledOnce();
     expect(
-      emittedPipelineEvents(emitAgentEvent).find(
-        (event) =>
-          event.data.phase === "qmd-keyword" &&
-          event.data.state === "completed",
-      )?.data,
-    ).toEqual(
+      emittedPipelineEvents(emitAgentEvent).filter(
+        (entry) => entry.data.phase === "intent-match",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("emits one failed intent event only when every routing stage fails", async () => {
+    const classifier = vi.fn().mockRejectedValue(new Error("unavailable"));
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      classifier,
+      qmdIntentIndex: qmdIndex({
+        keywordSearchUnavailable: true,
+        hybridSearchUnavailable: true,
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    const intentEvents = emittedPipelineEvents(emitAgentEvent).filter(
+      (entry) => entry.data.phase === "intent-match",
+    );
+    expect(intentEvents).toHaveLength(1);
+    expect(intentEvents[0]?.data).toEqual(
       expect.objectContaining({
-        confidence: 0.84,
-        reason: "matched: commit; confidence: 0.84/0.85",
-        result: "below-threshold",
+        state: "failed",
+        error:
+          "qmd-keyword: keyword index unavailable; qmd-hybrid: example/keyword index unavailable; llm-classifier: classifier execution failed",
       }),
     );
   });
@@ -3912,7 +3728,7 @@ describe("createHookHandlers topic switch flow", () => {
     );
   });
 
-  it("reports a direct hybrid route with its score and margin thresholds", async () => {
+  it("reports a direct hybrid route as one terminal intent event", async () => {
     const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
       intents: [intent, versionControlIntent],
@@ -3936,127 +3752,19 @@ describe("createHookHandlers topic switch flow", () => {
 
     await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(
-      emittedPipelineEvents(emitAgentEvent).find(
-        (entry) =>
-          entry.data.phase === "qmd-hybrid" && entry.data.state === "completed",
-      )?.data,
-    ).toEqual(
+    const intentEvents = emittedPipelineEvents(emitAgentEvent).filter(
+      (entry) => entry.data.phase === "intent-match",
+    );
+    expect(intentEvents).toHaveLength(1);
+    expect(intentEvents[0]?.data).toEqual(
       expect.objectContaining({
+        state: "completed",
         intent: "version-control",
         confidence: 0.93,
         reason:
-          "signals: lex,vec,hyde; confidence: 0.93/0.9; margin: 0.12/0.08",
-        result: "routed",
+          "qmd-hybrid: signals: lex,vec,hyde; confidence: 0.93/0.9; margin: 0.12/0.08",
       }),
     );
-  });
-
-  it("reports every rejected hybrid threshold outcome", async () => {
-    const scenarios = [
-      {
-        score: 0.89,
-        secondScore: 0.7,
-        result: "below-score-threshold",
-        margin: "0.19/0.08",
-      },
-      {
-        score: 0.93,
-        secondScore: 0.91,
-        result: "below-margin-threshold",
-        margin: "0.02/0.08",
-      },
-      {
-        score: 0.89,
-        secondScore: 0.87,
-        result: "below-score-and-margin-threshold",
-        margin: "0.02/0.08",
-      },
-    ];
-
-    for (const scenario of scenarios) {
-      const { handlers, emitAgentEvent } = createTopicFlowHarness({
-        historicalIntents: [],
-        intents: [intent, versionControlIntent],
-        qmdIntentIndex: qmdIndex({
-          keywordHits: [],
-          hybridHits: [
-            {
-              intentId: "version-control",
-              score: scenario.score,
-              collection: "intent-examples-and-keywords",
-            },
-            {
-              intentId: "general-chat",
-              score: scenario.secondScore,
-              collection: "intent-examples-and-keywords",
-            },
-          ],
-        }),
-      });
-
-      await handlers.onBeforePromptBuild(event, ctx);
-
-      expect(
-        emittedPipelineEvents(emitAgentEvent).find(
-          (entry) =>
-            entry.data.phase === "qmd-hybrid" &&
-            entry.data.state === "completed",
-        )?.data,
-      ).toEqual(
-        expect.objectContaining({
-          intent: "version-control",
-          confidence: scenario.score,
-          reason: `signals: lex,vec,hyde; confidence: ${scenario.score}/0.9; margin: ${scenario.margin}`,
-          result: scenario.result,
-        }),
-      );
-    }
-  });
-
-  it("reports unmatched and unrecognized hybrid searches", async () => {
-    const noHit = createTopicFlowHarness({
-      historicalIntents: [],
-      qmdIntentIndex: qmdIndex({ keywordHits: [], hybridHits: [] }),
-    });
-    await noHit.handlers.onBeforePromptBuild(event, ctx);
-    const noHitEvent = emittedPipelineEvents(noHit.emitAgentEvent).find(
-      (entry) =>
-        entry.data.phase === "qmd-hybrid" && entry.data.state === "completed",
-    );
-    expect(noHitEvent?.data).toEqual(
-      expect.objectContaining({ result: "none" }),
-    );
-    expect(noHitEvent?.data).not.toHaveProperty("confidence");
-
-    const unrecognized = createTopicFlowHarness({
-      historicalIntents: [],
-      qmdIntentIndex: qmdIndex({
-        keywordHits: [],
-        hybridHits: [
-          {
-            intentId: "removed-intent",
-            score: 0.93,
-            collection: "intent-examples-and-keywords",
-          },
-        ],
-      }),
-    });
-    await unrecognized.handlers.onBeforePromptBuild(event, ctx);
-    const unrecognizedEvent = emittedPipelineEvents(
-      unrecognized.emitAgentEvent,
-    ).find(
-      (entry) =>
-        entry.data.phase === "qmd-hybrid" && entry.data.state === "completed",
-    );
-    expect(unrecognizedEvent?.data).toEqual(
-      expect.objectContaining({
-        confidence: 0.93,
-        result: "unrecognized-intent",
-      }),
-    );
-    expect(unrecognizedEvent?.data).not.toHaveProperty("intent");
-    expect(unrecognizedEvent?.data).not.toHaveProperty("reason");
   });
 
   it("uses the configured direct QMD score threshold for example/keyword routing", async () => {
@@ -5031,7 +4739,7 @@ Current user request: fresh clean request
     }
   });
 
-  it("emits a bounded terminal pipeline failure when classification throws", async () => {
+  it("does not emit an intent event when only classification fails", async () => {
     const classifier = vi.fn().mockRejectedValue("classifier string failure");
     const { handlers, emitAgentEvent, record } = createTopicFlowHarness({
       historicalIntents: [],
@@ -5043,41 +4751,19 @@ Current user request: fresh clean request
     expect(result).toEqual({
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
-    expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
-    expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe("pipeline:failed");
-    expect(emittedPipelineEvents(emitAgentEvent).at(-1)?.data).toEqual(
-      expect.objectContaining({
-        error: "skill-harness pipeline execution failed",
-        durationMs: expect.any(Number),
-      }),
-    );
-    expect(JSON.stringify(emittedPipelineEvents(emitAgentEvent))).not.toContain(
-      "classifier string failure",
-    );
     expect(
-      emittedPipelineEvents(emitAgentEvent).find(
-        (entry) =>
-          entry.data.phase === "llm-classifier" &&
-          entry.data.state === "failed",
-      )?.data,
-    ).toEqual(
-      expect.objectContaining({
-        error: "classifier execution failed",
-        result: "none",
-      }),
-    );
+      emittedPipelineEvents(emitAgentEvent).filter(
+        (entry) => entry.data.phase === "intent-match",
+      ),
+    ).toHaveLength(0);
     expect(record).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
         current: expect.objectContaining({
-          intent: expect.objectContaining({
-            trigger: "llm-classifier",
-            intentProjection: expect.any(Object),
-          }),
+          intent: expect.objectContaining({ trigger: "llm-classifier" }),
         }),
       }),
     );
-    expect(record.mock.calls[0][1].current.intent).not.toHaveProperty("result");
   });
 
   it("resolves the session key before fail-open classifier errors", async () => {

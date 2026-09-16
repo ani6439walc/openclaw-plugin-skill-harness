@@ -11,7 +11,8 @@ import type { PluginHookAgentContext } from "./types.js";
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
-export type PipelinePhase = "pipeline" | "skill-match" | IntentTrigger;
+export type PipelinePhase =
+  "pipeline" | "intent-match" | "skill-match" | IntentTrigger;
 
 export type PipelineState = "started" | "completed" | "failed";
 
