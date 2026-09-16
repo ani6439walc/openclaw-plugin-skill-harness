@@ -16,6 +16,7 @@ import type {
 import { enqueueReview } from "../review/queue.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import {
   extractLatestUserMessage,
   limitConversationTurns,
@@ -23,7 +24,6 @@ import {
   extractToolText,
   isInternalUserTurn,
   attachHistoricalIntents,
-  sanitizeConversationText,
   sanitizeHistoricalIntentInput,
   getQmdCandidateLimits,
   projectQmdIntentCandidates,
@@ -59,6 +59,7 @@ import { experiencesPath, intentsPath, packageRoot } from "../file-utils.js";
 import type {
   QmdIntentHit,
   QmdIntentSearchEvidence,
+  QmdRawSearchResult,
 } from "../qmd/intent-index.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
@@ -320,6 +321,70 @@ function findIntentDomain(
   );
 }
 
+function extractRawResultDocId(
+  candidatePath: string | undefined,
+): string | undefined {
+  if (!candidatePath) return undefined;
+  const cleanPath = candidatePath.replace(/^qmd:\/\/[^/]+\//, "");
+  const base = path.basename(cleanPath);
+  const match = /^(.+-\d+)\.md(?:\.identity\.yml)?$/u.exec(base);
+  return (
+    match?.[1]?.trim() ?? base.replace(/\.md(?:\.identity\.yml)?$/u, "").trim()
+  );
+}
+
+function intentIdFromCandidatePath(
+  candidatePath: string | undefined,
+): string | undefined {
+  const docId = extractRawResultDocId(candidatePath);
+  if (!docId) return undefined;
+  const match = /^(.+)-\d+$/u.exec(docId);
+  return match?.[1]?.trim() ?? docId;
+}
+
+function extractLexicalTraceChannels(trace: unknown): string | undefined {
+  if (!trace || typeof trace !== "object") return undefined;
+  const record = trace as Record<string, unknown>;
+  if (Array.isArray(record.contributions) && record.contributions.length > 0) {
+    const parts: string[] = [];
+    for (const c of record.contributions) {
+      if (
+        c &&
+        typeof c === "object" &&
+        typeof (c as Record<string, unknown>).channel === "string"
+      ) {
+        const channel = (c as Record<string, unknown>).channel as string;
+        const score = (c as Record<string, unknown>).backendScore;
+        if (typeof score === "number" && Number.isFinite(score)) {
+          parts.push(`${channel} ${roundToDecimals(score, 2)}`);
+        } else {
+          parts.push(channel);
+        }
+      }
+    }
+    if (parts.length > 0) return parts.join(", ");
+  }
+  if (Array.isArray(record.channels) && record.channels.length > 0) {
+    const used = record.channels
+      .filter(
+        (ch) =>
+          ch &&
+          typeof ch === "object" &&
+          (ch as Record<string, unknown>).status === "used" &&
+          typeof (ch as Record<string, unknown>).channel === "string",
+      )
+      .map((ch) => (ch as Record<string, unknown>).channel as string);
+    if (used.length > 0) return used.join(", ");
+  }
+  return undefined;
+}
+
+function truncateHitText(text: string, maxLen = 30): string {
+  const clean = text.trim().replace(/\s+/g, " ");
+  if (!clean) return "";
+  return clean.length > maxLen ? `${clean.slice(0, maxLen)}...` : clean;
+}
+
 function findMatchingKeywords(
   message: string,
   keywords: readonly string[],
@@ -342,15 +407,41 @@ export function buildKeywordRouteReason(params: {
   hit: QmdIntentHit;
   query?: string;
   directRouteMinScore: number;
+  rawResult?: QmdRawSearchResult;
 }): string {
-  const matchedKeywords = params.query
-    ? findMatchingKeywords(params.query, params.intent.definition.keywords)
-    : [];
-  const matchedDisplay =
-    matchedKeywords.length > 0 ? matchedKeywords.join(", ") : "none";
   const score = roundToDecimals(params.hit.score, 2);
   const threshold = roundToDecimals(params.directRouteMinScore, 2);
-  return `matched: ${matchedDisplay}; confidence: ${score}/${threshold}`;
+
+  let hitText = params.rawResult?.body
+    ? truncateHitText(params.rawResult.body)
+    : "";
+  if (!hitText && params.query) {
+    const matched = findMatchingKeywords(
+      params.query,
+      params.intent.definition.keywords,
+    );
+    if (matched.length > 0) {
+      hitText = matched.join(", ");
+    }
+  }
+
+  const candidatePath =
+    params.rawResult?.filepath ??
+    params.rawResult?.file ??
+    params.rawResult?.displayPath;
+  const docId = extractRawResultDocId(candidatePath) || params.intent.id;
+
+  const trace =
+    (params.rawResult as Record<string, unknown> | undefined)?.lexicalTrace ??
+    params.hit.explain;
+  const channels = extractLexicalTraceChannels(trace);
+
+  const meta = channels ? `[${docId} | ${channels}]` : `[${docId}]`;
+
+  if (hitText) {
+    return `"${hitText}" ${meta} → score ${score}/${threshold}`;
+  }
+  return `${meta} → score ${score}/${threshold}`;
 }
 
 export function extractHybridSignals(explain: unknown): string {
@@ -396,13 +487,31 @@ export function buildQmdRouteReason(params: {
   directRouteMinScore: number;
   scoreMargin: number;
   directRouteMinMargin: number;
+  rawResult?: QmdRawSearchResult;
 }): string {
-  const signals = extractHybridSignals(params.hit.explain);
+  const score = roundToDecimals(params.hit.score, 2);
   const threshold = roundToDecimals(params.directRouteMinScore, 2);
   const margin = roundToDecimals(params.scoreMargin, 2);
   const minimumMargin = roundToDecimals(params.directRouteMinMargin, 2);
-  const score = roundToDecimals(params.hit.score, 2);
-  return `signals: ${signals}; confidence: ${score}/${threshold}; margin: ${margin}/${minimumMargin}`;
+
+  const rawSignals = extractHybridSignals(
+    params.hit.explain ?? params.rawResult?.explain,
+  );
+  const signals = rawSignals
+    .split(",")
+    .map((s) => s.trim())
+    .join(", ");
+
+  const hitText = params.rawResult?.body
+    ? truncateHitText(params.rawResult.body)
+    : "";
+  const meta = `[${signals}]`;
+  const scorePart = `score ${score}/${threshold} (margin ${margin}/${minimumMargin})`;
+
+  if (hitText) {
+    return `"${hitText}" ${meta} → ${scorePart}`;
+  }
+  return `${meta} → ${scorePart}`;
 }
 
 function buildQmdIntentResult(params: {
@@ -411,6 +520,7 @@ function buildQmdIntentResult(params: {
   directRouteMinScore: number;
   scoreMargin: number;
   directRouteMinMargin: number;
+  rawResult?: QmdRawSearchResult;
 }): IntentionResult {
   return {
     intent: params.intent.id,
@@ -420,6 +530,7 @@ function buildQmdIntentResult(params: {
       directRouteMinScore: params.directRouteMinScore,
       scoreMargin: params.scoreMargin,
       directRouteMinMargin: params.directRouteMinMargin,
+      rawResult: params.rawResult,
     }),
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
@@ -432,6 +543,7 @@ function buildKeywordIntentResult(params: {
   intent: IntentCatalogEntry;
   latestUserMessage?: string;
   directRouteMinScore: number;
+  rawResult?: QmdRawSearchResult;
 }): IntentionResult {
   return {
     intent: params.intent.id,
@@ -440,6 +552,7 @@ function buildKeywordIntentResult(params: {
       hit: params.hit,
       query: params.latestUserMessage,
       directRouteMinScore: params.directRouteMinScore,
+      rawResult: params.rawResult,
     }),
     keywords: params.intent.definition.keywords.slice(0, 5),
     domain: params.intent.definition.domain,
@@ -679,7 +792,7 @@ export function createHookHandlers(deps: HookDeps) {
         {
           result: result.intent,
           confidence: result.confidence,
-          reason: `${trigger}: ${result.reason}`,
+          reason: `${trigger} → ${result.reason}`,
           durationMs: Math.max(0, Date.now() - startedAtMs),
         },
       );
@@ -735,11 +848,20 @@ export function createHookHandlers(deps: HookDeps) {
         roundToDecimals(topKeywordHit.score, 2) >=
           roundToDecimals(keywordMinScore, 2)
       ) {
+        const matchingRawResult =
+          keywordRawResults?.find((raw) => {
+            const candidatePath = raw.filepath ?? raw.file ?? raw.displayPath;
+            return (
+              intentIdFromCandidatePath(candidatePath)?.toLowerCase() ===
+              matchedKeywordIntent.id.toLowerCase()
+            );
+          }) ?? keywordRawResults?.[0];
         const result = buildKeywordIntentResult({
           hit: topKeywordHit,
           intent: matchedKeywordIntent,
           latestUserMessage: params.latestUserMessage,
           directRouteMinScore: keywordMinScore,
+          rawResult: matchingRawResult,
         });
         emitIntentMatch("qmd-keyword", result);
         return { trigger: "qmd-keyword", result, routingEvidence };
@@ -822,12 +944,21 @@ export function createHookHandlers(deps: HookDeps) {
           roundToDecimals(hybridThresholds.directRouteMinScore, 2) &&
         satisfiesMargin
       ) {
+        const matchingRawResult =
+          hybridRawResults?.find((raw) => {
+            const candidatePath = raw.filepath ?? raw.file ?? raw.displayPath;
+            return (
+              intentIdFromCandidatePath(candidatePath)?.toLowerCase() ===
+              topIntent.id.toLowerCase()
+            );
+          }) ?? hybridRawResults?.[0];
         const result = buildQmdIntentResult({
           hit: topHit,
           intent: topIntent,
           directRouteMinScore: hybridThresholds.directRouteMinScore,
           scoreMargin,
           directRouteMinMargin: hybridThresholds.directRouteMinMargin,
+          rawResult: matchingRawResult,
         });
         emitIntentMatch("qmd-hybrid", result);
         return { trigger: "qmd-hybrid", result, routingEvidence };

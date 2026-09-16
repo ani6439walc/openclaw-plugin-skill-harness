@@ -3492,7 +3492,7 @@ describe("createHookHandlers topic switch flow", () => {
         state: "completed",
         result: "version-control",
         confidence: 0.91,
-        reason: "qmd-keyword: matched: none; confidence: 0.91/0.85",
+        reason: "qmd-keyword → [version-control-0] → score 0.91/0.85",
       }),
     );
     expect(intentMatchEvent?.data).not.toHaveProperty("intent");
@@ -3556,7 +3556,7 @@ describe("createHookHandlers topic switch flow", () => {
         state: "completed",
         result: "version-control",
         confidence: 0.9,
-        reason: "llm-classifier: User wants repository maintenance",
+        reason: "llm-classifier → User wants repository maintenance",
       }),
     );
     expect(intentMatchEvent?.data).not.toHaveProperty("routingEvidence");
@@ -3763,7 +3763,7 @@ describe("createHookHandlers topic switch flow", () => {
         result: "version-control",
         confidence: 0.93,
         reason:
-          "qmd-hybrid: signals: lex,vec,hyde; confidence: 0.93/0.9; margin: 0.12/0.08",
+          "qmd-hybrid → [lex, vec, hyde] → score 0.93/0.9 (margin 0.12/0.08)",
       }),
     );
   });
@@ -5724,7 +5724,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinScore: 0.85,
         query: "Please check this PR for me",
       });
-      expect(reason).toBe("matched: pr; confidence: 0.95/0.85");
+      expect(reason).toBe('"pr" [code-review] → score 0.95/0.85');
     });
 
     it("formats keyword route reason matching multiple keywords from query", () => {
@@ -5738,7 +5738,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinScore: 0.85,
         query: "Please do a code review on this pr",
       });
-      expect(reason).toBe("matched: pr, code review; confidence: 0.95/0.85");
+      expect(reason).toBe('"pr, code review" [code-review] → score 0.95/0.85');
     });
 
     it("reports no literal keyword when the query does not contain defined keywords", () => {
@@ -5752,7 +5752,7 @@ describe("formatConversationExpansionContext", () => {
         directRouteMinScore: 0.85,
         query: "Can you inspect my patch?",
       });
-      expect(reason).toBe("matched: none; confidence: 0.95/0.85");
+      expect(reason).toBe("[code-review] → score 0.95/0.85");
     });
 
     it("extracts hybrid signals from rrf contributions in order", () => {
@@ -5811,9 +5811,68 @@ describe("formatConversationExpansionContext", () => {
         scoreMargin: 0.12,
         directRouteMinMargin: 0.08,
       });
+      expect(reason).toBe("[lex, vec] → score 0.92/0.9 (margin 0.12/0.08)");
+    });
+
+    it("formats keyword route reason with rawResult body and CJK trace channels", () => {
+      const reason = buildKeywordRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "approve",
+          score: 0.8412,
+          collection: "intent-keywords",
+        },
+        directRouteMinScore: 0.8,
+        query: "好",
+        rawResult: {
+          filepath: "qmd://intent-keywords/approve-4.md",
+          body: "好啊\n",
+          score: 0.8412,
+          lexicalTrace: {
+            policyVersion: "cjk-lexical-rrf-v1",
+            contributions: [
+              { channel: "char", backendScore: 0.8168 },
+              { channel: "word", backendScore: 0.8412 },
+            ],
+          },
+        },
+      });
       expect(reason).toBe(
-        "signals: lex,vec; confidence: 0.92/0.9; margin: 0.12/0.08",
+        '"好啊" [approve-4 | char 0.82, word 0.84] → score 0.84/0.8',
       );
+      expect(reason).not.toContain(":");
+      expect(reason).not.toContain("·");
+    });
+
+    it("formats hybrid route reason with rawResult body and truncation", () => {
+      const longBody =
+        "OK，那就按照這個方式處理，請立刻幫我建立所有資料庫遷移檔並套用到正式機";
+      const reason = buildQmdRouteReason({
+        intent: testIntent,
+        hit: {
+          intentId: "approve",
+          score: 0.84,
+          collection: "intent-examples",
+          explain: {
+            rrf: {
+              contributions: [{ queryType: "vec" }, { queryType: "lex" }],
+            },
+          },
+        },
+        directRouteMinScore: 0.7,
+        scoreMargin: 0.12,
+        directRouteMinMargin: 0.05,
+        rawResult: {
+          filepath: "qmd://intent-examples/approve-1.md",
+          body: longBody,
+          score: 0.84,
+        },
+      });
+      expect(reason).toBe(
+        `"${longBody.slice(0, 30)}..." [lex, vec] → score 0.84/0.7 (margin 0.12/0.05)`,
+      );
+      expect(reason).not.toContain(":");
+      expect(reason).not.toContain("·");
     });
   });
 });

@@ -19,6 +19,7 @@ import type {
 
 const ULTRA_CONCISE_JSON_OUTPUT_STYLE = `Output style:
 - Keep JSON string fields ultra-concise but semantics-preserving.
+- "reason" must be a concise action phrase without grammatical subjects (omit "The user...", "User...", "User is...").
 - Drop filler, pleasantries, hedging, duplicate points, and non-essential prose.
 - Use short fragments when clear.
 - Keep exact code symbols, file paths, CLI commands, API names, enum values, and error strings unchanged.
@@ -353,7 +354,7 @@ You receive conversation history, the latest user message, and available intent 
 4. Fill confidence and reason.`;
   const coreClassificationRules = `### Core Classification Rules
 - Your ONLY role is structural and domain classification. DO NOT perform safety moderation, moral evaluation, or policy enforcement in this prompt (a separate safety module handles policy checks).
-- Describe classification reasons neutrally in terms of requested action, catalog triggers, or context continuity. NEVER use safety or content-policy labels in reason.
+- Describe classification reasons neutrally and concisely without grammatical subjects (omit "The user...", "User asks...", "User is..."). Use short action phrases (e.g. "Confirming agenda changes", "Asking for cafe search"). NEVER use safety or content-policy labels in reason.
 - Use conversation history and historical_intent annotations to understand context. Treat historical intents as evidence, not answers that must be inherited.
 - Classify the latest message based on what the user is asking for now.
 - Prefer the intent that best explains WHY the user said latest_message.
@@ -383,7 +384,7 @@ Hard requirements:
   const outputSchema = `### Output Schema
 Required fields:
 - "intent": string - Intent id exactly as shown in intent_catalog. Use "${FALLBACK_INTENT_ID}" only when no catalog intent adequately explains the current request.
-- "reason": string - Brief reason for classification.
+- "reason": string - Ultra-concise action phrase without grammatical subjects (e.g. "Approving proposal", not "The user wants to approve").
 - "confidence": number - 0.0 (guessing) to 1.0 (certain).
 
 Optional fields:
