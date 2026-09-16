@@ -20,7 +20,6 @@ triggers:
   - "  route this  "
 examples:
   - "  route this example  "
-domain: "  routing  "
 ${params.frontmatter ?? ""}
 ---
 ${params.body ?? guidance}`;
@@ -71,7 +70,6 @@ keywords:
             definition: {
               triggers: ["route this"],
               examples: ["route this example"],
-              domain: "routing",
               skills: ["Alpha.Skill", "beta-skill"],
               keywords: ["exact route"],
               guidance: "Keep routing focused！",
@@ -83,7 +81,6 @@ keywords:
             definition: {
               triggers: ["route this"],
               examples: ["route this example"],
-              domain: "routing",
               keywords: [],
               guidance: "Route this request using stable evidence.",
             },
@@ -119,7 +116,6 @@ keywords:
       `---
 triggers: ["route"]
 examples: []
-domain: "routing"
 ---
 ${"😀".repeat(299)}.
 `,
@@ -137,7 +133,6 @@ ${"😀".repeat(299)}.
       `---
 triggers: ["route"]
 examples: []
-domain: routing
 ---
 
 `,
@@ -148,7 +143,6 @@ domain: routing
       `---
 triggers: ["route"]
 examples: []
-domain: routing
 ---
 `,
     );
@@ -157,7 +151,6 @@ domain: routing
       `---
 triggers: ["route"]
 examples: []
-domain: routing
 ---
 Route this request.
 Keep it focused.
@@ -363,7 +356,7 @@ Route this request.
       expect.arrayContaining([
         "bad-arrays.md: triggers must contain at least one non-empty string and only non-empty strings",
         "bad-arrays.md: examples must be an array containing only non-empty strings",
-        "bad-arrays.md: domain must be a non-empty string",
+        "bad-arrays.md: unsupported top-level field domain",
         "bad-arrays.md: skills must be an array containing only non-empty strings",
         "bad-keywords.md: keywords must be an array containing only non-empty strings",
         "implicit-scalars.md: keywords must be an array containing only non-empty strings",

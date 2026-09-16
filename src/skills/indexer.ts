@@ -5,8 +5,6 @@ import path from "node:path";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
 import { resolveStateDirFromApi } from "../file-utils.js";
-import { canonicalIdentity } from "../normalize.js";
-import { buildSkillDomainMap } from "./domains.js";
 import {
   DEFAULT_SKILL_INDEX_CACHE_TTL_MS,
   resolveSkillIndexCacheTtlMs,
@@ -471,9 +469,6 @@ export async function listAvailableSkills(
 ): Promise<AvailableSkill[]> {
   const source = params.source?.trim().toLowerCase();
   const usageStats = params.usageStats ?? (await readSkillUsageStats(params));
-  const domainsBySkill = params.intents
-    ? buildSkillDomainMap(params.intents)
-    : undefined;
   const skills: AvailableSkill[] = [];
   const seen = new Set<string>();
 
@@ -485,16 +480,7 @@ export async function listAvailableSkills(
         continue;
       }
       seen.add(key);
-      skills.push({
-        ...stripIndexOnlyFields(skill),
-        ...(domainsBySkill
-          ? {
-              domains: [
-                ...(domainsBySkill.get(canonicalIdentity(skill.name)) ?? []),
-              ],
-            }
-          : {}),
-      });
+      skills.push(stripIndexOnlyFields(skill));
     }
   }
   return skills.sort((left, right) => {
@@ -514,22 +500,10 @@ export async function findAvailableSkill(
 ): Promise<AvailableSkill | undefined> {
   const normalizedName = params.name.trim().toLowerCase();
   if (!normalizedName) return;
-  const domainsBySkill = params.intents
-    ? buildSkillDomainMap(params.intents)
-    : undefined;
   for (const index of await listSkillIndexes(params)) {
     const skill = index.get(normalizedName);
     if (skill) {
-      return {
-        ...stripIndexOnlyFields(skill),
-        ...(domainsBySkill
-          ? {
-              domains: [
-                ...(domainsBySkill.get(canonicalIdentity(skill.name)) ?? []),
-              ],
-            }
-          : {}),
-      };
+      return stripIndexOnlyFields(skill);
     }
   }
 }

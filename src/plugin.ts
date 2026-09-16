@@ -250,7 +250,6 @@ export function createPlugin(
             const skills = await listAvailableSkills({
               api,
               agentId: normalizedAgentId,
-              intents: catalog.get(),
               nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
               sharedRoots: config.skills.sharedRoots,
             });
@@ -343,7 +342,6 @@ export function createPlugin(
       api.on("agent_end", handlers.onAgentEnd);
       api.on("session_end", handlers.onSessionEnd);
       registerSkillTools(api, {
-        getIntents: () => catalog.get(),
         experienceCatalog,
         qmdSkillIndex,
         scheduleSkillSearchIndex,

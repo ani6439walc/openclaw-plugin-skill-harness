@@ -127,7 +127,6 @@ export type ResolvedSkillHarnessPluginConfig = {
 export type IntentDefinition = {
   triggers: string[];
   examples: string[];
-  domain: string;
   skills?: string[];
   keywords: string[];
   guidance: string;
@@ -139,7 +138,6 @@ export type IntentCatalogEntry = {
 };
 
 export type IntentProjectionSelectionReason =
-  | "predicted-domain"
   | "authorized-history"
   | "candidate-keyword"
   | "intent-id"
@@ -213,7 +211,6 @@ export type IntentionResult = {
   intent: string;
   reason: string;
   keywords?: string[];
-  domain: string;
   confidence: number;
 };
 
@@ -227,10 +224,7 @@ export type AvailableSkill = {
   description: string;
 };
 
-export type HistoricalIntent = Pick<
-  IntentionResult,
-  "intent" | "domain" | "keywords"
-> &
+export type HistoricalIntent = Pick<IntentionResult, "intent" | "keywords"> &
   Partial<Pick<IntentionResult, "confidence">>;
 
 export type HistoricalIntentRecord = HistoricalIntent & {

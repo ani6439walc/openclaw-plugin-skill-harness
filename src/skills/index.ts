@@ -3,5 +3,4 @@ export * from "./roots.js";
 export * from "./indexer.js";
 export * from "./files.js";
 export * from "./usage-stats.js";
-export * from "./domains.js";
 export { registerSkillTools } from "./tools.js";

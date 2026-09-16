@@ -72,7 +72,6 @@ function formatIntentMetadata(
   if (!intent && !recommendationCandidates?.length) return "";
   const metadata: Record<string, unknown> = {};
   addDefined(metadata, "intent", intent?.intent);
-  addDefined(metadata, "domain", intent?.domain);
   addDefined(metadata, "confidence", intent?.confidence);
   addDefined(metadata, "reason", intent?.reason);
   addDefined(metadata, "keywords", intent?.keywords);
@@ -366,7 +365,6 @@ function formatIntentEntryMetadata(
   const definition = "definition" in entry ? entry.definition : entry;
   const metadata: Record<string, unknown> = {
     id: entry.id,
-    domain: definition.domain ?? null,
   };
   metadata.triggers = [...definition.triggers];
   metadata.examples = [...definition.examples];

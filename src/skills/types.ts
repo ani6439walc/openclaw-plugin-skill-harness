@@ -56,7 +56,6 @@ export interface AvailableSkill {
   location: string;
   description: string;
   source?: SkillSource;
-  domains?: string[];
   relatedSkills?: DeclaredRelatedSkill[];
 }
 
@@ -73,7 +72,6 @@ export interface SkillResolutionParams {
   bundledSkillsDir?: string;
   nativeBundledSkillsDir?: string;
   sharedRoots?: readonly string[];
-  intents?: readonly import("../types.js").IntentCatalogEntry[];
   cacheTtlMs?: number;
   nowMs?: number;
   homeDir?: string;
@@ -104,7 +102,6 @@ export type SkillReadResult =
       usage_stats: SkillUsageStats;
       related_skills: RelatedSkillResult[];
       source?: SkillSource;
-      domains: string[];
       readiness_status: "available";
     }
   | {
@@ -113,7 +110,6 @@ export type SkillReadResult =
       file: string;
       content: string;
       file_type: string;
-      domains: string[];
       related_skills: RelatedSkillResult[];
       is_binary?: boolean;
     }

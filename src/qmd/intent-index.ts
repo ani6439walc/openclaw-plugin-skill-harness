@@ -115,7 +115,6 @@ function snapshotFingerprint(
       intents: intents.map((intent) => ({
         id: intent.id,
         examples: intent.definition.examples,
-        domain: intent.definition.domain,
         keywords: intent.definition.keywords,
       })),
       qmd: {
@@ -156,7 +155,6 @@ function identitySidecarBody(params: {
 }): string {
   return matter.stringify("", {
     intent_id: params.intent.id,
-    domain: params.intent.definition.domain,
     kind: params.kind,
     path: params.relativePath,
   });

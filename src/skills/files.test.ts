@@ -33,20 +33,6 @@ function writeSkill(root: string): void {
   fs.writeFileSync(path.join(skillDir, "private", "secret.md"), "Secret");
 }
 
-const FILE_TEST_INTENTS: IntentCatalogEntry[] = [
-  {
-    id: "writer",
-    definition: {
-      triggers: ["write"],
-      examples: ["write"],
-      domain: "writing",
-      keywords: [],
-      skills: ["writer"],
-      guidance: "Use the writer skill.",
-    },
-  },
-];
-
 function writeStats(stateDir: string): void {
   const statsFile = path.join(
     stateDir,
@@ -87,14 +73,12 @@ describe("readAvailableSkill", () => {
       agentId: "main",
       name: "writer",
       cacheTtlMs: 0,
-      intents: FILE_TEST_INTENTS,
     });
 
     expect(result).toMatchObject({
       success: true,
       name: "writer",
       description: "Write well.",
-      domains: ["writing"],
       usage_stats: {
         usage_turns: 9,
         intent_matched_turns: 10,
@@ -125,12 +109,10 @@ describe("readAvailableSkill", () => {
         name: "writer",
         filePath: "references/style.md",
         cacheTtlMs: 0,
-        intents: FILE_TEST_INTENTS,
       }),
     ).resolves.toMatchObject({
       success: true,
       name: "writer",
-      domains: ["writing"],
       file: "references/style.md",
       content: "Style guide",
       file_type: ".md",

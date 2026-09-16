@@ -138,7 +138,7 @@ export function formatConversationExpansionContext(params: {
   const sections: string[] = [
     "You are expanding a query for conversational assistant skill & intent routing.\n" +
       "- Ground the expansion in the ongoing conversation: resolve pronouns, slang, abbreviations, and elliptical expressions using the conversation context.\n" +
-      "- Stay faithful to the user's actual intent and context; do not introduce unrelated domains or invent scenarios not grounded in the query or conversation history.\n" +
+      "- Stay faithful to the user's actual intent and context; do not introduce unrelated topics or invent scenarios not grounded in the query or conversation history.\n" +
       "- Write search queries from the user's perspective (search query or direct question); do not write third-person descriptions of the user (avoid '使用者...', 'User asks...').\n" +
       "- Strictly preserve the user's primary language and script (e.g. Traditional Chinese queries must produce Traditional Chinese expansions; never translate into English unless the user query is English).",
   ];
@@ -311,17 +311,6 @@ function findIntentEntry<
 
 function resolveIntentId(intent: string | undefined): string | undefined {
   return intent?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
-}
-
-function findIntentDomain(
-  intents: readonly IntentCatalogEntry[],
-  intent: string | undefined,
-): string {
-  const intentId = resolveIntentId(intent);
-  return (
-    intents.find((entry) => entry.id.toLowerCase() === intentId)?.definition
-      .domain ?? FALLBACK_INTENT.domain
-  );
 }
 
 function extractRawResultDocId(
@@ -536,7 +525,6 @@ function buildQmdIntentResult(params: {
       rawResult: params.rawResult,
     }),
     keywords: params.intent.definition.keywords.slice(0, 5),
-    domain: params.intent.definition.domain,
     confidence: params.hit.score,
   };
 }
@@ -558,7 +546,6 @@ function buildKeywordIntentResult(params: {
       rawResult: params.rawResult,
     }),
     keywords: params.intent.definition.keywords.slice(0, 5),
-    domain: params.intent.definition.domain,
     confidence: params.hit.score,
   };
 }
@@ -1144,7 +1131,6 @@ export function createHookHandlers(deps: HookDeps) {
       return;
     }
 
-    result.domain = findIntentDomain(params.availableIntents, result.intent);
     emitIntentMatch("llm-classifier", result);
     return {
       trigger: "llm-classifier",
@@ -1293,7 +1279,6 @@ export function createHookHandlers(deps: HookDeps) {
       const visibleSkills = await listAvailableSkills({
         api,
         agentId: params.routing.effectiveAgentId,
-        intents: params.intents,
         bundledSkillsDir,
         nativeBundledSkillsDir: await nativeBundledSkillsDir,
         sharedRoots: sharedRoots(),
@@ -2135,7 +2120,6 @@ export function createHookHandlers(deps: HookDeps) {
         id: entry.id,
         triggers: [...entry.definition.triggers],
         examples: [...entry.definition.examples],
-        domain: entry.definition.domain,
         guidance: entry.definition.guidance,
         skills: [...(entry.definition.skills ?? [])],
         keywords: [...entry.definition.keywords],

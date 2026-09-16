@@ -67,31 +67,6 @@ function writeExperience(
   );
 }
 
-const TOOL_TEST_INTENTS: IntentCatalogEntry[] = [
-  {
-    id: "writer-frontmatter",
-    definition: {
-      triggers: ["write"],
-      examples: ["write this"],
-      domain: "writing",
-      keywords: [],
-      skills: ["writer"],
-      guidance: "Use the writer skill.",
-    },
-  },
-  {
-    id: "writer-body",
-    definition: {
-      triggers: ["agent workflow"],
-      examples: ["agent workflow"],
-      domain: "agent-ops",
-      skills: ["writer"],
-      keywords: [],
-      guidance: "Use the writer workflow when drafting workflow text.",
-    },
-  },
-];
-
 function writeStats(
   stateDir: string,
   skills: Record<string, Record<string, unknown>>,
@@ -346,19 +321,6 @@ describe("registerSkillTools", () => {
       writeSkill(workspaceDir, "react", {}, "Build React UIs");
       writeSkill(workspaceDir, "docs", {}, "Write docs");
       const api = createApi(stateDir, workspaceDir);
-      const intents: IntentCatalogEntry[] = [
-        {
-          id: "frontend",
-          definition: {
-            domain: "frontend",
-            triggers: ["react"],
-            examples: ["build a react ui"],
-            skills: ["react"],
-            keywords: ["react"],
-            guidance: "Use the react skill for UI work.",
-          },
-        },
-      ];
       const searchHits = [
         {
           name: "react",
@@ -381,7 +343,6 @@ describe("registerSkillTools", () => {
       };
       const scheduleSkillSearchIndex = vi.fn();
       registerSkillTools(api, {
-        getIntents: () => intents,
         qmdSkillIndex,
         scheduleSkillSearchIndex,
       });
@@ -401,7 +362,6 @@ describe("registerSkillTools", () => {
             name: "react",
             description: "Build React UIs",
             source: "workspace",
-            domains: ["frontend"],
             score: 0.84,
           },
         ],
@@ -614,7 +574,6 @@ describe("registerSkillTools", () => {
       },
     });
     registerSkillTools(api, {
-      getIntents: () => TOOL_TEST_INTENTS,
       bundledSkillsDir: "",
     });
     const tools = toolsForAgent(api);
@@ -627,7 +586,6 @@ describe("registerSkillTools", () => {
           name: "writer",
           description: "Write well.",
           source: "workspace",
-          domains: ["agent-ops", "writing"],
         },
       ],
     });
@@ -662,7 +620,6 @@ describe("registerSkillTools", () => {
     ).resolves.toMatchObject({
       success: true,
       name: "writer",
-      domains: ["agent-ops", "writing"],
       content: expect.stringContaining("# Writer"),
       usage_stats: {
         usage_turns: 3,

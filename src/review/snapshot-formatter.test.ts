@@ -10,7 +10,6 @@ const snapshot: ReviewSnapshot = {
     input: "Need a review",
     intent: {
       intent: "other",
-      domain: "other",
       confidence: 0.2,
       reason: "fallback",
     },
@@ -21,14 +20,12 @@ const snapshot: ReviewSnapshot = {
   intentCatalog: [
     {
       id: "other",
-      domain: "other",
       triggers: ["unmatched"],
       examples: ["help"],
       keywords: ["help"],
     },
     {
       id: "code-review",
-      domain: "development",
       triggers: ["review code"],
       examples: ["review this"],
       keywords: ["review"],

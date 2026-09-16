@@ -798,7 +798,6 @@ description: Navigate Tokyo.
       definition: {
         triggers: ["commit"],
         examples: [],
-        domain: "git",
         skills: ["git-master"],
         keywords: [],
         guidance: "Follow the version-control workflow.",
@@ -887,7 +886,6 @@ description: Navigate Tokyo.
       definition: {
         triggers: ["commit"],
         examples: [],
-        domain: "git",
         skills: ["git-master"],
         keywords: [],
         guidance: "Follow the version-control workflow.",
@@ -957,7 +955,6 @@ description: Navigate Tokyo.
         result: {
           intent: "skill-lifecycle",
           reason: "test",
-          domain: "agent-ops",
           confidence: 0.9,
         },
       },
@@ -968,7 +965,6 @@ description: Navigate Tokyo.
       definition: {
         triggers: ["skill"],
         examples: [],
-        domain: "agent-ops",
         skills: ["vue"],
         keywords: [],
         guidance: "Follow the skill workflow.",
@@ -1003,7 +999,6 @@ description: Navigate Tokyo.
         result: {
           intent: "skill-lifecycle",
           reason: "test",
-          domain: "agent-ops",
           confidence: 0.9,
         },
       },
@@ -1014,7 +1009,6 @@ description: Navigate Tokyo.
       definition: {
         triggers: ["skill"],
         examples: [],
-        domain: "agent-ops",
         skills: ["skill-harness"],
         keywords: [],
         guidance: "Follow the skill workflow.",
@@ -1048,7 +1042,6 @@ description: Navigate Tokyo.
         result: {
           intent: "skill-lifecycle",
           reason: "test",
-          domain: "agent-ops",
           confidence: 0.9,
         },
       },
@@ -1059,7 +1052,6 @@ description: Navigate Tokyo.
       definition: {
         triggers: ["skill"],
         examples: [],
-        domain: "agent-ops",
         skills: ["skill-harness"],
         keywords: [],
         guidance: "Follow the skill workflow.",
@@ -1111,7 +1103,6 @@ description: Navigate Tokyo.
         result: {
           intent: "other",
           reason: "test",
-          domain: "other",
           confidence: 0.5,
         },
       },
@@ -1173,7 +1164,6 @@ description: Navigate Tokyo.
         result: {
           intent: "other",
           reason: "test",
-          domain: "other",
           confidence: 0.5,
         },
       },
@@ -1208,7 +1198,6 @@ description: Navigate Tokyo.
           result: {
             intent: "other",
             reason: "test",
-            domain: "other",
             confidence: 0.5,
           },
         },
@@ -1265,7 +1254,6 @@ description: Navigate Tokyo.
         result: {
           intent: "skill-lifecycle",
           reason: "test",
-          domain: "agent-ops",
           confidence: 0.9,
         },
       },
@@ -1276,7 +1264,6 @@ description: Navigate Tokyo.
       definition: {
         triggers: ["skill"],
         examples: [],
-        domain: "agent-ops",
         skills: ["skill-lifecycle"],
         keywords: [],
         guidance: "Follow the skill lifecycle workflow.",
@@ -1356,7 +1343,6 @@ description: Navigate Tokyo.
       definition: {
         triggers: ["Unmatched requests"],
         examples: ["help"],
-        domain: "other",
         skills: ["analysis"],
         keywords: [],
         guidance: "Ask for context.",
@@ -1438,7 +1424,6 @@ description: Navigate Tokyo.
               id: "other",
               triggers: ["Unmatched requests"],
               examples: ["help"],
-              domain: "other",
               skills: ["analysis"],
               keywords: [],
               guidance: "Ask for context.",
@@ -1611,7 +1596,6 @@ description: Navigate Tokyo.
         definition: {
           triggers: ["Unmatched requests"],
           examples: ["help"],
-          domain: "other",
           skills: ["analysis"],
           keywords: [],
           guidance: "Ask for context.",
@@ -1765,7 +1749,6 @@ description: Navigate Tokyo.
         intent: {
           intent: "unknown",
           reason: "same topic",
-          domain: "unknown",
           confidence: 0.95,
         },
         timestamps: { start: "2026-07-29T00:00:00.000Z" },
@@ -1887,7 +1870,6 @@ description: Navigate Tokyo.
         intent: {
           intent: "other",
           reason: "same topic",
-          domain: "other",
           confidence: 0.95,
         },
         timestamps: { start: "2026-07-29T00:00:00.000Z" },
@@ -1912,7 +1894,6 @@ description: Navigate Tokyo.
       definition: {
         triggers: ["Unmatched requests"],
         examples: ["help"],
-        domain: "other",
         skills: ["source-driven-development"],
         keywords: [],
         guidance: "Ask for context.",
@@ -2518,7 +2499,6 @@ describe("createHookHandlers topic switch flow", () => {
     definition: {
       triggers: ["chat"],
       examples: ["hi"],
-      domain: "chat",
       keywords: ["hi", "謝謝"],
       guidance: "Reply warmly.",
     },
@@ -2528,7 +2508,6 @@ describe("createHookHandlers topic switch flow", () => {
     definition: {
       triggers: ["git"],
       examples: ["commit this"],
-      domain: "git",
       keywords: ["commit"],
       guidance: "Use git carefully.",
     },
@@ -2625,7 +2604,6 @@ describe("createHookHandlers topic switch flow", () => {
         intent: "social-casual",
         reason: "User is chatting",
         keywords: ["topic", "flow"],
-        domain: "chat",
         changed: false,
         confidence: 0.9,
       });
@@ -2880,7 +2858,6 @@ describe("createHookHandlers topic switch flow", () => {
     const topicChecker = vi.fn().mockResolvedValue({
       keywords: ["inventory", "scan"],
       topic: "User wants inventory scanning.",
-      domain: "tools",
       changed: true,
       reason: "shift",
     });
@@ -2888,7 +2865,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "tool-reference",
       reason: "inventory request",
       keywords: ["inventory", "scan"],
-      domain: "tools",
       confidence: 0.9,
     });
     const { handlers, record } = createTopicFlowHarness({
@@ -2896,7 +2872,6 @@ describe("createHookHandlers topic switch flow", () => {
         {
           input: rawHistorical,
           intent: "tool-reference",
-          domain: "tools",
           keywords: ["skill-harness", "explanation"],
         },
       ],
@@ -3001,7 +2976,6 @@ describe("createHookHandlers topic switch flow", () => {
           intent: expect.objectContaining({
             result: expect.objectContaining({
               intent: "social-casual",
-              domain: "chat",
             }),
           }),
         }),
@@ -3337,7 +3311,6 @@ describe("createHookHandlers topic switch flow", () => {
       definition: {
         triggers: ["chat"],
         examples: ["hi"],
-        domain: "chat",
         keywords: ["hi"],
         guidance: "Reply warmly.",
       },
@@ -3400,7 +3373,6 @@ describe("createHookHandlers topic switch flow", () => {
         {
           input: "fix this",
           intent: "coding",
-          domain: "coding",
           confidence: 0.8,
         },
       ],
@@ -3473,7 +3445,6 @@ describe("createHookHandlers topic switch flow", () => {
       basis: "Latest asks for a git commit and matches the git domain.",
       keywords: ["comit"],
       topic: "User wants a git commit.",
-      domain: "git",
       changed: false,
       reason: undefined,
       confidence: 0.9,
@@ -3530,7 +3501,6 @@ describe("createHookHandlers topic switch flow", () => {
             trigger: "qmd-keyword",
             result: expect.objectContaining({
               intent: "version-control",
-              domain: "git",
               confidence: 0.91,
             }),
           }),
@@ -3636,7 +3606,6 @@ describe("createHookHandlers topic switch flow", () => {
       definition: {
         triggers: ["deploy"],
         examples: ["deploy this"],
-        domain: "operations",
         keywords: [],
         guidance: "Deploy safely.",
       },
@@ -3810,7 +3779,6 @@ describe("createHookHandlers topic switch flow", () => {
         basis: "The request is repository maintenance.",
         keywords: ["repository"],
         topic: "User wants repository maintenance.",
-        domain: "git",
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
@@ -3857,7 +3825,6 @@ describe("createHookHandlers topic switch flow", () => {
         basis: "The request is repository maintenance.",
         keywords: ["repository"],
         topic: "User wants repository maintenance.",
-        domain: "git",
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
@@ -3906,7 +3873,6 @@ describe("createHookHandlers topic switch flow", () => {
         basis: "The request is repository maintenance.",
         keywords: ["repository"],
         topic: "User wants repository maintenance.",
-        domain: "git",
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
@@ -3956,7 +3922,6 @@ describe("createHookHandlers topic switch flow", () => {
         basis: "The request is repository maintenance.",
         keywords: ["repository"],
         topic: "User wants repository maintenance.",
-        domain: "git",
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
@@ -3992,7 +3957,6 @@ describe("createHookHandlers topic switch flow", () => {
       definition: {
         triggers: ["deploy"],
         examples: ["deploy this"],
-        domain: "operations",
         keywords: [],
         guidance: "Deploy safely.",
       },
@@ -4018,7 +3982,6 @@ describe("createHookHandlers topic switch flow", () => {
         basis: "The request is repository maintenance.",
         keywords: ["repository"],
         topic: "User wants repository maintenance.",
-        domain: "git",
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
@@ -4051,7 +4014,6 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["comit"],
         topic: "User wants a git commit.",
-        domain: "git",
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
@@ -4087,7 +4049,6 @@ describe("createHookHandlers topic switch flow", () => {
           intent: expect.objectContaining({
             result: expect.objectContaining({
               intent: "version-control",
-              domain: "git",
             }),
           }),
         }),
@@ -4104,7 +4065,6 @@ describe("createHookHandlers topic switch flow", () => {
       definition: {
         triggers: ["git-ish"],
         examples: [],
-        domain: "git",
         keywords: ["comitx"],
         guidance: "Handle the near match.",
       },
@@ -4115,7 +4075,6 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["comit"],
         topic: "Ambiguous git-ish request.",
-        domain: "git",
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
@@ -4149,7 +4108,6 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["commit"],
         topic: "User wants a git commit.",
-        domain: "git",
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
@@ -4188,7 +4146,6 @@ describe("createHookHandlers topic switch flow", () => {
       topicChecker: vi.fn().mockResolvedValue({
         keywords: ["commit"],
         topic: "User wants a git commit.",
-        domain: "git",
         changed: true,
         reason: "start" as const,
         confidence: 0.9,
@@ -4221,7 +4178,6 @@ describe("createHookHandlers topic switch flow", () => {
       definition: {
         triggers: ["implement"],
         examples: ["implement topic checker"],
-        domain: "coding",
         keywords: [],
         guidance: "Implement the requested change.",
       },
@@ -4266,7 +4222,6 @@ describe("createHookHandlers topic switch flow", () => {
       definition: {
         triggers: ["implement"],
         examples: ["implement topic checker"],
-        domain: "coding",
         keywords: [],
         guidance: "Implement the requested change.",
       },
@@ -4275,7 +4230,6 @@ describe("createHookHandlers topic switch flow", () => {
       intent: "coding",
       reason: "User wants implementation",
       keywords: ["topic", "flow"],
-      domain: "coding",
       confidence: 0.1,
     });
     const { handlers, record, emitAgentEvent } = createTopicFlowHarness({
@@ -4300,7 +4254,6 @@ describe("createHookHandlers topic switch flow", () => {
         definition: {
           triggers: ["implement"],
           examples: ["implement topic checker"],
-          domain: "coding",
           keywords: [],
           guidance: "Implement the requested change.",
         },
@@ -4310,7 +4263,6 @@ describe("createHookHandlers topic switch flow", () => {
         reason: "User wants implementation",
         keywords: ["topic", "flow"],
         topic: "User wants implementation help for the topic flow.",
-        domain: "coding",
         topicChangeReason: "start",
         confidence,
       });
@@ -4568,7 +4520,6 @@ describe("createHookHandlers topic switch flow", () => {
       definition: {
         triggers: ["implement"],
         examples: ["implement topic checker"],
-        domain: "coding",
         skills: ["domain-test-skill"],
         keywords: [],
         guidance: "Implement the requested change.",
@@ -4579,7 +4530,6 @@ describe("createHookHandlers topic switch flow", () => {
       reason: "User wants implementation",
       keywords: ["topic", "checker"],
       topic: "User wants topic checker implementation.",
-      domain: "coding",
       topicChangeReason: "start",
       confidence: 0.9,
     });
@@ -4632,7 +4582,6 @@ Current user request: previous clean request
         {
           input: legacyInput,
           intent: "social-casual",
-          domain: "chat",
         },
       ],
     });
@@ -4680,12 +4629,11 @@ Current user request: fresh clean request
     );
   });
 
-  it("derives final domain from the selected intent despite wrong topic and model domains", async () => {
+  it("records selected intent from classifier", async () => {
     const classifier = vi.fn().mockResolvedValue({
       intent: "version-control",
       reason: "User wants a deployment follow-up",
       keywords: "deploy" as unknown as string[],
-      domain: "infra",
       confidence: 0.95,
     });
     const { handlers, record } = createTopicFlowHarness({
@@ -4694,7 +4642,6 @@ Current user request: fresh clean request
           input: "plan topic checker",
           intent: "coding",
           keywords: ["topic", "checker"],
-          domain: "coding",
           confidence: 0.8,
         },
       ],
@@ -4713,7 +4660,7 @@ Current user request: fresh clean request
         current: expect.objectContaining({
           intent: expect.objectContaining({
             result: expect.objectContaining({
-              domain: "git",
+              intent: "version-control",
             }),
           }),
         }),
@@ -4721,11 +4668,10 @@ Current user request: fresh clean request
     );
   });
 
-  it("derives the fallback domain for an explicit other classification", async () => {
+  it("records the fallback intent for an explicit other classification", async () => {
     const topicContext = {
       keywords: ["unclear", "request"],
       topic: "User request is unclear.",
-      domain: "git",
       changed: true,
       reason: "shift" as const,
     };
@@ -4733,7 +4679,6 @@ Current user request: fresh clean request
       intent: "unknown",
       reason: "No catalog intent adequately explains the request",
       keywords: ["unclear", "request"],
-      domain: "infra",
       confidence: 0.9,
     });
     const { handlers, record } = createTopicFlowHarness({
@@ -4754,7 +4699,6 @@ Current user request: fresh clean request
           intent: expect.objectContaining({
             result: expect.objectContaining({
               intent: "unknown",
-              domain: "unknown",
             }),
           }),
         }),
@@ -4791,7 +4735,6 @@ Current user request: fresh clean request
       definition: {
         triggers: ["diagram"],
         examples: ["draw architecture"],
-        domain: "coding",
         skills: ["architecture-diagram"],
         keywords: [],
         guidance: "Draw the requested architecture.",
@@ -4802,7 +4745,6 @@ Current user request: fresh clean request
       definition: {
         triggers: ["test"],
         examples: ["add tests"],
-        domain: "coding",
         skills: ["test-driven-development"],
         keywords: [],
         guidance: "Use test-driven development.",
@@ -4813,7 +4755,6 @@ Current user request: fresh clean request
       definition: {
         triggers: ["research"],
         examples: ["watch blogs"],
-        domain: "research",
         skills: ["blogwatcher"],
         keywords: [],
         guidance: "Watch relevant blogs.",
@@ -4824,7 +4765,6 @@ Current user request: fresh clean request
       definition: {
         triggers: ["codegraph"],
         examples: ["analyze code graph"],
-        domain: "coding",
         skills: ["codegraph-analysis"],
         keywords: [],
         guidance: "Analyze code graphs when requested.",
@@ -4835,7 +4775,6 @@ Current user request: fresh clean request
       reason: "User wants a diagram",
       keywords: ["diagram"],
       topic: "User wants an architecture diagram.",
-      domain: "coding",
       topicChangeReason: "start",
       confidence: 0.95,
     });
@@ -4962,7 +4901,7 @@ Current user request: fresh clean request
     );
   });
 
-  it("does not inherit a same-topic intent when topic triage changes its domain", async () => {
+  it("does not inherit a same-topic intent when topic triage changes intent", async () => {
     const classifier = vi.fn().mockResolvedValue({
       intent: "version-control",
       reason: "The request is now about version control.",
@@ -4973,7 +4912,6 @@ Current user request: fresh clean request
         {
           input: "plan topic checker",
           intent: "social-casual",
-          domain: "chat",
           confidence: 0.9,
         },
       ],
@@ -4983,7 +4921,6 @@ Current user request: fresh clean request
         basis: "The workflow is now version-control work.",
         keywords: ["commit"],
         topic: "User wants a git commit.",
-        domain: "git",
         changed: false,
         reason: "same-topic" as const,
         confidence: 0.9,
@@ -5807,7 +5744,6 @@ describe("formatConversationExpansionContext", () => {
       definition: {
         triggers: ["review"],
         examples: ["review my pr"],
-        domain: "review",
         keywords: ["pr", "code review", "git diff"],
         guidance: "Perform a thorough review.",
       },

@@ -1,5 +1,4 @@
 ---
-domain: memory
 triggers:
   - >-
     The user wants past records or prior information without a specific recent,

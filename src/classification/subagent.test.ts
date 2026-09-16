@@ -191,7 +191,6 @@ describe("runIntentionSubagent", () => {
       definition: {
         triggers: ["allowed work"],
         examples: ["do allowed work"],
-        domain: "development",
         skills: [],
         keywords: [],
         guidance: "Do allowed work.",
@@ -207,7 +206,6 @@ describe("runIntentionSubagent", () => {
             intent,
             reason: "The request matches the selected intent.",
             keywords: ["allowed"],
-            domain: "development",
             confidence: 0.9,
           }),
         },

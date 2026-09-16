@@ -1,5 +1,4 @@
 ---
-domain: chat
 triggers:
   - >-
     The user's complete message is a normal social interaction and contains no

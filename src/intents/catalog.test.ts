@@ -47,7 +47,6 @@ triggers:
   - "route"
 examples:
   - "route this"
-domain: "routing"
 keywords:
   - "route"
 ---
@@ -64,7 +63,6 @@ Route this request using stable evidence.
         definition: {
           triggers: ["route"],
           examples: ["route this"],
-          domain: "routing",
           keywords: ["route"],
           guidance: "Route this request using stable evidence.",
         },
@@ -80,7 +78,6 @@ triggers:
   - "User chats casually"
 examples:
   - "hi"
-domain: "chat"
 ---
 Reply naturally to this social interaction.
 `,
@@ -98,7 +95,6 @@ Reply naturally to this social interaction.
       `---
 triggers: ["route"]
 examples: ["route this"]
-domain: "routing"
 keywords: ["route"]
 ---
 Route this request using stable evidence.
@@ -113,7 +109,6 @@ Route this request using stable evidence.
         definition: {
           triggers: ["route"],
           examples: ["route this"],
-          domain: "routing",
           keywords: ["route"],
           guidance: "Route this request using stable evidence.",
         },
@@ -128,7 +123,6 @@ Route this request using stable evidence.
       `---
 triggers: ["route"]
 examples: ["route this"]
-domain: "routing"
 ---
 ## Legacy
 `,
@@ -147,7 +141,6 @@ triggers:
   - "legacy route"
 examples:
   - "legacy"
-domain: "legacy"
 keywords:
   - "old"
   - ""
@@ -168,7 +161,6 @@ guidance: "Keep routing focused on current metadata."
       `---
 triggers: ["route"]
 examples: ["route this"]
-domain: "routing"
 ---
 Route this request using stable evidence.
 `,
@@ -178,7 +170,6 @@ Route this request using stable evidence.
       `---
 triggers: ["legacy route"]
 examples: ["legacy"]
-domain: "legacy"
 fastpath:
   hint: "Legacy hint."
 ---
@@ -197,7 +188,6 @@ Keep routing focused on current metadata.
       `---
 triggers: ["route"]
 examples: ["route this"]
-domain: "routing"
 candidate:
   scope: global
   keywords:
@@ -214,28 +204,25 @@ Route carefully using verified metadata.
     expect(catalog.get()).toEqual([]);
   });
 
-  it("skips files without triggers or domain", () => {
+  it("skips files without triggers or examples", () => {
     fs.writeFileSync(
       path.join(root, "intents", "empty.md"),
       `---
 examples:
   - "example"
-domain: "test"
 ---
 ## Guidelines
 - Missing triggers.
 `,
     );
     fs.writeFileSync(
-      path.join(root, "intents", "missing-domain.md"),
+      path.join(root, "intents", "missing-examples.md"),
       `---
 triggers:
   - "trigger"
-examples:
-  - "example"
 ---
 ## Guidelines
-- Missing domain.
+- Missing examples.
 `,
     );
 

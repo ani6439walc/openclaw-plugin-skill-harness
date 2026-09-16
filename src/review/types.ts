@@ -70,9 +70,7 @@ export type ReviewSnapshot = {
   selectedPlacementSkill?: SelectedPlacementSkill;
   intentCatalog: Array<
     { id: string } & Pick<IntentDefinition, "triggers" | "examples"> &
-      Partial<
-        Pick<IntentDefinition, "domain" | "keywords" | "skills" | "guidance">
-      >
+      Partial<Pick<IntentDefinition, "keywords" | "skills" | "guidance">>
   >;
 };
 

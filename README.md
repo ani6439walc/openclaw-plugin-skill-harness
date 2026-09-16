@@ -362,9 +362,8 @@ This plugin version supports the current schema-v8 Review log. It migrates compa
 Keep each intent narrow and concrete:
 
 - one user outcome per file
-- fixed frontmatter key order: `domain`, `triggers`, `examples`, `keywords`, `skills`
+- fixed frontmatter key order: `triggers`, `examples`, `keywords`, `skills`
 - concrete triggers and examples formatted as complete sentences
-- domain metadata that matches the requested outcome
 - `keywords` (top-level string array) for exact/similarity BM25 routing shortcuts
 - `skills[]` written strictly in lowercase only when the skill genuinely helps
 - one durable plain-text body sentence for routing behavior
@@ -373,7 +372,6 @@ Example intent file (`~/.openclaw/plugins/skill-harness/intents/format.md`):
 
 ```yaml
 ---
-domain: "development"
 triggers:
   - "User wants to format code or fix linting layout"
 examples:
@@ -421,7 +419,7 @@ Skill Harness registers four runtime tools for agents to discover, search, view,
   - **Inputs**:
     - `query` (string, required): Task description or search keywords.
     - `show_evidence` (boolean, optional, default `true`): When `true`, returns matching chunk text evidence for each hit. Set to `false` to omit snippets.
-    - `show_related` (boolean, optional, default `false`): When `true`, returns related skills based on domain and capability links.
+    - `show_related` (boolean, optional, default `false`): When `true`, returns related skills based on capability links.
   - **Returns**: `{ results: Array<{ name, description, path, score, evidence?, related_skills? }> }`.
 
 - **`skill_view`**: Inspects the full `SKILL.md` or an allowed support file of a visible skill.

@@ -1,5 +1,4 @@
 ---
-domain: memory
 triggers:
   - >-
     The user wants two or more remembered subjects to be compared without

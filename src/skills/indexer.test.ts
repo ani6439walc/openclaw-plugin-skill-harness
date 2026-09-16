@@ -300,20 +300,6 @@ describe("skill indexer", () => {
       "aaa-bundled-skill": { usageTurns: 0 },
       "zzz-bundled-skill": { usageTurns: 0 },
     });
-    const intents: IntentCatalogEntry[] = [
-      {
-        id: "workspace-skills",
-        definition: {
-          triggers: ["workspace"],
-          examples: ["workspace"],
-          domain: "workspace-domain",
-          skills: ["shared-skill", "zeta-skill"],
-          keywords: [],
-          guidance: "Use the workspace skill workflow.",
-        },
-      },
-    ];
-
     const skills = await listAvailableSkills({
       api,
       agentId: "main",
@@ -321,7 +307,6 @@ describe("skill indexer", () => {
       nativeBundledSkillsDir: "",
       cacheTtlMs: 0,
       homeDir,
-      intents,
     });
 
     expect(skills.map((skill) => [skill.name, skill.source])).toEqual([
@@ -337,7 +322,7 @@ describe("skill indexer", () => {
       ["zzz-bundled-skill", "plugin"],
     ]);
     expect(skills.find((skill) => skill.name === "shared-skill")).toMatchObject(
-      { description: "Workspace wins.", domains: ["workspace-domain"] },
+      { description: "Workspace wins." },
     );
   });
 

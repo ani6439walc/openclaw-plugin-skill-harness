@@ -43,7 +43,6 @@ const catalog: IntentCatalogEntry[] = [
     definition: {
       triggers: ["implement the requested feature"],
       examples: ["add a QMD fastpath"],
-      domain: "development",
       keywords: ["implement", "feature"],
       guidance: "Implement the requested feature carefully.",
     },
@@ -538,8 +537,7 @@ describe("createIntentQmdIndex", () => {
       index.searchIntentExamplesAndKeywords({
         query: "add qmd",
         rawLimit: 12,
-        expansionContext:
-          "domain=development; keywords=qmd,routing; topic=Add QMD routing",
+        expansionContext: "keywords=qmd,routing; topic=Add QMD routing",
       }),
     ).resolves.toEqual([
       {
@@ -565,8 +563,7 @@ describe("createIntentQmdIndex", () => {
       query: "add qmd",
       collections: ["intent-examples", "intent-keywords"],
       includeHyde: true,
-      expansionContext:
-        "domain=development; keywords=qmd,routing; topic=Add QMD routing",
+      expansionContext: "keywords=qmd,routing; topic=Add QMD routing",
       rerank: false,
       limit: 12,
       candidateLimit: 12,
@@ -1078,7 +1075,7 @@ describe("createIntentQmdIndex", () => {
 
     const exampleSidecarContent = await readFile(exampleSidecarPath, "utf8");
     expect(exampleSidecarContent).toContain("intent_id: implementation");
-    expect(exampleSidecarContent).toContain("domain: development");
+    expect(exampleSidecarContent).not.toContain("domain");
     expect(exampleSidecarContent).toContain("kind: example");
 
     const keywordMdContent = await readFile(keywordMdPath, "utf8");

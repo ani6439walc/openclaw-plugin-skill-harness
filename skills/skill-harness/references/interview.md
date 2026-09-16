@@ -21,13 +21,12 @@ Confirm these fields in order:
 1. intent purpose and boundary
 2. best filename-derived intent id
 3. filename
-4. one required `domain`
-5. `triggers`
-6. `examples`
-7. optional durable short `keywords`
-8. one durable plain-text body routing `guidance` sentence
-9. direct skills that help the routing outcome
-10. collision check with existing intents
+4. `triggers`
+5. `examples`
+6. optional durable short `keywords`
+7. one durable plain-text body routing `guidance` sentence
+8. direct skills that help the routing outcome
+9. collision check with existing intents
 
 ## Rules
 
@@ -38,7 +37,7 @@ Confirm these fields in order:
 - If two intents are colliding, report the overlap and route the boundary decision to Intent Review.
 - Gather only direct `skills[]` dependencies. Candidate discovery and runtime experience references are host-owned; do not interview for or add experience records.
 - Do not write the final intent file until the boundary is clear.
-- **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, domain, keywords, and guidance. (See `references/format.md` for full spec.)
+- **No cross-references in intent metadata**: an intent must never mention other intents by name or id. Scope boundaries belong in triggers, examples, keywords, and guidance. (See `references/format.md` for full spec.)
 
 ## User-specified flow override
 

@@ -16,7 +16,6 @@ describe("attachHistoricalIntents", () => {
       {
         input: "Plan the release",
         intent: "PLANNING",
-        domain: "planning",
       },
     ];
 
@@ -26,7 +25,6 @@ describe("attachHistoricalIntents", () => {
         text: "Plan the release",
         historicalIntent: {
           intent: "PLANNING",
-          domain: "planning",
         },
       },
       { role: "assistant", text: "Here is a plan" },
@@ -43,21 +41,21 @@ describe("attachHistoricalIntents", () => {
       { role: "user", text: "same message" },
     ];
     const records: HistoricalIntentRecord[] = [
-      { input: " same message ", intent: "FIRST", domain: "unknown" },
-      { input: "same\nmessage", intent: "SECOND", domain: "unknown" },
+      { input: " same message ", intent: "FIRST" },
+      { input: "same\nmessage", intent: "SECOND" },
     ];
 
     expect(attachHistoricalIntents(conversation, records)).toEqual([
       {
         role: "user",
         text: "same message",
-        historicalIntent: { intent: "FIRST", domain: "unknown" },
+        historicalIntent: { intent: "FIRST" },
       },
       { role: "assistant", text: "first reply" },
       {
         role: "user",
         text: "same   message",
-        historicalIntent: { intent: "SECOND", domain: "unknown" },
+        historicalIntent: { intent: "SECOND" },
       },
       { role: "assistant", text: "second reply" },
       { role: "user", text: "same message" },
@@ -76,7 +74,6 @@ describe("attachHistoricalIntents", () => {
           input: "A long historical user message",
           intent: "RESEARCH",
           keywords: ["historical", "feature"],
-          domain: "research",
         },
       ],
     );
@@ -91,7 +88,6 @@ describe("attachHistoricalIntents", () => {
       text: "A long his",
       historicalIntent: {
         intent: "RESEARCH",
-        domain: "research",
         keywords: ["historical", "feature"],
       },
     });
@@ -106,7 +102,6 @@ describe("attachHistoricalIntents", () => {
       {
         input: "好累想睡了",
         intent: "chat",
-        domain: "chat",
       },
     ];
 
@@ -120,7 +115,6 @@ describe("attachHistoricalIntents", () => {
         text: "好累想睡了",
         historicalIntent: {
           intent: "chat",
-          domain: "chat",
         },
       },
       { role: "assistant", text: "快去睡吧" },
@@ -137,12 +131,10 @@ describe("attachHistoricalIntents", () => {
       {
         input: "好累想睡了",
         intent: "chat",
-        domain: "unknown",
       },
       {
         input: "不然這三個 幫我看看",
         intent: "prompt-engineering",
-        domain: "unknown",
       },
     ];
 
@@ -154,7 +146,7 @@ describe("attachHistoricalIntents", () => {
       {
         role: "user",
         text: "好累想睡了",
-        historicalIntent: { intent: "chat", domain: "unknown" },
+        historicalIntent: { intent: "chat" },
       },
       { role: "assistant", text: "快去睡吧" },
       { role: "user", text: "不然這三個 幫我看看" },

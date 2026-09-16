@@ -1,5 +1,4 @@
 ---
-domain: follow-up
 triggers:
   - >-
     The user gives a short rejection, correction, cancellation, or wait signal

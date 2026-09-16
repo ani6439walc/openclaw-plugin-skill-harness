@@ -4,7 +4,7 @@ Rules for generating intent definition files. The canonical format spec lives in
 
 ## Routing-only format
 
-An intent has YAML frontmatter for classification metadata plus a plain-text Markdown body. Required frontmatter fields are `domain`, `triggers[]`, and `examples[]`; the complete body is one `guidance` sentence. Optional routing metadata is `keywords` and direct `skills[]`.
+An intent has YAML frontmatter for classification metadata plus a plain-text Markdown body. Required frontmatter fields are `triggers[]` and `examples[]`; the complete body is one `guidance` sentence. Optional routing metadata is `keywords` and direct `skills[]`.
 
 The body is the entire guidance value, not a Markdown document: do not create headings, lists, fences, commands, paths, a `## Skills & Tools` section, workflow text, or experience text. Durable workflows and lessons belong in referenced skills, not intent definitions.
 
@@ -14,7 +14,6 @@ Runtime experience records are host-owned, skill-scoped files under `experiences
 
 ```yaml
 ---
-domain: "memory"
 triggers:
   - "The user asks to compare two previously recorded trips."
 examples:
@@ -29,13 +28,11 @@ Route this request to the declared skills and follow the bounded routing context
 
 Frontmatter keys must follow this fixed canonical order:
 
-1. `domain` (required, single string)
-2. `triggers` (required, array of full descriptive sentences)
-3. `examples` (required, array of realistic user message sentences)
-4. `keywords` (optional, array of exact/short phrases for Step 1 BM25)
-5. `skills` (optional, array of exact skill names in lowercase)
+1. `triggers` (required, array of full descriptive sentences)
+2. `examples` (required, array of realistic user message sentences)
+3. `keywords` (optional, array of exact/short phrases for Step 1 BM25)
+4. `skills` (optional, array of exact skill names in lowercase)
 
-- `domain` is required and must be one string.
 - `skills` is optional and must be a list of exact skill names written strictly in lowercase. Use it only for skills the intent should load or strongly prefer.
 - The complete plain-text body is required guidance, one durable routing-behavior sentence shared across QMD keyword, QMD hybrid, and classifier routes.
 - `keywords` is optional short phrases for Step 1 QMD keyword BM25 retrieval; never place a hint or workflow body here.

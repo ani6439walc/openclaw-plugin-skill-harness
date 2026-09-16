@@ -31,7 +31,6 @@ const snapshot: ReviewSnapshot = {
     input: "No, use the existing helper",
     intent: {
       intent: "other",
-      domain: "other",
       reason: "unclear",
       confidence: 0.2,
     },
@@ -65,7 +64,6 @@ const snapshot: ReviewSnapshot = {
     definition: {
       triggers: ["Requests that do not match a defined intent"],
       examples: ["help with this"],
-      domain: "other",
       keywords: ["help"],
       guidance: "Ask for context.",
     },
@@ -76,14 +74,12 @@ const snapshot: ReviewSnapshot = {
       id: "other",
       triggers: ["Requests that do not match a defined intent"],
       examples: ["help with this"],
-      domain: "other",
       keywords: ["help"],
     },
     {
       id: "debugging",
       triggers: ["Fix a failing test"],
       examples: ["Why does this test fail?"],
-      domain: "development",
       keywords: ["test", "failure"],
     },
   ],
@@ -191,25 +187,25 @@ it("detects only examples and keywords as QMD routing surfaces", () => {
   const before = new Map([
     [
       "other.md",
-      "---\ntriggers: [other]\nexamples: [help]\ndomain: other\nkeywords: [help]\nskills: [analysis]\n---\nAsk for context.\n",
+      "---\ntriggers: [other]\nexamples: [help]\nkeywords: [help]\nskills: [analysis]\n---\nAsk for context.\n",
     ],
   ]);
   const withExamples = new Map([
     [
       "other.md",
-      "---\ntriggers: [other]\nexamples: [help, explain this]\ndomain: other\nkeywords: [help]\nskills: [analysis]\n---\nAsk for context.\n",
+      "---\ntriggers: [other]\nexamples: [help, explain this]\nkeywords: [help]\nskills: [analysis]\n---\nAsk for context.\n",
     ],
   ]);
   const withKeywords = new Map([
     [
       "other.md",
-      "---\ntriggers: [other]\nexamples: [help]\ndomain: other\nkeywords: [help, explain]\nskills: [analysis]\n---\nAsk for context.\n",
+      "---\ntriggers: [other]\nexamples: [help]\nkeywords: [help, explain]\nskills: [analysis]\n---\nAsk for context.\n",
     ],
   ]);
   const classifierOnly = new Map([
     [
       "other.md",
-      "---\ntriggers: [other, clarify]\nexamples: [help]\ndomain: other\nkeywords: [help]\nskills: [analysis, debugging]\n---\nExplain the current context.\n",
+      "---\ntriggers: [other, clarify]\nexamples: [help]\nkeywords: [help]\nskills: [analysis, debugging]\n---\nExplain the current context.\n",
     ],
   ]);
 
@@ -242,7 +238,7 @@ describe("runReviewSubagent", () => {
     tempRoots.push(root);
     fs.writeFileSync(
       path.join(root, "other.md"),
-      "---\ntriggers:\n  - other\nexamples:\n  - help\ndomain: other\nkeywords:\n  - help\n---\nAsk for context.\n",
+      "---\ntriggers:\n  - other\nexamples:\n  - help\nkeywords:\n  - help\n---\nAsk for context.\n",
     );
     const api = {
       config: {},
@@ -302,11 +298,11 @@ describe("runReviewSubagent", () => {
     tempRoots.push(root);
     fs.writeFileSync(
       path.join(root, "obsolete.md"),
-      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\ndomain: other\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
+      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
     );
     fs.writeFileSync(
       path.join(root, "other.md"),
-      "---\ntriggers:\n  - other\nexamples:\n  - help\ndomain: other\nkeywords:\n  - help\n---\nAsk for context.\n",
+      "---\ntriggers:\n  - other\nexamples:\n  - help\nkeywords:\n  - help\n---\nAsk for context.\n",
     );
     const runEmbeddedAgent = vi
       .fn()
@@ -371,7 +367,7 @@ describe("runReviewSubagent", () => {
     tempRoots.push(root);
     fs.writeFileSync(
       path.join(root, "obsolete.md"),
-      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\ndomain: other\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
+      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
     );
     const runEmbeddedAgent = vi
       .fn()
@@ -430,11 +426,11 @@ describe("runReviewSubagent", () => {
     tempRoots.push(root);
     fs.writeFileSync(
       path.join(root, "obsolete.md"),
-      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\ndomain: other\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
+      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
     );
     fs.writeFileSync(
       path.join(root, "other.md"),
-      "---\ntriggers:\n  - other\nexamples:\n  - help\ndomain: other\nkeywords:\n  - help\n---\nAsk for context.\n",
+      "---\ntriggers:\n  - other\nexamples:\n  - help\nkeywords:\n  - help\n---\nAsk for context.\n",
     );
     const runEmbeddedAgent = vi
       .fn()
@@ -506,7 +502,7 @@ describe("runReviewSubagent", () => {
     ]) {
       fs.writeFileSync(
         path.join(root, `${id}.md`),
-        `---\ntriggers:\n  - ${trigger}\nexamples:\n  - ${example}\ndomain: other\nkeywords:\n  - ${example}\n---\n${guidance}\n`,
+        `---\ntriggers:\n  - ${trigger}\nexamples:\n  - ${example}\nkeywords:\n  - ${example}\n---\n${guidance}\n`,
       );
     }
     const runEmbeddedAgent = vi
@@ -582,7 +578,7 @@ describe("runReviewSubagent", () => {
     for (const id of ["alpha", "beta"]) {
       fs.writeFileSync(
         path.join(root, `${id}.md`),
-        `---\ntriggers:\n  - ${id}\nexamples:\n  - ${id}\ndomain: other\nkeywords:\n  - ${id}\n---\nKeep ${id}.\n`,
+        `---\ntriggers:\n  - ${id}\nexamples:\n  - ${id}\nkeywords:\n  - ${id}\n---\nKeep ${id}.\n`,
       );
     }
     let arrived = 0;

@@ -33,7 +33,6 @@ describe("SessionTracker exact-turn finalization", () => {
           result: {
             intent: "coding",
             reason: "test",
-            domain: "coding",
             confidence: 1,
           },
         },

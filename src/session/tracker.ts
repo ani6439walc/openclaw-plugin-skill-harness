@@ -31,7 +31,6 @@ const EMBEDDED_AGENT_SESSION_SUFFIXES = [
   ".session.trajectory.jsonl",
   ".session.trajectory-path.json",
 ];
-const DEFAULT_MIGRATED_DOMAIN = "unknown";
 const trackerCache = new Map<string, SessionTracker>();
 
 export interface SkillRecord {
@@ -153,7 +152,6 @@ const REVIEW_PARAM_MAX_CHARS = 500;
 const SAFE_REVIEW_PARAM_KEYS = new Set([
   "command",
   "cwd",
-  "domains",
   "filePath",
   "file_path",
   "keywords",
@@ -173,7 +171,7 @@ const SAFE_REVIEW_PARAM_KEYS = new Set([
   "workdir",
 ]);
 
-const JSON_REVIEW_PARAM_KEYS = new Set(["domains", "keywords"]);
+const JSON_REVIEW_PARAM_KEYS = new Set(["keywords"]);
 
 const SENSITIVE_REVIEW_PARAM_KEY_PATTERN =
   /api[_-]?key|authorization|body|content|cookie|credential|headers|password|prompt|secret|text|token/i;
@@ -944,7 +942,6 @@ export class SessionTracker {
       const record: HistoricalIntentRecord = {
         input: state.input,
         intent: result.intent,
-        domain: result.domain ?? DEFAULT_MIGRATED_DOMAIN,
         confidence: result.confidence,
       };
       if (result.keywords?.length) record.keywords = [...result.keywords];

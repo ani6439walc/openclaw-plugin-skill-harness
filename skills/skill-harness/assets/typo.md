@@ -1,5 +1,4 @@
 ---
-domain: chat
 triggers:
   - >-
     The user's message likely contains misspellings or damaged text that should

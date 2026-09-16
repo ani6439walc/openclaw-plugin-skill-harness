@@ -18,7 +18,6 @@ triggers:
   - "trigger"
 examples:
   - "example"
-domain: "test"
 keywords:
   - "hi"
 ---
@@ -62,8 +61,8 @@ Handle the test request.
     fs.writeFileSync(
       path.join(dir, "one.md"),
       valid().replace(
-        'domain: "test"',
-        'domain: "test"\nskills:\n  - skill-lifecycle\n  - skill-harness',
+        'examples:\n  - "example"',
+        'examples:\n  - "example"\nskills:\n  - skill-lifecycle\n  - skill-harness',
       ),
     );
 
@@ -77,8 +76,8 @@ Handle the test request.
     fs.writeFileSync(
       path.join(dir, "one.md"),
       valid().replace(
-        'domain: "test"',
-        'domain: "test"\ncandidate:\n  scope: cross-flow\n  keywords:\n    - "approval"',
+        'examples:\n  - "example"',
+        'examples:\n  - "example"\ncandidate:\n  scope: cross-flow\n  keywords:\n    - "approval"',
       ),
     );
 
@@ -93,8 +92,8 @@ Handle the test request.
     fs.writeFileSync(
       path.join(dir, "invalid-skills.md"),
       valid().replace(
-        'domain: "test"',
-        'domain: "test"\nskills: skill-lifecycle',
+        'examples:\n  - "example"',
+        'examples:\n  - "example"\nskills: skill-lifecycle',
       ),
     );
 
@@ -140,30 +139,19 @@ Handle the test request.
     );
   });
 
-  it("rejects missing, non-string, or empty domain", () => {
+  it("rejects domain as an unsupported top-level field", () => {
     fs.writeFileSync(
-      path.join(dir, "missing.md"),
-      valid().replace('domain: "test"\n', ""),
-    );
-    fs.writeFileSync(
-      path.join(dir, "invalid.md"),
-      valid().replace('domain: "test"', "domain: 123"),
-    );
-    fs.writeFileSync(
-      path.join(dir, "empty.md"),
-      valid().replace('domain: "test"', 'domain: ""'),
+      path.join(dir, "domain.md"),
+      valid().replace(
+        'examples:\n  - "example"',
+        'examples:\n  - "example"\ndomain: "test"',
+      ),
     );
 
     const result = validateRoutingIntentDirectory(dir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
-      "missing.md: domain must be a non-empty string",
-    );
-    expect(result.errors).toContain(
-      "invalid.md: domain must be a non-empty string",
-    );
-    expect(result.errors).toContain(
-      "empty.md: domain must be a non-empty string",
+      "domain.md: unsupported top-level field domain",
     );
   });
 

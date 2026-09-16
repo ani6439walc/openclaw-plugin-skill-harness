@@ -6,7 +6,6 @@ import { isRecord } from "../guards.js";
 const TOP_LEVEL_FIELDS = new Set([
   "triggers",
   "examples",
-  "domain",
   "skills",
   "keywords",
 ]);
@@ -124,7 +123,6 @@ const NATURAL_SENTENCE_COMMANDS = new Set(["go", "make", "set"]);
 export interface RoutingIntentDefinition {
   triggers: string[];
   examples: string[];
-  domain: string;
   skills?: string[];
   keywords: string[];
   guidance: string;
@@ -399,11 +397,6 @@ export function validateRoutingIntentDirectory(
         );
       }
 
-      const domain = typeof data.domain === "string" ? data.domain.trim() : "";
-      if (!domain) {
-        fileErrors.push(`${file}: domain must be a non-empty string`);
-      }
-
       let skills: string[] | undefined;
       if (data.skills !== undefined) {
         skills = normalizedStringArray(data.skills);
@@ -452,20 +445,13 @@ export function validateRoutingIntentDirectory(
 
       const guidance = validateGuidance(file, parsed.content, fileErrors);
 
-      if (
-        fileErrors.length === 0 &&
-        triggers &&
-        examples &&
-        domain &&
-        guidance
-      ) {
+      if (fileErrors.length === 0 && triggers && examples && guidance) {
         intents.push({
           id,
           file,
           definition: {
             triggers,
             examples,
-            domain,
             ...(skills && skills.length > 0 ? { skills } : {}),
             keywords,
             guidance,

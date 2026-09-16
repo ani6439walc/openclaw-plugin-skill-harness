@@ -92,7 +92,7 @@ const REVIEW_INSTRUCTIONS: Record<
       "Use the supplied capability evidence to preserve a reusable observed-skill workflow or refine matched-intent guidance and skills.",
     goal: "Make the smallest source-authorized capability repair.",
     workflow:
-      "capability-fit: tool-call and tool-failure evidence may refine only matched-intent guidance or skills, or create an experience for an observed skill. Tool-call experiences require an error-free turn; tool-failure experiences require demonstrated recovery and verification. Skill-placement evidence may add only the selected skill to exactly one existing intent. Do not alter keywords, examples, triggers, domains, create, split, or merge intents.",
+      "capability-fit: tool-call and tool-failure evidence may refine only matched-intent guidance or skills, or create an experience for an observed skill. Tool-call experiences require an error-free turn; tool-failure experiences require demonstrated recovery and verification. Skill-placement evidence may add only the selected skill to exactly one existing intent. Do not alter keywords, examples, triggers, create, split, or merge intents.",
   },
 };
 
@@ -132,7 +132,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 - The target library shape is class-level routing definitions: strict classification frontmatter plus one plain-text guidance body. Do not create one-intent-per-session artifacts.
 
 ### Target preference order and full CRUD authority
-- You have full CRUD (Create, Read, Update, Delete) authority over intent files and all their subfields (domain, triggers, examples, keywords, skills, guidance).
+- You have full CRUD (Create, Read, Update, Delete) authority over intent files and all their subfields (triggers, examples, keywords, skills, guidance).
 - DO NOT treat intents as append-only. When existing triggers, examples, or keywords contain stale, bloated, repetitive, or anti-pattern entries, you MUST actively prune, edit, rewrite, or delete them to maintain high quality and conciseness.
 - Refine-First Hierarchy (Avoid Frivolous Creates):
   1. Priority 1 (Refine existing intent): Before proposing a new intent, always check if the turn's user goal fits under an existing umbrella or related intent in the Intent Catalog. If so, refine that intent by adding the turn's phrasing/keywords to its examples and keywords. Never create a new intent when an existing intent can be refined to accommodate the task class.
@@ -144,10 +144,9 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
 
 ### Intent shape and boundaries
 - Prefer the smallest maintainable boundary and the least disruptive operation allowed by the requested trigger workflow.
-- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and must strictly follow canonical YAML key order: domain, triggers, examples, keywords, skills (with skills placed last and strictly lowercase).
+- Intent ids come from Markdown filenames without the .md suffix. Frontmatter is classification-only and must strictly follow canonical YAML key order: triggers, examples, keywords, skills (with skills placed last and strictly lowercase).
 - Frontmatter schema structure:
   ---
-  domain: <broad routing bucket>
   triggers:
     - <3-5 high-level goal boundaries for Step 3 LLM classifier>
   examples:
@@ -160,7 +159,7 @@ const INTENT_CRAFT_RUBRIC_BASE = `Intent Markdown review rules:
   <One single-line plain-text routing guidance sentence.>
 
 ### 3-Stage routing field responsibilities
-- Step 1 BM25 keywords: keywords[] must contain 5-12 discriminative, multi-character domain phrases or prefixed commands (e.g., 'git status', 'gcloud storage', 'review'). NEVER use single-character items (e.g., '好', '是', '對', '改') or ubiquitous generic words (e.g., '功能', '用途', 'retry', 'status') which create false-positive traps in BM25 search. Actively equip newly created or refined intents with high-quality keywords.
+- Step 1 BM25 keywords: keywords[] must contain 5-12 discriminative, multi-character phrases or prefixed commands (e.g., 'git status', 'gcloud storage', 'review'). NEVER use single-character items (e.g., '好', '是', '對', '改') or ubiquitous generic words (e.g., '功能', '用途', 'retry', 'status') which create false-positive traps in BM25 search. Actively equip newly created or refined intents with high-quality keywords.
 - Step 2 QMD hybrid examples: examples[] must contain 5-10 diverse, realistic user utterances reflecting natural conversation habits (colloquial phrasing, mixed Traditional Chinese/English, short queries, questions) to ensure sufficient dense vector subspace coverage.
 - Step 3 LLM classifier triggers: triggers[] describe 3-5 concise high-level user goal boundaries.
   - Positive definition first: focus triggers on what the intent IS and what user goals it satisfies.

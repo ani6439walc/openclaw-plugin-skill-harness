@@ -54,7 +54,6 @@ export function attachHistoricalIntents(
     if (!record) continue;
     const historicalIntent: RecentTurn["historicalIntent"] = {
       intent: record.intent,
-      domain: record.domain ?? "unknown",
     };
     if (record.keywords?.length) historicalIntent.keywords = record.keywords;
     turn.historicalIntent = historicalIntent;

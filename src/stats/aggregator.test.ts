@@ -25,7 +25,6 @@ describe("StatsAggregator", () => {
     definition: {
       triggers: ["commit"],
       examples: [],
-      domain: "development",
       skills: ["git-master", "dev-lifecycle"],
       keywords: [],
       guidance: "Follow the version-control workflow.",
@@ -224,7 +223,6 @@ describe("StatsAggregator", () => {
         result: {
           intent: "version-control",
           reason: "test",
-          domain: "git",
           confidence: 0.75,
         },
         intentMatchedSkills,
@@ -446,7 +444,6 @@ describe("StatsAggregator", () => {
             result: {
               intent: "version-control",
               reason: "test",
-              domain: "git",
               confidence: 0.75,
             },
             intentMatchedSkills: [],
@@ -1171,7 +1168,6 @@ describe("StatsAggregator", () => {
           result: {
             intent: "version-control",
             reason: "test",
-            domain: "development",
             confidence,
           },
           intentMatchedSkills: [],
@@ -1370,12 +1366,12 @@ describe("StatsAggregator", () => {
             candidateSelections: [
               {
                 intentId: "version-control",
-                selectionReasons: ["predicted-domain"],
+                selectionReasons: ["candidate-keyword"],
                 matchedKeywords: [],
               },
             ],
             supportReasons: ["high-overall-confidence"],
-            selectionReasons: ["predicted-domain", "cross-flow"],
+            selectionReasons: ["candidate-keyword", "qmd-hit"],
             matchedKeywords: [],
           },
         },
@@ -1404,12 +1400,12 @@ describe("StatsAggregator", () => {
             candidateSelections: [
               {
                 intentId: "version-control",
-                selectionReasons: ["predicted-domain"],
+                selectionReasons: ["candidate-keyword"],
                 matchedKeywords: [],
               },
             ],
             supportReasons: [],
-            selectionReasons: ["predicted-domain"],
+            selectionReasons: ["candidate-keyword"],
             matchedKeywords: [],
           },
         },
@@ -1437,7 +1433,7 @@ describe("StatsAggregator", () => {
       averageDurationMs: 3,
       fallbackReasons: { "insufficient-evidence": 1 },
       supportReasons: { "high-overall-confidence": 1 },
-      selectionReasons: { "predicted-domain": 2, "cross-flow": 1 },
+      selectionReasons: { "candidate-keyword": 2, "qmd-hit": 1 },
     });
     expect(stats.daily["2026-06-11"].projection).toEqual({
       eligibleTurns: 2,
@@ -1514,12 +1510,12 @@ describe("StatsAggregator", () => {
               candidateSelections: [
                 {
                   intentId: "version-control",
-                  selectionReasons: ["predicted-domain"],
+                  selectionReasons: ["candidate-keyword"],
                   matchedKeywords: [],
                 },
               ],
               supportReasons: [],
-              selectionReasons: ["predicted-domain"],
+              selectionReasons: ["candidate-keyword"],
               matchedKeywords: [],
             },
           },
@@ -1590,7 +1586,6 @@ describe("StatsAggregator", () => {
             result: {
               intent: "__other__",
               reason: "test",
-              domain: "test",
               confidence: 0.9,
             },
             intentMatchedSkills: ["__other__"],
@@ -1703,7 +1698,6 @@ describe("StatsAggregator", () => {
       definition: {
         triggers: ["prompt"],
         examples: [],
-        domain: "development",
         keywords: [],
         guidance: [
           "Candidate skills:",
@@ -1813,7 +1807,6 @@ describe("StatsAggregator", () => {
       definition: {
         triggers: ["chat"],
         examples: [],
-        domain: "chat",
         keywords: [],
         guidance: "Just chat.",
       },

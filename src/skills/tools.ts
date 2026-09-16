@@ -22,7 +22,6 @@ const MAX_EXPERIENCE_BODY_CODE_POINTS = 2_000;
 const MAX_EXPERIENCE_TOTAL_CODE_POINTS = 5_000;
 
 export interface RegisterSkillToolsOptions {
-  getIntents?: (agentId: string) => readonly IntentCatalogEntry[];
   experienceCatalog?: SkillExperienceCatalog;
   qmdSkillIndex?: SkillQmdIndex;
   scheduleSkillSearchIndex?: (agentId: string) => void;
@@ -148,7 +147,6 @@ export function registerSkillTools(
           const skills = await listAvailableSkills({
             api,
             agentId,
-            intents: options.getIntents?.(agentId),
             bundledSkillsDir: options.bundledSkillsDir,
             nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
             sharedRoots: options.getSharedRoots?.(),
@@ -174,7 +172,6 @@ export function registerSkillTools(
               name: skill.name,
               description: skill.description,
               source: skill.source,
-              domains: skill.domains ?? [],
               path: skill.location,
               ...(relatedSkills
                 ? {
@@ -269,7 +266,6 @@ export function registerSkillTools(
           const inventory = await listAvailableSkills({
             api,
             agentId,
-            intents: options.getIntents?.(agentId),
             bundledSkillsDir: options.bundledSkillsDir,
             nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
             sharedRoots: options.getSharedRoots?.(),
@@ -305,7 +301,6 @@ export function registerSkillTools(
                 name: skill.name,
                 description: skill.description,
                 source: skill.source,
-                domains: skill.domains ?? [],
                 score: hit.score,
                 ...(usageStats
                   ? {
@@ -384,7 +379,6 @@ export function registerSkillTools(
               agentId,
               name: requiredStringParam(params, "name"),
               filePath: optionalStringParam(params, "file_path"),
-              intents: options.getIntents?.(agentId),
               bundledSkillsDir: options.bundledSkillsDir,
               nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
               sharedRoots: options.getSharedRoots?.(),

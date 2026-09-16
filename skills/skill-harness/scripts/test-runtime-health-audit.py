@@ -22,7 +22,6 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         (self.root / "intents").mkdir()
         (self.root / "intents" / "example.md").write_text(
             "---\n"
-            "domain: test\n"
             "triggers:\n"
             "  - The test request matches the example intent.\n"
             "examples:\n"

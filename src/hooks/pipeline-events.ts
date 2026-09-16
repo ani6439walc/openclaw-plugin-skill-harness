@@ -24,7 +24,6 @@ export type SkillCandidatePoolFallbackReason =
 
 export type PipelineMetadata = {
   basis?: string;
-  domain?: string;
   keywords?: string[];
   changed?: boolean;
   reason?: string;

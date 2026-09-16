@@ -144,7 +144,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "chat",
               reason: "test",
-              domain: "chat",
               confidence: 0.9,
             },
           },
@@ -192,7 +191,6 @@ describe("SessionTracker", () => {
               result: {
                 intent: "version-control",
                 reason: "User requests repository maintenance.",
-                domain: "git",
                 confidence: 0.9,
               },
               routingEvidence: {
@@ -599,7 +597,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "tool-reference",
               reason: "User wants to read a skill",
-              domain: "agent-ops",
               confidence: 0.9,
             },
             intentMatchedSkills: ["skill-viewer", "tool-reference"],
@@ -628,7 +625,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "skill-lifecycle",
               reason: "test",
-              domain: "agent-ops",
               confidence: 0.9,
             },
           },
@@ -642,7 +638,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "skill-lifecycle",
               reason: "test",
-              domain: "agent-ops",
               confidence: 0.95,
             },
           },
@@ -665,7 +660,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "skill-lifecycle",
               reason: "test",
-              domain: "agent-ops",
               confidence: 0.9,
             },
           },
@@ -679,7 +673,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "skill-lifecycle",
               reason: "test",
-              domain: "agent-ops",
               confidence: 0.95,
             },
           },
@@ -1526,7 +1519,6 @@ describe("SessionTracker", () => {
                 intent: "PLANNING",
                 reason: "test",
                 keywords: ["plan", "change"],
-                domain: "planning",
                 confidence: 0.8,
               },
             },
@@ -1537,7 +1529,6 @@ describe("SessionTracker", () => {
               result: {
                 intent: "MISSING_INPUT",
                 reason: "test",
-                domain: "unknown",
                 confidence: 0.8,
               },
             },
@@ -1549,7 +1540,6 @@ describe("SessionTracker", () => {
             result: {
               intent: "CODING",
               reason: "test",
-              domain: "coding",
               confidence: 0.75,
             },
           },
@@ -1560,14 +1550,12 @@ describe("SessionTracker", () => {
         {
           input: "Plan the change",
           intent: "PLANNING",
-          domain: "planning",
           keywords: ["plan", "change"],
           confidence: 0.8,
         },
         {
           input: "Implement the change",
           intent: "CODING",
-          domain: "coding",
           confidence: 0.75,
         },
       ]);
@@ -1586,7 +1574,6 @@ describe("SessionTracker", () => {
               intent: "social-casual",
               reason: "Fast Path A1 keyword exact match: hi",
               keywords: ["hi"],
-              domain: "chat",
               confidence: 1,
             },
           },
@@ -1597,7 +1584,6 @@ describe("SessionTracker", () => {
         expect.objectContaining({
           input: "hi",
           intent: "social-casual",
-          domain: "chat",
           keywords: ["hi"],
         }),
       ]);
@@ -1650,7 +1636,6 @@ describe("SessionTracker", () => {
                     command: `pnpm run test ${"x".repeat(600)}`,
                     urls: ["https://example.com/a", "https://example.com/b"],
                     source: "managed",
-                    domains: ["development", "testing"],
                     keywords: ["review", "prompt"],
                     show_stats: true,
                     show_related: false,
@@ -1690,7 +1675,6 @@ describe("SessionTracker", () => {
           command: `pnpm run test ${"x".repeat(486)}`,
           urls: "https://example.com/a, https://example.com/b",
           source: "managed",
-          domains: '["development","testing"]',
           keywords: '["review","prompt"]',
           show_stats: "true",
           show_related: "false",
@@ -1739,7 +1723,6 @@ Current user request: ${request}
             result: {
               intent: "code-review",
               reason: "test",
-              domain: "development",
               confidence: 0.9,
             },
           },
@@ -1753,7 +1736,6 @@ Current user request: ${request}
             result: {
               intent: "code-review",
               reason: "test",
-              domain: "development",
               confidence: 0.9,
             },
           },
@@ -1791,7 +1773,6 @@ Current user request: ${request}
             result: {
               intent: "code-review",
               reason: "test",
-              domain: "development",
               confidence: 0.9,
             },
             intentProjection: {
@@ -1803,7 +1784,7 @@ Current user request: ${request}
               candidateIntentIds: ["code-review"],
               candidateSelections: [],
               supportReasons: ["high-overall-confidence"],
-              selectionReasons: ["predicted-domain"],
+              selectionReasons: ["exact-keyword-overlap"],
               matchedKeywords: [],
             },
           },

@@ -155,7 +155,6 @@ export async function readAvailableSkill(
         usage_stats: skillUsageStatsForName(usageStats, skill.name),
         related_skills: relatedSkills,
         source: skill.source,
-        domains: skill.domains ?? [],
         readiness_status: "available",
       };
     } catch (err) {
@@ -182,7 +181,6 @@ export async function readAvailableSkill(
       file: validation.normalizedFilePath,
       content: await fs.readFile(validation.resolvedPath, "utf-8"),
       file_type: path.extname(validation.normalizedFilePath),
-      domains: skill.domains ?? [],
       related_skills: relatedSkills,
     };
   } catch (err) {

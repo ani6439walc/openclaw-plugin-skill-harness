@@ -34,7 +34,7 @@ Use `references/clustering.md`:
 - Assign each capability to exactly one primary cluster.
 - Compare each cluster to current runtime intents.
 - Mark clusters as covered, gap, overlap, or unclear.
-- Apply the domain-intent consistency criteria from `references/clustering.md` before presenting the cluster map.
+- Apply the cluster consistency criteria from `references/clustering.md` before presenting the cluster map.
 
 ## Step 4 — Calibration checkpoint
 
@@ -53,7 +53,7 @@ Use simple format checks instead of command-specific validation steps:
 - Triggers/examples are concrete and non-duplicative.
 - Optional `keywords` are durable short phrases appropriate for Step 1 QMD keyword BM25 retrieval.
 - New intents do not collide with existing runtime intent boundaries.
-- Domain-intent consistency criteria pass for every changed or newly proposed domain/intent relationship.
+- Cluster consistency criteria pass for every changed or newly proposed cluster/intent relationship.
 - Skill dependencies use direct frontmatter `skills[]`; the body remains only the one plain-text guidance sentence.
 - Commands, workflows, and durable lessons remain in referenced skills, not intent definitions.
 

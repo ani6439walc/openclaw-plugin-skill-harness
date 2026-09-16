@@ -5,11 +5,10 @@ import {
   projectQmdIntentCandidates,
 } from "./candidates.js";
 
-function intent(id: string, domain: string): IntentCatalogEntry {
+function intent(id: string): IntentCatalogEntry {
   const definition: IntentCatalogEntry["definition"] = {
     triggers: [`trigger ${id}`],
     examples: [`example ${id}`],
-    domain,
     keywords: [],
     guidance: `prompt ${id}`,
   };
@@ -17,11 +16,11 @@ function intent(id: string, domain: string): IntentCatalogEntry {
 }
 
 const catalog = [
-  intent("chat", "chat"),
-  intent("approve", "conversation"),
-  intent("typescript", "development"),
-  intent("version-control", "development"),
-  intent("deploy", "operations"),
+  intent("chat"),
+  intent("approve"),
+  intent("typescript"),
+  intent("version-control"),
+  intent("deploy"),
 ];
 
 describe("projectQmdIntentCandidates", () => {
@@ -37,8 +36,8 @@ describe("projectQmdIntentCandidates", () => {
         },
       ],
       histories: [
-        { input: "one", intent: "deploy", domain: "operations" },
-        { input: "two", intent: "typescript", domain: "development" },
+        { input: "one", intent: "deploy" },
+        { input: "two", intent: "typescript" },
       ],
     });
 
