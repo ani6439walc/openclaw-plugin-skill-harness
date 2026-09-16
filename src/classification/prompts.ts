@@ -268,8 +268,8 @@ function selectAdvisoryHeader(
 }
 
 export function buildRoutingContext(params: {
-  result: IntentionResult;
-  guidance: string;
+  result?: IntentionResult;
+  guidance?: string;
   intentMatchedSkills: readonly AvailableSkill[];
   experiences: readonly SkillExperienceEntry[];
   inputMatchedSkills?: readonly AvailableSkill[];
@@ -279,11 +279,13 @@ export function buildRoutingContext(params: {
   );
   const inputMatched = params.inputMatchedSkills ?? [];
   const blocks = [
-    xmlBlock(
-      "intent",
-      escapeXmlText(params.guidance),
-      ` name="${escapeXmlAttribute(params.result.intent)}"`,
-    ),
+    params.result && params.guidance
+      ? xmlBlock(
+          "intent",
+          escapeXmlText(params.guidance),
+          ` name="${escapeXmlAttribute(params.result.intent)}"`,
+        )
+      : undefined,
     params.intentMatchedSkills.length > 0
       ? `${formatSkillXmlBlock(
           "intent_matched_skills",

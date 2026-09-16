@@ -3490,11 +3490,12 @@ describe("createHookHandlers topic switch flow", () => {
     expect(intentMatchEvent?.data).toEqual(
       expect.objectContaining({
         state: "completed",
-        intent: "version-control",
+        result: "version-control",
         confidence: 0.91,
         reason: "qmd-keyword: matched: none; confidence: 0.91/0.85",
       }),
     );
+    expect(intentMatchEvent?.data).not.toHaveProperty("intent");
     expect(intentMatchEvent?.data).not.toHaveProperty("trigger");
     expect(intentMatchEvent?.data).not.toHaveProperty("domain");
     expect(intentMatchEvent?.data).not.toHaveProperty("searchEvidence");
@@ -3553,7 +3554,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(intentMatchEvent?.data).toEqual(
       expect.objectContaining({
         state: "completed",
-        intent: "version-control",
+        result: "version-control",
         confidence: 0.9,
         reason: "llm-classifier: User wants repository maintenance",
       }),
@@ -3759,7 +3760,7 @@ describe("createHookHandlers topic switch flow", () => {
     expect(intentEvents[0]?.data).toEqual(
       expect.objectContaining({
         state: "completed",
-        intent: "version-control",
+        result: "version-control",
         confidence: 0.93,
         reason:
           "qmd-hybrid: signals: lex,vec,hyde; confidence: 0.93/0.9; margin: 0.12/0.08",
@@ -4321,6 +4322,42 @@ describe("createHookHandlers topic switch flow", () => {
     );
   });
 
+  it("injects input-matched skills when intent classification has no result", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-input-only-skill-match-"),
+    );
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    writeSkill(path.join(workspace, "skills"), "review", "Review code.");
+    const { handlers, classifier } = createTopicFlowHarness({
+      historicalIntents: [],
+      classifier: vi.fn().mockResolvedValue(undefined),
+      qmdSkillIndex: {
+        search: vi
+          .fn()
+          .mockResolvedValue([
+            { name: "review", score: 0.7, semanticScore: 0.9 },
+          ]),
+      },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => state },
+          agent: { resolveAgentWorkspaceDir: () => workspace },
+        },
+      } as unknown as Partial<OpenClawPluginApi>,
+    });
+    try {
+      const result = await handlers.onBeforePromptBuild(event, ctx);
+
+      expect(classifier).toHaveBeenCalledOnce();
+      expect(result?.prependContext).toContain("<input_matched_skills>");
+      expect(result?.prependContext).not.toContain("<intent name=");
+      expect(result?.prependContext).not.toContain("<intent_matched_skills>");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("records skill match methods and injected names", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-skill-match-event-"),
@@ -4350,7 +4387,7 @@ describe("createHookHandlers topic switch flow", () => {
           entry.data.state === "completed",
       );
       expect(skillMatchEvent?.data).toEqual(
-        expect.objectContaining({ reason: "qmd-search", result: "review" }),
+        expect.objectContaining({ reason: "qmd-search", result: ["review"] }),
       );
       expect(record).toHaveBeenLastCalledWith(
         "session-1",

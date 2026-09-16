@@ -677,7 +677,7 @@ export function createHookHandlers(deps: HookDeps) {
         "intent-match",
         "completed",
         {
-          intent: result.intent,
+          result: result.intent,
           confidence: result.confidence,
           reason: `${trigger}: ${result.reason}`,
           durationMs: Math.max(0, Date.now() - startedAtMs),
@@ -1171,9 +1171,7 @@ export function createHookHandlers(deps: HookDeps) {
                 source === "name-match" ? "name-match" : "qmd-search",
               )
               .join(",") || "none",
-          result:
-            selection.selectedSkills.map((skill) => skill.name).join(",") ||
-            "none",
+          result: selection.selectedSkills.map((skill) => skill.name),
           ...(fallbackReason ? { fallbackReason } : {}),
           durationMs: Math.max(0, Date.now() - startedAtMs),
         },
@@ -1205,7 +1203,7 @@ export function createHookHandlers(deps: HookDeps) {
           injectedCount: 0,
           injectedSkills: [],
           reason: "none",
-          result: "none",
+          result: [],
           fallbackReason: fallbackReason ?? "empty-pool",
           durationMs: Math.max(0, Date.now() - startedAtMs),
         },
@@ -1345,64 +1343,62 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     conversation: ReturnType<typeof limitConversationTurns>;
     availableIntents: readonly IntentCatalogEntry[];
-    classification: PromptBuildClassification;
+    classification?: PromptBuildClassification;
+    inputSkillMatch: {
+      skills: AvailableSkill[];
+      telemetry: InputSkillDiscovery;
+    };
     workingSetSkillsXml?: string;
   }): Promise<PluginHookBeforePromptBuildResult | undefined> {
-    const { trigger, result, intentProjection, routingEvidence } =
-      params.classification;
-    logger.debug("intention result", {
-      trigger,
-      intentResolved: Boolean(result.intent),
-    });
+    const classification = params.classification;
+    const result = classification?.result;
+    const intent = result
+      ? findIntentEntry(params.availableIntents, result.intent)
+      : undefined;
+    const routingContext =
+      intent && result
+        ? await resolveRoutingContext({
+            routing: params.routing,
+            result,
+            intent,
+          })
+        : { intentMatchedSkills: [], experiences: [] };
 
-    await recordPromptBuildResult({
-      ctx: params.ctx,
-      routing: params.routing,
-      latestUserMessage: params.latestUserMessage,
-      trigger,
-      result,
-      intentProjection,
-      routingEvidence,
-      conversation: params.conversation,
-    });
-    const intent = findIntentEntry(params.availableIntents, result.intent);
-    if (!intent) {
-      return toPromptBuildResult(undefined, params.workingSetSkillsXml);
+    if (classification && result) {
+      logger.debug("intention result", {
+        trigger: classification.trigger,
+        intentResolved: Boolean(result.intent),
+      });
     }
-    const routingContext = await resolveRoutingContext({
-      routing: params.routing,
-      result,
-      intent,
-    });
-    const inputSkillMatch = await discoverInputMatchedSkills({
-      ctx: params.ctx,
-      routing: params.routing,
-      refreshedConfig: params.refreshedConfig,
+    await recordPromptBuildSession({
+      association: params.routing.association,
       latestUserMessage: params.latestUserMessage,
-      conversation: params.conversation,
-      intents: params.availableIntents,
-    });
-    await recordPromptBuildResult({
-      ctx: params.ctx,
-      routing: params.routing,
-      latestUserMessage: params.latestUserMessage,
-      trigger,
-      result,
+      trigger: classification?.trigger ?? "llm-classifier",
+      ...(result ? { result } : {}),
       intentMatchedSkills: routingContext.intentMatchedSkills.map(
         (skill) => skill.name,
       ),
-      inputSkillDiscovery: inputSkillMatch.telemetry,
-      intentProjection,
-      routingEvidence,
+      ...(classification?.intentProjection
+        ? { intentProjection: classification.intentProjection }
+        : {}),
+      ...(classification?.routingEvidence
+        ? { routingEvidence: classification.routingEvidence }
+        : {}),
+      inputSkillDiscovery: params.inputSkillMatch.telemetry,
       conversation: params.conversation,
     });
+
+    if (!intent && params.inputSkillMatch.skills.length === 0) {
+      return toPromptBuildResult(undefined, params.workingSetSkillsXml);
+    }
     return toPromptBuildResult(
       buildRoutingContext({
-        result,
-        guidance: intent.definition.guidance,
+        ...(result && intent
+          ? { result, guidance: intent.definition.guidance }
+          : {}),
         intentMatchedSkills: routingContext.intentMatchedSkills,
         experiences: routingContext.experiences,
-        inputMatchedSkills: inputSkillMatch.skills,
+        inputMatchedSkills: params.inputSkillMatch.skills,
       }),
       params.workingSetSkillsXml,
     );
@@ -1517,25 +1513,28 @@ export function createHookHandlers(deps: HookDeps) {
         ctx,
         routing.resolvedSessionKey,
         async () => {
-          const classification = await resolvePromptBuildClassification({
-            ctx,
-            refreshedConfig,
-            effectiveAgentId: routing.effectiveAgentId,
-            resolvedSessionKey: routing.resolvedSessionKey,
-            association: routing.association,
-            latestUserMessage,
-            historicalIntents,
-            conversation,
-            modelRef,
-            availableIntents,
-          });
-
-          if (!classification) {
-            logger.debug(
-              "intent resolution yielded no result; skipping routing context injection.",
-            );
-            return toPromptBuildResult(undefined, workingSetSkillsXml);
-          }
+          const [classification, inputSkillMatch] = await Promise.all([
+            resolvePromptBuildClassification({
+              ctx,
+              refreshedConfig,
+              effectiveAgentId: routing.effectiveAgentId,
+              resolvedSessionKey: routing.resolvedSessionKey,
+              association: routing.association,
+              latestUserMessage,
+              historicalIntents,
+              conversation,
+              modelRef,
+              availableIntents,
+            }),
+            discoverInputMatchedSkills({
+              ctx,
+              routing,
+              refreshedConfig,
+              latestUserMessage,
+              conversation,
+              intents: availableIntents,
+            }),
+          ]);
 
           return await handleResolvedIntentPromptBuild({
             ctx,
@@ -1545,6 +1544,7 @@ export function createHookHandlers(deps: HookDeps) {
             conversation,
             availableIntents,
             classification,
+            inputSkillMatch,
             workingSetSkillsXml,
           });
         },
