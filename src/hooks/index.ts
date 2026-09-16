@@ -1442,16 +1442,16 @@ export function createHookHandlers(deps: HookDeps) {
           candidateCount: selection.pool.length,
           injectedCount: selection.selectedSkills.length,
           injectedSkills: selection.selectedSkills.map((skill) => skill.name),
-          reason:
-            [
+          ...(() => {
+            const sources = [
               ...new Set(
                 injectedCandidates.map((candidate) => candidate.source),
               ),
-            ]
-              .map((source) =>
-                source === "name-match" ? "name-match" : "qmd-search",
-              )
-              .join(",") || "none",
+            ].map((source) =>
+              source === "name-match" ? "name-match" : "qmd-search",
+            );
+            return sources.length > 0 ? { reason: sources.join(",") } : {};
+          })(),
           result: selection.selectedSkills.map((skill) => skill.name),
           collectionHits: retrievalCollections,
           injectedCollections,
