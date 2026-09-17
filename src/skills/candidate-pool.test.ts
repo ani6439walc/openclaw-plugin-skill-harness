@@ -18,7 +18,6 @@ describe("selectSkillCandidates", () => {
       ],
       options: {
         maxInjectedSkills: 4,
-        minInjectionScore: 0.3,
       },
     });
     expect(result.pool).toEqual([
@@ -38,7 +37,7 @@ describe("selectSkillCandidates", () => {
         { skillName: "BETA", score: 0.6, source: "name-match" },
         { skillName: "ALPHA", score: 0.6, source: "name-match" },
       ],
-      options: { maxInjectedSkills: 4, minInjectionScore: 0 },
+      options: { maxInjectedSkills: 4 },
     });
 
     expect(result.pool.map((candidate) => candidate.skillName)).toEqual([
@@ -54,7 +53,7 @@ describe("selectSkillCandidates", () => {
         { skillName: "alpha", score: 0.9, source: "name-match" },
         { skillName: "beta", score: 0.2, source: "direct-retrieval" },
       ],
-      options: { maxInjectedSkills: 1, minInjectionScore: 0.1 },
+      options: { maxInjectedSkills: 1 },
     });
     expect(result.pool.map((candidate) => candidate.skillName)).toEqual([
       "alpha",
@@ -75,7 +74,7 @@ describe("selectSkillCandidates", () => {
           topCollection: "meta",
         },
       ],
-      options: { maxInjectedSkills: 1, minInjectionScore: 0.1 },
+      options: { maxInjectedSkills: 1 },
     });
     expect(result.pool[0].collections).toEqual(["meta", "body"]);
     expect(result.pool[0].topCollection).toBe("meta");

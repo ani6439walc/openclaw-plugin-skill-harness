@@ -16,7 +16,6 @@ export type SkillDiscoveryCandidate = {
 
 export type CandidatePoolOptions = {
   maxInjectedSkills: number;
-  minInjectionScore: number;
 };
 
 export type CandidatePoolResult = {
@@ -59,7 +58,6 @@ export function selectSkillCandidates(params: {
     )
     .map(([, candidate]) => candidate);
   const selectedSkills = pool
-    .filter((candidate) => candidate.score >= params.options.minInjectionScore)
     .slice(0, params.options.maxInjectedSkills)
     .flatMap((candidate) => {
       const skill = visible.get(canonicalIdentity(candidate.skillName));

@@ -66,7 +66,6 @@ export type ResolvedSkillCandidatesConfig = {
   search: ResolvedSkillCandidateSearchConfig;
   nameMatch: ResolvedSkillCandidateNameMatchConfig;
   maxInjectedSkills: number;
-  minInjectionScore: number;
 };
 
 export type ResolvedRoutingConfig = {

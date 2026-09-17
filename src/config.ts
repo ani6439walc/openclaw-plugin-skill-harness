@@ -74,7 +74,6 @@ const DEFAULT_SKILL_CANDIDATES: ResolvedSkillCandidatesConfig = {
     genericTokens: [],
   },
   maxInjectedSkills: 4,
-  minInjectionScore: 0.3,
 };
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
@@ -364,13 +363,6 @@ const SkillCandidatesSchema = z
     search: SkillCandidatesSearchSchema,
     nameMatch: SkillCandidatesNameMatchSchema,
     maxInjectedSkills: z.number().int().min(0).max(4).optional().default(4),
-    minInjectionScore: z
-      .number()
-      .finite()
-      .min(0)
-      .max(1)
-      .optional()
-      .default(0.3),
   })
   .strict()
   .optional()

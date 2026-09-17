@@ -428,13 +428,6 @@
                 "maximum": 4,
                 "default": 4,
                 "description": "Maximum input-matched skills injected into advisory context."
-              },
-              "minInjectionScore": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.3,
-                "description": "Inclusive candidate score required for input-matched injection."
               }
             },
             "default": {}

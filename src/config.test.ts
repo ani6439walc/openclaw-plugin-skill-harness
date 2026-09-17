@@ -1042,7 +1042,6 @@ describe("resolveConfig", () => {
           genericTokens: [],
         },
         maxInjectedSkills: 4,
-        minInjectionScore: 0.3,
       });
     });
 
@@ -1070,7 +1069,6 @@ describe("resolveConfig", () => {
               genericTokens: ["Code", "code", "  Review  "],
             },
             maxInjectedSkills: 3,
-            minInjectionScore: 0.4,
           },
         },
       }).routing.skillCandidates;
@@ -1084,7 +1082,6 @@ describe("resolveConfig", () => {
           genericTokens: ["code", "review"],
         },
         maxInjectedSkills: 3,
-        minInjectionScore: 0.4,
       });
     });
 
@@ -1093,7 +1090,6 @@ describe("resolveConfig", () => {
         { search: { timeoutMs: 99 } },
         { nameMatch: { maxEditDistance: 3 } },
         { maxInjectedSkills: 5 },
-        { minInjectionScore: Number.NaN },
       ]) {
         expect(() => resolveConfig({ routing: { skillCandidates } })).toThrow();
       }
