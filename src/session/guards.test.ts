@@ -16,7 +16,7 @@ describe("isEnabledForAgent", () => {
   it("returns false when no agentId", () => {
     expect(
       isEnabledForAgent(
-        resolveConfig({ scope: { agents: ["main"] } }),
+        resolveConfig({ routing: { scope: { agents: ["main"] } } }),
         undefined,
       ),
     ).toBe(false);
@@ -24,14 +24,17 @@ describe("isEnabledForAgent", () => {
 
   it("returns true when agent is in list", () => {
     expect(
-      isEnabledForAgent(resolveConfig({ scope: { agents: ["main"] } }), "main"),
+      isEnabledForAgent(
+        resolveConfig({ routing: { scope: { agents: ["main"] } } }),
+        "main",
+      ),
     ).toBe(true);
   });
 
   it("returns false when agent not in list", () => {
     expect(
       isEnabledForAgent(
-        resolveConfig({ scope: { agents: ["main"] } }),
+        resolveConfig({ routing: { scope: { agents: ["main"] } } }),
         "other",
       ),
     ).toBe(false);
@@ -247,17 +250,23 @@ describe("resolveCanonicalSessionKeyFromSessionId", () => {
 describe("isAllowedChatType", () => {
   it("allows direct when direct allowed", () => {
     expect(
-      isAllowedChatType(resolveConfig({ scope: { chatTypes: ["direct"] } }), {
-        sessionKey: "agent:main:direct:123",
-      }),
+      isAllowedChatType(
+        resolveConfig({ routing: { scope: { chatTypes: ["direct"] } } }),
+        {
+          sessionKey: "agent:main:direct:123",
+        },
+      ),
     ).toBe(true);
   });
 
   it("denies group when only direct allowed", () => {
     expect(
-      isAllowedChatType(resolveConfig({ scope: { chatTypes: ["direct"] } }), {
-        sessionKey: "agent:main:group:123",
-      }),
+      isAllowedChatType(
+        resolveConfig({ routing: { scope: { chatTypes: ["direct"] } } }),
+        {
+          sessionKey: "agent:main:group:123",
+        },
+      ),
     ).toBe(false);
   });
 });
@@ -266,7 +275,9 @@ describe("isAllowedChatId", () => {
   it("allows any when no restrictions", () => {
     expect(
       isAllowedChatId(
-        resolveConfig({ scope: { allowedChatIds: [], deniedChatIds: [] } }),
+        resolveConfig({
+          routing: { scope: { allowedChatIds: [], deniedChatIds: [] } },
+        }),
         {
           sessionKey: "agent:main:direct:123",
         },
@@ -278,9 +289,11 @@ describe("isAllowedChatId", () => {
     expect(
       isAllowedChatId(
         resolveConfig({
-          scope: {
-            allowedChatIds: [],
-            deniedChatIds: ["discord:direct:123"],
+          routing: {
+            scope: {
+              allowedChatIds: [],
+              deniedChatIds: ["discord:direct:123"],
+            },
           },
         }),
         { sessionKey: "agent:main:direct:123", messageProvider: "discord" },

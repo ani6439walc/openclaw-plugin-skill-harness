@@ -25,7 +25,9 @@ describe("resolveConfig", () => {
         };
       };
 
-      expect(manifest.configSchema.properties.workingSetSkills).toMatchObject({
+      expect(
+        manifest.configSchema.properties.skills.properties.workingSet,
+      ).toMatchObject({
         type: "object",
         additionalProperties: false,
         properties: {
@@ -34,18 +36,20 @@ describe("resolveConfig", () => {
             type: "object",
             additionalProperties: { type: "array", items: { type: "string" } },
           },
-          includeWorkspaceSkills: {
-            type: "boolean",
-            default: true,
-          },
-          includeWorkshopSkills: {
-            type: "boolean",
-            default: true,
-          },
-          suppressNativeSkillPrompt: {
-            type: "boolean",
-            default: true,
-          },
+        },
+      });
+      expect(manifest.configSchema.properties.skills.properties).toMatchObject({
+        includeWorkspaceSkills: {
+          type: "boolean",
+          default: true,
+        },
+        includeWorkshopSkills: {
+          type: "boolean",
+          default: true,
+        },
+        suppressNativeSkillPrompt: {
+          type: "boolean",
+          default: true,
         },
       });
       expect(resolveConfig({}).skills.search.collectionWeights).toEqual({
@@ -57,10 +61,10 @@ describe("resolveConfig", () => {
 
     it("should use default values for empty config", () => {
       const result = resolveConfig({});
-      expect(result.scope.agents).toEqual(["main"]);
-      expect(result.scope.chatTypes).toEqual(["direct"]);
-      expect(result.scope.allowedChatIds).toEqual([]);
-      expect(result.scope.deniedChatIds).toEqual([]);
+      expect(result.routing.scope.agents).toEqual(["main"]);
+      expect(result.routing.scope.chatTypes).toEqual(["direct"]);
+      expect(result.routing.scope.allowedChatIds).toEqual([]);
+      expect(result.routing.scope.deniedChatIds).toEqual([]);
 
       expect(result.routing.thresholds).toEqual({
         keyword: {
@@ -130,8 +134,8 @@ describe("resolveConfig", () => {
 
     it("should handle empty object loading", () => {
       const result = resolveConfig({});
-      expect(result.scope.allowedChatIds).toEqual([]);
-      expect(result.scope.deniedChatIds).toEqual([]);
+      expect(result.routing.scope.allowedChatIds).toEqual([]);
+      expect(result.routing.scope.deniedChatIds).toEqual([]);
       expect(result.routing.classifier.model).toBeUndefined();
       expect(result.routing.classifier.modelFallback).toBeUndefined();
     });
@@ -139,8 +143,8 @@ describe("resolveConfig", () => {
     it("should use default values for non-object config", () => {
       for (const raw of [undefined, null, "invalid", []]) {
         const result = resolveConfig(raw);
-        expect(result.scope.agents).toEqual(["main"]);
-        expect(result.scope.chatTypes).toEqual(["direct"]);
+        expect(result.routing.scope.agents).toEqual(["main"]);
+        expect(result.routing.scope.chatTypes).toEqual(["direct"]);
         expect(result.routing.classifier.queryMode).toBe(DEFAULT_QUERY_MODE);
         expect(result.routing.classifier.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
       }
@@ -181,70 +185,68 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("workingSetSkills", () => {
+  describe("skills working set and flags", () => {
     it("canonicalizes agent and skill names and resolves agent-specific names before defaults", () => {
       const result = resolveConfig({
-        workingSetSkills: {
-          defaults: [" Shared ", "general", "Ｓｈａｒｅｄ"],
-          agents: {
-            " Writer ": [" Draft ", "shared", "DRAFT"],
+        skills: {
+          workingSet: {
+            defaults: [" Shared ", "general", "Ｓｈａｒｅｄ"],
+            agents: {
+              " Writer ": [" Draft ", "shared", "DRAFT"],
+            },
           },
         },
       });
 
-      expect(result.workingSetSkills).toEqual({
+      expect(result.skills.workingSet).toEqual({
         defaults: ["shared", "general"],
         agents: { writer: ["draft", "shared", "general"] },
-        includeWorkspaceSkills: true,
-        includeWorkshopSkills: true,
-        suppressNativeSkillPrompt: true,
       });
+      expect(result.skills.includeWorkspaceSkills).toBe(true);
+      expect(result.skills.includeWorkshopSkills).toBe(true);
+      expect(result.skills.suppressNativeSkillPrompt).toBe(true);
     });
 
     it("resolves includeWorkspaceSkills with default true and respects boolean setting", () => {
-      expect(resolveConfig({}).workingSetSkills.includeWorkspaceSkills).toBe(
-        true,
-      );
+      expect(resolveConfig({}).skills.includeWorkspaceSkills).toBe(true);
       expect(
         resolveConfig({
-          workingSetSkills: { includeWorkspaceSkills: false },
-        }).workingSetSkills.includeWorkspaceSkills,
+          skills: { includeWorkspaceSkills: false },
+        }).skills.includeWorkspaceSkills,
       ).toBe(false);
     });
 
     it("resolves includeWorkshopSkills with default true and respects boolean setting", () => {
-      expect(resolveConfig({}).workingSetSkills.includeWorkshopSkills).toBe(
-        true,
-      );
+      expect(resolveConfig({}).skills.includeWorkshopSkills).toBe(true);
       expect(
         resolveConfig({
-          workingSetSkills: { includeWorkshopSkills: false },
-        }).workingSetSkills.includeWorkshopSkills,
+          skills: { includeWorkshopSkills: false },
+        }).skills.includeWorkshopSkills,
       ).toBe(false);
     });
 
     it("resolves suppressNativeSkillPrompt with default true and respects boolean setting", () => {
-      expect(resolveConfig({}).workingSetSkills.suppressNativeSkillPrompt).toBe(
-        true,
-      );
+      expect(resolveConfig({}).skills.suppressNativeSkillPrompt).toBe(true);
       expect(
         resolveConfig({
-          workingSetSkills: { suppressNativeSkillPrompt: false },
-        }).workingSetSkills.suppressNativeSkillPrompt,
+          skills: { suppressNativeSkillPrompt: false },
+        }).skills.suppressNativeSkillPrompt,
       ).toBe(false);
     });
 
     it("rejects malformed working-set objects and colliding canonical agent IDs", () => {
       expect(() =>
-        resolveConfig({ workingSetSkills: { agents: [] } }),
+        resolveConfig({ skills: { workingSet: { agents: [] } } }),
       ).toThrow();
       expect(() =>
-        resolveConfig({ workingSetSkills: { unexpected: [] } }),
+        resolveConfig({ skills: { workingSet: { unexpected: [] } } }),
       ).toThrow();
       expect(() =>
         resolveConfig({
-          workingSetSkills: {
-            agents: { Writer: ["draft"], " writer ": ["review"] },
+          skills: {
+            workingSet: {
+              agents: { Writer: ["draft"], " writer ": ["review"] },
+            },
           },
         }),
       ).toThrow();
@@ -253,8 +255,8 @@ describe("resolveConfig", () => {
     it.each([
       { defaults: ["shared", 42] },
       { agents: { writer: ["draft", false] } },
-    ])("rejects malformed working-set list members", (workingSetSkills) => {
-      expect(() => resolveConfig({ workingSetSkills })).toThrow();
+    ])("rejects malformed working-set list members", (workingSet) => {
+      expect(() => resolveConfig({ skills: { workingSet } })).toThrow();
     });
   });
 
@@ -943,69 +945,73 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("scope string array fields", () => {
+  describe("routing.scope string array fields", () => {
     it("should parse agents as string array", () => {
-      const result = resolveConfig({ scope: { agents: ["agent1", "agent2"] } });
-      expect(result.scope.agents).toEqual(["agent1", "agent2"]);
+      const result = resolveConfig({
+        routing: { scope: { agents: ["agent1", "agent2"] } },
+      });
+      expect(result.routing.scope.agents).toEqual(["agent1", "agent2"]);
     });
 
     it("should trim and filter empty strings in agents", () => {
       const result = resolveConfig({
-        scope: { agents: ["  agent1  ", "", "  ", "agent2"] },
+        routing: { scope: { agents: ["  agent1  ", "", "  ", "agent2"] } },
       });
-      expect(result.scope.agents).toEqual(["agent1", "agent2"]);
+      expect(result.routing.scope.agents).toEqual(["agent1", "agent2"]);
     });
 
     it("should convert single string to array", () => {
-      const result = resolveConfig({ scope: { agents: "singleAgent" } });
-      expect(result.scope.agents).toEqual(["singleAgent"]);
+      const result = resolveConfig({
+        routing: { scope: { agents: "singleAgent" } },
+      });
+      expect(result.routing.scope.agents).toEqual(["singleAgent"]);
     });
 
     it("should use default for empty agents array", () => {
-      const result = resolveConfig({ scope: { agents: [] } });
-      expect(result.scope.agents).toEqual(["main"]);
+      const result = resolveConfig({ routing: { scope: { agents: [] } } });
+      expect(result.routing.scope.agents).toEqual(["main"]);
     });
 
     it("should parse allowedChatIds as string array", () => {
       const result = resolveConfig({
-        scope: { allowedChatIds: ["id1", "id2"] },
+        routing: { scope: { allowedChatIds: ["id1", "id2"] } },
       });
-      expect(result.scope.allowedChatIds).toEqual(["id1", "id2"]);
+      expect(result.routing.scope.allowedChatIds).toEqual(["id1", "id2"]);
     });
 
     it("should parse deniedChatIds as string array", () => {
       const result = resolveConfig({
-        scope: { deniedChatIds: ["id1", "id2"] },
+        routing: { scope: { deniedChatIds: ["id1", "id2"] } },
       });
-      expect(result.scope.deniedChatIds).toEqual(["id1", "id2"]);
+      expect(result.routing.scope.deniedChatIds).toEqual(["id1", "id2"]);
     });
 
     it("should parse chatTypes as string array", () => {
       const result = resolveConfig({
-        scope: { chatTypes: ["direct", "group"] },
+        routing: { scope: { chatTypes: ["direct", "group"] } },
       });
-      expect(result.scope.chatTypes).toEqual(["direct", "group"]);
+      expect(result.routing.scope.chatTypes).toEqual(["direct", "group"]);
     });
 
     it("should fall back for invalid primitive string and array fields", () => {
       const result = resolveConfig({
-        scope: {
-          agents: 123,
-          chatTypes: false,
-          allowedChatIds: {},
-          deniedChatIds: 0,
-        },
         routing: {
+          scope: {
+            agents: 123,
+            chatTypes: false,
+            allowedChatIds: {},
+            deniedChatIds: 0,
+          },
           classifier: {
             model: {},
             modelFallback: [],
           },
         },
       });
-      expect(result.scope.agents).toEqual(["main"]);
-      expect(result.scope.chatTypes).toEqual(["direct"]);
-      expect(result.scope.allowedChatIds).toEqual([]);
-      expect(result.scope.deniedChatIds).toEqual([]);
+      expect(result.routing.scope.agents).toEqual(["main"]);
+      expect(result.routing.scope.chatTypes).toEqual(["direct"]);
+      expect(result.routing.scope.allowedChatIds).toEqual([]);
+      expect(result.routing.scope.deniedChatIds).toEqual([]);
       expect(result.routing.classifier.model).toBeUndefined();
       expect(result.routing.classifier.modelFallback).toBeUndefined();
     });

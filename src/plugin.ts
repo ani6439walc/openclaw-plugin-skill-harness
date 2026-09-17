@@ -124,8 +124,8 @@ export function createWorkingSetSkillsResolver(
       const liveConfig = refreshLiveConfig();
       const normalized = canonicalIdentity(agentId);
       return (
-        liveConfig.workingSetSkills.agents[normalized] ??
-        liveConfig.workingSetSkills.defaults
+        liveConfig.skills.workingSet.agents[normalized] ??
+        liveConfig.skills.workingSet.defaults
       );
     } catch (error) {
       logger.warn("failed to resolve live working-set skills", {
@@ -235,7 +235,7 @@ export function createPlugin(
             knownAgentIds.add(id);
           }
         }
-        for (const agentId of Object.keys(config.workingSetSkills.agents)) {
+        for (const agentId of Object.keys(config.skills.workingSet.agents)) {
           knownAgentIds.add(agentId);
         }
         return knownAgentIds;
@@ -352,13 +352,12 @@ export function createPlugin(
 
       if (
         canAccessRuntime &&
-        (config.workingSetSkills.suppressNativeSkillPrompt ||
+        (config.skills.suppressNativeSkillPrompt ||
           config.skills.suppressNativeExtraDirs)
       ) {
         void suppressNativeSkillsOnStartup({
           api,
-          suppressNativeSkillPrompt:
-            config.workingSetSkills.suppressNativeSkillPrompt,
+          suppressNativeSkillPrompt: config.skills.suppressNativeSkillPrompt,
           suppressNativeExtraDirs: config.skills.suppressNativeExtraDirs,
         });
       }

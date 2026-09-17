@@ -2344,7 +2344,8 @@ describe("createHookHandlers internal turn guards", () => {
   it("injects only base static context for an agent excluded from intent analysis", async () => {
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
-      config: () => resolveConfig({ scope: { agents: ["other"] } }),
+      config: () =>
+        resolveConfig({ routing: { scope: { agents: ["other"] } } }),
       refreshLiveConfigFromRuntime: vi.fn(),
       refreshIntents: vi.fn(),
     });
@@ -2366,17 +2367,17 @@ describe("createHookHandlers internal turn guards", () => {
   it.each([
     {
       label: "disallowed chat type",
-      config: { scope: { chatTypes: ["group"] } },
+      config: { routing: { scope: { chatTypes: ["group"] } } },
       sessionKey: "agent:main:direct:123",
     },
     {
       label: "chat id absent from allowlist",
-      config: { scope: { allowedChatIds: ["direct:999"] } },
+      config: { routing: { scope: { allowedChatIds: ["direct:999"] } } },
       sessionKey: "agent:main:direct:123",
     },
     {
       label: "denied chat id",
-      config: { scope: { deniedChatIds: ["direct:123"] } },
+      config: { routing: { scope: { deniedChatIds: ["direct:123"] } } },
       sessionKey: "agent:main:direct:123",
     },
     {
@@ -5075,7 +5076,7 @@ Current user request: fresh clean request
     expect(systemContext).toContain("Nested workspace skill.");
   });
 
-  it("omits workspace skills when workingSetSkills.includeWorkspaceSkills is false", async () => {
+  it("omits workspace skills when skills.includeWorkspaceSkills is false", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-suppress-workspace-skills-"),
     );
@@ -5090,7 +5091,7 @@ Current user request: fresh clean request
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       configRaw: {
-        workingSetSkills: { includeWorkspaceSkills: false },
+        skills: { includeWorkspaceSkills: false },
       },
       api: {
         runtime: {
@@ -5115,7 +5116,7 @@ Current user request: fresh clean request
     expect(systemContext).not.toContain("<working_set_skills>");
   });
 
-  it("automatically appends agent workshop skills when workingSetSkills.includeWorkshopSkills is default", async () => {
+  it("automatically appends agent workshop skills when skills.includeWorkshopSkills is default", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-workshop-skills-default-"),
     );
@@ -5130,7 +5131,7 @@ Current user request: fresh clean request
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       configRaw: {
-        workingSetSkills: { includeWorkspaceSkills: false },
+        skills: { includeWorkspaceSkills: false },
       },
       api: {
         runtime: {
@@ -5156,7 +5157,7 @@ Current user request: fresh clean request
     expect(systemContext).toContain("Workshop skill description.");
   });
 
-  it("omits agent workshop skills when workingSetSkills.includeWorkshopSkills is false", async () => {
+  it("omits agent workshop skills when skills.includeWorkshopSkills is false", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-suppress-workshop-skills-"),
     );
@@ -5171,7 +5172,7 @@ Current user request: fresh clean request
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       configRaw: {
-        workingSetSkills: {
+        skills: {
           includeWorkspaceSkills: false,
           includeWorkshopSkills: false,
         },
@@ -5243,7 +5244,7 @@ Current user request: fresh clean request
     );
     const { handlers, classifier } = createTopicFlowHarness({
       historicalIntents: [],
-      configRaw: { scope: { agents: ["other"] } },
+      configRaw: { routing: { scope: { agents: ["other"] } } },
       api: {
         runtime: {
           state: { resolveStateDir: () => stateDir },
@@ -5657,7 +5658,7 @@ Current user request: fresh clean request
     const classifier = vi.fn();
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
-      configRaw: { scope: { agents: ["main"] } },
+      configRaw: { routing: { scope: { agents: ["main"] } } },
       classifier,
       bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
       getWorkingSetSkills,

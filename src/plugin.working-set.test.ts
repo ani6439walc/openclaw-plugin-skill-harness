@@ -95,7 +95,9 @@ describe("createPlugin working-set prompt integration", () => {
         entries: {
           "skill-harness": {
             config: {
-              workingSetSkills: { agents: { main: ["static-known"] } },
+              skills: {
+                workingSet: { agents: { main: ["static-known"] } },
+              },
             },
           },
         },
@@ -103,7 +105,7 @@ describe("createPlugin working-set prompt integration", () => {
     });
 
     const context = await invoke({
-      pluginConfig: { scope: { agents: ["main"] } },
+      pluginConfig: { routing: { scope: { agents: ["main"] } } },
     });
 
     expect(context).not.toContain("<working_set_skills>");
@@ -120,19 +122,23 @@ describe("createPlugin working-set prompt integration", () => {
           entries: {
             "skill-harness": {
               config: {
-                workingSetSkills: {
-                  agents: { main: ["static-known"] },
+                skills: {
+                  workingSet: {
+                    agents: { main: ["static-known"] },
+                  },
                 },
               },
             },
           },
         },
       },
-      pluginConfig: { scope: { agents: ["other"] } },
+      pluginConfig: { routing: { scope: { agents: ["other"] } } },
       runtimeConfig: {
         plugins: {
           entries: {
-            "skill-harness": { config: { scope: { agents: ["other"] } } },
+            "skill-harness": {
+              config: { routing: { scope: { agents: ["other"] } } },
+            },
           },
         },
       },
@@ -162,9 +168,11 @@ describe("createPlugin working-set prompt integration", () => {
           entries: {
             "skill-harness": {
               config: {
-                skills: { sharedRoots: [extraSkillsDir] },
-                workingSetSkills: {
-                  agents: { main: ["runtime-root-skill"] },
+                skills: {
+                  sharedRoots: [extraSkillsDir],
+                  workingSet: {
+                    agents: { main: ["runtime-root-skill"] },
+                  },
                 },
               },
             },
@@ -188,8 +196,10 @@ describe("createPlugin working-set prompt integration", () => {
           entries: {
             "skill-harness": {
               config: {
-                workingSetSkills: {
-                  agents: { main: ["nonexistent-working-set-skill"] },
+                skills: {
+                  workingSet: {
+                    agents: { main: ["nonexistent-working-set-skill"] },
+                  },
                 },
               },
             },
@@ -212,8 +222,10 @@ describe("createPlugin working-set prompt integration", () => {
           entries: {
             "skill-harness": {
               config: {
-                workingSetSkills: {
-                  agents: { main: ["registration-skill"] },
+                skills: {
+                  workingSet: {
+                    agents: { main: ["registration-skill"] },
+                  },
                 },
               },
             },
@@ -225,7 +237,9 @@ describe("createPlugin working-set prompt integration", () => {
           entries: {
             "skill-harness": {
               config: {
-                workingSetSkills: { agents: { main: ["runtime-skill"] } },
+                skills: {
+                  workingSet: { agents: { main: ["runtime-skill"] } },
+                },
               },
             },
           },
@@ -256,7 +270,9 @@ describe("createPlugin working-set prompt integration", () => {
             entries: {
               "skill-harness": {
                 config: {
-                  workingSetSkills: { agents: { main: ["runtime-skill"] } },
+                  skills: {
+                    workingSet: { agents: { main: ["runtime-skill"] } },
+                  },
                 },
               },
             },
@@ -269,7 +285,7 @@ describe("createPlugin working-set prompt integration", () => {
     },
   );
 
-  it("suppresses workspace skills when workingSetSkills.includeWorkspaceSkills is false", async () => {
+  it("suppresses workspace skills when skills.includeWorkspaceSkills is false", async () => {
     const workspaceSkillDir = path.join(
       stateDir,
       "workspace",
@@ -292,7 +308,7 @@ describe("createPlugin working-set prompt integration", () => {
           entries: {
             "skill-harness": {
               config: {
-                workingSetSkills: { includeWorkspaceSkills: false },
+                skills: { includeWorkspaceSkills: false },
               },
             },
           },
@@ -302,7 +318,7 @@ describe("createPlugin working-set prompt integration", () => {
     expect(contextWithoutAutoLoad).not.toContain("workspace-skill");
   });
 
-  it("suppresses agent workshop skills when workingSetSkills.includeWorkshopSkills is false", async () => {
+  it("suppresses agent workshop skills when skills.includeWorkshopSkills is false", async () => {
     const workshopSkillDir = path.join(
       stateDir,
       "agents",
@@ -329,7 +345,7 @@ describe("createPlugin working-set prompt integration", () => {
           entries: {
             "skill-harness": {
               config: {
-                workingSetSkills: { includeWorkshopSkills: false },
+                skills: { includeWorkshopSkills: false },
               },
             },
           },

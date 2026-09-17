@@ -1574,9 +1574,9 @@ export function createHookHandlers(deps: HookDeps) {
       }
 
       const includeWorkspaceSkills =
-        deps.config?.().workingSetSkills?.includeWorkspaceSkills ?? true;
+        deps.config?.().skills?.includeWorkspaceSkills ?? true;
       const includeWorkshopSkills =
-        deps.config?.().workingSetSkills?.includeWorkshopSkills ?? true;
+        deps.config?.().skills?.includeWorkshopSkills ?? true;
 
       const [workspaceSkills, workshopSkills] = await Promise.all([
         includeWorkspaceSkills ? loadDiscoveredSkills("workspace") : [],

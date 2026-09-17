@@ -291,7 +291,7 @@ describe("createPlugin", () => {
       },
       pluginConfig: {
         qmd: { indexRefreshIntervalSeconds: 300 },
-        workingSetSkills: { agents: { writer: ["draft"] } },
+        skills: { workingSet: { agents: { writer: ["draft"] } } },
       },
     });
 
@@ -517,9 +517,11 @@ describe("createPlugin", () => {
         entries: {
           "skill-harness": {
             config: {
-              workingSetSkills: {
-                defaults: ["shared"],
-                agents: { main: ["live-agent"] },
+              skills: {
+                workingSet: {
+                  defaults: ["shared"],
+                  agents: { main: ["live-agent"] },
+                },
               },
             },
           },
@@ -559,9 +561,11 @@ describe("createPlugin", () => {
         entries: {
           "skill-harness": {
             config: {
-              workingSetSkills: {
-                defaults: ["shared"],
-                agents: { main: ["live-agent"] },
+              skills: {
+                workingSet: {
+                  defaults: ["shared"],
+                  agents: { main: ["live-agent"] },
+                },
               },
             },
           },
@@ -595,7 +599,9 @@ describe("createPlugin", () => {
         entries: {
           "skill-harness": {
             config: {
-              workingSetSkills: { agents: { main: ["skill-harness"] } },
+              skills: {
+                workingSet: { agents: { main: ["skill-harness"] } },
+              },
             },
           },
         },
@@ -622,7 +628,7 @@ describe("createPlugin", () => {
       plugins: {
         entries: {
           "skill-harness": {
-            config: { workingSetSkills: { agents: { main: [] } } },
+            config: { skills: { workingSet: { agents: { main: [] } } } },
           },
         },
       },
@@ -633,7 +639,7 @@ describe("createPlugin", () => {
       plugins: {
         entries: {
           "skill-harness": {
-            config: { workingSetSkills: { agents: [] } },
+            config: { skills: { workingSet: { agents: [] } } },
           },
         },
       },

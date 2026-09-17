@@ -15,12 +15,13 @@ import type {
   ResolvedQmdConfig,
   ResolvedReviewConfig,
   ResolvedRoutingConfig,
+  ResolvedRoutingScopeConfig,
   ResolvedScopeConfig,
   ResolvedSkillCandidatesConfig,
   ResolvedSkillHarnessPluginConfig,
   ResolvedSkillSearchConfig,
   ResolvedSkillsConfig,
-  ResolvedWorkingSetSkillsConfig,
+  ResolvedWorkingSetConfig,
 } from "./types.js";
 import type { OpenClawConfig } from "../api.js";
 import { resolveQmdEndpoint } from "./qmd/provider-resolver.js";
@@ -47,12 +48,13 @@ const DEFAULT_CONTEXT_WINDOW: ContextWindow = {
   },
 };
 
-const DEFAULT_SCOPE: ResolvedScopeConfig = {
+const DEFAULT_ROUTING_SCOPE: ResolvedRoutingScopeConfig = {
   agents: ["main"],
   chatTypes: ["direct"],
   allowedChatIds: [],
   deniedChatIds: [],
 };
+const DEFAULT_SCOPE: ResolvedScopeConfig = DEFAULT_ROUTING_SCOPE;
 
 const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
   model: undefined,
@@ -76,6 +78,7 @@ const DEFAULT_SKILL_CANDIDATES: ResolvedSkillCandidatesConfig = {
 };
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
+  scope: DEFAULT_ROUTING_SCOPE,
   thresholds: {
     keyword: { directRouteMinScore: 0.85 },
     hybrid: {
@@ -92,18 +95,19 @@ const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
   collectionWeights: { meta: 3, body: 2, references: 1 },
 };
 
-const DEFAULT_SKILLS: ResolvedSkillsConfig = {
-  search: DEFAULT_SKILL_SEARCH,
-  sharedRoots: [],
-  suppressNativeExtraDirs: true,
-};
-
-const DEFAULT_WORKING_SET_SKILLS: ResolvedWorkingSetSkillsConfig = {
+const DEFAULT_WORKING_SET: ResolvedWorkingSetConfig = {
   defaults: [],
   agents: {},
+};
+
+const DEFAULT_SKILLS: ResolvedSkillsConfig = {
+  workingSet: DEFAULT_WORKING_SET,
   includeWorkspaceSkills: true,
   includeWorkshopSkills: true,
   suppressNativeSkillPrompt: true,
+  suppressNativeExtraDirs: true,
+  sharedRoots: [],
+  search: DEFAULT_SKILL_SEARCH,
 };
 
 const DEFAULT_QMD: ResolvedQmdConfig = {
@@ -127,11 +131,9 @@ const DEFAULT_REVIEW = {
 } as const;
 
 const DEFAULT_CONFIG: ResolvedSkillHarnessPluginConfig = {
-  scope: DEFAULT_SCOPE,
-  routing: DEFAULT_ROUTING,
-  skills: DEFAULT_SKILLS,
-  workingSetSkills: DEFAULT_WORKING_SET_SKILLS,
   qmd: DEFAULT_QMD,
+  skills: DEFAULT_SKILLS,
+  routing: DEFAULT_ROUTING,
   review: DEFAULT_REVIEW,
 };
 
@@ -376,6 +378,7 @@ const SkillCandidatesSchema = z
 
 const RoutingSchema = z
   .object({
+    scope: ScopeSchema.optional().default(DEFAULT_ROUTING_SCOPE),
     thresholds: RoutingThresholdsSchema.optional().default(
       DEFAULT_ROUTING.thresholds,
     ),
@@ -457,23 +460,6 @@ const SharedSkillRootsSchema = z
     return normalizedRoots;
   });
 
-const SkillsSchema = z
-  .object({
-    search: SkillSearchSchema.optional().default(DEFAULT_SKILL_SEARCH),
-    sharedRoots: SharedSkillRootsSchema,
-    suppressNativeExtraDirs: z.boolean().optional().default(true),
-  })
-  .strict()
-  .default(DEFAULT_SKILLS);
-
-function resolveSkillsConfig(raw: unknown): ResolvedSkillsConfig {
-  const skills =
-    raw && typeof raw === "object" && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>).skills
-      : undefined;
-  return SkillsSchema.parse(skills === undefined ? {} : skills);
-}
-
 const WorkingSetAgentsSchema = z
   .record(z.string(), WorkingSetStringListSchema)
   .transform((agents, context) => {
@@ -484,7 +470,7 @@ const WorkingSetAgentsSchema = z
         context.addIssue({
           code: "custom",
           path: [agentId],
-          message: "workingSetSkills agent IDs must not be empty",
+          message: "workingSet agent IDs must not be empty",
         });
         continue;
       }
@@ -492,7 +478,7 @@ const WorkingSetAgentsSchema = z
         context.addIssue({
           code: "custom",
           path: [agentId],
-          message: `workingSetSkills agent ID collides with ${canonicalAgentId}`,
+          message: `workingSet agent ID collides with ${canonicalAgentId}`,
         });
         continue;
       }
@@ -501,16 +487,13 @@ const WorkingSetAgentsSchema = z
     return Object.fromEntries(canonicalAgents);
   });
 
-const WorkingSetSkillsSchema = z
+const WorkingSetSchema = z
   .object({
     defaults: WorkingSetStringListSchema.optional().default([]),
     agents: WorkingSetAgentsSchema.optional().default({}),
-    includeWorkspaceSkills: z.boolean().optional(),
-    includeWorkshopSkills: z.boolean().optional(),
-    suppressNativeSkillPrompt: z.boolean().optional(),
   })
   .strict()
-  .transform((value): ResolvedWorkingSetSkillsConfig => ({
+  .transform((value): ResolvedWorkingSetConfig => ({
     defaults: value.defaults,
     agents: Object.fromEntries(
       Object.entries(value.agents).map(([agentId, skillNames]) => [
@@ -518,21 +501,28 @@ const WorkingSetSkillsSchema = z
         [...new Set([...skillNames, ...value.defaults])],
       ]),
     ),
-    includeWorkspaceSkills: value.includeWorkspaceSkills ?? true,
-    includeWorkshopSkills: value.includeWorkshopSkills ?? true,
-    suppressNativeSkillPrompt: value.suppressNativeSkillPrompt ?? true,
-  }));
+  }))
+  .default(DEFAULT_WORKING_SET);
 
-function resolveWorkingSetSkillsConfig(
-  raw: unknown,
-): ResolvedWorkingSetSkillsConfig {
-  const workingSetSkills =
+const SkillsSchema = z
+  .object({
+    workingSet: WorkingSetSchema.optional().default(DEFAULT_WORKING_SET),
+    includeWorkspaceSkills: z.boolean().optional().default(true),
+    includeWorkshopSkills: z.boolean().optional().default(true),
+    suppressNativeSkillPrompt: z.boolean().optional().default(true),
+    suppressNativeExtraDirs: z.boolean().optional().default(true),
+    sharedRoots: SharedSkillRootsSchema,
+    search: SkillSearchSchema.optional().default(DEFAULT_SKILL_SEARCH),
+  })
+  .strict()
+  .default(DEFAULT_SKILLS);
+
+function resolveSkillsConfig(raw: unknown): ResolvedSkillsConfig {
+  const skills =
     raw && typeof raw === "object" && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>).workingSetSkills
+      ? (raw as Record<string, unknown>).skills
       : undefined;
-  return WorkingSetSkillsSchema.parse(
-    workingSetSkills === undefined ? {} : workingSetSkills,
-  );
+  return SkillsSchema.parse(skills === undefined ? {} : skills);
 }
 
 const enabledSchema = z.boolean().catch(true);
@@ -604,19 +594,15 @@ const QmdSchema = z
 
 const SkillHarnessConfigSchema = z
   .object({
-    scope: ScopeSchema.optional().default(DEFAULT_SCOPE),
-    routing: z.unknown().optional(),
-    skills: z.unknown().optional(),
-    workingSetSkills: z.unknown().optional(),
     qmd: QmdSchema,
+    skills: z.unknown().optional(),
+    routing: z.unknown().optional(),
     review: ReviewSchema.optional().default(DEFAULT_REVIEW),
   })
   .catch({
-    scope: DEFAULT_SCOPE,
-    routing: DEFAULT_ROUTING,
-    skills: DEFAULT_SKILLS,
-    workingSetSkills: DEFAULT_WORKING_SET_SKILLS,
     qmd: DEFAULT_QMD,
+    skills: DEFAULT_SKILLS,
+    routing: DEFAULT_ROUTING,
     review: DEFAULT_REVIEW,
   });
 
@@ -626,7 +612,6 @@ export function resolveConfig(
 ): ResolvedSkillHarnessPluginConfig {
   const resolved = SkillHarnessConfigSchema.parse(raw);
   const resolvedSkills = resolveSkillsConfig(raw);
-  const resolvedWorkingSetSkills = resolveWorkingSetSkillsConfig(raw);
 
   const resolvedEmbedding = resolveQmdEndpoint(resolved.qmd.embedding, {
     ...options,
@@ -643,10 +628,6 @@ export function resolveConfig(
   const resolvedRouting = resolveRoutingConfig(raw, timeoutMs);
 
   return {
-    scope: resolved.scope,
-    routing: resolvedRouting,
-    skills: resolvedSkills,
-    workingSetSkills: resolvedWorkingSetSkills,
     qmd: {
       timeoutMs,
       indexRefreshIntervalSeconds: clampInt(
@@ -668,6 +649,8 @@ export function resolveConfig(
         ...resolvedExpansion,
       },
     },
+    skills: resolvedSkills,
+    routing: resolvedRouting,
     review: resolved.review,
   };
 }

@@ -105,7 +105,7 @@ graph TD
   M --> N[Record stats and optionally review the completed turn]
 ```
 
-Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<working_set_skills>` block is the ordered union of plugin-owned `workingSetSkills` and skills discovered from that agent's workspace `skills/` tree: the agent-specific working set precedes shared `defaults`, workspace-only skills append, and duplicate names retain their explicit-list position while resolving to the workspace-precedence skill content. Native OpenClaw `agents.*.skills` lists are not a plugin source after cutover. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `scope.agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid example/keyword retrieval with expansion, and candidate scoring for Step 3 fallback classification.
+Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Its `<working_set_skills>` block is the ordered union of plugin-owned `skills.workingSet` and skills discovered from that agent's workspace `skills/` tree: the agent-specific working set precedes shared `defaults`, workspace-only skills append, and duplicate names retain their explicit-list position while resolving to the workspace-precedence skill content. Native OpenClaw `agents.*.skills` lists are not a plugin source after cutover. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `routing.scope.agents` option and chat scope limit dynamic intent routing only. QMD is mandatory for dynamic routing, powering Step 1 lexical BM25 keyword matching, Step 2 hybrid example/keyword retrieval with expansion, and candidate scoring for Step 3 fallback classification.
 
 ### Skill discovery directories and precedence
 
@@ -122,7 +122,7 @@ Every agent resolves the following skill roots in order; unavailable directories
 
 If the same skill name appears in more than one directory, the **first directory above wins**. Within one root, discovery is alphabetical; shared roots override plugin and bundled skills, plugin links win over the Skill Harness package fallback, and bundled OpenClaw skills win over that fallback. Shared roots are visible to every agent but never grant access to another agent's workspace or workshop tree. Built-in bundled skills include `gifgrep` and `meme-maker`.
 
-The static cutover boundary is explicit: `plugins.entries.skill-harness.config.workingSetSkills` is the only plugin-owned static skill source. By default startup normalizes `agents.defaults.skills` to `[]`, removes `agents.entries.<id>.skills`, and clears `skills.load.extraDirs`; configure intentionally shared directories with `plugins.entries.skill-harness.config.skills.sharedRoots` instead. Unknown or missing names in `workingSetSkills` are filtered when the prompt is built, while workspace-resolved skills are appended according to the precedence rules above.
+The static cutover boundary is explicit: `plugins.entries.skill-harness.config.skills.workingSet` is the only plugin-owned static skill source. By default startup normalizes `agents.defaults.skills` to `[]`, removes `agents.entries.<id>.skills`, and clears `skills.load.extraDirs`; configure intentionally shared directories with `plugins.entries.skill-harness.config.skills.sharedRoots` instead. Unknown or missing names in `skills.workingSet` are filtered when the prompt is built, while workspace-resolved skills are appended according to the precedence rules above.
 
 ### Architecture and routing contract
 
@@ -134,9 +134,9 @@ The routing stages are:
 2. Append fixed skill-discovery guidance and enriched working-set skills to every remaining agent turn.
 3. Gate dynamic routing by configured agent, chat scope, external-user turn, and interactive-session status.
 4. Route via the 3-stage pipeline:
-   - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{directRouteMinScore}$ (default `0.85`) routes directly as `qmd-keyword`, bypassing LLM classification.
-   - **Step 2 (QMD Hybrid Example/Keyword Search)**: If Step 1 does not direct-route, performs hybrid semantic/BM25 retrieval over intent examples and keywords with conversation context expansion. A top score $\ge \text{directRouteMinScore}$ (default `0.85`) routes directly as `qmd-hybrid`, bypassing LLM classification.
-   - **Step 3 (Fallback Intent Classifier)**: If neither direct route matches, projects candidate intents meeting $\ge \text{minCandidateScore}$ (default `0.35`) into a focused candidate manifest (falling back to full catalog if insufficient trusted hits), and invokes a single LLM intent classifier call with prompt context (`llm-classifier`).
+   - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{thresholds.keyword.directRouteMinScore}$ (default `0.85`) routes directly as `qmd-keyword`, bypassing LLM classification.
+   - **Step 2 (QMD Hybrid Example/Keyword Search)**: If Step 1 does not direct-route, performs hybrid semantic/BM25 retrieval over intent examples and keywords with conversation context expansion. A top score $\ge \text{thresholds.hybrid.directRouteMinScore}$ (default `0.9`) with candidate margin $\ge \text{thresholds.hybrid.directRouteMinMargin}$ (default `0.08`) routes directly as `qmd-hybrid`, bypassing LLM classification.
+   - **Step 3 (Fallback Intent Classifier)**: If neither direct route matches, projects candidate intents meeting $\ge \text{thresholds.hybrid.minCandidateScore}$ (default `0.4`) into a focused candidate manifest (falling back to full catalog if insufficient trusted hits), and invokes a single LLM intent classifier call with prompt context (`llm-classifier`).
 5. Inject the selected intent, its one guidance sentence, intent-matched skills, and intent-matched experience metadata; then record the completed turn and run configured background work.
 
 QMD intent snapshots and their SQLite database live under `qmd/intents/`; searchable `examples/*.md` and `keywords/*.md` contain plain text, while `<intent>-<n>.md.identity.yml` sidecars hold identity metadata and are ignored by QMD collections. The `intent-routing.sqlite` database and `intent-routing.json` metadata stay in the same snapshot directory. They refresh in the background, so a cold or unhealthy index fails open to the classifier.
@@ -205,17 +205,26 @@ Configure Skill Harness in `openclaw.json`:
       "skill-harness": {
         enabled: true,
         config: {
-          scope: {
-            agents: ["main"],
-            chatTypes: ["direct"],
-          },
-          workingSetSkills: {
-            defaults: ["safe-default"],
-            agents: {
-              main: ["agent-first"],
+          skills: {
+            workingSet: {
+              defaults: ["safe-default"],
+              agents: {
+                main: ["agent-first"],
+              },
+            },
+            search: {
+              collectionWeights: {
+                meta: 3,
+                body: 2,
+                references: 1,
+              },
             },
           },
           routing: {
+            scope: {
+              agents: ["main"],
+              chatTypes: ["direct"],
+            },
             classifier: {
               model: "google/gemini-3-flash",
               modelFallback: "openai/gpt-5-mini",
@@ -224,16 +233,13 @@ Configure Skill Harness in `openclaw.json`:
               timeoutMs: 5000,
             },
             thresholds: {
-              directRouteMinScore: 0.85,
-              minCandidateScore: 0.35,
-            },
-          },
-          skills: {
-            search: {
-              collectionWeights: {
-                meta: 3,
-                body: 2,
-                references: 1,
+              keyword: {
+                directRouteMinScore: 0.85,
+              },
+              hybrid: {
+                directRouteMinScore: 0.9,
+                directRouteMinMargin: 0.08,
+                minCandidateScore: 0.4,
               },
             },
           },
@@ -263,15 +269,17 @@ Configure Skill Harness in `openclaw.json`:
 
 | Option                                               | Default            | Purpose                                                                                                                                                                                                                                                                                                                   |
 | ---------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scope.agents`                                       | `["main"]`         | OpenClaw agent IDs eligible for dynamic intent routing.                                                                                                                                                                                                                                                                   |
-| `scope.chatTypes`                                    | `["direct"]`       | Chat types that may run dynamic routing (`"direct"`, `"group"`, `"channel"`, `"explicit"`).                                                                                                                                                                                                                               |
-| `scope.allowedChatIds` / `deniedChatIds`             | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                                                                                                                                                                                                                                               |
-| `workingSetSkills.defaults` / `agents.<id>`          | `[]` / `{}`        | Plugin-owned static working-set source. The resolved per-agent order is agent-specific entries followed by shared defaults; workspace-only skills append. Unknown or malformed members are rejected.                                                                                                                      |
-| `workingSetSkills.includeWorkspaceSkills`            | `true`             | Whether to automatically discover and append workspace-only skills (`<workspaceDir>/skills/`) to the static working set. Setting to `false` suppresses workspace skills auto-loading.                                                                                                                                     |
-| `workingSetSkills.includeWorkshopSkills`             | `true`             | Whether to automatically discover and append agent-specific workshop skills (`.openclaw/agents/<agentId>/agent/workshop-skills/`) to the static working set. Setting to `false` suppresses agent workshop skills auto-loading.                                                                                            |
-| `workingSetSkills.suppressNativeSkillPrompt`         | `true`             | When enabled, automatically ensures `agents.defaults.skills` is `[]` and removes `agents.entries.*.skills` in `openclaw.json` on startup to suppress duplicate native OpenClaw `<available_skills>` prompts. Setting to `false` disables startup mutation.                                                                |
-| `routing.thresholds.directRouteMinScore`             | `0.85`             | Inclusive QMD score required for direct routing bypass in Step 1 and Step 2.                                                                                                                                                                                                                                              |
-| `routing.thresholds.minCandidateScore`               | `0.35`             | Inclusive QMD score floor for classifier candidate projection in Step 3.                                                                                                                                                                                                                                                  |
+| `routing.scope.agents`                               | `["main"]`         | OpenClaw agent IDs eligible for dynamic intent routing.                                                                                                                                                                                                                                                                   |
+| `routing.scope.chatTypes`                            | `["direct"]`       | Chat types that may run dynamic routing (`"direct"`, `"group"`, `"channel"`, `"explicit"`).                                                                                                                                                                                                                               |
+| `routing.scope.allowedChatIds` / `deniedChatIds`     | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                                                                                                                                                                                                                                               |
+| `skills.workingSet.defaults` / `agents.<id>`         | `[]` / `{}`        | Plugin-owned static working-set source. The resolved per-agent order is agent-specific entries followed by shared defaults; workspace-only skills append. Unknown or malformed members are rejected.                                                                                                                      |
+| `skills.includeWorkspaceSkills`                      | `true`             | Whether to automatically discover and append workspace-only skills (`<workspaceDir>/skills/`) to the static working set. Setting to `false` suppresses workspace skills auto-loading.                                                                                                                                     |
+| `skills.includeWorkshopSkills`                       | `true`             | Whether to automatically discover and append agent-specific workshop skills (`.openclaw/agents/<agentId>/agent/workshop-skills/`) to the static working set. Setting to `false` suppresses agent workshop skills auto-loading.                                                                                            |
+| `skills.suppressNativeSkillPrompt`                   | `true`             | When enabled, automatically ensures `agents.defaults.skills` is `[]` and removes `agents.entries.*.skills` in `openclaw.json` on startup to suppress duplicate native OpenClaw `<available_skills>` prompts. Setting to `false` disables startup mutation.                                                                |
+| `routing.thresholds.keyword.directRouteMinScore`     | `0.85`             | Inclusive BM25 score required for Step 1 keyword direct routing bypass.                                                                                                                                                                                                                                                   |
+| `routing.thresholds.hybrid.directRouteMinScore`      | `0.9`              | Inclusive semantic score required for Step 2 hybrid direct routing bypass.                                                                                                                                                                                                                                                |
+| `routing.thresholds.hybrid.directRouteMinMargin`     | `0.08`             | Minimum score margin between #1 and #2 candidates required for Step 2 hybrid direct routing.                                                                                                                                                                                                                              |
+| `routing.thresholds.hybrid.minCandidateScore`        | `0.4`              | Inclusive semantic score floor required to consider an intent candidate for Step 2 and Step 3 classifier projection.                                                                                                                                                                                                      |
 | `routing.classifier.model` / `modelFallback`         | unset              | Scanner model and last-resort resolution fallback.                                                                                                                                                                                                                                                                        |
 | `routing.classifier.thinking`                        | `"medium"`         | Intent-classifier thinking level.                                                                                                                                                                                                                                                                                         |
 | `routing.classifier.queryMode` / `contextWindow`     | `"recent"` / unset | Scanner context and its limits.                                                                                                                                                                                                                                                                                           |
@@ -309,7 +317,7 @@ After adding QMD, remove the entire legacy `instruction: { ... }` block from `pl
 
 ### Static working-set migration
 
-Move static skill selections into the plugin-owned `workingSetSkills` block:
+Move static skill selections into the plugin-owned `skills.workingSet` block:
 
 ```json5
 {
@@ -323,9 +331,11 @@ Move static skill selections into the plugin-owned `workingSetSkills` block:
     entries: {
       "skill-harness": {
         config: {
-          workingSetSkills: {
-            defaults: ["safe-default"],
-            agents: { main: ["agent-first"] },
+          skills: {
+            workingSet: {
+              defaults: ["safe-default"],
+              agents: { main: ["agent-first"] },
+            },
           },
         },
       },
@@ -433,7 +443,7 @@ Skill Harness registers four runtime tools for agents to discover, search, view,
     - `query` (string, optional): Search query (at most 500 Unicode code points).
   - Searches at most six visible skills, returns at most three entries, caps each body at 2,000 code points, and caps all returned bodies at 5,000 code points. Reports unavailable requested skills separately and does not expose a catalog-wide experience inventory.
 
-`skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. Core visibility follows root precedence and disabled bundled-skill entries only; it is unchanged by this migration. Prompt-time automatic working-set injection is narrower and uses plugin-owned `workingSetSkills` plus workspace skills, not native OpenClaw agent skill lists.
+`skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. Core visibility follows root precedence and disabled bundled-skill entries only; it is unchanged by this migration. Prompt-time automatic working-set injection is narrower and uses plugin-owned `skills.workingSet` plus workspace skills, not native OpenClaw agent skill lists.
 
 ## Intent Review
 
@@ -469,7 +479,7 @@ Every requested trigger needs a valid positive or no-finding decision. Missing o
 
 For a placement run, the reviewer receives the complete intent catalog plus one bounded, host-resolved skill snapshot. It may refine exactly one existing intent's `skills[]` frontmatter and, only when necessary, its one-sentence guidance. It cannot create, delete, merge, rename, or modify skills. The host re-resolves the selected skill for the same tracked agent before enqueueing, validates the staged change and current runtime state under the intent lock, and writes the Review event and completed epoch atomically to schema-v8 `review.json`.
 
-Review embedded runs use `sessionPersistence: "detached"`; the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
+Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn finishes (default 30-second idle delay). Subsequent turns in the same session cancel previous pending timers and coalesce them into a single run, with pending entries capped by LRU eviction (default 32 sessions). Before executing, the scheduler checks if the system is actively processing embedded runs (`isSystemActive`); if busy, review is postponed by a 30-second retry delay. If OpenClaw Gateway is shutting down (`isDraining`), pending reviews abort immediately without executing. Review runs execute in the background detached from the hook scope (`runDetachedFromWorkScope`) with `sessionPersistence: "detached"`, and the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
 
 ## Runtime files and metrics
 
@@ -492,7 +502,7 @@ Local observations are operational measurements, not synthetic benchmarks. An in
 
 ### Fresh schema-v7 statistics and attribution boundary
 
-Schema v7 starts a fresh telemetry cohort. It records per-intent selected route reasons (`qmd-keyword`, `qmd-hybrid`, and `llm-classifier`) with count, average score, minimum score, and maximum score. QMD scores use the selected retrieval hit score; classifier scores use classifier confidence. `skillDiscovery` separately records input skill matching: name-match and QMD search candidates, QMD semantic-score distribution, pre-injection candidate and injection counts, fallback reasons, and duration summaries. It does not retain user requests, snippets, QMD explanations, or per-hit score lists. Per-day maps include the same aggregate input skill-match telemetry alongside intent outcomes, intent routing, intent-matched skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
+Schema v7 starts a fresh telemetry cohort. It records per-intent selected route reasons (`qmd-keyword`, `qmd-hybrid`, and `llm-classifier`) with count, average score, minimum score, and maximum score. QMD scores use the selected retrieval hit score; classifier scores use classifier confidence. `skillDiscovery` separately records input skill matching: name-match and QMD search candidates, QMD semantic-score distribution, collection hit distribution (`meta`, `body`, `references`) for retrieved candidates and final injected skills, pre-injection candidate and injection counts, fallback reasons, and duration summaries. It does not retain user requests, snippets, QMD explanations, or per-hit score lists. Per-day maps include the same aggregate input skill-match telemetry alongside intent outcomes, intent routing, intent-matched skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
 
 The runtime-health projection keeps one canonical `routing` block, one canonical `projection` block, and names retained processed events as `retainedProcessedEventCount`. It omits the duplicate `routingEffectiveness` / `projectionEfficiency` aliases and the internal `dailyDynamicKeyCardinality` diagnostic.
 
@@ -500,7 +510,7 @@ Schema v7 does not migrate or rewrite schema-v1 through schema-v6 files: older t
 
 ### Live cutover boundary
 
-Changing a live OpenClaw configuration is a separate, confirmation-gated operation. Prepare and validate a sealed migration batch first; before applying it, require explicit confirmation naming the batch, its precondition, the target `openclaw.json`, any conditional telemetry reset, Gateway restart impact, and rollback pair. Until that confirmation, do not edit native agent skill lists or runtime state. After the confirmed cutover, `workingSetSkills` is the plugin's only static source and the native lists are intentionally empty.
+Changing a live OpenClaw configuration is a separate, confirmation-gated operation. Prepare and validate a sealed migration batch first; before applying it, require explicit confirmation naming the batch, its precondition, the target `openclaw.json`, any conditional telemetry reset, Gateway restart impact, and rollback pair. Until that confirmation, do not edit native agent skill lists or runtime state. After the confirmed cutover, `skills.workingSet` is the plugin's only static source and the native lists are intentionally empty.
 
 Retired candidate-skills headers and the `<skill_candidates>` wrapper are not emitted by the current renderer. Sanitization targets the current routing block and known OpenClaw runtime envelopes so retained runtime text cannot be reclassified as current user context.
 
@@ -574,7 +584,7 @@ projects candidate intents and invokes a single LLM intent classifier call only
 when no direct QMD match reaches the threshold. Every eligible normal agent still receives
 fixed skill-discovery context even when dynamic intent routing is skipped or fails.
 
-That fixed context is rendered from plugin-owned `workingSetSkills` plus workspace
+That fixed context is rendered from plugin-owned `skills.workingSet` plus workspace
 skills. Dynamic context records the selected `intentMatchedSkills` in the session and
 stats state; it does not reuse OpenClaw's native agent skill lists or emit a separate
 skill metadata wrapper.

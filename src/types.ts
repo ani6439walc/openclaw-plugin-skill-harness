@@ -33,12 +33,14 @@ export type QmdEmbeddingConfig = QmdEndpointConfig & {
   dimension?: number;
 };
 
-export type ResolvedScopeConfig = {
+export type ResolvedRoutingScopeConfig = {
   agents: string[];
   chatTypes: string[];
   allowedChatIds: string[];
   deniedChatIds: string[];
 };
+
+export type ResolvedScopeConfig = ResolvedRoutingScopeConfig;
 
 export type ResolvedClassifierConfig = {
   model: string | undefined;
@@ -68,6 +70,7 @@ export type ResolvedSkillCandidatesConfig = {
 };
 
 export type ResolvedRoutingConfig = {
+  scope: ResolvedRoutingScopeConfig;
   thresholds: {
     keyword: {
       directRouteMinScore: number;
@@ -90,18 +93,19 @@ export type ResolvedSkillSearchConfig = {
   };
 };
 
-export type ResolvedSkillsConfig = {
-  search: ResolvedSkillSearchConfig;
-  sharedRoots: string[];
-  suppressNativeExtraDirs: boolean;
-};
-
-export type ResolvedWorkingSetSkillsConfig = {
+export type ResolvedWorkingSetConfig = {
   defaults: string[];
   agents: Record<string, string[]>;
+};
+
+export type ResolvedSkillsConfig = {
+  workingSet: ResolvedWorkingSetConfig;
   includeWorkspaceSkills: boolean;
   includeWorkshopSkills: boolean;
   suppressNativeSkillPrompt: boolean;
+  suppressNativeExtraDirs: boolean;
+  sharedRoots: string[];
+  search: ResolvedSkillSearchConfig;
 };
 
 export type ResolvedQmdConfig = {
@@ -116,11 +120,9 @@ export type ResolvedQmdConfig = {
 };
 
 export type ResolvedSkillHarnessPluginConfig = {
-  scope: ResolvedScopeConfig;
-  routing: ResolvedRoutingConfig;
-  skills: ResolvedSkillsConfig;
-  workingSetSkills: ResolvedWorkingSetSkillsConfig;
   qmd: ResolvedQmdConfig;
+  skills: ResolvedSkillsConfig;
+  routing: ResolvedRoutingConfig;
   review: ResolvedReviewConfig;
 };
 
