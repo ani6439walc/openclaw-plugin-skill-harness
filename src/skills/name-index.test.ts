@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractEnglishSegments,
   matchAvailableSkillNames,
+  matchAvailableSkillNamesWithTokens,
   tokenizeNameText,
 } from "./name-index.js";
 
@@ -134,5 +135,68 @@ describe("skill name matching", () => {
         options: { ...options, genericTokens: ["review"] },
       }),
     ).toHaveLength(1);
+  });
+
+  describe("matchAvailableSkillNamesWithTokens", () => {
+    it("extracts matched and typo-corrected skill tokens even when Jaccard cliff is not met", () => {
+      const result = matchAvailableSkillNamesWithTokens({
+        skills: [
+          {
+            name: "kubernetes-cluster-deployer",
+            description: "Deploy k8s",
+            location: "",
+          },
+        ],
+        input: "幫我用 kuberntes 處理",
+        options,
+      });
+
+      expect(result.candidates).toEqual([]);
+      expect(result.matchedTokens).toEqual(["kubernetes"]);
+    });
+
+    it("extracts exact and typo matched tokens sorted and deduped", () => {
+      const result = matchAvailableSkillNamesWithTokens({
+        skills: [
+          {
+            name: "docker-compose-deploy",
+            description: "Deploy docker",
+            location: "",
+          },
+        ],
+        input: "dockr deploy service",
+        options,
+      });
+
+      expect(result.matchedTokens).toEqual(["deploy", "docker"]);
+    });
+
+    it("prevents short tokens from generating typo match noise", () => {
+      const result = matchAvailableSkillNamesWithTokens({
+        skills: [
+          {
+            name: "chat-helper",
+            description: "Chat",
+            location: "",
+          },
+        ],
+        input: "cat helper",
+        options,
+      });
+
+      // "helper" is exact match, but "cat" -> "chat" typo is rejected because "cat" has only 3 characters
+      expect(result.matchedTokens).toEqual(["helper"]);
+    });
+
+    it("filters out generic single-token inputs from matchedTokens", () => {
+      const result = matchAvailableSkillNamesWithTokens({
+        skills,
+        input: "review",
+        options: { ...options, genericTokens: ["review"] },
+      });
+
+      expect(result.candidates).toEqual([]);
+      expect(result.matchedTokens).toEqual([]);
+    });
   });
 });

@@ -112,26 +112,37 @@ export function buildSkillNameIndex(
   });
 }
 
-export function matchSkillNames(params: {
+export type SkillNameMatchResult = {
+  candidates: SkillNameCandidate[];
+  matchedTokens: string[];
+};
+
+export function matchSkillNamesDetailed(params: {
   index: readonly IndexedSkill[];
   input: string;
   options: NameMatchOptions;
-}): SkillNameCandidate[] {
+}): SkillNameMatchResult {
   const inputTokens = tokenizeNameText(extractEnglishSegments(params.input));
-  if (!inputTokens.length) return [];
+  if (!inputTokens.length) return { candidates: [], matchedTokens: [] };
   if (
     inputTokens.length === 1 &&
     params.options.genericTokens.includes(inputTokens[0]!)
-  )
-    return [];
+  ) {
+    return { candidates: [], matchedTokens: [] };
+  }
 
-  return params.index.flatMap(({ skill, tokens }) => {
+  const matchedTokensSet = new Set<string>();
+
+  const candidates = params.index.flatMap(({ skill, tokens }) => {
     const available = new Set(tokens);
     const matched = new Set<string>();
     for (const inputToken of inputTokens) {
       if (available.has(inputToken)) {
         available.delete(inputToken);
         matched.add(inputToken);
+        if (!params.options.genericTokens.includes(inputToken)) {
+          matchedTokensSet.add(inputToken);
+        }
         continue;
       }
       const options = [...available].flatMap((nameToken) => {
@@ -147,8 +158,17 @@ export function matchSkillNames(params: {
       const minimum = Math.min(...options.map((option) => option.distance));
       const closest = options.filter((option) => option.distance === minimum);
       if (closest.length === 1) {
-        available.delete(closest[0]!.nameToken);
-        matched.add(closest[0]!.nameToken);
+        const targetToken = closest[0]!.nameToken;
+        available.delete(targetToken);
+        matched.add(targetToken);
+        if (
+          minimum <= 1 &&
+          inputToken.length >= 4 &&
+          targetToken.length >= 4 &&
+          !params.options.genericTokens.includes(targetToken)
+        ) {
+          matchedTokensSet.add(targetToken);
+        }
       }
     }
     const score =
@@ -158,6 +178,19 @@ export function matchSkillNames(params: {
       ? [{ skillName: skill.name, score, source: "name-match" as const }]
       : [];
   });
+
+  const matchedTokens = [...matchedTokensSet].sort((a, b) =>
+    a.localeCompare(b, "en"),
+  );
+  return { candidates, matchedTokens };
+}
+
+export function matchSkillNames(params: {
+  index: readonly IndexedSkill[];
+  input: string;
+  options: NameMatchOptions;
+}): SkillNameCandidate[] {
+  return matchSkillNamesDetailed(params).candidates;
 }
 
 export function matchAvailableSkillNames(params: {
@@ -166,6 +199,17 @@ export function matchAvailableSkillNames(params: {
   options: NameMatchOptions;
 }): SkillNameCandidate[] {
   return matchSkillNames({
+    ...params,
+    index: buildSkillNameIndex(params.skills),
+  });
+}
+
+export function matchAvailableSkillNamesWithTokens(params: {
+  skills: readonly AvailableSkill[];
+  input: string;
+  options: NameMatchOptions;
+}): SkillNameMatchResult {
+  return matchSkillNamesDetailed({
     ...params,
     index: buildSkillNameIndex(params.skills),
   });

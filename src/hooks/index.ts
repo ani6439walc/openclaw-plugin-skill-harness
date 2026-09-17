@@ -57,7 +57,6 @@ import {
   resolveAvailableSkills,
   resolveSkillInventory,
 } from "../intents/index.js";
-import { FALLBACK_INTENT, FALLBACK_INTENT_ID } from "../constants.js";
 import { experiencesPath, intentsPath, packageRoot } from "../file-utils.js";
 import type {
   QmdIntentHit,
@@ -66,7 +65,7 @@ import type {
 } from "../qmd/intent-index.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
-import { matchAvailableSkillNames } from "../skills/name-index.js";
+import { matchAvailableSkillNamesWithTokens } from "../skills/name-index.js";
 import {
   selectSkillCandidates,
   type SkillDiscoveryCandidate,
@@ -130,8 +129,16 @@ const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
 
 export function formatConversationExpansionContext(params: {
   conversation?: readonly RecentTurn[];
+  candidateTokens?: readonly string[];
 }): string | undefined {
-  if (!params.conversation || params.conversation.length === 0) {
+  const hasConversation = Boolean(
+    params.conversation && params.conversation.length > 0,
+  );
+  const hasTokens = Boolean(
+    params.candidateTokens && params.candidateTokens.length > 0,
+  );
+
+  if (!hasConversation && !hasTokens) {
     return undefined;
   }
 
@@ -143,10 +150,18 @@ export function formatConversationExpansionContext(params: {
       "- Strictly preserve the user's primary language and script (e.g. Traditional Chinese queries must produce Traditional Chinese expansions; never translate into English unless the user query is English).",
   ];
 
-  const conversationLines = params.conversation
-    .map((t) => `- [${t.role}] ${t.text.trim()}`)
-    .join("\n");
-  sections.push(`Recent conversation:\n${conversationLines}`);
+  if (hasTokens && params.candidateTokens) {
+    sections.push(
+      `Detected candidate skill terms in user query:\n${params.candidateTokens.join(", ")}`,
+    );
+  }
+
+  if (hasConversation && params.conversation) {
+    const conversationLines = params.conversation
+      .map((t) => `- [${t.role}] ${t.text.trim()}`)
+      .join("\n");
+    sections.push(`Recent conversation:\n${conversationLines}`);
+  }
 
   return sections.join("\n\n");
 }
@@ -1284,8 +1299,27 @@ export function createHookHandlers(deps: HookDeps) {
         sharedRoots: sharedRoots(),
         usageStats: {},
       });
+      let matchedTokens: string[] = [];
+      try {
+        const nameMatchResult = matchAvailableSkillNamesWithTokens({
+          skills: visibleSkills,
+          input: params.latestUserMessage,
+          options: policy.nameMatch,
+        });
+        nameCandidates = nameMatchResult.candidates.map((candidate) => ({
+          ...candidate,
+          collections: ["meta" as const],
+          topCollection: "meta" as const,
+        }));
+        matchedTokens = nameMatchResult.matchedTokens;
+      } catch (error) {
+        fallbackReason = "name-channel-unavailable";
+        logger.warn("skill name candidate matching failed", { error });
+      }
+
       const expansionContext = formatConversationExpansionContext({
         conversation: params.conversation,
+        candidateTokens: matchedTokens,
       });
       const search = qmdSkillIndex
         ? qmdSkillIndex.search({
@@ -1296,20 +1330,6 @@ export function createHookHandlers(deps: HookDeps) {
             ...(expansionContext ? { expansionContext } : {}),
           })
         : undefined;
-      try {
-        nameCandidates = matchAvailableSkillNames({
-          skills: visibleSkills,
-          input: params.latestUserMessage,
-          options: policy.nameMatch,
-        }).map((candidate) => ({
-          ...candidate,
-          collections: ["meta" as const],
-          topCollection: "meta" as const,
-        }));
-      } catch (error) {
-        fallbackReason = "name-channel-unavailable";
-        logger.warn("skill name candidate matching failed", { error });
-      }
       if (search) {
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {

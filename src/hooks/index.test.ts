@@ -4388,6 +4388,58 @@ describe("createHookHandlers topic switch flow", () => {
     }
   });
 
+  it("passes matched skill tokens to qmdSkillIndex.search expansionContext", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-skill-match-tokens-"),
+    );
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    writeSkill(
+      path.join(workspace, "skills"),
+      "kubernetes-deployer",
+      "Deploy apps to kubernetes cluster.",
+    );
+    const search = vi
+      .fn()
+      .mockResolvedValue([
+        { name: "kubernetes-deployer", score: 0.8, semanticScore: 0.9 },
+      ]);
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      qmdSkillIndex: { search },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => state },
+          agent: { resolveAgentWorkspaceDir: () => workspace },
+        },
+      } as unknown as Partial<OpenClawPluginApi>,
+    });
+    try {
+      const customEvent = {
+        prompt: "幫我用 kuberntes 部署",
+        messages: [
+          {
+            role: "user" as const,
+            content: "幫我用 kuberntes 部署",
+            provenance: { kind: "external_user" as const },
+          },
+        ],
+      } as never;
+      await handlers.onBeforePromptBuild(customEvent, ctx);
+
+      expect(search).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: "幫我用 kuberntes 部署",
+          expansionContext: expect.stringContaining(
+            "Detected candidate skill terms in user query:\nkubernetes",
+          ),
+        }),
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("collects collection hits and explain details when evidence is provided", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-skill-match-evidence-"),
@@ -5737,6 +5789,41 @@ describe("formatConversationExpansionContext", () => {
     expect(result).toContain("- [user] turn 3");
     expect(result).toContain("- [assistant] turn 4");
     expect(result).toContain(`- [user] ${longText}`);
+  });
+
+  it("returns formatted context when candidateTokens is provided even without conversation history", () => {
+    const result = formatConversationExpansionContext({
+      candidateTokens: ["deploy", "kubernetes"],
+    });
+
+    expect(result).toBeDefined();
+    expect(result).toContain(
+      "You are expanding a query for conversational assistant skill & intent routing.",
+    );
+    expect(result).toContain(
+      "Detected candidate skill terms in user query:\ndeploy, kubernetes",
+    );
+    expect(result).not.toContain("Recent conversation:");
+  });
+
+  it("includes both candidateTokens and conversation history when both exist", () => {
+    const conversation = [
+      { role: "user" as const, text: "turn 1" },
+      { role: "assistant" as const, text: "turn 2" },
+    ];
+
+    const result = formatConversationExpansionContext({
+      conversation,
+      candidateTokens: ["docker"],
+    });
+
+    expect(result).toBeDefined();
+    expect(result).toContain(
+      "Detected candidate skill terms in user query:\ndocker",
+    );
+    expect(result).toContain(
+      "Recent conversation:\n- [user] turn 1\n- [assistant] turn 2",
+    );
   });
 
   describe("route reason formatting", () => {
