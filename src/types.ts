@@ -42,6 +42,20 @@ export type ResolvedRoutingScopeConfig = {
 
 export type ResolvedScopeConfig = ResolvedRoutingScopeConfig;
 
+export type ResolvedRoutingIntentsConfig = {
+  keyword: {
+    directRouteMinScore: number;
+  };
+  hybrid: {
+    directRouteMinScore: number;
+    directRouteMinMargin: number;
+    minCandidateScore: number;
+  };
+};
+
+export type ResolvedRoutingIntentsThresholdsConfig =
+  ResolvedRoutingIntentsConfig;
+
 export type ResolvedClassifierConfig = {
   model: string | undefined;
   modelFallback: string | undefined;
@@ -50,6 +64,7 @@ export type ResolvedClassifierConfig = {
   queryMode: "message" | "recent" | "full";
   contextWindow: ContextWindow;
 };
+
 export type ResolvedSkillCandidateSearchConfig = {
   minCandidateScore: number;
   timeoutMs: number;
@@ -61,27 +76,33 @@ export type ResolvedSkillCandidateNameMatchConfig = {
   genericTokens: string[];
 };
 
-export type ResolvedSkillCandidatesConfig = {
-  enabled: boolean;
+export type ResolvedRoutingSkillsConfig = {
   search: ResolvedSkillCandidateSearchConfig;
   nameMatch: ResolvedSkillCandidateNameMatchConfig;
   maxInjectedSkills: number;
 };
 
+export type ResolvedSkillCandidatesConfig = ResolvedRoutingSkillsConfig;
+
+export type RoutingLlmResult = {
+  intent?: string;
+  skills: string[];
+  confidence: number;
+  reason: string;
+};
+
+export type SkillRerankerResult = RoutingLlmResult;
+
 export type ResolvedRoutingConfig = {
   scope: ResolvedRoutingScopeConfig;
-  thresholds: {
-    keyword: {
-      directRouteMinScore: number;
-    };
-    hybrid: {
-      directRouteMinScore: number;
-      directRouteMinMargin: number;
-      minCandidateScore: number;
-    };
-  };
-  classifier: ResolvedClassifierConfig;
-  skillCandidates: ResolvedSkillCandidatesConfig;
+  intents: ResolvedRoutingIntentsConfig;
+  skills: ResolvedRoutingSkillsConfig;
+  model?: string;
+  modelFallback?: string;
+  thinking: ThinkLevel;
+  timeoutMs: number;
+  queryMode: "message" | "recent" | "full";
+  contextWindow: ContextWindow;
 };
 
 export type ResolvedSkillSearchConfig = {
@@ -189,8 +210,8 @@ export type IntentRoutingEvidence = {
 };
 
 export type IntentProjectionTelemetry = {
-  decision: "projected" | "full-fallback";
-  effectiveInput: "projected" | "full-fallback";
+  decision: "projected" | "none" | "full-fallback";
+  effectiveInput: "projected" | "none" | "full-fallback";
   fallbackReason?: string;
   originalIntentCount: number;
   candidateIntentCount: number;

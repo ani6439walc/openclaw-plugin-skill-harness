@@ -2669,8 +2669,22 @@ describe("createHookHandlers topic switch flow", () => {
       searchIntentExamplesAndKeywords: vi
         .fn()
         .mockImplementation(
-          async ({ includeRawResults }: { includeRawResults?: boolean }) =>
-            includeRawResults ? { hits: [], rawResults: [] } : [],
+          async ({ includeRawResults }: { includeRawResults?: boolean }) => {
+            const hits = intents.map((entry) => ({
+              intentId: entry.id,
+              score: 0.6,
+              collection: "intent-examples-and-keywords",
+            }));
+            return includeRawResults
+              ? {
+                  hits,
+                  rawResults: hits.map((hit) => ({
+                    filepath: `/snapshot/${hit.collection}/${hit.intentId}-0.md`,
+                    score: hit.score,
+                  })),
+                }
+              : hits;
+          },
         ),
     };
     const qmdIntentIndex = params.qmdIntentIndex ?? defaultQmdIntentIndex;
@@ -3338,14 +3352,16 @@ describe("createHookHandlers topic switch flow", () => {
   });
 
   it("does not emit an intent event when the classifier returns no result", async () => {
+    const classifier = vi.fn().mockResolvedValue(undefined);
     const { handlers, emitAgentEvent, record } = createTopicFlowHarness({
       historicalIntents: [],
       topicChecker: vi.fn().mockResolvedValue(undefined),
-      classifier: vi.fn().mockResolvedValue(undefined),
+      classifier,
     });
 
     await handlers.onBeforePromptBuild(event, ctx);
 
+    expect(classifier).toHaveBeenCalled();
     const intentEvents = emittedPipelineEvents(emitAgentEvent).filter(
       (event) => event.data.phase === "intent-match",
     );
@@ -3358,14 +3374,55 @@ describe("createHookHandlers topic switch flow", () => {
           intent: expect.objectContaining({
             trigger: "llm-classifier",
             intentProjection: expect.objectContaining({
-              decision: "full-fallback",
-              fallbackReason: "qmd-no-trusted-recall",
+              decision: "projected",
             }),
           }),
         }),
       }),
     );
     expect(record.mock.calls[0][1].current.intent).not.toHaveProperty("result");
+  });
+
+  it("does not run classifier and records decision: none when all QMD hits are below minCandidateScore", async () => {
+    const classifier = vi.fn();
+    const { handlers, emitAgentEvent, record } = createTopicFlowHarness({
+      historicalIntents: [],
+      classifier,
+      qmdIntentIndex: qmdIndex({
+        keywordHits: [],
+        hybridHits: [
+          {
+            intentId: "social-casual",
+            score: 0.2,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    const result = await handlers.onBeforePromptBuild(event, ctx);
+
+    expect(classifier).not.toHaveBeenCalled();
+    expect(result?.prependContext).toBeUndefined();
+    const intentEvents = emittedPipelineEvents(emitAgentEvent).filter(
+      (event) => event.data.phase === "intent-match",
+    );
+    expect(intentEvents).toHaveLength(0);
+    expect(record).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        current: expect.objectContaining({
+          input: "implement topic checker",
+          intent: expect.objectContaining({
+            trigger: "llm-classifier",
+            intentProjection: expect.objectContaining({
+              decision: "none",
+              fallbackReason: "qmd-no-trusted-recall",
+            }),
+          }),
+        }),
+      }),
+    );
   });
 
   it("routes exact keyword matches regardless of session history", async () => {
@@ -3567,7 +3624,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(classifier).toHaveBeenCalledOnce();
+    expect(classifier).not.toHaveBeenCalled();
     expect(
       emittedPipelineEvents(emitAgentEvent).filter(
         (entry) => entry.data.phase === "intent-match",
@@ -3588,6 +3645,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     await handlers.onBeforePromptBuild(event, ctx);
 
+    expect(classifier).not.toHaveBeenCalled();
     const intentEvents = emittedPipelineEvents(emitAgentEvent).filter(
       (entry) => entry.data.phase === "intent-match",
     );
@@ -3596,7 +3654,7 @@ describe("createHookHandlers topic switch flow", () => {
       expect.objectContaining({
         state: "failed",
         error:
-          "qmd-keyword: keyword index unavailable; qmd-hybrid: example/keyword index unavailable; llm-classifier: classifier execution failed",
+          "qmd-keyword: keyword index unavailable; qmd-hybrid: example/keyword index unavailable",
       }),
     );
   });
@@ -3972,9 +4030,11 @@ describe("createHookHandlers topic switch flow", () => {
       intents: [intent, versionControlIntent, operationsIntent],
       configRaw: {
         routing: {
-          thresholds: {
-            directRouteMinScore: 0.95,
-            minCandidateScore: 0.75,
+          intents: {
+            hybrid: {
+              directRouteMinScore: 0.95,
+              minCandidateScore: 0.75,
+            },
           },
         },
       },
@@ -4001,11 +4061,7 @@ describe("createHookHandlers topic switch flow", () => {
 
     await handlers.onBeforePromptBuild(event, ctx);
 
-    expect(classifier).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intents: [intent, versionControlIntent, operationsIntent],
-      }),
-    );
+    expect(classifier).not.toHaveBeenCalled();
   });
 
   it("uses QMD topic-keyword routing to inject deterministic guidance on changed topics", async () => {
@@ -4103,7 +4159,12 @@ describe("createHookHandlers topic switch flow", () => {
       historicalIntents: [],
       intents: [versionControlIntent],
       configRaw: {
-        routing: { thresholds: { directRouteMinScore: 0.92 } },
+        routing: {
+          intents: {
+            keyword: { directRouteMinScore: 0.92 },
+            hybrid: { directRouteMinScore: 0.92 },
+          },
+        },
       },
       classifier,
       topicChecker: vi.fn().mockResolvedValue({
@@ -4121,7 +4182,13 @@ describe("createHookHandlers topic switch flow", () => {
             collection: "intent-topic-keywords-git",
           },
         ],
-        hybridHits: [],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.91,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
       }),
     });
 
@@ -4298,7 +4365,7 @@ describe("createHookHandlers topic switch flow", () => {
     );
   });
 
-  it("injects input-matched skills when intent classification has no result", async () => {
+  it("does not inject fallback skills when intent classification has no result", async () => {
     const tmp = fs.mkdtempSync(
       path.join(os.tmpdir(), "hook-input-only-skill-match-"),
     );
@@ -4326,9 +4393,50 @@ describe("createHookHandlers topic switch flow", () => {
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
       expect(classifier).toHaveBeenCalledOnce();
-      expect(result?.prependContext).toContain("<input_matched_skills>");
+      expect(result?.prependContext).toBeUndefined();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("injects matched skills when classifier selects skills without an intent", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-input-skills-only-match-"),
+    );
+    const workspace = path.join(tmp, "workspace");
+    const state = path.join(tmp, "state");
+    writeSkill(path.join(workspace, "skills"), "review", "Review code.");
+    const { handlers, classifier } = createTopicFlowHarness({
+      historicalIntents: [],
+      classifier: vi.fn().mockResolvedValue({
+        intent: undefined,
+        skills: ["review"],
+        reason: "User wants review",
+        confidence: 0.9,
+      }),
+      qmdSkillIndex: {
+        search: vi
+          .fn()
+          .mockResolvedValue([
+            { name: "review", score: 0.7, semanticScore: 0.9 },
+          ]),
+      },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => state },
+          agent: { resolveAgentWorkspaceDir: () => workspace },
+        },
+      } as unknown as Partial<OpenClawPluginApi>,
+    });
+    try {
+      const result = await handlers.onBeforePromptBuild(event, ctx);
+
+      expect(classifier).toHaveBeenCalledOnce();
+      expect(result?.prependContext).toContain("<matched_skills>");
+      expect(result?.prependContext).toContain('<skill name="review">');
       expect(result?.prependContext).not.toContain("<intent name=");
       expect(result?.prependContext).not.toContain("<intent_matched_skills>");
+      expect(result?.prependContext).not.toContain("<input_matched_skills>");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -4356,7 +4464,8 @@ describe("createHookHandlers topic switch flow", () => {
     });
     try {
       const result = await handlers.onBeforePromptBuild(event, ctx);
-      expect(result?.prependContext).toContain("<input_matched_skills>");
+      expect(result?.prependContext).toContain("<matched_skills>");
+      expect(result?.prependContext).not.toContain("<input_matched_skills>");
       const skillMatchEvent = emittedPipelineEvents(emitAgentEvent).find(
         (entry) =>
           entry.data.phase === "skill-match" &&
@@ -4602,7 +4711,8 @@ describe("createHookHandlers topic switch flow", () => {
     try {
       const result = await handlers.onBeforePromptBuild(event, ctx);
 
-      expect(result?.prependContext).toContain("<intent_matched_skills>");
+      expect(result?.prependContext).toContain("<matched_skills>");
+      expect(result?.prependContext).not.toContain("<intent_matched_skills>");
       expect(result?.prependContext).not.toContain("<skill_candidates>");
       expect(result?.prependContext).toContain(ROUTING_ADVISORY_HEADER);
       expect(result?.prependContext).toContain(
@@ -4857,7 +4967,8 @@ Current user request: fresh clean request
       expect(result?.prependContext).toContain(
         '<intent name="architecture">\n    Draw the requested architecture.\n  </intent>',
       );
-      expect(result?.prependContext).toContain("<intent_matched_skills>");
+      expect(result?.prependContext).toContain("<matched_skills>");
+      expect(result?.prependContext).not.toContain("<intent_matched_skills>");
       expect(result?.prependContext).not.toContain("<skill_candidates>");
       expect(result?.prependContext).toContain(
         '<skill name="architecture-diagram">',

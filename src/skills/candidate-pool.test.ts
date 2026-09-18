@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { selectSkillCandidates } from "./candidate-pool.js";
+import {
+  buildCandidateSkillsUnionPool,
+  selectSkillCandidates,
+} from "./candidate-pool.js";
 
 const skills = [
   { name: "alpha", description: "Alpha", location: "" },
@@ -78,5 +81,24 @@ describe("selectSkillCandidates", () => {
     });
     expect(result.pool[0].collections).toEqual(["meta", "body"]);
     expect(result.pool[0].topCollection).toBe("meta");
+  });
+});
+
+describe("buildCandidateSkillsUnionPool", () => {
+  it("builds candidate skills from name, retrieval, and intent-matched sources without fallbackSkills", () => {
+    const union = buildCandidateSkillsUnionPool({
+      visibleSkills: skills,
+      nameCandidates: [
+        { skillName: "alpha", score: 0.9, source: "name-match" },
+      ],
+      retrievalCandidates: [
+        { skillName: "beta", score: 0.8, source: "direct-retrieval" },
+      ],
+      intentMatchedSkillNames: ["alpha"],
+    });
+
+    expect(union.pool).toHaveLength(2);
+    expect(union.candidateSkills.map((s) => s.name)).toEqual(["alpha", "beta"]);
+    expect((union as Record<string, unknown>).fallbackSkills).toBeUndefined();
   });
 });

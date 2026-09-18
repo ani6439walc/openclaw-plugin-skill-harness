@@ -7,15 +7,22 @@ import {
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { FALLBACK_INTENT_ID } from "../constants.js";
-import { buildIntentionPrompt, parseIntentionResult } from "./prompts.js";
+import {
+  buildIntentionPrompt,
+  buildUnifiedRoutingPrompt,
+  parseIntentionResult,
+  parseUnifiedRoutingResult,
+} from "./prompts.js";
 import { resolveCanonicalSessionKeyFromSessionId } from "../session/index.js";
 import { buildEmbeddedSubagentRunDefaults } from "../subagent-runtime.js";
 import { agentWorkspacePath } from "../file-utils.js";
 import type {
+  AvailableSkill,
   ClassifiedIntentionResult,
   IntentCatalogEntry,
   RecentTurn,
   ResolvedSkillHarnessPluginConfig,
+  RoutingLlmResult,
 } from "../types.js";
 
 export type EmbeddedSubagentBaseParams = {
@@ -108,8 +115,8 @@ export function getModelRef(
   return resolveModelRefChain(
     api,
     agentId,
-    [config.routing.classifier.model, currentModelRef],
-    [config.routing.classifier.modelFallback],
+    [config.routing.model, currentModelRef],
+    [config.routing.modelFallback],
   );
 }
 
@@ -126,8 +133,8 @@ export function getReviewModelRef(
   return resolveModelRefChain(
     api,
     agentId,
-    [config.review.model ?? config.routing.classifier.model, currentModelRef],
-    [config.review.modelFallback ?? config.routing.classifier.modelFallback],
+    [config.review.model ?? config.routing.model, currentModelRef],
+    [config.review.modelFallback ?? config.routing.modelFallback],
   );
 }
 
@@ -187,6 +194,77 @@ export async function runIntentionSubagent(params: {
   }
 }
 
+export async function runUnifiedRoutingSubagent(params: {
+  api: OpenClawPluginApi;
+  config: ResolvedSkillHarnessPluginConfig;
+  agentId: string;
+  sessionKey?: string;
+  sessionId?: string;
+  conversation?: RecentTurn[];
+  latest: string;
+  messageProvider?: string;
+  channelId?: string;
+  modelRef: { provider: string; model: string };
+  resolvedIntent?: { id: string; guidance: string };
+  candidateIntents?: readonly IntentCatalogEntry[];
+  candidateSkills?: readonly AvailableSkill[];
+  dataRoot?: string;
+}): Promise<RoutingLlmResult | undefined> {
+  const { subagentSessionId, subagentSessionKey } =
+    createSubagentSessionIdentity(params, {
+      runPrefix: "skill-harness",
+      keyPrefix: "skill-harness",
+      hashInput: params.latest,
+    });
+
+  const prompt = buildUnifiedRoutingPrompt({
+    conversation: params.conversation,
+    latest: params.latest,
+    resolvedIntent: params.resolvedIntent,
+    candidateIntents: params.candidateIntents,
+    candidateSkills: params.candidateSkills,
+    currentTime: resolveCurrentTime(params.api),
+  });
+  const embeddedRunParams = buildIntentionEmbeddedRunParams({
+    params,
+    subagentSessionId,
+    subagentSessionKey,
+    prompt,
+  });
+
+  try {
+    const result =
+      await params.api.runtime.agent.runEmbeddedAgent(embeddedRunParams);
+
+    const rawReply = extractPayloadText(result);
+
+    const validIntentIds =
+      params.candidateIntents && params.candidateIntents.length > 0
+        ? params.candidateIntents.map((i) => i.id)
+        : undefined;
+    const candidateSkillNames = params.candidateSkills
+      ? params.candidateSkills.map((s) => s.name)
+      : undefined;
+
+    const parsed = parseUnifiedRoutingResult(rawReply, {
+      validIntentIds,
+      candidateSkillNames,
+      maxSkills: params.config.routing.skills.maxInjectedSkills,
+    });
+    if (!parsed) {
+      logger.warn("Unified routing result parse failed", {
+        rawReply,
+        validIntentIds,
+        candidateSkillNames,
+      });
+    }
+    return parsed;
+  } catch (err) {
+    logger.warn("Unified routing subagent error", { error: err });
+    return;
+  }
+}
+
 export function buildIntentionEmbeddedRunParams(params: {
   params: EmbeddedSubagentBaseParams;
   subagentSessionId: string;
@@ -204,7 +282,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     prompt: params.prompt,
     provider: params.params.modelRef.provider,
     model: params.params.modelRef.model,
-    timeoutMs: params.params.config.routing.classifier.timeoutMs,
+    timeoutMs: params.params.config.routing.timeoutMs,
     runId: params.subagentSessionId,
     workspaceDir,
     agentDir: workspaceDir,
@@ -214,7 +292,7 @@ export function buildIntentionEmbeddedRunParams(params: {
     sessionPersistence: "detached" as const,
     toolsAllow: [],
     disableTools: true,
-    thinkLevel: params.params.config.routing.classifier.thinking,
+    thinkLevel: params.params.config.routing.thinking,
   };
 }
 

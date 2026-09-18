@@ -59,7 +59,7 @@ export type InputSkillDiscovery = {
   candidateCount: number;
   injectedSkills: Array<{
     name: string;
-    source: "name-match" | "direct-retrieval";
+    source: "name-match" | "direct-retrieval" | "intent-matched";
     collections?: SkillCollectionKind[];
     topCollection?: SkillCollectionKind;
   }>;

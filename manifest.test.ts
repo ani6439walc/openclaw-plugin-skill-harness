@@ -29,8 +29,7 @@ describe("skill-harness manifest", () => {
   });
 
   it("matches the runtime contextWindow schema", () => {
-    const properties =
-      manifest.configSchema.properties.routing.properties.classifier.properties;
+    const properties = manifest.configSchema.properties.routing.properties;
     expect(manifest.configSchema.properties).not.toHaveProperty(
       "contextWindow",
     );
@@ -76,8 +75,7 @@ describe("skill-harness manifest", () => {
 
   it("keeps timeoutMs aligned with the runtime schema", () => {
     const timeoutMs =
-      manifest.configSchema.properties.routing.properties.classifier.properties
-        .timeoutMs;
+      manifest.configSchema.properties.routing.properties.timeoutMs;
     expect(timeoutMs).toMatchObject({
       minimum: 1_000,
       maximum: 60_000,
@@ -87,10 +85,10 @@ describe("skill-harness manifest", () => {
 
   it("does not apply null defaults to optional model strings", () => {
     const properties = manifest.configSchema.properties;
-    const classifierProps = properties.routing.properties.classifier.properties;
+    const routingProps = properties.routing.properties;
     for (const model of [
-      classifierProps.model,
-      classifierProps.modelFallback,
+      routingProps.model,
+      routingProps.modelFallback,
       properties.review.properties.model,
       properties.review.properties.modelFallback,
     ]) {
@@ -161,36 +159,30 @@ describe("skill-harness manifest", () => {
   });
 
   it("matches the runtime thresholds schema for keyword and hybrid routing", () => {
-    const thresholds =
-      manifest.configSchema.properties.routing.properties.thresholds;
-    expect(
-      thresholds.properties.keyword.properties.directRouteMinScore,
-    ).toEqual({
+    const intents =
+      manifest.configSchema.properties.routing.properties.intents.properties;
+    expect(intents.keyword.properties.directRouteMinScore).toEqual({
       type: "number",
       minimum: 0,
       maximum: 1,
       default: 0.85,
       description: expect.any(String),
     });
-    expect(thresholds.properties.hybrid.properties.directRouteMinScore).toEqual(
-      {
-        type: "number",
-        minimum: 0,
-        maximum: 1,
-        default: 0.9,
-        description: expect.any(String),
-      },
-    );
-    expect(
-      thresholds.properties.hybrid.properties.directRouteMinMargin,
-    ).toEqual({
+    expect(intents.hybrid.properties.directRouteMinScore).toEqual({
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.9,
+      description: expect.any(String),
+    });
+    expect(intents.hybrid.properties.directRouteMinMargin).toEqual({
       type: "number",
       minimum: 0,
       maximum: 1,
       default: 0.08,
       description: expect.any(String),
     });
-    expect(thresholds.properties.hybrid.properties.minCandidateScore).toEqual({
+    expect(intents.hybrid.properties.minCandidateScore).toEqual({
       type: "number",
       minimum: 0,
       maximum: 1,

@@ -3,7 +3,8 @@ import type { AvailableSkill } from "./types.js";
 import type { SkillQmdEvidence } from "../qmd/skill-index.js";
 import type { SkillCollectionKind } from "../session/tracker.js";
 
-export type SkillDiscoverySource = "name-match" | "direct-retrieval";
+export type SkillDiscoverySource =
+  "name-match" | "direct-retrieval" | "intent-matched";
 
 export type SkillDiscoveryCandidate = {
   skillName: string;
@@ -64,4 +65,46 @@ export function selectSkillCandidates(params: {
       return skill ? [skill] : [];
     });
   return { pool, selectedSkills };
+}
+
+export function buildCandidateSkillsUnionPool(params: {
+  visibleSkills: readonly AvailableSkill[];
+  nameCandidates: readonly SkillDiscoveryCandidate[];
+  retrievalCandidates: readonly SkillDiscoveryCandidate[];
+  intentMatchedSkillNames?: readonly string[];
+  maxInjectedSkills?: number;
+}): {
+  pool: readonly SkillDiscoveryCandidate[];
+  candidateSkills: readonly AvailableSkill[];
+} {
+  const intentCandidates: SkillDiscoveryCandidate[] = (
+    params.intentMatchedSkillNames ?? []
+  ).map((name) => ({
+    skillName: name,
+    score: 0.95,
+    source: "intent-matched" as const,
+  }));
+  const allCandidates = [
+    ...params.nameCandidates,
+    ...intentCandidates,
+    ...params.retrievalCandidates,
+  ];
+  const result = selectSkillCandidates({
+    visibleSkills: params.visibleSkills,
+    candidates: allCandidates,
+    options: { maxInjectedSkills: params.maxInjectedSkills ?? 4 },
+  });
+  const visibleMap = new Map(
+    params.visibleSkills.map(
+      (skill) => [canonicalIdentity(skill.name), skill] as const,
+    ),
+  );
+  const candidateSkills = result.pool.flatMap((c) => {
+    const skill = visibleMap.get(canonicalIdentity(c.skillName));
+    return skill ? [skill] : [];
+  });
+  return {
+    pool: result.pool,
+    candidateSkills,
+  };
 }

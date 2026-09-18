@@ -134,9 +134,9 @@ The routing stages are:
 2. Append fixed skill-discovery guidance and enriched working-set skills to every remaining agent turn.
 3. Gate dynamic routing by configured agent, chat scope, external-user turn, and interactive-session status.
 4. Route via the 3-stage pipeline:
-   - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{thresholds.keyword.directRouteMinScore}$ (default `0.85`) routes directly as `qmd-keyword`, bypassing LLM classification.
-   - **Step 2 (QMD Hybrid Example/Keyword Search)**: If Step 1 does not direct-route, performs hybrid semantic/BM25 retrieval over intent examples and keywords with conversation context expansion. A top score $\ge \text{thresholds.hybrid.directRouteMinScore}$ (default `0.9`) with candidate margin $\ge \text{thresholds.hybrid.directRouteMinMargin}$ (default `0.08`) routes directly as `qmd-hybrid`, bypassing LLM classification.
-   - **Step 3 (Fallback Intent Classifier)**: If neither direct route matches, projects candidate intents meeting $\ge \text{thresholds.hybrid.minCandidateScore}$ (default `0.4`) into a focused candidate manifest (falling back to full catalog if insufficient trusted hits), and invokes a single LLM intent classifier call with prompt context (`llm-classifier`).
+   - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{routing.intents.keyword.directRouteMinScore}$ (default `0.85`) routes directly as `qmd-keyword`, bypassing LLM classification.
+   - **Step 2 (QMD Hybrid Example/Keyword Search)**: If Step 1 does not direct-route, performs hybrid semantic/BM25 retrieval over intent examples and keywords with conversation context expansion. A top score $\ge \text{routing.intents.hybrid.directRouteMinScore}$ (default `0.9`) with candidate margin $\ge \text{routing.intents.hybrid.directRouteMinMargin}$ (default `0.08`) routes directly as `qmd-hybrid`, bypassing LLM classification.
+   - **Step 3 (Fallback Intent Classifier)**: If neither direct route matches, evaluates candidate intents meeting $\ge \text{routing.intents.hybrid.minCandidateScore}$ (default `0.4`). If no intent meets the candidate score, no intent is forced or re-evaluated (`decision: "none"`), bypassing intent classification and reranking. If candidate intents exist, invokes a single LLM intent classifier call with prompt context (`llm-classifier`).
 5. Inject the selected intent, its one guidance sentence, intent-matched skills, and intent-matched experience metadata; then record the completed turn and run configured background work.
 
 QMD intent snapshots and their SQLite database live under `qmd/intents/`; searchable `examples/*.md` and `keywords/*.md` contain plain text, while `<intent>-<n>.md.identity.yml` sidecars hold identity metadata and are ignored by QMD collections. The `intent-routing.sqlite` database and `intent-routing.json` metadata stay in the same snapshot directory. They refresh in the background, so a cold or unhealthy index fails open to the classifier.
@@ -164,12 +164,12 @@ Automate web browsing and interaction.
 ```text
 [Tue 2026-09-08 11:35 GMT+8]
 
-Inferred intent and intent-matched skills (advisory, non-user input; load with `skill_view` if relevant):
+Inferred intent and relevant skills (advisory, non-user input; load with `skill_view` if relevant):
 <skill_harness_plugin>
 <intent name="format">
 Format the specified files following repository style conventions.
 </intent>
-<intent_matched_skills>
+<matched_skills>
 <skill name="code-formatter">
 Run Prettier, ESLint, or language formatters.
 <skill_experience>
@@ -177,7 +177,7 @@ Run Prettier, ESLint, or language formatters.
 <keywords>["prettier", "eslint", "tabs"]</keywords>
 </skill_experience>
 </skill>
-</intent_matched_skills>
+</matched_skills>
 </skill_harness_plugin>
 
 Format index.ts using prettier
@@ -185,13 +185,12 @@ Format index.ts using prettier
 
 The prompt layout minimizes token consumption:
 
-- Dynamic routing context is separated from preceding turn metadata by a blank line, introduced by a concise single-line advisory header (`Inferred intent and intent-matched skills (advisory, non-user input; load with \`skill_view\` if relevant):`when intent-matched skills exist, or`Inferred user intent from conversation (advisory, non-user input):`when intent-only) preceding`<skill_harness_plugin>`.
+- Dynamic routing context is separated from preceding turn metadata by a blank line, introduced by a concise single-line advisory header (`Inferred intent and relevant skills (advisory, non-user input; load with \`skill_view\` if relevant):`when intent and skills exist,`Inferred relevant skills from conversation (advisory, non-user input; load with \`skill_view\` if relevant):`when skills-only, or`Inferred user intent from conversation (advisory, non-user input):`when intent-only) preceding`<skill_harness_plugin>`.
 - `<intent name="${intent}">` merges the intent name and guidance into a single tag.
 - Skill file paths are omitted from prompt injection; agents inspect `path` dynamically via `skill_list` or `skill_view`.
 - Redundant policy blocks and legacy headers are eliminated.
 - The renderer does not emit `<<<BEGIN_SKILL_HARNESS_CONTEXT>>>` or OpenClaw reserved delimiters; conversation sanitization treats those markers only as input boundaries.
-- `<intent_matched_skills>` nests intent-matched `<skill_experience>` identity and keyword metadata; full experience records can be retrieved on demand via `skill_experience`.
-- `<input_matched_skills>`, when present, is a separate advisory layer selected from current input name evidence or semantic retrieval. It does not replace intent-bound skills and contains only XML-escaped names and descriptions—never scores, queries, paths, sources, provenance, or experience metadata.
+- `<matched_skills>` contains the unified selected skills, nesting `<skill_experience>` identity and keyword metadata when available; full experience records can be retrieved on demand via `skill_experience`.
 - The renderer does not emit a `<skill_metadata>` wrapper or `<path>` elements. Skill descriptions and experience values are escaped before insertion, so skill files cannot create prompt-level XML tags.
 
 ## Basic configuration
@@ -225,14 +224,12 @@ Configure Skill Harness in `openclaw.json`:
               agents: ["main"],
               chatTypes: ["direct"],
             },
-            classifier: {
-              model: "google/gemini-3-flash",
-              modelFallback: "openai/gpt-5-mini",
-              thinking: "medium",
-              queryMode: "recent",
-              timeoutMs: 5000,
-            },
-            thresholds: {
+            model: "google/gemini-3-flash",
+            modelFallback: "openai/gpt-5-mini",
+            thinking: "medium",
+            queryMode: "recent",
+            timeoutMs: 5000,
+            intents: {
               keyword: {
                 directRouteMinScore: 0.85,
               },
@@ -241,6 +238,17 @@ Configure Skill Harness in `openclaw.json`:
                 directRouteMinMargin: 0.08,
                 minCandidateScore: 0.4,
               },
+            },
+            skills: {
+              search: {
+                minCandidateScore: 0.6,
+              },
+              nameMatch: {
+                maxEditDistance: 2,
+                minJaccardScore: 0.5,
+                genericTokens: [],
+              },
+              maxInjectedSkills: 4,
             },
           },
           qmd: {
@@ -276,35 +284,34 @@ Configure Skill Harness in `openclaw.json`:
 | `skills.includeWorkspaceSkills`                      | `true`             | Whether to automatically discover and append workspace-only skills (`<workspaceDir>/skills/`) to the static working set. Setting to `false` suppresses workspace skills auto-loading.                                                                                                                                     |
 | `skills.includeWorkshopSkills`                       | `true`             | Whether to automatically discover and append agent-specific workshop skills (`.openclaw/agents/<agentId>/agent/workshop-skills/`) to the static working set. Setting to `false` suppresses agent workshop skills auto-loading.                                                                                            |
 | `skills.suppressNativeSkillPrompt`                   | `true`             | When enabled, automatically ensures `agents.defaults.skills` is `[]` and removes `agents.entries.*.skills` in `openclaw.json` on startup to suppress duplicate native OpenClaw `<available_skills>` prompts. Setting to `false` disables startup mutation.                                                                |
-| `routing.thresholds.keyword.directRouteMinScore`     | `0.85`             | Inclusive BM25 score required for Step 1 keyword direct routing bypass.                                                                                                                                                                                                                                                   |
-| `routing.thresholds.hybrid.directRouteMinScore`      | `0.9`              | Inclusive semantic score required for Step 2 hybrid direct routing bypass.                                                                                                                                                                                                                                                |
-| `routing.thresholds.hybrid.directRouteMinMargin`     | `0.08`             | Minimum score margin between #1 and #2 candidates required for Step 2 hybrid direct routing.                                                                                                                                                                                                                              |
-| `routing.thresholds.hybrid.minCandidateScore`        | `0.4`              | Inclusive semantic score floor required to consider an intent candidate for Step 2 and Step 3 classifier projection.                                                                                                                                                                                                      |
-| `routing.classifier.model` / `modelFallback`         | unset              | Scanner model and last-resort resolution fallback.                                                                                                                                                                                                                                                                        |
-| `routing.classifier.thinking`                        | `"medium"`         | Intent-classifier thinking level.                                                                                                                                                                                                                                                                                         |
-| `routing.classifier.queryMode` / `contextWindow`     | `"recent"` / unset | Scanner context and its limits.                                                                                                                                                                                                                                                                                           |
-| `routing.classifier.timeoutMs`                       | `5000`             | Intent-classifier time budget in milliseconds.                                                                                                                                                                                                                                                                            |
-| `routing.skillCandidates.enabled`                    | `true`             | Master switch for advisory input-matched discovery. Disabled means no input-matched block.                                                                                                                                                                                                                                |
-| `routing.skillCandidates.search.minCandidateScore`   | `0.6`              | Inclusive semantic-evidence threshold for a retrieved skill to be eligible for injection; it never uses RRF rank score.                                                                                                                                                                                                   |
-| `routing.skillCandidates.search.timeoutMs`           | `qmd.timeoutMs`    | Optional millisecond override for prompt-build retrieval and query expansion; defaults to `qmd.timeoutMs`.                                                                                                                                                                                                                |
-| `routing.skillCandidates.nameMatch.maxEditDistance`  | `2`                | Maximum classic Levenshtein distance for a name token typo.                                                                                                                                                                                                                                                               |
-| `routing.skillCandidates.nameMatch.minJaccardScore`  | `0.5`              | Inclusive typo-aware token-set Jaccard threshold.                                                                                                                                                                                                                                                                         |
-| `routing.skillCandidates.nameMatch.genericTokens`    | `[]`               | Normalized terms that block only a one-token auto-match; multi-token matching remains available.                                                                                                                                                                                                                          |
-| `routing.skillCandidates.maxInjectedSkills`          | `4`                | Maximum advisory input-matched skills injected into context.                                                                                                                                                                                                                                                              |
+| `routing.intents.keyword.directRouteMinScore`        | `0.85`             | Inclusive BM25 score required for Step 1 keyword direct routing bypass.                                                                                                                                                                                                                                                   |
+| `routing.intents.hybrid.directRouteMinScore`         | `0.9`              | Inclusive semantic score required for Step 2 hybrid direct routing bypass.                                                                                                                                                                                                                                                |
+| `routing.intents.hybrid.directRouteMinMargin`        | `0.08`             | Minimum score margin between #1 and #2 candidates required for Step 2 hybrid direct routing.                                                                                                                                                                                                                              |
+| `routing.intents.hybrid.minCandidateScore`           | `0.4`              | Inclusive semantic score floor required to consider an intent candidate for Step 2 and Step 3 classifier projection.                                                                                                                                                                                                      |
+| `routing.model` / `modelFallback`                    | unset              | Scanner model and last-resort resolution fallback.                                                                                                                                                                                                                                                                        |
+| `routing.thinking`                                   | `"medium"`         | Unified routing thinking level.                                                                                                                                                                                                                                                                                           |
+| `routing.queryMode` / `contextWindow`                | `"recent"` / unset | Scanner context and its limits.                                                                                                                                                                                                                                                                                           |
+| `routing.timeoutMs`                                  | `5000`             | Unified routing time budget in milliseconds.                                                                                                                                                                                                                                                                              |
+| `routing.skills.search.minCandidateScore`            | `0.6`              | Inclusive semantic-evidence threshold for a retrieved skill to be eligible for injection; it never uses RRF rank score.                                                                                                                                                                                                   |
+| `routing.skills.search.timeoutMs`                    | `qmd.timeoutMs`    | Optional millisecond override for prompt-build retrieval and query expansion; defaults to `qmd.timeoutMs`.                                                                                                                                                                                                                |
+| `routing.skills.nameMatch.maxEditDistance`           | `2`                | Maximum classic Levenshtein distance for a name token typo.                                                                                                                                                                                                                                                               |
+| `routing.skills.nameMatch.minJaccardScore`           | `0.5`              | Inclusive typo-aware token-set Jaccard threshold.                                                                                                                                                                                                                                                                         |
+| `routing.skills.nameMatch.genericTokens`             | `[]`               | Normalized terms that block only a one-token auto-match; multi-token matching remains available.                                                                                                                                                                                                                          |
+| `routing.skills.maxInjectedSkills`                   | `4`                | Maximum advisory candidate skills injected into context.                                                                                                                                                                                                                                                                  |
 | `skills.sharedRoots`                                 | `[]`               | Absolute local skill directories intentionally shared with every agent. They are resolved after agent-local, plugin, and bundled roots; duplicate names retain the higher-precedence root.                                                                                                                                |
 | `skills.suppressNativeExtraDirs`                     | `true`             | On startup, clears OpenClaw `skills.load.extraDirs`; migrate intentionally shared paths to `skills.sharedRoots`.                                                                                                                                                                                                          |
 | `skills.search.collectionWeights`                    | `3/2/1`            | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.                                                                                                                                                                                                                        |
 | `qmd.embedding` / `expansion`                        | required           | Remote endpoint and model for mandatory QMD hybrid routing. Supports OpenClaw `provider/model` syntax (e.g. `bifrost/text-embedding-3-small`) to auto-resolve `baseUrl` and `apiKey` from OpenClaw's `models.providers`. Explicit `baseUrl` and `apiKey` remain supported. `embedding.dimension` defaults to `1536`.      |
-| `qmd.timeoutMs`                                      | `15000`            | Per-request QMD embedding and expansion timeout; also the default prompt-build candidate retrieval budget unless `routing.skillCandidates.search.timeoutMs` overrides it.                                                                                                                                                 |
+| `qmd.timeoutMs`                                      | `15000`            | Per-request QMD embedding and expansion timeout; also the default prompt-build candidate retrieval budget unless `routing.skills.search.timeoutMs` overrides it.                                                                                                                                                          |
 | `qmd.indexRefreshIntervalSeconds`                    | `300`              | Seconds between source checks for QMD intent and skill indexes; `0` disables subsequent automatic checks. A completed intent index is reopened read-only after Gateway restart when its persisted catalog and QMD configuration fingerprint still matches; stale, incomplete, or unreadable state rebuilds automatically. |
 | `review.enabled`                                     | `false`            | Enables post-turn Intent Review.                                                                                                                                                                                                                                                                                          |
-| `review.model` / `review.modelFallback`              | unset              | Review model and last-resort resolution fallback (defaults to classifier model/fallback if unset).                                                                                                                                                                                                                        |
+| `review.model` / `review.modelFallback`              | unset              | Review model and last-resort resolution fallback (defaults to routing model/fallback if unset).                                                                                                                                                                                                                           |
 | `review.thinking` / `timeoutSeconds`                 | `"medium"` / `300` | Intent Review thinking level and time budget in seconds.                                                                                                                                                                                                                                                                  |
 | `review.triggers.intentHealthCheck.everyTurns`       | `10`               | Fixed cadence for a bounded post-turn intent health check.                                                                                                                                                                                                                                                                |
 | `review.triggers.routingUncertainty.confidenceBelow` | `0.5`              | Confidence below which fallback/uncertain routing receives bounded review.                                                                                                                                                                                                                                                |
 | `review.triggers.capabilityFit`                      | enabled, `5` / `2` | Tool-call/failure threshold and stats-selected-skill evidence for bounded capability review.                                                                                                                                                                                                                              |
 
-Intent Classifier and Intent Review resolve models in this order: their explicit configured model (`routing.classifier.model` or `review.model`), current session model, agent primary model, then their configured fallback (`routing.classifier.modelFallback` or `review.modelFallback`). A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
+Unified Routing and Intent Review resolve models in this order: their explicit configured model (`routing.model` or `review.model`), current session model, agent primary model, then their configured fallback (`routing.modelFallback` or `review.modelFallback`). A fallback is only a resolution-time last resort; errors, timeouts, parse failures, and validation failures fail open rather than retrying with another model.
 
 ### Upgrade from the removed instruction writer to mandatory QMD routing
 
@@ -422,7 +429,7 @@ Skill Harness registers four runtime tools for agents to discover, search, view,
 - **`skill_list`**: Lists all available skills across bundled, workspace, and configured roots.
   - **Inputs**: None.
   - **Returns**: `{ skills: Array<{ name, description, path, source }> }`.
-  - **Note**: Because prompt injection (`<working_set_skills>` and `<intent_matched_skills>`) omits file paths to conserve tokens, agents obtain the filesystem `path` through `skill_list` or view skill contents and reference files directly via `skill_view`.
+  - **Note**: Because prompt injection (`<working_set_skills>` and `<matched_skills>`) omits file paths to conserve tokens, agents obtain the filesystem `path` through `skill_list` or view skill contents and reference files directly via `skill_view`.
 
 - **`skill_search`**: Hybrid semantic/lexical discovery over skill metadata, full bodies, and references via QMD.
   - **Inputs**:
@@ -497,7 +504,7 @@ Session cleanup preserves the ended main-session record and removes only expired
 
 ### Interpreting observations
 
-Local observations are operational measurements, not synthetic benchmarks. An intent-matched skill opportunity is a top-level skill injected into the final `<intent_matched_skills>` block, and adoption is that skill's same-turn use. Related-skill metadata and routing-guidance prose do not count as adoption. Rendered catalog size is Unicode code points rather than provider-billed tokens; provider tokenization and other plugins' context are outside this measurement scope. A projection can be eligible even if later classifier execution or parsing fails, and ordinary Review outcomes remain owned by `review.json`, never synthesized in `stats.json`.
+Local observations are operational measurements, not synthetic benchmarks. An intent-matched skill opportunity is a top-level skill injected into the final `<matched_skills>` block, and adoption is that skill's same-turn use. Related-skill metadata and routing-guidance prose do not count as adoption. Rendered catalog size is Unicode code points rather than provider-billed tokens; provider tokenization and other plugins' context are outside this measurement scope. A projection can be eligible even if later classifier execution or parsing fails, and ordinary Review outcomes remain owned by `review.json`, never synthesized in `stats.json`.
 
 ### Fresh schema-v7 statistics and attribution boundary
 

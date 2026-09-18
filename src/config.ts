@@ -15,7 +15,10 @@ import type {
   ResolvedQmdConfig,
   ResolvedReviewConfig,
   ResolvedRoutingConfig,
+  ResolvedRoutingIntentsConfig,
+  ResolvedRoutingIntentsThresholdsConfig,
   ResolvedRoutingScopeConfig,
+  ResolvedRoutingSkillsConfig,
   ResolvedScopeConfig,
   ResolvedSkillCandidatesConfig,
   ResolvedSkillHarnessPluginConfig,
@@ -56,6 +59,17 @@ const DEFAULT_ROUTING_SCOPE: ResolvedRoutingScopeConfig = {
 };
 const DEFAULT_SCOPE: ResolvedScopeConfig = DEFAULT_ROUTING_SCOPE;
 
+const DEFAULT_ROUTING_INTENTS: ResolvedRoutingIntentsConfig = {
+  keyword: { directRouteMinScore: 0.85 },
+  hybrid: {
+    directRouteMinScore: 0.9,
+    directRouteMinMargin: 0.08,
+    minCandidateScore: 0.4,
+  },
+};
+const DEFAULT_ROUTING_THRESHOLDS: ResolvedRoutingIntentsThresholdsConfig =
+  DEFAULT_ROUTING_INTENTS;
+
 const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
   model: undefined,
   modelFallback: undefined,
@@ -65,8 +79,7 @@ const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
   contextWindow: DEFAULT_CONTEXT_WINDOW,
 };
 
-const DEFAULT_SKILL_CANDIDATES: ResolvedSkillCandidatesConfig = {
-  enabled: true,
+const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
   search: { minCandidateScore: 0.6, timeoutMs: undefined as never },
   nameMatch: {
     maxEditDistance: 2,
@@ -76,18 +89,18 @@ const DEFAULT_SKILL_CANDIDATES: ResolvedSkillCandidatesConfig = {
   maxInjectedSkills: 4,
 };
 
+const DEFAULT_SKILL_CANDIDATES = DEFAULT_ROUTING_SKILLS;
+
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
   scope: DEFAULT_ROUTING_SCOPE,
-  thresholds: {
-    keyword: { directRouteMinScore: 0.85 },
-    hybrid: {
-      directRouteMinScore: 0.9,
-      directRouteMinMargin: 0.08,
-      minCandidateScore: 0.4,
-    },
-  },
-  classifier: DEFAULT_CLASSIFIER,
-  skillCandidates: DEFAULT_SKILL_CANDIDATES,
+  intents: DEFAULT_ROUTING_INTENTS,
+  skills: DEFAULT_ROUTING_SKILLS,
+  model: undefined,
+  modelFallback: undefined,
+  thinking: "medium",
+  timeoutMs: DEFAULT_TIMEOUT_MS,
+  queryMode: DEFAULT_QUERY_MODE,
+  contextWindow: DEFAULT_CONTEXT_WINDOW,
 };
 
 const DEFAULT_SKILL_SEARCH: ResolvedSkillSearchConfig = {
@@ -238,26 +251,26 @@ const RoutingScoreSchema = (fallback: number) =>
 const KeywordThresholdsSchema = z
   .object({
     directRouteMinScore: RoutingScoreSchema(
-      DEFAULT_ROUTING.thresholds.keyword.directRouteMinScore,
+      DEFAULT_ROUTING_THRESHOLDS.keyword.directRouteMinScore,
     ),
   })
   .strict()
-  .default(DEFAULT_ROUTING.thresholds.keyword);
+  .default(DEFAULT_ROUTING_THRESHOLDS.keyword);
 
 const HybridThresholdsSchema = z
   .object({
     directRouteMinScore: RoutingScoreSchema(
-      DEFAULT_ROUTING.thresholds.hybrid.directRouteMinScore,
+      DEFAULT_ROUTING_THRESHOLDS.hybrid.directRouteMinScore,
     ),
     directRouteMinMargin: RoutingScoreSchema(
-      DEFAULT_ROUTING.thresholds.hybrid.directRouteMinMargin,
+      DEFAULT_ROUTING_THRESHOLDS.hybrid.directRouteMinMargin,
     ),
     minCandidateScore: RoutingScoreSchema(
-      DEFAULT_ROUTING.thresholds.hybrid.minCandidateScore,
+      DEFAULT_ROUTING_THRESHOLDS.hybrid.minCandidateScore,
     ),
   })
   .strict()
-  .default(DEFAULT_ROUTING.thresholds.hybrid)
+  .default(DEFAULT_ROUTING_THRESHOLDS.hybrid)
   .superRefine((hybrid, context) => {
     if (
       roundToDecimals(hybrid.minCandidateScore, 2) >
@@ -312,15 +325,27 @@ const RoutingThresholdsSchema = z
     z
       .object({
         keyword: KeywordThresholdsSchema.optional().default(
-          DEFAULT_ROUTING.thresholds.keyword,
+          DEFAULT_ROUTING_THRESHOLDS.keyword,
         ),
         hybrid: HybridThresholdsSchema.optional().default(
-          DEFAULT_ROUTING.thresholds.hybrid,
+          DEFAULT_ROUTING_THRESHOLDS.hybrid,
         ),
       })
       .strict(),
   )
-  .default(DEFAULT_ROUTING.thresholds);
+  .default(DEFAULT_ROUTING_THRESHOLDS);
+
+const RoutingIntentsSchema = z
+  .preprocess((val) => {
+    if (val && typeof val === "object" && "thresholds" in val) {
+      const { thresholds, ...rest } = val as Record<string, unknown>;
+      if (thresholds && typeof thresholds === "object") {
+        return { ...(thresholds as Record<string, unknown>), ...rest };
+      }
+    }
+    return val;
+  }, RoutingThresholdsSchema)
+  .default(DEFAULT_ROUTING_INTENTS);
 
 const GenericTokensSchema = z
   .array(z.string())
@@ -345,7 +370,7 @@ const SkillCandidatesSearchSchema = z
   })
   .strict()
   .optional()
-  .default(DEFAULT_SKILL_CANDIDATES.search);
+  .default(DEFAULT_ROUTING_SKILLS.search);
 
 const SkillCandidatesNameMatchSchema = z
   .object({
@@ -355,29 +380,29 @@ const SkillCandidatesNameMatchSchema = z
   })
   .strict()
   .optional()
-  .default(DEFAULT_SKILL_CANDIDATES.nameMatch);
+  .default(DEFAULT_ROUTING_SKILLS.nameMatch);
 
-const SkillCandidatesSchema = z
+const RoutingSkillsSchema = z
   .object({
-    enabled: z.boolean().optional().default(true),
     search: SkillCandidatesSearchSchema,
     nameMatch: SkillCandidatesNameMatchSchema,
     maxInjectedSkills: z.number().int().min(0).max(4).optional().default(4),
   })
   .strict()
   .optional()
-  .default(DEFAULT_SKILL_CANDIDATES);
+  .default(DEFAULT_ROUTING_SKILLS);
 
 const RoutingSchema = z
   .object({
     scope: ScopeSchema.optional().default(DEFAULT_ROUTING_SCOPE),
-    thresholds: RoutingThresholdsSchema.optional().default(
-      DEFAULT_ROUTING.thresholds,
-    ),
-    classifier: ClassifierSchema.optional().default(DEFAULT_CLASSIFIER),
-    skillCandidates: SkillCandidatesSchema.optional().default(
-      DEFAULT_SKILL_CANDIDATES,
-    ),
+    intents: RoutingIntentsSchema.optional().default(DEFAULT_ROUTING_INTENTS),
+    skills: RoutingSkillsSchema,
+    model: z.string().optional().catch(undefined),
+    modelFallback: z.string().optional().catch(undefined),
+    thinking: ThinkLevelSchema,
+    timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
+    queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
+    contextWindow: ContextWindowSchema,
   })
   .strict();
 
@@ -385,24 +410,119 @@ function resolveRoutingConfig(
   raw: unknown,
   qmdTimeoutMs: number,
 ): ResolvedRoutingConfig {
-  const routing =
-    raw && typeof raw === "object" && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>).routing
-      : undefined;
-  const resolved = RoutingSchema.parse(routing === undefined ? {} : routing);
-  return {
+  const hasRouting =
+    raw && typeof raw === "object" && !Array.isArray(raw) && "routing" in raw;
+  const rawRouting = hasRouting
+    ? (raw as Record<string, unknown>).routing
+    : undefined;
+  if (
+    rawRouting === null ||
+    (rawRouting !== undefined &&
+      (typeof rawRouting !== "object" || Array.isArray(rawRouting)))
+  ) {
+    RoutingSchema.parse(rawRouting);
+  }
+  const routingInput =
+    rawRouting && typeof rawRouting === "object" && !Array.isArray(rawRouting)
+      ? { ...(rawRouting as Record<string, unknown>) }
+      : {};
+  if (
+    routingInput.skills === undefined &&
+    routingInput.skillCandidates !== undefined
+  ) {
+    const sc = { ...(routingInput.skillCandidates as Record<string, unknown>) };
+    delete sc.enabled;
+    routingInput.skills = sc;
+    delete routingInput.skillCandidates;
+  } else if (
+    routingInput.skills !== undefined &&
+    typeof routingInput.skills === "object"
+  ) {
+    delete (routingInput.skills as Record<string, unknown>).enabled;
+  }
+  if (routingInput.intents === undefined) {
+    if (routingInput.thresholds !== undefined) {
+      routingInput.intents = routingInput.thresholds;
+      delete routingInput.thresholds;
+    }
+  } else if (routingInput.thresholds !== undefined) {
+    delete routingInput.thresholds;
+  }
+  if (
+    routingInput.classifier !== undefined &&
+    typeof routingInput.classifier === "object"
+  ) {
+    const c = routingInput.classifier as Record<string, unknown>;
+    if (routingInput.model === undefined && c.model !== undefined)
+      routingInput.model = c.model;
+    if (
+      routingInput.modelFallback === undefined &&
+      c.modelFallback !== undefined
+    )
+      routingInput.modelFallback = c.modelFallback;
+    if (routingInput.thinking === undefined && c.thinking !== undefined)
+      routingInput.thinking = c.thinking;
+    if (routingInput.timeoutMs === undefined && c.timeoutMs !== undefined)
+      routingInput.timeoutMs = c.timeoutMs;
+    if (routingInput.queryMode === undefined && c.queryMode !== undefined)
+      routingInput.queryMode = c.queryMode;
+    if (
+      routingInput.contextWindow === undefined &&
+      c.contextWindow !== undefined
+    )
+      routingInput.contextWindow = c.contextWindow;
+    delete routingInput.classifier;
+  }
+  const resolved = RoutingSchema.parse(routingInput);
+  const out: ResolvedRoutingConfig = {
     ...resolved,
-    skillCandidates: {
-      ...resolved.skillCandidates,
+    skills: {
+      ...resolved.skills,
       search: {
-        ...resolved.skillCandidates.search,
+        ...resolved.skills.search,
         timeoutMs:
-          resolved.skillCandidates.search.timeoutMs === undefined
+          resolved.skills.search.timeoutMs === undefined
             ? qmdTimeoutMs
-            : resolved.skillCandidates.search.timeoutMs,
+            : resolved.skills.search.timeoutMs,
       },
     },
   };
+  Object.defineProperty(out, "classifier", {
+    get() {
+      return {
+        model: this.model,
+        modelFallback: this.modelFallback,
+        thinking: this.thinking,
+        timeoutMs: this.timeoutMs,
+        queryMode: this.queryMode,
+        contextWindow: this.contextWindow,
+      };
+    },
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(out, "thresholds", {
+    get() {
+      return this.intents;
+    },
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(out.intents, "thresholds", {
+    get() {
+      return this;
+    },
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(out, "skillCandidates", {
+    get() {
+      return this.skills;
+    },
+    enumerable: false,
+    configurable: true,
+  });
+  return out;
 }
 
 const SkillSearchSchema = z

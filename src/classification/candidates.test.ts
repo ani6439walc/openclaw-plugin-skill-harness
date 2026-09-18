@@ -50,7 +50,7 @@ describe("projectQmdIntentCandidates", () => {
     expect(result.selectionReasons).toEqual(["qmd-hit", "recent-history"]);
   });
 
-  it("falls back to the complete catalog when QMD is unavailable or below the configured minimum score", () => {
+  it("yields decision: 'none' and empty effectiveIntents when QMD is unavailable or below the configured minimum score", () => {
     expect(
       projectQmdIntentCandidates({
         intents: catalog,
@@ -58,8 +58,10 @@ describe("projectQmdIntentCandidates", () => {
         minCandidateScore: 0.35,
       }),
     ).toMatchObject({
+      decision: "none",
       fallbackReason: "qmd-unavailable",
-      effectiveIntents: catalog,
+      effectiveIntents: [],
+      candidateIntents: [],
     });
     expect(
       projectQmdIntentCandidates({
@@ -75,8 +77,10 @@ describe("projectQmdIntentCandidates", () => {
         minCandidateScore: 0.35,
       }),
     ).toMatchObject({
+      decision: "none",
       fallbackReason: "qmd-no-trusted-recall",
-      effectiveIntents: catalog,
+      effectiveIntents: [],
+      candidateIntents: [],
     });
   });
 

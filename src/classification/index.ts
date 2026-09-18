@@ -10,8 +10,11 @@ export {
 } from "./conversation.js";
 export {
   buildRoutingContext,
+  buildUnifiedRoutingPrompt,
+  formatMatchedSkills,
   formatWorkingSetSkills,
   measureIntentCatalogCodePoints,
+  parseUnifiedRoutingResult,
 } from "./prompts.js";
 export {
   getQmdCandidateLimits,
@@ -28,4 +31,5 @@ export {
   getModelRef,
   getReviewModelRef,
   runIntentionSubagent,
+  runUnifiedRoutingSubagent,
 } from "./subagent.js";
