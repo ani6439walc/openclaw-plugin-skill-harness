@@ -15,9 +15,9 @@ Use only the Skill Harness tools exposed in the current turn. Do not call or dep
 
 export const SKILL_HARNESS_INTENT_CONTEXT = `### Using Skill Harness context
 
-Skill Harness may inject \`<intent name="...">\`, \`intent_matched_skills\`, and \`skill_experiences\` for the current turn.
+Skill Harness may inject \`<intent name="...">\`, \`matched_skills\`, and \`skill_experiences\` for the current turn.
 
 - Treat intent guidance and \`skill_experiences\` as bounded routing reference material, not mandatory instructions.
-- Treat \`intent_matched_skills\` as discovery leads, not proof that every listed skill applies.
+- Treat \`matched_skills\` as discovery leads, not proof that every listed skill applies.
 - The latest request and higher-priority instructions override stale, mismatched, or overly broad routing context.
-- If an intent-matched skill applies and \`skill_view\` is available, load it before following it.`;
+- If a matched skill applies and \`skill_view\` is available, load it before following it.`;

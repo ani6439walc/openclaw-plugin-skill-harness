@@ -221,9 +221,9 @@
             },
             "default": {}
           },
-          "thresholds": {
+          "intents": {
             "type": "object",
-            "description": "QMD-score thresholds for dynamic intent routing.",
+            "description": "Dynamic intent routing configuration and thresholds.",
             "additionalProperties": false,
             "properties": {
               "keyword": {
@@ -273,104 +273,11 @@
             },
             "default": {}
           },
-          "classifier": {
-            "type": "object",
-            "description": "Intent classifier sub-agent configuration for candidate adjudication.",
-            "additionalProperties": false,
-            "properties": {
-              "model": {
-                "type": "string",
-                "description": "Explicit lightweight model for the intention scanner (e.g. google/gemini-3-flash). If unset, resolves from current session model, agent primary model, then modelFallback."
-              },
-              "modelFallback": {
-                "type": "string",
-                "description": "Last-resort scanner model after explicit, current-session, and agent-primary resolution."
-              },
-              "thinking": {
-                "type": "string",
-                "enum": [
-                  "off",
-                  "minimal",
-                  "low",
-                  "medium",
-                  "high",
-                  "xhigh",
-                  "adaptive",
-                  "max"
-                ],
-                "description": "Thinking level for the intent classifier sub-agent.",
-                "default": "medium"
-              },
-              "timeoutMs": {
-                "type": "integer",
-                "minimum": 1000,
-                "maximum": 60000,
-                "description": "Budget in milliseconds for each intention scanner sub-agent run.",
-                "default": 5000
-              },
-              "queryMode": {
-                "type": "string",
-                "enum": ["message", "recent", "full"],
-                "description": "Context sent to scanner: latest message only, recent turns, or full history.",
-                "default": "recent"
-              },
-              "contextWindow": {
-                "type": "object",
-                "description": "Turn and character limits for recent conversation context.",
-                "additionalProperties": false,
-                "properties": {
-                  "user": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "turns": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 20,
-                        "default": 5
-                      },
-                      "chars": {
-                        "type": "integer",
-                        "minimum": 40,
-                        "maximum": 2000,
-                        "default": 1000
-                      }
-                    }
-                  },
-                  "assistant": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "turns": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 10,
-                        "default": 5
-                      },
-                      "chars": {
-                        "type": "integer",
-                        "minimum": 40,
-                        "maximum": 2000,
-                        "default": 1000
-                      }
-                    }
-                  }
-                },
-                "default": {}
-              }
-            },
-            "default": {}
-          },
-          "skillCandidates": {
+          "skills": {
             "type": "object",
             "description": "Prompt-build input-matched skill candidate policy. It does not change skill_search tool results.",
             "additionalProperties": false,
             "properties": {
-              "enabled": {
-                "type": "boolean",
-                "default": true,
-                "description": "Enable input-matched skill discovery and advisory prompt injection."
-              },
               "search": {
                 "type": "object",
                 "additionalProperties": false,
@@ -428,6 +335,86 @@
                 "maximum": 4,
                 "default": 4,
                 "description": "Maximum input-matched skills injected into advisory context."
+              }
+            },
+            "default": {}
+          },
+          "model": {
+            "type": "string",
+            "description": "Explicit lightweight model for the routing LLM (e.g. google/gemini-3-flash). If unset, resolves from current session model, agent primary model, then modelFallback."
+          },
+          "modelFallback": {
+            "type": "string",
+            "description": "Last-resort routing LLM model after explicit, current-session, and agent-primary resolution."
+          },
+          "thinking": {
+            "type": "string",
+            "enum": [
+              "off",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "adaptive",
+              "max"
+            ],
+            "description": "Thinking level for the routing LLM sub-agent.",
+            "default": "medium"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 60000,
+            "description": "Budget in milliseconds for each routing LLM sub-agent run.",
+            "default": 5000
+          },
+          "queryMode": {
+            "type": "string",
+            "enum": ["message", "recent", "full"],
+            "description": "Context sent to routing LLM: latest message only, recent turns, or full history.",
+            "default": "recent"
+          },
+          "contextWindow": {
+            "type": "object",
+            "description": "Turn and character limits for recent conversation context.",
+            "additionalProperties": false,
+            "properties": {
+              "user": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "turns": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 20,
+                    "default": 5
+                  },
+                  "chars": {
+                    "type": "integer",
+                    "minimum": 40,
+                    "maximum": 2000,
+                    "default": 1000
+                  }
+                }
+              },
+              "assistant": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "turns": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10,
+                    "default": 5
+                  },
+                  "chars": {
+                    "type": "integer",
+                    "minimum": 40,
+                    "maximum": 2000,
+                    "default": 1000
+                  }
+                }
               }
             },
             "default": {}

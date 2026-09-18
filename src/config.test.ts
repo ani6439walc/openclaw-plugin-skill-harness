@@ -21,7 +21,15 @@ describe("resolveConfig", () => {
         ),
       ) as {
         configSchema: {
-          properties: Record<string, unknown>;
+          properties: {
+            skills: {
+              properties: Record<string, unknown>;
+            };
+            routing: {
+              properties: Record<string, unknown>;
+            };
+            [key: string]: unknown;
+          };
         };
       };
 
@@ -66,7 +74,7 @@ describe("resolveConfig", () => {
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
 
-      expect(result.routing.thresholds).toEqual({
+      expect(result.routing.intents).toEqual({
         keyword: {
           directRouteMinScore: 0.85,
         },
@@ -76,22 +84,24 @@ describe("resolveConfig", () => {
           minCandidateScore: 0.4,
         },
       });
+      expect(result.routing.intents.thresholds).toEqual(result.routing.intents);
+      expect(result.routing.thresholds).toEqual(result.routing.intents);
 
-      expect(result.routing.classifier.queryMode).toBe(DEFAULT_QUERY_MODE);
-      expect(result.routing.classifier.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
-      expect(result.routing.classifier.thinking).toBe("medium");
-      expect(result.routing.classifier.model).toBeUndefined();
-      expect(result.routing.classifier.modelFallback).toBeUndefined();
-      expect(result.routing.classifier.contextWindow.user.turns).toBe(
+      expect(result.routing.queryMode).toBe(DEFAULT_QUERY_MODE);
+      expect(result.routing.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+      expect(result.routing.thinking).toBe("medium");
+      expect(result.routing.model).toBeUndefined();
+      expect(result.routing.modelFallback).toBeUndefined();
+      expect(result.routing.contextWindow.user.turns).toBe(
         DEFAULT_RECENT_USER_TURNS,
       );
-      expect(result.routing.classifier.contextWindow.assistant.turns).toBe(
+      expect(result.routing.contextWindow.assistant.turns).toBe(
         DEFAULT_RECENT_ASSISTANT_TURNS,
       );
-      expect(result.routing.classifier.contextWindow.user.chars).toBe(
+      expect(result.routing.contextWindow.user.chars).toBe(
         DEFAULT_RECENT_USER_CHARS,
       );
-      expect(result.routing.classifier.contextWindow.assistant.chars).toBe(
+      expect(result.routing.contextWindow.assistant.chars).toBe(
         DEFAULT_RECENT_ASSISTANT_CHARS,
       );
 
@@ -136,8 +146,8 @@ describe("resolveConfig", () => {
       const result = resolveConfig({});
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
-      expect(result.routing.classifier.model).toBeUndefined();
-      expect(result.routing.classifier.modelFallback).toBeUndefined();
+      expect(result.routing.model).toBeUndefined();
+      expect(result.routing.modelFallback).toBeUndefined();
     });
 
     it("should use default values for non-object config", () => {
@@ -145,15 +155,15 @@ describe("resolveConfig", () => {
         const result = resolveConfig(raw);
         expect(result.routing.scope.agents).toEqual(["main"]);
         expect(result.routing.scope.chatTypes).toEqual(["direct"]);
-        expect(result.routing.classifier.queryMode).toBe(DEFAULT_QUERY_MODE);
-        expect(result.routing.classifier.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+        expect(result.routing.queryMode).toBe(DEFAULT_QUERY_MODE);
+        expect(result.routing.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
       }
     });
   });
 
   describe("skill candidates", () => {
     it("does not retain an independent candidate pool cap", () => {
-      const candidates = resolveConfig({}).routing.skillCandidates;
+      const candidates = resolveConfig({}).routing.skills;
       expect(candidates).not.toHaveProperty("maxPoolSize");
       expect(() =>
         resolveConfig({ routing: { skillCandidates: { maxPoolSize: 12 } } }),
@@ -260,9 +270,9 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("routing & thresholds", () => {
+  describe("routing & intents thresholds", () => {
     it("resolves default routing thresholds when routing is omitted", () => {
-      expect(resolveConfig({}).routing.thresholds).toEqual({
+      expect(resolveConfig({}).routing.intents).toEqual({
         keyword: {
           directRouteMinScore: 0.85,
         },
@@ -272,13 +282,16 @@ describe("resolveConfig", () => {
           minCandidateScore: 0.4,
         },
       });
+      expect(resolveConfig({}).routing.intents.thresholds).toEqual(
+        resolveConfig({}).routing.intents,
+      );
     });
 
-    it("accepts nested routing thresholds", () => {
+    it("accepts direct routing intents configuration", () => {
       expect(
         resolveConfig({
           routing: {
-            thresholds: {
+            intents: {
               keyword: { directRouteMinScore: 0.8 },
               hybrid: {
                 directRouteMinScore: 0.95,
@@ -287,7 +300,33 @@ describe("resolveConfig", () => {
               },
             },
           },
-        }).routing.thresholds,
+        }).routing.intents,
+      ).toEqual({
+        keyword: { directRouteMinScore: 0.8 },
+        hybrid: {
+          directRouteMinScore: 0.95,
+          directRouteMinMargin: 0.05,
+          minCandidateScore: 0.3,
+        },
+      });
+    });
+
+    it("accepts legacy nested routing thresholds under intents", () => {
+      expect(
+        resolveConfig({
+          routing: {
+            intents: {
+              thresholds: {
+                keyword: { directRouteMinScore: 0.8 },
+                hybrid: {
+                  directRouteMinScore: 0.95,
+                  directRouteMinMargin: 0.05,
+                  minCandidateScore: 0.3,
+                },
+              },
+            } as never,
+          },
+        }).routing.intents,
       ).toEqual({
         keyword: { directRouteMinScore: 0.8 },
         hybrid: {
@@ -307,7 +346,7 @@ describe("resolveConfig", () => {
               minCandidateScore: 0.5,
             } as never,
           },
-        }).routing.thresholds,
+        }).routing.intents,
       ).toEqual({
         keyword: { directRouteMinScore: 0.92 },
         hybrid: {
@@ -323,10 +362,12 @@ describe("resolveConfig", () => {
       expect(() =>
         resolveConfig({
           routing: {
-            thresholds: {
-              hybrid: {
-                directRouteMinScore: 0.3,
-                minCandidateScore: 0.7,
+            intents: {
+              thresholds: {
+                hybrid: {
+                  directRouteMinScore: 0.3,
+                  minCandidateScore: 0.7,
+                },
               },
             },
           },
@@ -350,7 +391,7 @@ describe("resolveConfig", () => {
             };
             routing?: {
               properties: {
-                thresholds: {
+                intents?: {
                   properties: Record<
                     string,
                     { properties: Record<string, { default?: number }> }
@@ -377,8 +418,8 @@ describe("resolveConfig", () => {
         manifest.configSchema.properties.qmd.properties,
       ).not.toHaveProperty("rerank");
       expect(
-        manifest.configSchema.properties.routing?.properties.thresholds
-          .properties.keyword.properties.directRouteMinScore.default,
+        manifest.configSchema.properties.routing?.properties.intents?.properties
+          .keyword.properties.directRouteMinScore.default,
       ).toBe(0.85);
       for (const endpoint of ["embedding", "expansion"]) {
         expect(
@@ -660,11 +701,11 @@ describe("resolveConfig", () => {
 
     it("falls back for invalid classifier and review thinking levels", () => {
       const result = resolveConfig({
-        routing: { classifier: { thinking: "invalid" } },
-        review: { thinking: "invalid" },
+        routing: { thinking: "invalid" as never },
+        review: { thinking: "invalid" as never },
       });
 
-      expect(result.routing.classifier.thinking).toBe("medium");
+      expect(result.routing.thinking).toBe("medium");
       expect(result.review.thinking).toBe("medium");
     });
 
@@ -713,31 +754,31 @@ describe("resolveConfig", () => {
   describe("enum validation", () => {
     it("should accept valid queryMode values", () => {
       const messageResult = resolveConfig({
-        routing: { classifier: { queryMode: "message" } },
+        routing: { queryMode: "message" },
       });
-      expect(messageResult.routing.classifier.queryMode).toBe("message");
+      expect(messageResult.routing.queryMode).toBe("message");
 
       const recentResult = resolveConfig({
-        routing: { classifier: { queryMode: "recent" } },
+        routing: { queryMode: "recent" },
       });
-      expect(recentResult.routing.classifier.queryMode).toBe("recent");
+      expect(recentResult.routing.queryMode).toBe("recent");
 
       const fullResult = resolveConfig({
-        routing: { classifier: { queryMode: "full" } },
+        routing: { queryMode: "full" },
       });
-      expect(fullResult.routing.classifier.queryMode).toBe("full");
+      expect(fullResult.routing.queryMode).toBe("full");
     });
 
     it("should fall back to default for invalid queryMode", () => {
       const result = resolveConfig({
-        routing: { classifier: { queryMode: "invalid" } },
+        routing: { queryMode: "invalid" as never },
       });
-      expect(result.routing.classifier.queryMode).toBe(DEFAULT_QUERY_MODE);
+      expect(result.routing.queryMode).toBe(DEFAULT_QUERY_MODE);
     });
 
     it("should use default when queryMode is undefined", () => {
       const result = resolveConfig({});
-      expect(result.routing.classifier.queryMode).toBe(DEFAULT_QUERY_MODE);
+      expect(result.routing.queryMode).toBe(DEFAULT_QUERY_MODE);
     });
   });
 
@@ -760,186 +801,148 @@ describe("resolveConfig", () => {
   describe("clampInt behavior", () => {
     it("should clamp classifier timeoutMs within bounds (1000-60000)", () => {
       const lowResult = resolveConfig({
-        routing: { classifier: { timeoutMs: 100 } },
+        routing: { timeoutMs: 100 },
       });
-      expect(lowResult.routing.classifier.timeoutMs).toBe(1_000);
+      expect(lowResult.routing.timeoutMs).toBe(1_000);
 
       const highResult = resolveConfig({
-        routing: { classifier: { timeoutMs: 200000 } },
+        routing: { timeoutMs: 200000 },
       });
-      expect(highResult.routing.classifier.timeoutMs).toBe(60_000);
+      expect(highResult.routing.timeoutMs).toBe(60_000);
 
       const validResult = resolveConfig({
-        routing: { classifier: { timeoutMs: 5000 } },
+        routing: { timeoutMs: 5000 },
       });
-      expect(validResult.routing.classifier.timeoutMs).toBe(5000);
+      expect(validResult.routing.timeoutMs).toBe(5000);
     });
 
     it("should clamp contextWindow.user.turns within bounds (0-20)", () => {
       const lowResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: { turns: -5 }, assistant: {} } as never,
-          },
+          contextWindow: { user: { turns: -5 }, assistant: {} } as never,
         },
       });
-      expect(lowResult.routing.classifier.contextWindow.user.turns).toBe(0);
+      expect(lowResult.routing.contextWindow.user.turns).toBe(0);
 
       const highResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: { turns: 50 }, assistant: {} } as never,
-          },
+          contextWindow: { user: { turns: 50 }, assistant: {} } as never,
         },
       });
-      expect(highResult.routing.classifier.contextWindow.user.turns).toBe(20);
+      expect(highResult.routing.contextWindow.user.turns).toBe(20);
 
       const validResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: { turns: 10 }, assistant: {} } as never,
-          },
+          contextWindow: { user: { turns: 10 }, assistant: {} } as never,
         },
       });
-      expect(validResult.routing.classifier.contextWindow.user.turns).toBe(10);
+      expect(validResult.routing.contextWindow.user.turns).toBe(10);
     });
 
     it("should clamp contextWindow.assistant.turns within bounds (0-10)", () => {
       const lowResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: {}, assistant: { turns: -1 } } as never,
-          },
+          contextWindow: { user: {}, assistant: { turns: -1 } } as never,
         },
       });
-      expect(lowResult.routing.classifier.contextWindow.assistant.turns).toBe(
-        0,
-      );
+      expect(lowResult.routing.contextWindow.assistant.turns).toBe(0);
 
       const highResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: {}, assistant: { turns: 20 } } as never,
-          },
+          contextWindow: { user: {}, assistant: { turns: 20 } } as never,
         },
       });
-      expect(highResult.routing.classifier.contextWindow.assistant.turns).toBe(
-        10,
-      );
+      expect(highResult.routing.contextWindow.assistant.turns).toBe(10);
 
       const validResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: {}, assistant: { turns: 5 } } as never,
-          },
+          contextWindow: { user: {}, assistant: { turns: 5 } } as never,
         },
       });
-      expect(validResult.routing.classifier.contextWindow.assistant.turns).toBe(
-        5,
-      );
+      expect(validResult.routing.contextWindow.assistant.turns).toBe(5);
     });
 
     it("should clamp contextWindow.user.chars within bounds (40-2000)", () => {
       const lowResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: { chars: 10 }, assistant: {} } as never,
-          },
+          contextWindow: { user: { chars: 10 }, assistant: {} } as never,
         },
       });
-      expect(lowResult.routing.classifier.contextWindow.user.chars).toBe(40);
+      expect(lowResult.routing.contextWindow.user.chars).toBe(40);
 
       const highResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: { chars: 5000 }, assistant: {} } as never,
-          },
+          contextWindow: { user: { chars: 5000 }, assistant: {} } as never,
         },
       });
-      expect(highResult.routing.classifier.contextWindow.user.chars).toBe(2000);
+      expect(highResult.routing.contextWindow.user.chars).toBe(2000);
 
       const validResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: { chars: 500 }, assistant: {} } as never,
-          },
+          contextWindow: { user: { chars: 500 }, assistant: {} } as never,
         },
       });
-      expect(validResult.routing.classifier.contextWindow.user.chars).toBe(500);
+      expect(validResult.routing.contextWindow.user.chars).toBe(500);
     });
 
     it("should clamp contextWindow.assistant.chars within bounds (40-2000)", () => {
       const lowResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: {}, assistant: { chars: 20 } } as never,
-          },
+          contextWindow: { user: {}, assistant: { chars: 20 } } as never,
         },
       });
-      expect(lowResult.routing.classifier.contextWindow.assistant.chars).toBe(
-        40,
-      );
+      expect(lowResult.routing.contextWindow.assistant.chars).toBe(40);
 
       const highResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: {}, assistant: { chars: 5000 } } as never,
-          },
+          contextWindow: { user: {}, assistant: { chars: 5000 } } as never,
         },
       });
-      expect(highResult.routing.classifier.contextWindow.assistant.chars).toBe(
-        2000,
-      );
+      expect(highResult.routing.contextWindow.assistant.chars).toBe(2000);
 
       const validResult = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: {}, assistant: { chars: 300 } } as never,
-          },
+          contextWindow: { user: {}, assistant: { chars: 300 } } as never,
         },
       });
-      expect(validResult.routing.classifier.contextWindow.assistant.chars).toBe(
-        300,
-      );
+      expect(validResult.routing.contextWindow.assistant.chars).toBe(300);
     });
 
     it("should use default for NaN values", () => {
       const result = resolveConfig({
-        routing: { classifier: { timeoutMs: NaN } },
+        routing: { timeoutMs: NaN as never },
       });
-      expect(result.routing.classifier.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+      expect(result.routing.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
     });
 
     it("should use default for undefined numeric values", () => {
       const result = resolveConfig({
-        routing: { classifier: { timeoutMs: undefined } },
+        routing: { timeoutMs: undefined },
       });
-      expect(result.routing.classifier.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+      expect(result.routing.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
     });
 
     it("should use default for invalid primitive numeric values", () => {
       const result = resolveConfig({
         routing: {
-          classifier: {
-            timeoutMs: "5000",
-            contextWindow: {
-              user: { turns: "3", chars: false },
-              assistant: { turns: {}, chars: [] },
-            },
+          timeoutMs: "5000" as never,
+          contextWindow: {
+            user: { turns: "3" as never, chars: false as never },
+            assistant: { turns: {} as never, chars: [] as never },
           },
         },
       });
-      expect(result.routing.classifier.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
-      expect(result.routing.classifier.contextWindow.user.turns).toBe(
+      expect(result.routing.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
+      expect(result.routing.contextWindow.user.turns).toBe(
         DEFAULT_RECENT_USER_TURNS,
       );
-      expect(result.routing.classifier.contextWindow.user.chars).toBe(
+      expect(result.routing.contextWindow.user.chars).toBe(
         DEFAULT_RECENT_USER_CHARS,
       );
-      expect(result.routing.classifier.contextWindow.assistant.turns).toBe(
+      expect(result.routing.contextWindow.assistant.turns).toBe(
         DEFAULT_RECENT_ASSISTANT_TURNS,
       );
-      expect(result.routing.classifier.contextWindow.assistant.chars).toBe(
+      expect(result.routing.contextWindow.assistant.chars).toBe(
         DEFAULT_RECENT_ASSISTANT_CHARS,
       );
     });
@@ -1002,18 +1005,16 @@ describe("resolveConfig", () => {
             allowedChatIds: {},
             deniedChatIds: 0,
           },
-          classifier: {
-            model: {},
-            modelFallback: [],
-          },
-        },
+          model: {},
+          modelFallback: [],
+        } as never,
       });
       expect(result.routing.scope.agents).toEqual(["main"]);
       expect(result.routing.scope.chatTypes).toEqual(["direct"]);
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
-      expect(result.routing.classifier.model).toBeUndefined();
-      expect(result.routing.classifier.modelFallback).toBeUndefined();
+      expect(result.routing.model).toBeUndefined();
+      expect(result.routing.modelFallback).toBeUndefined();
     });
   });
 
@@ -1033,8 +1034,7 @@ describe("resolveConfig", () => {
 
   describe("skillCandidates", () => {
     it("resolves the complete default policy for legacy routing config", () => {
-      expect(resolveConfig({}).routing.skillCandidates).toEqual({
-        enabled: true,
+      expect(resolveConfig({}).routing.skills).toEqual({
         search: { minCandidateScore: 0.6, timeoutMs: 15_000 },
         nameMatch: {
           maxEditDistance: 2,
@@ -1048,20 +1048,19 @@ describe("resolveConfig", () => {
     it("inherits qmd timeout for candidate retrieval unless overridden", () => {
       const inherited = resolveConfig({ qmd: { timeoutMs: 12_000 } });
       expect(inherited.qmd.timeoutMs).toBe(12_000);
-      expect(inherited.routing.skillCandidates.search.timeoutMs).toBe(12_000);
+      expect(inherited.routing.skills.search.timeoutMs).toBe(12_000);
 
       const overridden = resolveConfig({
         qmd: { timeoutMs: 12_000 },
-        routing: { skillCandidates: { search: { timeoutMs: 250 } } },
+        routing: { skills: { search: { timeoutMs: 250 } } },
       });
-      expect(overridden.routing.skillCandidates.search.timeoutMs).toBe(250);
+      expect(overridden.routing.skills.search.timeoutMs).toBe(250);
     });
 
     it("accepts valid partial candidate routing configuration", () => {
       const policy = resolveConfig({
         routing: {
-          skillCandidates: {
-            enabled: false,
+          skills: {
             search: { minCandidateScore: 0.7, timeoutMs: 250 },
             nameMatch: {
               maxEditDistance: 1,
@@ -1071,10 +1070,9 @@ describe("resolveConfig", () => {
             maxInjectedSkills: 3,
           },
         },
-      }).routing.skillCandidates;
+      }).routing.skills;
 
       expect(policy).toEqual({
-        enabled: false,
         search: { minCandidateScore: 0.7, timeoutMs: 250 },
         nameMatch: {
           maxEditDistance: 1,
@@ -1099,27 +1097,25 @@ describe("resolveConfig", () => {
   describe("contextWindow partial overrides", () => {
     it("should support missing nested config and partial overrides", () => {
       const emptyNested = resolveConfig({
-        routing: { classifier: { contextWindow: {} } },
+        routing: { contextWindow: {} },
       });
-      expect(emptyNested.routing.classifier.contextWindow.user.turns).toBe(
+      expect(emptyNested.routing.contextWindow.user.turns).toBe(
         DEFAULT_RECENT_USER_TURNS,
       );
-      expect(emptyNested.routing.classifier.contextWindow.assistant.turns).toBe(
+      expect(emptyNested.routing.contextWindow.assistant.turns).toBe(
         DEFAULT_RECENT_ASSISTANT_TURNS,
       );
 
       const partial = resolveConfig({
         routing: {
-          classifier: {
-            contextWindow: { user: { turns: 7 } },
-          },
+          contextWindow: { user: { turns: 7 } },
         },
       } as never);
-      expect(partial.routing.classifier.contextWindow.user.turns).toBe(7);
-      expect(partial.routing.classifier.contextWindow.user.chars).toBe(
+      expect(partial.routing.contextWindow.user.turns).toBe(7);
+      expect(partial.routing.contextWindow.user.chars).toBe(
         DEFAULT_RECENT_USER_CHARS,
       );
-      expect(partial.routing.classifier.contextWindow.assistant.turns).toBe(
+      expect(partial.routing.contextWindow.assistant.turns).toBe(
         DEFAULT_RECENT_ASSISTANT_TURNS,
       );
     });
@@ -1128,22 +1124,22 @@ describe("resolveConfig", () => {
   describe("optional fields", () => {
     it("should handle optional model field", () => {
       const withModel = resolveConfig({
-        routing: { classifier: { model: "gpt-4" } },
+        routing: { model: "gpt-4" },
       });
-      expect(withModel.routing.classifier.model).toBe("gpt-4");
+      expect(withModel.routing.model).toBe("gpt-4");
 
       const withoutModel = resolveConfig({});
-      expect(withoutModel.routing.classifier.model).toBeUndefined();
+      expect(withoutModel.routing.model).toBeUndefined();
     });
 
     it("should handle optional modelFallback field", () => {
       const withFallback = resolveConfig({
-        routing: { classifier: { modelFallback: "gpt-3.5" } },
+        routing: { modelFallback: "gpt-3.5" },
       });
-      expect(withFallback.routing.classifier.modelFallback).toBe("gpt-3.5");
+      expect(withFallback.routing.modelFallback).toBe("gpt-3.5");
 
       const withoutFallback = resolveConfig({});
-      expect(withoutFallback.routing.classifier.modelFallback).toBeUndefined();
+      expect(withoutFallback.routing.modelFallback).toBeUndefined();
     });
   });
 });

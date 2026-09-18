@@ -331,7 +331,7 @@ export function createPlugin(
       scheduleQmdIndexRefresh();
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
-        timeoutMs: config.routing.classifier.timeoutMs * 2 + 1_500,
+        timeoutMs: config.routing.timeoutMs * 2 + 1_500,
         priority: -1,
       });
       api.on("before_tool_call", handlers.onBeforeToolCall);

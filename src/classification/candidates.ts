@@ -21,7 +21,7 @@ export type IntentProjectionFallbackReason =
   | "selector-error";
 
 export interface IntentProjection {
-  decision: "projected" | "full-fallback";
+  decision: "projected" | "none";
   originalIntentCount: number;
   candidateIntentCount: number;
   effectiveIntents: IntentCatalogEntry[];
@@ -47,25 +47,20 @@ function resolveIntentId(value: string | undefined): string | undefined {
   return value?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
 }
 
-function fullCatalogResult(
+function emptyProjectionResult(
   intents: readonly IntentCatalogEntry[],
   fallbackReason: IntentProjectionFallbackReason,
-  candidateIntents: Iterable<IntentCatalogEntry> = intents,
-  selectionReasons: Iterable<IntentProjectionSelectionReason> = [],
-  candidateSelections: IntentProjection["candidateSelections"] = [],
-  supportReasons: Iterable<IntentProjectionSupportReason> = [],
 ): IntentProjection {
-  const candidates = [...candidateIntents];
   return {
-    decision: "full-fallback",
+    decision: "none",
     originalIntentCount: intents.length,
-    candidateIntentCount: candidates.length,
-    effectiveIntents: [...intents],
-    candidateIntents: candidates,
+    candidateIntentCount: 0,
+    effectiveIntents: [],
+    candidateIntents: [],
     projected: false,
-    supportReasons: [...supportReasons],
-    selectionReasons: [...selectionReasons],
-    candidateSelections,
+    supportReasons: [],
+    selectionReasons: [],
+    candidateSelections: [],
     matchedKeywords: [],
     fallbackReason,
   };
@@ -93,14 +88,15 @@ export function projectQmdIntentCandidates(params: {
   maxCandidates?: number;
 }): IntentProjection {
   const intents = [...params.intents];
-  if (intents.length === 0) return fullCatalogResult(intents, "empty-catalog");
-  if (!params.qmdHits) return fullCatalogResult(intents, "qmd-unavailable");
+  if (intents.length === 0)
+    return emptyProjectionResult(intents, "empty-catalog");
+  if (!params.qmdHits) return emptyProjectionResult(intents, "qmd-unavailable");
   const minCandidateScore = roundToDecimals(params.minCandidateScore, 2);
   const trustedHits = params.qmdHits
     .filter((hit) => roundToDecimals(hit.score, 2) >= minCandidateScore)
     .sort((a, b) => b.score - a.score);
   if (trustedHits.length === 0) {
-    return fullCatalogResult(intents, "qmd-no-trusted-recall");
+    return emptyProjectionResult(intents, "qmd-no-trusted-recall");
   }
 
   const intentById = new Map(
@@ -137,19 +133,10 @@ export function projectQmdIntentCandidates(params: {
     matchedKeywords: [],
   }));
 
-  if (
-    candidateIntents.length === 0 ||
-    candidateIntents.length >= intents.length
-  ) {
-    return fullCatalogResult(
-      intents,
-      candidateIntents.length === 0 ? "empty-projection" : "no-reduction",
-      candidateIntents,
-      selectionReasons,
-      candidateSelections,
-      ["qmd-retrieval"],
-    );
+  if (candidateIntents.length === 0) {
+    return emptyProjectionResult(intents, "empty-projection");
   }
+
   return {
     decision: "projected",
     originalIntentCount: intents.length,

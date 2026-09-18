@@ -13,9 +13,13 @@ export const DEFAULT_RECENT_USER_CHARS = 1000;
 export const DEFAULT_RECENT_ASSISTANT_CHARS = 1000;
 export const SKILL_HARNESS_PLUGIN_TAG = "skill_harness_plugin";
 export const ROUTING_ADVISORY_HEADER =
-  "Inferred intent and intent-matched skills (advisory, non-user input; load with `skill_view` if relevant):";
+  "Inferred intent and relevant skills (advisory, non-user input; load with `skill_view` if relevant):";
+export const ROUTING_ADVISORY_SKILLS_ONLY_HEADER =
+  "Inferred relevant skills from conversation (advisory, non-user input; load with `skill_view` if relevant):";
 export const ROUTING_ADVISORY_INTENT_ONLY_HEADER =
   "Inferred user intent from conversation (advisory, non-user input):";
+export const ROUTING_ADVISORY_LEGACY_HEADER =
+  "Inferred intent and intent-matched skills (advisory, non-user input; load with `skill_view` if relevant):";
 
 export const FALLBACK_INTENT_ID = "unknown";
 export const FALLBACK_INTENT: IntentDefinition = {
