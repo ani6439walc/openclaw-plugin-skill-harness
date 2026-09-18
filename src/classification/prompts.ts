@@ -503,10 +503,15 @@ export function buildUnifiedRoutingPrompt(
 ): string {
   const timeLine = params.currentTime ? `${params.currentTime} ` : "";
   const isIntentResolved = Boolean(params.resolvedIntent);
+  const isSkillsOnly =
+    !isIntentResolved &&
+    (!params.candidateIntents || params.candidateIntents.length === 0);
 
   const header = isIntentResolved
     ? `${timeLine}You are the OpenClaw skill harness routing agent. The user's intent is already identified. Your task is to evaluate the user's latest request and select 0 to 4 relevant skills from the provided candidate_skills if genuinely needed.`
-    : `${timeLine}You are the OpenClaw skill harness routing agent. Your task is to classify the user's intent from the catalog and select 0 to 4 relevant skills from candidate_skills if genuinely needed.`;
+    : isSkillsOnly
+      ? `${timeLine}You are the OpenClaw skill harness routing agent. Your task is to evaluate the user's latest request and select 0 to 4 relevant skills from the provided candidate_skills if genuinely needed.`
+      : `${timeLine}You are the OpenClaw skill harness routing agent. Your task is to classify the user's intent from the catalog and select 0 to 4 relevant skills from candidate_skills if genuinely needed.`;
 
   const decisionProcedure = isIntentResolved
     ? `### Decision Procedure
@@ -515,9 +520,16 @@ export function buildUnifiedRoutingPrompt(
 3. Select up to 4 skills that directly help the user's current request and identified intent.
 4. If no candidate skills are needed, return an empty skills list \`[]\`.
 5. Provide confidence (0.0 to 1.0) and an ultra-concise action phrase for reason.`
-    : `### Decision Procedure
+    : isSkillsOnly
+      ? `### Decision Procedure
+1. Review conversation_context and latest_message.
+2. Inspect candidate_skills.
+3. Select up to 4 skills that directly help the user's current request.
+4. If no candidate skills are needed, return an empty skills list \`[]\`.
+5. Provide confidence (0.0 to 1.0) and an ultra-concise action phrase for reason.`
+      : `### Decision Procedure
 1. Review conversation_context, latest_message, and intent_catalog.
-2. Select the catalog intent that best explains the user's current request. If none fit, select "${FALLBACK_INTENT_ID}".
+2. Select the catalog intent that best explains the user's current request. If none fit, set "intent" to null.
 3. Inspect candidate_skills.
 4. Select up to 4 skills that directly help the user's current request and chosen intent.
 5. If no candidate skills are needed, return an empty skills list \`[]\`.
@@ -528,9 +540,9 @@ export function buildUnifiedRoutingPrompt(
 - "reason" must be a concise action phrase without grammatical subjects (e.g. "Drafting release notes", "Running browser automation").
 - "confidence" must be a float between 0.0 and 1.0.
 - "skills" must strictly be canonical skill names chosen from candidate_skills. Maximum 4 skills. Return \`[]\` if none are needed. NEVER fabricate skill names.${
-    isIntentResolved
+    isIntentResolved || isSkillsOnly
       ? ""
-      : `\n- "intent" must be a valid id from intent_catalog or "${FALLBACK_INTENT_ID}".`
+      : `\n- "intent" must be a valid id from intent_catalog or null.`
   }`;
 
   const trustBoundaries = `### Trust Boundaries
@@ -546,15 +558,16 @@ Hard requirements:
 - No Markdown fences.
 - No prose before or after the JSON object.`;
 
-  const outputSchema = isIntentResolved
-    ? `### Output Schema
+  const outputSchema =
+    isIntentResolved || isSkillsOnly
+      ? `### Output Schema
 Required fields:
 - "skills": string[] - Array of skill names chosen from candidate_skills (0 to 4 items).
 - "confidence": number - Confidence score between 0.0 and 1.0.
 - "reason": string - Ultra-concise action phrase without grammatical subjects.`
-    : `### Output Schema
+      : `### Output Schema
 Required fields:
-- "intent": string - Intent id from intent_catalog or "${FALLBACK_INTENT_ID}".
+- "intent": string | null - Intent id from intent_catalog or null if none fit.
 - "skills": string[] - Array of skill names chosen from candidate_skills (0 to 4 items).
 - "confidence": number - Confidence score between 0.0 and 1.0.
 - "reason": string - Ultra-concise action phrase without grammatical subjects.`;
@@ -562,16 +575,17 @@ Required fields:
   const outputStyle = `### Output Style
 ${ULTRA_CONCISE_JSON_OUTPUT_STYLE}`;
 
-  const outputShapeTemplates = isIntentResolved
-    ? `### Output Shape Template
+  const outputShapeTemplates =
+    isIntentResolved || isSkillsOnly
+      ? `### Output Shape Template
 {
   "skills": ["{{SKILL_NAME_FROM_CANDIDATE_SKILLS}}"],
   "confidence": {{NUMBER_0_TO_1}},
   "reason": "{{ACTION_PHRASE}}"
 }`
-    : `### Output Shape Template
+      : `### Output Shape Template
 {
-  "intent": "{{INTENT_ID}}",
+  "intent": {{INTENT_ID_OR_NULL}},
   "skills": ["{{SKILL_NAME_FROM_CANDIDATE_SKILLS}}"],
   "confidence": {{NUMBER_0_TO_1}},
   "reason": "{{ACTION_PHRASE}}"
@@ -673,30 +687,32 @@ export function parseUnifiedRoutingResult(
     }
 
     let intent: string | undefined;
-    if (typeof parsed.intent === "string") {
-      const parsedIntent = parsed.intent.trim();
-      if (options.validIntentIds) {
-        const matched = options.validIntentIds.find(
-          (id) => id.toLowerCase() === parsedIntent.toLowerCase(),
-        );
-        if (matched) {
-          intent = matched;
-        } else if (
+    if (parsed.intent !== undefined && parsed.intent !== null) {
+      if (typeof parsed.intent === "string") {
+        const parsedIntent = parsed.intent.trim();
+        if (
+          parsedIntent.toLowerCase() === "null" ||
           parsedIntent.toLowerCase() === FALLBACK_INTENT_ID.toLowerCase()
         ) {
-          intent = FALLBACK_INTENT_ID;
+          intent = undefined;
+        } else if (
+          options.validIntentIds &&
+          options.validIntentIds.length > 0
+        ) {
+          const matched = options.validIntentIds.find(
+            (id) => id.toLowerCase() === parsedIntent.toLowerCase(),
+          );
+          if (matched) {
+            intent = matched;
+          } else {
+            return undefined;
+          }
+        } else {
+          intent = parsedIntent;
         }
       } else {
-        intent = parsedIntent;
+        return undefined;
       }
-    }
-
-    if (
-      options.validIntentIds &&
-      options.validIntentIds.length > 0 &&
-      !intent
-    ) {
-      return undefined;
     }
 
     return {

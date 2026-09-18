@@ -4,8 +4,10 @@ import * as classification from "./index.js";
 import {
   buildRoutingContext,
   buildIntentionPrompt,
+  buildUnifiedRoutingPrompt,
   formatWorkingSetSkills,
   parseIntentionResult,
+  parseUnifiedRoutingResult,
   formatInputMatchedSkills,
 } from "./prompts.js";
 import type { IntentCatalogEntry, RecentTurn } from "../types.js";
@@ -959,5 +961,165 @@ describe("XML boundary hardening", () => {
     expect(prompt).toContain("&lt;/latest_message&gt;&lt;latest_message&gt;");
     expect(prompt).not.toContain("</latest_message><latest_message>");
     expect(prompt.match(/<latest_message>\n/g)).toHaveLength(1);
+  });
+});
+
+describe("buildUnifiedRoutingPrompt", () => {
+  const candidateSkills = [
+    { name: "github", description: "Interact with GitHub APIs." },
+    { name: "terminal", description: "Run terminal commands." },
+  ];
+
+  it("builds prompt in skills-only mode when resolvedIntent is undefined and candidateIntents is empty/undefined", () => {
+    const prompt = buildUnifiedRoutingPrompt({
+      latest: "check disk space",
+      candidateSkills,
+    });
+
+    expect(prompt).not.toContain("intent_catalog");
+    expect(prompt).not.toContain('"intent":');
+    expect(prompt).toContain(
+      "Your task is to evaluate the user's latest request and select 0 to 4 relevant skills",
+    );
+    expect(prompt).toContain("### Candidate Skills");
+    expect(prompt).toContain('<skill name="github">');
+  });
+
+  it("builds prompt with resolved intent without requesting intent classification", () => {
+    const prompt = buildUnifiedRoutingPrompt({
+      latest: "check disk space",
+      resolvedIntent: { id: "sysadmin", guidance: "Handle system tasks" },
+      candidateSkills,
+    });
+
+    expect(prompt).not.toContain("intent_catalog");
+    expect(prompt).not.toContain('"intent":');
+    expect(prompt).toContain("The user's intent is already identified");
+    expect(prompt).toContain("### Inferred Intent");
+    expect(prompt).toContain('<inferred_intent id="sysadmin">');
+  });
+
+  it("builds prompt with candidate intents and specifies intent can be null if none fit", () => {
+    const candidateIntents: IntentCatalogEntry[] = [
+      {
+        id: "sysadmin",
+        definition: {
+          triggers: ["sysadmin"],
+          examples: ["check disk"],
+          keywords: ["disk"],
+          guidance: "Handle system tasks",
+        },
+      },
+    ];
+    const prompt = buildUnifiedRoutingPrompt({
+      latest: "check disk space",
+      candidateIntents,
+      candidateSkills,
+    });
+
+    expect(prompt).toContain("intent_catalog");
+    expect(prompt).toContain('If none fit, set "intent" to null.');
+    expect(prompt).toContain('"intent": string | null');
+    expect(prompt).toContain(
+      '- "intent" must be a valid id from intent_catalog or null.',
+    );
+  });
+});
+
+describe("parseUnifiedRoutingResult", () => {
+  const validIntentIds = ["coding", "debugging"];
+  const candidateSkillNames = ["git", "terminal"];
+
+  it("parses valid intent and selected skills", () => {
+    const raw = JSON.stringify({
+      intent: "coding",
+      skills: ["git"],
+      confidence: 0.9,
+      reason: "Creating branch",
+    });
+    const parsed = parseUnifiedRoutingResult(raw, {
+      validIntentIds,
+      candidateSkillNames,
+    });
+
+    expect(parsed).toEqual({
+      intent: "coding",
+      skills: ["git"],
+      confidence: 0.9,
+      reason: "Creating branch",
+    });
+  });
+
+  it("parses intent: null as valid (undefined intent)", () => {
+    const raw = JSON.stringify({
+      intent: null,
+      skills: ["terminal"],
+      confidence: 0.85,
+      reason: "Running shell command",
+    });
+    const parsed = parseUnifiedRoutingResult(raw, {
+      validIntentIds,
+      candidateSkillNames,
+    });
+
+    expect(parsed).toEqual({
+      skills: ["terminal"],
+      confidence: 0.85,
+      reason: "Running shell command",
+    });
+    expect(parsed?.intent).toBeUndefined();
+  });
+
+  it("parses intent: 'unknown' / FALLBACK_INTENT_ID as valid (undefined intent)", () => {
+    const raw = JSON.stringify({
+      intent: "unknown",
+      skills: [],
+      confidence: 0.5,
+      reason: "No matching intent",
+    });
+    const parsed = parseUnifiedRoutingResult(raw, {
+      validIntentIds,
+      candidateSkillNames,
+    });
+
+    expect(parsed).toEqual({
+      skills: [],
+      confidence: 0.5,
+      reason: "No matching intent",
+    });
+    expect(parsed?.intent).toBeUndefined();
+  });
+
+  it("rejects hallucinated intent string not in validIntentIds", () => {
+    const raw = JSON.stringify({
+      intent: "hallucinated-intent",
+      skills: ["git"],
+      confidence: 0.9,
+      reason: "Some reason",
+    });
+    const parsed = parseUnifiedRoutingResult(raw, {
+      validIntentIds,
+      candidateSkillNames,
+    });
+
+    expect(parsed).toBeUndefined();
+  });
+
+  it("parses skills-only output without intent field", () => {
+    const raw = JSON.stringify({
+      skills: ["git"],
+      confidence: 0.95,
+      reason: "Checking git status",
+    });
+    const parsed = parseUnifiedRoutingResult(raw, {
+      candidateSkillNames,
+    });
+
+    expect(parsed).toEqual({
+      skills: ["git"],
+      confidence: 0.95,
+      reason: "Checking git status",
+    });
+    expect(parsed?.intent).toBeUndefined();
   });
 });

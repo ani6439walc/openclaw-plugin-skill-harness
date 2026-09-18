@@ -238,9 +238,10 @@ export async function runUnifiedRoutingSubagent(params: {
 
     const rawReply = extractPayloadText(result);
 
-    const validIntentIds = params.candidateIntents
-      ? [...params.candidateIntents.map((i) => i.id), FALLBACK_INTENT_ID]
-      : undefined;
+    const validIntentIds =
+      params.candidateIntents && params.candidateIntents.length > 0
+        ? params.candidateIntents.map((i) => i.id)
+        : undefined;
     const candidateSkillNames = params.candidateSkills
       ? params.candidateSkills.map((s) => s.name)
       : undefined;
