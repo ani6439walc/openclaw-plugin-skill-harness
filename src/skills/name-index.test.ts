@@ -17,6 +17,32 @@ describe("skill name matching", () => {
     expect(extractEnglishSegments("幫我 code 的 review")).toBe("code review");
   });
 
+  it("strips URLs so they do not dilute skill name matching", () => {
+    expect(
+      extractEnglishSegments(
+        "幫我 code review quality https://github.com/ani6439walc/openclaw-plugin-skill-harness/pull/78",
+      ),
+    ).toBe("code review quality");
+    expect(
+      extractEnglishSegments(
+        "code review quality [https://example.com/pull/1](https://example.com/pull/1)",
+      ),
+    ).toBe("code review quality");
+    expect(
+      matchAvailableSkillNames({
+        skills,
+        input:
+          "幫我 code review quality https://github.com/ani6439walc/openclaw-plugin-skill-harness/pull/78",
+        options,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        skillName: "code-review-and-quality",
+        score: 1,
+      }),
+    ]);
+  });
+
   it("normalizes Latin accents before extracting name tokens", () => {
     expect(extractEnglishSegments("café")).toBe("cafe");
     expect(
