@@ -83,7 +83,7 @@ Large skill catalogs create two practical problems:
 
 Skill Harness addresses both:
 
-1. **Focused routing context per turn.** Eligible user turns receive the selected intent, its one routing-guidance sentence, intent-matched skills, and intent-matched `<skill_experience>` metadata (identity and keywords only) nested under the matching `<skill>`. The fixed system context does not include the runtime skill inventory.
+1. **Focused routing context per turn.** Eligible user turns independently retrieve intent and skill evidence, then use at most one constrained unified-routing call to choose an optional intent and zero to four visible skills. The resulting `<matched_skills>` block may be rendered with or without an intent; nested `<skill_experience>` metadata exposes identity and keywords only. The fixed system context does not include the runtime skill inventory.
 2. **Evidence-gated routing improvements.** Optional Intent Review distinguishes routing observations from actual adoption, can autonomously maintain runtime intent Markdown, and may create at most one validated experience for a currently visible skill observed in the completed turn. It does not train the base model or rewrite skill files.
 
 ## How it works
@@ -133,15 +133,17 @@ The routing stages are:
 1. Resolve canonical agent and session identity, then exclude helper, generic subagent, Review, dreaming, and active-memory sessions from all injection.
 2. Append fixed skill-discovery guidance and enriched working-set skills to every remaining agent turn.
 3. Gate dynamic routing by configured agent, chat scope, external-user turn, and interactive-session status.
-4. Route via the 3-stage pipeline:
-   - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{routing.intents.keyword.directRouteMinScore}$ (default `0.85`) routes directly as `qmd-keyword`, bypassing LLM classification.
-   - **Step 2 (QMD Hybrid Example/Keyword Search)**: If Step 1 does not direct-route, performs hybrid semantic/BM25 retrieval over intent examples and keywords with conversation context expansion. A top score $\ge \text{routing.intents.hybrid.directRouteMinScore}$ (default `0.9`) with candidate margin $\ge \text{routing.intents.hybrid.directRouteMinMargin}$ (default `0.08`) routes directly as `qmd-hybrid`, bypassing LLM classification.
-   - **Step 3 (Fallback Intent Classifier)**: If neither direct route matches, evaluates candidate intents meeting $\ge \text{routing.intents.hybrid.minCandidateScore}$ (default `0.4`). If no intent meets the candidate score, no intent is forced or re-evaluated (`decision: "none"`), bypassing intent classification and reranking. If candidate intents exist, invokes a single LLM intent classifier call with prompt context (`llm-classifier`).
-5. Inject the selected intent, its one guidance sentence, intent-matched skills, and intent-matched experience metadata; then record the completed turn and run configured background work.
+4. Run intent matching and input skill discovery in parallel. Intent matching follows a 3-stage pipeline:
+   - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{routing.intents.keyword.directRouteMinScore}$ (default `0.85`) routes directly as `qmd-keyword`.
+   - **Step 2 (QMD Hybrid Example/Keyword Search)**: If Step 1 does not direct-route, performs hybrid semantic/BM25 retrieval over intent examples and keywords with conversation context expansion. A top score $\ge \text{routing.intents.hybrid.directRouteMinScore}$ (default `0.9`) with candidate margin $\ge \text{routing.intents.hybrid.directRouteMinMargin}$ (default `0.08`) routes directly as `qmd-hybrid`.
+   - **Step 3 (Unified fallback selection)**: If neither direct route matches, projects intents meeting $\ge \text{routing.intents.hybrid.minCandidateScore}$ (default `0.4`). If no intent meets that score, the route may remain intent-less (`decision: "none"`); it does not force a full-catalog fallback. When a candidate union exists, one constrained LLM call selects the optional intent and/or skills.
+5. In parallel, deterministic name matching and direct `SkillQmdIndex` retrieval build a visibility-filtered input-skill pool. Name matching strips URLs before tokenization, accepts only bounded typo matches, and uses the latest request; direct retrieval searches skill metadata, bodies, and references with bounded conversation expansion.
+6. The unified selector can choose only canonical skills from the union of intent-derived and input-derived candidates. A direct intent with an empty candidate pool needs no LLM call; `maxInjectedSkills: 0` short-circuits skill discovery; a failed or malformed selector result injects no heuristic fallback skills.
+7. Render the optional selected intent and a single optional `<matched_skills>` block, then record the completed turn and schedule configured background work.
 
 QMD intent snapshots and their SQLite database live under `qmd/intents/`; searchable `examples/*.md` and `keywords/*.md` contain plain text, while `<intent>-<n>.md.identity.yml` sidecars hold identity metadata and are ignored by QMD collections. The `intent-routing.sqlite` database and `intent-routing.json` metadata stay in the same snapshot directory. They refresh in the background, so a cold or unhealthy index fails open to the classifier.
 
-Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains the selected intent, guidance, intent-matched skills with their nested experience metadata, and any separate advisory input-matched skills selected from direct user-input evidence. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
+Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains an optional intent and one unified set of selected skills with their nested experience metadata; it never emits separate intent- and input-skill wrappers. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
 
 #### Context injection format
 
@@ -583,17 +585,17 @@ On startup, the plugin initializes its runtime data root, loads the runtime
 intent catalog, and seeds bundled example intents only when the runtime catalog
 has no Markdown files. Existing runtime intents are not overwritten.
 
-Routing is fail-open. Eligible turns evaluate the 3-stage pipeline: Step 1 checks
-QMD BM25 lexical matches against indexed intent `keywords`; Step 2 performs QMD
-hybrid search over intent `examples` and `keywords` with conversation expansion; Step 3
-projects candidate intents and invokes a single LLM intent classifier call only
-when no direct QMD match reaches the threshold. Every eligible normal agent still receives
-fixed skill-discovery context even when dynamic intent routing is skipped or fails.
+Routing is fail-open. Eligible turns run the 3-stage QMD intent pipeline alongside
+name matching and direct managed-QMD skill discovery. When candidate evidence needs a
+model decision, a single unified routing call selects an optional intent plus zero to
+four candidate skills; direct intent hits with no skill candidates require no model call.
+Every eligible normal agent still receives fixed skill-discovery context even when
+dynamic routing is skipped or fails.
 
 That fixed context is rendered from plugin-owned `skills.workingSet` plus workspace
-skills. Dynamic context records the selected `intentMatchedSkills` in the session and
-stats state; it does not reuse OpenClaw's native agent skill lists or emit a separate
-skill metadata wrapper.
+skills. Dynamic context records the final selected `intentMatchedSkills` in session and
+stats state; it does not reuse OpenClaw's native agent skill lists, emit a separate
+skill metadata wrapper, or fall back to an unvetted heuristic skill list.
 
 Intent Review is disabled by default; when enabled, its runtime intent edits are
 serialized so concurrent reviews cannot race on the runtime catalog.
