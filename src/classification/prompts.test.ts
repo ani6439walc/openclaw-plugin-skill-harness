@@ -966,8 +966,16 @@ describe("XML boundary hardening", () => {
 
 describe("buildUnifiedRoutingPrompt", () => {
   const candidateSkills = [
-    { name: "github", description: "Interact with GitHub APIs." },
-    { name: "terminal", description: "Run terminal commands." },
+    {
+      name: "github",
+      location: "/skills/github",
+      description: "Interact with GitHub APIs.",
+    },
+    {
+      name: "terminal",
+      location: "/skills/terminal",
+      description: "Run terminal commands.",
+    },
   ];
 
   it("builds prompt in skills-only mode when resolvedIntent is undefined and candidateIntents is empty/undefined", () => {

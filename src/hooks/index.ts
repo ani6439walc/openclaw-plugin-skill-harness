@@ -1239,6 +1239,17 @@ export function createHookHandlers(deps: HookDeps) {
       references: 0,
     };
 
+    if (policy.maxInjectedSkills === 0) {
+      return {
+        visibleSkills: [],
+        nameCandidates: [],
+        retrievalCandidates: [],
+        retrievalSemanticScores: [],
+        retrievalCollections,
+        startedAtMs,
+      };
+    }
+
     let visibleSkills: AvailableSkill[] = [];
     try {
       visibleSkills = await listAvailableSkills({
