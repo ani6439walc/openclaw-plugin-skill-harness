@@ -6,7 +6,7 @@ import matter from "gray-matter";
 import { logger } from "../../api.js";
 import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
-import { normalizeEmbeddingModel } from "./provider-resolver.js";
+import { isJevModel, normalizeEmbeddingModel } from "./provider-resolver.js";
 import { boundQmdQuery } from "./query-budget.js";
 
 const EXAMPLES_COLLECTION = "intent-examples";
@@ -88,6 +88,7 @@ function hash(value: string): string {
 }
 
 function buildStoreModels(config: ResolvedQmdConfig) {
+  const isJev = isJevModel(config.expansion.model);
   return {
     embed_api_url: config.embedding.baseUrl,
     embed_api_model: config.embedding.model,
@@ -101,6 +102,15 @@ function buildStoreModels(config: ResolvedQmdConfig) {
     generate_api_model: config.expansion.model,
     ...(config.expansion.apiKey
       ? { generate_api_key: config.expansion.apiKey }
+      : {}),
+    ...(isJev && config.expansion.baseUrl
+      ? { jev_base_url: config.expansion.baseUrl }
+      : {}),
+    ...(isJev && config.expansion.model
+      ? { jev_api_model: config.expansion.model }
+      : {}),
+    ...(isJev && config.expansion.apiKey
+      ? { jev_api_key: config.expansion.apiKey }
       : {}),
   };
 }

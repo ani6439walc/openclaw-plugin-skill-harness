@@ -166,6 +166,41 @@ export function resolveQmdEndpoint(
   const explicitBaseUrl = rawEndpoint.baseUrl?.trim();
   let resolvedBaseUrl = explicitBaseUrl || "";
 
+  // 1. Check model-specific baseUrl under providerEntry.models first
+  if (!resolvedBaseUrl && providerEntry && providerEntry.models) {
+    if (Array.isArray(providerEntry.models)) {
+      const matched = providerEntry.models.find(
+        (m: unknown) =>
+          typeof m === "object" &&
+          m !== null &&
+          ((m as { id?: string }).id === modelId ||
+            (m as { id?: string }).id === rawModel ||
+            (m as { name?: string }).name === modelId ||
+            (m as { name?: string }).name === rawModel) &&
+          typeof (m as { baseUrl?: string }).baseUrl === "string" &&
+          (m as { baseUrl?: string }).baseUrl!.trim(),
+      );
+      if (matched) {
+        resolvedBaseUrl = (matched as { baseUrl: string }).baseUrl.trim();
+      }
+    } else if (
+      typeof providerEntry.models === "object" &&
+      providerEntry.models !== null
+    ) {
+      const modelsObj = providerEntry.models as Record<string, unknown>;
+      const matchVal = modelsObj[modelId] ?? modelsObj[rawModel];
+      if (
+        typeof matchVal === "object" &&
+        matchVal !== null &&
+        typeof (matchVal as { baseUrl?: string }).baseUrl === "string" &&
+        (matchVal as { baseUrl?: string }).baseUrl!.trim()
+      ) {
+        resolvedBaseUrl = (matchVal as { baseUrl: string }).baseUrl.trim();
+      }
+    }
+  }
+
+  // 2. Fall back to providerEntry.baseUrl
   if (
     !resolvedBaseUrl &&
     providerEntry &&
@@ -183,6 +218,44 @@ export function resolveQmdEndpoint(
 
   const explicitApiKey = rawEndpoint.apiKey?.trim();
   let resolvedApiKey: string | undefined = explicitApiKey || undefined;
+
+  // 1. Check model-specific apiKey under providerEntry.models first
+  if (!resolvedApiKey && providerEntry && providerEntry.models) {
+    if (Array.isArray(providerEntry.models)) {
+      const matched = providerEntry.models.find(
+        (m: unknown) =>
+          typeof m === "object" &&
+          m !== null &&
+          ((m as { id?: string }).id === modelId ||
+            (m as { id?: string }).id === rawModel ||
+            (m as { name?: string }).name === modelId ||
+            (m as { name?: string }).name === rawModel) &&
+          (m as { apiKey?: unknown }).apiKey !== undefined,
+      );
+      if (matched) {
+        resolvedApiKey = extractApiKeyFromProvider(
+          (matched as { apiKey?: unknown }).apiKey,
+          env,
+        );
+      }
+    } else if (
+      typeof providerEntry.models === "object" &&
+      providerEntry.models !== null
+    ) {
+      const modelsObj = providerEntry.models as Record<string, unknown>;
+      const matchVal = modelsObj[modelId] ?? modelsObj[rawModel];
+      if (
+        typeof matchVal === "object" &&
+        matchVal !== null &&
+        (matchVal as { apiKey?: unknown }).apiKey !== undefined
+      ) {
+        resolvedApiKey = extractApiKeyFromProvider(
+          (matchVal as { apiKey?: unknown }).apiKey,
+          env,
+        );
+      }
+    }
+  }
 
   if (!resolvedApiKey && providerEntry) {
     resolvedApiKey = extractApiKeyFromProvider(providerEntry.apiKey, env);
@@ -220,6 +293,33 @@ export function normalizeEmbeddingModel(rawModel?: string): string {
   const slashIndex = trimmed.indexOf("/");
   if (slashIndex > 0) {
     return trimmed.slice(slashIndex + 1).trim();
+  }
+  return trimmed;
+}
+
+/**
+ * Checks whether a given model string references TypeSafe Jev.
+ */
+export function isJevModel(model?: string): boolean {
+  if (!model) return false;
+  const lower = model.toLowerCase();
+  return lower.includes("jev") || lower.startsWith("typesafe/");
+}
+
+/**
+ * Normalizes a base URL for TypeSafeClient (@typesafe-ai/sdk).
+ * The SDK appends '/v1/systemone' to baseURL. If the provided URL ends with '/v1',
+ * we strip it (e.g. 'https://openrouter.ai/api/v1' -> 'https://openrouter.ai/api').
+ */
+export function normalizeTypeSafeBaseUrl(baseUrl?: string): string | undefined {
+  if (!baseUrl) return undefined;
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  if (!trimmed) return undefined;
+  if (trimmed.endsWith("/v1/systemone")) {
+    return trimmed.slice(0, -"/v1/systemone".length);
+  }
+  if (trimmed.endsWith("/v1")) {
+    return trimmed.slice(0, -"/v1".length);
   }
   return trimmed;
 }

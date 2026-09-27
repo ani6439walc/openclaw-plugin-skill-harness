@@ -298,6 +298,62 @@ describe("resolveQmdEndpoint", () => {
 
     expect(result.dimension).toBe(1536);
   });
+
+  it("prioritizes model-specific baseUrl from provider models array over provider baseUrl", () => {
+    const mockConfig: OpenClawConfig = {
+      models: {
+        providers: {
+          openrouter: {
+            baseUrl: "https://openrouter.ai/api/v1",
+            apiKey: "or-general-key",
+            models: [
+              {
+                id: "typesafe/jev-latest",
+                baseUrl: "https://openrouter.ai/api",
+                apiKey: "or-jev-key",
+              },
+            ],
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    const result = resolveQmdEndpoint(
+      { model: "openrouter/typesafe/jev-latest" },
+      { openClawConfig: mockConfig },
+    );
+
+    expect(result.baseUrl).toBe("https://openrouter.ai/api");
+    expect(result.model).toBe("typesafe/jev-latest");
+    expect(result.apiKey).toBe("or-jev-key");
+  });
+
+  it("prioritizes model-specific baseUrl from provider models object map over provider baseUrl", () => {
+    const mockConfig: OpenClawConfig = {
+      models: {
+        providers: {
+          openrouter: {
+            baseUrl: "https://openrouter.ai/api/v1",
+            apiKey: "or-general-key",
+            models: {
+              "typesafe/jev-1.13": {
+                baseUrl: "https://custom.openrouter.proxy/api",
+              },
+            },
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    const result = resolveQmdEndpoint(
+      { model: "openrouter/typesafe/jev-1.13" },
+      { openClawConfig: mockConfig },
+    );
+
+    expect(result.baseUrl).toBe("https://custom.openrouter.proxy/api");
+    expect(result.model).toBe("typesafe/jev-1.13");
+    expect(result.apiKey).toBe("or-general-key");
+  });
 });
 
 describe("normalizeEmbeddingModel", () => {

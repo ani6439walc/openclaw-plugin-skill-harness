@@ -12,7 +12,7 @@ import type {
   ResolvedSkillHarnessPluginConfig,
   ResolvedSkillsConfig,
 } from "../types.js";
-import { normalizeEmbeddingModel } from "./provider-resolver.js";
+import { isJevModel, normalizeEmbeddingModel } from "./provider-resolver.js";
 import { weightedReciprocalRankFusion } from "./rrf.js";
 
 const META_COLLECTION = "skill-meta";
@@ -983,6 +983,15 @@ export function createSkillQmdIndex(params: {
                   generate_api_model: qmd.expansion.model,
                   ...(qmd.expansion.apiKey
                     ? { generate_api_key: qmd.expansion.apiKey }
+                    : {}),
+                  ...(isJevModel(qmd.expansion.model) && qmd.expansion.baseUrl
+                    ? { jev_base_url: qmd.expansion.baseUrl }
+                    : {}),
+                  ...(isJevModel(qmd.expansion.model) && qmd.expansion.model
+                    ? { jev_api_model: qmd.expansion.model }
+                    : {}),
+                  ...(isJevModel(qmd.expansion.model) && qmd.expansion.apiKey
+                    ? { jev_api_key: qmd.expansion.apiKey }
                     : {}),
                 },
               },

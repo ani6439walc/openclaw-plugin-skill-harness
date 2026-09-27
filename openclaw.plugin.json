@@ -69,25 +69,6 @@
               }
             }
           },
-          "jev": {
-            "type": "object",
-            "additionalProperties": false,
-            "description": "Optional TypeSafe Jev provider for intent classification and candidate reranking.",
-            "properties": {
-              "baseUrl": {
-                "type": "string",
-                "description": "Optional base URL for TypeSafe Jev. If omitted, resolved from the OpenClaw provider prefix in model or TYPESAFE_BASE_URL."
-              },
-              "model": {
-                "type": "string",
-                "description": "TypeSafe Jev model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/jev-1.13')."
-              },
-              "apiKey": {
-                "type": "string",
-                "description": "Optional API key for TypeSafe Jev. If omitted, resolved from the OpenClaw provider, TYPESAFE_API_KEY, or environment."
-              }
-            }
-          },
           "indexRefreshIntervalSeconds": {
             "type": "integer",
             "minimum": 0,
