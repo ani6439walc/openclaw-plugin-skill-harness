@@ -128,6 +128,24 @@ async function waitForReady(
 }
 
 describe("createIntentQmdIndex", () => {
+  it("does not accept new builds after close", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-closed-intents-"),
+    );
+    roots.push(root);
+    const createStore = vi.fn(async () => createStoreDouble({}));
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+    });
+    await index.close();
+    index.schedule(catalog);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(createStore).not.toHaveBeenCalled();
+    expect(index.getStatus()).toBe("idle");
+  });
+
   it("reopens a matching completed index after process restart", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
     roots.push(root);
@@ -890,42 +908,47 @@ describe("createIntentQmdIndex", () => {
     await index.close();
   });
 
-  it("does not re-queue or rebuild when scheduled repeatedly while building the same fingerprint", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
-    roots.push(root);
-    let releaseFirstUpdate: (() => void) | undefined;
-    const firstUpdate = new Promise<void>((resolve) => {
-      releaseFirstUpdate = resolve;
-    });
-    const createStore = vi
-      .fn()
-      .mockResolvedValue(
-        createStoreDouble({ update: vi.fn().mockReturnValue(firstUpdate) }),
+  it.each([0, 750])(
+    "does not re-queue or rebuild when scheduled repeatedly while building the same fingerprint (store delay %i ms)",
+    async (storeDelayMs) => {
+      const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+      roots.push(root);
+      const updateStarted = Promise.withResolvers<void>();
+      const firstUpdate = Promise.withResolvers<void>();
+      const createStore = vi.fn().mockResolvedValue(
+        createStoreDouble({
+          update: vi.fn(() => {
+            updateStarted.resolve();
+            return firstUpdate.promise;
+          }),
+        }),
       );
-    const index = createIntentQmdIndex({
-      dataRoot: root,
-      config: () => qmdConfig,
-      createStore,
-    });
+      const index = createIntentQmdIndex({
+        dataRoot: root,
+        config: () => qmdConfig,
+        createStore: async () => {
+          if (storeDelayMs > 0)
+            await new Promise((resolve) => setTimeout(resolve, storeDelayMs));
+          return createStore();
+        },
+      });
 
-    index.schedule(catalog);
-    await waitFor(
-      () => createStore.mock.calls.length === 1,
-      "initial QMD store was not created",
-    );
+      index.schedule(catalog);
+      await updateStarted.promise;
 
-    // Repeated schedule calls with identical catalog while building
-    index.schedule(catalog);
-    index.schedule(catalog);
+      // Repeated schedule calls with identical catalog while building
+      index.schedule(catalog);
+      index.schedule(catalog);
 
-    releaseFirstUpdate?.();
-    await waitForReady(index);
+      firstUpdate.resolve();
+      await waitForReady(index);
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(createStore).toHaveBeenCalledTimes(1);
-    await index.close();
-  });
+      expect(createStore).toHaveBeenCalledTimes(1);
+      await index.close();
+    },
+  );
 
   it("coalesces overlapping schedules into the latest catalog snapshot", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));

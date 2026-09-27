@@ -371,6 +371,7 @@ export function createIntentQmdIndex(params: {
   let store: QMDStore | undefined;
   let status: QmdIntentIndexStatus = "idle";
   let running: Promise<void> | undefined;
+  let closed = false;
   let buildingFingerprint: string | undefined;
   let failedFingerprint: string | undefined;
   let consecutiveFailures = 0;
@@ -473,6 +474,7 @@ export function createIntentQmdIndex(params: {
       const locked = await withFileLock(
         databasePath,
         async () => {
+          if (closed) return;
           const reopenedStore = await reopenCompletedStore(target.fingerprint);
           if (reopenedStore) {
             nextStore = reopenedStore;
@@ -559,7 +561,7 @@ export function createIntentQmdIndex(params: {
 
   async function runWorker(): Promise<void> {
     try {
-      while (desired) {
+      while (!closed && desired) {
         const target = desired;
         desired = undefined;
         buildingFingerprint = target.fingerprint;
@@ -585,6 +587,7 @@ export function createIntentQmdIndex(params: {
 
   return {
     schedule(intents) {
+      if (closed) return;
       const fingerprint = snapshotFingerprint(intents, params.config());
       if (
         (fingerprint === currentFingerprint ||
@@ -678,6 +681,7 @@ export function createIntentQmdIndex(params: {
     },
     getStatus: () => status,
     async close() {
+      closed = true;
       desired = undefined;
       await running;
       buildingFingerprint = undefined;

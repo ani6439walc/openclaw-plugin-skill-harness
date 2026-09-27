@@ -659,6 +659,32 @@ describe("createSkillQmdIndex", () => {
     expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
+  it("does not retry an in-flight failure or accept new work after close", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-close-"));
+    roots.push(root);
+    const embedding = Promise.withResolvers<{ errors: number }>();
+    const embed = vi.fn(() => embedding.promise);
+    const setTimer = vi.fn();
+    const store = createStoreDouble({ embed });
+    const createStore = vi.fn(async () => store);
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+      setTimer,
+    });
+    scheduleSkills(index, "main", []);
+    await vi.waitFor(() => expect(embed).toHaveBeenCalledOnce());
+    const closing = index.close();
+    embedding.resolve({ errors: 1 });
+    await closing;
+    expect(setTimer).not.toHaveBeenCalled();
+    scheduleSkills(index, "main", []);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(createStore).toHaveBeenCalledOnce();
+    expect(store.close).toHaveBeenCalledOnce();
+  });
+
   it("waits for pending fingerprint scheduling before closing", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-qmd-skills-"),

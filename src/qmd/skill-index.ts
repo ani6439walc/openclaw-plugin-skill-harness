@@ -637,6 +637,7 @@ export function createSkillQmdIndex(params: {
   clearTimer?: (timer: unknown) => void;
 }): SkillQmdIndex {
   const agents = new Map<string, AgentIndexState>();
+  let closed = false;
   const indexes = new Map<string, SharedIndexState>();
   const skillsRoot = path.join(params.dataRoot, "qmd", "skills");
   const indexesRoot = path.join(skillsRoot, "indexes");
@@ -834,6 +835,7 @@ export function createSkillQmdIndex(params: {
   }
 
   function ensureStore(state: SharedIndexState): Promise<QMDStore | undefined> {
+    if (closed) return Promise.resolve(undefined);
     if (state.store) return Promise.resolve(state.store);
     if (state.opening) return state.opening;
     const opening = (async () => {
@@ -888,7 +890,7 @@ export function createSkillQmdIndex(params: {
   }
 
   function armRetry(state: SharedIndexState): void {
-    if (state.retryTimer !== undefined) return;
+    if (closed || state.retryTimer !== undefined) return;
     const delayMs = Math.max(0, state.nextRetryAtMs - now());
     state.retryTimer = setTimer(() => {
       state.retryTimer = undefined;
@@ -942,6 +944,7 @@ export function createSkillQmdIndex(params: {
     const locked = await withFileLock(
       state.root,
       async () => {
+        if (closed) return true;
         try {
           await fs.mkdir(state.root, { recursive: true });
           const skills = mergedSkills(state);
@@ -966,9 +969,11 @@ export function createSkillQmdIndex(params: {
             state.store = store;
           }
           await store.update();
+          if (closed) return true;
           state.usable = true;
           await bindAgents(state);
           state.status = "ready";
+          if (closed) return true;
           const embedResult = await store.embed();
           const status = await store.getStatus();
           state.needsEmbedding = status.needsEmbedding;
@@ -1001,7 +1006,7 @@ export function createSkillQmdIndex(params: {
   }
 
   function startRefresh(state: SharedIndexState): void {
-    if (state.refreshing) return;
+    if (closed || state.refreshing) return;
     const signature = skillSetSignature(mergedSkills(state));
     state.refreshSignature = signature;
     const refreshing = refreshIndex(state);
@@ -1025,6 +1030,7 @@ export function createSkillQmdIndex(params: {
     );
     const scheduling = (async () => {
       await initialization;
+      if (closed) return;
       const { qmd } = config();
       const fingerprint = skillIndexFingerprint({
         sourceRoots: input.sourceRoots,
@@ -1056,10 +1062,12 @@ export function createSkillQmdIndex(params: {
 
   return {
     schedule(agentId, input) {
+      if (closed) return;
       scheduleLocked(normalizeAgentId(agentId), input);
     },
     async search({ agentId, query, limit, includeEvidence, expansionContext }) {
       await initialization;
+      if (closed) return;
       const normalizedAgentId = normalizeAgentId(agentId);
       const agent = agents.get(normalizedAgentId);
       if (!agent?.fingerprint) return;
@@ -1199,6 +1207,7 @@ export function createSkillQmdIndex(params: {
       return indexes.get(fingerprint)?.status ?? "idle";
     },
     async close() {
+      closed = true;
       await initialization;
       await Promise.all(
         [...agents.values()]
@@ -1213,6 +1222,7 @@ export function createSkillQmdIndex(params: {
       );
       await Promise.all(
         [...indexes.values()].map(async (state) => {
+          await state.opening;
           const store = state.store;
           state.store = undefined;
           if (store) await store.close().catch(() => undefined);

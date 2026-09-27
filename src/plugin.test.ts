@@ -34,7 +34,7 @@ describe("createPlugin", () => {
 
   beforeEach(() => {
     stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-state-"));
-    createHookHandlersSpy.mockClear();
+    createHookHandlersSpy.mockReset();
   });
 
   afterEach(() => {
@@ -109,6 +109,59 @@ describe("createPlugin", () => {
     expect(deps.nativeBundledSkillsDir).toBeInstanceOf(Promise);
     await expect(deps.nativeBundledSkillsDir).resolves.toBeDefined();
   });
+
+  it("uses the installation root for index identity across captured generations", async () => {
+    const sourceRoots: string[][] = [];
+    createHookHandlersSpy.mockImplementation((deps) => {
+      vi.spyOn(deps.qmdIntentIndex, "schedule").mockImplementation(() => {});
+      vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(
+        (_agent, input) => {
+          sourceRoots.push(input.sourceRoots);
+        },
+      );
+    });
+    const rootDir = path.join(stateDir, "extensions", "skill-harness");
+    for (const generation of ["capture-a", "capture-b"]) {
+      const api = createApi({
+        rootDir,
+        runtimeSource: path.join(stateDir, generation, "dist/index.js"),
+        pluginConfig: { qmd: { indexRefreshIntervalSeconds: 0 } },
+      });
+      createPlugin(api).register(api);
+    }
+    await vi.waitFor(() => expect(sourceRoots).toHaveLength(2));
+    expect(sourceRoots[0]).toContain(path.join(rootDir, "skills"));
+    expect(sourceRoots[1]).toEqual(sourceRoots[0]);
+    createHookHandlersSpy.mockReset();
+  });
+
+  it("stops polling and closes both indexes when the generation is disposed", async () => {
+    vi.useFakeTimers();
+    const onDispose = vi.fn();
+    const api = createApi({ lifecycle: { onDispose } });
+    const load = vi.spyOn(IntentCatalog.prototype, "load").mockReturnValue(0);
+    createPlugin(api).register(api);
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+    const closeSkills = vi.spyOn(deps.qmdSkillIndex, "close");
+    const closeIntents = vi.spyOn(deps.qmdIntentIndex, "close");
+    expect(onDispose).toHaveBeenCalledOnce();
+    await onDispose.mock.calls[0][0]();
+    const calls = load.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(load).toHaveBeenCalledTimes(calls);
+    expect(closeSkills).toHaveBeenCalledOnce();
+    expect(closeIntents).toHaveBeenCalledOnce();
+  });
+
+  it.each(["cli-metadata", "discovery", "tool-discovery"])(
+    "does not start background indexing during %s registration",
+    (registrationMode) => {
+      const load = vi.spyOn(IntentCatalog.prototype, "load").mockReturnValue(0);
+      const api = createApi({ registrationMode });
+      createPlugin(api).register(api);
+      expect(load).not.toHaveBeenCalled();
+    },
+  );
 
   it("registers the session_end hook", () => {
     const api = createApi();

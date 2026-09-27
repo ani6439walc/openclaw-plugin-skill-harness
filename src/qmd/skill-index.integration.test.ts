@@ -355,8 +355,9 @@ describe("createSkillQmdIndex real QMD integration", () => {
           );
         const embed = store.embed.bind(store);
         store.embed = async (embedOptions) => {
+          const result = await embed(embedOptions);
           restartEmbeds += 1;
-          return embed(embedOptions);
+          return result;
         };
         return store;
       },
@@ -374,6 +375,13 @@ describe("createSkillQmdIndex real QMD integration", () => {
           input !== "betastableterm" && input.includes("integration marker"),
       ),
     ).toHaveLength(documentInputsBeforeRestart);
+    const requestsBeforeRefresh = fixture.inputs.length;
+    restarted.schedule("main", { skills: [alpha, beta], sourceRoots });
+    await waitUntil(
+      () => restartEmbeds === 1,
+      "restart refresh did not finish",
+    );
+    expect(fixture.inputs).toHaveLength(requestsBeforeRefresh);
     await restarted.close();
   }, 30_000);
 

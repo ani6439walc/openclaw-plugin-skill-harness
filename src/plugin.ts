@@ -198,6 +198,15 @@ export function createPlugin(
       initializePluginDataRoot({ dataRoot });
 
       const bundledSkillsDir = path.join(defaultPackageRoot, "skills");
+      // Captured generations have different asset paths but share one index identity.
+      const bundledSkillsIdentityDir = path.join(
+        api.rootDir ?? defaultPackageRoot,
+        "skills",
+      );
+      const ownsBackgroundWork =
+        api.registrationMode === undefined || api.registrationMode === "full";
+      let disposed = false;
+      let refreshTimer: ReturnType<typeof setTimeout> | undefined;
       const nativeBundledSkillsDir = resolveOpenClawBundledSkillsDir();
       const catalog = IntentCatalog.create(dataRoot);
       const experienceCatalog = new SkillExperienceCatalog(dataRoot);
@@ -242,23 +251,26 @@ export function createPlugin(
       };
 
       const scheduleSkillSearchIndex = (agentId: string) => {
+        if (disposed || !ownsBackgroundWork) return;
         const normalizedAgentId = canonicalIdentity(agentId);
         if (!normalizedAgentId || normalizedAgentId === "defaults") return;
         knownAgentIds.add(normalizedAgentId);
         void nativeBundledSkillsDir
           .then(async (resolvedNativeBundledSkillsDir) => {
+            if (disposed) return;
             const skills = await listAvailableSkills({
               api,
               agentId: normalizedAgentId,
               nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
               sharedRoots: config.skills.sharedRoots,
             });
+            if (disposed) return;
             qmdSkillIndex.schedule(normalizedAgentId, {
               skills,
               sourceRoots: resolveSkillRoots({
                 api,
                 agentId: normalizedAgentId,
-                bundledSkillsDir,
+                bundledSkillsDir: bundledSkillsIdentityDir,
                 nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
                 sharedRoots: config.skills.sharedRoots,
               }).map((root) => root.path),
@@ -273,6 +285,7 @@ export function createPlugin(
       };
 
       const refreshQmdIndexes = () => {
+        if (disposed || !ownsBackgroundWork) return;
         refreshLiveConfigFromRuntime();
         refreshRuntimeIntents();
         qmdIntentIndex.schedule(catalog.get());
@@ -282,27 +295,27 @@ export function createPlugin(
       };
 
       const scheduleQmdIndexRefresh = () => {
+        if (disposed || !ownsBackgroundWork) return;
         const intervalSeconds = config.qmd.indexRefreshIntervalSeconds;
         if (intervalSeconds <= 0) return;
-        const timer = setTimeout(() => {
+        refreshTimer = setTimeout(() => {
           refreshQmdIndexes();
           scheduleQmdIndexRefresh();
         }, intervalSeconds * 1_000);
-        timer.unref();
+        refreshTimer.unref();
       };
 
       const reviewScheduler = createIntentReviewScheduler();
 
-      const registerLifecycle =
-        (api as any).lifecycle?.registerRuntimeLifecycle ??
-        (api as any).registerRuntimeLifecycle;
-      if (typeof registerLifecycle === "function") {
-        registerLifecycle.call((api as any).lifecycle ?? api, {
-          id: "skill-harness-review-scheduler",
-          dispose: () => reviewScheduler.dispose(),
-          cleanup: () => reviewScheduler.dispose(),
-        });
-      }
+      api.lifecycle?.onDispose?.(async () => {
+        disposed = true;
+        if (refreshTimer !== undefined) clearTimeout(refreshTimer);
+        await Promise.all([
+          reviewScheduler.dispose(),
+          qmdSkillIndex.close(),
+          qmdIntentIndex.close(),
+        ]);
+      });
 
       const deps: HookDeps = {
         api: runtimeConfigApi,
@@ -351,7 +364,7 @@ export function createPlugin(
       });
 
       if (
-        canAccessRuntime &&
+        ownsBackgroundWork &&
         (config.skills.suppressNativeSkillPrompt ||
           config.skills.suppressNativeExtraDirs)
       ) {
