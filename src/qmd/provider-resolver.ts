@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../../api.js";
+import type { ResolvedQmdConfig } from "../types.js";
 
 export interface RawQmdEndpointInput {
   baseUrl?: string;
@@ -303,7 +304,13 @@ export function normalizeEmbeddingModel(rawModel?: string): string {
 export function isJevModel(model?: string): boolean {
   if (!model) return false;
   const lower = model.toLowerCase();
-  return lower.includes("jev") || lower.startsWith("typesafe/");
+  return (
+    lower.includes("/jev") ||
+    lower.startsWith("jev-") ||
+    lower.startsWith("jev/") ||
+    lower === "jev" ||
+    lower.startsWith("typesafe/")
+  );
 }
 
 /**
@@ -322,4 +329,33 @@ export function normalizeTypeSafeBaseUrl(baseUrl?: string): string | undefined {
     return trimmed.slice(0, -"/v1".length);
   }
   return trimmed;
+}
+
+/**
+ * Builds the C++ QMD store models configuration, resolving Jev endpoints
+ * from config.jev (even if model is omitted) or fallback to expansion.
+ */
+export function buildStoreModels(config: ResolvedQmdConfig) {
+  const jevEndpoint =
+    config.jev ??
+    (isJevModel(config.expansion.model) ? config.expansion : undefined);
+
+  return {
+    embed_api_url: config.embedding.baseUrl,
+    embed_api_model: config.embedding.model,
+    ...(config.embedding.apiKey
+      ? { embed_api_key: config.embedding.apiKey }
+      : {}),
+    ...(config.embedding.dimension
+      ? { embed_dimension: config.embedding.dimension }
+      : {}),
+    generate_api_url: config.expansion.baseUrl,
+    generate_api_model: config.expansion.model,
+    ...(config.expansion.apiKey
+      ? { generate_api_key: config.expansion.apiKey }
+      : {}),
+    ...(jevEndpoint?.baseUrl ? { jev_base_url: jevEndpoint.baseUrl } : {}),
+    ...(jevEndpoint?.model ? { jev_api_model: jevEndpoint.model } : {}),
+    ...(jevEndpoint?.apiKey ? { jev_api_key: jevEndpoint.apiKey } : {}),
+  };
 }

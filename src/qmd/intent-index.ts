@@ -6,7 +6,10 @@ import matter from "gray-matter";
 import { logger } from "../../api.js";
 import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { IntentCatalogEntry, ResolvedQmdConfig } from "../types.js";
-import { isJevModel, normalizeEmbeddingModel } from "./provider-resolver.js";
+import {
+  buildStoreModels,
+  normalizeEmbeddingModel,
+} from "./provider-resolver.js";
 import { boundQmdQuery } from "./query-budget.js";
 
 const EXAMPLES_COLLECTION = "intent-examples";
@@ -85,33 +88,6 @@ export interface IntentQmdIndex {
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function buildStoreModels(config: ResolvedQmdConfig) {
-  const jevEndpoint = config.jev?.model
-    ? config.jev
-    : isJevModel(config.expansion.model)
-      ? config.expansion
-      : undefined;
-
-  return {
-    embed_api_url: config.embedding.baseUrl,
-    embed_api_model: config.embedding.model,
-    ...(config.embedding.apiKey
-      ? { embed_api_key: config.embedding.apiKey }
-      : {}),
-    ...(config.embedding.dimension
-      ? { embed_dimension: config.embedding.dimension }
-      : {}),
-    generate_api_url: config.expansion.baseUrl,
-    generate_api_model: config.expansion.model,
-    ...(config.expansion.apiKey
-      ? { generate_api_key: config.expansion.apiKey }
-      : {}),
-    ...(jevEndpoint?.baseUrl ? { jev_base_url: jevEndpoint.baseUrl } : {}),
-    ...(jevEndpoint?.model ? { jev_api_model: jevEndpoint.model } : {}),
-    ...(jevEndpoint?.apiKey ? { jev_api_key: jevEndpoint.apiKey } : {}),
-  };
 }
 
 function snapshotFingerprint(

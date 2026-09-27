@@ -567,4 +567,43 @@ describe("runJevUnifiedRouting", () => {
       expect(res).toBeUndefined();
     }
   });
+
+  it("respects plugin-level qmd.jev overrides (e.g. baseUrl, apiKey, model)", async () => {
+    const mockSystemOne = vi.fn().mockResolvedValue({
+      model: "typesafe/jev-custom",
+      answers: {
+        intent: {
+          type: "choice",
+          choice: "code-review",
+          confidence: 0.9,
+        },
+        "skill_git-tools": { type: "noul", noul: 0.8 },
+        "skill_markdown-formatter": { type: "noul", noul: 0.2 },
+      },
+    });
+
+    const config = resolveConfig({
+      qmd: {
+        jev: {
+          baseUrl: "https://custom-proxy.internal/v1",
+          apiKey: "custom-proxy-key",
+          model: "typesafe/jev-custom",
+        },
+      },
+    });
+
+    const result = await runJevUnifiedRouting({
+      api: dummyApi,
+      config,
+      agentId: "main",
+      latest: "review code",
+      modelRef: { provider: "typesafe", model: "jev-latest" },
+      candidateIntents,
+      candidateSkills,
+      client: { systemOne: mockSystemOne } as unknown as TypeSafeClient,
+    });
+
+    expect(result).toBeDefined();
+    expect(result?.intent).toBe("code-review");
+  });
 });

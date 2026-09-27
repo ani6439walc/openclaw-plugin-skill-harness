@@ -32,17 +32,26 @@ export async function runJevUnifiedRouting(
   params: JevUnifiedRoutingParams,
 ): Promise<RoutingLlmResult | undefined> {
   try {
-    const rawRef = `${params.modelRef.provider}/${params.modelRef.model}`;
+    const pluginJev = params.config.qmd.jev;
+    const rawRef =
+      pluginJev?.model ||
+      `${params.modelRef.provider}/${params.modelRef.model}`;
     const endpoint = resolveQmdEndpoint(
-      { model: rawRef },
+      {
+        model: rawRef,
+        baseUrl: pluginJev?.baseUrl,
+        apiKey: pluginJev?.apiKey,
+      },
       { openClawConfig: params.api.config },
     );
 
-    const baseURL = normalizeTypeSafeBaseUrl(endpoint.baseUrl);
-    const apiKey = endpoint.apiKey;
+    const baseURL = normalizeTypeSafeBaseUrl(
+      pluginJev?.baseUrl || endpoint.baseUrl,
+    );
+    const apiKey = pluginJev?.apiKey || endpoint.apiKey;
     const timeoutMs =
       params.config.routing.timeoutMs ?? params.config.qmd.timeoutMs;
-    const model = endpoint.model || params.modelRef.model;
+    const model = endpoint.model || rawRef;
 
     const client =
       params.client ??
