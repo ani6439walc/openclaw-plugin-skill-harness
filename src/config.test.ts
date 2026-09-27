@@ -529,6 +529,50 @@ describe("resolveConfig", () => {
       expect(result.qmd.embedding.dimension).toBe(768);
     });
 
+    it("resolves optional qmd.jev endpoint and normalizes baseUrl while preserving expansion LLM", () => {
+      const mockConfig = {
+        models: {
+          providers: {
+            openrouter: {
+              baseUrl: "https://openrouter.ai/api/v1",
+              apiKey: "or-key",
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      const result = resolveConfig(
+        {
+          qmd: {
+            embedding: {
+              baseUrl: "https://example.com/v1",
+              model: "embed-model",
+            },
+            expansion: {
+              baseUrl: "https://example.com/v1",
+              model: "gemini-flash",
+              apiKey: "gemini-key",
+            },
+            jev: {
+              model: "openrouter/typesafe/jev-latest",
+            },
+          },
+        },
+        { openClawConfig: mockConfig },
+      );
+
+      expect(result.qmd.expansion).toEqual({
+        baseUrl: "https://example.com/v1",
+        model: "gemini-flash",
+        apiKey: "gemini-key",
+      });
+      expect(result.qmd.jev).toEqual({
+        baseUrl: "https://openrouter.ai/api",
+        model: "typesafe/jev-latest",
+        apiKey: "or-key",
+      });
+    });
+
     it("resolves default skills.search weights and index refresh interval", () => {
       const manifest = JSON.parse(
         readFileSync(

@@ -137,6 +137,7 @@ export type ResolvedQmdConfig = {
     Omit<QmdEmbeddingConfig, "baseUrl" | "model" | "dimension">;
   expansion: Required<Pick<QmdEndpointConfig, "baseUrl" | "model">> &
     Omit<QmdEndpointConfig, "baseUrl" | "model">;
+  jev?: QmdEndpointConfig;
 };
 
 export type ResolvedSkillHarnessPluginConfig = {
