@@ -2,6 +2,7 @@ import { choice, noul, TypeSafeClient } from "@typesafe-ai/sdk";
 import type { ChoiceCriteria, EntryType } from "@typesafe-ai/sdk";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
+import { canonicalIdentity } from "../normalize.js";
 import {
   normalizeTypeSafeBaseUrl,
   resolveQmdEndpoint,
@@ -39,7 +40,8 @@ export async function runJevUnifiedRouting(
 
     const baseURL = normalizeTypeSafeBaseUrl(endpoint.baseUrl);
     const apiKey = endpoint.apiKey;
-    const timeoutMs = params.config.routing.timeoutMs;
+    const timeoutMs =
+      params.config.routing.timeoutMs ?? params.config.qmd.timeoutMs;
     const model = endpoint.model || params.modelRef.model;
 
     const client =
@@ -153,42 +155,110 @@ export async function runJevUnifiedRouting(
       questions,
     });
 
-    let selectedIntent: string | undefined = params.resolvedIntent?.id;
-    let confidence = params.resolvedIntent ? 1.0 : 0.85;
+    if (
+      !response ||
+      typeof response !== "object" ||
+      !response.answers ||
+      typeof response.answers !== "object"
+    ) {
+      logger.warn("Jev unified routing returned invalid response structure", {
+        response,
+      });
+      return undefined;
+    }
 
-    if (!params.resolvedIntent) {
-      const intentAns = (response.answers as Record<string, any>)?.intent;
+    const answers = response.answers as Record<string, unknown>;
+
+    let selectedIntent: string | undefined = params.resolvedIntent?.id;
+    let confidence = params.resolvedIntent ? 1.0 : 1.0;
+
+    // Validate Intent answer if candidate intents were queried
+    if (
+      !params.resolvedIntent &&
+      params.candidateIntents &&
+      params.candidateIntents.length > 0
+    ) {
+      const intentAns = answers.intent as
+        { type?: unknown; choice?: unknown; confidence?: unknown } | undefined;
+
       if (
-        intentAns &&
-        intentAns.type === "choice" &&
-        intentAns.choice &&
-        intentAns.choice !== "none"
+        !intentAns ||
+        typeof intentAns !== "object" ||
+        intentAns.type !== "choice"
       ) {
-        selectedIntent = String(intentAns.choice);
-        confidence =
-          typeof intentAns.confidence === "number"
-            ? intentAns.confidence
-            : 0.85;
-      } else {
+        logger.warn("Jev unified routing missing or malformed intent answer", {
+          intentAns,
+        });
+        return undefined;
+      }
+
+      if (
+        typeof intentAns.confidence !== "number" ||
+        !Number.isFinite(intentAns.confidence) ||
+        intentAns.confidence < 0 ||
+        intentAns.confidence > 1
+      ) {
+        logger.warn("Jev unified routing invalid intent confidence", {
+          confidence: intentAns.confidence,
+        });
+        return undefined;
+      }
+
+      confidence = intentAns.confidence;
+
+      if (intentAns.choice === "none" || intentAns.choice === null) {
         selectedIntent = undefined;
-        confidence =
-          typeof intentAns?.confidence === "number"
-            ? intentAns.confidence
-            : 0.5;
+      } else if (typeof intentAns.choice === "string") {
+        const choiceCanonical = canonicalIdentity(intentAns.choice);
+        const matchedIntent = params.candidateIntents.find(
+          (c) => canonicalIdentity(c.id) === choiceCanonical,
+        );
+        if (!matchedIntent) {
+          logger.warn(
+            "Jev unified routing returned non-candidate intent choice",
+            {
+              choice: intentAns.choice,
+            },
+          );
+          return undefined;
+        }
+        selectedIntent = matchedIntent.id;
+      } else {
+        logger.warn("Jev unified routing returned invalid intent choice type", {
+          choice: intentAns.choice,
+        });
+        return undefined;
       }
     }
 
-    const candidateSkillNames = new Set(
-      (params.candidateSkills ?? []).map((s) => s.name),
+    // Validate and collect Skill answers
+    const candidateSkillNames = (params.candidateSkills ?? []).map(
+      (s) => s.name,
     );
     const skillProbabilities: Array<{ name: string; prob: number }> = [];
 
     for (const skillName of candidateSkillNames) {
       const qKey = `skill_${skillName}`;
-      const ans = (response.answers as Record<string, any>)?.[qKey];
-      if (ans && ans.type === "noul" && typeof ans.noul === "number") {
-        skillProbabilities.push({ name: skillName, prob: ans.noul });
+      const ans = answers[qKey] as
+        { type?: unknown; noul?: unknown } | undefined;
+
+      if (
+        !ans ||
+        typeof ans !== "object" ||
+        ans.type !== "noul" ||
+        typeof ans.noul !== "number" ||
+        !Number.isFinite(ans.noul) ||
+        ans.noul < 0 ||
+        ans.noul > 1
+      ) {
+        logger.warn("Jev unified routing invalid or missing skill answer", {
+          skillName,
+          ans,
+        });
+        return undefined;
       }
+
+      skillProbabilities.push({ name: skillName, prob: ans.noul });
     }
 
     // Filter prob >= 0.5, sort descending, slice to maxInjectedSkills

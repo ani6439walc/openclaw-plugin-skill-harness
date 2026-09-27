@@ -26,6 +26,7 @@ describe("runJevUnifiedRouting", () => {
       definition: {
         triggers: ["review code"],
         examples: ["please review this pr"],
+        keywords: ["review", "pr"],
         guidance: "Review code thoroughly for bugs.",
       },
     },
@@ -34,6 +35,7 @@ describe("runJevUnifiedRouting", () => {
       definition: {
         triggers: ["write docs"],
         examples: ["generate api documentation"],
+        keywords: ["docs", "api"],
         guidance: "Generate and format documentation.",
       },
     },
@@ -356,5 +358,213 @@ describe("runJevUnifiedRouting", () => {
       confidence: 0.0,
       reason: "Jev: no candidate questions to evaluate",
     });
+  });
+
+  it("fails closed and returns undefined when choice returns a non-candidate intent", async () => {
+    const mockSystemOne = vi.fn().mockResolvedValue({
+      model: "typesafe/jev-latest",
+      usage: { input_tokens: 20, output_tokens: 10 },
+      answers: {
+        intent: {
+          type: "choice",
+          choice: "hallucinated-non-candidate-intent",
+          confidence: 0.95,
+        },
+        "skill_git-tools": { type: "noul", noul: 0.1 },
+        "skill_markdown-formatter": { type: "noul", noul: 0.1 },
+      },
+    });
+
+    const mockClient = {
+      systemOne: mockSystemOne,
+    } as unknown as TypeSafeClient;
+
+    const result = await runJevUnifiedRouting({
+      api: dummyApi,
+      config: resolveConfig({}),
+      agentId: "main",
+      latest: "hello there",
+      modelRef: { provider: "typesafe", model: "jev-latest" },
+      candidateIntents,
+      candidateSkills,
+      client: mockClient,
+    });
+
+    expect(result).toBeUndefined();
+  });
+
+  it("fails closed when intent answer is missing from response", async () => {
+    const mockSystemOne = vi.fn().mockResolvedValue({
+      model: "typesafe/jev-latest",
+      answers: {
+        // missing intent answer
+        "skill_git-tools": { type: "noul", noul: 0.1 },
+        "skill_markdown-formatter": { type: "noul", noul: 0.1 },
+      },
+    });
+
+    const mockClient = {
+      systemOne: mockSystemOne,
+    } as unknown as TypeSafeClient;
+
+    const result = await runJevUnifiedRouting({
+      api: dummyApi,
+      config: resolveConfig({}),
+      agentId: "main",
+      latest: "hello there",
+      modelRef: { provider: "typesafe", model: "jev-latest" },
+      candidateIntents,
+      candidateSkills,
+      client: mockClient,
+    });
+
+    expect(result).toBeUndefined();
+  });
+
+  it("fails closed when intent answer is malformed or has invalid confidence", async () => {
+    const invalidConfidenceCases = [NaN, Infinity, -0.5, 1.2, "0.9" as never];
+
+    for (const badConfidence of invalidConfidenceCases) {
+      const mockSystemOne = vi.fn().mockResolvedValue({
+        model: "typesafe/jev-latest",
+        answers: {
+          intent: {
+            type: "choice",
+            choice: "code-review",
+            confidence: badConfidence,
+          },
+          "skill_git-tools": { type: "noul", noul: 0.1 },
+          "skill_markdown-formatter": { type: "noul", noul: 0.1 },
+        },
+      });
+
+      const mockClient = {
+        systemOne: mockSystemOne,
+      } as unknown as TypeSafeClient;
+
+      const result = await runJevUnifiedRouting({
+        api: dummyApi,
+        config: resolveConfig({}),
+        agentId: "main",
+        latest: "hello there",
+        modelRef: { provider: "typesafe", model: "jev-latest" },
+        candidateIntents,
+        candidateSkills,
+        client: mockClient,
+      });
+
+      expect(result).toBeUndefined();
+    }
+
+    // Wrong type
+    const mockSystemOneWrongType = vi.fn().mockResolvedValue({
+      model: "typesafe/jev-latest",
+      answers: {
+        intent: {
+          type: "noul",
+          choice: "code-review",
+          confidence: 0.9,
+        },
+        "skill_git-tools": { type: "noul", noul: 0.1 },
+        "skill_markdown-formatter": { type: "noul", noul: 0.1 },
+      },
+    });
+
+    const resultWrongType = await runJevUnifiedRouting({
+      api: dummyApi,
+      config: resolveConfig({}),
+      agentId: "main",
+      latest: "hello there",
+      modelRef: { provider: "typesafe", model: "jev-latest" },
+      candidateIntents,
+      candidateSkills,
+      client: {
+        systemOne: mockSystemOneWrongType,
+      } as unknown as TypeSafeClient,
+    });
+
+    expect(resultWrongType).toBeUndefined();
+  });
+
+  it("fails closed when a skill answer is missing or malformed", async () => {
+    // Missing skill answer
+    const mockMissingSkill = vi.fn().mockResolvedValue({
+      model: "typesafe/jev-latest",
+      answers: {
+        intent: {
+          type: "choice",
+          choice: "code-review",
+          confidence: 0.9,
+        },
+        "skill_git-tools": { type: "noul", noul: 0.8 },
+        // skill_markdown-formatter is missing
+      },
+    });
+
+    const resultMissing = await runJevUnifiedRouting({
+      api: dummyApi,
+      config: resolveConfig({}),
+      agentId: "main",
+      latest: "review code",
+      modelRef: { provider: "typesafe", model: "jev-latest" },
+      candidateIntents,
+      candidateSkills,
+      client: { systemOne: mockMissingSkill } as unknown as TypeSafeClient,
+    });
+    expect(resultMissing).toBeUndefined();
+
+    // Invalid skill probability values
+    const invalidProbCases = [NaN, Infinity, -0.1, 1.5, "high" as never];
+    for (const badProb of invalidProbCases) {
+      const mockBadProb = vi.fn().mockResolvedValue({
+        model: "typesafe/jev-latest",
+        answers: {
+          intent: {
+            type: "choice",
+            choice: "code-review",
+            confidence: 0.9,
+          },
+          "skill_git-tools": { type: "noul", noul: badProb },
+          "skill_markdown-formatter": { type: "noul", noul: 0.1 },
+        },
+      });
+
+      const res = await runJevUnifiedRouting({
+        api: dummyApi,
+        config: resolveConfig({}),
+        agentId: "main",
+        latest: "review code",
+        modelRef: { provider: "typesafe", model: "jev-latest" },
+        candidateIntents,
+        candidateSkills,
+        client: { systemOne: mockBadProb } as unknown as TypeSafeClient,
+      });
+      expect(res).toBeUndefined();
+    }
+  });
+
+  it("fails closed when response structure is invalid", async () => {
+    const invalidResponses = [
+      null,
+      undefined,
+      {},
+      { answers: null },
+      { answers: "invalid" },
+    ];
+
+    for (const badResponse of invalidResponses) {
+      const mockBad = vi.fn().mockResolvedValue(badResponse);
+      const res = await runJevUnifiedRouting({
+        api: dummyApi,
+        config: resolveConfig({}),
+        agentId: "main",
+        latest: "review code",
+        modelRef: { provider: "typesafe", model: "jev-latest" },
+        candidateIntents,
+        candidateSkills,
+        client: { systemOne: mockBad } as unknown as TypeSafeClient,
+      });
+      expect(res).toBeUndefined();
+    }
   });
 });

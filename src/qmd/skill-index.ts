@@ -625,6 +625,29 @@ function skillSetSignature(skills: readonly AvailableSkill[]): string {
   );
 }
 
+function buildSkillStoreModels(qmd: ResolvedQmdConfig) {
+  const jevEndpoint = qmd.jev?.model
+    ? qmd.jev
+    : isJevModel(qmd.expansion.model)
+      ? qmd.expansion
+      : undefined;
+
+  return {
+    embed_api_url: qmd.embedding.baseUrl,
+    embed_api_model: qmd.embedding.model,
+    ...(qmd.embedding.apiKey ? { embed_api_key: qmd.embedding.apiKey } : {}),
+    ...(qmd.embedding.dimension
+      ? { embed_dimension: qmd.embedding.dimension }
+      : {}),
+    generate_api_url: qmd.expansion.baseUrl,
+    generate_api_model: qmd.expansion.model,
+    ...(qmd.expansion.apiKey ? { generate_api_key: qmd.expansion.apiKey } : {}),
+    ...(jevEndpoint?.baseUrl ? { jev_base_url: jevEndpoint.baseUrl } : {}),
+    ...(jevEndpoint?.model ? { jev_api_model: jevEndpoint.model } : {}),
+    ...(jevEndpoint?.apiKey ? { jev_api_key: jevEndpoint.apiKey } : {}),
+  };
+}
+
 export function createSkillQmdIndex(params: {
   dataRoot: string;
   config: SkillQmdIndexConfigProvider;
@@ -803,31 +826,6 @@ export function createSkillQmdIndex(params: {
   }
 
   const initialization = loadExistingIndexCatalog();
-
-  function buildSkillStoreModels(qmd: ResolvedQmdConfig) {
-    const jevEndpoint = qmd.jev?.model
-      ? qmd.jev
-      : isJevModel(qmd.expansion.model)
-        ? qmd.expansion
-        : undefined;
-
-    return {
-      embed_api_url: qmd.embedding.baseUrl,
-      embed_api_model: qmd.embedding.model,
-      ...(qmd.embedding.apiKey ? { embed_api_key: qmd.embedding.apiKey } : {}),
-      ...(qmd.embedding.dimension
-        ? { embed_dimension: qmd.embedding.dimension }
-        : {}),
-      generate_api_url: qmd.expansion.baseUrl,
-      generate_api_model: qmd.expansion.model,
-      ...(qmd.expansion.apiKey
-        ? { generate_api_key: qmd.expansion.apiKey }
-        : {}),
-      ...(jevEndpoint?.baseUrl ? { jev_base_url: jevEndpoint.baseUrl } : {}),
-      ...(jevEndpoint?.model ? { jev_api_model: jevEndpoint.model } : {}),
-      ...(jevEndpoint?.apiKey ? { jev_api_key: jevEndpoint.apiKey } : {}),
-    };
-  }
 
   async function createConfiguredStore(
     state: SharedIndexState,
