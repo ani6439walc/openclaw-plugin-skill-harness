@@ -29,6 +29,7 @@ const qmdConfig: ResolvedQmdConfig = {
     baseUrl: "https://embedding.example.test/v1",
     model: "embedding-model",
     apiKey: "embedding-key",
+    dimension: 1536,
   },
   expansion: {
     baseUrl: "https://expand.example.test/v1",
@@ -395,6 +396,47 @@ describe("createIntentQmdIndex", () => {
     expect(rebuiltStore.embed).toHaveBeenCalledOnce();
 
     await restartedIndex.close();
+  });
+
+  it("forwards jev configuration to store models when qmd.jev is configured", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+    roots.push(root);
+    const createStore = vi.fn().mockResolvedValue(createStoreDouble({}));
+
+    const jevQmdConfig: ResolvedQmdConfig = {
+      ...qmdConfig,
+      jev: {
+        baseUrl: "https://openrouter.ai/api",
+        model: "typesafe/jev-latest",
+        apiKey: "jev-secret-key",
+      },
+    };
+
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => jevQmdConfig,
+      createStore,
+    });
+
+    index.schedule(catalog);
+    await waitForReady(index);
+
+    expect(createStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          models: expect.objectContaining({
+            generate_api_model: "expand-model",
+            generate_api_url: "https://expand.example.test/v1",
+            generate_api_key: "expand-key",
+            jev_base_url: "https://openrouter.ai/api",
+            jev_api_model: "typesafe/jev-latest",
+            jev_api_key: "jev-secret-key",
+          }),
+        }),
+      }),
+    );
+
+    await index.close();
   });
 
   it("rebuilds when a matching persisted index still needs embeddings", async () => {

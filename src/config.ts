@@ -11,6 +11,7 @@ import {
 import { roundToDecimals } from "./normalize.js";
 import type {
   ContextWindow,
+  QmdEndpointConfig,
   ResolvedClassifierConfig,
   ResolvedQmdConfig,
   ResolvedReviewConfig,
@@ -20,14 +21,16 @@ import type {
   ResolvedRoutingScopeConfig,
   ResolvedRoutingSkillsConfig,
   ResolvedScopeConfig,
-  ResolvedSkillCandidatesConfig,
   ResolvedSkillHarnessPluginConfig,
   ResolvedSkillSearchConfig,
   ResolvedSkillsConfig,
   ResolvedWorkingSetConfig,
 } from "./types.js";
 import type { OpenClawConfig } from "../api.js";
-import { resolveQmdEndpoint } from "./qmd/provider-resolver.js";
+import {
+  normalizeTypeSafeBaseUrl,
+  resolveQmdEndpoint,
+} from "./qmd/provider-resolver.js";
 import { canonicalIdentity } from "./normalize.js";
 
 export function clampInt(
@@ -695,12 +698,22 @@ const QmdEmbeddingSchema = QmdEndpointObjectSchema.extend({
   dimension: z.number().int().positive().default(1536).catch(1536),
 }).catch({ baseUrl: "", model: "", dimension: 1536 });
 
+const QmdJevSchema = z
+  .object({
+    baseUrl: z.string().trim().optional().catch(undefined),
+    model: z.string().trim().optional().catch(undefined),
+    apiKey: z.string().trim().optional().catch(undefined),
+  })
+  .optional()
+  .catch(undefined);
+
 const QmdSchema = z
   .object({
     timeoutMs: z.number().optional().catch(undefined),
     indexRefreshIntervalSeconds: boundedInt(300, 0, 86_400),
     embedding: QmdEmbeddingSchema,
     expansion: QmdEndpointSchema,
+    jev: QmdJevSchema,
   })
   .catch(DEFAULT_QMD);
 
@@ -731,6 +744,21 @@ export function resolveConfig(
   });
   const resolvedExpansion = resolveQmdEndpoint(resolved.qmd.expansion, options);
 
+  let resolvedJev: QmdEndpointConfig | undefined = undefined;
+  if (
+    resolved.qmd.jev &&
+    (resolved.qmd.jev.model ||
+      resolved.qmd.jev.baseUrl ||
+      resolved.qmd.jev.apiKey)
+  ) {
+    const ep = resolveQmdEndpoint(resolved.qmd.jev, options);
+    resolvedJev = {
+      ...resolved.qmd.jev,
+      ...ep,
+      baseUrl: normalizeTypeSafeBaseUrl(ep.baseUrl) || ep.baseUrl,
+    };
+  }
+
   const timeoutMs = clampInt(
     resolved.qmd.timeoutMs,
     DEFAULT_QMD.timeoutMs,
@@ -760,6 +788,7 @@ export function resolveConfig(
         ...resolved.qmd.expansion,
         ...resolvedExpansion,
       },
+      ...(resolvedJev ? { jev: resolvedJev } : {}),
     },
     skills: resolvedSkills,
     routing: resolvedRouting,

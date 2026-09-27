@@ -16,6 +16,8 @@ import {
 import { resolveCanonicalSessionKeyFromSessionId } from "../session/index.js";
 import { buildEmbeddedSubagentRunDefaults } from "../subagent-runtime.js";
 import { agentWorkspacePath } from "../file-utils.js";
+import { isJevModel } from "../qmd/provider-resolver.js";
+import { runJevUnifiedRouting } from "./jev-client.js";
 import type {
   AvailableSkill,
   ClassifiedIntentionResult,
@@ -210,6 +212,13 @@ export async function runUnifiedRoutingSubagent(params: {
   candidateSkills?: readonly AvailableSkill[];
   dataRoot?: string;
 }): Promise<RoutingLlmResult | undefined> {
+  if (
+    isJevModel(params.modelRef.model) ||
+    params.modelRef.provider.toLowerCase() === "typesafe"
+  ) {
+    return runJevUnifiedRouting(params);
+  }
+
   const { subagentSessionId, subagentSessionKey } =
     createSubagentSessionIdentity(params, {
       runPrefix: "skill-harness",

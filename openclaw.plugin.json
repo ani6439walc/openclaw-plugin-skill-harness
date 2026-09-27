@@ -72,7 +72,7 @@
           "jev": {
             "type": "object",
             "additionalProperties": false,
-            "description": "Optional TypeSafe Jev provider for intent classification and candidate reranking.",
+            "description": "Optional TypeSafe Jev provider for hybrid intent classification and candidate reranking in QMD.",
             "properties": {
               "baseUrl": {
                 "type": "string",
@@ -80,7 +80,7 @@
               },
               "model": {
                 "type": "string",
-                "description": "TypeSafe Jev model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/jev-1.13')."
+                "description": "TypeSafe Jev model name or OpenClaw 'provider/model' reference (e.g. 'typesafe/jev-latest' or 'openrouter/typesafe/jev-latest')."
               },
               "apiKey": {
                 "type": "string",

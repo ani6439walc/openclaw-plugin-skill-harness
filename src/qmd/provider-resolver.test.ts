@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildStoreModels,
+  isJevModel,
   normalizeEmbeddingModel,
+  normalizeTypeSafeBaseUrl,
   resolveQmdEndpoint,
 } from "./provider-resolver.js";
 import type { OpenClawConfig } from "../../api.js";
+import type { ResolvedQmdConfig } from "../types.js";
 
 describe("resolveQmdEndpoint", () => {
   it("preserves explicit baseUrl and apiKey", () => {
@@ -298,6 +302,62 @@ describe("resolveQmdEndpoint", () => {
 
     expect(result.dimension).toBe(1536);
   });
+
+  it("prioritizes model-specific baseUrl from provider models array over provider baseUrl", () => {
+    const mockConfig: OpenClawConfig = {
+      models: {
+        providers: {
+          openrouter: {
+            baseUrl: "https://openrouter.ai/api/v1",
+            apiKey: "or-general-key",
+            models: [
+              {
+                id: "typesafe/jev-latest",
+                baseUrl: "https://openrouter.ai/api",
+                apiKey: "or-jev-key",
+              },
+            ],
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    const result = resolveQmdEndpoint(
+      { model: "openrouter/typesafe/jev-latest" },
+      { openClawConfig: mockConfig },
+    );
+
+    expect(result.baseUrl).toBe("https://openrouter.ai/api");
+    expect(result.model).toBe("typesafe/jev-latest");
+    expect(result.apiKey).toBe("or-jev-key");
+  });
+
+  it("prioritizes model-specific baseUrl from provider models object map over provider baseUrl", () => {
+    const mockConfig: OpenClawConfig = {
+      models: {
+        providers: {
+          openrouter: {
+            baseUrl: "https://openrouter.ai/api/v1",
+            apiKey: "or-general-key",
+            models: {
+              "typesafe/jev-1.13": {
+                baseUrl: "https://custom.openrouter.proxy/api",
+              },
+            },
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    const result = resolveQmdEndpoint(
+      { model: "openrouter/typesafe/jev-1.13" },
+      { openClawConfig: mockConfig },
+    );
+
+    expect(result.baseUrl).toBe("https://custom.openrouter.proxy/api");
+    expect(result.model).toBe("typesafe/jev-1.13");
+    expect(result.apiKey).toBe("or-general-key");
+  });
 });
 
 describe("normalizeEmbeddingModel", () => {
@@ -319,5 +379,98 @@ describe("normalizeEmbeddingModel", () => {
   it("handles undefined and empty string", () => {
     expect(normalizeEmbeddingModel(undefined)).toBe("");
     expect(normalizeEmbeddingModel("")).toBe("");
+  });
+});
+
+describe("isJevModel", () => {
+  it("recognizes valid TypeSafe Jev model references", () => {
+    expect(isJevModel("typesafe/jev-latest")).toBe(true);
+    expect(isJevModel("jev-latest")).toBe(true);
+    expect(isJevModel("jev")).toBe(true);
+    expect(isJevModel("openrouter/typesafe/jev-1.13")).toBe(true);
+    expect(isJevModel("typesafe/my-custom-model")).toBe(true);
+  });
+
+  it("does not inadvertently match unrelated model names with 'jev' substrings", () => {
+    expect(isJevModel("jeven-7b")).toBe(false);
+    expect(isJevModel("openrouter/jeven-7b")).toBe(false);
+    expect(isJevModel("huggingface/jevic-model")).toBe(false);
+    expect(isJevModel("my-jeven-model")).toBe(false);
+    expect(isJevModel("openai/gpt-4o")).toBe(false);
+    expect(isJevModel("deepseek-ai/DeepSeek-V3")).toBe(false);
+    expect(isJevModel(undefined)).toBe(false);
+  });
+});
+
+describe("normalizeTypeSafeBaseUrl", () => {
+  it("strips /v1 and /v1/systemone from base URLs", () => {
+    expect(
+      normalizeTypeSafeBaseUrl("https://openrouter.ai/api/v1/systemone"),
+    ).toBe("https://openrouter.ai/api");
+    expect(normalizeTypeSafeBaseUrl("https://openrouter.ai/api/v1")).toBe(
+      "https://openrouter.ai/api",
+    );
+    expect(normalizeTypeSafeBaseUrl("https://api.typesafe.ai/v1/")).toBe(
+      "https://api.typesafe.ai",
+    );
+    expect(normalizeTypeSafeBaseUrl("http://localhost:8080")).toBe(
+      "http://localhost:8080",
+    );
+    expect(normalizeTypeSafeBaseUrl(undefined)).toBeUndefined();
+  });
+});
+
+describe("buildStoreModels", () => {
+  const baseConfig: ResolvedQmdConfig = {
+    embedding: {
+      baseUrl: "https://embed.example.com",
+      model: "text-embedding-3",
+      apiKey: "embed-key",
+      dimension: 1536,
+    },
+    expansion: {
+      baseUrl: "https://expand.example.com",
+      model: "gpt-4o-mini",
+      apiKey: "expand-key",
+    },
+    timeoutMs: 15000,
+    indexRefreshIntervalSeconds: 300,
+  };
+
+  it("resolves Jev endpoint when config.jev has only baseUrl and no model", () => {
+    const config: ResolvedQmdConfig = {
+      ...baseConfig,
+      jev: {
+        baseUrl: "http://proxy.local/v1",
+      } as any,
+    };
+
+    const models = buildStoreModels(config);
+    expect(models.jev_base_url).toBe("http://proxy.local/v1");
+    expect(models.jev_api_model).toBeUndefined();
+    expect(models.embed_api_url).toBe("https://embed.example.com");
+  });
+
+  it("resolves Jev endpoint from expansion when expansion.model is a Jev model", () => {
+    const config: ResolvedQmdConfig = {
+      ...baseConfig,
+      expansion: {
+        baseUrl: "https://api.typesafe.ai/v1",
+        model: "typesafe/jev-latest",
+        apiKey: "jev-key",
+      },
+    };
+
+    const models = buildStoreModels(config);
+    expect(models.jev_base_url).toBe("https://api.typesafe.ai/v1");
+    expect(models.jev_api_model).toBe("typesafe/jev-latest");
+    expect(models.jev_api_key).toBe("jev-key");
+  });
+
+  it("does not populate Jev store models when no Jev config or model is present", () => {
+    const models = buildStoreModels(baseConfig);
+    expect(models).not.toHaveProperty("jev_base_url");
+    expect(models).not.toHaveProperty("jev_api_model");
+    expect(models).not.toHaveProperty("jev_api_key");
   });
 });

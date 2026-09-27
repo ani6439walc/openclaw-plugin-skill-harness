@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../../api.js";
+import type { ResolvedQmdConfig } from "../types.js";
 
 export interface RawQmdEndpointInput {
   baseUrl?: string;
@@ -163,9 +164,48 @@ export function resolveQmdEndpoint(
     }
   }
 
+  // Find model-specific entry under providerEntry.models if present
+  let matchedModelEntry: Record<string, unknown> | undefined;
+  if (providerEntry && providerEntry.models) {
+    if (Array.isArray(providerEntry.models)) {
+      const found = providerEntry.models.find(
+        (m: unknown) =>
+          typeof m === "object" &&
+          m !== null &&
+          ((m as { id?: string }).id === modelId ||
+            (m as { id?: string }).id === rawModel ||
+            (m as { name?: string }).name === modelId ||
+            (m as { name?: string }).name === rawModel),
+      );
+      if (found && typeof found === "object") {
+        matchedModelEntry = found as Record<string, unknown>;
+      }
+    } else if (
+      typeof providerEntry.models === "object" &&
+      providerEntry.models !== null
+    ) {
+      const modelsObj = providerEntry.models as Record<string, unknown>;
+      const matchVal = modelsObj[modelId] ?? modelsObj[rawModel];
+      if (typeof matchVal === "object" && matchVal !== null) {
+        matchedModelEntry = matchVal as Record<string, unknown>;
+      }
+    }
+  }
+
   const explicitBaseUrl = rawEndpoint.baseUrl?.trim();
   let resolvedBaseUrl = explicitBaseUrl || "";
 
+  // 1. Check model-specific baseUrl under providerEntry.models first
+  if (
+    !resolvedBaseUrl &&
+    matchedModelEntry &&
+    typeof matchedModelEntry.baseUrl === "string" &&
+    matchedModelEntry.baseUrl.trim()
+  ) {
+    resolvedBaseUrl = matchedModelEntry.baseUrl.trim();
+  }
+
+  // 2. Fall back to providerEntry.baseUrl
   if (
     !resolvedBaseUrl &&
     providerEntry &&
@@ -183,6 +223,15 @@ export function resolveQmdEndpoint(
 
   const explicitApiKey = rawEndpoint.apiKey?.trim();
   let resolvedApiKey: string | undefined = explicitApiKey || undefined;
+
+  // 1. Check model-specific apiKey under providerEntry.models first
+  if (
+    !resolvedApiKey &&
+    matchedModelEntry &&
+    matchedModelEntry.apiKey !== undefined
+  ) {
+    resolvedApiKey = extractApiKeyFromProvider(matchedModelEntry.apiKey, env);
+  }
 
   if (!resolvedApiKey && providerEntry) {
     resolvedApiKey = extractApiKeyFromProvider(providerEntry.apiKey, env);
@@ -222,4 +271,67 @@ export function normalizeEmbeddingModel(rawModel?: string): string {
     return trimmed.slice(slashIndex + 1).trim();
   }
   return trimmed;
+}
+
+/**
+ * Checks whether a given model string references TypeSafe Jev.
+ */
+export function isJevModel(model?: string): boolean {
+  if (!model) return false;
+  const lower = model.toLowerCase();
+  if (lower.startsWith("typesafe/") || lower.includes("/typesafe/"))
+    return true;
+
+  // Extract the model name without the provider prefix
+  const parts = lower.split("/");
+  const modelName = parts[parts.length - 1] ?? "";
+
+  return modelName === "jev" || modelName.startsWith("jev-");
+}
+
+/**
+ * Normalizes a base URL for TypeSafeClient (@typesafe-ai/sdk).
+ * The SDK appends '/v1/systemone' to baseURL. If the provided URL ends with '/v1',
+ * we strip it (e.g. 'https://openrouter.ai/api/v1' -> 'https://openrouter.ai/api').
+ */
+export function normalizeTypeSafeBaseUrl(baseUrl?: string): string | undefined {
+  if (!baseUrl) return undefined;
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  if (!trimmed) return undefined;
+  if (trimmed.endsWith("/v1/systemone")) {
+    return trimmed.slice(0, -"/v1/systemone".length);
+  }
+  if (trimmed.endsWith("/v1")) {
+    return trimmed.slice(0, -"/v1".length);
+  }
+  return trimmed;
+}
+
+/**
+ * Builds the C++ QMD store models configuration, resolving Jev endpoints
+ * from config.jev (even if model is omitted) or fallback to expansion.
+ */
+export function buildStoreModels(config: ResolvedQmdConfig) {
+  const jevEndpoint =
+    config.jev ??
+    (isJevModel(config.expansion.model) ? config.expansion : undefined);
+
+  return {
+    embed_api_url: config.embedding.baseUrl,
+    embed_api_model: config.embedding.model,
+    ...(config.embedding.apiKey
+      ? { embed_api_key: config.embedding.apiKey }
+      : {}),
+    ...(config.embedding.dimension
+      ? { embed_dimension: config.embedding.dimension }
+      : {}),
+    generate_api_url: config.expansion.baseUrl,
+    generate_api_model: config.expansion.model,
+    ...(config.expansion.apiKey
+      ? { generate_api_key: config.expansion.apiKey }
+      : {}),
+    ...(jevEndpoint?.baseUrl ? { jev_base_url: jevEndpoint.baseUrl } : {}),
+    ...(jevEndpoint?.model ? { jev_api_model: jevEndpoint.model } : {}),
+    ...(jevEndpoint?.apiKey ? { jev_api_key: jevEndpoint.apiKey } : {}),
+  };
 }

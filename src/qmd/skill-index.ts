@@ -12,7 +12,10 @@ import type {
   ResolvedSkillHarnessPluginConfig,
   ResolvedSkillsConfig,
 } from "../types.js";
-import { normalizeEmbeddingModel } from "./provider-resolver.js";
+import {
+  buildStoreModels,
+  normalizeEmbeddingModel,
+} from "./provider-resolver.js";
 import { weightedReciprocalRankFusion } from "./rrf.js";
 
 const META_COLLECTION = "skill-meta";
@@ -824,21 +827,7 @@ export function createSkillQmdIndex(params: {
       dbPath: state.databasePath,
       config: {
         collections: skillSnapshotCollections(state.docsRoot),
-        models: {
-          embed_api_url: qmd.embedding.baseUrl,
-          embed_api_model: qmd.embedding.model,
-          ...(qmd.embedding.apiKey
-            ? { embed_api_key: qmd.embedding.apiKey }
-            : {}),
-          ...(qmd.embedding.dimension
-            ? { embed_dimension: qmd.embedding.dimension }
-            : {}),
-          generate_api_url: qmd.expansion.baseUrl,
-          generate_api_model: qmd.expansion.model,
-          ...(qmd.expansion.apiKey
-            ? { generate_api_key: qmd.expansion.apiKey }
-            : {}),
-        },
+        models: buildStoreModels(qmd),
       },
       remoteRequestTimeoutMs: qmd.timeoutMs,
     });
@@ -970,21 +959,7 @@ export function createSkillQmdIndex(params: {
               dbPath: state.databasePath,
               config: {
                 collections,
-                models: {
-                  embed_api_url: qmd.embedding.baseUrl,
-                  embed_api_model: qmd.embedding.model,
-                  ...(qmd.embedding.apiKey
-                    ? { embed_api_key: qmd.embedding.apiKey }
-                    : {}),
-                  ...(qmd.embedding.dimension
-                    ? { embed_dimension: qmd.embedding.dimension }
-                    : {}),
-                  generate_api_url: qmd.expansion.baseUrl,
-                  generate_api_model: qmd.expansion.model,
-                  ...(qmd.expansion.apiKey
-                    ? { generate_api_key: qmd.expansion.apiKey }
-                    : {}),
-                },
+                models: buildStoreModels(qmd),
               },
               remoteRequestTimeoutMs: qmd.timeoutMs,
             });
