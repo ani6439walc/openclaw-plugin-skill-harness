@@ -1,5 +1,5 @@
 import { choice, noul, TypeSafeClient } from "@typesafe-ai/sdk";
-import type { EntryType } from "@typesafe-ai/sdk";
+import type { ChoiceCriteria, EntryType } from "@typesafe-ai/sdk";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import {
@@ -100,15 +100,24 @@ export async function runJevUnifiedRouting(
     } else {
       // Branch B: Intent not yet resolved
       if (params.candidateIntents && params.candidateIntents.length > 0) {
-        const criteria: Record<string, string> = {};
+        const criteria: ChoiceCriteria = {};
         for (const intent of params.candidateIntents) {
-          criteria[intent.id] =
-            intent.definition.guidance ||
-            intent.definition.triggers?.[0] ||
-            intent.id;
+          criteria[intent.id] = {
+            guidance: intent.definition.guidance || intent.id,
+            ...(intent.definition.triggers &&
+            intent.definition.triggers.length > 0
+              ? { triggers: intent.definition.triggers }
+              : {}),
+            ...(intent.definition.examples &&
+            intent.definition.examples.length > 0
+              ? { examples: intent.definition.examples }
+              : {}),
+          };
         }
-        criteria["none"] =
-          "None of the candidate intents adequately match the user request.";
+        criteria["none"] = {
+          guidance:
+            "None of the candidate intents adequately match the user request.",
+        };
         questions["intent"] = choice(
           "Select the single intent from the catalog that best explains what the user wants to accomplish in latest_message, or select 'none' if no candidate intent fits.",
           criteria,

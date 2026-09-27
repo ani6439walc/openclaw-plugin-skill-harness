@@ -170,6 +170,15 @@ describe("runJevUnifiedRouting", () => {
     expect(mockSystemOne).toHaveBeenCalledOnce();
     const callArgs = mockSystemOne.mock.calls[0][0];
     expect(callArgs.questions).toHaveProperty("intent");
+    expect(callArgs.questions.intent.criteria["code-review"]).toEqual({
+      guidance: "Review code thoroughly for bugs.",
+      triggers: ["review code"],
+      examples: ["please review this pr"],
+    });
+    expect(callArgs.questions.intent.criteria["none"]).toEqual({
+      guidance:
+        "None of the candidate intents adequately match the user request.",
+    });
     expect(callArgs.questions).toHaveProperty("skill_git-tools");
     expect(callArgs.questions).toHaveProperty("skill_markdown-formatter");
 
