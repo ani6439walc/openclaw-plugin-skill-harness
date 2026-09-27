@@ -573,6 +573,27 @@ describe("resolveConfig", () => {
       });
     });
 
+    it("resolves optional qmd.jev endpoint when only apiKey is provided", () => {
+      const result = resolveConfig({
+        qmd: {
+          embedding: {
+            baseUrl: "https://example.com/v1",
+            model: "embed-model",
+          },
+          expansion: {
+            baseUrl: "https://example.com/v1",
+            model: "gemini-flash",
+          },
+          jev: {
+            apiKey: "my-custom-jev-key",
+          },
+        },
+      });
+
+      expect(result.qmd.jev).toBeDefined();
+      expect(result.qmd.jev?.apiKey).toBe("my-custom-jev-key");
+    });
+
     it("resolves default skills.search weights and index refresh interval", () => {
       const manifest = JSON.parse(
         readFileSync(

@@ -179,7 +179,7 @@ export async function runJevUnifiedRouting(
     const answers = response.answers as Record<string, unknown>;
 
     let selectedIntent: string | undefined = params.resolvedIntent?.id;
-    let confidence = params.resolvedIntent ? 1.0 : 1.0;
+    let confidence = 1.0;
 
     // Validate Intent answer if candidate intents were queried
     if (

@@ -393,6 +393,8 @@ describe("isJevModel", () => {
 
   it("does not inadvertently match unrelated model names with 'jev' substrings", () => {
     expect(isJevModel("jeven-7b")).toBe(false);
+    expect(isJevModel("openrouter/jeven-7b")).toBe(false);
+    expect(isJevModel("huggingface/jevic-model")).toBe(false);
     expect(isJevModel("my-jeven-model")).toBe(false);
     expect(isJevModel("openai/gpt-4o")).toBe(false);
     expect(isJevModel("deepseek-ai/DeepSeek-V3")).toBe(false);

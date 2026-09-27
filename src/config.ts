@@ -747,7 +747,9 @@ export function resolveConfig(
   let resolvedJev: QmdEndpointConfig | undefined = undefined;
   if (
     resolved.qmd.jev &&
-    (resolved.qmd.jev.model || resolved.qmd.jev.baseUrl)
+    (resolved.qmd.jev.model ||
+      resolved.qmd.jev.baseUrl ||
+      resolved.qmd.jev.apiKey)
   ) {
     const ep = resolveQmdEndpoint(resolved.qmd.jev, options);
     resolvedJev = {

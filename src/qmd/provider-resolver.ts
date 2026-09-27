@@ -164,25 +164,21 @@ export function resolveQmdEndpoint(
     }
   }
 
-  const explicitBaseUrl = rawEndpoint.baseUrl?.trim();
-  let resolvedBaseUrl = explicitBaseUrl || "";
-
-  // 1. Check model-specific baseUrl under providerEntry.models first
-  if (!resolvedBaseUrl && providerEntry && providerEntry.models) {
+  // Find model-specific entry under providerEntry.models if present
+  let matchedModelEntry: Record<string, unknown> | undefined;
+  if (providerEntry && providerEntry.models) {
     if (Array.isArray(providerEntry.models)) {
-      const matched = providerEntry.models.find(
+      const found = providerEntry.models.find(
         (m: unknown) =>
           typeof m === "object" &&
           m !== null &&
           ((m as { id?: string }).id === modelId ||
             (m as { id?: string }).id === rawModel ||
             (m as { name?: string }).name === modelId ||
-            (m as { name?: string }).name === rawModel) &&
-          typeof (m as { baseUrl?: string }).baseUrl === "string" &&
-          (m as { baseUrl?: string }).baseUrl!.trim(),
+            (m as { name?: string }).name === rawModel),
       );
-      if (matched) {
-        resolvedBaseUrl = (matched as { baseUrl: string }).baseUrl.trim();
+      if (found && typeof found === "object") {
+        matchedModelEntry = found as Record<string, unknown>;
       }
     } else if (
       typeof providerEntry.models === "object" &&
@@ -190,15 +186,23 @@ export function resolveQmdEndpoint(
     ) {
       const modelsObj = providerEntry.models as Record<string, unknown>;
       const matchVal = modelsObj[modelId] ?? modelsObj[rawModel];
-      if (
-        typeof matchVal === "object" &&
-        matchVal !== null &&
-        typeof (matchVal as { baseUrl?: string }).baseUrl === "string" &&
-        (matchVal as { baseUrl?: string }).baseUrl!.trim()
-      ) {
-        resolvedBaseUrl = (matchVal as { baseUrl: string }).baseUrl.trim();
+      if (typeof matchVal === "object" && matchVal !== null) {
+        matchedModelEntry = matchVal as Record<string, unknown>;
       }
     }
+  }
+
+  const explicitBaseUrl = rawEndpoint.baseUrl?.trim();
+  let resolvedBaseUrl = explicitBaseUrl || "";
+
+  // 1. Check model-specific baseUrl under providerEntry.models first
+  if (
+    !resolvedBaseUrl &&
+    matchedModelEntry &&
+    typeof matchedModelEntry.baseUrl === "string" &&
+    matchedModelEntry.baseUrl.trim()
+  ) {
+    resolvedBaseUrl = matchedModelEntry.baseUrl.trim();
   }
 
   // 2. Fall back to providerEntry.baseUrl
@@ -221,41 +225,12 @@ export function resolveQmdEndpoint(
   let resolvedApiKey: string | undefined = explicitApiKey || undefined;
 
   // 1. Check model-specific apiKey under providerEntry.models first
-  if (!resolvedApiKey && providerEntry && providerEntry.models) {
-    if (Array.isArray(providerEntry.models)) {
-      const matched = providerEntry.models.find(
-        (m: unknown) =>
-          typeof m === "object" &&
-          m !== null &&
-          ((m as { id?: string }).id === modelId ||
-            (m as { id?: string }).id === rawModel ||
-            (m as { name?: string }).name === modelId ||
-            (m as { name?: string }).name === rawModel) &&
-          (m as { apiKey?: unknown }).apiKey !== undefined,
-      );
-      if (matched) {
-        resolvedApiKey = extractApiKeyFromProvider(
-          (matched as { apiKey?: unknown }).apiKey,
-          env,
-        );
-      }
-    } else if (
-      typeof providerEntry.models === "object" &&
-      providerEntry.models !== null
-    ) {
-      const modelsObj = providerEntry.models as Record<string, unknown>;
-      const matchVal = modelsObj[modelId] ?? modelsObj[rawModel];
-      if (
-        typeof matchVal === "object" &&
-        matchVal !== null &&
-        (matchVal as { apiKey?: unknown }).apiKey !== undefined
-      ) {
-        resolvedApiKey = extractApiKeyFromProvider(
-          (matchVal as { apiKey?: unknown }).apiKey,
-          env,
-        );
-      }
-    }
+  if (
+    !resolvedApiKey &&
+    matchedModelEntry &&
+    matchedModelEntry.apiKey !== undefined
+  ) {
+    resolvedApiKey = extractApiKeyFromProvider(matchedModelEntry.apiKey, env);
   }
 
   if (!resolvedApiKey && providerEntry) {
@@ -304,13 +279,14 @@ export function normalizeEmbeddingModel(rawModel?: string): string {
 export function isJevModel(model?: string): boolean {
   if (!model) return false;
   const lower = model.toLowerCase();
-  return (
-    lower.includes("/jev") ||
-    lower.startsWith("jev-") ||
-    lower.startsWith("jev/") ||
-    lower === "jev" ||
-    lower.startsWith("typesafe/")
-  );
+  if (lower.startsWith("typesafe/") || lower.includes("/typesafe/"))
+    return true;
+
+  // Extract the model name without the provider prefix
+  const parts = lower.split("/");
+  const modelName = parts[parts.length - 1] ?? "";
+
+  return modelName === "jev" || modelName.startsWith("jev-");
 }
 
 /**
