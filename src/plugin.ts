@@ -212,6 +212,7 @@ export function createPlugin(
       const experienceCatalog = new SkillExperienceCatalog(dataRoot);
       const qmdIntentIndex = createIntentQmdIndex({
         dataRoot,
+        readOnly: !ownsBackgroundWork,
         config: () => {
           refreshLiveConfigFromRuntime();
           return config.qmd;
@@ -229,8 +230,10 @@ export function createPlugin(
       const reviewLogWriter = new IntentReviewLogWriter(dataRoot);
 
       const refreshRuntimeIntents = (options?: { rebuildQmd?: boolean }) => {
+        if (disposed) return;
         catalog.load("intents");
-        if (options?.rebuildQmd) qmdIntentIndex.schedule(catalog.get());
+        if (options?.rebuildQmd || !ownsBackgroundWork)
+          qmdIntentIndex.schedule(catalog.get());
       };
 
       const knownAgentIds = new Set<string>(["main"]);

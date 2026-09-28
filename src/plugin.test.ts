@@ -11,6 +11,7 @@ import {
   initializePluginDataRoot,
 } from "./plugin.js";
 import { IntentCatalog } from "./intents/index.js";
+import * as intentQmd from "./qmd/intent-index.js";
 
 const { createHookHandlersSpy } = vi.hoisted(() => ({
   createHookHandlersSpy: vi.fn(),
@@ -170,6 +171,25 @@ describe("createPlugin", () => {
 
     expect(api.on).toHaveBeenCalledWith("session_end", expect.any(Function));
   });
+
+  it.each(["discovery", "tool-discovery"])(
+    "opens existing intents on demand during %s",
+    async (registrationMode) => {
+      const createIndex = vi.spyOn(intentQmd, "createIntentQmdIndex");
+      const api = createApi({ registrationMode });
+      createPlugin(api).register(api);
+      expect(createIndex).toHaveBeenCalledWith(
+        expect.objectContaining({ readOnly: true }),
+      );
+      const deps = createHookHandlersSpy.mock.calls[0][0];
+      const schedule = vi.spyOn(deps.qmdIntentIndex, "schedule");
+      expect(schedule).not.toHaveBeenCalled();
+      deps.refreshIntents();
+      expect(schedule).toHaveBeenCalledWith(deps.catalog.get());
+      await deps.qmdIntentIndex.close();
+      await deps.qmdSkillIndex.close();
+    },
+  );
 
   it("registers tool tracking and finalize hooks", () => {
     const api = createApi();

@@ -128,6 +128,87 @@ async function waitForReady(
 }
 
 describe("createIntentQmdIndex", () => {
+  it("does not create an index or snapshot when a read-only consumer has no persisted index", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-readonly-"));
+    roots.push(root);
+    const createStore = vi.fn(async () => createStoreDouble({}));
+    const index = createIntentQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+      readOnly: true,
+    });
+    index.schedule(catalog);
+    await expect(
+      index.searchKeywords({ query: "implement" }),
+    ).resolves.toBeUndefined();
+    await index.close();
+    expect(createStore).not.toHaveBeenCalled();
+    await expect(stat(path.join(root, "qmd"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it.each(["stale", "incomplete", "unreadable"])(
+    "does not rebuild a %s index in read-only mode",
+    async (condition) => {
+      const root = await mkdtemp(
+        path.join(tmpdir(), "skill-harness-readonly-"),
+      );
+      roots.push(root);
+      const writer = createIntentQmdIndex({
+        dataRoot: root,
+        config: () => qmdConfig,
+        createStore: async () => createStoreDouble({}),
+      });
+      writer.schedule(catalog);
+      await waitForReady(writer);
+      await writer.close();
+      const metadataPath = path.join(
+        root,
+        "qmd",
+        "intents",
+        "intent-routing.json",
+      );
+      const metadata = await readFile(metadataPath, "utf8");
+      const readerStore = createStoreDouble({
+        getStatus: vi
+          .fn()
+          .mockResolvedValue({ needsEmbedding: 1, totalDocuments: 2 }),
+      });
+      const createStore = vi.fn(async () => {
+        if (condition === "unreadable")
+          throw new Error("cannot open persisted index");
+        return readerStore;
+      });
+      const reader = createIntentQmdIndex({
+        dataRoot: root,
+        config: () =>
+          condition === "stale"
+            ? {
+                ...qmdConfig,
+                embedding: { ...qmdConfig.embedding, model: "changed-model" },
+              }
+            : qmdConfig,
+        createStore,
+        readOnly: true,
+      });
+      reader.schedule(catalog);
+      await expect(
+        reader.searchKeywords({ query: "implement" }),
+      ).resolves.toBeUndefined();
+      await reader.close();
+      expect(readerStore.update).not.toHaveBeenCalled();
+      expect(readerStore.embed).not.toHaveBeenCalled();
+      expect(await readFile(metadataPath, "utf8")).toBe(metadata);
+      if (condition === "stale") expect(createStore).not.toHaveBeenCalled();
+      else
+        expect(createStore).toHaveBeenCalledWith(
+          expect.objectContaining({ readOnly: true }),
+        );
+    },
+  );
+
   it("does not accept new builds after close", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-closed-intents-"),
@@ -146,86 +227,90 @@ describe("createIntentQmdIndex", () => {
     expect(index.getStatus()).toBe("idle");
   });
 
-  it("reopens a matching completed index after process restart", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
-    roots.push(root);
-    const firstStore = createStoreDouble({});
-    const firstCreateStore = vi.fn().mockResolvedValue(firstStore);
-    const firstIndex = createIntentQmdIndex({
-      dataRoot: root,
-      config: () => qmdConfig,
-      createStore: firstCreateStore,
-    });
+  it.each([false, true])(
+    "reopens a matching completed index after process restart (readOnly=%s)",
+    async (readOnly) => {
+      const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));
+      roots.push(root);
+      const firstStore = createStoreDouble({});
+      const firstCreateStore = vi.fn().mockResolvedValue(firstStore);
+      const firstIndex = createIntentQmdIndex({
+        dataRoot: root,
+        config: () => qmdConfig,
+        createStore: firstCreateStore,
+      });
 
-    firstIndex.schedule(catalog);
-    await waitForReady(firstIndex);
-    await writeFile(
-      path.join(root, "qmd", "intents", "intent-routing.sqlite"),
-      "existing index",
-    );
-    await firstIndex.close();
+      firstIndex.schedule(catalog);
+      await waitForReady(firstIndex);
+      await writeFile(
+        path.join(root, "qmd", "intents", "intent-routing.sqlite"),
+        "existing index",
+      );
+      await firstIndex.close();
 
-    const reopenedSearch = vi
-      .fn()
-      .mockResolvedValue([qmdResult("implementation")]);
-    const reopenedLexSearch = vi
-      .fn()
-      .mockResolvedValue([
-        { filepath: "/snapshot/keywords/implementation-0.md", score: 0.91 },
+      const reopenedSearch = vi
+        .fn()
+        .mockResolvedValue([qmdResult("implementation")]);
+      const reopenedLexSearch = vi
+        .fn()
+        .mockResolvedValue([
+          { filepath: "/snapshot/keywords/implementation-0.md", score: 0.91 },
+        ]);
+      const reopenedStore = createStoreDouble({
+        search: reopenedSearch,
+        searchLex: reopenedLexSearch,
+      });
+      const secondCreateStore = vi.fn().mockResolvedValue(reopenedStore);
+      const restartedIndex = createIntentQmdIndex({
+        dataRoot: root,
+        config: () => qmdConfig,
+        createStore: secondCreateStore,
+        readOnly,
+      });
+
+      restartedIndex.schedule(catalog);
+      if (!readOnly) await waitForReady(restartedIndex);
+
+      await expect(
+        restartedIndex.searchIntentExamplesAndKeywords({
+          query: "implement",
+          rawLimit: 1,
+        }),
+      ).resolves.toEqual([
+        {
+          intentId: "implementation",
+          score: 0.91,
+          collection: "intent-examples-and-keywords",
+        },
       ]);
-    const reopenedStore = createStoreDouble({
-      search: reopenedSearch,
-      searchLex: reopenedLexSearch,
-    });
-    const secondCreateStore = vi.fn().mockResolvedValue(reopenedStore);
-    const restartedIndex = createIntentQmdIndex({
-      dataRoot: root,
-      config: () => qmdConfig,
-      createStore: secondCreateStore,
-    });
-
-    restartedIndex.schedule(catalog);
-    await waitForReady(restartedIndex);
-
-    await expect(
-      restartedIndex.searchIntentExamplesAndKeywords({
-        query: "implement",
-        rawLimit: 1,
-      }),
-    ).resolves.toEqual([
-      {
-        intentId: "implementation",
-        score: 0.91,
-        collection: "intent-examples-and-keywords",
-      },
-    ]);
-    await expect(
-      restartedIndex.searchKeywords({ query: "implement" }),
-    ).resolves.toEqual([
-      {
-        intentId: "implementation",
-        score: 0.91,
-        collection: "intent-keywords",
-      },
-    ]);
-    expect(secondCreateStore).toHaveBeenCalledWith(
-      expect.objectContaining({
-        dbPath: path.join(root, "qmd", "intents", "intent-routing.sqlite"),
-        readOnly: true,
-        remoteRequestTimeoutMs: 1_234,
-        config: expect.objectContaining({
-          models: expect.objectContaining({
-            embed_api_key: "embedding-key",
-            generate_api_key: "expand-key",
+      await expect(
+        restartedIndex.searchKeywords({ query: "implement" }),
+      ).resolves.toEqual([
+        {
+          intentId: "implementation",
+          score: 0.91,
+          collection: "intent-keywords",
+        },
+      ]);
+      expect(secondCreateStore).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dbPath: path.join(root, "qmd", "intents", "intent-routing.sqlite"),
+          readOnly: true,
+          remoteRequestTimeoutMs: 1_234,
+          config: expect.objectContaining({
+            models: expect.objectContaining({
+              embed_api_key: "embedding-key",
+              generate_api_key: "expand-key",
+            }),
           }),
         }),
-      }),
-    );
-    expect(reopenedStore.update).not.toHaveBeenCalled();
-    expect(reopenedStore.embed).not.toHaveBeenCalled();
+      );
+      expect(reopenedStore.update).not.toHaveBeenCalled();
+      expect(reopenedStore.embed).not.toHaveBeenCalled();
 
-    await restartedIndex.close();
-  });
+      await restartedIndex.close();
+    },
+  );
 
   it("rebuilds after restart when the catalog fingerprint changed", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-"));

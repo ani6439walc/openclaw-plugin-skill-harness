@@ -360,6 +360,7 @@ export function createIntentQmdIndex(params: {
   dataRoot: string;
   config: () => ResolvedQmdConfig;
   createStore?: QmdCreateStore;
+  readOnly?: boolean;
 }): IntentQmdIndex {
   const snapshotRoot = path.join(params.dataRoot, "qmd", "intents");
   const databasePath = path.join(snapshotRoot, "intent-routing.sqlite");
@@ -471,72 +472,18 @@ export function createIntentQmdIndex(params: {
     status = "building";
     let nextStore: QMDStore | undefined;
     try {
-      const locked = await withFileLock(
-        databasePath,
-        async () => {
-          if (closed) return;
-          const reopenedStore = await reopenCompletedStore(target.fingerprint);
-          if (reopenedStore) {
-            nextStore = reopenedStore;
-            if (desired?.fingerprint === target.fingerprint) {
-              await reopenedStore.close();
-              nextStore = undefined;
-              return;
-            }
-            const previousStore = store;
-            store = reopenedStore;
-            currentFingerprint = target.fingerprint;
-            status = "ready";
-            resetRetryState();
-            if (previousStore) {
-              await previousStore.close().catch((error: unknown) => {
-                logger.warn("failed to close previous QMD intent index", {
-                  error,
-                });
-              });
-            }
-            return true;
-          }
-
-          await fs.rm(metadataPath, { force: true });
-          const qmd = params.config();
-          if (
-            !qmd.embedding.baseUrl ||
-            !qmd.embedding.model ||
-            !qmd.expansion.baseUrl ||
-            !qmd.expansion.model
-          ) {
-            throw new Error(
-              "QMD embedding and expansion endpoints must be configured.",
-            );
-          }
-          const createQmdStore =
-            params.createStore ?? (await import("@wei840222/qmd")).createStore;
-          const { collections } = await writeSnapshot(target.intents);
-          nextStore = await createQmdStore({
-            dbPath: databasePath,
-            config: {
-              collections,
-              models: buildStoreModels(qmd),
-            },
-            remoteRequestTimeoutMs: qmd.timeoutMs,
-          });
-          await nextStore.update();
-          const embedResult = await nextStore.embed();
-          const indexStatus = await nextStore.getStatus();
-          if (embedResult.errors > 0 || indexStatus.needsEmbedding > 0) {
-            throw new Error(
-              `QMD intent index embedding is incomplete (errors=${embedResult.errors}, needsEmbedding=${indexStatus.needsEmbedding}).`,
-            );
-          }
-
+      const refresh = async () => {
+        if (closed) return;
+        const reopenedStore = await reopenCompletedStore(target.fingerprint);
+        if (reopenedStore) {
+          nextStore = reopenedStore;
           if (desired?.fingerprint === target.fingerprint) {
-            await nextStore.close();
+            await reopenedStore.close();
+            nextStore = undefined;
             return;
           }
           const previousStore = store;
-          persistFingerprint(target.fingerprint);
-          store = nextStore;
+          store = reopenedStore;
           currentFingerprint = target.fingerprint;
           status = "ready";
           resetRetryState();
@@ -548,9 +495,70 @@ export function createIntentQmdIndex(params: {
             });
           }
           return true;
-        },
-        { maxWaitMs: 30 * 60 * 1000 },
-      );
+        }
+
+        if (params.readOnly) {
+          status = "idle";
+          return true;
+        }
+        await fs.rm(metadataPath, { force: true });
+        const qmd = params.config();
+        if (
+          !qmd.embedding.baseUrl ||
+          !qmd.embedding.model ||
+          !qmd.expansion.baseUrl ||
+          !qmd.expansion.model
+        ) {
+          throw new Error(
+            "QMD embedding and expansion endpoints must be configured.",
+          );
+        }
+        const createQmdStore =
+          params.createStore ?? (await import("@wei840222/qmd")).createStore;
+        const { collections } = await writeSnapshot(target.intents);
+        nextStore = await createQmdStore({
+          dbPath: databasePath,
+          config: {
+            collections,
+            models: buildStoreModels(qmd),
+          },
+          remoteRequestTimeoutMs: qmd.timeoutMs,
+        });
+        await nextStore.update();
+        const embedResult = await nextStore.embed();
+        const indexStatus = await nextStore.getStatus();
+        if (embedResult.errors > 0 || indexStatus.needsEmbedding > 0) {
+          throw new Error(
+            `QMD intent index embedding is incomplete (errors=${embedResult.errors}, needsEmbedding=${indexStatus.needsEmbedding}).`,
+          );
+        }
+
+        if (desired?.fingerprint === target.fingerprint) {
+          await nextStore.close();
+          return;
+        }
+        const previousStore = store;
+        persistFingerprint(target.fingerprint);
+        store = nextStore;
+        currentFingerprint = target.fingerprint;
+        status = "ready";
+        resetRetryState();
+        if (previousStore) {
+          await previousStore.close().catch((error: unknown) => {
+            logger.warn("failed to close previous QMD intent index", {
+              error,
+            });
+          });
+        }
+        return true;
+      };
+      if (params.readOnly) {
+        await refresh();
+        return;
+      }
+      const locked = await withFileLock(databasePath, refresh, {
+        maxWaitMs: 30 * 60 * 1000,
+      });
       if (locked === undefined)
         throw new Error("intent index build lock is busy");
     } catch (error) {
@@ -626,7 +634,8 @@ export function createIntentQmdIndex(params: {
         ? QmdIntentSearchEvidence | undefined
         : QmdIntentHit[] | undefined
     > {
-      if (!isReadyForCurrentCatalog()) return;
+      if (params.readOnly) await running;
+      if (closed || !isReadyForCurrentCatalog()) return;
       const activeStore = store;
       if (!activeStore) return;
       try {
@@ -663,7 +672,8 @@ export function createIntentQmdIndex(params: {
         ? QmdIntentSearchEvidence | undefined
         : QmdIntentHit[] | undefined
     > {
-      if (!isReadyForCurrentCatalog()) return;
+      if (params.readOnly) await running;
+      if (closed || !isReadyForCurrentCatalog()) return;
       const activeStore = store;
       if (!activeStore) return;
       try {
