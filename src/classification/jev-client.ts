@@ -105,7 +105,7 @@ export async function runJevUnifiedRouting(
           intent: params.resolvedIntent.id,
           skills: [],
           confidence: 1.0,
-          reason: `Jev direct route: ${params.resolvedIntent.id}`,
+          reason: `jev → direct route: ${params.resolvedIntent.id}`,
         };
       }
     } else {
@@ -153,7 +153,7 @@ export async function runJevUnifiedRouting(
         intent: params.resolvedIntent?.id,
         skills: [],
         confidence: params.resolvedIntent ? 1.0 : 0.0,
-        reason: "Jev: no candidate questions to evaluate",
+        reason: "jev → no candidate questions to evaluate",
       };
     }
 
@@ -278,10 +278,9 @@ export async function runJevUnifiedRouting(
       .slice(0, maxSkills)
       .map((sp) => sp.name);
 
-    const intentTag = selectedIntent ?? "none";
-    const skillListStr =
-      selectedSkills.length > 0 ? selectedSkills.join(", ") : "none";
-    const reason = `Jev decision (intent: ${intentTag}, confidence: ${confidence.toFixed(2)}, skills: [${skillListStr}])`;
+    const skillListStr = selectedSkills.join(", ");
+    const skillCount = `${selectedSkills.length} ${selectedSkills.length === 1 ? "skill" : "skills"}`;
+    const reason = `jev → ${skillCount}: [${skillListStr}]`;
 
     return {
       intent: selectedIntent,

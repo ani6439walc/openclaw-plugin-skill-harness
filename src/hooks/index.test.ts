@@ -3614,6 +3614,50 @@ describe("createHookHandlers topic switch flow", () => {
     expect(record).toHaveBeenCalled();
   });
 
+  it("preserves jev reason prefix without adding llm-classifier prefix", async () => {
+    const classifier = vi.fn().mockResolvedValue({
+      intent: "version-control",
+      skills: ["git-tools", "obsidian"],
+      reason: "jev → 2 skills: [git-tools, obsidian]",
+      confidence: 1.0,
+    });
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
+      historicalIntents: [],
+      intents: [intent, versionControlIntent],
+      classifier,
+      qmdIntentIndex: qmdIndex({
+        keywordHits: [
+          {
+            intentId: "version-control",
+            score: 0.79,
+            collection: "intent-keywords",
+          },
+        ],
+        hybridHits: [
+          {
+            intentId: "version-control",
+            score: 0.55,
+            collection: "intent-examples-and-keywords",
+          },
+        ],
+      }),
+    });
+
+    await handlers.onBeforePromptBuild(event, ctx);
+
+    const intentMatchEvent = emittedPipelineEvents(emitAgentEvent).find(
+      (entry) => entry.data.phase === "intent-match",
+    );
+    expect(intentMatchEvent?.data).toEqual(
+      expect.objectContaining({
+        state: "completed",
+        result: "version-control",
+        confidence: 1.0,
+        reason: "jev → 2 skills: [git-tools, obsidian]",
+      }),
+    );
+  });
+
   it("does not emit intent events for normal unmatched QMD searches", async () => {
     const classifier = vi.fn().mockResolvedValue(undefined);
     const { handlers, emitAgentEvent } = createTopicFlowHarness({

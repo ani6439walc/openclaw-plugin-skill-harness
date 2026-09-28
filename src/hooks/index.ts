@@ -1852,6 +1852,14 @@ export function createHookHandlers(deps: HookDeps) {
                         }
                       : {}),
                   };
+                  const formatClassifierReason = (
+                    reasonText: string | undefined,
+                  ): string => {
+                    if (!reasonText) return "llm-classifier → fallback";
+                    if (reasonText.startsWith("jev →")) return reasonText;
+                    return `llm-classifier → ${reasonText}`;
+                  };
+
                   if (resolvedIntent) {
                     emitPipelineEvent(
                       ctx,
@@ -1861,7 +1869,7 @@ export function createHookHandlers(deps: HookDeps) {
                       {
                         result: result.intent,
                         confidence: result.confidence,
-                        reason: `llm-classifier → ${result.reason}`,
+                        reason: formatClassifierReason(result.reason),
                         durationMs: Math.max(
                           0,
                           Date.now() - routingStartedAtMs,
@@ -1877,7 +1885,7 @@ export function createHookHandlers(deps: HookDeps) {
                       {
                         result: llmResult.intent,
                         confidence: llmResult.confidence,
-                        reason: `llm-classifier → ${llmResult.reason || "fallback"}`,
+                        reason: formatClassifierReason(llmResult.reason),
                         durationMs: Math.max(
                           0,
                           Date.now() - routingStartedAtMs,

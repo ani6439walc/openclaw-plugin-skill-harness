@@ -99,7 +99,7 @@ describe("runJevUnifiedRouting", () => {
       intent: "code-review",
       skills: ["git-tools"],
       confidence: 1.0,
-      reason: expect.stringContaining("code-review"),
+      reason: "jev → 1 skill: [git-tools]",
     });
   });
 
@@ -125,7 +125,7 @@ describe("runJevUnifiedRouting", () => {
       intent: "code-review",
       skills: [],
       confidence: 1.0,
-      reason: "Jev direct route: code-review",
+      reason: "jev → direct route: code-review",
     });
   });
 
@@ -188,7 +188,7 @@ describe("runJevUnifiedRouting", () => {
       intent: "documentation",
       skills: ["markdown-formatter"],
       confidence: 0.92,
-      reason: expect.stringContaining("documentation"),
+      reason: "jev → 1 skill: [markdown-formatter]",
     });
   });
 
@@ -270,6 +270,7 @@ describe("runJevUnifiedRouting", () => {
     });
 
     expect(result?.skills).toEqual(["skill-2", "skill-3"]);
+    expect(result?.reason).toBe("jev → 2 skills: [skill-2, skill-3]");
   });
 
   it("returns early when no candidate questions exist", async () => {
@@ -294,7 +295,7 @@ describe("runJevUnifiedRouting", () => {
       intent: undefined,
       skills: [],
       confidence: 0.0,
-      reason: "Jev: no candidate questions to evaluate",
+      reason: "jev → no candidate questions to evaluate",
     });
   });
 
@@ -356,7 +357,7 @@ describe("runJevUnifiedRouting", () => {
       intent: undefined,
       skills: [],
       confidence: 0.0,
-      reason: "Jev: no candidate questions to evaluate",
+      reason: "jev → no candidate questions to evaluate",
     });
   });
 
