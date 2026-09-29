@@ -2404,6 +2404,16 @@ describe("createHookHandlers internal turn guards", () => {
       const refreshIntents = vi.fn();
       const topicChecker = vi.fn();
       const classifier = vi.fn();
+      const tracker = {
+        preparePromptTurn: vi.fn().mockResolvedValue({
+          status: "applied",
+          identity: { turnKey: "mock-turn", reused: false },
+        }),
+        mergeTurnAndPersist: vi.fn().mockResolvedValue("applied"),
+        getHistoricalIntentRecords: vi.fn().mockReturnValue([]),
+        resolveCurrentSessionId: vi.fn().mockReturnValue(undefined),
+        listRetainedSessions: vi.fn().mockReturnValue([]),
+      };
       const handlers = createHookHandlers({
         api: {
           config: {},
@@ -2417,6 +2427,7 @@ describe("createHookHandlers internal turn guards", () => {
         refreshIntents,
         topicChecker,
         classifier,
+        tracker: tracker as never,
       });
 
       try {
@@ -2457,15 +2468,22 @@ describe("createHookHandlers internal turn guards", () => {
 
   it("does not skip a normal external-user turn", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
-    const getHistoricalIntentRecords = vi.spyOn(
-      defaultTracker,
-      "getHistoricalIntentRecords",
-    );
+    const tracker = {
+      preparePromptTurn: vi.fn().mockResolvedValue({
+        status: "applied",
+        identity: { turnKey: "normal-turn", reused: false },
+      }),
+      mergeTurnAndPersist: vi.fn().mockResolvedValue("applied"),
+      getHistoricalIntentRecords: vi.fn().mockReturnValue([]),
+      resolveCurrentSessionId: vi.fn().mockReturnValue(undefined),
+      listRetainedSessions: vi.fn().mockReturnValue([]),
+    };
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({}),
       refreshLiveConfigFromRuntime,
       refreshIntents: vi.fn(),
+      tracker: tracker as never,
     });
 
     await handlers.onBeforePromptBuild(
@@ -2488,7 +2506,9 @@ describe("createHookHandlers internal turn guards", () => {
     );
 
     expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
-    expect(getHistoricalIntentRecords).toHaveBeenCalledWith("normal-session");
+    expect(tracker.getHistoricalIntentRecords).toHaveBeenCalledWith(
+      "normal-session",
+    );
   });
 });
 
