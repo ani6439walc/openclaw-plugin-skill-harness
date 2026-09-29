@@ -3,13 +3,9 @@
   "displayName": "Skill Harness",
   "description": "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
   "version": "2026.9.6",
-  "packageManager": "pnpm@11.22.0",
-  "type": "module",
   "license": "MIT",
-  "author": "Ani <ani6439walc@gmail.com>",
-  "contributors": [
-    "Wan, Jiun Wei <wei840222@gmail.com>"
-  ],
+  "packageManager": "pnpm@12.8.1",
+  "type": "module",
   "homepage": "https://github.com/ani6439walc/openclaw-plugin-skill-harness#readme",
   "repository": {
     "type": "git",
@@ -55,8 +51,8 @@
     "@typesafe-ai/sdk": "^0.6.0",
     "@wei840222/qmd": "2026.9.30",
     "gray-matter": "4.0.3",
-    "typebox": "1.3.27",
-    "zod": "4.5.4"
+    "typebox": "1.3.30",
+    "zod": "4.6.5"
   },
   "peerDependencies": {
     "openclaw": "2026.9.6"
@@ -64,6 +60,6 @@
   "devDependencies": {
     "typescript": "6.0.3",
     "vitest": "5.0.0",
-    "prettier": "3.9.6"
+    "prettier": "3.9.9"
   }
 }
