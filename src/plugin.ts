@@ -185,7 +185,7 @@ export function createPlugin(
     id: PLUGIN_ID,
     name: "Skill Harness",
     description:
-      "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
+      "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
     register() {
       const getWorkingSetSkills = createWorkingSetSkillsResolver(
         refreshLiveConfigFromRuntime,
