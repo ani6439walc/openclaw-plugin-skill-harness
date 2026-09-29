@@ -34,7 +34,7 @@ export async function runJevUnifiedRouting(
   params: JevUnifiedRoutingParams,
 ): Promise<RoutingLlmResult | undefined> {
   try {
-    const pluginJev = params.config.qmd.jev;
+    const pluginJev = params.config.jev ?? params.config.qmd.jev;
     const rawRef =
       pluginJev?.model ||
       `${params.modelRef.provider}/${params.modelRef.model}`;

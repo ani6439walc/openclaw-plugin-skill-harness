@@ -211,4 +211,10 @@ describe("skill-harness manifest", () => {
       description: expect.any(String),
     });
   });
+
+  it("exposes jev at top level alongside qmd and not under qmd properties", () => {
+    expect(manifest.configSchema.properties.jev).toBeDefined();
+    expect(manifest.configSchema.properties.jev.type).toBe("object");
+    expect(manifest.configSchema.properties.qmd.properties.jev).toBeUndefined();
+  });
 });

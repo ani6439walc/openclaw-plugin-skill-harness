@@ -548,6 +548,69 @@ describe("resolveConfig", () => {
       expect(result.qmd.jev?.apiKey).toBe("my-custom-jev-key");
     });
 
+    it("resolves top-level jev endpoint when configured at root", () => {
+      const mockConfig = {
+        models: {
+          providers: {
+            openrouter: {
+              baseUrl: "https://openrouter.ai/api/v1",
+              apiKey: "or-key",
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      const result = resolveConfig(
+        {
+          qmd: {
+            embedding: {
+              baseUrl: "https://example.com/v1",
+              model: "embed-model",
+            },
+            expansion: {
+              baseUrl: "https://example.com/v1",
+              model: "gemini-flash",
+            },
+          },
+          jev: {
+            model: "openrouter/typesafe/jev-latest",
+          },
+        },
+        { openClawConfig: mockConfig },
+      );
+
+      expect(result.jev).toEqual({
+        baseUrl: "https://openrouter.ai/api",
+        model: "typesafe/jev-latest",
+        apiKey: "or-key",
+      });
+      expect(result.qmd.jev).toEqual(result.jev);
+    });
+
+    it("prefers top-level jev when both top-level and qmd.jev are specified", () => {
+      const result = resolveConfig({
+        qmd: {
+          embedding: {
+            baseUrl: "https://example.com/v1",
+            model: "embed-model",
+          },
+          expansion: {
+            baseUrl: "https://example.com/v1",
+            model: "gemini-flash",
+          },
+          jev: {
+            apiKey: "legacy-key",
+          },
+        },
+        jev: {
+          apiKey: "top-level-key",
+        },
+      });
+
+      expect(result.jev?.apiKey).toBe("top-level-key");
+      expect(result.qmd.jev?.apiKey).toBe("top-level-key");
+    });
+
     it("resolves default skills.search weights and index refresh interval", () => {
       const manifest = JSON.parse(
         readFileSync(

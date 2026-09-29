@@ -647,12 +647,14 @@ const QmdSchema = z
 const SkillHarnessConfigSchema = z
   .object({
     qmd: QmdSchema,
+    jev: QmdJevSchema,
     skills: z.unknown().optional(),
     routing: z.unknown().optional(),
     review: ReviewSchema.optional().default(DEFAULT_REVIEW),
   })
   .catch({
     qmd: DEFAULT_QMD,
+    jev: undefined,
     skills: DEFAULT_SKILLS,
     routing: DEFAULT_ROUTING,
     review: DEFAULT_REVIEW,
@@ -671,16 +673,12 @@ export function resolveConfig(
   });
   const resolvedExpansion = resolveQmdEndpoint(resolved.qmd.expansion, options);
 
+  const rawJev = resolved.jev ?? resolved.qmd.jev;
   let resolvedJev: QmdEndpointConfig | undefined = undefined;
-  if (
-    resolved.qmd.jev &&
-    (resolved.qmd.jev.model ||
-      resolved.qmd.jev.baseUrl ||
-      resolved.qmd.jev.apiKey)
-  ) {
-    const ep = resolveQmdEndpoint(resolved.qmd.jev, options);
+  if (rawJev && (rawJev.model || rawJev.baseUrl || rawJev.apiKey)) {
+    const ep = resolveQmdEndpoint(rawJev, options);
     resolvedJev = {
-      ...resolved.qmd.jev,
+      ...rawJev,
       ...ep,
       baseUrl: normalizeTypeSafeBaseUrl(ep.baseUrl) || ep.baseUrl,
     };
@@ -717,6 +715,7 @@ export function resolveConfig(
       },
       ...(resolvedJev ? { jev: resolvedJev } : {}),
     },
+    ...(resolvedJev ? { jev: resolvedJev } : {}),
     skills: resolvedSkills,
     routing: resolvedRouting,
     review: resolved.review,
