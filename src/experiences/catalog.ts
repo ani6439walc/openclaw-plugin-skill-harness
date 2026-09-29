@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import matter from "gray-matter";
 import { experiencesPath } from "../file-utils.js";
 import { normalizeForComparison } from "../normalize.js";
 import type {
@@ -16,21 +15,23 @@ const MAX_KEYWORD_CODE_POINTS = 64;
 const MAX_KEYWORDS = 12;
 const MAX_BODY_CODE_POINTS = 12_000;
 const VALID_SEGMENT = /^[a-z0-9][a-z0-9._-]*$/;
-const FRONTMATTER_FIELDS = new Set(["skill", "summary", "keywords"]);
+
+const REQUIRED_FILES = ["summary.md", "keywords.md", "body.md"] as const;
+const OPTIONAL_FILES = ["skills.md"] as const;
+const ALLOWED_FILES = new Set<string>([...REQUIRED_FILES, ...OPTIONAL_FILES]);
 
 type ExperienceScore = readonly [
-  identityExact: 0 | 1,
+  idExact: 0 | 1,
   exactKeywordMatches: number,
   summaryPhraseMatches: number,
   bodyPhraseMatches: number,
 ];
 
-interface ScannedFile {
+interface ScannedEntry {
   absolutePath: string;
   relativePath: string;
-  skillSegment?: string;
   entrySegment?: string;
-  canonicalIdentity?: string;
+  canonicalId?: string;
   pathError?: string;
 }
 
@@ -67,19 +68,19 @@ function toRelativePath(root: string, target: string): string {
   return relative || ".";
 }
 
-function scanMarkdownFiles(experienceDirectory: string): {
-  files: ScannedFile[];
+function scanExperienceFolders(experienceDirectory: string): {
+  entries: ScannedEntry[];
   errors: ExperienceDirectoryValidationError[];
 } {
   const root = path.resolve(experienceDirectory);
   const errors: ExperienceDirectoryValidationError[] = [];
-  const files: ScannedFile[] = [];
+  const entries: ScannedEntry[] = [];
   let rootReal: string;
   try {
     const rootStat = fs.lstatSync(root);
     if (rootStat.isSymbolicLink()) {
       return {
-        files,
+        entries,
         errors: [
           { file: ".", message: "experience root cannot be a symbolic link" },
         ],
@@ -87,17 +88,17 @@ function scanMarkdownFiles(experienceDirectory: string): {
     }
     if (!rootStat.isDirectory()) {
       return {
-        files,
+        entries,
         errors: [{ file: ".", message: "experience root must be a directory" }],
       };
     }
     rootReal = fs.realpathSync(root);
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return { files, errors };
+      return { entries, errors };
     }
     return {
-      files,
+      entries,
       errors: [
         {
           file: ".",
@@ -107,124 +108,107 @@ function scanMarkdownFiles(experienceDirectory: string): {
     };
   }
 
-  const visit = (directory: string): void => {
-    let entries: fs.Dirent[];
+  let dirents: fs.Dirent[];
+  try {
+    dirents = fs
+      .readdirSync(root, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name, "en"));
+  } catch (error) {
+    errors.push({
+      file: ".",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return { entries, errors };
+  }
+
+  for (const dirent of dirents) {
+    const declaredPath = path.join(root, dirent.name);
+    const relativePath = toRelativePath(root, declaredPath);
+    let stat: fs.Stats;
     try {
-      entries = fs
-        .readdirSync(directory, { withFileTypes: true })
-        .sort((left, right) => left.name.localeCompare(right.name, "en"));
+      stat = fs.lstatSync(declaredPath);
     } catch (error) {
       errors.push({
-        file: toRelativePath(root, directory),
+        file: relativePath,
         message: error instanceof Error ? error.message : String(error),
       });
-      return;
+      continue;
     }
 
-    for (const directoryEntry of entries) {
-      const declaredPath = path.join(directory, directoryEntry.name);
-      const relativePath = toRelativePath(root, declaredPath);
-      let stat: fs.Stats;
-      try {
-        stat = fs.lstatSync(declaredPath);
-      } catch (error) {
-        errors.push({
-          file: relativePath,
-          message: error instanceof Error ? error.message : String(error),
-        });
-        continue;
-      }
-
-      if (stat.isSymbolicLink()) {
-        errors.push({
-          file: relativePath,
-          message: "symbolic links are not allowed in the experience directory",
-        });
-        continue;
-      }
-      if (stat.isDirectory()) {
-        let realDirectory: string;
-        try {
-          realDirectory = fs.realpathSync(declaredPath);
-        } catch (error) {
-          errors.push({
-            file: relativePath,
-            message: error instanceof Error ? error.message : String(error),
-          });
-          continue;
-        }
-        if (!isConfined(rootReal, realDirectory)) {
-          errors.push({
-            file: relativePath,
-            message:
-              "directory real path is not confined to the experience root",
-          });
-          continue;
-        }
-        visit(declaredPath);
-        continue;
-      }
-      if (
-        !stat.isFile() ||
-        !directoryEntry.name.toLowerCase().endsWith(".md")
-      ) {
-        continue;
-      }
-
-      const segments = relativePath.split("/");
-      const entryFile = segments.at(-1) ?? "";
-      const entrySegment = entryFile.slice(0, -".md".length);
-      const skillSegment = segments.length === 2 ? segments[0] : undefined;
-      const canonicalSkill = normalizeSegment(skillSegment ?? "");
-      const canonicalEntry = normalizeSegment(entrySegment);
-      let pathError: string | undefined;
-      if (!entryFile.endsWith(".md")) {
-        pathError = "experience Markdown filename must use the .md extension";
-      } else if (segments.length !== 2) {
-        pathError =
-          "experience Markdown path must be <normalized-skill>/<entry-id>.md";
-      } else if (!isNormalizedSegment(skillSegment ?? "")) {
-        pathError = "skill directory must be a bounded normalized name";
-      } else if (!isNormalizedSegment(entrySegment)) {
-        pathError = "entry id must be a bounded normalized name";
-      }
-
-      files.push({
-        absolutePath: declaredPath,
-        relativePath,
-        skillSegment,
-        entrySegment,
-        canonicalIdentity:
-          canonicalSkill && canonicalEntry
-            ? `${canonicalSkill}/${canonicalEntry}`
-            : undefined,
-        pathError,
+    if (stat.isSymbolicLink()) {
+      errors.push({
+        file: relativePath,
+        message: "symbolic links are not allowed in the experience directory",
       });
+      continue;
     }
-  };
 
-  visit(root);
-  return { files, errors };
+    if (!stat.isDirectory()) {
+      errors.push({
+        file: relativePath,
+        message: "experience root can only contain experience directories",
+      });
+      continue;
+    }
+
+    let realDirectory: string;
+    try {
+      realDirectory = fs.realpathSync(declaredPath);
+    } catch (error) {
+      errors.push({
+        file: relativePath,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    if (!isConfined(rootReal, realDirectory)) {
+      errors.push({
+        file: relativePath,
+        message: "directory real path is not confined to the experience root",
+      });
+      continue;
+    }
+
+    const entrySegment = dirent.name;
+    const canonicalId = normalizeSegment(entrySegment);
+    let pathError: string | undefined;
+    if (!isNormalizedSegment(entrySegment)) {
+      pathError = "entry directory must be a bounded normalized name";
+    }
+
+    entries.push({
+      absolutePath: declaredPath,
+      relativePath,
+      entrySegment,
+      canonicalId,
+      pathError,
+    });
+  }
+
+  return { entries, errors };
 }
 
-function parseExperienceFile(
+function parseExperienceFolder(
   rootReal: string,
-  file: ScannedFile,
+  entry: ScannedEntry,
 ): {
   entry?: SkillExperienceEntry;
   errors: ExperienceDirectoryValidationError[];
 } {
   const messages: string[] = [];
-  if (file.pathError) messages.push(file.pathError);
+  if (entry.pathError) messages.push(entry.pathError);
 
-  let realFile: string;
+  let realDir: string;
   try {
-    realFile = fs.realpathSync(file.absolutePath);
-    if (!isConfined(rootReal, realFile)) {
-      messages.push("file real path is not confined to the experience root");
+    realDir = fs.realpathSync(entry.absolutePath);
+    if (!isConfined(rootReal, realDir)) {
+      messages.push(
+        "directory real path is not confined to the experience root",
+      );
       return {
         errors: messages.map((message) => ({
-          file: file.relativePath,
+          file: entry.relativePath,
           message,
         })),
       };
@@ -232,57 +216,82 @@ function parseExperienceFile(
   } catch (error) {
     messages.push(error instanceof Error ? error.message : String(error));
     return {
-      errors: messages.map((message) => ({ file: file.relativePath, message })),
+      errors: messages.map((message) => ({
+        file: entry.relativePath,
+        message,
+      })),
     };
   }
 
-  let parsed: matter.GrayMatterFile<string>;
+  let childDirents: fs.Dirent[];
   try {
-    parsed = matter(fs.readFileSync(realFile, "utf-8"));
+    childDirents = fs
+      .readdirSync(realDir, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name, "en"));
   } catch (error) {
-    messages.push(
-      `malformed YAML frontmatter: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    messages.push(error instanceof Error ? error.message : String(error));
     return {
-      errors: messages.map((message) => ({ file: file.relativePath, message })),
+      errors: messages.map((message) => ({
+        file: entry.relativePath,
+        message,
+      })),
     };
   }
 
-  if (
-    typeof parsed.data !== "object" ||
-    parsed.data === null ||
-    Array.isArray(parsed.data)
-  ) {
-    return {
-      errors: [
-        {
-          file: file.relativePath,
-          message: "frontmatter must be an object",
-        },
-      ],
-    };
-  }
-  const data = parsed.data as Record<string, unknown>;
-  for (const field of Object.keys(data)) {
-    if (!FRONTMATTER_FIELDS.has(field)) {
-      messages.push(`unknown frontmatter field ${field}`);
+  for (const child of childDirents) {
+    const childRelative = path.join(entry.relativePath, child.name);
+    const childDeclaredPath = path.join(entry.absolutePath, child.name);
+    let childStat: fs.Stats;
+    try {
+      childStat = fs.lstatSync(childDeclaredPath);
+    } catch (error) {
+      messages.push(
+        `failed to stat ${childRelative}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
+    }
+    if (childStat.isSymbolicLink()) {
+      messages.push(
+        `symbolic links are not allowed in experience entry: ${child.name}`,
+      );
+      continue;
+    }
+    if (childStat.isDirectory()) {
+      messages.push(
+        `subdirectories are not allowed inside experience entry: ${child.name}`,
+      );
+      continue;
+    }
+    if (!ALLOWED_FILES.has(child.name)) {
+      messages.push(`unexpected file in experience entry: ${child.name}`);
     }
   }
-  for (const field of FRONTMATTER_FIELDS) {
-    if (!(field in data)) messages.push(`missing frontmatter field ${field}`);
+
+  const existingFileNames = new Set(childDirents.map((d) => d.name));
+  for (const req of REQUIRED_FILES) {
+    if (!existingFileNames.has(req)) {
+      messages.push(`missing required file: ${req}`);
+    }
   }
 
-  const skill = typeof data.skill === "string" ? data.skill : "";
-  const normalizedSkill = normalizeSegment(skill);
-  if (!normalizedSkill || skill !== normalizedSkill) {
-    messages.push("skill must be a bounded normalized name");
-  } else if (file.skillSegment && normalizedSkill !== file.skillSegment) {
+  if (messages.length > 0) {
+    return {
+      errors: messages.map((message) => ({
+        file: entry.relativePath,
+        message,
+      })),
+    };
+  }
+
+  // Parse summary.md
+  let summary = "";
+  try {
+    summary = fs.readFileSync(path.join(realDir, "summary.md"), "utf8").trim();
+  } catch (error) {
     messages.push(
-      `skill ${normalizedSkill} does not match parent directory ${file.skillSegment}`,
+      `failed to read summary.md: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-
-  const summary = typeof data.summary === "string" ? data.summary.trim() : "";
   if (!summary) {
     messages.push("summary must be a non-empty string");
   } else if (codePointLength(summary) > MAX_SUMMARY_CODE_POINTS) {
@@ -291,20 +300,23 @@ function parseExperienceFile(
     );
   }
 
-  const keywords = Array.isArray(data.keywords) ? data.keywords : undefined;
+  // Parse keywords.md
   const normalizedKeywords: string[] = [];
-  if (!keywords || keywords.length < 1 || keywords.length > MAX_KEYWORDS) {
-    messages.push(
-      `keywords must contain between 1 and ${MAX_KEYWORDS} strings`,
+  try {
+    const rawKeywords = fs.readFileSync(
+      path.join(realDir, "keywords.md"),
+      "utf8",
     );
-  } else {
+    const lines = rawKeywords.split(/\r?\n/);
     const seen = new Set<string>();
-    for (const value of keywords) {
-      if (typeof value !== "string" || !value.trim()) {
-        messages.push("keywords must contain only non-empty strings");
-        continue;
+    for (const rawLine of lines) {
+      let trimmed = rawLine.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+        trimmed = trimmed.slice(2).trim();
       }
-      const trimmed = value.trim();
+      if (!trimmed) continue;
+
       if (codePointLength(trimmed) > MAX_KEYWORD_CODE_POINTS) {
         messages.push(
           `each keyword must contain at most ${MAX_KEYWORD_CODE_POINTS} Unicode code points`,
@@ -318,9 +330,29 @@ function parseExperienceFile(
         normalizedKeywords.push(trimmed);
       }
     }
+  } catch (error) {
+    messages.push(
+      `failed to read keywords.md: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (
+    normalizedKeywords.length < 1 ||
+    normalizedKeywords.length > MAX_KEYWORDS
+  ) {
+    messages.push(
+      `keywords must contain between 1 and ${MAX_KEYWORDS} strings`,
+    );
   }
 
-  const body = parsed.content.trim();
+  // Parse body.md
+  let body = "";
+  try {
+    body = fs.readFileSync(path.join(realDir, "body.md"), "utf8").trim();
+  } catch (error) {
+    messages.push(
+      `failed to read body.md: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   if (!body) {
     messages.push("Markdown body must be non-empty");
   } else if (codePointLength(body) > MAX_BODY_CODE_POINTS) {
@@ -329,26 +361,58 @@ function parseExperienceFile(
     );
   }
 
-  if (
-    messages.length > 0 ||
-    !normalizedSkill ||
-    !file.skillSegment ||
-    !file.entrySegment
-  ) {
+  // Parse skills.md (optional)
+  const normalizedSkills: string[] = [];
+  if (existingFileNames.has("skills.md")) {
+    try {
+      const rawSkills = fs.readFileSync(
+        path.join(realDir, "skills.md"),
+        "utf8",
+      );
+      const lines = rawSkills.split(/\r?\n/);
+      const seen = new Set<string>();
+      for (const rawLine of lines) {
+        let trimmed = rawLine.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+          trimmed = trimmed.slice(2).trim();
+        }
+        if (!trimmed) continue;
+
+        const normalized = normalizeSegment(trimmed);
+        if (!normalized || normalized !== trimmed) {
+          messages.push(`skill ${trimmed} must be a bounded normalized name`);
+          continue;
+        }
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          normalizedSkills.push(normalized);
+        }
+      }
+    } catch (error) {
+      messages.push(
+        `failed to read skills.md: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  if (messages.length > 0 || !entry.canonicalId) {
     return {
-      errors: messages.map((message) => ({ file: file.relativePath, message })),
+      errors: messages.map((message) => ({
+        file: entry.relativePath,
+        message,
+      })),
     };
   }
 
   return {
     entry: {
-      identity: `${normalizedSkill}/${file.entrySegment}`,
-      skill: normalizedSkill,
-      entryId: file.entrySegment,
+      id: entry.canonicalId,
+      skills: normalizedSkills,
       summary,
       keywords: normalizedKeywords,
       body,
-      path: file.absolutePath,
+      path: entry.absolutePath,
     },
     errors: [],
   };
@@ -371,7 +435,7 @@ export function validateExperienceDirectory(params: {
   experienceDirectory: string;
   visibleSkillsByAgent: Readonly<Record<string, readonly string[]>>;
 }): ExperienceDirectoryValidationResult {
-  const scanned = scanMarkdownFiles(params.experienceDirectory);
+  const scanned = scanExperienceFolders(params.experienceDirectory);
   if (
     scanned.errors.length === 0 &&
     !fs.existsSync(params.experienceDirectory)
@@ -388,45 +452,46 @@ export function validateExperienceDirectory(params: {
 
   const errors = [...scanned.errors];
   const parsedEntries: SkillExperienceEntry[] = [];
-  const duplicatePaths = new Map<string, ScannedFile[]>();
-  for (const file of scanned.files) {
-    if (!file.canonicalIdentity) continue;
-    const duplicates = duplicatePaths.get(file.canonicalIdentity) ?? [];
-    duplicates.push(file);
-    duplicatePaths.set(file.canonicalIdentity, duplicates);
+  const duplicatePaths = new Map<string, ScannedEntry[]>();
+  for (const entry of scanned.entries) {
+    if (!entry.canonicalId) continue;
+    const duplicates = duplicatePaths.get(entry.canonicalId) ?? [];
+    duplicates.push(entry);
+    duplicatePaths.set(entry.canonicalId, duplicates);
   }
-  const rejectedIdentities = new Set<string>();
-  for (const [identity, files] of duplicatePaths) {
-    if (files.length < 2) continue;
-    rejectedIdentities.add(identity);
-    for (const file of files) {
+  const rejectedIds = new Set<string>();
+  for (const [id, entries] of duplicatePaths) {
+    if (entries.length < 2) continue;
+    rejectedIds.add(id);
+    for (const entry of entries) {
       errors.push({
-        file: file.relativePath,
-        message: `duplicate canonical identity ${identity}`,
+        file: entry.relativePath,
+        message: `duplicate canonical id ${id}`,
       });
     }
   }
-  const entriesByIdentity = new Map<string, SkillExperienceEntry[]>();
-  for (const file of scanned.files) {
-    const parsed = parseExperienceFile(rootReal, file);
+
+  const entriesById = new Map<string, SkillExperienceEntry[]>();
+  for (const entry of scanned.entries) {
+    const parsed = parseExperienceFolder(rootReal, entry);
     errors.push(...parsed.errors);
     if (!parsed.entry) continue;
     parsedEntries.push(parsed.entry);
-    const duplicates = entriesByIdentity.get(parsed.entry.identity) ?? [];
+    const duplicates = entriesById.get(parsed.entry.id) ?? [];
     duplicates.push(parsed.entry);
-    entriesByIdentity.set(parsed.entry.identity, duplicates);
+    entriesById.set(parsed.entry.id, duplicates);
   }
 
-  for (const [identity, entries] of entriesByIdentity) {
+  for (const [id, entries] of entriesById) {
     if (entries.length < 2) continue;
-    rejectedIdentities.add(identity);
+    rejectedIds.add(id);
     for (const entry of entries) {
       errors.push({
         file: toRelativePath(
           path.resolve(params.experienceDirectory),
           entry.path,
         ),
-        message: `duplicate canonical identity ${identity}`,
+        message: `duplicate canonical id ${id}`,
       });
     }
   }
@@ -434,23 +499,26 @@ export function validateExperienceDirectory(params: {
   const visible = visibleSkillNames(params.visibleSkillsByAgent);
   const validEntries: SkillExperienceEntry[] = [];
   for (const entry of parsedEntries) {
-    if (rejectedIdentities.has(entry.identity)) continue;
-    if (!visible.has(entry.skill)) {
-      errors.push({
-        file: toRelativePath(
-          path.resolve(params.experienceDirectory),
-          entry.path,
-        ),
-        message: `skill ${entry.skill} is not visible to any configured agent`,
-      });
-      continue;
+    if (rejectedIds.has(entry.id)) continue;
+    let skillError = false;
+    for (const skill of entry.skills) {
+      if (!visible.has(skill)) {
+        errors.push({
+          file: toRelativePath(
+            path.resolve(params.experienceDirectory),
+            entry.path,
+          ),
+          message: `skill ${skill} is not visible to any configured agent`,
+        });
+        skillError = true;
+      }
     }
-    validEntries.push(entry);
+    if (!skillError) {
+      validEntries.push(entry);
+    }
   }
 
-  validEntries.sort((left, right) =>
-    left.identity.localeCompare(right.identity, "en"),
-  );
+  validEntries.sort((left, right) => left.id.localeCompare(right.id, "en"));
   errors.sort(
     (left, right) =>
       left.file.localeCompare(right.file, "en") ||
@@ -462,7 +530,7 @@ export function validateExperienceDirectory(params: {
 function readCatalogEntries(
   experienceDirectory: string,
 ): SkillExperienceEntry[] {
-  const scanned = scanMarkdownFiles(experienceDirectory);
+  const scanned = scanExperienceFolders(experienceDirectory);
   if (!fs.existsSync(experienceDirectory)) return [];
 
   let rootReal: string;
@@ -472,20 +540,20 @@ function readCatalogEntries(
     return [];
   }
 
-  const byIdentity = new Map<string, SkillExperienceEntry[]>();
-  for (const file of scanned.files) {
-    const parsed = parseExperienceFile(rootReal, file);
+  const byId = new Map<string, SkillExperienceEntry[]>();
+  for (const entry of scanned.entries) {
+    const parsed = parseExperienceFolder(rootReal, entry);
     if (!parsed.entry || parsed.errors.length > 0) continue;
-    const entries = byIdentity.get(parsed.entry.identity) ?? [];
+    const entries = byId.get(parsed.entry.id) ?? [];
     entries.push(parsed.entry);
-    byIdentity.set(parsed.entry.identity, entries);
+    byId.set(parsed.entry.id, entries);
   }
 
-  return [...byIdentity.values()]
+  return [...byId.values()]
     .filter((entries) => entries.length === 1)
     .map(([entry]) => entry)
     .filter((entry): entry is SkillExperienceEntry => Boolean(entry))
-    .sort((left, right) => left.identity.localeCompare(right.identity, "en"));
+    .sort((left, right) => left.id.localeCompare(right.id, "en"));
 }
 
 function phraseCount(value: string, phrase: string): number {
@@ -504,10 +572,11 @@ function scoreEntry(
   entry: SkillExperienceEntry,
   query: string,
 ): ExperienceScore {
-  const identity = normalizeForComparison(entry.identity);
+  const id = normalizeForComparison(entry.id);
   const keywords = entry.keywords.map(normalizeForComparison);
+  const skills = entry.skills.map(normalizeForComparison);
   return [
-    identity === query ? 1 : 0,
+    id === query || skills.includes(query) ? 1 : 0,
     keywords.filter((keyword) => keyword === query).length,
     phraseCount(normalizeForComparison(entry.summary), query),
     phraseCount(normalizeForComparison(entry.body), query),
@@ -541,24 +610,23 @@ export class SkillExperienceCatalog {
     );
     if (requested.size === 0) return [];
     return readCatalogEntries(this.experienceDirectory).filter((entry) =>
-      requested.has(entry.skill),
+      entry.skills.some((skill) => requested.has(skill)),
     );
   }
 
-  resolve(identity: string): SkillExperienceEntry | undefined {
-    const segments = normalizeForComparison(identity).split("/");
-    if (segments.length !== 2) return;
-    const skill = normalizeSegment(segments[0] ?? "");
-    const entryId = normalizeSegment(segments[1] ?? "");
-    if (!skill || !entryId) return;
-    const canonicalIdentity = `${skill}/${entryId}`;
+  resolve(id: string): SkillExperienceEntry | undefined {
+    const canonicalId = normalizeSegment(id);
+    if (!canonicalId) return;
     return readCatalogEntries(this.experienceDirectory).find(
-      (entry) => entry.identity === canonicalIdentity,
+      (entry) => entry.id === canonicalId,
     );
   }
 
   search(params: ExperienceSearchParams): SkillExperienceEntry[] {
-    const entries = this.listForSkills(params.skillNames);
+    const entries =
+      params.skills && params.skills.length > 0
+        ? this.listForSkills(params.skills)
+        : this.listAll();
     const query = normalizeForComparison(params.query ?? "");
     const limit =
       params.limit === undefined
@@ -572,7 +640,7 @@ export class SkillExperienceCatalog {
       .sort(
         (left, right) =>
           compareScores(left.score, right.score) ||
-          left.entry.identity.localeCompare(right.entry.identity, "en"),
+          left.entry.id.localeCompare(right.entry.id, "en"),
       )
       .slice(0, limit)
       .map(({ entry }) => entry);

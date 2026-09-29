@@ -14,6 +14,7 @@ import type {
   ResolvedSkillHarnessPluginConfig,
   RoutingLlmResult,
 } from "../types.js";
+import type { SkillExperienceEntry } from "../experiences/types.js";
 
 export type JevUnifiedRoutingParams = {
   api: OpenClawPluginApi;
@@ -25,6 +26,7 @@ export type JevUnifiedRoutingParams = {
   resolvedIntent?: { id: string; guidance: string };
   candidateIntents?: readonly IntentCatalogEntry[];
   candidateSkills?: readonly AvailableSkill[];
+  candidateExperiences?: readonly SkillExperienceEntry[];
   client?: TypeSafeClient;
 };
 
@@ -100,10 +102,30 @@ export async function runJevUnifiedRouting(
             },
           );
         }
-      } else {
+      }
+      if (
+        params.candidateExperiences &&
+        params.candidateExperiences.length > 0
+      ) {
+        for (const exp of params.candidateExperiences) {
+          questions[`exp_${exp.id}`] = noul(
+            `Is this past experience '${exp.id}' (${exp.summary}) relevant and helpful for answering or guiding the user request under intent '${params.resolvedIntent.id}'?`,
+            {
+              true: `Experience '${exp.id}' is directly relevant and provides helpful guidance or procedures.`,
+              false: `Experience '${exp.id}' is not needed, irrelevant, or not applicable.`,
+            },
+          );
+        }
+      }
+      if (
+        (!params.candidateSkills || params.candidateSkills.length === 0) &&
+        (!params.candidateExperiences ||
+          params.candidateExperiences.length === 0)
+      ) {
         return {
           intent: params.resolvedIntent.id,
           skills: [],
+          experiences: [],
           confidence: 1.0,
           reason: `jev → direct route: ${params.resolvedIntent.id}`,
         };
@@ -146,12 +168,28 @@ export async function runJevUnifiedRouting(
           );
         }
       }
+
+      if (
+        params.candidateExperiences &&
+        params.candidateExperiences.length > 0
+      ) {
+        for (const exp of params.candidateExperiences) {
+          questions[`exp_${exp.id}`] = noul(
+            `Is this past experience '${exp.id}' (${exp.summary}) relevant and helpful for answering or guiding the user request?`,
+            {
+              true: `Experience '${exp.id}' is directly relevant and provides helpful guidance or procedures.`,
+              false: `Experience '${exp.id}' is not needed, irrelevant, or not applicable.`,
+            },
+          );
+        }
+      }
     }
 
     if (Object.keys(questions).length === 0) {
       return {
         intent: params.resolvedIntent?.id,
         skills: [],
+        experiences: [],
         confidence: params.resolvedIntent ? 1.0 : 0.0,
         reason: "jev → no candidate questions to evaluate",
       };
@@ -270,22 +308,79 @@ export async function runJevUnifiedRouting(
       skillProbabilities.push({ name: skillName, prob: ans.noul });
     }
 
-    // Filter prob >= relevanceThreshold, sort descending, slice to maxInjectedSkills
-    const threshold = params.config.routing.skills.relevanceThreshold ?? 0.6;
-    const maxSkills = params.config.routing.skills.maxInjectedSkills;
-    const selectedSkills = skillProbabilities
-      .filter((sp) => sp.prob >= threshold)
+    // Validate and collect Experience answers
+    const candidateExperiences = params.candidateExperiences ?? [];
+    const experienceProbabilities: Array<{
+      entry: SkillExperienceEntry;
+      prob: number;
+    }> = [];
+
+    for (const exp of candidateExperiences) {
+      const qKey = `exp_${exp.id}`;
+      const ans = answers[qKey] as
+        { type?: unknown; noul?: unknown } | undefined;
+
+      if (
+        !ans ||
+        typeof ans !== "object" ||
+        ans.type !== "noul" ||
+        typeof ans.noul !== "number" ||
+        !Number.isFinite(ans.noul) ||
+        ans.noul < 0 ||
+        ans.noul > 1
+      ) {
+        logger.warn(
+          "Jev unified routing invalid or missing experience answer",
+          {
+            experienceId: exp.id,
+            ans,
+          },
+        );
+        return undefined;
+      }
+
+      experienceProbabilities.push({ entry: exp, prob: ans.noul });
+    }
+
+    // Filter prob >= relevanceThreshold, sort descending, slice to maxInjectedExperiences
+    const expThreshold =
+      params.config.routing.experiences?.relevanceThreshold ?? 0.6;
+    const maxExperiences =
+      params.config.routing.experiences?.maxInjectedExperiences ?? 4;
+    const qualifyingExperiences = experienceProbabilities
+      .filter((ep) => ep.prob >= expThreshold)
       .sort((a, b) => b.prob - a.prob)
-      .slice(0, maxSkills)
+      .slice(0, maxExperiences);
+    const selectedExperiences = qualifyingExperiences.map((ep) => ep.entry.id);
+
+    // Filter prob >= relevanceThreshold, sort descending, slice to maxInjectedSkills
+    const skillThreshold =
+      params.config.routing.skills.relevanceThreshold ?? 0.6;
+    const maxSkills = params.config.routing.skills.maxInjectedSkills ?? 8;
+    const directQualifyingSkills = skillProbabilities
+      .filter((sp) => sp.prob >= skillThreshold)
+      .sort((a, b) => b.prob - a.prob)
       .map((sp) => sp.name);
+
+    // Union of direct qualifying skills and associated skills from qualifying experiences
+    const unionSkillsSet = new Set<string>(directQualifyingSkills);
+    for (const exp of qualifyingExperiences) {
+      for (const skillName of exp.entry.skills) {
+        unionSkillsSet.add(skillName);
+      }
+    }
+    const selectedSkills = [...unionSkillsSet].slice(0, maxSkills);
 
     const skillListStr = selectedSkills.join(", ");
     const skillCount = `${selectedSkills.length} ${selectedSkills.length === 1 ? "skill" : "skills"}`;
-    const reason = `jev → ${skillCount}: [${skillListStr}]`;
+    const expListStr = selectedExperiences.join(", ");
+    const expCount = `${selectedExperiences.length} ${selectedExperiences.length === 1 ? "exp" : "exps"}`;
+    const reason = `jev → ${skillCount}: [${skillListStr}]${selectedExperiences.length > 0 ? `, ${expCount}: [${expListStr}]` : ""}`;
 
     return {
       intent: selectedIntent,
       skills: selectedSkills,
+      experiences: selectedExperiences,
       confidence,
       reason,
     };

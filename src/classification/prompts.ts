@@ -4,6 +4,8 @@ import {
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   ROUTING_ADVISORY_SKILLS_ONLY_HEADER,
+  ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
+  ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER,
   SKILL_HARNESS_PLUGIN_TAG,
 } from "../constants.js";
 import { xmlBlock } from "../xml-format.js";
@@ -191,32 +193,49 @@ function buildLatestHistoricalIntentMarkdown(
   return lines.join("\n");
 }
 
-function formatSkillXmlBlock(
-  tag: string,
-  skills: AvailableSkill[] | undefined,
-  attributes = "",
-  experiencesBySkill?: ReadonlyMap<string, readonly string[]>,
-): string {
-  const body = skills
-    ?.map((skill) =>
-      formatSkillXml(
-        skill,
-        experiencesBySkill?.get(canonicalIdentity(skill.name)),
-      ),
-    )
-    .join("\n");
-  return xmlBlock(tag, body ?? "", attributes);
+function escapeXmlText(value: string | null | undefined): string {
+  return (value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
-function formatSkillXml(
-  skill: AvailableSkill,
-  experiences: readonly string[] = [],
+function escapeXmlAttribute(value: string): string {
+  return escapeXmlText(value)
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;")
+    .replaceAll("\r", "&#xD;")
+    .replaceAll("\n", "&#xA;")
+    .replaceAll("\t", "&#x9;");
+}
+
+function formatExperienceXml(experience: SkillExperienceEntry): string {
+  const attrs = [
+    `id="${escapeXmlAttribute(experience.id)}"`,
+    ...(experience.skills.length > 0
+      ? [`skills="${escapeXmlAttribute(experience.skills.join(","))}"`]
+      : []),
+  ];
+  return xmlBlock(
+    "experience",
+    escapeXmlText(experience.summary),
+    ` ${attrs.join(" ")}`,
+  );
+}
+
+export function formatMatchedExperiences(
+  experiences: readonly SkillExperienceEntry[],
 ): string {
+  if (experiences.length === 0) return "";
+  const lines = experiences.map((exp) => formatExperienceXml(exp));
+  return xmlBlock("matched_experiences", lines.join("\n"));
+}
+
+function formatSkillXml(skill: AvailableSkill): string {
   const lines: string[] = [];
   if (skill.description) {
     lines.push(escapeXmlText(skill.description));
   }
-  lines.push(...experiences);
   return xmlBlock(
     "skill",
     lines.join("\n"),
@@ -224,38 +243,18 @@ function formatSkillXml(
   );
 }
 
-function formatExperienceXml(experience: SkillExperienceEntry): string {
-  const lines = [
-    formatXmlTextElement("identity", experience.identity),
-    formatXmlTextElement("keywords", JSON.stringify(experience.keywords)),
-  ];
-  return xmlBlock("skill_experience", lines.join("\n"));
-}
-
-function formatIntentMatchedSkillExperiences(
-  experiences: readonly SkillExperienceEntry[],
-): ReadonlyMap<string, readonly string[]> {
-  const bySkill = new Map<string, string[]>();
-  for (const experience of experiences) {
-    const key = canonicalIdentity(experience.skill);
-    const entries = bySkill.get(key) ?? [];
-    entries.push(formatExperienceXml(experience));
-    bySkill.set(key, entries);
-  }
-  return bySkill;
-}
-
-export function formatMatchedSkills(
-  skills: readonly AvailableSkill[],
-  experiencesBySkill?: ReadonlyMap<string, readonly string[]>,
+function formatSkillXmlBlock(
+  tag: string,
+  skills: AvailableSkill[] | undefined,
+  attributes = "",
 ): string {
+  const body = skills?.map((skill) => formatSkillXml(skill)).join("\n");
+  return xmlBlock(tag, body ?? "", attributes);
+}
+
+export function formatMatchedSkills(skills: readonly AvailableSkill[]): string {
   if (skills.length === 0) return "";
-  return formatSkillXmlBlock(
-    "matched_skills",
-    [...skills],
-    "",
-    experiencesBySkill,
-  );
+  return formatSkillXmlBlock("matched_skills", [...skills], "");
 }
 
 export function formatInputMatchedSkills(
@@ -265,11 +264,14 @@ export function formatInputMatchedSkills(
   return formatSkillXmlBlock("matched_skills", [...skills], "");
 }
 
-function selectAdvisoryHeader(hasIntent: boolean, hasSkills: boolean): string {
-  if (hasIntent && hasSkills) return ROUTING_ADVISORY_HEADER;
-  if (hasIntent) return ROUTING_ADVISORY_INTENT_ONLY_HEADER;
-  if (hasSkills) return ROUTING_ADVISORY_SKILLS_ONLY_HEADER;
-  return ROUTING_ADVISORY_INTENT_ONLY_HEADER;
+function selectAdvisoryHeader(
+  hasSkills: boolean,
+  hasExperiences: boolean,
+): string {
+  if (hasSkills && hasExperiences)
+    return ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER;
+  if (hasExperiences) return ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER;
+  return ROUTING_ADVISORY_SKILLS_ONLY_HEADER;
 }
 
 export function buildRoutingContext(params: {
@@ -280,10 +282,6 @@ export function buildRoutingContext(params: {
   experiences?: readonly SkillExperienceEntry[];
   inputMatchedSkills?: readonly AvailableSkill[];
 }): string {
-  const experiencesBySkill = formatIntentMatchedSkillExperiences(
-    params.experiences ?? [],
-  );
-
   const matchedSkills: readonly AvailableSkill[] =
     params.matchedSkills !== undefined
       ? params.matchedSkills
@@ -291,23 +289,24 @@ export function buildRoutingContext(params: {
           ...(params.intentMatchedSkills ?? []),
           ...(params.inputMatchedSkills ?? []),
         ];
+  const experiences = params.experiences ?? [];
 
-  if (matchedSkills.length === 0) return "";
+  if (matchedSkills.length === 0 && experiences.length === 0) return "";
 
-  const blocks: string[] = [
-    formatMatchedSkills(matchedSkills, experiencesBySkill),
-  ];
+  const blocks: string[] = [];
+  if (experiences.length > 0) {
+    blocks.push(formatMatchedExperiences(experiences));
+  }
+  if (matchedSkills.length > 0) {
+    blocks.push(formatInputMatchedSkills(matchedSkills));
+  }
 
   const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
-  const header = ROUTING_ADVISORY_SKILLS_ONLY_HEADER;
+  const header = selectAdvisoryHeader(
+    matchedSkills.length > 0,
+    experiences.length > 0,
+  );
   return `${header}\n${taggedContent}`;
-}
-
-function escapeXmlText(value: string | null | undefined): string {
-  return (value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }
 
 function formatXmlTextElement(tag: string, value: string): string {
@@ -315,15 +314,6 @@ function formatXmlTextElement(tag: string, value: string): string {
   return content.includes("\n")
     ? xmlBlock(tag, content)
     : `<${tag}>${content}</${tag}>`;
-}
-
-function escapeXmlAttribute(value: string): string {
-  return escapeXmlText(value)
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;")
-    .replaceAll("\r", "&#xD;")
-    .replaceAll("\n", "&#xA;")
-    .replaceAll("\t", "&#x9;");
 }
 
 export function buildIntentionPrompt(params: {
@@ -707,6 +697,7 @@ export function parseUnifiedRoutingResult(
     return {
       ...(intent ? { intent } : {}),
       skills: selectedSkills,
+      experiences: [],
       confidence,
       reason,
     };

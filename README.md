@@ -133,18 +133,18 @@ The routing stages are:
 1. Resolve canonical agent and session identity, then exclude helper, generic subagent, Review, dreaming, and active-memory sessions from all injection.
 2. Append fixed skill-discovery guidance and enriched working-set skills to every remaining agent turn.
 3. Gate dynamic routing by configured agent, chat scope, external-user turn, and interactive-session status.
-4. Run intent matching and input skill discovery in parallel. Intent matching follows a 3-stage pipeline:
-   - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{routing.intents.keyword.directRouteMinScore}$ (default `0.85`) routes directly as `qmd-keyword`.
-   - **Step 3 (Unified fallback selection)**: If neither direct route matches, projects intents meeting $\ge \text{routing.intents.hybrid.minCandidateScore}$ (default `0.4`). If no intent meets that score, the route may remain intent-less (`decision: "none"`); it does not force a full-catalog fallback. When a candidate union exists, one constrained LLM call selects the optional intent.
-5. In parallel, three candidate sources build a visibility-filtered skill pool: deterministic typo-aware name matching, direct `SkillQmdIndex` retrieval (over metadata, bodies, and references), and `SkillExperienceQmdIndex` retrieval (over trigger keywords, descriptions, context, and lessons).
-6. The unified selector evaluates canonical skills from the candidate pool using Jev/LLM reranking against `relevanceThreshold` (default 0.6) and caps at `maxInjectedSkills` (default 8). An empty candidate pool needs no LLM call (0-call short-circuit); `maxInjectedSkills: 0` short-circuits skill discovery; a failed or malformed selector result injects no heuristic fallback skills.
-7. Render a single optional `<matched_skills>` block (with strictly hit `<skill_experience>` metadata), record the completed turn in session tracking, and schedule configured background work.
+4. Run input skill discovery and experience retrieval in parallel:
+   - Skill candidates come from deterministic typo-aware name matching and direct `SkillQmdIndex` retrieval (over metadata, bodies, and references with `minCandidateScore` default `0.6`).
+   - Experience candidates come from `SkillExperienceQmdIndex` multi-collection retrieval (over `keywords: 1.0`, `summary: 0.8`, `body: 0.5` with `minCandidateScore` default `0.4`).
+5. The unified selector evaluates canonical skills and experiences from the candidate pools using Jev/LLM reranking against `relevanceThreshold` (default `0.6`), capping at `maxInjectedSkills` (default `8`) and `maxInjectedExperiences` (default `4`). An empty candidate pool needs no LLM call (0-call short-circuit); `maxInjectedSkills: 0` short-circuits skill discovery.
+6. Final injected skills are the union of selector-selected skills and skills associated with selector-selected experiences.
+7. Render decoupled optional `<matched_experiences>` and `<matched_skills>` blocks, record the completed turn in session tracking, and schedule configured background work.
 
 QMD skill and experience snapshots and their SQLite databases live under `qmd/skills/` and `qmd/experiences/`. They refresh in the background, so a cold or unhealthy index fails open to the classifier.
 
 OpenClaw 2026.9.6 or later is required. Skill index identity uses the plugin's original installation directory, so captured plugin generations reuse existing indexes under `qmd/skills/indexes/`. Background indexing runs only during full registration; disposing a generation stops polling and retries and closes its QMD stores after active work finishes. Discovery instances open completed indexes read-only on demand and wait for initialization before searching. Missing, stale, or incomplete indexes remain unavailable until the full instance updates them; discovery never rebuilds or embeds. Existing indexes do not need to be deleted when upgrading.
 
-Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains one unified set of selected skills with their strictly hit experience metadata; it never emits separate intent tags or input-skill wrappers. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
+Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains decoupled selected experiences and selected skills; it never emits separate intent tags or input-skill wrappers. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
 
 #### Context injection format
 
@@ -166,15 +166,16 @@ Automate web browsing and interaction.
 ```text
 [Tue 2026-09-08 11:35 GMT+8]
 
-Inferred relevant skills from conversation (advisory, non-user input; load with `skill_view` if relevant):
+Inferred relevant skills and experiences from conversation (advisory, non-user input; load with `skill_view` or `skill_experience` if relevant):
 <skill_harness_plugin>
+<matched_experiences>
+<experience id="format-config" skills="code-formatter">
+Prettier and ESLint configuration patterns for formatting code.
+</experience>
+</matched_experiences>
 <matched_skills>
 <skill name="code-formatter">
 Run Prettier, ESLint, or language formatters.
-<skill_experience>
-<identity>format-config</identity>
-<keywords>["prettier", "eslint", "tabs"]</keywords>
-</skill_experience>
 </skill>
 </matched_skills>
 </skill_harness_plugin>
@@ -184,8 +185,9 @@ Format index.ts using prettier
 
 The prompt layout minimizes token consumption:
 
-- Dynamic routing context is separated from preceding turn metadata by a blank line, introduced by the concise single-line advisory header `Inferred relevant skills from conversation (advisory, non-user input; load with \`skill_view\` if relevant):`preceding`<skill_harness_plugin>`.
-- `<matched_skills>` contains the unified selected skills, nesting strictly hit `<skill_experience>` identity and keyword metadata; full experience records can be retrieved on demand via `skill_experience`.
+- Dynamic routing context is separated from preceding turn metadata by a blank line, introduced by the concise single-line advisory header `Inferred relevant skills and experiences from conversation (advisory, non-user input; load with \`skill_view\` or \`skill_experience\` if relevant):`(or skills-only / experiences-only variants) preceding`<skill_harness_plugin>`.
+- `<matched_experiences>` contains selected experiences with their IDs, declared associated skills, and summaries; full experience bodies can be retrieved on demand via `skill_experience`.
+- `<matched_skills>` contains the union of selected skills and skills declared by selected experiences.
 - Skill file paths are omitted from prompt injection; agents inspect `path` dynamically via `skill_list` or `skill_view`.
 - Redundant policy blocks, `<intent>` tags, and legacy headers are eliminated.
 - The renderer does not emit `<<<BEGIN_SKILL_HARNESS_CONTEXT>>>` or OpenClaw reserved delimiters; conversation sanitization treats those markers only as input boundaries.
@@ -282,10 +284,10 @@ Configure Skill Harness in `openclaw.json`:
 | `skills.includeWorkspaceSkills`                      | `true`             | Whether to automatically discover and append workspace-only skills (`<workspaceDir>/skills/`) to the static working set. Setting to `false` suppresses workspace skills auto-loading.                                                                                                                                     |
 | `skills.includeWorkshopSkills`                       | `true`             | Whether to automatically discover and append agent-specific workshop skills (`.openclaw/agents/<agentId>/agent/workshop-skills/`) to the static working set. Setting to `false` suppresses agent workshop skills auto-loading.                                                                                            |
 | `skills.suppressNativeSkillPrompt`                   | `true`             | When enabled, automatically ensures `agents.defaults.skills` is `[]` and removes `agents.entries.*.skills` in `openclaw.json` on startup to suppress duplicate native OpenClaw `<available_skills>` prompts. Setting to `false` disables startup mutation.                                                                |
-| `routing.intents.keyword.directRouteMinScore`        | `0.85`             | Inclusive BM25 score required for Step 1 keyword direct routing bypass.                                                                                                                                                                                                                                                   |
-| `routing.intents.hybrid.directRouteMinScore`         | `0.9`              | Inclusive semantic score required for Step 2 hybrid direct routing bypass.                                                                                                                                                                                                                                                |
-| `routing.intents.hybrid.directRouteMinMargin`        | `0.08`             | Minimum score margin between #1 and #2 candidates required for Step 2 hybrid direct routing.                                                                                                                                                                                                                              |
-| `routing.intents.hybrid.minCandidateScore`           | `0.4`              | Inclusive semantic score floor required to consider an intent candidate for Step 2 and Step 3 classifier projection.                                                                                                                                                                                                      |
+| `routing.experiences.search.minCandidateScore`       | `0.4`              | Inclusive semantic-evidence score required for a retrieved experience to enter the candidate pool.                                                                                                                                                                                                                        |
+| `routing.experiences.search.timeoutMs`               | `qmd.timeoutMs`    | Optional millisecond override for prompt-build experience retrieval; defaults to `qmd.timeoutMs`.                                                                                                                                                                                                                         |
+| `routing.experiences.relevanceThreshold`             | `0.6`              | Inclusive relevance threshold for candidate experience selection.                                                                                                                                                                                                                                                         |
+| `routing.experiences.maxInjectedExperiences`         | `4`                | Maximum advisory candidate experiences injected into context.                                                                                                                                                                                                                                                             |
 | `routing.model` / `modelFallback`                    | unset              | Scanner model and last-resort resolution fallback.                                                                                                                                                                                                                                                                        |
 | `routing.thinking`                                   | `"medium"`         | Unified routing thinking level.                                                                                                                                                                                                                                                                                           |
 | `routing.queryMode` / `contextWindow`                | `"recent"` / unset | Scanner context and its limits.                                                                                                                                                                                                                                                                                           |

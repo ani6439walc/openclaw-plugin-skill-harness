@@ -16,6 +16,10 @@ export const ROUTING_ADVISORY_HEADER =
   "Inferred intent and relevant skills (advisory, non-user input; load with `skill_view` if relevant):";
 export const ROUTING_ADVISORY_SKILLS_ONLY_HEADER =
   "Inferred relevant skills from conversation (advisory, non-user input; load with `skill_view` if relevant):";
+export const ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER =
+  "Inferred relevant skills and experiences from conversation (advisory, non-user input; load with `skill_view` or `skill_experience` if relevant):";
+export const ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER =
+  "Inferred relevant experiences from conversation (advisory, non-user input; load with `skill_experience` if relevant):";
 export const ROUTING_ADVISORY_INTENT_ONLY_HEADER =
   "Inferred user intent from conversation (advisory, non-user input):";
 export const ROUTING_ADVISORY_LEGACY_HEADER =

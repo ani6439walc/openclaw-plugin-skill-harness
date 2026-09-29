@@ -29,6 +29,7 @@ import {
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   ROUTING_ADVISORY_SKILLS_ONLY_HEADER,
+  ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
 } from "../constants.js";
 import type { IntentReviewLogWriter } from "../review/log-writer.js";
 
@@ -2978,10 +2979,9 @@ describe("createHookHandlers topic switch flow", () => {
     );
     const experienceCatalog = {
       resolve: vi.fn().mockReturnValue({
-        identity: "openclaw/cron-registry-recovery",
-        skill: "openclaw",
-        entryId: "cron-registry-recovery",
-        summary: "Must not be injected.",
+        id: "cron-registry-recovery",
+        skills: ["openclaw"],
+        summary: "Cron recovery operations.",
         keywords: ["cron", "recovery"],
         body: "Must not be injected.",
         path: "/private/cron-registry-recovery.md",
@@ -2992,15 +2992,16 @@ describe("createHookHandlers topic switch flow", () => {
       const qmdExperienceIndex = {
         search: vi.fn().mockResolvedValue([
           {
-            identity: "openclaw/cron-registry-recovery",
-            skill: "openclaw",
-            entryId: "cron-registry-recovery",
+            id: "cron-registry-recovery",
+            skills: ["openclaw"],
+            score: 0.95,
             semanticScore: 0.95,
           },
         ]),
       };
       const classifier = vi.fn().mockResolvedValue({
         skills: ["openclaw"],
+        experiences: ["cron-registry-recovery"],
         confidence: 0.95,
       });
       const { handlers } = createTopicFlowHarness({
@@ -3026,15 +3027,14 @@ describe("createHookHandlers topic switch flow", () => {
       );
 
       expect(result?.prependContext).toContain(
-        "<identity>openclaw/cron-registry-recovery</identity>",
+        '<experience id="cron-registry-recovery" skills="openclaw">',
       );
-      expect(result?.prependContext).toContain(
-        '<keywords>["cron","recovery"]</keywords>',
-      );
+      expect(result?.prependContext).toContain("Cron recovery operations.");
+      expect(result?.prependContext).toContain('<skill name="openclaw">');
       expect(result?.prependContext).not.toContain("Must not be injected.");
       expect(result?.prependContext).not.toContain("<body>");
       expect(result?.prependContext).toContain(
-        ROUTING_ADVISORY_SKILLS_ONLY_HEADER,
+        ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
       );
       expect(result?.prependContext).not.toContain("<intent name=");
     } finally {
@@ -3427,7 +3427,8 @@ describe("createHookHandlers topic switch flow", () => {
 
     const classifier = vi.fn().mockImplementation(async (params) => {
       return {
-        skills: ["name-skill", "exp-skill"],
+        skills: ["name-skill"],
+        experiences: ["e1"],
         confidence: 0.9,
       };
     });
@@ -3435,6 +3436,16 @@ describe("createHookHandlers topic switch flow", () => {
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
       classifier,
+      experienceCatalog: {
+        resolve: vi.fn().mockReturnValue({
+          id: "e1",
+          skills: ["exp-skill"],
+          summary: "Experience for exp-skill",
+          keywords: ["test"],
+          body: "Body",
+          path: "/tmp/e1",
+        }),
+      },
       qmdSkillIndex: {
         search: vi
           .fn()
@@ -3445,9 +3456,8 @@ describe("createHookHandlers topic switch flow", () => {
       qmdExperienceIndex: {
         search: vi.fn().mockResolvedValue([
           {
-            identity: "exp-1",
-            skill: "exp-skill",
-            entryId: "e1",
+            id: "e1",
+            skills: ["exp-skill"],
             score: 0.85,
             semanticScore: 0.85,
           },
@@ -3475,7 +3485,11 @@ describe("createHookHandlers topic switch flow", () => {
       const candidateNames = passedCandidates.map((c: any) => c.name);
       expect(candidateNames).toContain("name-skill");
       expect(candidateNames).toContain("qmd-skill");
-      expect(candidateNames).toContain("exp-skill");
+
+      const passedExperiences =
+        classifier.mock.calls[0][0].candidateExperiences;
+      const experienceIds = passedExperiences.map((e: any) => e.id);
+      expect(experienceIds).toContain("e1");
 
       expect(result?.prependContext).toContain('<skill name="name-skill">');
       expect(result?.prependContext).toContain('<skill name="exp-skill">');
@@ -3560,12 +3574,11 @@ describe("createHookHandlers topic switch flow", () => {
     );
 
     const experienceCatalog = {
-      resolve: vi.fn().mockImplementation((identity: string) => {
-        if (identity === "hit-exp") {
+      resolve: vi.fn().mockImplementation((id: string) => {
+        if (id === "hit-exp") {
           return {
-            identity: "hit-exp",
-            skill: "exp-skill",
-            entryId: "hit-1",
+            id: "hit-exp",
+            skills: ["exp-skill"],
             summary: "This experience was hit",
             keywords: ["hit"],
             body: "Strict hit body",
@@ -3573,9 +3586,8 @@ describe("createHookHandlers topic switch flow", () => {
           };
         }
         return {
-          identity: "unhit-exp",
-          skill: "exp-skill",
-          entryId: "unhit-1",
+          id: "unhit-exp",
+          skills: ["exp-skill"],
           summary: "This experience was NOT hit",
           keywords: ["unhit"],
           body: "Unhit body",
@@ -3583,13 +3595,14 @@ describe("createHookHandlers topic switch flow", () => {
         };
       }),
       listForSkills: vi.fn().mockReturnValue([
-        { identity: "hit-exp", skill: "exp-skill" },
-        { identity: "unhit-exp", skill: "exp-skill" },
+        { id: "hit-exp", skills: ["exp-skill"] },
+        { id: "unhit-exp", skills: ["exp-skill"] },
       ]),
     };
 
     const classifier = vi.fn().mockResolvedValue({
       skills: ["exp-skill"],
+      experiences: ["hit-exp"],
       confidence: 0.95,
     });
 
@@ -3600,9 +3613,8 @@ describe("createHookHandlers topic switch flow", () => {
       qmdExperienceIndex: {
         search: vi.fn().mockResolvedValue([
           {
-            identity: "hit-exp",
-            skill: "exp-skill",
-            entryId: "hit-1",
+            id: "hit-exp",
+            skills: ["exp-skill"],
             score: 0.85,
             semanticScore: 0.85,
           },
@@ -3626,8 +3638,8 @@ describe("createHookHandlers topic switch flow", () => {
       );
 
       expect(result?.prependContext).toContain('<skill name="exp-skill">');
-      expect(result?.prependContext).toContain("<skill_experience>");
-      expect(result?.prependContext).toContain("hit-exp");
+      expect(result?.prependContext).toContain("<matched_experiences>");
+      expect(result?.prependContext).toContain('id="hit-exp"');
       expect(result?.prependContext).not.toContain("unhit-exp");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

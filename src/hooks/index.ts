@@ -599,6 +599,9 @@ export function createHookHandlers(deps: HookDeps) {
               skills: (callParams.candidateSkills ?? [])
                 .slice(0, 4)
                 .map((s) => s.name),
+              experiences: (callParams.candidateExperiences ?? [])
+                .slice(0, 4)
+                .map((e) => e.id),
               confidence: 1.0,
               reason: "Selected relevant candidate skills",
             };
@@ -616,6 +619,7 @@ export function createHookHandlers(deps: HookDeps) {
             modelRef: callParams.modelRef,
             intents: callParams.candidateIntents ?? [],
             candidateSkills: callParams.candidateSkills,
+            candidateExperiences: callParams.candidateExperiences,
             dataRoot: callParams.dataRoot,
           });
           if (!classified) return undefined;
@@ -647,6 +651,13 @@ export function createHookHandlers(deps: HookDeps) {
           )
             ? (classified as unknown as { skills: string[] }).skills
             : undefined;
+          const mockExperiences = Array.isArray(
+            (classified as unknown as { experiences?: unknown }).experiences,
+          )
+            ? (classified as unknown as { experiences: string[] }).experiences
+            : (callParams.candidateExperiences ?? [])
+                .slice(0, 4)
+                .map((e) => e.id);
           const combinedSkills =
             mockSkills ??
             [...new Set([...declaredSkills, ...candidateSkillNames])].slice(
@@ -656,6 +667,7 @@ export function createHookHandlers(deps: HookDeps) {
           return {
             intent: classified.intent,
             skills: combinedSkills,
+            experiences: mockExperiences,
             confidence: classified.confidence,
             reason: classified.reason,
           };
@@ -940,213 +952,6 @@ export function createHookHandlers(deps: HookDeps) {
     return { latestUserMessage, historicalIntents, conversation };
   }
 
-  type IntentIndexSearchResult =
-    | {
-        hitType: "keyword";
-        hit: QmdIntentHit;
-        intent: IntentCatalogEntry;
-        rawResult?: QmdRawSearchResult;
-        routingEvidence: IntentRoutingEvidence;
-      }
-    | {
-        hitType: "hybrid";
-        hit: QmdIntentHit;
-        intent: IntentCatalogEntry;
-        scoreMargin: number;
-        rawResult?: QmdRawSearchResult;
-        routingEvidence: IntentRoutingEvidence;
-      }
-    | {
-        hitType: "miss";
-        qmdHits?: QmdIntentHit[];
-        hybridRawResults?: QmdIntentSearchEvidence["rawResults"];
-        routingEvidence?: IntentRoutingEvidence;
-        failures: string[];
-      };
-
-  async function searchIntentIndices(params: {
-    latestUserMessage: string;
-    conversation: ReturnType<typeof limitConversationTurns>;
-    availableIntents: readonly IntentCatalogEntry[];
-    refreshedConfig: ResolvedSkillHarnessPluginConfig;
-  }): Promise<IntentIndexSearchResult> {
-    const failures: string[] = [];
-    let keywordHits: QmdIntentHit[] | undefined;
-    let keywordRawResults: QmdIntentSearchEvidence["rawResults"] | undefined;
-    let routingEvidence: IntentRoutingEvidence | undefined;
-
-    // Step 1: QMD Keyword Search (BM25 searchLex)
-    if (qmdIntentIndex) {
-      try {
-        const keywordSearch = await qmdIntentIndex.searchKeywords({
-          query: params.latestUserMessage,
-          includeRawResults: true,
-        });
-        keywordHits = keywordSearch?.hits;
-        keywordRawResults = keywordSearch?.rawResults;
-      } catch (error) {
-        failures.push("qmd-keyword: keyword index unavailable");
-        logger.warn("keyword intent search failed", { error });
-      }
-      const topKeywordHit = keywordHits?.[0];
-      const matchedKeywordIntent = topKeywordHit
-        ? findIntentEntry(params.availableIntents, topKeywordHit.intentId)
-        : undefined;
-      const keywordMinScore =
-        params.refreshedConfig.routing.intents.keyword.directRouteMinScore;
-      const keywordOutcome =
-        keywordHits === undefined
-          ? "unavailable"
-          : !topKeywordHit
-            ? "none"
-            : !matchedKeywordIntent
-              ? "unrecognized-intent"
-              : roundToDecimals(topKeywordHit.score, 2) >=
-                  roundToDecimals(keywordMinScore, 2)
-                ? "routed"
-                : "below-threshold";
-      routingEvidence = {
-        keyword: {
-          query: params.latestUserMessage,
-          ...(keywordHits === undefined ? {} : { hits: keywordHits }),
-          ...(keywordRawResults === undefined
-            ? {}
-            : { rawResults: keywordRawResults }),
-          outcome: keywordOutcome,
-          directRouteMinScore: keywordMinScore,
-        },
-      };
-      if (
-        topKeywordHit &&
-        matchedKeywordIntent &&
-        roundToDecimals(topKeywordHit.score, 2) >=
-          roundToDecimals(keywordMinScore, 2)
-      ) {
-        const matchingRawResult =
-          keywordRawResults?.find((raw) => {
-            const candidatePath = raw.filepath ?? raw.file ?? raw.displayPath;
-            return (
-              intentIdFromCandidatePath(candidatePath)?.toLowerCase() ===
-              matchedKeywordIntent.id.toLowerCase()
-            );
-          }) ?? keywordRawResults?.[0];
-        return {
-          hitType: "keyword",
-          hit: topKeywordHit,
-          intent: matchedKeywordIntent,
-          rawResult: matchingRawResult,
-          routingEvidence,
-        };
-      }
-      if (keywordHits === undefined && failures.length === 0) {
-        failures.push("qmd-keyword: keyword index unavailable");
-      }
-    }
-
-    // Step 2: QMD Hybrid Search (Examples & Keywords) with Context Expansion
-    let qmdHits: QmdIntentHit[] | undefined;
-    let hybridRawResults: QmdIntentSearchEvidence["rawResults"] | undefined;
-    let topHit: QmdIntentHit | undefined;
-    if (qmdIntentIndex) {
-      const limits = getQmdCandidateLimits(params.availableIntents.length);
-      const expansionContext = formatConversationExpansionContext({
-        conversation: params.conversation,
-      });
-      try {
-        const hybridSearch =
-          await qmdIntentIndex.searchIntentExamplesAndKeywords({
-            query: params.latestUserMessage,
-            rawLimit: limits.rawLimit,
-            ...(expansionContext ? { expansionContext } : {}),
-            includeRawResults: true,
-          });
-        qmdHits = hybridSearch?.hits;
-        hybridRawResults = hybridSearch?.rawResults;
-      } catch (error) {
-        failures.push("qmd-hybrid: example/keyword index unavailable");
-        logger.warn("hybrid intent search failed", { error });
-      }
-      topHit = qmdHits?.[0];
-      const secondHit = qmdHits?.[1];
-      const topIntent = topHit
-        ? findIntentEntry(params.availableIntents, topHit.intentId)
-        : undefined;
-      const hybridThresholds = params.refreshedConfig.routing.intents.hybrid;
-      const scoreMargin =
-        topHit && secondHit
-          ? topHit.score - secondHit.score
-          : (topHit?.score ?? 0);
-      const satisfiesMargin =
-        !secondHit ||
-        roundToDecimals(scoreMargin, 2) >=
-          roundToDecimals(hybridThresholds.directRouteMinMargin, 2);
-      const hybridOutcome =
-        qmdHits === undefined
-          ? "unavailable"
-          : !topHit
-            ? "none"
-            : !topIntent
-              ? "unrecognized-intent"
-              : roundToDecimals(topHit.score, 2) <
-                  roundToDecimals(hybridThresholds.directRouteMinScore, 2)
-                ? satisfiesMargin
-                  ? "below-threshold"
-                  : "below-score-and-margin-threshold"
-                : !satisfiesMargin
-                  ? "below-margin-threshold"
-                  : "routed";
-      routingEvidence = {
-        ...routingEvidence,
-        hybrid: {
-          query: params.latestUserMessage,
-          ...(qmdHits === undefined ? {} : { hits: qmdHits }),
-          ...(hybridRawResults === undefined
-            ? {}
-            : { rawResults: hybridRawResults }),
-          outcome: hybridOutcome,
-          directRouteMinScore: hybridThresholds.directRouteMinScore,
-          directRouteMinMargin: hybridThresholds.directRouteMinMargin,
-          ...(expansionContext ? { expansionContext } : {}),
-        },
-      };
-      if (
-        topHit &&
-        topIntent &&
-        roundToDecimals(topHit.score, 2) >=
-          roundToDecimals(hybridThresholds.directRouteMinScore, 2) &&
-        satisfiesMargin
-      ) {
-        const matchingRawResult =
-          hybridRawResults?.find((raw) => {
-            const candidatePath = raw.filepath ?? raw.file ?? raw.displayPath;
-            return (
-              intentIdFromCandidatePath(candidatePath)?.toLowerCase() ===
-              topIntent.id.toLowerCase()
-            );
-          }) ?? hybridRawResults?.[0];
-        return {
-          hitType: "hybrid",
-          hit: topHit,
-          intent: topIntent,
-          scoreMargin,
-          rawResult: matchingRawResult,
-          routingEvidence,
-        };
-      }
-      if (qmdHits === undefined && failures.length < 2) {
-        failures.push("qmd-hybrid: example/keyword index unavailable");
-      }
-    }
-
-    return {
-      hitType: "miss",
-      qmdHits,
-      hybridRawResults,
-      routingEvidence,
-      failures,
-    };
-  }
-
   async function recordPromptBuildSession(params: {
     association?: TurnAssociation;
     latestUserMessage: string;
@@ -1223,7 +1028,7 @@ export function createHookHandlers(deps: HookDeps) {
     visibleSkills: AvailableSkill[];
     nameCandidates: SkillDiscoveryCandidate[];
     retrievalCandidates: SkillDiscoveryCandidate[];
-    experienceCandidates: SkillDiscoveryCandidate[];
+    candidateExperiences: SkillExperienceEntry[];
     retrievalSemanticScores: number[];
     retrievalCollections: Record<SkillCollectionKind, number>;
     fallbackReason?: SkillCandidatePoolFallbackReason;
@@ -1238,18 +1043,22 @@ export function createHookHandlers(deps: HookDeps) {
   }): Promise<SkillCandidateDiscoveryResult> {
     const startedAtMs = Date.now();
     const policy = params.refreshedConfig.routing.skills;
+    const expPolicy = params.refreshedConfig.routing.experiences;
     const retrievalCollections: Record<SkillCollectionKind, number> = {
       meta: 0,
       body: 0,
       references: 0,
     };
 
-    if (policy.maxInjectedSkills === 0) {
+    if (
+      policy.maxInjectedSkills === 0 &&
+      expPolicy.maxInjectedExperiences === 0
+    ) {
       return {
         visibleSkills: [],
         nameCandidates: [],
         retrievalCandidates: [],
-        experienceCandidates: [],
+        candidateExperiences: [],
         retrievalSemanticScores: [],
         retrievalCollections,
         startedAtMs,
@@ -1377,21 +1186,22 @@ export function createHookHandlers(deps: HookDeps) {
       }
     };
 
+    const candidateExperiences: SkillExperienceEntry[] = [];
     const searchExperiences = async () => {
-      if (!qmdExperienceIndex) return;
+      if (!qmdExperienceIndex || expPolicy.maxInjectedExperiences === 0) return;
       let expTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         const timeout = new Promise<"timeout">((resolve) => {
           expTimer = setTimeout(
             () => resolve("timeout"),
-            policy.search.timeoutMs,
+            expPolicy.search.timeoutMs,
           );
         });
         const expOutcome = await Promise.race([
           qmdExperienceIndex
             .search({
               query: params.latestUserMessage,
-              limit: policy.maxInjectedSkills,
+              limit: expPolicy.maxInjectedExperiences * 3,
               ...(expansionContext ? { expansionContext } : {}),
             })
             .then((hits) => ({ hits }))
@@ -1405,29 +1215,23 @@ export function createHookHandlers(deps: HookDeps) {
         ) {
           const qualifiedHits = expOutcome.hits.filter(
             (hit) =>
-              hit.semanticScore !== undefined &&
-              roundToDecimals(hit.semanticScore, 2) >=
-                roundToDecimals(policy.search.minCandidateScore, 2),
+              roundToDecimals(hit.score, 2) >=
+              roundToDecimals(expPolicy.search.minCandidateScore, 2),
           );
-          const hitsBySkill = new Map<string, SkillExperienceHit[]>();
           for (const hit of qualifiedHits) {
-            const key = canonicalIdentity(hit.skill);
-            const list = hitsBySkill.get(key) ?? [];
-            list.push(hit);
-            hitsBySkill.set(key, list);
-          }
-          for (const [skillKey, hits] of hitsBySkill) {
-            const topScore = Math.max(...hits.map((h) => h.semanticScore ?? 0));
-            const visible = visibleSkills.find(
-              (s) => canonicalIdentity(s.name) === skillKey,
-            );
-            const skillName = visible ? visible.name : hits[0].skill;
-            experienceCandidates.push({
-              skillName,
-              score: topScore,
-              source: "experience-qmd" as const,
-              experienceHits: hits,
-            });
+            const resolved = experienceCatalog?.resolve(hit.id);
+            if (resolved) {
+              candidateExperiences.push(resolved);
+            } else {
+              candidateExperiences.push({
+                id: hit.id,
+                skills: [...hit.skills],
+                summary: "",
+                keywords: [],
+                body: "",
+                path: "",
+              });
+            }
           }
         }
       } catch (error) {
@@ -1443,7 +1247,7 @@ export function createHookHandlers(deps: HookDeps) {
       visibleSkills,
       nameCandidates,
       retrievalCandidates,
-      experienceCandidates,
+      candidateExperiences,
       retrievalSemanticScores,
       retrievalCollections,
       fallbackReason,
@@ -1679,11 +1483,11 @@ export function createHookHandlers(deps: HookDeps) {
             visibleSkills: skillDiscoveryResult.visibleSkills,
             nameCandidates: skillDiscoveryResult.nameCandidates,
             retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
-            experienceCandidates: skillDiscoveryResult.experienceCandidates,
             maxInjectedSkills: refreshedConfig.routing.skills.maxInjectedSkills,
           });
 
           let matchedSkills: readonly AvailableSkill[] = [];
+          let matchedExperiences: SkillExperienceEntry[] = [];
           const visibleMap = new Map(
             skillDiscoveryResult.visibleSkills.map((s) => [
               canonicalIdentity(s.name),
@@ -1691,8 +1495,13 @@ export function createHookHandlers(deps: HookDeps) {
             ]),
           );
 
-          if (unionPool.candidateSkills.length === 0 || !modelRef) {
+          if (
+            (unionPool.candidateSkills.length === 0 &&
+              skillDiscoveryResult.candidateExperiences.length === 0) ||
+            !modelRef
+          ) {
             matchedSkills = [];
+            matchedExperiences = [];
           } else {
             try {
               const llmResult = await effectiveRoutingSubagent({
@@ -1707,22 +1516,52 @@ export function createHookHandlers(deps: HookDeps) {
                 channelId: ctx.channelId,
                 modelRef,
                 candidateSkills: unionPool.candidateSkills,
+                candidateExperiences: skillDiscoveryResult.candidateExperiences,
                 dataRoot: deps.dataRoot,
               });
 
               if (llmResult) {
-                matchedSkills = llmResult.skills
+                const candidateExpMap = new Map(
+                  skillDiscoveryResult.candidateExperiences.map((e) => [
+                    e.id,
+                    e,
+                  ]),
+                );
+                matchedExperiences = (llmResult.experiences ?? [])
+                  .flatMap((id) => {
+                    const e =
+                      candidateExpMap.get(id) ?? experienceCatalog?.resolve(id);
+                    return e ? [e] : [];
+                  })
+                  .slice(
+                    0,
+                    refreshedConfig.routing.experiences.maxInjectedExperiences,
+                  );
+
+                const unionSkillNames = new Set<string>();
+                for (const name of llmResult.skills) {
+                  unionSkillNames.add(canonicalIdentity(name));
+                }
+                for (const exp of matchedExperiences) {
+                  for (const sk of exp.skills) {
+                    unionSkillNames.add(canonicalIdentity(sk));
+                  }
+                }
+
+                matchedSkills = Array.from(unionSkillNames)
                   .flatMap((name) => {
-                    const s = visibleMap.get(canonicalIdentity(name));
+                    const s = visibleMap.get(name);
                     return s ? [s] : [];
                   })
                   .slice(0, refreshedConfig.routing.skills.maxInjectedSkills);
               } else {
                 matchedSkills = [];
+                matchedExperiences = [];
               }
             } catch (error) {
               logger.warn("routing subagent execution failed", { error });
               matchedSkills = [];
+              matchedExperiences = [];
             }
           }
 
@@ -1781,10 +1620,11 @@ export function createHookHandlers(deps: HookDeps) {
               retrievalCandidates:
                 skillDiscoveryResult.retrievalCandidates.length,
               experienceCandidates:
-                skillDiscoveryResult.experienceCandidates.length,
+                skillDiscoveryResult.candidateExperiences.length,
               candidateCount: unionPool.pool.length,
               injectedCount: matchedSkills.length,
               injectedSkills: matchedSkills.map((s) => s.name),
+              injectedExperiences: matchedExperiences.map((e) => e.id),
               ...(skillSources.length > 0
                 ? { reason: skillSources.join(",") }
                 : {}),
@@ -1793,6 +1633,7 @@ export function createHookHandlers(deps: HookDeps) {
               injectedCollections,
               explain: explainSummary || "none",
               ...(matchedSkills.length === 0 &&
+              matchedExperiences.length === 0 &&
               skillDiscoveryResult.fallbackReason
                 ? { fallbackReason: skillDiscoveryResult.fallbackReason }
                 : {}),
@@ -1823,32 +1664,6 @@ export function createHookHandlers(deps: HookDeps) {
             ),
           };
 
-          // Strict Hit Only: only attach experiences that were actually hit in Experience QMD for matched skills!
-          const experiences: SkillExperienceEntry[] = [];
-          for (const skill of matchedSkills) {
-            const hits = unionPool.experienceHitsBySkill.get(
-              canonicalIdentity(skill.name),
-            );
-            if (hits && hits.length > 0) {
-              for (const hit of hits) {
-                const resolved = experienceCatalog?.resolve(hit.identity);
-                if (resolved) {
-                  experiences.push(resolved);
-                } else {
-                  experiences.push({
-                    identity: hit.identity,
-                    skill: hit.skill,
-                    entryId: hit.entryId,
-                    summary: "",
-                    keywords: [],
-                    body: "",
-                    path: "",
-                  });
-                }
-              }
-            }
-          }
-
           await recordPromptBuildSession({
             association: routing.association,
             latestUserMessage,
@@ -1858,13 +1673,13 @@ export function createHookHandlers(deps: HookDeps) {
             conversation,
           });
 
-          if (matchedSkills.length === 0) {
+          if (matchedSkills.length === 0 && matchedExperiences.length === 0) {
             return toPromptBuildResult(undefined, workingSetSkillsXml);
           }
           return toPromptBuildResult(
             buildRoutingContext({
               matchedSkills,
-              experiences,
+              experiences: matchedExperiences,
             }),
             workingSetSkillsXml,
           );

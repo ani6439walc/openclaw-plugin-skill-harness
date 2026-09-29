@@ -26,6 +26,7 @@ import type {
   ResolvedSkillHarnessPluginConfig,
   RoutingLlmResult,
 } from "../types.js";
+import type { SkillExperienceEntry } from "../experiences/types.js";
 
 export type EmbeddedSubagentBaseParams = {
   api: OpenClawPluginApi;
@@ -153,6 +154,7 @@ export async function runIntentionSubagent(params: {
   modelRef: { provider: string; model: string };
   intents: readonly IntentCatalogEntry[];
   candidateSkills?: readonly AvailableSkill[];
+  candidateExperiences?: readonly SkillExperienceEntry[];
   dataRoot?: string;
 }): Promise<ClassifiedIntentionResult | undefined> {
   const { subagentSessionId, subagentSessionKey } =
@@ -211,6 +213,7 @@ export async function runUnifiedRoutingSubagent(params: {
   resolvedIntent?: { id: string; guidance: string };
   candidateIntents?: readonly IntentCatalogEntry[];
   candidateSkills?: readonly AvailableSkill[];
+  candidateExperiences?: readonly SkillExperienceEntry[];
   dataRoot?: string;
 }): Promise<RoutingLlmResult | undefined> {
   if (

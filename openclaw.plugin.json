@@ -240,54 +240,45 @@
             },
             "default": {}
           },
-          "intents": {
+          "experiences": {
             "type": "object",
-            "description": "Dynamic intent routing configuration and thresholds.",
+            "description": "Prompt-build input-matched experience candidate policy.",
             "additionalProperties": false,
             "properties": {
-              "keyword": {
+              "search": {
                 "type": "object",
-                "description": "Step 1 QMD keyword routing thresholds.",
                 "additionalProperties": false,
+                "description": "Direct SkillExperience retrieval used only while building prompt candidates.",
                 "properties": {
-                  "directRouteMinScore": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1,
-                    "default": 0.85,
-                    "description": "Inclusive BM25 score required for keyword direct routing bypass."
-                  }
-                },
-                "default": {}
-              },
-              "hybrid": {
-                "type": "object",
-                "description": "Step 2 QMD hybrid routing thresholds.",
-                "additionalProperties": false,
-                "properties": {
-                  "directRouteMinScore": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1,
-                    "default": 0.9,
-                    "description": "Inclusive semantic score required for hybrid direct routing bypass."
-                  },
-                  "directRouteMinMargin": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1,
-                    "default": 0.08,
-                    "description": "Minimum score margin between #1 and #2 candidates required for hybrid direct routing."
-                  },
                   "minCandidateScore": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
                     "default": 0.4,
-                    "description": "Inclusive semantic score required to consider an intent candidate."
+                    "description": "Inclusive semantic-evidence score required for a retrieved experience to enter the candidate pool."
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 60000,
+                    "description": "Optional millisecond override for prompt-build experience retrieval. Defaults to qmd.timeoutMs."
                   }
                 },
                 "default": {}
+              },
+              "relevanceThreshold": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.6,
+                "description": "Inclusive relevance threshold for candidate experience selection."
+              },
+              "maxInjectedExperiences": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 20,
+                "default": 4,
+                "description": "Maximum input-matched experiences injected into advisory context."
               }
             },
             "default": {}

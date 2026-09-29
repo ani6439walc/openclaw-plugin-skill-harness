@@ -12,11 +12,21 @@ import {
   normalizeEmbeddingModel,
 } from "./provider-resolver.js";
 import { boundQmdQuery } from "./query-budget.js";
+import { weightedReciprocalRankFusion } from "./rrf.js";
 
-const EXPERIENCES_COLLECTION = "skill-experiences";
+export const EXPERIENCE_KEYWORDS_COLLECTION = "keywords";
+export const EXPERIENCE_SUMMARY_COLLECTION = "summary";
+export const EXPERIENCE_BODY_COLLECTION = "body";
+
+export const EXPERIENCE_COLLECTIONS = [
+  { name: EXPERIENCE_KEYWORDS_COLLECTION, weight: 1.0 },
+  { name: EXPERIENCE_SUMMARY_COLLECTION, weight: 0.8 },
+  { name: EXPERIENCE_BODY_COLLECTION, weight: 0.5 },
+] as const;
+
 const INITIAL_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 60_000;
-const EXPERIENCE_INDEX_METADATA_SCHEMA_VERSION = 1;
+const EXPERIENCE_INDEX_METADATA_SCHEMA_VERSION = 2;
 
 type QmdCreateStore = (typeof import("@wei840222/qmd"))["createStore"];
 
@@ -47,13 +57,20 @@ export type QmdRawSearchResult = Record<string, unknown> & {
   explain?: unknown;
 };
 
+export interface SkillExperienceEvidence {
+  collection: string;
+  score: number;
+  snippet?: string;
+  explain?: unknown;
+}
+
 export interface SkillExperienceHit {
-  identity: string;
-  skill: string;
-  entryId: string;
+  id: string;
+  skills: readonly string[];
   score: number;
   semanticScore: number;
-  collection: string;
+  matchedCollections: readonly string[];
+  evidence: readonly SkillExperienceEvidence[];
   explain?: unknown;
 }
 
@@ -79,18 +96,15 @@ function snapshotFingerprint(
   entries: readonly SkillExperienceEntry[],
   config: ResolvedQmdConfig,
 ): string {
-  const sorted = [...entries].sort((a, b) =>
-    a.identity.localeCompare(b.identity),
-  );
+  const sorted = [...entries].sort((a, b) => a.id.localeCompare(b.id));
   return hash(
     JSON.stringify({
       schemaVersion: EXPERIENCE_INDEX_METADATA_SCHEMA_VERSION,
       entries: sorted.map((entry) => ({
-        identity: entry.identity,
-        skill: entry.skill,
-        entryId: entry.entryId,
-        summary: entry.summary,
-        keywords: entry.keywords,
+        id: entry.id,
+        skills: [...entry.skills].sort(),
+        summaryHash: hash(entry.summary),
+        keywords: [...entry.keywords].sort(),
         bodyHash: hash(entry.body),
       })),
       qmd: {
@@ -131,91 +145,82 @@ function extractSemanticScore(result: QmdRawSearchResult): number {
   return result.score;
 }
 
-function identityFromCandidatePath(targetPath: string):
-  | {
-      identity: string;
-      skill: string;
-      entryId: string;
-    }
-  | undefined {
+function idFromCandidatePath(targetPath: string): string | undefined {
   const normalized = targetPath.split(path.sep).join("/");
   const segments = normalized.split("/").filter(Boolean);
-  if (segments.length < 2) return;
+  if (segments.length === 0) return;
   const fileName = segments[segments.length - 1];
   if (!fileName?.endsWith(".md")) return;
-  const entryId = fileName.slice(0, -".md".length);
-  const skill = segments[segments.length - 2];
-  if (!skill || !entryId) return;
-  return {
-    identity: `${skill}/${entryId}`,
-    skill,
-    entryId,
-  };
+  return fileName.slice(0, -".md".length);
 }
 
-function parseExperienceHits(
-  results: readonly QmdRawSearchResult[],
-  collection: string,
-): SkillExperienceHit[] {
-  const hitByIdentity = new Map<string, SkillExperienceHit>();
-  for (const result of results) {
+function parseFrontmatterIdentity(raw: string | undefined): {
+  id?: string;
+  skills?: string[];
+  snippet?: string;
+} {
+  if (!raw) return {};
+  try {
+    const parsed = matter(raw);
+    return {
+      id:
+        typeof parsed.data.id === "string" ? parsed.data.id.trim() : undefined,
+      skills: Array.isArray(parsed.data.skills)
+        ? parsed.data.skills.filter((s): s is string => typeof s === "string")
+        : undefined,
+      snippet: parsed.content.trim().slice(0, 240) || undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+interface RawCollectionHit {
+  id: string;
+  collection: string;
+  score: number;
+  semanticScore: number;
+  snippet?: string;
+  explain?: unknown;
+}
+
+function parseStoreHits(params: {
+  results: readonly QmdRawSearchResult[];
+  collection: string;
+}): RawCollectionHit[] {
+  const hits: RawCollectionHit[] = [];
+  for (const result of params.results) {
     if (!Number.isFinite(result.score)) continue;
-    let identityInfo:
-      { identity: string; skill: string; entryId: string } | undefined;
 
-    const pathCandidates = [
-      result.filepath,
-      result.file,
-      result.displayPath,
-    ].filter((val): val is string => Boolean(val));
+    const fromBody = parseFrontmatterIdentity(result.body);
+    let id = fromBody.id;
 
-    for (const cand of pathCandidates) {
-      identityInfo = identityFromCandidatePath(cand);
-      if (identityInfo) break;
-    }
+    if (!id) {
+      const pathCandidates = [
+        result.filepath,
+        result.file,
+        result.displayPath,
+      ].filter((val): val is string => Boolean(val));
 
-    if (!identityInfo && result.body) {
-      try {
-        const parsed = matter(result.body);
-        const skill =
-          typeof parsed.data.skill === "string"
-            ? parsed.data.skill.trim()
-            : undefined;
-        if (skill && result.filepath) {
-          const entryId = path.basename(result.filepath, ".md");
-          identityInfo = {
-            identity: `${skill}/${entryId}`,
-            skill,
-            entryId,
-          };
-        }
-      } catch {
-        // Fallback ignore
+      for (const cand of pathCandidates) {
+        id = idFromCandidatePath(cand);
+        if (id) break;
       }
     }
 
-    if (!identityInfo) continue;
+    if (!id) continue;
     const semanticScore = extractSemanticScore(result);
-    const existing = hitByIdentity.get(identityInfo.identity);
-    if (!existing || semanticScore > existing.semanticScore) {
-      hitByIdentity.set(identityInfo.identity, {
-        identity: identityInfo.identity,
-        skill: identityInfo.skill,
-        entryId: identityInfo.entryId,
-        score: result.score,
-        semanticScore,
-        collection,
-        ...(result.explain === undefined ? {} : { explain: result.explain }),
-      });
-    }
-  }
 
-  return [...hitByIdentity.values()].sort(
-    (left, right) =>
-      right.semanticScore - left.semanticScore ||
-      right.score - left.score ||
-      left.identity.localeCompare(right.identity, "en"),
-  );
+    hits.push({
+      id,
+      collection: params.collection,
+      score: result.score,
+      semanticScore,
+      ...(fromBody.snippet ? { snippet: fromBody.snippet } : {}),
+      ...(result.explain === undefined ? {} : { explain: result.explain }),
+    });
+  }
+  return hits;
 }
 
 export function createSkillExperienceQmdIndex(params: {
@@ -241,6 +246,7 @@ export function createSkillExperienceQmdIndex(params: {
     | undefined;
   let consecutiveFailures = 0;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let knownEntriesById = new Map<string, SkillExperienceEntry>();
 
   function clearRetryTimer(): void {
     if (retryTimer) {
@@ -262,41 +268,100 @@ export function createSkillExperienceQmdIndex(params: {
     writeJsonAtomic(metadataPath, meta);
   }
 
+  function sidecarYaml(entry: SkillExperienceEntry, kind: string): string {
+    return matter.stringify("", {
+      id: entry.id,
+      skills: entry.skills,
+      kind,
+      path: entry.path,
+    });
+  }
+
   async function writeSnapshot(
     entries: readonly SkillExperienceEntry[],
   ): Promise<
     Record<string, { path: string; pattern: string; ignore?: string[] }>
   > {
     const collections = {
-      [EXPERIENCES_COLLECTION]: {
-        path: docsRoot,
+      [EXPERIENCE_KEYWORDS_COLLECTION]: {
+        path: path.join(docsRoot, EXPERIENCE_KEYWORDS_COLLECTION),
         pattern: "**/*.md",
+        ignore: ["**/*.identity.yml"],
+      },
+      [EXPERIENCE_SUMMARY_COLLECTION]: {
+        path: path.join(docsRoot, EXPERIENCE_SUMMARY_COLLECTION),
+        pattern: "**/*.md",
+        ignore: ["**/*.identity.yml"],
+      },
+      [EXPERIENCE_BODY_COLLECTION]: {
+        path: path.join(docsRoot, EXPERIENCE_BODY_COLLECTION),
+        pattern: "**/*.md",
+        ignore: ["**/*.identity.yml"],
       },
     };
 
     const currentFiles = new Set<string>();
-    for (const entry of entries) {
-      const relPath = path.join(entry.skill, `${entry.entryId}.md`);
-      const targetPath = path.join(docsRoot, relPath);
-      currentFiles.add(targetPath);
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
 
-      const frontmatter = {
-        skill: entry.skill,
-        summary: entry.summary,
-        keywords: entry.keywords,
-      };
-      const yamlStr = matter.stringify(entry.body, frontmatter);
+    const writeDoc = async (
+      collectionName: string,
+      entryId: string,
+      content: string,
+      sidecar: string,
+    ) => {
+      const colDir = path.join(docsRoot, collectionName);
+      await fs.mkdir(colDir, { recursive: true });
+      const mdPath = path.join(colDir, `${entryId}.md`);
+      const sidecarPath = `${mdPath}.identity.yml`;
+      currentFiles.add(mdPath);
+      currentFiles.add(sidecarPath);
 
-      let existing: string | undefined;
+      let existingMd: string | undefined;
       try {
-        existing = await fs.readFile(targetPath, "utf8");
+        existingMd = await fs.readFile(mdPath, "utf8");
       } catch {
-        // file doesn't exist
+        // file does not exist
       }
-      if (existing !== yamlStr) {
-        await fs.writeFile(targetPath, yamlStr, "utf8");
+      if (existingMd !== content) {
+        await fs.writeFile(mdPath, content, "utf8");
       }
+
+      let existingSidecar: string | undefined;
+      try {
+        existingSidecar = await fs.readFile(sidecarPath, "utf8");
+      } catch {
+        // sidecar does not exist
+      }
+      if (existingSidecar !== sidecar) {
+        await fs.writeFile(sidecarPath, sidecar, "utf8");
+      }
+    };
+
+    for (const entry of entries) {
+      // 1. keywords
+      const keywordsContent =
+        entry.keywords.map((k) => `- ${k}`).join("\n") + "\n";
+      await writeDoc(
+        EXPERIENCE_KEYWORDS_COLLECTION,
+        entry.id,
+        keywordsContent,
+        sidecarYaml(entry, "keywords"),
+      );
+
+      // 2. summary
+      await writeDoc(
+        EXPERIENCE_SUMMARY_COLLECTION,
+        entry.id,
+        `${entry.summary.trim()}\n`,
+        sidecarYaml(entry, "summary"),
+      );
+
+      // 3. body
+      await writeDoc(
+        EXPERIENCE_BODY_COLLECTION,
+        entry.id,
+        `${entry.body.trim()}\n`,
+        sidecarYaml(entry, "body"),
+      );
     }
 
     async function cleanDir(dir: string): Promise<void> {
@@ -315,7 +380,10 @@ export function createSkillExperienceQmdIndex(params: {
           } catch {
             // Not empty
           }
-        } else if (dirent.isFile() && dirent.name.endsWith(".md")) {
+        } else if (
+          dirent.isFile() &&
+          (dirent.name.endsWith(".md") || dirent.name.endsWith(".identity.yml"))
+        ) {
           if (!currentFiles.has(full)) {
             await fs.rm(full, { force: true });
           }
@@ -327,32 +395,31 @@ export function createSkillExperienceQmdIndex(params: {
     return collections;
   }
 
-  async function openExistingIndex(): Promise<boolean> {
+  async function openExistingIndex(): Promise<void> {
     try {
-      const meta = readJsonFile(metadataPath);
-      if (!isExperienceIndexMetadata(meta)) return false;
-      const qmd = params.config();
-      const createQmdStore =
+      const meta = readJsonFile<unknown>(metadataPath);
+      if (!isExperienceIndexMetadata(meta)) {
+        return;
+      }
+      const resolvedConfig = params.config();
+      const createStore =
         params.createStore ?? (await import("@wei840222/qmd")).createStore;
-      store = await createQmdStore({
+      const opened = await createStore({
         dbPath: databasePath,
-        config: {
-          collections: {
-            [EXPERIENCES_COLLECTION]: {
-              path: docsRoot,
-              pattern: "**/*.md",
-            },
-          },
-          models: buildStoreModels(qmd),
-        },
-        remoteRequestTimeoutMs: qmd.timeoutMs,
+        config: { collections: {}, models: buildStoreModels(resolvedConfig) },
+        readOnly: true,
+        remoteRequestTimeoutMs: resolvedConfig.timeoutMs,
       });
+      if (closed) {
+        await opened.close();
+        return;
+      }
+      store = opened;
       currentFingerprint = meta.fingerprint;
       status = "ready";
-      return true;
-    } catch (error) {
-      logger.warn("failed to open existing QMD experience index", { error });
-      return false;
+      resetRetryState();
+    } catch {
+      status = "idle";
     }
   }
 
@@ -360,37 +427,25 @@ export function createSkillExperienceQmdIndex(params: {
     entries: readonly SkillExperienceEntry[];
     fingerprint: string;
   }): Promise<void> {
+    status = "building";
     let nextStore: QMDStore | undefined;
     try {
-      status = "building";
-      const refresh = async (): Promise<boolean> => {
-        if (params.readOnly) {
-          status = "idle";
-          return true;
-        }
-        await fs.rm(metadataPath, { force: true });
-        const qmd = params.config();
-        if (
-          !qmd.embedding.baseUrl ||
-          !qmd.embedding.model ||
-          !qmd.expansion.baseUrl ||
-          !qmd.expansion.model
-        ) {
-          throw new Error(
-            "QMD embedding and expansion endpoints must be configured.",
-          );
-        }
-        const createQmdStore =
-          params.createStore ?? (await import("@wei840222/qmd")).createStore;
-        const collections = await writeSnapshot(target.entries);
-        nextStore = await createQmdStore({
+      await fs.mkdir(indexPath, { recursive: true });
+      const resolvedConfig = params.config();
+      const collections = await writeSnapshot(target.entries);
+      const createStore =
+        params.createStore ?? (await import("@wei840222/qmd")).createStore;
+
+      const refresh = async () => {
+        nextStore = await createStore({
           dbPath: databasePath,
           config: {
             collections,
-            models: buildStoreModels(qmd),
+            models: buildStoreModels(resolvedConfig),
           },
-          remoteRequestTimeoutMs: qmd.timeoutMs,
+          remoteRequestTimeoutMs: resolvedConfig.timeoutMs,
         });
+
         await nextStore.update();
         const embedResult = await nextStore.embed();
         const indexStatus = await nextStore.getStatus();
@@ -400,18 +455,16 @@ export function createSkillExperienceQmdIndex(params: {
           );
         }
 
-        const previousStore = store;
-        persistFingerprint(target.fingerprint);
+        const active = store;
         store = nextStore;
+        nextStore = undefined;
         currentFingerprint = target.fingerprint;
         status = "ready";
         resetRetryState();
-        if (previousStore) {
-          await previousStore.close().catch((err: unknown) => {
-            logger.warn("failed to close previous QMD experience index", {
-              error: err,
-            });
-          });
+        persistFingerprint(target.fingerprint);
+
+        if (active) {
+          await active.close().catch(() => undefined);
         }
         return true;
       };
@@ -479,6 +532,7 @@ export function createSkillExperienceQmdIndex(params: {
   return {
     schedule(entries) {
       if (closed) return;
+      knownEntriesById = new Map(entries.map((e) => [e.id, e]));
       const fingerprint = snapshotFingerprint(entries, params.config());
       expectedFingerprint = fingerprint;
 
@@ -499,19 +553,85 @@ export function createSkillExperienceQmdIndex(params: {
     async search({ query, limit = 8, expansionContext }) {
       if (closed || !isReadyForCurrentCatalog() || !store) return;
       try {
-        const results = (await store.search({
-          query: boundQmdQuery(query),
-          collections: [EXPERIENCES_COLLECTION],
-          includeHyde: true,
-          ...(expansionContext ? { expansionContext } : {}),
-          rerank: false,
-          limit,
-          candidateLimit: limit,
-          minScore: 0,
-          explain: true,
-        })) as unknown as QmdRawSearchResult[];
+        const searchLimit = Math.max(limit * 2, 20);
+        const collectionHits = await Promise.all(
+          EXPERIENCE_COLLECTIONS.map(async (collection) => {
+            const results = (await store!.search({
+              query: boundQmdQuery(query),
+              collections: [collection.name],
+              includeHyde: true,
+              ...(expansionContext ? { expansionContext } : {}),
+              rerank: false,
+              limit: searchLimit,
+              candidateLimit: searchLimit,
+              minScore: 0,
+              explain: true,
+            })) as unknown as QmdRawSearchResult[];
 
-        return parseExperienceHits(results, EXPERIENCES_COLLECTION);
+            const ranked = parseStoreHits({
+              results,
+              collection: collection.name,
+            }).sort((left, right) => {
+              if (right.score !== left.score) return right.score - left.score;
+              return left.id.localeCompare(right.id);
+            });
+            return { collection, ranked };
+          }),
+        );
+
+        // Weighted Reciprocal Rank Fusion
+        const fused = weightedReciprocalRankFusion({
+          lists: collectionHits.map((entry) =>
+            entry.ranked.map((hit) => ({ id: hit.id })),
+          ),
+          weights: collectionHits.map((entry) => entry.collection.weight),
+        });
+
+        const hitsById = new Map<string, RawCollectionHit[]>();
+        for (const col of collectionHits) {
+          for (const hit of col.ranked) {
+            const list = hitsById.get(hit.id) ?? [];
+            list.push(hit);
+            hitsById.set(hit.id, list);
+          }
+        }
+
+        const hits: SkillExperienceHit[] = [];
+        for (const fusedHit of fused) {
+          const rawHits = hitsById.get(fusedHit.id);
+          if (!rawHits || rawHits.length === 0) continue;
+
+          const entry = knownEntriesById.get(fusedHit.id);
+          const skills = entry?.skills ?? [];
+          const semanticScore = Math.max(
+            ...rawHits.map((h) => h.semanticScore),
+          );
+          const matchedCollections = [
+            ...new Set(rawHits.map((h) => h.collection)),
+          ];
+          const evidence: SkillExperienceEvidence[] = rawHits.map((h) => ({
+            collection: h.collection,
+            score: h.score,
+            ...(h.snippet ? { snippet: h.snippet } : {}),
+            ...(h.explain !== undefined ? { explain: h.explain } : {}),
+          }));
+
+          hits.push({
+            id: fusedHit.id,
+            skills,
+            score: fusedHit.score,
+            semanticScore,
+            matchedCollections,
+            evidence,
+            ...(rawHits[0].explain !== undefined
+              ? { explain: rawHits[0].explain }
+              : {}),
+          });
+
+          if (hits.length >= limit) break;
+        }
+
+        return hits;
       } catch (error) {
         logger.warn("QMD experience search failed", { error });
         return;

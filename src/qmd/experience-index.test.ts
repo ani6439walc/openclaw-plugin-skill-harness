@@ -7,6 +7,7 @@ import type { SkillExperienceEntry } from "../experiences/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
 import {
   createSkillExperienceQmdIndex,
+  EXPERIENCE_COLLECTIONS,
   type SkillExperienceQmdIndex,
 } from "./experience-index.js";
 
@@ -27,22 +28,20 @@ const DEFAULT_CONFIG: ResolvedQmdConfig = {
 
 const MOCK_ENTRIES: SkillExperienceEntry[] = [
   {
-    identity: "cx/image-analysis",
-    skill: "cx",
-    entryId: "image-analysis",
+    id: "image-analysis",
+    skills: ["cx", "vision"],
     summary: "Visual inspection and structured extraction from screenshots.",
     keywords: ["ocr", "image", "screenshot"],
     body: "# Image Analysis\n\n## Guidance\nPerform OCR and image inspection.\n",
-    path: "/tmp/mock/cx/image-analysis.md",
+    path: "/tmp/mock/image-analysis",
   },
   {
-    identity: "treemd/docs-lookup",
-    skill: "treemd",
-    entryId: "docs-lookup",
+    id: "docs-lookup",
+    skills: ["treemd"],
     summary: "Lookup documentation in project knowledge trees.",
     keywords: ["docs", "lookup", "documentation"],
     body: "# Docs Lookup\n\n## Guidance\nUse tree navigation for project documentation.\n",
-    path: "/tmp/mock/treemd/docs-lookup.md",
+    path: "/tmp/mock/docs-lookup",
   },
 ];
 
@@ -62,18 +61,37 @@ describe("SkillExperienceQmdIndex", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("builds index and performs search returning parsed hits", async () => {
+  it("builds multi-collection snapshot and performs RRF search returning parsed hits", async () => {
     const mockStore: Partial<QMDStore> = {
       update: vi.fn().mockResolvedValue(undefined),
-      embed: vi.fn().mockResolvedValue({ errors: 0, embedded: 2 }),
-      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
-      search: vi.fn().mockResolvedValue([
-        {
-          filepath: "cx/image-analysis.md",
-          score: 0.92,
-          explain: { vectorScores: [0.95] },
-        },
-      ]),
+      embed: vi.fn().mockResolvedValue({ errors: 0 }),
+      getStatus: vi
+        .fn()
+        .mockResolvedValue({ needsEmbedding: 0, totalDocuments: 1 }),
+      search: vi
+        .fn()
+        .mockImplementation(async (params: { collections?: string[] }) => {
+          const col = params.collections?.[0];
+          if (col === "keywords") {
+            return [
+              {
+                filepath: "keywords/image-analysis.md",
+                score: 0.95,
+                explain: { vectorScores: [0.95] },
+              },
+            ];
+          }
+          if (col === "summary") {
+            return [
+              {
+                filepath: "summary/image-analysis.md",
+                score: 0.88,
+                explain: { vectorScores: [0.9] },
+              },
+            ];
+          }
+          return [];
+        }),
       close: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -88,7 +106,6 @@ describe("SkillExperienceQmdIndex", () => {
 
     index.schedule(MOCK_ENTRIES);
 
-    // Wait until status is ready
     let attempts = 0;
     while (index.getStatus() !== "ready" && attempts < 50) {
       await new Promise((r) => setTimeout(r, 50));
@@ -100,24 +117,36 @@ describe("SkillExperienceQmdIndex", () => {
     expect(mockStore.update).toHaveBeenCalled();
     expect(mockStore.embed).toHaveBeenCalled();
 
+    // Verify snapshot documents and sidecars exist on disk
+    const docsDir = path.join(tmpDir, "qmd", "experiences", "docs");
+    expect(
+      await fs.readFile(
+        path.join(docsDir, "keywords", "image-analysis.md"),
+        "utf8",
+      ),
+    ).toContain("- ocr");
+    expect(
+      await fs.readFile(
+        path.join(docsDir, "keywords", "image-analysis.md.identity.yml"),
+        "utf8",
+      ),
+    ).toContain("id: image-analysis");
+
     const hits = await index.search({ query: "analyze screenshot" });
     expect(hits).toBeDefined();
     expect(hits).toHaveLength(1);
-    expect(hits![0]).toMatchObject({
-      identity: "cx/image-analysis",
-      skill: "cx",
-      entryId: "image-analysis",
-      score: 0.92,
-      semanticScore: 0.95,
-      collection: "skill-experiences",
-    });
+    expect(hits![0].id).toBe("image-analysis");
+    expect(hits![0].skills).toEqual(["cx", "vision"]);
+    expect(hits![0].matchedCollections).toContain("keywords");
+    expect(hits![0].matchedCollections).toContain("summary");
+    expect(hits![0].semanticScore).toBe(0.95);
+    expect(hits![0].evidence.length).toBe(2);
   });
 
   it("handles empty or failed searches gracefully", async () => {
     const mockStore: Partial<QMDStore> = {
+      addCollection: vi.fn().mockResolvedValue(undefined),
       update: vi.fn().mockResolvedValue(undefined),
-      embed: vi.fn().mockResolvedValue({ errors: 0, embedded: 2 }),
-      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
       search: vi.fn().mockRejectedValue(new Error("Network failure")),
       close: vi.fn().mockResolvedValue(undefined),
     };
@@ -133,8 +162,10 @@ describe("SkillExperienceQmdIndex", () => {
 
     index.schedule(MOCK_ENTRIES);
 
-    while (index.getStatus() !== "ready") {
+    let attempts = 0;
+    while (index.getStatus() !== "ready" && attempts < 50) {
       await new Promise((r) => setTimeout(r, 50));
+      attempts += 1;
     }
 
     const hits = await index.search({ query: "broken" });

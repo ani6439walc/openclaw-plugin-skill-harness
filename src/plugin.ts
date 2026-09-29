@@ -371,6 +371,7 @@ export function createPlugin(
       api.on("session_end", handlers.onSessionEnd);
       registerSkillTools(api, {
         experienceCatalog,
+        qmdExperienceIndex,
         qmdSkillIndex,
         scheduleSkillSearchIndex,
         bundledSkillsDir: deps.bundledSkillsDir,

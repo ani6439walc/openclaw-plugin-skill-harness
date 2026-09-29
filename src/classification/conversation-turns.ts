@@ -2,6 +2,8 @@ import {
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   ROUTING_ADVISORY_SKILLS_ONLY_HEADER,
+  ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
+  ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER,
   ROUTING_ADVISORY_LEGACY_HEADER,
 } from "../constants.js";
 import type { RecentTurn } from "../types.js";
@@ -36,6 +38,10 @@ export function sanitizeConversationText(text: string): string {
     .split(ROUTING_ADVISORY_INTENT_ONLY_HEADER)
     .join(" ")
     .split(ROUTING_ADVISORY_SKILLS_ONLY_HEADER)
+    .join(" ")
+    .split(ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER)
+    .join(" ")
+    .split(ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER)
     .join(" ")
     .split(ROUTING_ADVISORY_LEGACY_HEADER)
     .join(" ")

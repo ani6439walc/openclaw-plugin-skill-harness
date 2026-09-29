@@ -16,8 +16,7 @@ import type {
   ResolvedQmdConfig,
   ResolvedReviewConfig,
   ResolvedRoutingConfig,
-  ResolvedRoutingIntentsConfig,
-  ResolvedRoutingIntentsThresholdsConfig,
+  ResolvedRoutingExperiencesConfig,
   ResolvedRoutingScopeConfig,
   ResolvedRoutingSkillsConfig,
   ResolvedScopeConfig,
@@ -62,16 +61,11 @@ const DEFAULT_ROUTING_SCOPE: ResolvedRoutingScopeConfig = {
 };
 const DEFAULT_SCOPE: ResolvedScopeConfig = DEFAULT_ROUTING_SCOPE;
 
-const DEFAULT_ROUTING_INTENTS: ResolvedRoutingIntentsConfig = {
-  keyword: { directRouteMinScore: 0.85 },
-  hybrid: {
-    directRouteMinScore: 0.9,
-    directRouteMinMargin: 0.08,
-    minCandidateScore: 0.4,
-  },
+const DEFAULT_ROUTING_EXPERIENCES: ResolvedRoutingExperiencesConfig = {
+  search: { minCandidateScore: 0.4, timeoutMs: undefined as never },
+  relevanceThreshold: 0.6,
+  maxInjectedExperiences: 4,
 };
-const DEFAULT_ROUTING_THRESHOLDS: ResolvedRoutingIntentsThresholdsConfig =
-  DEFAULT_ROUTING_INTENTS;
 
 const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
   model: undefined,
@@ -97,7 +91,7 @@ const DEFAULT_SKILL_CANDIDATES = DEFAULT_ROUTING_SKILLS;
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
   scope: DEFAULT_ROUTING_SCOPE,
-  intents: DEFAULT_ROUTING_INTENTS,
+  experiences: DEFAULT_ROUTING_EXPERIENCES,
   skills: DEFAULT_ROUTING_SKILLS,
   model: undefined,
   modelFallback: undefined,
@@ -249,107 +243,42 @@ const ClassifierSchema = z
     contextWindow: val.contextWindow,
   }));
 
-const RoutingScoreSchema = (fallback: number) =>
-  z.number().min(0).max(1).optional().default(fallback);
-
-const KeywordThresholdsSchema = z
+const ExperienceCandidatesSearchSchema = z
   .object({
-    directRouteMinScore: RoutingScoreSchema(
-      DEFAULT_ROUTING_THRESHOLDS.keyword.directRouteMinScore,
-    ),
+    minCandidateScore: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.4),
+    timeoutMs: z.number().int().min(100).max(60_000).optional(),
   })
   .strict()
-  .default(DEFAULT_ROUTING_THRESHOLDS.keyword);
+  .optional()
+  .default(DEFAULT_ROUTING_EXPERIENCES.search);
 
-const HybridThresholdsSchema = z
+const RoutingExperiencesSchema = z
   .object({
-    directRouteMinScore: RoutingScoreSchema(
-      DEFAULT_ROUTING_THRESHOLDS.hybrid.directRouteMinScore,
-    ),
-    directRouteMinMargin: RoutingScoreSchema(
-      DEFAULT_ROUTING_THRESHOLDS.hybrid.directRouteMinMargin,
-    ),
-    minCandidateScore: RoutingScoreSchema(
-      DEFAULT_ROUTING_THRESHOLDS.hybrid.minCandidateScore,
-    ),
+    search: ExperienceCandidatesSearchSchema,
+    relevanceThreshold: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.6),
+    maxInjectedExperiences: z
+      .number()
+      .int()
+      .min(0)
+      .max(20)
+      .optional()
+      .default(4),
   })
   .strict()
-  .default(DEFAULT_ROUTING_THRESHOLDS.hybrid)
-  .superRefine((hybrid, context) => {
-    if (
-      roundToDecimals(hybrid.minCandidateScore, 2) >
-      roundToDecimals(hybrid.directRouteMinScore, 2)
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["minCandidateScore"],
-        message:
-          "minCandidateScore must be less than or equal to directRouteMinScore",
-      });
-    }
-  });
-
-const RoutingThresholdsSchema = z
-  .preprocess(
-    (raw) => {
-      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-        return {};
-      }
-      const record = raw as Record<string, unknown>;
-      if ("keyword" in record || "hybrid" in record) {
-        return record;
-      }
-      const legacyDirect =
-        typeof record.directRouteMinScore === "number"
-          ? record.directRouteMinScore
-          : undefined;
-      const legacyMinCandidate =
-        typeof record.minCandidateScore === "number"
-          ? record.minCandidateScore
-          : undefined;
-      if (legacyDirect !== undefined || legacyMinCandidate !== undefined) {
-        return {
-          keyword: {
-            ...(legacyDirect !== undefined
-              ? { directRouteMinScore: legacyDirect }
-              : {}),
-          },
-          hybrid: {
-            ...(legacyDirect !== undefined
-              ? { directRouteMinScore: legacyDirect }
-              : {}),
-            ...(legacyMinCandidate !== undefined
-              ? { minCandidateScore: legacyMinCandidate }
-              : {}),
-          },
-        };
-      }
-      return record;
-    },
-    z
-      .object({
-        keyword: KeywordThresholdsSchema.optional().default(
-          DEFAULT_ROUTING_THRESHOLDS.keyword,
-        ),
-        hybrid: HybridThresholdsSchema.optional().default(
-          DEFAULT_ROUTING_THRESHOLDS.hybrid,
-        ),
-      })
-      .strict(),
-  )
-  .default(DEFAULT_ROUTING_THRESHOLDS);
-
-const RoutingIntentsSchema = z
-  .preprocess((val) => {
-    if (val && typeof val === "object" && "thresholds" in val) {
-      const { thresholds, ...rest } = val as Record<string, unknown>;
-      if (thresholds && typeof thresholds === "object") {
-        return { ...(thresholds as Record<string, unknown>), ...rest };
-      }
-    }
-    return val;
-  }, RoutingThresholdsSchema)
-  .default(DEFAULT_ROUTING_INTENTS);
+  .optional()
+  .default(DEFAULT_ROUTING_EXPERIENCES);
 
 const GenericTokensSchema = z
   .array(z.string())
@@ -406,7 +335,7 @@ const RoutingSkillsSchema = z
 const RoutingSchema = z
   .object({
     scope: ScopeSchema.optional().default(DEFAULT_ROUTING_SCOPE),
-    intents: RoutingIntentsSchema.optional().default(DEFAULT_ROUTING_INTENTS),
+    experiences: RoutingExperiencesSchema,
     skills: RoutingSkillsSchema,
     model: z.string().optional().catch(undefined),
     modelFallback: z.string().optional().catch(undefined),
@@ -451,14 +380,8 @@ function resolveRoutingConfig(
   ) {
     delete (routingInput.skills as Record<string, unknown>).enabled;
   }
-  if (routingInput.intents === undefined) {
-    if (routingInput.thresholds !== undefined) {
-      routingInput.intents = routingInput.thresholds;
-      delete routingInput.thresholds;
-    }
-  } else if (routingInput.thresholds !== undefined) {
-    delete routingInput.thresholds;
-  }
+  delete routingInput.intents;
+  delete routingInput.thresholds;
   if (
     routingInput.classifier !== undefined &&
     typeof routingInput.classifier === "object"
@@ -487,6 +410,16 @@ function resolveRoutingConfig(
   const resolved = RoutingSchema.parse(routingInput);
   const out: ResolvedRoutingConfig = {
     ...resolved,
+    experiences: {
+      ...resolved.experiences,
+      search: {
+        ...resolved.experiences.search,
+        timeoutMs:
+          resolved.experiences.search.timeoutMs === undefined
+            ? qmdTimeoutMs
+            : resolved.experiences.search.timeoutMs,
+      },
+    },
     skills: {
       ...resolved.skills,
       search: {
@@ -508,20 +441,6 @@ function resolveRoutingConfig(
         queryMode: this.queryMode,
         contextWindow: this.contextWindow,
       };
-    },
-    enumerable: false,
-    configurable: true,
-  });
-  Object.defineProperty(out, "thresholds", {
-    get() {
-      return this.intents;
-    },
-    enumerable: false,
-    configurable: true,
-  });
-  Object.defineProperty(out.intents, "thresholds", {
-    get() {
-      return this;
     },
     enumerable: false,
     configurable: true,

@@ -16,6 +16,8 @@ import {
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   ROUTING_ADVISORY_SKILLS_ONLY_HEADER,
+  ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
+  ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER,
 } from "../constants.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
 
@@ -113,9 +115,8 @@ describe("buildRoutingContext", () => {
 
   it("serializes routing guidance, intent-matched skills, and experiences at the XML trust boundary", () => {
     const experience: SkillExperienceEntry = {
-      identity: "architecture-diagram/layout",
-      skill: "architecture-diagram",
-      entryId: "layout",
+      id: "layout",
+      skills: ["architecture-diagram"],
       summary: "Prefer clear diagrams.",
       keywords: ["diagram"],
       body: "Keep <boundaries> explicit & reviewable.",
@@ -140,7 +141,7 @@ describe("buildRoutingContext", () => {
     });
 
     expect(result).toContain(
-      `${ROUTING_ADVISORY_SKILLS_ONLY_HEADER}\n<skill_harness_plugin>`,
+      `${ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER}\n<skill_harness_plugin>`,
     );
     expect(result).toContain("<skill_harness_plugin>");
     expect(result).not.toContain("<intent ");
@@ -149,6 +150,7 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("<context_policy>");
     expect(result).not.toContain("<task_complexity>");
     expect(result).toContain("<matched_skills>");
+    expect(result).toContain("<matched_experiences>");
     expect(result).not.toContain("<intent_matched_skills>");
     expect(result).not.toContain("<skill_candidates>");
     expect(result).not.toContain("<name>architecture-diagram</name>");
@@ -157,36 +159,30 @@ describe("buildRoutingContext", () => {
     expect(result).toContain("&lt;clear&gt;");
     expect(result).toContain("&amp;");
     expect(result).not.toContain("<skill_experiences>");
-    const skillStart = result.indexOf('<skill name="architecture-diagram">');
-    const experienceStart = result.indexOf("<skill_experience>", skillStart);
-    expect(skillStart).toBeGreaterThanOrEqual(0);
-    expect(experienceStart).toBeGreaterThan(skillStart);
     expect(result).toContain(
-      "<identity>architecture-diagram/layout</identity>",
+      '<experience id="layout" skills="architecture-diagram">',
     );
-    expect(result).toContain('<keywords>["diagram"]</keywords>');
+    expect(result).toContain("Prefer clear diagrams.");
     expect(result).not.toContain("<boundaries>");
     expect(result).not.toContain("<body>");
     expect(result).not.toContain("/private/SKILL.md");
     expect(result).not.toContain("/private/experience.md");
-    expect(result.startsWith(ROUTING_ADVISORY_SKILLS_ONLY_HEADER)).toBe(true);
+    expect(
+      result.startsWith(ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER),
+    ).toBe(true);
     expect(result).not.toContain("<<<BEGIN_SKILL_HARNESS_CONTEXT>>>");
     expect(result).not.toContain("<<<END_SKILL_HARNESS_CONTEXT>>>");
     expect(result.endsWith("</skill_harness_plugin>")).toBe(true);
   });
 
-  it("omits empty optional blocks and renders matched-skill experiences only within their skill", () => {
-    const experience = (
-      entryId: string,
-      body: string,
-    ): SkillExperienceEntry => ({
-      identity: `skill/${entryId}`,
-      skill: "skill",
-      entryId,
+  it("omits empty optional blocks and renders matched experiences alongside skills", () => {
+    const experience = (id: string, body: string): SkillExperienceEntry => ({
+      id,
+      skills: ["skill"],
       summary: "Summary.",
       keywords: ["keyword"],
       body,
-      path: `/private/${entryId}.md`,
+      path: `/private/${id}.md`,
     });
 
     const empty = buildRoutingContext({
@@ -223,13 +219,13 @@ describe("buildRoutingContext", () => {
       ],
     });
 
-    expect(bounded).toContain("<identity>skill/one</identity>");
-    expect(bounded).toContain("<identity>skill/two</identity>");
-    expect(bounded).toContain("<identity>skill/three</identity>");
-    expect(bounded).toContain("<identity>skill/four</identity>");
-    expect(bounded.match(/<skill_experience>/g)).toHaveLength(4);
+    expect(bounded).toContain('<experience id="one"');
+    expect(bounded).toContain('<experience id="two"');
+    expect(bounded).toContain('<experience id="three"');
+    expect(bounded).toContain('<experience id="four"');
+    expect(bounded.match(/<experience id=/g)).toHaveLength(4);
 
-    const unmatched = buildRoutingContext({
+    const expOnly = buildRoutingContext({
       result: {
         intent: "unknown",
         reason: "No exact match.",
@@ -237,10 +233,13 @@ describe("buildRoutingContext", () => {
       },
       guidance: "Use only verified context.",
       intentMatchedSkills: [],
-      experiences: [experience("unmatched", "must not render")],
+      experiences: [experience("standalone", "must render summary")],
     });
-    expect(unmatched).not.toContain("<skill_experience>");
-    expect(unmatched).not.toContain("skill/unmatched");
+    expect(expOnly).toContain('<experience id="standalone"');
+    expect(expOnly).not.toContain("<matched_skills>");
+    expect(expOnly.startsWith(ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER)).toBe(
+      true,
+    );
   });
   it("escapes adversarial input-matched skill descriptions", () => {
     const result = formatInputMatchedSkills([
@@ -369,11 +368,10 @@ describe("buildRoutingContext", () => {
     expect(result).toBe("");
   });
 
-  it("attaches experiences to matched skills matching their skill property", () => {
+  it("renders decoupled matched experiences alongside matched skills", () => {
     const experience: SkillExperienceEntry = {
-      identity: "test-skill/layout",
-      skill: "test-skill",
-      entryId: "layout",
+      id: "layout",
+      skills: ["test-skill"],
       summary: "Test experience.",
       keywords: ["test"],
       body: "Test body.",
@@ -399,8 +397,9 @@ describe("buildRoutingContext", () => {
 
     expect(result).toContain("<matched_skills>");
     expect(result).toContain('<skill name="test-skill">');
-    expect(result).toContain("<skill_experience>");
-    expect(result).toContain("<identity>test-skill/layout</identity>");
+    expect(result).toContain("<matched_experiences>");
+    expect(result).toContain('<experience id="layout" skills="test-skill">');
+    expect(result).toContain("Test experience.");
   });
 });
 
@@ -1043,6 +1042,7 @@ describe("parseUnifiedRoutingResult", () => {
     expect(parsed).toEqual({
       intent: "coding",
       skills: ["git"],
+      experiences: [],
       confidence: 0.9,
       reason: "Creating branch",
     });
@@ -1062,6 +1062,7 @@ describe("parseUnifiedRoutingResult", () => {
 
     expect(parsed).toEqual({
       skills: ["terminal"],
+      experiences: [],
       confidence: 0.85,
       reason: "Running shell command",
     });
@@ -1082,6 +1083,7 @@ describe("parseUnifiedRoutingResult", () => {
 
     expect(parsed).toEqual({
       skills: [],
+      experiences: [],
       confidence: 0.5,
       reason: "No matching intent",
     });
@@ -1115,6 +1117,7 @@ describe("parseUnifiedRoutingResult", () => {
 
     expect(parsed).toEqual({
       skills: ["git"],
+      experiences: [],
       confidence: 0.95,
       reason: "Checking git status",
     });

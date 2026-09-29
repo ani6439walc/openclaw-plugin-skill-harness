@@ -74,18 +74,14 @@ describe("resolveConfig", () => {
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
 
-      expect(result.routing.intents).toEqual({
-        keyword: {
-          directRouteMinScore: 0.85,
-        },
-        hybrid: {
-          directRouteMinScore: 0.9,
-          directRouteMinMargin: 0.08,
+      expect(result.routing.experiences).toEqual({
+        search: {
           minCandidateScore: 0.4,
+          timeoutMs: 15000,
         },
+        relevanceThreshold: 0.6,
+        maxInjectedExperiences: 4,
       });
-      expect(result.routing.intents.thresholds).toEqual(result.routing.intents);
-      expect(result.routing.thresholds).toEqual(result.routing.intents);
 
       expect(result.routing.queryMode).toBe(DEFAULT_QUERY_MODE);
       expect(result.routing.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
@@ -270,105 +266,62 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("routing & intents thresholds", () => {
-    it("resolves default routing thresholds when routing is omitted", () => {
-      expect(resolveConfig({}).routing.intents).toEqual({
-        keyword: {
-          directRouteMinScore: 0.85,
-        },
-        hybrid: {
-          directRouteMinScore: 0.9,
-          directRouteMinMargin: 0.08,
+  describe("routing & experiences", () => {
+    it("resolves default routing experiences when routing is omitted", () => {
+      expect(resolveConfig({}).routing.experiences).toEqual({
+        search: {
           minCandidateScore: 0.4,
+          timeoutMs: 15000,
         },
+        relevanceThreshold: 0.6,
+        maxInjectedExperiences: 4,
       });
-      expect(resolveConfig({}).routing.intents.thresholds).toEqual(
-        resolveConfig({}).routing.intents,
-      );
     });
 
-    it("accepts direct routing intents configuration", () => {
+    it("accepts custom routing experiences configuration", () => {
       expect(
         resolveConfig({
           routing: {
-            intents: {
-              keyword: { directRouteMinScore: 0.8 },
-              hybrid: {
-                directRouteMinScore: 0.95,
-                directRouteMinMargin: 0.05,
-                minCandidateScore: 0.3,
-              },
+            experiences: {
+              search: { minCandidateScore: 0.5 },
+              relevanceThreshold: 0.7,
+              maxInjectedExperiences: 6,
             },
           },
-        }).routing.intents,
+        }).routing.experiences,
       ).toEqual({
-        keyword: { directRouteMinScore: 0.8 },
-        hybrid: {
-          directRouteMinScore: 0.95,
-          directRouteMinMargin: 0.05,
-          minCandidateScore: 0.3,
-        },
+        search: { minCandidateScore: 0.5, timeoutMs: 15000 },
+        relevanceThreshold: 0.7,
+        maxInjectedExperiences: 6,
       });
     });
 
-    it("accepts legacy nested routing thresholds under intents", () => {
-      expect(
-        resolveConfig({
-          routing: {
-            intents: {
-              thresholds: {
-                keyword: { directRouteMinScore: 0.8 },
-                hybrid: {
-                  directRouteMinScore: 0.95,
-                  directRouteMinMargin: 0.05,
-                  minCandidateScore: 0.3,
-                },
-              },
-            } as never,
+    it("ignores legacy intents and thresholds gracefully", () => {
+      const resolved = resolveConfig({
+        routing: {
+          intents: {
+            keyword: { directRouteMinScore: 0.8 },
           },
-        }).routing.intents,
-      ).toEqual({
-        keyword: { directRouteMinScore: 0.8 },
-        hybrid: {
-          directRouteMinScore: 0.95,
-          directRouteMinMargin: 0.05,
-          minCandidateScore: 0.3,
-        },
-      });
-    });
-
-    it("migrates legacy flat routing thresholds backwards-compatibly", () => {
-      expect(
-        resolveConfig({
-          routing: {
-            thresholds: {
-              directRouteMinScore: 0.92,
-              minCandidateScore: 0.5,
-            } as never,
+          thresholds: {
+            directRouteMinScore: 0.9,
           },
-        }).routing.intents,
-      ).toEqual({
-        keyword: { directRouteMinScore: 0.92 },
-        hybrid: {
-          directRouteMinScore: 0.92,
-          directRouteMinMargin: 0.08,
-          minCandidateScore: 0.5,
-        },
+        } as never,
       });
+      expect(
+        (resolved.routing as Record<string, unknown>).intents,
+      ).toBeUndefined();
+      expect(
+        (resolved.routing as Record<string, unknown>).thresholds,
+      ).toBeUndefined();
     });
 
-    it("rejects out-of-range and non-monotonic routing thresholds", () => {
+    it("rejects out-of-range routing experiences configuration", () => {
       expect(() => resolveConfig({ routing: null })).toThrow();
       expect(() =>
         resolveConfig({
           routing: {
-            intents: {
-              thresholds: {
-                hybrid: {
-                  directRouteMinScore: 0.3,
-                  minCandidateScore: 0.7,
-                },
-              },
+            experiences: {
+              relevanceThreshold: 2.5,
             },
           },
         }),
@@ -391,11 +344,12 @@ describe("resolveConfig", () => {
             };
             routing?: {
               properties: {
-                intents?: {
-                  properties: Record<
-                    string,
-                    { properties: Record<string, { default?: number }> }
-                  >;
+                experiences?: {
+                  properties: {
+                    search: {
+                      properties: { minCandidateScore: { default?: number } };
+                    };
+                  };
                 };
               };
             };
@@ -418,9 +372,9 @@ describe("resolveConfig", () => {
         manifest.configSchema.properties.qmd.properties,
       ).not.toHaveProperty("rerank");
       expect(
-        manifest.configSchema.properties.routing?.properties.intents?.properties
-          .keyword.properties.directRouteMinScore.default,
-      ).toBe(0.85);
+        manifest.configSchema.properties.routing?.properties.experiences
+          ?.properties.search.properties.minCandidateScore.default,
+      ).toBe(0.4);
       for (const endpoint of ["embedding", "expansion"]) {
         expect(
           manifest.configSchema.properties.qmd.properties[endpoint]?.required,

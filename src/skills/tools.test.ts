@@ -59,12 +59,12 @@ function writeExperience(
   entryId: string,
   body: string,
 ): void {
-  const directory = path.join(dataRoot, "experiences", skill);
+  const directory = path.join(dataRoot, "experiences", entryId);
   fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(
-    path.join(directory, `${entryId}.md`),
-    `---\nskill: ${skill}\nsummary: ${entryId} summary\nkeywords: [${entryId}]\n---\n${body}\n`,
-  );
+  fs.writeFileSync(path.join(directory, "summary.md"), `${entryId} summary`);
+  fs.writeFileSync(path.join(directory, "keywords.md"), `- ${entryId}\n`);
+  fs.writeFileSync(path.join(directory, "body.md"), `${body}\n`);
+  fs.writeFileSync(path.join(directory, "skills.md"), `- ${skill}\n`);
 }
 
 function writeStats(
@@ -183,8 +183,8 @@ describe("registerSkillTools", () => {
     const experienceFile = path.join(
       dataRoot,
       "experiences",
-      "react",
-      "alpha.md",
+      "alpha",
+      "body.md",
     );
     const readBefore = fs.readFileSync(experienceFile, "utf8");
 
@@ -200,9 +200,11 @@ describe("registerSkillTools", () => {
       success: true,
       unavailable_skills: ["vue", "missing"],
     });
-    expect(
-      result.entries.map((entry: { identity: string }) => entry.identity),
-    ).toEqual(["react/alpha", "react/beta", "react/gamma"]);
+    expect(result.entries.map((entry: { id: string }) => entry.id)).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+    ]);
     expect(
       result.entries.map(
         (entry: { body: string }) => Array.from(entry.body).length,
@@ -244,7 +246,7 @@ describe("registerSkillTools", () => {
       success: true,
       requested_skills: ["react", "vue"],
       unavailable_skills: ["vue"],
-      entries: [expect.objectContaining({ identity: "react/forms" })],
+      entries: [expect.objectContaining({ id: "forms" })],
     });
   });
 

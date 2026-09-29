@@ -42,19 +42,16 @@ export type ResolvedRoutingScopeConfig = {
 
 export type ResolvedScopeConfig = ResolvedRoutingScopeConfig;
 
-export type ResolvedRoutingIntentsConfig = {
-  keyword: {
-    directRouteMinScore: number;
-  };
-  hybrid: {
-    directRouteMinScore: number;
-    directRouteMinMargin: number;
-    minCandidateScore: number;
-  };
+export type ResolvedExperienceCandidateSearchConfig = {
+  minCandidateScore: number;
+  timeoutMs: number;
 };
 
-export type ResolvedRoutingIntentsThresholdsConfig =
-  ResolvedRoutingIntentsConfig;
+export type ResolvedRoutingExperiencesConfig = {
+  search: ResolvedExperienceCandidateSearchConfig;
+  relevanceThreshold: number;
+  maxInjectedExperiences: number;
+};
 
 export type ResolvedClassifierConfig = {
   model: string | undefined;
@@ -88,6 +85,7 @@ export type ResolvedSkillCandidatesConfig = ResolvedRoutingSkillsConfig;
 export type RoutingLlmResult = {
   intent?: string;
   skills: string[];
+  experiences: string[];
   confidence: number;
   reason: string;
 };
@@ -96,7 +94,7 @@ export type SkillRerankerResult = RoutingLlmResult;
 
 export type ResolvedRoutingConfig = {
   scope: ResolvedRoutingScopeConfig;
-  intents: ResolvedRoutingIntentsConfig;
+  experiences: ResolvedRoutingExperiencesConfig;
   skills: ResolvedRoutingSkillsConfig;
   model?: string;
   modelFallback?: string;
