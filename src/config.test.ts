@@ -1106,7 +1106,8 @@ describe("resolveConfig", () => {
           minJaccardScore: 0.5,
           genericTokens: [],
         },
-        maxInjectedSkills: 4,
+        relevanceThreshold: 0.6,
+        maxInjectedSkills: 8,
       });
     });
 
@@ -1144,6 +1145,7 @@ describe("resolveConfig", () => {
           minJaccardScore: 0.75,
           genericTokens: ["code", "review"],
         },
+        relevanceThreshold: 0.6,
         maxInjectedSkills: 3,
       });
     });
@@ -1152,7 +1154,8 @@ describe("resolveConfig", () => {
       for (const skillCandidates of [
         { search: { timeoutMs: 99 } },
         { nameMatch: { maxEditDistance: 3 } },
-        { maxInjectedSkills: 5 },
+        { maxInjectedSkills: 17 },
+        { relevanceThreshold: 1.5 },
       ]) {
         expect(() => resolveConfig({ routing: { skillCandidates } })).toThrow();
       }

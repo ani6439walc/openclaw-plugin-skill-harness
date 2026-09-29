@@ -26,6 +26,7 @@ import { suppressNativeSkillsOnStartup } from "./skills/suppress-native.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
 import { createIntentQmdIndex } from "./qmd/intent-index.js";
 import { createSkillQmdIndex } from "./qmd/skill-index.js";
+import { createSkillExperienceQmdIndex } from "./qmd/experience-index.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
@@ -225,6 +226,14 @@ export function createPlugin(
           return { qmd: config.qmd, skills: config.skills };
         },
       });
+      const qmdExperienceIndex = createSkillExperienceQmdIndex({
+        dataRoot,
+        readOnly: !ownsBackgroundWork,
+        config: () => {
+          refreshLiveConfigFromRuntime();
+          return config.qmd;
+        },
+      });
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const reviewLogWriter = new IntentReviewLogWriter(dataRoot);
@@ -292,6 +301,7 @@ export function createPlugin(
         refreshLiveConfigFromRuntime();
         refreshRuntimeIntents();
         qmdIntentIndex.schedule(catalog.get());
+        qmdExperienceIndex.schedule(experienceCatalog.listAll());
         for (const agentId of collectKnownAgentIds()) {
           scheduleSkillSearchIndex(agentId);
         }
@@ -316,6 +326,7 @@ export function createPlugin(
         await Promise.all([
           reviewScheduler.dispose(),
           qmdSkillIndex.close(),
+          qmdExperienceIndex.close(),
           qmdIntentIndex.close(),
         ]);
       });
@@ -333,6 +344,7 @@ export function createPlugin(
         getWorkingSetSkills,
         qmdIntentIndex,
         qmdSkillIndex,
+        qmdExperienceIndex,
 
         bundledSkillsDir,
         nativeBundledSkillsDir,

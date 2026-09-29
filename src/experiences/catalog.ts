@@ -529,6 +529,10 @@ export class SkillExperienceCatalog {
     this.experienceDirectory = experiencesPath(path.resolve(dataRoot));
   }
 
+  listAll(): SkillExperienceEntry[] {
+    return readCatalogEntries(this.experienceDirectory);
+  }
+
   listForSkills(skillNames: readonly string[]): SkillExperienceEntry[] {
     const requested = new Set(
       skillNames

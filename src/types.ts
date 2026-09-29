@@ -79,6 +79,7 @@ export type ResolvedSkillCandidateNameMatchConfig = {
 export type ResolvedRoutingSkillsConfig = {
   search: ResolvedSkillCandidateSearchConfig;
   nameMatch: ResolvedSkillCandidateNameMatchConfig;
+  relevanceThreshold: number;
   maxInjectedSkills: number;
 };
 
@@ -239,7 +240,8 @@ export type IntentionResult = {
 
 export type ClassifiedIntentionResult = IntentionResult;
 
-export type IntentTrigger = "qmd-keyword" | "qmd-hybrid" | "llm-classifier";
+export type IntentTrigger =
+  "qmd-keyword" | "qmd-hybrid" | "llm-classifier" | "skill-only";
 
 export type AvailableSkill = {
   name: string;

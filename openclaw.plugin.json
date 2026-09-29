@@ -348,11 +348,18 @@
                 },
                 "default": {}
               },
+              "relevanceThreshold": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.6,
+                "description": "Inclusive relevance threshold for candidate skill selection."
+              },
               "maxInjectedSkills": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 4,
-                "default": 4,
+                "maximum": 20,
+                "default": 8,
                 "description": "Maximum input-matched skills injected into advisory context."
               }
             },

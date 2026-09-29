@@ -89,7 +89,8 @@ const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
     minJaccardScore: 0.5,
     genericTokens: [],
   },
-  maxInjectedSkills: 4,
+  relevanceThreshold: 0.6,
+  maxInjectedSkills: 8,
 };
 
 const DEFAULT_SKILL_CANDIDATES = DEFAULT_ROUTING_SKILLS;
@@ -389,7 +390,14 @@ const RoutingSkillsSchema = z
   .object({
     search: SkillCandidatesSearchSchema,
     nameMatch: SkillCandidatesNameMatchSchema,
-    maxInjectedSkills: z.number().int().min(0).max(4).optional().default(4),
+    relevanceThreshold: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.6),
+    maxInjectedSkills: z.number().int().min(0).max(16).optional().default(8),
   })
   .strict()
   .optional()

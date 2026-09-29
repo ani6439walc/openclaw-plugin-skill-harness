@@ -152,6 +152,7 @@ export async function runIntentionSubagent(params: {
   channelId?: string;
   modelRef: { provider: string; model: string };
   intents: readonly IntentCatalogEntry[];
+  candidateSkills?: readonly AvailableSkill[];
   dataRoot?: string;
 }): Promise<ClassifiedIntentionResult | undefined> {
   const { subagentSessionId, subagentSessionKey } =

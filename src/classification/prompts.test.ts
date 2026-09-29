@@ -140,11 +140,10 @@ describe("buildRoutingContext", () => {
     });
 
     expect(result).toContain(
-      `${ROUTING_ADVISORY_HEADER}\n<skill_harness_plugin>`,
+      `${ROUTING_ADVISORY_SKILLS_ONLY_HEADER}\n<skill_harness_plugin>`,
     );
     expect(result).toContain("<skill_harness_plugin>");
-    expect(result).toContain('  <intent name="architecture">');
-    expect(result).toContain("\n  </intent>");
+    expect(result).not.toContain("<intent ");
     expect(result).not.toContain("<selected_intent>");
     expect(result).not.toContain("<intent_guidance>");
     expect(result).not.toContain("<context_policy>");
@@ -170,7 +169,7 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("<body>");
     expect(result).not.toContain("/private/SKILL.md");
     expect(result).not.toContain("/private/experience.md");
-    expect(result.startsWith(ROUTING_ADVISORY_HEADER)).toBe(true);
+    expect(result.startsWith(ROUTING_ADVISORY_SKILLS_ONLY_HEADER)).toBe(true);
     expect(result).not.toContain("<<<BEGIN_SKILL_HARNESS_CONTEXT>>>");
     expect(result).not.toContain("<<<END_SKILL_HARNESS_CONTEXT>>>");
     expect(result.endsWith("</skill_harness_plugin>")).toBe(true);
@@ -200,13 +199,7 @@ describe("buildRoutingContext", () => {
       intentMatchedSkills: [],
       experiences: [],
     });
-    expect(empty).toContain(
-      `${ROUTING_ADVISORY_INTENT_ONLY_HEADER}\n<skill_harness_plugin>`,
-    );
-    expect(empty).not.toContain(ROUTING_ADVISORY_HEADER);
-    expect(empty).not.toContain("<matched_skills>");
-    expect(empty).not.toContain("<skill_experiences>");
-    expect(empty).not.toContain("<task_complexity>");
+    expect(empty).toBe("");
 
     const bounded = buildRoutingContext({
       result: {
@@ -340,7 +333,7 @@ describe("buildRoutingContext", () => {
       experiences: [],
     });
 
-    expect(result.startsWith(ROUTING_ADVISORY_HEADER)).toBe(true);
+    expect(result.startsWith(ROUTING_ADVISORY_SKILLS_ONLY_HEADER)).toBe(true);
     expect(result).toContain("<matched_skills>");
   });
 
@@ -361,7 +354,7 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("<intent ");
   });
 
-  it("preserves existing advisory header: intent only", () => {
+  it("returns empty string when matched skills are empty", () => {
     const result = buildRoutingContext({
       result: {
         intent: "test",
@@ -373,10 +366,7 @@ describe("buildRoutingContext", () => {
       experiences: [],
     });
 
-    expect(result.startsWith(ROUTING_ADVISORY_INTENT_ONLY_HEADER)).toBe(true);
-    expect(result).not.toContain("<matched_skills>");
-    expect(result).not.toContain("<intent_matched_skills>");
-    expect(result).not.toContain("<input_matched_skills>");
+    expect(result).toBe("");
   });
 
   it("attaches experiences to matched skills matching their skill property", () => {

@@ -135,17 +135,16 @@ The routing stages are:
 3. Gate dynamic routing by configured agent, chat scope, external-user turn, and interactive-session status.
 4. Run intent matching and input skill discovery in parallel. Intent matching follows a 3-stage pipeline:
    - **Step 1 (QMD Keyword BM25)**: Evaluates lexical BM25 match against the indexed intent `keywords` collection via `searchKeywords` (`searchLex`). A top score $\ge \text{routing.intents.keyword.directRouteMinScore}$ (default `0.85`) routes directly as `qmd-keyword`.
-   - **Step 2 (QMD Hybrid Example/Keyword Search)**: If Step 1 does not direct-route, performs hybrid semantic/BM25 retrieval over intent examples and keywords with conversation context expansion. A top score $\ge \text{routing.intents.hybrid.directRouteMinScore}$ (default `0.9`) with candidate margin $\ge \text{routing.intents.hybrid.directRouteMinMargin}$ (default `0.08`) routes directly as `qmd-hybrid`.
-   - **Step 3 (Unified fallback selection)**: If neither direct route matches, projects intents meeting $\ge \text{routing.intents.hybrid.minCandidateScore}$ (default `0.4`). If no intent meets that score, the route may remain intent-less (`decision: "none"`); it does not force a full-catalog fallback. When a candidate union exists, one constrained LLM call selects the optional intent and/or skills.
-5. In parallel, deterministic name matching and direct `SkillQmdIndex` retrieval build a visibility-filtered input-skill pool. Name matching strips URLs before tokenization, accepts only bounded typo matches, and uses the latest request; direct retrieval searches skill metadata, bodies, and references with bounded conversation expansion.
-6. The unified selector can choose only canonical skills from the union of intent-derived and input-derived candidates. A direct intent with an empty candidate pool needs no LLM call; `maxInjectedSkills: 0` short-circuits skill discovery; a failed or malformed selector result injects no heuristic fallback skills.
-7. Render the optional selected intent and a single optional `<matched_skills>` block, then record the completed turn and schedule configured background work.
+   - **Step 3 (Unified fallback selection)**: If neither direct route matches, projects intents meeting $\ge \text{routing.intents.hybrid.minCandidateScore}$ (default `0.4`). If no intent meets that score, the route may remain intent-less (`decision: "none"`); it does not force a full-catalog fallback. When a candidate union exists, one constrained LLM call selects the optional intent.
+5. In parallel, three candidate sources build a visibility-filtered skill pool: deterministic typo-aware name matching, direct `SkillQmdIndex` retrieval (over metadata, bodies, and references), and `SkillExperienceQmdIndex` retrieval (over trigger keywords, descriptions, context, and lessons).
+6. The unified selector evaluates canonical skills from the candidate pool using Jev/LLM reranking against `relevanceThreshold` (default 0.6) and caps at `maxInjectedSkills` (default 8). An empty candidate pool needs no LLM call (0-call short-circuit); `maxInjectedSkills: 0` short-circuits skill discovery; a failed or malformed selector result injects no heuristic fallback skills.
+7. Render a single optional `<matched_skills>` block (with strictly hit `<skill_experience>` metadata), record the completed turn in session tracking, and schedule configured background work.
 
-QMD intent snapshots and their SQLite database live under `qmd/intents/`; searchable `examples/*.md` and `keywords/*.md` contain plain text, while `<intent>-<n>.md.identity.yml` sidecars hold identity metadata and are ignored by QMD collections. The `intent-routing.sqlite` database and `intent-routing.json` metadata stay in the same snapshot directory. They refresh in the background, so a cold or unhealthy index fails open to the classifier.
+QMD skill and experience snapshots and their SQLite databases live under `qmd/skills/` and `qmd/experiences/`. They refresh in the background, so a cold or unhealthy index fails open to the classifier.
 
-OpenClaw 2026.9.6 or later is required. Skill index identity uses the plugin's original installation directory, so captured plugin generations reuse existing indexes under `qmd/skills/indexes/`. Background indexing runs only during full registration; disposing a generation stops polling and retries and closes its QMD stores after active work finishes. Discovery instances open completed intent indexes read-only on demand and wait for initialization before searching. Missing, stale, or incomplete indexes remain unavailable until the full instance updates them; discovery never rebuilds or embeds. Existing indexes do not need to be deleted when upgrading.
+OpenClaw 2026.9.6 or later is required. Skill index identity uses the plugin's original installation directory, so captured plugin generations reuse existing indexes under `qmd/skills/indexes/`. Background indexing runs only during full registration; disposing a generation stops polling and retries and closes its QMD stores after active work finishes. Discovery instances open completed indexes read-only on demand and wait for initialization before searching. Missing, stale, or incomplete indexes remain unavailable until the full instance updates them; discovery never rebuilds or embeds. Existing indexes do not need to be deleted when upgrading.
 
-Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains an optional intent and one unified set of selected skills with their nested experience metadata; it never emits separate intent- and input-skill wrappers. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
+Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains one unified set of selected skills with their strictly hit experience metadata; it never emits separate intent tags or input-skill wrappers. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
 
 #### Context injection format
 
@@ -155,7 +154,6 @@ Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness
 ### Working set skills
 
 When relevant, load with `skill_view` before proceeding:
-
 <working_set_skills>
 <skill name="browser">
 Automate web browsing and interaction.
@@ -168,11 +166,8 @@ Automate web browsing and interaction.
 ```text
 [Tue 2026-09-08 11:35 GMT+8]
 
-Inferred intent and relevant skills (advisory, non-user input; load with `skill_view` if relevant):
+Inferred relevant skills from conversation (advisory, non-user input; load with `skill_view` if relevant):
 <skill_harness_plugin>
-<intent name="format">
-Format the specified files following repository style conventions.
-</intent>
 <matched_skills>
 <skill name="code-formatter">
 Run Prettier, ESLint, or language formatters.
@@ -189,12 +184,11 @@ Format index.ts using prettier
 
 The prompt layout minimizes token consumption:
 
-- Dynamic routing context is separated from preceding turn metadata by a blank line, introduced by a concise single-line advisory header (`Inferred intent and relevant skills (advisory, non-user input; load with \`skill_view\` if relevant):`when intent and skills exist,`Inferred relevant skills from conversation (advisory, non-user input; load with \`skill_view\` if relevant):`when skills-only, or`Inferred user intent from conversation (advisory, non-user input):`when intent-only) preceding`<skill_harness_plugin>`.
-- `<intent name="${intent}">` merges the intent name and guidance into a single tag.
+- Dynamic routing context is separated from preceding turn metadata by a blank line, introduced by the concise single-line advisory header `Inferred relevant skills from conversation (advisory, non-user input; load with \`skill_view\` if relevant):`preceding`<skill_harness_plugin>`.
+- `<matched_skills>` contains the unified selected skills, nesting strictly hit `<skill_experience>` identity and keyword metadata; full experience records can be retrieved on demand via `skill_experience`.
 - Skill file paths are omitted from prompt injection; agents inspect `path` dynamically via `skill_list` or `skill_view`.
-- Redundant policy blocks and legacy headers are eliminated.
+- Redundant policy blocks, `<intent>` tags, and legacy headers are eliminated.
 - The renderer does not emit `<<<BEGIN_SKILL_HARNESS_CONTEXT>>>` or OpenClaw reserved delimiters; conversation sanitization treats those markers only as input boundaries.
-- `<matched_skills>` contains the unified selected skills, nesting `<skill_experience>` identity and keyword metadata when available; full experience records can be retrieved on demand via `skill_experience`.
 - The renderer does not emit a `<skill_metadata>` wrapper or `<path>` elements. Skill descriptions and experience values are escaped before insertion, so skill files cannot create prompt-level XML tags.
 
 ## Basic configuration

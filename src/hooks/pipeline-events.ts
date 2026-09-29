@@ -33,6 +33,7 @@ export type PipelineMetadata = {
   durationMs?: number;
   nameCandidates?: number;
   retrievalCandidates?: number;
+  experienceCandidates?: number;
   candidateCount?: number;
   injectedCount?: number;
   injectedSkills?: string[];

@@ -20,6 +20,7 @@ import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
 import type { IntentQmdIndex } from "../qmd/intent-index.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
+import type { SkillExperienceQmdIndex } from "../qmd/experience-index.js";
 import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import type {
   TurnAssociation,
@@ -148,6 +149,7 @@ export type HookDeps = {
   experienceCatalog?: SkillExperienceCatalog;
   qmdIntentIndex?: IntentQmdIndex;
   qmdSkillIndex?: SkillQmdIndex;
+  qmdExperienceIndex?: SkillExperienceQmdIndex;
   reviewScheduler?: IntentReviewScheduler | ReviewSchedulerLike;
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],

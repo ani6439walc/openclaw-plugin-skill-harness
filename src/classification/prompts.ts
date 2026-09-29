@@ -292,25 +292,14 @@ export function buildRoutingContext(params: {
           ...(params.inputMatchedSkills ?? []),
         ];
 
-  const blocks: string[] = [];
-  if (params.result && params.guidance) {
-    blocks.push(
-      xmlBlock(
-        "intent",
-        escapeXmlText(params.guidance),
-        ` name="${escapeXmlAttribute(params.result.intent)}"`,
-      ),
-    );
-  }
-  if (matchedSkills.length > 0) {
-    blocks.push(formatMatchedSkills(matchedSkills, experiencesBySkill));
-  }
-  if (blocks.length === 0) return "";
+  if (matchedSkills.length === 0) return "";
+
+  const blocks: string[] = [
+    formatMatchedSkills(matchedSkills, experiencesBySkill),
+  ];
 
   const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
-  const hasIntent = Boolean(params.result && params.guidance);
-  const hasSkills = matchedSkills.length > 0;
-  const header = selectAdvisoryHeader(hasIntent, hasSkills);
+  const header = ROUTING_ADVISORY_SKILLS_ONLY_HEADER;
   return `${header}\n${taggedContent}`;
 }
 

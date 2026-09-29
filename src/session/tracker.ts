@@ -59,7 +59,8 @@ export type InputSkillDiscovery = {
   candidateCount: number;
   injectedSkills: Array<{
     name: string;
-    source: "name-match" | "direct-retrieval" | "intent-matched";
+    source:
+      "name-match" | "direct-retrieval" | "intent-matched" | "experience-qmd";
     collections?: SkillCollectionKind[];
     topCollection?: SkillCollectionKind;
   }>;

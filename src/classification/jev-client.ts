@@ -270,10 +270,11 @@ export async function runJevUnifiedRouting(
       skillProbabilities.push({ name: skillName, prob: ans.noul });
     }
 
-    // Filter prob >= 0.5, sort descending, slice to maxInjectedSkills
+    // Filter prob >= relevanceThreshold, sort descending, slice to maxInjectedSkills
+    const threshold = params.config.routing.skills.relevanceThreshold ?? 0.6;
     const maxSkills = params.config.routing.skills.maxInjectedSkills;
     const selectedSkills = skillProbabilities
-      .filter((sp) => sp.prob >= 0.5)
+      .filter((sp) => sp.prob >= threshold)
       .sort((a, b) => b.prob - a.prob)
       .slice(0, maxSkills)
       .map((sp) => sp.name);

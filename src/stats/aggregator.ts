@@ -1824,7 +1824,10 @@ export class StatsAggregator {
           stats,
           intentId,
           result,
-          routeReason: state.intent?.trigger,
+          routeReason:
+            state.intent?.trigger === "skill-only"
+              ? undefined
+              : state.intent?.trigger,
           eventTime,
           skillsUsed,
           toolCallCount: toolCalls.length,
