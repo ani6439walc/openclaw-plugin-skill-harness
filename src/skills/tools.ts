@@ -6,7 +6,6 @@ import { relatedSkillsBySkillName } from "./related.js";
 import { skillSourcePriority } from "./types.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
 import { readSkillUsageStats, skillUsageStatsForName } from "./usage-stats.js";
-import type { IntentCatalogEntry } from "../types.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
 import type { SkillExperienceQmdIndex } from "../qmd/experience-index.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";

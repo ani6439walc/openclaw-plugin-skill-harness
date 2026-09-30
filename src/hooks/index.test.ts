@@ -7,10 +7,7 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import {
-  buildKeywordRouteReason,
-  buildQmdRouteReason,
   createHookHandlers,
-  extractHybridSignals,
   formatConversationExpansionContext,
 } from "./index.js";
 import {
@@ -19,9 +16,13 @@ import {
 } from "./system-context.js";
 import { defaultTracker, type SessionState } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
-import { defaultCatalog } from "../intents/index.js";
-import type { IntentCatalogEntry } from "../types.js";
 import { resolvePackageRoot } from "../file-utils.js";
+
+const defaultCatalog = {
+  get: () => [] as any[],
+  load: () => 0,
+};
+type IntentCatalogEntry = any;
 import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { TurnAssociationRegistry } from "./turn-associations.js";
 import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
@@ -41,14 +42,13 @@ const emitHostAgentEvent = vi.mocked(emitAgentEvent);
 const SKILL_HARNESS_SYSTEM_CONTEXT = `${BASE_SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_INTENT_CONTEXT}`;
 
 function createHandlers(
-  api: Partial<OpenClawPluginApi> = {},
+  api: unknown = {},
   overrides: Record<string, unknown> = {},
 ) {
   return createHookHandlers({
     api: api as OpenClawPluginApi,
     config: () => resolveConfig({}),
     refreshLiveConfigFromRuntime: () => undefined,
-    refreshIntents: () => undefined,
     ...overrides,
   } as never);
 }
@@ -152,7 +152,7 @@ describe("createHookHandlers tracking guards", () => {
   }
 
   function createFinalizedTurnHarness(
-    state: SessionState,
+    state: any,
     params: {
       sessionId?: string;
       turnKey?: string;
@@ -825,7 +825,7 @@ description: Navigate Tokyo.
       }),
     );
     expect(getTurnState).toHaveBeenCalledWith("session-1", "run-1");
-    expect(recordStats).toHaveBeenCalledWith("session-1", state, definition);
+    expect(recordStats).toHaveBeenCalledWith("session-1", state);
   });
 
   it("passes every staged fallback for the exact turn through one agent_end finalization", async () => {
@@ -1031,11 +1031,7 @@ description: Navigate Tokyo.
       { sessionKey } as never,
     );
 
-    expect(recordStats).toHaveBeenCalledWith(
-      "tracked-session",
-      state,
-      definition,
-    );
+    expect(recordStats).toHaveBeenCalledWith("tracked-session", state);
   });
 
   it("attributes inventory observation to the tracked agent", async () => {
@@ -1091,7 +1087,7 @@ description: Navigate Tokyo.
     expect(recordStats).toHaveBeenCalledWith(
       "tracked-session",
       state,
-      definition,
+      undefined,
       { skillInventory: { agentId: "agent-a", skills: inventory } },
     );
   });
@@ -1123,7 +1119,6 @@ description: Navigate Tokyo.
         },
       },
       recent: [],
-      intentCatalog: [],
     });
     vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
     vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
@@ -1152,11 +1147,7 @@ description: Navigate Tokyo.
       { sessionId: "tracked-session", agentId: "agent-a" } as never,
     );
 
-    expect(recordStats).toHaveBeenCalledWith(
-      "tracked-session",
-      state,
-      undefined,
-    );
+    expect(recordStats).toHaveBeenCalledWith("tracked-session", state);
     expect(selectPlacement).not.toHaveBeenCalled();
   });
 
@@ -1321,7 +1312,6 @@ description: Navigate Tokyo.
         timestamps: { start: "2026-06-11T00:00:00.000Z" },
       },
       recent: [],
-      intentCatalog: [],
     };
     const state = {
       input: snapshot.current.input,
@@ -1340,17 +1330,6 @@ description: Navigate Tokyo.
       snapshot,
     );
     vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
-    const definition = {
-      id: "other",
-      definition: {
-        triggers: ["Unmatched requests"],
-        examples: ["help"],
-        skills: ["analysis"],
-        keywords: [],
-        guidance: "Ask for context.",
-      },
-    };
-    vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-review-skills-"));
     const workspaceDir = path.join(tmp, "workspace");
     const skillDir = path.join(workspaceDir, "skills", "analysis");
@@ -1360,7 +1339,6 @@ description: Navigate Tokyo.
       "---\nname: analysis\ndescription: Break down unclear tasks.\n---\n",
     );
     const reviewScheduler = createMockReviewScheduler();
-    const refreshIntents = vi.fn();
     const reviewer = vi.fn().mockResolvedValue({
       findings: [],
       outcome: "nofinding" as const,
@@ -1393,7 +1371,6 @@ description: Navigate Tokyo.
           },
         }),
       refreshLiveConfigFromRuntime: vi.fn(),
-      refreshIntents,
       reviewScheduler,
       reviewer,
       reviewLogWriter,
@@ -1413,27 +1390,11 @@ description: Navigate Tokyo.
     expect(reviewer).toHaveBeenCalledWith(
       expect.objectContaining({
         snapshot: expect.objectContaining({
-          matchedIntent: definition,
-          availableSkills: [
-            {
-              name: "analysis",
-              location: path.join(skillDir, "SKILL.md"),
-              description: "Break down unclear tasks.",
-            },
-          ],
-          intentCatalog: [
-            {
-              id: "other",
-              triggers: ["Unmatched requests"],
-              examples: ["help"],
-              skills: ["analysis"],
-              keywords: [],
-              guidance: "Ask for context.",
-            },
-          ],
+          sessionId: "session-1",
+          availableSkills: [],
         }),
         triggers: [
-          "intent-health-check",
+          "experience-health-check",
           "routing-uncertainty",
           "capability-fit",
         ],
@@ -1445,7 +1406,7 @@ description: Navigate Tokyo.
       [],
       {
         triggers: [
-          "intent-health-check",
+          "experience-health-check",
           "routing-uncertainty",
           "capability-fit",
         ],
@@ -1453,32 +1414,24 @@ description: Navigate Tokyo.
         noFindingReasonCounts: { "wrong-trigger": 1 },
       },
     );
-    expect(refreshIntents).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(tmp, "review.json"))).toBe(false);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
   it("rebuilds QMD only after a review changes an intent routing surface", async () => {
     const snapshot = {
-      sessionId: "session-routing-refresh",
+      sessionId: "session-experience-refresh",
       agentId: "main",
-      eventId: "session-routing-refresh:2026-06-11T00:00:00.000Z",
+      eventId: "session-experience-refresh:2026-06-11T00:00:00.000Z",
       turnNumber: 10,
       current: {
         input: "find the deployment instructions",
-        intent: {
-          intent: "other",
-          reason: "test",
-          confidence: 0.2,
-        },
         timestamps: { start: "2026-06-11T00:00:00.000Z" },
       },
       recent: [],
-      intentCatalog: [],
     };
     const state = {
       input: snapshot.current.input,
-      intent: { result: snapshot.current.intent },
       timestamps: snapshot.current.timestamps,
     };
     vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd").mockResolvedValue(
@@ -1486,36 +1439,32 @@ description: Navigate Tokyo.
     );
     vi.spyOn(defaultTracker, "getTurnState").mockReturnValue(state);
     vi.spyOn(defaultTracker, "getReviewSnapshotForTurn").mockReturnValue(
-      snapshot,
+      snapshot as never,
     );
     vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
-    vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
     const reviewScheduler = createMockReviewScheduler();
-    const refreshIntents = vi.fn();
+    const mockExperience = {
+      id: "exp-1",
+      summary: "test",
+      keywords: [],
+      body: "",
+    };
+    const experienceCatalog = {
+      listAll: vi.fn().mockReturnValue([mockExperience]),
+    };
+    const qmdExperienceIndex = {
+      schedule: vi.fn(),
+    };
     const reviewer = vi
       .fn()
       .mockResolvedValueOnce({
         findings: [],
         outcome: "applied" as const,
-        changedIntentIds: ["other"],
-        routingSurfaceChanged: true,
+        changedExperienceIds: ["exp-1"],
       })
       .mockResolvedValueOnce({
-        findings: [
-          {
-            trigger: "routing-uncertainty" as const,
-            targetKind: "intent-markdown" as const,
-            operation: "refine" as const,
-            targetIntentIds: ["other"],
-            dedupeKey: "other-classifier-boundary",
-            summary: "Clarify the classifier boundary",
-            evidence: ["The fallback classifier handled the request."],
-            correctionGoal: "Improve fallback classifier context.",
-            suggestedChange: "Add the stable boundary to triggers.",
-          },
-        ],
-        outcome: "applied" as const,
-        changedIntentIds: ["other"],
+        findings: [],
+        outcome: "nofinding" as const,
       });
     const reviewLogWriter = { record: vi.fn(async () => true) };
     const turnAssociations = seedAssociation(snapshot.sessionId, "run-1");
@@ -1526,11 +1475,12 @@ description: Navigate Tokyo.
           review: { enabled: true, model: "google/test-review" },
         }),
       refreshLiveConfigFromRuntime: vi.fn(),
-      refreshIntents,
       reviewScheduler,
       reviewer,
       reviewLogWriter,
-      dataRoot: fs.mkdtempSync(path.join(os.tmpdir(), "hook-routing-refresh-")),
+      experienceCatalog: experienceCatalog as never,
+      qmdExperienceIndex: qmdExperienceIndex as never,
+      dataRoot: fs.mkdtempSync(path.join(os.tmpdir(), "hook-exp-refresh-")),
       turnAssociations,
     });
 
@@ -1539,7 +1489,7 @@ description: Navigate Tokyo.
       agentId: "main",
     });
     await reviewScheduler.flush(0);
-    expect(refreshIntents).toHaveBeenCalledWith({ rebuildQmd: true });
+    expect(qmdExperienceIndex.schedule).toHaveBeenCalledWith([mockExperience]);
 
     bindAssociation(turnAssociations, {
       sessionId: snapshot.sessionId,
@@ -1551,7 +1501,7 @@ description: Navigate Tokyo.
       agentId: "main",
     });
     await reviewScheduler.flush(1);
-    expect(refreshIntents).toHaveBeenLastCalledWith({ rebuildQmd: false });
+    expect(qmdExperienceIndex.schedule).toHaveBeenCalledTimes(1);
   });
 
   it("persists v7 review records in distinct per-handler data roots", async () => {
@@ -1648,7 +1598,6 @@ description: Navigate Tokyo.
               review: { enabled: true, model: "google/test-review" },
             }),
           refreshLiveConfigFromRuntime: vi.fn(),
-          refreshIntents: vi.fn(),
           reviewScheduler: reviewSchedulers[index],
           reviewer,
           skillInventoryResolver: vi.fn().mockResolvedValue([]),
@@ -1717,7 +1666,6 @@ description: Navigate Tokyo.
         api: {} as OpenClawPluginApi,
         config: () => resolveConfig({}),
         refreshLiveConfigFromRuntime: vi.fn(),
-        refreshIntents: vi.fn(),
       };
 
       createIsolatedHookHandlers(deps);
@@ -1751,12 +1699,11 @@ description: Navigate Tokyo.
         intent: {
           intent: "unknown",
           reason: "same topic",
-          confidence: 0.95,
+          confidence: 0.2,
         },
         timestamps: { start: "2026-07-29T00:00:00.000Z" },
       },
       recent: [],
-      intentCatalog: [],
     };
     const candidate = {
       epochKey: "b".repeat(64),
@@ -1767,6 +1714,8 @@ description: Navigate Tokyo.
       observedTurns: 20,
       usageTurns: 0,
       intentMatchedTurns: 0,
+      winnerFingerprint: "wf",
+      fingerprint: "fp",
     };
     const state = {
       input: snapshot.current.input,
@@ -1826,7 +1775,6 @@ description: Navigate Tokyo.
           },
         }),
       refreshLiveConfigFromRuntime: vi.fn(),
-      refreshIntents: vi.fn(),
       reviewScheduler,
       reviewer,
       reviewLogWriter: {
@@ -1877,7 +1825,6 @@ description: Navigate Tokyo.
         timestamps: { start: "2026-07-29T00:00:00.000Z" },
       },
       recent: [],
-      intentCatalog: [],
     };
     const candidate = {
       epochKey: "a".repeat(64),
@@ -1890,16 +1837,6 @@ description: Navigate Tokyo.
       observedTurns: 20,
       usageTurns: 0,
       intentMatchedTurns: 0,
-    };
-    const definition = {
-      id: "other",
-      definition: {
-        triggers: ["Unmatched requests"],
-        examples: ["help"],
-        skills: ["source-driven-development"],
-        keywords: [],
-        guidance: "Ask for context.",
-      },
     };
     const state = {
       input: snapshot.current.input,
@@ -1923,7 +1860,6 @@ description: Navigate Tokyo.
           ? undefined
           : candidate,
       );
-    vi.spyOn(defaultCatalog, "get").mockReturnValue([definition]);
 
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ih-placement-"));
     const workspaceDir = path.join(tmp, "workspace");
@@ -2012,7 +1948,6 @@ description: Navigate Tokyo.
           },
         }),
       refreshLiveConfigFromRuntime: vi.fn(),
-      refreshIntents: vi.fn(),
       reviewScheduler,
       reviewer,
       reviewLogWriter,
@@ -2066,10 +2001,7 @@ description: Navigate Tokyo.
         agentId: "persisted-agent",
         triggers: ["capability-fit"],
         snapshot: expect.objectContaining({
-          skillPlacementCandidate: {
-            ...candidate,
-            currentlyReferencedIntentIds: ["other"],
-          },
+          skillPlacementCandidate: candidate,
           availableSkills: [],
           selectedPlacementSkill: {
             name: "source-driven-development",
@@ -2077,12 +2009,6 @@ description: Navigate Tokyo.
             content:
               "---\nname: source-driven-development\ndescription: Ground work in primary sources.\n---\n",
           },
-          intentCatalog: [
-            expect.objectContaining({
-              id: "other",
-              skills: ["source-driven-development"],
-            }),
-          ],
         }),
       }),
     );
@@ -2136,7 +2062,7 @@ describe("createHookHandlers session cleanup", () => {
           sessionId: "ended-session",
           messageCount: 1,
           reason,
-        },
+        } as never,
         { sessionId: "ended-session" },
       );
 
@@ -2156,7 +2082,7 @@ describe("createHookHandlers session cleanup", () => {
           sessionId: "ended-session",
           messageCount: 1,
           reason,
-        },
+        } as never,
         { sessionId: "ended-session" },
       );
 
@@ -2172,12 +2098,10 @@ describe("createHookHandlers internal turn guards", () => {
 
   it("injects static context for inter-session turns after refreshing config but without intents", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
-    const refreshIntents = vi.fn();
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({}),
       refreshLiveConfigFromRuntime,
-      refreshIntents,
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -2205,7 +2129,6 @@ describe("createHookHandlers internal turn guards", () => {
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
     expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
-    expect(refreshIntents).not.toHaveBeenCalled();
   });
 
   it("injects static context for legacy inter-session marker turns", async () => {
@@ -2214,7 +2137,6 @@ describe("createHookHandlers internal turn guards", () => {
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({}),
       refreshLiveConfigFromRuntime,
-      refreshIntents: vi.fn(),
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -2242,7 +2164,6 @@ describe("createHookHandlers internal turn guards", () => {
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({}),
       refreshLiveConfigFromRuntime,
-      refreshIntents: vi.fn(),
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -2269,12 +2190,10 @@ describe("createHookHandlers internal turn guards", () => {
 
   it("injects static context for a scoped non-user trigger without dynamic work", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
-    const refreshIntents = vi.fn();
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({}),
       refreshLiveConfigFromRuntime,
-      refreshIntents,
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -2290,17 +2209,14 @@ describe("createHookHandlers internal turn guards", () => {
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
     expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
-    expect(refreshIntents).not.toHaveBeenCalled();
   });
 
   it("injects static context when trigger is omitted but the session is scoped", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
-    const refreshIntents = vi.fn();
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({}),
       refreshLiveConfigFromRuntime,
-      refreshIntents,
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -2315,7 +2231,6 @@ describe("createHookHandlers internal turn guards", () => {
       appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
     });
     expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
-    expect(refreshIntents).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -2328,7 +2243,6 @@ describe("createHookHandlers internal turn guards", () => {
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({}),
       refreshLiveConfigFromRuntime: vi.fn(),
-      refreshIntents: vi.fn(),
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -2349,7 +2263,6 @@ describe("createHookHandlers internal turn guards", () => {
       config: () =>
         resolveConfig({ routing: { scope: { agents: ["other"] } } }),
       refreshLiveConfigFromRuntime: vi.fn(),
-      refreshIntents: vi.fn(),
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -2401,8 +2314,6 @@ describe("createHookHandlers internal turn guards", () => {
         "utf8",
       );
       const refreshLiveConfigFromRuntime = vi.fn();
-      const refreshIntents = vi.fn();
-      const topicChecker = vi.fn();
       const classifier = vi.fn();
       const tracker = {
         preparePromptTurn: vi.fn().mockResolvedValue({
@@ -2424,8 +2335,6 @@ describe("createHookHandlers internal turn guards", () => {
         } as never,
         config: () => resolveConfig(config as never),
         refreshLiveConfigFromRuntime,
-        refreshIntents,
-        topicChecker,
         classifier,
         tracker: tracker as never,
       });
@@ -2457,8 +2366,6 @@ describe("createHookHandlers internal turn guards", () => {
         expect(systemContext).toContain('<skill name="static-scope">');
         expect(systemContext).toContain("Static scope workspace skill.");
         expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
-        expect(refreshIntents).not.toHaveBeenCalled();
-        expect(topicChecker).not.toHaveBeenCalled();
         expect(classifier).not.toHaveBeenCalled();
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
@@ -2474,7 +2381,6 @@ describe("createHookHandlers internal turn guards", () => {
         identity: { turnKey: "normal-turn", reused: false },
       }),
       mergeTurnAndPersist: vi.fn().mockResolvedValue("applied"),
-      getHistoricalIntentRecords: vi.fn().mockReturnValue([]),
       resolveCurrentSessionId: vi.fn().mockReturnValue(undefined),
       listRetainedSessions: vi.fn().mockReturnValue([]),
     };
@@ -2482,7 +2388,6 @@ describe("createHookHandlers internal turn guards", () => {
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({}),
       refreshLiveConfigFromRuntime,
-      refreshIntents: vi.fn(),
       tracker: tracker as never,
     });
 
@@ -2506,9 +2411,7 @@ describe("createHookHandlers internal turn guards", () => {
     );
 
     expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
-    expect(tracker.getHistoricalIntentRecords).toHaveBeenCalledWith(
-      "normal-session",
-    );
+    expect(tracker.preparePromptTurn).toHaveBeenCalled();
   });
 });
 
@@ -2556,9 +2459,7 @@ describe("createHookHandlers topic switch flow", () => {
   }
 
   function createTopicFlowHarness(params: {
-    historicalIntents: ReturnType<
-      typeof defaultTracker.getHistoricalIntentRecords
-    >;
+    historicalIntents: unknown[];
     configRaw?: Parameters<typeof resolveConfig>[0];
     intents?: IntentCatalogEntry[];
     classifier?: ReturnType<typeof vi.fn>;
@@ -2627,13 +2528,16 @@ describe("createHookHandlers topic switch flow", () => {
     };
     const classifier =
       params.classifier ??
-      vi.fn().mockResolvedValue({
-        intent: "social-casual",
-        reason: "User is chatting",
-        keywords: ["topic", "flow"],
-        changed: false,
+      vi.fn().mockImplementation(async (callParams: any) => ({
+        skills: (callParams?.candidateSkills ?? []).map((s: any) =>
+          typeof s === "string" ? s : s.name,
+        ),
+        experiences: (callParams?.candidateExperiences ?? []).map((e: any) =>
+          typeof e === "string" ? e : e.id,
+        ),
         confidence: 0.9,
-      });
+        reason: "Matched candidates",
+      }));
     const topicChecker = params.topicChecker ?? vi.fn();
     const emitAgentEvent = emitHostAgentEvent;
     const inputConfig =
@@ -2664,7 +2568,7 @@ describe("createHookHandlers topic switch flow", () => {
           }) => {
             const normalizedQuery = query.toLowerCase().replace(/\s+/g, "");
             const matched = intents.find((entry) =>
-              entry.definition.keywords.some((k) => {
+              entry.definition.keywords.some((k: string) => {
                 const normalizedK = k.toLowerCase().replace(/\s+/g, "");
                 return (
                   normalizedQuery === normalizedK ||
@@ -2724,17 +2628,14 @@ describe("createHookHandlers topic switch flow", () => {
         ...params.api,
       } as unknown as OpenClawPluginApi,
       config: () => resolveConfig(rawConfig),
-      refreshLiveConfigFromRuntime:
-        params.refreshLiveConfigFromRuntime ?? vi.fn(),
-      refreshIntents: vi.fn(),
-      catalog: catalog as never,
+      refreshLiveConfigFromRuntime: (params.refreshLiveConfigFromRuntime ??
+        vi.fn()) as () => void,
       tracker: tracker as never,
-      classifier,
+      classifier: classifier as never,
       turnAssociations: params.turnAssociations,
       bundledSkillsDir: params.bundledSkillsDir,
       getWorkingSetSkills: params.getWorkingSetSkills,
       experienceCatalog: params.experienceCatalog as never,
-      qmdIntentIndex: qmdIntentIndex as never,
       qmdSkillIndex: params.qmdSkillIndex as never,
       qmdExperienceIndex: params.qmdExperienceIndex as never,
     });
@@ -5488,179 +5389,5 @@ describe("formatConversationExpansionContext", () => {
     expect(result).toContain(
       "Recent conversation:\n- [user] turn 1\n- [assistant] turn 2",
     );
-  });
-
-  describe("route reason formatting", () => {
-    const testIntent: IntentCatalogEntry = {
-      id: "code-review",
-      definition: {
-        triggers: ["review"],
-        examples: ["review my pr"],
-        keywords: ["pr", "code review", "git diff"],
-        guidance: "Perform a thorough review.",
-      },
-    };
-
-    it("formats keyword route reason matching single keyword from query", () => {
-      const reason = buildKeywordRouteReason({
-        intent: testIntent,
-        hit: {
-          intentId: "code-review",
-          score: 0.95,
-          collection: "keywords",
-        },
-        directRouteMinScore: 0.85,
-        query: "Please check this PR for me",
-      });
-      expect(reason).toBe('"pr" [code-review] → score 0.95/0.85');
-    });
-
-    it("formats keyword route reason matching multiple keywords from query", () => {
-      const reason = buildKeywordRouteReason({
-        intent: testIntent,
-        hit: {
-          intentId: "code-review",
-          score: 0.95,
-          collection: "keywords",
-        },
-        directRouteMinScore: 0.85,
-        query: "Please do a code review on this pr",
-      });
-      expect(reason).toBe('"pr, code review" [code-review] → score 0.95/0.85');
-    });
-
-    it("reports no literal keyword when the query does not contain defined keywords", () => {
-      const reason = buildKeywordRouteReason({
-        intent: testIntent,
-        hit: {
-          intentId: "code-review",
-          score: 0.95,
-          collection: "keywords",
-        },
-        directRouteMinScore: 0.85,
-        query: "Can you inspect my patch?",
-      });
-      expect(reason).toBe("[code-review] → score 0.95/0.85");
-    });
-
-    it("extracts hybrid signals from rrf contributions in order", () => {
-      const explain = {
-        rrf: {
-          contributions: [
-            { queryType: "hyde" },
-            { queryType: "lex" },
-            { queryType: "vec" },
-          ],
-        },
-      };
-      expect(extractHybridSignals(explain)).toBe("lex,vec,hyde");
-    });
-
-    it("extracts hybrid signals from vectorScores and ftsScores when rrf trace is absent", () => {
-      expect(
-        extractHybridSignals({
-          vectorScores: [0.8],
-          ftsScores: [0.5],
-        }),
-      ).toBe("lex,vec");
-      expect(
-        extractHybridSignals({
-          vectorScores: [0.8],
-          ftsScores: [],
-        }),
-      ).toBe("vec");
-      expect(
-        extractHybridSignals({
-          vectorScores: [],
-          ftsScores: [0.5],
-        }),
-      ).toBe("lex");
-    });
-
-    it("defaults hybrid signals to lex,vec,hyde when explain is empty", () => {
-      expect(extractHybridSignals(undefined)).toBe("lex,vec,hyde");
-      expect(extractHybridSignals({})).toBe("lex,vec,hyde");
-    });
-
-    it("formats QMD hybrid route reason with collection, intent, and signals", () => {
-      const reason = buildQmdRouteReason({
-        intent: testIntent,
-        hit: {
-          intentId: "code-review",
-          score: 0.92,
-          collection: "examples",
-          explain: {
-            rrf: {
-              contributions: [{ queryType: "lex" }, { queryType: "vec" }],
-            },
-          },
-        },
-        directRouteMinScore: 0.9,
-        scoreMargin: 0.12,
-        directRouteMinMargin: 0.08,
-      });
-      expect(reason).toBe("[lex, vec] → score 0.92/0.9 (margin 0.12/0.08)");
-    });
-
-    it("formats keyword route reason with rawResult body and CJK trace channels", () => {
-      const reason = buildKeywordRouteReason({
-        intent: testIntent,
-        hit: {
-          intentId: "approve",
-          score: 0.8412,
-          collection: "intent-keywords",
-        },
-        directRouteMinScore: 0.8,
-        query: "好",
-        rawResult: {
-          filepath: "qmd://intent-keywords/approve-4.md",
-          body: "好啊\n",
-          score: 0.8412,
-          lexicalTrace: {
-            policyVersion: "cjk-lexical-rrf-v1",
-            contributions: [
-              { channel: "char", backendScore: 0.8168 },
-              { channel: "word", backendScore: 0.8412 },
-            ],
-          },
-        },
-      });
-      expect(reason).toBe(
-        '"好啊" [approve-4 | char 0.82, word 0.84] → score 0.84/0.8',
-      );
-      expect(reason).not.toContain(":");
-      expect(reason).not.toContain("·");
-    });
-
-    it("formats hybrid route reason with rawResult body and truncation", () => {
-      const longBody =
-        "OK，那就按照這個方式處理，請立刻幫我建立所有資料庫遷移檔並套用到正式機";
-      const reason = buildQmdRouteReason({
-        intent: testIntent,
-        hit: {
-          intentId: "approve",
-          score: 0.84,
-          collection: "intent-examples",
-          explain: {
-            rrf: {
-              contributions: [{ queryType: "vec" }, { queryType: "lex" }],
-            },
-          },
-        },
-        directRouteMinScore: 0.7,
-        scoreMargin: 0.12,
-        directRouteMinMargin: 0.05,
-        rawResult: {
-          filepath: "qmd://intent-examples/approve-1.md",
-          body: longBody,
-          score: 0.84,
-        },
-      });
-      expect(reason).toBe(
-        `"${longBody.slice(0, 30)}..." [lex, vec] → score 0.84/0.7 (margin 0.12/0.05)`,
-      );
-      expect(reason).not.toContain(":");
-      expect(reason).not.toContain("·");
-    });
   });
 });

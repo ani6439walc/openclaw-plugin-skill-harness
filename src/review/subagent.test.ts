@@ -29,13 +29,9 @@ const snapshot: ReviewSnapshot = {
   eventId: "session-1:2026-06-11T00:00:00.000Z",
   turnNumber: 10,
   current: {
-    input: "No, use the existing helper",
-    intent: {
-      intent: "other",
-      reason: "unclear",
-      confidence: 0.2,
-    },
-    routeProvenance: { trigger: "qmd-hybrid" },
+    input: "Run the tests and fix any failures",
+    matchedSkills: ["test-driven-development"],
+    matchedExperiences: ["exp-tdd"],
     capabilityFit: {
       source: "tool-call-threshold",
       observedSkillNames: ["test-driven-development"],
@@ -60,187 +56,109 @@ const snapshot: ReviewSnapshot = {
     timestamps: { start: "2026-06-11T00:00:00.000Z" },
   },
   recent: [],
-  matchedIntent: {
-    id: "other",
-    definition: {
-      triggers: ["Requests that do not match a defined intent"],
-      examples: ["help with this"],
-      keywords: ["help"],
-      guidance: "Ask for context.",
-    },
-  },
-  availableSkills: [],
-  intentCatalog: [
+  availableSkills: [
     {
-      id: "other",
-      triggers: ["Requests that do not match a defined intent"],
-      examples: ["help with this"],
-      keywords: ["help"],
+      name: "test-driven-development",
+      description: "Drive changes with failing tests first.",
+      location: "/skills/test-driven-development/SKILL.md",
     },
+  ],
+  activeExperiences: [
     {
-      id: "debugging",
-      triggers: ["Fix a failing test"],
-      examples: ["Why does this test fail?"],
-      keywords: ["test", "failure"],
+      id: "exp-tdd",
+      path: "/experiences/exp-tdd",
+      summary: "Use red-green-refactor loop to fix test failures.",
+      keywords: ["test", "tdd", "failure"],
+      skills: ["test-driven-development"],
+      body: "Run pnpm test before modifying code.",
     },
   ],
 };
 
 describe("buildReviewPrompt", () => {
-  it("gives routing uncertainty the full catalog and QMD-aware repair guidance", () => {
+  it("gives experience health checks full guidance for catalog curation", () => {
+    const prompt = buildReviewPrompt(snapshot, ["experience-health-check"]);
+
+    expect(prompt).toContain("experience-health-check: Review focus:");
+    expect(prompt).toContain("Curate high-value skill experiences");
+    expect(prompt).toContain("experiences/<id>/");
+  });
+
+  it("gives routing uncertainty guidance to capture missing reusable workflows", () => {
     const prompt = buildReviewPrompt(snapshot, ["routing-uncertainty"]);
 
     expect(prompt).toContain("routing-uncertainty: Review focus:");
-    expect(prompt).toContain(
-      "qmd-hybrid means repair examples and/or keywords",
-    );
-    expect(prompt).toContain(
-      "trigger-only edit does not improve QMD retrieval",
-    );
-    expect(prompt).toContain("<intent_catalog>");
+    expect(prompt).toContain("Capture the missing reusable workflow");
   });
 
-  it("gives health checks the full catalog for boundary maintenance", () => {
-    const prompt = buildReviewPrompt(snapshot, ["intent-health-check"]);
-
-    expect(prompt).toContain("intent-health-check: Review focus:");
-    expect(prompt).toContain("analyze complexity, overlap, and stale coverage");
-    expect(prompt).toContain("create, refine, split, merge, or delete");
-    expect(prompt).toContain("<intent_catalog>");
-  });
-
-  it("constrains capability fit to its explicit evidence source", () => {
+  it("constrains capability fit to tool failure recovery and verified evidence", () => {
     const prompt = buildReviewPrompt(snapshot, ["capability-fit"]);
 
     expect(prompt).toContain("capability-fit: Review focus:");
-    expect(prompt).toContain(
-      "Tool-call experiences require an error-free turn",
-    );
-    expect(prompt).toContain(
-      "tool-failure experiences require demonstrated recovery and verification",
-    );
-    expect(prompt).not.toContain("trigger keyword");
+    expect(prompt).toContain("demonstrated recovery and verification");
   });
 });
 
 describe("parseReviewFindings", () => {
-  it("keeps valid intent findings", () => {
+  it("keeps valid skill-experience findings", () => {
     expect(
       parseReviewFindings(
         JSON.stringify({
           findings: [
             {
-              trigger: "routing-uncertainty",
+              trigger: "experience-health-check",
               hasFinding: true,
-              targetKind: "intent-markdown",
-              operation: "refine",
-              targetIntentIds: ["other"],
-              dedupeKey: "other-keywords",
-              summary: "Add matching keyword",
-              evidence: ["The route used qmd-keyword."],
-              correctionGoal: "Improve keyword retrieval.",
-              suggestedChange: "Add the stable phrase to keywords.",
+              targetKind: "skill-experience",
+              targetExperienceIds: ["exp-tdd"],
+              dedupeKey: "exp-tdd-refine",
+              summary: "Refine keywords for TDD workflow",
+              evidence: ["Missing vitest keyword"],
+              correctionGoal: "Improve keyword retrieval for Vitest runs",
+              suggestedChange: "Add vitest to keywords.md",
             },
           ],
         }),
-        ["routing-uncertainty"],
+        ["experience-health-check"],
       ),
     ).toEqual([
       expect.objectContaining({
-        trigger: "routing-uncertainty",
-        targetKind: "intent-markdown",
-      }),
-    ]);
-  });
-
-  it("keeps valid standalone delete findings", () => {
-    expect(
-      parseReviewFindings(
-        JSON.stringify({
-          findings: [
-            {
-              trigger: "intent-health-check",
-              hasFinding: true,
-              targetKind: "intent-markdown",
-              operation: "delete",
-              targetIntentIds: ["obsolete"],
-              dedupeKey: "obsolete-intent",
-              summary: "Remove an obsolete intent.",
-              evidence: ["The catalog has a durable duplicate boundary."],
-              correctionGoal: "Remove the redundant runtime intent.",
-              suggestedChange: "Delete obsolete.md.",
-            },
-          ],
-        }),
-        ["intent-health-check"],
-      ),
-    ).toEqual([
-      expect.objectContaining({
-        trigger: "intent-health-check",
-        operation: "delete",
-        targetIntentIds: ["obsolete"],
+        trigger: "experience-health-check",
+        targetKind: "skill-experience",
+        targetExperienceIds: ["exp-tdd"],
       }),
     ]);
   });
 });
 
-it("detects only examples and keywords as QMD routing surfaces", () => {
-  const before = new Map([
-    [
-      "other.md",
-      "---\ntriggers: [other]\nexamples: [help]\nkeywords: [help]\nskills: [analysis]\n---\nAsk for context.\n",
-    ],
-  ]);
-  const withExamples = new Map([
-    [
-      "other.md",
-      "---\ntriggers: [other]\nexamples: [help, explain this]\nkeywords: [help]\nskills: [analysis]\n---\nAsk for context.\n",
-    ],
-  ]);
-  const withKeywords = new Map([
-    [
-      "other.md",
-      "---\ntriggers: [other]\nexamples: [help]\nkeywords: [help, explain]\nskills: [analysis]\n---\nAsk for context.\n",
-    ],
-  ]);
-  const classifierOnly = new Map([
-    [
-      "other.md",
-      "---\ntriggers: [other, clarify]\nexamples: [help]\nkeywords: [help]\nskills: [analysis, debugging]\n---\nExplain the current context.\n",
-    ],
-  ]);
+it("detects experience changes as routing surface change", () => {
+  expect(
+    hasRoutingSurfaceChange({
+      changedExperienceIds: ["exp-tdd"],
+    }),
+  ).toBe(true);
 
   expect(
     hasRoutingSurfaceChange({
-      before,
-      after: withExamples,
-      changedIds: ["other"],
-    }),
-  ).toBe(true);
-  expect(
-    hasRoutingSurfaceChange({
-      before,
-      after: withKeywords,
-      changedIds: ["other"],
-    }),
-  ).toBe(true);
-  expect(
-    hasRoutingSurfaceChange({
-      before,
-      after: classifierOnly,
-      changedIds: ["other"],
+      changedExperienceIds: [],
     }),
   ).toBe(false);
 });
 
 describe("runReviewSubagent", () => {
   async function runNoFindingReview(deleteSession: ReturnType<typeof vi.fn>) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-intents-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-experiences-"));
     tempRoots.push(root);
+
+    const expDir = path.join(root, "exp-1");
+    fs.mkdirSync(expDir, { recursive: true });
     fs.writeFileSync(
-      path.join(root, "other.md"),
-      "---\ntriggers:\n  - other\nexamples:\n  - help\nkeywords:\n  - help\n---\nAsk for context.\n",
+      path.join(expDir, "summary.md"),
+      "Sample experience summary.",
     );
+    fs.writeFileSync(path.join(expDir, "keywords.md"), "sample, test");
+    fs.writeFileSync(path.join(expDir, "body.md"), "Sample experience body.");
+    fs.writeFileSync(path.join(expDir, "skills.md"), "test-driven-development");
+
     const api = {
       config: {},
       runtime: {
@@ -264,18 +182,10 @@ describe("runReviewSubagent", () => {
         api,
         config: resolveConfig({}),
         agentId: "main",
-        intentDirectory: root,
+        experienceDirectory: root,
+        allowedExperienceSkills: ["test-driven-development"],
         modelRef: { provider: "test", model: "review" },
-        snapshot: {
-          ...snapshot,
-          current: {
-            ...snapshot.current,
-            capabilityFit: {
-              ...snapshot.current.capabilityFit!,
-              turnHasToolErrors: true,
-            },
-          },
-        },
+        snapshot,
         triggers: ["capability-fit"],
       }),
       runEmbeddedAgent: api.runtime.agent.runEmbeddedAgent,
@@ -294,40 +204,41 @@ describe("runReviewSubagent", () => {
     expect(deleteSession).not.toHaveBeenCalled();
   });
 
-  it("applies a standalone reviewer-owned intent deletion", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-"));
+  it("applies a reviewer-owned experience update", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-apply-"));
     tempRoots.push(root);
-    fs.writeFileSync(
-      path.join(root, "obsolete.md"),
-      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
-    );
-    fs.writeFileSync(
-      path.join(root, "other.md"),
-      "---\ntriggers:\n  - other\nexamples:\n  - help\nkeywords:\n  - help\n---\nAsk for context.\n",
-    );
+
+    const expDir = path.join(root, "exp-1");
+    fs.mkdirSync(expDir, { recursive: true });
+    fs.writeFileSync(path.join(expDir, "summary.md"), "Initial summary.");
+    fs.writeFileSync(path.join(expDir, "keywords.md"), "initial");
+    fs.writeFileSync(path.join(expDir, "body.md"), "Initial body.");
+    fs.writeFileSync(path.join(expDir, "skills.md"), "test-driven-development");
+
     const runEmbeddedAgent = vi
       .fn()
       .mockImplementation(
         async ({ workspaceDir }: { workspaceDir: string }) => {
-          fs.rmSync(path.join(workspaceDir, "obsolete.md"));
+          const targetDir = path.join(workspaceDir, "experiences", "exp-1");
+          fs.writeFileSync(
+            path.join(targetDir, "summary.md"),
+            "Updated summary for TDD workflow.",
+          );
           return {
             payloads: [
               {
                 text: JSON.stringify({
                   findings: [
                     {
-                      trigger: "intent-health-check",
+                      trigger: "experience-health-check",
                       hasFinding: true,
-                      targetKind: "intent-markdown",
-                      operation: "delete",
-                      targetIntentIds: ["obsolete"],
-                      dedupeKey: "obsolete-intent",
-                      summary: "Remove an obsolete intent.",
-                      evidence: [
-                        "The catalog has a durable duplicate boundary.",
-                      ],
-                      correctionGoal: "Remove the redundant runtime intent.",
-                      suggestedChange: "Delete obsolete.md.",
+                      targetKind: "skill-experience",
+                      targetExperienceIds: ["exp-1"],
+                      dedupeKey: "exp-1-refine",
+                      summary: "Improve summary description",
+                      evidence: ["Initial summary lacked context"],
+                      correctionGoal: "Make summary descriptive",
+                      suggestedChange: "Update summary.md",
                     },
                   ],
                 }),
@@ -336,6 +247,7 @@ describe("runReviewSubagent", () => {
           };
         },
       );
+
     const api = {
       config: {},
       runtime: {
@@ -348,49 +260,56 @@ describe("runReviewSubagent", () => {
       api,
       config: resolveConfig({}),
       agentId: "main",
-      intentDirectory: root,
+      experienceDirectory: root,
+      allowedExperienceSkills: ["test-driven-development"],
       modelRef: { provider: "test", model: "review" },
       snapshot,
-      triggers: ["intent-health-check"],
+      triggers: ["experience-health-check"],
     });
 
     expect(result.outcome).toBe("applied");
-    expect(result.changedIntentIds).toEqual(["obsolete"]);
+    expect(result.changedExperienceIds).toEqual(["exp-1"]);
     expect(result.findings[0]).toMatchObject({
-      operation: "delete",
-      targetIntentIds: ["obsolete"],
+      targetKind: "skill-experience",
+      targetExperienceIds: ["exp-1"],
     });
-    expect(fs.existsSync(path.join(root, "obsolete.md"))).toBe(false);
+    expect(
+      fs.readFileSync(path.join(root, "exp-1", "summary.md"), "utf8"),
+    ).toBe("Updated summary for TDD workflow.");
   });
 
-  it("rejects deletion of the last runtime intent", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-last-"));
+  it("rejects experience update if validation fails", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-invalid-"));
     tempRoots.push(root);
-    fs.writeFileSync(
-      path.join(root, "obsolete.md"),
-      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
-    );
+
+    const expDir = path.join(root, "exp-1");
+    fs.mkdirSync(expDir, { recursive: true });
+    fs.writeFileSync(path.join(expDir, "summary.md"), "Initial summary.");
+    fs.writeFileSync(path.join(expDir, "keywords.md"), "initial");
+    fs.writeFileSync(path.join(expDir, "body.md"), "Initial body.");
+
     const runEmbeddedAgent = vi
       .fn()
       .mockImplementation(
         async ({ workspaceDir }: { workspaceDir: string }) => {
-          fs.rmSync(path.join(workspaceDir, "obsolete.md"));
+          // Break validation by removing required body.md
+          const targetDir = path.join(workspaceDir, "experiences", "exp-1");
+          fs.rmSync(path.join(targetDir, "body.md"));
           return {
             payloads: [
               {
                 text: JSON.stringify({
                   findings: [
                     {
-                      trigger: "intent-health-check",
+                      trigger: "experience-health-check",
                       hasFinding: true,
-                      targetKind: "intent-markdown",
-                      operation: "delete",
-                      targetIntentIds: ["obsolete"],
-                      dedupeKey: "obsolete-intent",
-                      summary: "Remove an obsolete intent.",
-                      evidence: ["The catalog contains no surviving route."],
-                      correctionGoal: "Remove the redundant runtime intent.",
-                      suggestedChange: "Delete obsolete.md.",
+                      targetKind: "skill-experience",
+                      targetExperienceIds: ["exp-1"],
+                      dedupeKey: "exp-1-broken",
+                      summary: "Invalid removal",
+                      evidence: ["Removed body"],
+                      correctionGoal: "Break validation",
+                      suggestedChange: "Remove body.md",
                     },
                   ],
                 }),
@@ -399,6 +318,7 @@ describe("runReviewSubagent", () => {
           };
         },
       );
+
     const api = {
       config: {},
       runtime: {
@@ -411,305 +331,16 @@ describe("runReviewSubagent", () => {
       api,
       config: resolveConfig({}),
       agentId: "main",
-      intentDirectory: root,
+      experienceDirectory: root,
+      allowedExperienceSkills: ["test-driven-development"],
       modelRef: { provider: "test", model: "review" },
       snapshot,
-      triggers: ["intent-health-check"],
+      triggers: ["experience-health-check"],
     });
 
     expect(result.outcome).toBe("validation-failed");
-    expect(result.validationErrors).toContain("no intent Markdown files found");
-    expect(fs.existsSync(path.join(root, "obsolete.md"))).toBe(true);
-  });
-
-  it("revalidates the complete live catalog before deleting an intent", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-live-"));
-    tempRoots.push(root);
-    fs.writeFileSync(
-      path.join(root, "obsolete.md"),
-      "---\ntriggers:\n  - obsolete\nexamples:\n  - obsolete\nkeywords:\n  - obsolete\n---\nRetire this obsolete route.\n",
-    );
-    fs.writeFileSync(
-      path.join(root, "other.md"),
-      "---\ntriggers:\n  - other\nexamples:\n  - help\nkeywords:\n  - help\n---\nAsk for context.\n",
-    );
-    const runEmbeddedAgent = vi
-      .fn()
-      .mockImplementation(
-        async ({ workspaceDir }: { workspaceDir: string }) => {
-          fs.rmSync(path.join(workspaceDir, "obsolete.md"));
-          fs.writeFileSync(path.join(root, "other.md"), "invalid\n");
-          return {
-            payloads: [
-              {
-                text: JSON.stringify({
-                  findings: [
-                    {
-                      trigger: "intent-health-check",
-                      hasFinding: true,
-                      targetKind: "intent-markdown",
-                      operation: "delete",
-                      targetIntentIds: ["obsolete"],
-                      dedupeKey: "obsolete-intent",
-                      summary: "Remove an obsolete intent.",
-                      evidence: [
-                        "The catalog has a durable duplicate boundary.",
-                      ],
-                      correctionGoal: "Remove the redundant runtime intent.",
-                      suggestedChange: "Delete obsolete.md.",
-                    },
-                  ],
-                }),
-              },
-            ],
-          };
-        },
-      );
-    const api = {
-      config: {},
-      runtime: {
-        agent: { runEmbeddedAgent },
-        subagent: { deleteSession: vi.fn() },
-      },
-    } as unknown as OpenClawPluginApi;
-
-    const result = await runReviewSubagent({
-      api,
-      config: resolveConfig({}),
-      agentId: "main",
-      intentDirectory: root,
-      modelRef: { provider: "test", model: "review" },
-      snapshot,
-      triggers: ["intent-health-check"],
-    });
-
-    expect(result.outcome).toBe("validation-failed");
-    expect(
-      result.validationErrors?.some((error) => error.includes("other.md")),
-    ).toBe(true);
-    expect(fs.existsSync(path.join(root, "obsolete.md"))).toBe(true);
-    expect(fs.readFileSync(path.join(root, "other.md"), "utf8")).toBe(
-      "invalid\n",
-    );
-  });
-
-  it("allows multiple standalone deletes when the surviving catalog remains valid", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-many-"));
-    tempRoots.push(root);
-    for (const [id, trigger, example, guidance] of [
-      ["obsolete-a", "obsolete-a", "obsolete-a", "Retire this route."],
-      ["obsolete-b", "obsolete-b", "obsolete-b", "Retire this route too."],
-      ["other", "other", "help", "Ask for context."],
-    ]) {
-      fs.writeFileSync(
-        path.join(root, `${id}.md`),
-        `---\ntriggers:\n  - ${trigger}\nexamples:\n  - ${example}\nkeywords:\n  - ${example}\n---\n${guidance}\n`,
-      );
-    }
-    const runEmbeddedAgent = vi
-      .fn()
-      .mockImplementation(
-        async ({ workspaceDir }: { workspaceDir: string }) => {
-          fs.rmSync(path.join(workspaceDir, "obsolete-a.md"));
-          fs.rmSync(path.join(workspaceDir, "obsolete-b.md"));
-          return {
-            payloads: [
-              {
-                text: JSON.stringify({
-                  findings: [
-                    {
-                      trigger: "intent-health-check",
-                      hasFinding: true,
-                      targetKind: "intent-markdown",
-                      operation: "delete",
-                      targetIntentIds: ["obsolete-a"],
-                      dedupeKey: "obsolete-a-intent",
-                      summary: "Remove the first obsolete intent.",
-                      evidence: ["The route is permanently redundant."],
-                      correctionGoal: "Remove the redundant runtime intent.",
-                      suggestedChange: "Delete obsolete-a.md.",
-                    },
-                    {
-                      trigger: "intent-health-check",
-                      hasFinding: true,
-                      targetKind: "intent-markdown",
-                      operation: "delete",
-                      targetIntentIds: ["obsolete-b"],
-                      dedupeKey: "obsolete-b-intent",
-                      summary: "Remove the second obsolete intent.",
-                      evidence: ["The route is permanently redundant."],
-                      correctionGoal: "Remove the redundant runtime intent.",
-                      suggestedChange: "Delete obsolete-b.md.",
-                    },
-                  ],
-                }),
-              },
-            ],
-          };
-        },
-      );
-    const api = {
-      config: {},
-      runtime: {
-        agent: { runEmbeddedAgent },
-        subagent: { deleteSession: vi.fn() },
-      },
-    } as unknown as OpenClawPluginApi;
-
-    const result = await runReviewSubagent({
-      api,
-      config: resolveConfig({}),
-      agentId: "main",
-      intentDirectory: root,
-      modelRef: { provider: "test", model: "review" },
-      snapshot,
-      triggers: ["intent-health-check"],
-    });
-
-    expect(result.outcome).toBe("applied");
-    expect(result.changedIntentIds).toEqual(["obsolete-a", "obsolete-b"]);
-    expect(fs.existsSync(path.join(root, "other.md"))).toBe(true);
-    expect(fs.existsSync(path.join(root, "obsolete-a.md"))).toBe(false);
-    expect(fs.existsSync(path.join(root, "obsolete-b.md"))).toBe(false);
-  });
-
-  it("rejects a concurrent pair of deletes that would empty the catalog", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-delete-race-"));
-    tempRoots.push(root);
-    for (const id of ["alpha", "beta"]) {
-      fs.writeFileSync(
-        path.join(root, `${id}.md`),
-        `---\ntriggers:\n  - ${id}\nexamples:\n  - ${id}\nkeywords:\n  - ${id}\n---\nKeep ${id}.\n`,
-      );
-    }
-    let arrived = 0;
-    let releaseBarrier: (() => void) | undefined;
-    const barrier = new Promise<void>((resolve) => {
-      releaseBarrier = resolve;
-    });
-    let invocation = 0;
-    const runEmbeddedAgent = vi
-      .fn()
-      .mockImplementation(
-        async ({ workspaceDir }: { workspaceDir: string }) => {
-          const target = invocation++ === 0 ? "alpha" : "beta";
-          fs.rmSync(path.join(workspaceDir, `${target}.md`));
-          arrived += 1;
-          if (arrived === 2) releaseBarrier?.();
-          await barrier;
-          return {
-            payloads: [
-              {
-                text: JSON.stringify({
-                  findings: [
-                    {
-                      trigger: "intent-health-check",
-                      hasFinding: true,
-                      targetKind: "intent-markdown",
-                      operation: "delete",
-                      targetIntentIds: [target],
-                      dedupeKey: `${target}-intent`,
-                      summary: `Remove ${target}.`,
-                      evidence: ["The route is permanently redundant."],
-                      correctionGoal: `Remove ${target}.md.`,
-                      suggestedChange: `Delete ${target}.md.`,
-                    },
-                  ],
-                }),
-              },
-            ],
-          };
-        },
-      );
-    const api = {
-      config: {},
-      runtime: {
-        agent: { runEmbeddedAgent },
-        subagent: { deleteSession: vi.fn() },
-      },
-    } as unknown as OpenClawPluginApi;
-    const reviewParams = {
-      api,
-      config: resolveConfig({}),
-      agentId: "main",
-      intentDirectory: root,
-      modelRef: { provider: "test", model: "review" },
-      snapshot,
-      triggers: ["intent-health-check"] as const,
-    };
-
-    const results = await Promise.all([
-      runReviewSubagent(reviewParams),
-      runReviewSubagent(reviewParams),
-    ]);
-
-    expect(results.map((result) => result.outcome).sort()).toEqual([
-      "applied",
-      "validation-failed",
-    ]);
-    expect(
-      fs.readdirSync(root).filter((file) => file.endsWith(".md")),
-    ).toHaveLength(1);
-  });
-});
-
-describe("getReviewModelRef", () => {
-  const api = {
-    config: {
-      agents: { defaults: { model: { primary: "anthropic/agent-primary" } } },
-    },
-  } as unknown as OpenClawPluginApi;
-  const currentRun = {
-    modelProviderId: "openai",
-    modelId: "session-model",
-  };
-
-  it("applies the resolution priority to review models", () => {
-    expect(
-      getReviewModelRef(
-        api,
-        "main",
-        resolveConfig({
-          review: {
-            model: "bifrost/review-explicit",
-            modelFallback: "google/review-fallback",
-          },
-        }),
-        currentRun,
-      ),
-    ).toEqual({ provider: "bifrost", model: "review-explicit" });
-
-    expect(
-      getReviewModelRef(
-        api,
-        "main",
-        resolveConfig({
-          review: { modelFallback: "google/review-fallback" },
-        }),
-        currentRun,
-      ),
-    ).toEqual({ provider: "openai", model: "session-model" });
-
-    expect(
-      getReviewModelRef(
-        api,
-        "main",
-        resolveConfig({
-          review: { modelFallback: "google/review-fallback" },
-        }),
-        {},
-      ),
-    ).toEqual({ provider: "anthropic", model: "agent-primary" });
-
-    expect(
-      getReviewModelRef(
-        { config: {} } as OpenClawPluginApi,
-        "main",
-        resolveConfig({
-          review: { modelFallback: "google/review-fallback" },
-        }),
-        {},
-      ),
-    ).toEqual({ provider: "google", model: "review-fallback" });
+    expect(result.validationErrors?.length).toBeGreaterThan(0);
+    // Original file remains intact
+    expect(fs.existsSync(path.join(root, "exp-1", "body.md"))).toBe(true);
   });
 });

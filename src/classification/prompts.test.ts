@@ -25,13 +25,7 @@ describe("conversation context prompt serialization", () => {
 describe("buildRoutingContext", () => {
   it("escapes adversarial matched-skill descriptions", () => {
     const result = buildRoutingContext({
-      result: {
-        intent: "security-review",
-        reason: "The matched skill is relevant.",
-        confidence: 0.9,
-      },
-      guidance: "Review the selected routing evidence.",
-      intentMatchedSkills: [
+      matchedSkills: [
         {
           name: "adversarial-skill",
           location: "/private/adversarial/SKILL.md",
@@ -59,13 +53,7 @@ describe("buildRoutingContext", () => {
     };
 
     const result = buildRoutingContext({
-      result: {
-        intent: "architecture",
-        reason: "User requested a diagram.",
-        confidence: 0.95,
-      },
-      guidance: "Render the selected skills with stable evidence.",
-      intentMatchedSkills: [
+      matchedSkills: [
         {
           name: "architecture-diagram",
           location: "/private/SKILL.md",
@@ -121,25 +109,13 @@ describe("buildRoutingContext", () => {
     });
 
     const empty = buildRoutingContext({
-      result: {
-        intent: "unknown",
-        reason: "No exact match.",
-        confidence: 0.5,
-      },
-      guidance: "Use only verified context.",
-      intentMatchedSkills: [],
+      matchedSkills: [],
       experiences: [],
     });
     expect(empty).toBe("");
 
     const bounded = buildRoutingContext({
-      result: {
-        intent: "unknown",
-        reason: "No exact match.",
-        confidence: 0.5,
-      },
-      guidance: "Use only verified context.",
-      intentMatchedSkills: [
+      matchedSkills: [
         {
           name: "skill",
           location: "/private/SKILL.md",
@@ -161,13 +137,7 @@ describe("buildRoutingContext", () => {
     expect(bounded.match(/<experience id=/g)).toHaveLength(4);
 
     const expOnly = buildRoutingContext({
-      result: {
-        intent: "unknown",
-        reason: "No exact match.",
-        confidence: 0.5,
-      },
-      guidance: "Use only verified context.",
-      intentMatchedSkills: [],
+      matchedSkills: [],
       experiences: [experience("standalone", "must render summary")],
     });
     expect(expOnly).toContain('<experience id="standalone"');
@@ -222,12 +192,6 @@ describe("buildRoutingContext", () => {
 
   it("renders matched skills block in buildRoutingContext when provided", () => {
     const result = buildRoutingContext({
-      result: {
-        intent: "code-review",
-        reason: "User requested code review.",
-        confidence: 0.9,
-      },
-      guidance: "Review the code.",
       matchedSkills: [
         {
           name: "intent-skill",
@@ -249,28 +213,6 @@ describe("buildRoutingContext", () => {
     expect(result).toContain('<skill name="input-skill">');
   });
 
-  it("selects advisory header: intent + matched skills", () => {
-    const result = buildRoutingContext({
-      result: {
-        intent: "test",
-        reason: "Test.",
-        confidence: 0.5,
-      },
-      guidance: "Test.",
-      matchedSkills: [
-        {
-          name: "skill-1",
-          location: "/private/SKILL.md",
-          description: "Skill 1.",
-        },
-      ],
-      experiences: [],
-    });
-
-    expect(result.startsWith(ROUTING_ADVISORY_SKILLS_ONLY_HEADER)).toBe(true);
-    expect(result).toContain("<matched_skills>");
-  });
-
   it("selects advisory header: matched skills only", () => {
     const result = buildRoutingContext({
       matchedSkills: [
@@ -285,17 +227,10 @@ describe("buildRoutingContext", () => {
 
     expect(result.startsWith(ROUTING_ADVISORY_SKILLS_ONLY_HEADER)).toBe(true);
     expect(result).toContain("<matched_skills>");
-    expect(result).not.toContain("<intent ");
   });
 
   it("returns empty string when matched skills are empty", () => {
     const result = buildRoutingContext({
-      result: {
-        intent: "test",
-        reason: "Test.",
-        confidence: 0.5,
-      },
-      guidance: "Test.",
       matchedSkills: [],
       experiences: [],
     });
@@ -314,12 +249,6 @@ describe("buildRoutingContext", () => {
     };
 
     const result = buildRoutingContext({
-      result: {
-        intent: "test",
-        reason: "Test.",
-        confidence: 0.5,
-      },
-      guidance: "Test.",
       matchedSkills: [
         {
           name: "test-skill",

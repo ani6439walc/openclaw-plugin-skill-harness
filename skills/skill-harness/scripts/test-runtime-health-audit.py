@@ -59,6 +59,11 @@ class RuntimeHealthAuditTest(unittest.TestCase):
             """
         )
         qmd_database.close()
+        (self.root / "experiences" / "example").mkdir(parents=True)
+        (self.root / "experiences" / "example" / "summary.md").write_text("Example summary\n", encoding="utf-8")
+        (self.root / "experiences" / "example" / "keywords.md").write_text("example\n", encoding="utf-8")
+        (self.root / "experiences" / "example" / "body.md").write_text("Example body\n", encoding="utf-8")
+        (self.root / "experiences" / "example" / "skills.md").write_text("example-skill\n", encoding="utf-8")
         (self.root / "review.json").write_text(
             json.dumps(
                 {
@@ -74,8 +79,9 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                             "changes": [
                                 {
                                     "trigger": "capability-fit",
-                                    "targetKind": "intent-markdown",
+                                    "targetKind": "skill-experience",
                                     "operation": "refine",
+                                    "targetExperienceIds": ["example"],
                                     "targetIntentIds": ["example"],
                                 }
                             ],
@@ -303,11 +309,14 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                 "eventsByChangeCount": {"0": 1, "1": 1},
                 "byTrigger": {"capability-fit": 1},
                 "byOperation": {"refine": 1},
+                "topTargetExperiences": [{"experience": "example", "changes": 1}],
                 "topTargetIntents": [{"intent": "example", "changes": 1}],
             },
         )
         self.assertEqual(report["runtime"]["sessions"]["sessionFiles"], 1)
         self.assertEqual(report["runtime"]["sessions"]["agentArtifactFiles"], 1)
+        self.assertEqual(report["runtime"]["experiences"]["count"], 1)
+        self.assertEqual(report["runtime"]["experiences"]["markdownFiles"], 4)
         self.assertEqual(report["runtime"]["intents"]["markdownFiles"], 1)
         self.assertEqual(
             report["runtime"]["qmd"],
@@ -510,5 +519,51 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertIn("schema-v7", result.stderr)
 
 
+    def test_reports_pure_experience_health(self) -> None:
+        import shutil
+        shutil.rmtree(self.root / "intents")
+        shutil.rmtree(self.root / "qmd" / "intents")
+        (self.root / "qmd" / "experiences").mkdir(parents=True)
+        (self.root / "qmd" / "experiences" / "doc1.md").write_text("# Doc 1\n", encoding="utf-8")
+        qmd_database = sqlite3.connect(self.root / "qmd" / "experiences" / "experience-routing.sqlite")
+        qmd_database.executescript(
+            """
+            CREATE TABLE embedding_index_state (
+              singleton INTEGER PRIMARY KEY,
+              status TEXT NOT NULL,
+              generation INTEGER NOT NULL,
+              lease_expires_at INTEGER,
+              updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE documents (active INTEGER NOT NULL);
+            CREATE TABLE content_vectors (id INTEGER PRIMARY KEY);
+            INSERT INTO embedding_index_state VALUES (1, 'ready', 1, NULL, 1234567890);
+            INSERT INTO documents VALUES (1);
+            INSERT INTO content_vectors VALUES (1);
+            """
+        )
+        qmd_database.close()
+
+        report = self.run_audit()
+        self.assertEqual(report["runtime"]["intents"]["markdownFiles"], 0)
+        self.assertEqual(report["runtime"]["experiences"]["count"], 1)
+        self.assertEqual(report["runtime"]["experiences"]["markdownFiles"], 4)
+        self.assertEqual(
+            report["runtime"]["qmd"],
+            {
+                "databaseStatus": "ready",
+                "integrityCheck": "ok",
+                "generation": 1,
+                "leaseActive": False,
+                "snapshotMarkdownFiles": 1,
+                "indexedDocuments": 1,
+                "indexedVectors": 1,
+                "documentsMatchVectors": True,
+                "snapshotMatchesIndexedDocuments": True,
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
+

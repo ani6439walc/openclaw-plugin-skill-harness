@@ -1,15 +1,13 @@
-import { choice, noul, TypeSafeClient } from "@typesafe-ai/sdk";
-import type { ChoiceCriteria, EntryType } from "@typesafe-ai/sdk";
+import { noul, TypeSafeClient } from "@typesafe-ai/sdk";
+import type { EntryType } from "@typesafe-ai/sdk";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
-import { canonicalIdentity } from "../normalize.js";
 import {
   normalizeTypeSafeBaseUrl,
   resolveQmdEndpoint,
 } from "../qmd/provider-resolver.js";
 import type {
   AvailableSkill,
-  IntentCatalogEntry,
   RecentTurn,
   ResolvedSkillHarnessPluginConfig,
   RoutingLlmResult,
@@ -27,8 +25,6 @@ export type JevUnifiedRoutingParams = {
   messageProvider?: string;
   channelId?: string;
   modelRef?: { provider: string; model: string };
-  resolvedIntent?: { id: string; guidance: string };
-  candidateIntents?: readonly IntentCatalogEntry[];
   candidateSkills?: readonly AvailableSkill[];
   candidateExperiences?: readonly SkillExperienceEntry[];
   client?: TypeSafeClient;
@@ -83,125 +79,40 @@ export async function runJevUnifiedRouting(
       state.conversation_context = params.conversation.map((turn) => ({
         role: turn.role,
         text: turn.text,
-        ...(turn.historicalIntent
-          ? { intent: turn.historicalIntent.intent }
-          : {}),
       }));
     }
 
-    if (params.resolvedIntent) {
-      state.resolved_intent = {
-        id: params.resolvedIntent.id,
-        guidance: params.resolvedIntent.guidance,
-      };
-    }
+    const questions: Record<string, ReturnType<typeof noul>> = {};
 
-    const questions: Record<
-      string,
-      ReturnType<typeof choice | typeof noul>
-    > = {};
-
-    // Branch A: Intent already resolved
-    if (params.resolvedIntent) {
-      if (params.candidateSkills && params.candidateSkills.length > 0) {
-        for (const skill of params.candidateSkills) {
-          questions[`skill_${skill.name}`] = noul(
-            `Should the agent load skill '${skill.name}' (${skill.description}) to help fulfill the user request under intent '${params.resolvedIntent.id}'?`,
-            {
-              true: `Skill '${skill.name}' is directly relevant and helpful.`,
-              false: `Skill '${skill.name}' is not needed or irrelevant.`,
-            },
-          );
-        }
-      }
-      if (
-        params.candidateExperiences &&
-        params.candidateExperiences.length > 0
-      ) {
-        for (const exp of params.candidateExperiences) {
-          questions[`exp_${exp.id}`] = noul(
-            `Is this past experience '${exp.id}' (${exp.summary}) relevant and helpful for answering or guiding the user request under intent '${params.resolvedIntent.id}'?`,
-            {
-              true: `Experience '${exp.id}' is directly relevant and provides helpful guidance or procedures.`,
-              false: `Experience '${exp.id}' is not needed, irrelevant, or not applicable.`,
-            },
-          );
-        }
-      }
-      if (
-        (!params.candidateSkills || params.candidateSkills.length === 0) &&
-        (!params.candidateExperiences ||
-          params.candidateExperiences.length === 0)
-      ) {
-        return {
-          intent: params.resolvedIntent.id,
-          skills: [],
-          experiences: [],
-          confidence: 1.0,
-          reason: `jev → direct route: ${params.resolvedIntent.id}`,
-        };
-      }
-    } else {
-      // Branch B: Intent not yet resolved
-      if (params.candidateIntents && params.candidateIntents.length > 0) {
-        const criteria: ChoiceCriteria = {};
-        for (const intent of params.candidateIntents) {
-          criteria[intent.id] = {
-            guidance: intent.definition.guidance || intent.id,
-            ...(intent.definition.triggers &&
-            intent.definition.triggers.length > 0
-              ? { triggers: intent.definition.triggers }
-              : {}),
-            ...(intent.definition.examples &&
-            intent.definition.examples.length > 0
-              ? { examples: intent.definition.examples }
-              : {}),
-          };
-        }
-        criteria["none"] = {
-          guidance:
-            "None of the candidate intents adequately match the user request.",
-        };
-        questions["intent"] = choice(
-          "Select the single intent from the catalog that best explains what the user wants to accomplish in latest_message, or select 'none' if no candidate intent fits.",
-          criteria,
+    if (params.candidateSkills && params.candidateSkills.length > 0) {
+      for (const skill of params.candidateSkills) {
+        questions[`skill_${skill.name}`] = noul(
+          `Should the agent load skill '${skill.name}' (${skill.description}) to help fulfill the user request?`,
+          {
+            true: `Skill '${skill.name}' is directly relevant and helpful.`,
+            false: `Skill '${skill.name}' is not needed or irrelevant.`,
+          },
         );
       }
+    }
 
-      if (params.candidateSkills && params.candidateSkills.length > 0) {
-        for (const skill of params.candidateSkills) {
-          questions[`skill_${skill.name}`] = noul(
-            `Should the agent load skill '${skill.name}' (${skill.description}) to help fulfill the user request?`,
-            {
-              true: `Skill '${skill.name}' is directly relevant and helpful.`,
-              false: `Skill '${skill.name}' is not needed or irrelevant.`,
-            },
-          );
-        }
-      }
-
-      if (
-        params.candidateExperiences &&
-        params.candidateExperiences.length > 0
-      ) {
-        for (const exp of params.candidateExperiences) {
-          questions[`exp_${exp.id}`] = noul(
-            `Is this past experience '${exp.id}' (${exp.summary}) relevant and helpful for answering or guiding the user request?`,
-            {
-              true: `Experience '${exp.id}' is directly relevant and provides helpful guidance or procedures.`,
-              false: `Experience '${exp.id}' is not needed, irrelevant, or not applicable.`,
-            },
-          );
-        }
+    if (params.candidateExperiences && params.candidateExperiences.length > 0) {
+      for (const exp of params.candidateExperiences) {
+        questions[`exp_${exp.id}`] = noul(
+          `Is this past experience '${exp.id}' (${exp.summary}) relevant and helpful for answering or guiding the user request?`,
+          {
+            true: `Experience '${exp.id}' is directly relevant and provides helpful guidance or procedures.`,
+            false: `Experience '${exp.id}' is not needed, irrelevant, or not applicable.`,
+          },
+        );
       }
     }
 
     if (Object.keys(questions).length === 0) {
       return {
-        intent: params.resolvedIntent?.id,
         skills: [],
         experiences: [],
-        confidence: params.resolvedIntent ? 1.0 : 0.0,
+        confidence: 0.0,
         reason: "jev → no candidate questions to evaluate",
       };
     }
@@ -226,68 +137,6 @@ export async function runJevUnifiedRouting(
     }
 
     const answers = response.answers as Record<string, unknown>;
-
-    let selectedIntent: string | undefined = params.resolvedIntent?.id;
-    let confidence = 1.0;
-
-    // Validate Intent answer if candidate intents were queried
-    if (
-      !params.resolvedIntent &&
-      params.candidateIntents &&
-      params.candidateIntents.length > 0
-    ) {
-      const intentAns = answers.intent as
-        { type?: unknown; choice?: unknown; confidence?: unknown } | undefined;
-
-      if (
-        !intentAns ||
-        typeof intentAns !== "object" ||
-        intentAns.type !== "choice"
-      ) {
-        logger.warn("Jev unified routing missing or malformed intent answer", {
-          intentAns,
-        });
-        return undefined;
-      }
-
-      if (
-        typeof intentAns.confidence !== "number" ||
-        !Number.isFinite(intentAns.confidence) ||
-        intentAns.confidence < 0 ||
-        intentAns.confidence > 1
-      ) {
-        logger.warn("Jev unified routing invalid intent confidence", {
-          confidence: intentAns.confidence,
-        });
-        return undefined;
-      }
-
-      confidence = intentAns.confidence;
-
-      if (intentAns.choice === "none" || intentAns.choice === null) {
-        selectedIntent = undefined;
-      } else if (typeof intentAns.choice === "string") {
-        const choiceCanonical = canonicalIdentity(intentAns.choice);
-        const matchedIntent = params.candidateIntents.find(
-          (c) => canonicalIdentity(c.id) === choiceCanonical,
-        );
-        if (!matchedIntent) {
-          logger.warn(
-            "Jev unified routing returned non-candidate intent choice",
-            {
-              choice: intentAns.choice,
-            },
-          );
-          return undefined;
-        }
-        selectedIntent = matchedIntent.id;
-      } else {
-        logger.warn("Jev unified routing returned invalid intent choice type", {
-          choice: intentAns.choice,
-        });
-        return undefined;
-      }
-    }
 
     // Validate and collect Skill answers
     const candidateSkillNames = (params.candidateSkills ?? []).map(
@@ -389,10 +238,9 @@ export async function runJevUnifiedRouting(
     const reason = `jev → ${skillCount}: [${skillListStr}]${selectedExperiences.length > 0 ? `, ${expCount}: [${expListStr}]` : ""}`;
 
     return {
-      intent: selectedIntent,
       skills: selectedSkills,
       experiences: selectedExperiences,
-      confidence,
+      confidence: 1.0,
       reason,
     };
   } catch (err) {

@@ -5,13 +5,7 @@ import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
 import type { SkillPlacementReason } from "../stats/aggregator.js";
 
-export const REVIEW_OPERATIONS = [
-  "create",
-  "refine",
-  "split",
-  "merge",
-  "delete",
-] as const;
+export const REVIEW_OPERATIONS = ["create", "refine", "delete"] as const;
 export type ReviewOperation = (typeof REVIEW_OPERATIONS)[number];
 
 export const PROCESSED_EVENT_OUTCOMES = [
@@ -55,10 +49,9 @@ export type SchemaRejectionReasonCounts = Partial<
 
 export type AppliedReviewChange = {
   trigger: ReviewTrigger;
-  targetKind: "intent-markdown" | "skill-experience";
-  operation: ReviewOperation;
-  targetIntentIds: string[];
-  targetExperienceIds?: string[];
+  targetKind: "skill-experience";
+  operation?: ReviewOperation;
+  targetExperienceIds: string[];
   dedupeKey: string;
   summary: string;
   evidence: string[];
@@ -73,7 +66,6 @@ export type ProcessedEventRecord = {
   changeCount: number;
   outcome: ProcessedEventOutcome;
   changes?: AppliedReviewChange[];
-  changedIntentIds?: string[];
   changedExperienceIds?: string[];
   validationErrors?: string[];
   noFindingReasonCounts?: NoFindingReasonCounts;
@@ -141,26 +133,13 @@ const NoFindingReasonCountsSchema = PositiveCountsSchema.refine((value) =>
 const SchemaRejectionReasonCountsSchema = PositiveCountsSchema.refine((value) =>
   hasOnlyKeys(value, SCHEMA_REJECTION_REASON_CODES),
 ).transform((value): SchemaRejectionReasonCounts => value);
-const IntentChangeSchema = z
-  .object({
-    trigger: z.enum(REVIEW_TRIGGER_TYPES),
-    targetKind: z.literal("intent-markdown"),
-    operation: z.enum(REVIEW_OPERATIONS),
-    targetIntentIds: z.array(z.string().trim().min(1)),
-    dedupeKey: z.string().trim().min(1),
-    summary: z.string().trim().min(1),
-    evidence: z.array(z.string()),
-    correctionGoal: z.string().trim().min(1),
-    suggestedChange: z.string().trim().min(1),
-  })
-  .strict();
+
 const ExperienceChangeSchema = z
   .object({
     trigger: z.enum(REVIEW_TRIGGER_TYPES),
     targetKind: z.literal("skill-experience"),
-    operation: z.literal("create"),
-    targetIntentIds: z.array(z.string()).length(0),
-    targetExperienceIds: z.array(z.string().trim().min(3)).length(1),
+    operation: z.enum(REVIEW_OPERATIONS).optional(),
+    targetExperienceIds: z.array(z.string().trim().min(3)).min(1),
     dedupeKey: z.string().trim().min(1),
     summary: z.string().trim().min(1),
     evidence: z.array(z.string()),
@@ -168,6 +147,7 @@ const ExperienceChangeSchema = z
     suggestedChange: z.string().trim().min(1),
   })
   .strict();
+
 const ProcessedEventRecordSchema = z
   .object({
     processedAt: z.string(),
@@ -175,10 +155,7 @@ const ProcessedEventRecordSchema = z
     triggers: z.array(z.enum(REVIEW_TRIGGER_TYPES)),
     changeCount: z.number().int().nonnegative(),
     outcome: ProcessedEventOutcomeSchema,
-    changes: z
-      .array(z.union([IntentChangeSchema, ExperienceChangeSchema]))
-      .optional(),
-    changedIntentIds: z.array(z.string()).optional(),
+    changes: z.array(ExperienceChangeSchema).optional(),
     changedExperienceIds: z.array(z.string()).optional(),
     validationErrors: z.array(z.string()).optional(),
     noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
@@ -198,6 +175,7 @@ const ReviewedSkillEpochSchema = z
     eventId: z.string().trim().min(1),
   })
   .strict();
+
 export const ReviewLogSchema = z
   .object({
     schemaVersion: z.literal(8),
@@ -225,6 +203,7 @@ export function createReviewLog(nowIso: string): ReviewLog {
 export function parseReviewLog(raw: unknown): ReviewLog {
   return ReviewLogSchema.parse(raw);
 }
+
 export function pruneReviewLogEvents(
   log: ReviewLog,
   nowMs: number = Date.now(),

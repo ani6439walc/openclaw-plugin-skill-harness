@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { logger } from "../../api.js";
 import { resolveTurnEventId } from "../session/index.js";
 import type { SessionState } from "../session/index.js";
-import type { IntentCatalogEntry, IntentTrigger } from "../types.js";
 import {
   packageRoot,
   statsPath,
@@ -10,7 +9,6 @@ import {
   readJsonFile,
   safeWriteJson,
 } from "../file-utils.js";
-import { FALLBACK_INTENT_ID } from "../constants.js";
 import type { SkillInventoryItem, SkillSource } from "../skills/types.js";
 import { SKILL_SOURCE_ORDER } from "../skills/types.js";
 import { canonicalIdentity } from "../normalize.js";
@@ -42,7 +40,7 @@ const INTENT_ROUTE_REASONS = [
   "qmd-keyword",
   "qmd-hybrid",
   "llm-classifier",
-] as const satisfies readonly IntentTrigger[];
+] as const;
 const statsAggregatorCache = new Map<string, StatsAggregator>();
 
 type CountMap = Record<string, number>;
@@ -405,7 +403,7 @@ function emptyIntentRouteReasons(): Record<
 
 function resolveIntentId(
   resultIntent: string,
-  definition: IntentCatalogEntry | undefined,
+  definition: { id: string } | undefined,
 ): string {
   if (definition) return definition.id;
   return resultIntent.match(/^([A-Za-z0-9_-]+)/)?.[1] ?? resultIntent;
@@ -997,7 +995,9 @@ function recordSummaryStats(params: {
   stats.summary.skillUsageCount += skillsUsed.length;
   stats.summary.toolCallCount += toolCallCount;
   stats.summary.unknownTurns +=
-    intentId.toLowerCase() === FALLBACK_INTENT_ID ? 1 : 0;
+    intentId.toLowerCase() === "unknown" || intentId.toLowerCase() === "other"
+      ? 1
+      : 0;
 }
 
 function recordIntentRouteStats(
@@ -1300,16 +1300,17 @@ function recordProjectionStats(
   const currentTurns = stats.projection.eligibleTurns;
   stats.projection.averageOriginalIntentCount = rate(
     stats.projection.averageOriginalIntentCount * currentTurns +
-      projection.originalIntentCount,
+      (projection.originalIntentCount ?? 0),
     currentTurns + 1,
   );
   stats.projection.averageCandidateIntentCount = rate(
     stats.projection.averageCandidateIntentCount * currentTurns +
-      projection.candidateIntentCount,
+      (projection.candidateIntentCount ?? 0),
     currentTurns + 1,
   );
   stats.projection.averageDurationMs = rate(
-    stats.projection.averageDurationMs * currentTurns + projection.durationMs,
+    stats.projection.averageDurationMs * currentTurns +
+      (projection.durationMs ?? 0),
     currentTurns + 1,
   );
   stats.projection.eligibleTurns += 1;
@@ -1342,11 +1343,15 @@ function recordProjectionStats(
       projection.fallbackReason,
     );
   }
-  for (const reason of new Set(projection.supportReasons)) {
-    incrementBoundedReason(stats.projection.supportReasons, reason);
+  for (const reason of new Set(projection.supportReasons ?? [])) {
+    if (typeof reason === "string") {
+      incrementBoundedReason(stats.projection.supportReasons, reason);
+    }
   }
-  for (const reason of new Set(projection.selectionReasons)) {
-    incrementBoundedReason(stats.projection.selectionReasons, reason);
+  for (const reason of new Set(projection.selectionReasons ?? [])) {
+    if (typeof reason === "string") {
+      incrementBoundedReason(stats.projection.selectionReasons, reason);
+    }
   }
 }
 
@@ -1765,7 +1770,7 @@ export class StatsAggregator {
   record(
     sessionId: string | undefined,
     state: SessionState,
-    intentDefinition?: IntentCatalogEntry,
+    intentDefinition?: { id: string },
     options: StatsRecordOptions = {},
   ): boolean {
     const result = state.intent?.result;
@@ -1827,7 +1832,7 @@ export class StatsAggregator {
           routeReason:
             state.intent?.trigger === "skill-only"
               ? undefined
-              : state.intent?.trigger,
+              : (state.intent?.trigger as IntentRouteReason | undefined),
           eventTime,
           skillsUsed,
           toolCallCount: toolCalls.length,

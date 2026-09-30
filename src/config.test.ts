@@ -777,6 +777,7 @@ describe("resolveConfig", () => {
       expect(result.review).not.toHaveProperty("keywordCoverage");
       expect(result.review.triggers).toEqual({
         intentHealthCheck: { enabled: true, everyTurns: 10 },
+        experienceHealthCheck: { enabled: true, everyTurns: 10 },
         routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
         capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
       });

@@ -1,8 +1,7 @@
-import type { IntentionResult, ResolvedReviewConfig } from "../types.js";
-import { FALLBACK_INTENT_ID } from "../constants.js";
+import type { ResolvedReviewConfig } from "../types.js";
 
 export const REVIEW_TRIGGER_TYPES = [
-  "intent-health-check",
+  "experience-health-check",
   "routing-uncertainty",
   "capability-fit",
 ] as const;
@@ -15,15 +14,14 @@ type TriggerToolCall = {
 };
 
 export type TriggerState = {
-  intent?: { result?: IntentionResult } | IntentionResult;
   toolCalls?: TriggerToolCall[];
+  confidence?: number;
+  intent?:
+    | { result?: { confidence?: number; intent?: string } }
+    | { confidence?: number; intent?: string };
+  matchedSkills?: Array<{ name: string }> | string[];
+  matchedExperiences?: Array<{ id: string }> | string[];
 };
-
-function resolveIntentResult(
-  intent: TriggerState["intent"],
-): IntentionResult | undefined {
-  return intent && "intent" in intent ? intent : intent?.result;
-}
 
 export function checkReviewTriggers(
   state: TriggerState,
@@ -31,23 +29,29 @@ export function checkReviewTriggers(
   config: ResolvedReviewConfig["triggers"],
 ): ReviewTrigger[] {
   const matches: ReviewTrigger[] = [];
-  const result = resolveIntentResult(state.intent);
   const toolCalls = state.toolCalls ?? [];
 
+  const healthCheck = config.experienceHealthCheck ?? config.intentHealthCheck;
   if (
-    config.intentHealthCheck.enabled &&
+    healthCheck?.enabled &&
     turnNumber > 0 &&
-    turnNumber % config.intentHealthCheck.everyTurns === 0
+    turnNumber % healthCheck.everyTurns === 0
   ) {
-    matches.push("intent-health-check");
+    matches.push("experience-health-check");
   }
+
+  const legacyConfidence =
+    state.intent && "confidence" in state.intent
+      ? state.intent.confidence
+      : state.intent && "result" in state.intent
+        ? state.intent.result?.confidence
+        : undefined;
+  const confidence = state.confidence ?? legacyConfidence;
 
   if (
     config.routingUncertainty.enabled &&
-    result &&
-    (result.intent.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase() ===
-      FALLBACK_INTENT_ID ||
-      result.confidence < config.routingUncertainty.confidenceBelow)
+    typeof confidence === "number" &&
+    confidence < config.routingUncertainty.confidenceBelow
   ) {
     matches.push("routing-uncertainty");
   }

@@ -5,7 +5,6 @@ import type {
 } from "../session/index.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
-import { defaultCatalog } from "../intents/index.js";
 import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
@@ -13,6 +12,7 @@ import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { getReviewModelRef, runReviewSubagent } from "../review/subagent.js";
 import type {
   CapabilityFitEvidence,
+  ReviewSnapshot,
   SelectedPlacementSkill,
   SkillPlacementReviewCandidate,
 } from "../review/types.js";
@@ -26,12 +26,7 @@ import {
   extractRecentTurns,
   extractToolText,
   isInternalUserTurn,
-  attachHistoricalIntents,
-  sanitizeHistoricalIntentInput,
-  getQmdCandidateLimits,
-  projectQmdIntentCandidates,
-  measureIntentCatalogCodePoints,
-  type IntentProjection,
+  sanitizePromptInput,
 } from "../classification/index.js";
 import {
   isAllowedChatId,
@@ -43,7 +38,6 @@ import {
   shouldSkipSkillSystemContext,
   resolveCanonicalSessionKeyFromSessionId,
 } from "../session/index.js";
-import { FALLBACK_INTENT_ID } from "../constants.js";
 import {
   runJevUnifiedRouting,
   type JevUnifiedRoutingParams,
@@ -54,13 +48,8 @@ import {
   listAvailableSkills,
   resolveAvailableSkills,
   resolveSkillInventory,
-} from "../intents/index.js";
-import { experiencesPath, intentsPath, packageRoot } from "../file-utils.js";
-import type {
-  QmdIntentHit,
-  QmdIntentSearchEvidence,
-  QmdRawSearchResult,
-} from "../qmd/intent-index.js";
+} from "../skills/index.js";
+import { experiencesPath, packageRoot } from "../file-utils.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import type { SkillExperienceEntry } from "../experiences/index.js";
 import type { SkillExperienceHit } from "../qmd/experience-index.js";
@@ -70,16 +59,7 @@ import {
   buildCandidateSkillsUnionPool,
   type SkillDiscoveryCandidate,
 } from "../skills/candidate-pool.js";
-import type {
-  ClassifiedIntentionResult,
-  HistoricalIntentRecord,
-  IntentCatalogEntry,
-  IntentProjectionTelemetry,
-  IntentRoutingEvidence,
-  IntentTrigger,
-  IntentionResult,
-  RoutingLlmResult,
-} from "../types.js";
+import type { RoutingLlmResult } from "../types.js";
 import {
   emitPipelineEvent,
   type SkillCandidatePoolFallbackReason,
@@ -113,23 +93,11 @@ import {
   resolveToolResultText,
 } from "./tool-tracking.js";
 import {
-  SKILL_HARNESS_INTENT_CONTEXT,
+  SKILL_HARNESS_ROUTING_CONTEXT,
   SKILL_HARNESS_SYSTEM_CONTEXT,
 } from "./system-context.js";
 export type { HookDeps } from "./types.js";
 
-function sanitizeHistoricalIntentRecords(
-  records: HistoricalIntentRecord[],
-): HistoricalIntentRecord[] {
-  return records.flatMap((record) => {
-    const input = sanitizeHistoricalIntentInput(record.input);
-    return input ? [{ ...record, input }] : [];
-  });
-}
-
-const MAX_PROJECTION_CANDIDATE_IDS = 128;
-const MAX_PROJECTION_MATCHED_KEYWORDS = 32;
-const MAX_PROJECTION_KEYWORD_CHARS = 200;
 const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
 
 export function formatConversationExpansionContext(params: {
@@ -235,69 +203,13 @@ async function resolveSelectedPlacementSkill(
   }
 }
 
-function measureProjectionCatalogs(
-  originalIntents: readonly IntentCatalogEntry[],
-  candidateIntents: readonly IntentCatalogEntry[],
-): Pick<
-  IntentProjectionTelemetry,
-  "originalCatalogCodePoints" | "candidateCatalogCodePoints"
-> {
-  try {
-    return {
-      originalCatalogCodePoints:
-        measureIntentCatalogCodePoints(originalIntents),
-      candidateCatalogCodePoints:
-        measureIntentCatalogCodePoints(candidateIntents),
-    };
-  } catch (error) {
-    logger.warn("failed to measure intent projection catalogs", { error });
-    return {};
-  }
-}
-
-function toIntentProjectionTelemetry(params: {
-  projection: IntentProjection;
-  originalIntents: readonly IntentCatalogEntry[];
-  durationMs: number;
-}): IntentProjectionTelemetry {
-  const { projection, originalIntents, durationMs } = params;
-  return {
-    decision: projection.decision,
-    effectiveInput: projection.decision,
-    ...(projection.fallbackReason
-      ? { fallbackReason: projection.fallbackReason }
-      : {}),
-    originalIntentCount: projection.originalIntentCount,
-    candidateIntentCount: projection.candidateIntentCount,
-    ...measureProjectionCatalogs(originalIntents, projection.candidateIntents),
-    durationMs,
-    candidateIntentIds: projection.candidateIntents
-      .slice(0, MAX_PROJECTION_CANDIDATE_IDS)
-      .map((intent) => intent.id),
-    candidateSelections: projection.candidateSelections
-      .slice(0, MAX_PROJECTION_CANDIDATE_IDS)
-      .map((selection) => ({
-        intentId: selection.intentId,
-        selectionReasons: [...selection.selectionReasons],
-        matchedKeywords: selection.matchedKeywords
-          .slice(0, MAX_PROJECTION_MATCHED_KEYWORDS)
-          .map((keyword) => keyword.slice(0, MAX_PROJECTION_KEYWORD_CHARS)),
-      })),
-    supportReasons: [...projection.supportReasons],
-    selectionReasons: [...projection.selectionReasons],
-    matchedKeywords: projection.matchedKeywords
-      .slice(0, MAX_PROJECTION_MATCHED_KEYWORDS)
-      .map((keyword) => keyword.slice(0, MAX_PROJECTION_KEYWORD_CHARS)),
-  };
-}
-
 function toPromptBuildResult(
   prependContext?: string,
   workingSetSkillsXml?: string,
-  includeIntentContext = true,
+  includeRoutingContext = true,
 ): PluginHookBeforePromptBuildResult {
-  const systemContext = includeIntentContext
-    ? `${SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_INTENT_CONTEXT}`
+  const systemContext = includeRoutingContext
+    ? `${SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_ROUTING_CONTEXT}`
     : SKILL_HARNESS_SYSTEM_CONTEXT;
   const appendSystemContext = workingSetSkillsXml
     ? `${systemContext}\n\n${workingSetSkillsXml}`
@@ -308,278 +220,8 @@ function toPromptBuildResult(
   };
 }
 
-function findIntentDefinition(
-  catalog: typeof defaultCatalog,
-  intent: string | undefined,
-) {
-  const intentId = intent?.match(/^([A-Za-z0-9_-]+)/)?.[1];
-  if (!intentId) return;
-  return catalog
-    .get()
-    .find((entry) => entry.id.toLowerCase() === intentId.toLowerCase());
-}
-
-function findIntentEntry<
-  T extends { id: string; definition: { guidance: string; skills?: string[] } },
->(intents: readonly T[], intent: string | undefined): T | undefined {
-  const intentId = intent?.match(/^([A-Za-z0-9_-]+)/)?.[1];
-  if (!intentId) return;
-  return intents.find(
-    (entry) => entry.id.toLowerCase() === intentId.toLowerCase(),
-  );
-}
-
-function resolveIntentId(intent: string | undefined): string | undefined {
-  return intent?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
-}
-
-function extractRawResultDocId(
-  candidatePath: string | undefined,
-): string | undefined {
-  if (!candidatePath) return undefined;
-  const cleanPath = candidatePath.replace(/^qmd:\/\/[^/]+\//, "");
-  const base = path.basename(cleanPath);
-  const match = /^(.+-\d+)\.md(?:\.identity\.yml)?$/u.exec(base);
-  return (
-    match?.[1]?.trim() ?? base.replace(/\.md(?:\.identity\.yml)?$/u, "").trim()
-  );
-}
-
-function intentIdFromCandidatePath(
-  candidatePath: string | undefined,
-): string | undefined {
-  const docId = extractRawResultDocId(candidatePath);
-  if (!docId) return undefined;
-  const match = /^(.+)-\d+$/u.exec(docId);
-  return match?.[1]?.trim() ?? docId;
-}
-
-function extractLexicalTraceChannels(trace: unknown): string | undefined {
-  if (!trace || typeof trace !== "object") return undefined;
-  const record = trace as Record<string, unknown>;
-  if (Array.isArray(record.contributions) && record.contributions.length > 0) {
-    const parts: string[] = [];
-    for (const c of record.contributions) {
-      if (
-        c &&
-        typeof c === "object" &&
-        typeof (c as Record<string, unknown>).channel === "string"
-      ) {
-        const channel = (c as Record<string, unknown>).channel as string;
-        const score = (c as Record<string, unknown>).backendScore;
-        if (typeof score === "number" && Number.isFinite(score)) {
-          parts.push(`${channel} ${roundToDecimals(score, 2)}`);
-        } else {
-          parts.push(channel);
-        }
-      }
-    }
-    if (parts.length > 0) return parts.join(", ");
-  }
-  if (Array.isArray(record.channels) && record.channels.length > 0) {
-    const used = record.channels
-      .filter(
-        (ch) =>
-          ch &&
-          typeof ch === "object" &&
-          (ch as Record<string, unknown>).status === "used" &&
-          typeof (ch as Record<string, unknown>).channel === "string",
-      )
-      .map((ch) => (ch as Record<string, unknown>).channel as string);
-    if (used.length > 0) return used.join(", ");
-  }
-  return undefined;
-}
-
-function truncateHitText(text: string, maxLen = 30): string {
-  const clean = text.trim().replace(/\s+/g, " ");
-  if (!clean) return "";
-  return clean.length > maxLen ? `${clean.slice(0, maxLen)}...` : clean;
-}
-
-function findMatchingKeywords(
-  message: string,
-  keywords: readonly string[],
-): string[] {
-  const normalizedMessage = message.toLowerCase();
-  const matched: string[] = [];
-  for (const keyword of keywords) {
-    const trimmed = keyword.trim();
-    if (!trimmed) continue;
-    const normalizedKeyword = trimmed.toLowerCase();
-    if (normalizedMessage.includes(normalizedKeyword)) {
-      matched.push(trimmed);
-    }
-  }
-  return matched;
-}
-
-export function buildKeywordRouteReason(params: {
-  intent: IntentCatalogEntry;
-  hit: QmdIntentHit;
-  query?: string;
-  directRouteMinScore: number;
-  rawResult?: QmdRawSearchResult;
-}): string {
-  const score = roundToDecimals(params.hit.score, 2);
-  const threshold = roundToDecimals(params.directRouteMinScore, 2);
-
-  let hitText = params.rawResult?.body
-    ? truncateHitText(params.rawResult.body)
-    : "";
-  if (!hitText && params.query) {
-    const matched = findMatchingKeywords(
-      params.query,
-      params.intent.definition.keywords,
-    );
-    if (matched.length > 0) {
-      hitText = matched.join(", ");
-    }
-  }
-
-  const candidatePath =
-    params.rawResult?.filepath ??
-    params.rawResult?.file ??
-    params.rawResult?.displayPath;
-  const docId = extractRawResultDocId(candidatePath) || params.intent.id;
-
-  const trace =
-    (params.rawResult as Record<string, unknown> | undefined)?.lexicalTrace ??
-    params.hit.explain;
-  const channels = extractLexicalTraceChannels(trace);
-
-  const meta = channels ? `[${docId} | ${channels}]` : `[${docId}]`;
-
-  if (hitText) {
-    return `"${hitText}" ${meta} → score ${score}/${threshold}`;
-  }
-  return `${meta} → score ${score}/${threshold}`;
-}
-
-export function extractHybridSignals(explain: unknown): string {
-  if (explain && typeof explain === "object") {
-    const record = explain as Record<string, unknown>;
-    if (record.rrf && typeof record.rrf === "object") {
-      const rrf = record.rrf as Record<string, unknown>;
-      if (Array.isArray(rrf.contributions) && rrf.contributions.length > 0) {
-        const types = new Set<string>();
-        for (const c of rrf.contributions) {
-          if (
-            c &&
-            typeof c === "object" &&
-            typeof (c as Record<string, unknown>).queryType === "string"
-          ) {
-            types.add((c as Record<string, unknown>).queryType as string);
-          }
-        }
-        if (types.size > 0) {
-          const order = ["lex", "vec", "hyde", "original"];
-          const sorted = order.filter((t) => types.has(t));
-          for (const t of types) {
-            if (!sorted.includes(t)) sorted.push(t);
-          }
-          return sorted.join(",");
-        }
-      }
-    }
-    const hasVector =
-      Array.isArray(record.vectorScores) && record.vectorScores.length > 0;
-    const hasFts =
-      Array.isArray(record.ftsScores) && record.ftsScores.length > 0;
-    if (hasVector && hasFts) return "lex,vec";
-    if (hasVector) return "vec";
-    if (hasFts) return "lex";
-  }
-  return "lex,vec,hyde";
-}
-
-export function buildQmdRouteReason(params: {
-  intent: IntentCatalogEntry;
-  hit: QmdIntentHit;
-  directRouteMinScore: number;
-  scoreMargin: number;
-  directRouteMinMargin: number;
-  rawResult?: QmdRawSearchResult;
-}): string {
-  const score = roundToDecimals(params.hit.score, 2);
-  const threshold = roundToDecimals(params.directRouteMinScore, 2);
-  const margin = roundToDecimals(params.scoreMargin, 2);
-  const minimumMargin = roundToDecimals(params.directRouteMinMargin, 2);
-
-  const rawSignals = extractHybridSignals(
-    params.hit.explain ?? params.rawResult?.explain,
-  );
-  const signals = rawSignals
-    .split(",")
-    .map((s) => s.trim())
-    .join(", ");
-
-  const hitText = params.rawResult?.body
-    ? truncateHitText(params.rawResult.body)
-    : "";
-  const meta = `[${signals}]`;
-  const scorePart = `score ${score}/${threshold} (margin ${margin}/${minimumMargin})`;
-
-  if (hitText) {
-    return `"${hitText}" ${meta} → ${scorePart}`;
-  }
-  return `${meta} → ${scorePart}`;
-}
-
-function buildQmdIntentResult(params: {
-  hit: QmdIntentHit;
-  intent: IntentCatalogEntry;
-  directRouteMinScore: number;
-  scoreMargin: number;
-  directRouteMinMargin: number;
-  rawResult?: QmdRawSearchResult;
-}): IntentionResult {
-  return {
-    intent: params.intent.id,
-    reason: buildQmdRouteReason({
-      intent: params.intent,
-      hit: params.hit,
-      directRouteMinScore: params.directRouteMinScore,
-      scoreMargin: params.scoreMargin,
-      directRouteMinMargin: params.directRouteMinMargin,
-      rawResult: params.rawResult,
-    }),
-    keywords: params.intent.definition.keywords.slice(0, 5),
-    confidence: params.hit.score,
-  };
-}
-
-function buildKeywordIntentResult(params: {
-  hit: QmdIntentHit;
-  intent: IntentCatalogEntry;
-  latestUserMessage?: string;
-  directRouteMinScore: number;
-  rawResult?: QmdRawSearchResult;
-}): IntentionResult {
-  return {
-    intent: params.intent.id,
-    reason: buildKeywordRouteReason({
-      intent: params.intent,
-      hit: params.hit,
-      query: params.latestUserMessage,
-      directRouteMinScore: params.directRouteMinScore,
-      rawResult: params.rawResult,
-    }),
-    keywords: params.intent.definition.keywords.slice(0, 5),
-    confidence: params.hit.score,
-  };
-}
-
-type PromptBuildClassification = {
-  trigger: IntentTrigger;
-  result: IntentionResult;
-  intentProjection?: IntentProjectionTelemetry;
-  routingEvidence?: IntentRoutingEvidence;
-};
-
 export function createHookHandlers(deps: HookDeps) {
-  const { api, config, refreshLiveConfigFromRuntime, refreshIntents } = deps;
-  const catalog = deps.catalog ?? defaultCatalog;
+  const { api, config, refreshLiveConfigFromRuntime } = deps;
   const tracker = deps.tracker ?? defaultTracker;
   const statsAggregator = deps.statsAggregator ?? defaultStatsAggregator;
   const skillInventoryResolver =
@@ -593,23 +235,7 @@ export function createHookHandlers(deps: HookDeps) {
     routingSelector ??
     (classifier
       ? async (callParams: JevUnifiedRoutingParams) => {
-          if (callParams.resolvedIntent) {
-            return {
-              skills: (callParams.candidateSkills ?? [])
-                .slice(0, 4)
-                .map((s) => s.name),
-              experiences: (callParams.candidateExperiences ?? [])
-                .slice(0, 4)
-                .map((e) => e.id),
-              confidence: 1.0,
-              reason: "Selected relevant candidate skills",
-            };
-          }
-          const classified = await (
-            classifier as (
-              params: unknown,
-            ) => Promise<ClassifiedIntentionResult | undefined>
-          )({
+          const classified = await classifier({
             api: callParams.api,
             config: callParams.config,
             agentId: callParams.agentId,
@@ -620,59 +246,16 @@ export function createHookHandlers(deps: HookDeps) {
             messageProvider: callParams.messageProvider,
             channelId: callParams.channelId,
             modelRef: callParams.modelRef,
-            intents: callParams.candidateIntents ?? [],
             candidateSkills: callParams.candidateSkills,
             candidateExperiences: callParams.candidateExperiences,
             dataRoot: callParams.dataRoot,
           });
           if (!classified) return undefined;
-          const matchedIntent = classified.intent
-            ? (callParams.candidateIntents ?? []).find(
-                (i) =>
-                  canonicalIdentity(i.id) ===
-                  canonicalIdentity(classified.intent ?? ""),
-              )
-            : undefined;
-          const declaredSkills = matchedIntent?.definition.skills ?? [];
-          const candidateSkillNames = (callParams.candidateSkills ?? [])
-            .filter(
-              (s) =>
-                !(callParams.candidateIntents ?? []).some(
-                  (other) =>
-                    Boolean(classified.intent) &&
-                    canonicalIdentity(other.id) !==
-                      canonicalIdentity(classified.intent ?? "") &&
-                    (other.definition.skills ?? []).some(
-                      (name) =>
-                        canonicalIdentity(name) === canonicalIdentity(s.name),
-                    ),
-                ),
-            )
-            .map((s) => s.name);
-          const mockSkills = Array.isArray(
-            (classified as unknown as { skills?: unknown }).skills,
-          )
-            ? (classified as unknown as { skills: string[] }).skills
-            : undefined;
-          const mockExperiences = Array.isArray(
-            (classified as unknown as { experiences?: unknown }).experiences,
-          )
-            ? (classified as unknown as { experiences: string[] }).experiences
-            : (callParams.candidateExperiences ?? [])
-                .slice(0, 4)
-                .map((e) => e.id);
-          const combinedSkills =
-            mockSkills ??
-            [...new Set([...declaredSkills, ...candidateSkillNames])].slice(
-              0,
-              4,
-            );
           return {
-            intent: classified.intent,
-            skills: combinedSkills,
-            experiences: mockExperiences,
-            confidence: classified.confidence,
-            reason: classified.reason,
+            skills: classified.skills ?? [],
+            experiences: classified.experiences ?? [],
+            confidence: classified.confidence ?? 1.0,
+            reason: classified.reason ?? "Selected relevant candidate skills",
           };
         }
       : runJevUnifiedRouting);
@@ -680,7 +263,6 @@ export function createHookHandlers(deps: HookDeps) {
   const experienceCatalog =
     deps.experienceCatalog ??
     (deps.dataRoot ? new SkillExperienceCatalog(deps.dataRoot) : undefined);
-  const qmdIntentIndex = deps.qmdIntentIndex;
   const qmdSkillIndex = deps.qmdSkillIndex;
   const qmdExperienceIndex = deps.qmdExperienceIndex;
 
@@ -734,7 +316,6 @@ export function createHookHandlers(deps: HookDeps) {
         api,
         config: candidate.resolvedConfig,
         agentId: candidate.agentId,
-        intentDirectory: intentsPath(deps.dataRoot ?? "."),
         experienceDirectory: experiencesPath(deps.dataRoot ?? "."),
         allowedExperienceSkills,
         sessionKey: candidate.ctx.sessionKey ?? candidate.snapshot.sessionKey,
@@ -758,7 +339,6 @@ export function createHookHandlers(deps: HookDeps) {
         {
           triggers: candidate.triggers,
           outcome: reviewResult.outcome,
-          changedIntentIds: reviewResult.changedIntentIds,
           changedExperienceIds: reviewResult.changedExperienceIds,
           validationErrors: reviewResult.validationErrors,
           noFindingReasonCounts: reviewResult.noFindingReasonCounts,
@@ -766,10 +346,12 @@ export function createHookHandlers(deps: HookDeps) {
           skillPlacementCandidate: candidate.skillPlacementCandidate,
         },
       );
-      if (reviewResult.changedIntentIds?.length) {
-        refreshIntents({
-          rebuildQmd: reviewResult.routingSurfaceChanged === true,
-        });
+      if (
+        reviewResult.changedExperienceIds?.length &&
+        experienceCatalog &&
+        qmdExperienceIndex
+      ) {
+        qmdExperienceIndex.schedule(experienceCatalog.listAll());
       }
     } finally {
       if (candidate.skillPlacementCandidate) {
@@ -927,44 +509,31 @@ export function createHookHandlers(deps: HookDeps) {
 
   function buildConversationContext(
     event: PluginHookBeforePromptBuildEvent,
-    ctx: PluginHookAgentContext,
+    _ctx: PluginHookAgentContext,
     refreshedConfig: ResolvedSkillHarnessPluginConfig,
   ): {
     latestUserMessage: string;
-    historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
   } {
     const latestUserMessage = extractLatestUserMessage(
       event.messages,
       event.prompt,
     );
-    const historicalIntents = sanitizeHistoricalIntentRecords(
-      ctx.sessionId ? tracker.getHistoricalIntentRecords(ctx.sessionId) : [],
-    );
-    const allTurns = attachHistoricalIntents(
-      extractRecentTurns(event.messages),
-      historicalIntents,
-      { latestInput: latestUserMessage },
-    );
     const conversation = limitConversationTurns(
-      allTurns,
+      extractRecentTurns(event.messages),
       refreshedConfig.routing.queryMode,
       refreshedConfig.routing.contextWindow,
     );
 
-    return { latestUserMessage, historicalIntents, conversation };
+    return { latestUserMessage, conversation };
   }
 
   async function recordPromptBuildSession(params: {
     association?: TurnAssociation;
     latestUserMessage: string;
-    trigger: IntentTrigger;
-    result?: IntentionResult;
-    intentMatchedSkills?: string[];
-    intentProjection?: IntentProjectionTelemetry;
-    routingEvidence?: IntentRoutingEvidence;
+    matchedSkills?: readonly AvailableSkill[];
+    matchedExperiences?: readonly SkillExperienceEntry[];
     inputSkillDiscovery?: InputSkillDiscovery;
-    conversation: ReturnType<typeof limitConversationTurns>;
   }): Promise<void> {
     if (!params.association) return;
     await tracker.mergeTurnAndPersist({
@@ -974,45 +543,13 @@ export function createHookHandlers(deps: HookDeps) {
       data: {
         input: params.latestUserMessage,
         intent: {
-          trigger: params.trigger,
-          ...(params.result ? { result: params.result } : {}),
-          intentMatchedSkills: params.intentMatchedSkills,
-          ...(params.intentProjection
-            ? { intentProjection: params.intentProjection }
-            : {}),
-          ...(params.routingEvidence
-            ? { routingEvidence: params.routingEvidence }
-            : {}),
+          trigger: "skill-only",
+          intentMatchedSkills: params.matchedSkills?.map((s) => s.name),
           ...(params.inputSkillDiscovery
             ? { inputSkillDiscovery: params.inputSkillDiscovery }
             : {}),
         },
       },
-    });
-  }
-
-  async function recordPromptBuildResult(params: {
-    ctx: PluginHookAgentContext;
-    routing: PromptBuildIdentity;
-    latestUserMessage: string;
-    trigger: IntentTrigger;
-    result: IntentionResult;
-    intentMatchedSkills?: string[];
-    intentProjection?: IntentProjectionTelemetry;
-    routingEvidence?: IntentRoutingEvidence;
-    inputSkillDiscovery?: InputSkillDiscovery;
-    conversation: ReturnType<typeof limitConversationTurns>;
-  }): Promise<void> {
-    await recordPromptBuildSession({
-      association: params.routing.association,
-      latestUserMessage: params.latestUserMessage,
-      trigger: params.trigger,
-      result: params.result,
-      intentMatchedSkills: params.intentMatchedSkills,
-      intentProjection: params.intentProjection,
-      routingEvidence: params.routingEvidence,
-      inputSkillDiscovery: params.inputSkillDiscovery,
-      conversation: params.conversation,
     });
   }
 
@@ -1437,8 +974,11 @@ export function createHookHandlers(deps: HookDeps) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
-      const { latestUserMessage, historicalIntents, conversation } =
-        buildConversationContext(event, ctx, refreshedConfig);
+      const { latestUserMessage, conversation } = buildConversationContext(
+        event,
+        ctx,
+        refreshedConfig,
+      );
       routing.association = await prepareTrackingTurn({
         ctx,
         routing,
@@ -1658,10 +1198,9 @@ export function createHookHandlers(deps: HookDeps) {
           await recordPromptBuildSession({
             association: routing.association,
             latestUserMessage,
-            trigger: "skill-only",
-            intentMatchedSkills: matchedSkills.map((s) => s.name),
+            matchedSkills,
+            matchedExperiences,
             inputSkillDiscovery,
-            conversation,
           });
 
           if (matchedSkills.length === 0 && matchedExperiences.length === 0) {
@@ -1859,10 +1398,6 @@ export function createHookHandlers(deps: HookDeps) {
     const state = tracker.getTurnState(sessionId, turnKey);
     if (!state) return;
 
-    const intentDefinition = findIntentDefinition(
-      catalog,
-      state.intent?.result?.intent,
-    );
     const agentId = tracker.getAgentId(sessionId)?.trim();
     if (agentId && !statsAggregator.isRecordable(sessionId, state)) return;
     let skillInventory:
@@ -1888,13 +1423,12 @@ export function createHookHandlers(deps: HookDeps) {
       }
     }
     const recorded = skillInventory
-      ? statsAggregator.record(sessionId, state, intentDefinition, {
+      ? statsAggregator.record(sessionId, state, undefined, {
           skillInventory,
         })
-      : statsAggregator.record(sessionId, state, intentDefinition);
+      : statsAggregator.record(sessionId, state);
     if (!recorded) return;
     return {
-      intentDefinition,
       agentId,
       skillInventoryObserved: skillInventory !== undefined,
     };
@@ -1902,14 +1436,13 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function buildReviewSnapshot(
     baseSnapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>,
-    intentDefinition: ReturnType<typeof findIntentDefinition>,
     agentId: string,
     skillPlacementCandidate?: SkillPlacementReviewCandidate,
     capabilityFit?: CapabilityFitEvidence,
   ) {
     const availableSkillNames = skillPlacementCandidate
       ? [skillPlacementCandidate.name]
-      : [...(intentDefinition?.definition.skills ?? [])];
+      : [];
     const resolvedAvailableSkills =
       availableSkillNames.length > 0
         ? await resolveAvailableSkills({
@@ -1944,27 +1477,10 @@ export function createHookHandlers(deps: HookDeps) {
         ...baseSnapshot.current,
         ...(capabilityFit ? { capabilityFit } : {}),
       },
-      matchedIntent: intentDefinition
-        ? {
-            id: intentDefinition.id,
-            definition: {
-              ...intentDefinition.definition,
-              triggers: [...intentDefinition.definition.triggers],
-              examples: [...intentDefinition.definition.examples],
-            },
-          }
-        : undefined,
       availableSkills: skillPlacementCandidate ? [] : resolvedAvailableSkills,
       ...(skillPlacementCandidate ? { skillPlacementCandidate } : {}),
       ...(selectedPlacementSkill ? { selectedPlacementSkill } : {}),
-      intentCatalog: catalog.get().map((entry) => ({
-        id: entry.id,
-        triggers: [...entry.definition.triggers],
-        examples: [...entry.definition.examples],
-        guidance: entry.definition.guidance,
-        skills: [...(entry.definition.skills ?? [])],
-        keywords: [...entry.definition.keywords],
-      })),
+      activeExperiences: experienceCatalog?.listAll() ?? [],
     };
   }
 
@@ -2088,18 +1604,7 @@ export function createHookHandlers(deps: HookDeps) {
           if (selected) {
             pendingSkillEpochKeys.add(selected.epochKey);
             ownsReservation = true;
-            const canonicalName = selected.name.trim().toLowerCase();
-            skillPlacementCandidate = {
-              ...selected,
-              currentlyReferencedIntentIds: catalog
-                .get()
-                .filter((entry) =>
-                  (entry.definition.skills ?? []).some(
-                    (name) => name.trim().toLowerCase() === canonicalName,
-                  ),
-                )
-                .map((entry) => entry.id),
-            };
+            skillPlacementCandidate = selected;
             if (!triggers.includes("capability-fit")) {
               triggers.push("capability-fit");
             }
@@ -2123,7 +1628,6 @@ export function createHookHandlers(deps: HookDeps) {
       });
       let snapshot = await buildReviewSnapshot(
         baseSnapshot,
-        agentEndStats.intentDefinition,
         agentId,
         skillPlacementCandidate,
         capabilityFit,
@@ -2155,7 +1659,6 @@ export function createHookHandlers(deps: HookDeps) {
         if (!modelRef) return;
         snapshot = await buildReviewSnapshot(
           baseSnapshot,
-          agentEndStats.intentDefinition,
           agentId,
           undefined,
           capabilityFit,

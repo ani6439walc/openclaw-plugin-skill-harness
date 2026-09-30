@@ -8,58 +8,40 @@ const snapshot: ReviewSnapshot = {
   turnNumber: 1,
   current: {
     input: "Need a review",
-    intent: {
-      intent: "other",
-      confidence: 0.2,
-      reason: "fallback",
-    },
-    routeProvenance: { trigger: "qmd-keyword" },
+    matchedSkills: ["git-tools"],
+    matchedExperiences: ["git-merge-conflict"],
     toolCalls: [{ name: "read", params: { path: "x" }, success: true }],
   },
   recent: [],
-  intentCatalog: [
+  activeExperiences: [
     {
-      id: "other",
-      triggers: ["unmatched"],
-      examples: ["help"],
-      keywords: ["help"],
-    },
-    {
-      id: "code-review",
-      triggers: ["review code"],
-      examples: ["review this"],
-      keywords: ["review"],
+      id: "git-merge-conflict",
+      skills: ["git-tools"],
+      summary: "Resolve complex 3-way merge conflicts.",
+      keywords: ["git", "merge", "conflict"],
+      body: "Resolution steps",
+      path: "/experiences/git-merge-conflict",
     },
   ],
 };
 
 describe("formatReviewSnapshot", () => {
-  it("renders route provenance with current-turn evidence", () => {
+  it("renders active experiences in snapshot", () => {
     const output = formatReviewSnapshot(snapshot, {
       requestedTriggers: ["routing-uncertainty"],
     });
 
-    expect(output).toContain('"routeProvenance":"qmd-keyword"');
-    expect(output).toContain('"intentConfidence":0.2');
+    expect(output).toContain("<active_experiences>");
+    expect(output).toContain('"id":"git-merge-conflict"');
+    expect(output).toContain("Resolve complex 3-way merge conflicts.");
   });
 
-  it("renders the full catalog for boundary-aware review triggers", () => {
+  it("renders manifest with experience counts", () => {
     const output = formatReviewSnapshot(snapshot, {
-      requestedTriggers: ["routing-uncertainty"],
+      requestedTriggers: ["experience-health-check"],
     });
 
-    expect(output).toContain("<intent_catalog>");
-    expect(output).toContain('"id":"code-review"');
-    expect(output).toContain('"intentCatalog":"full"');
-  });
-
-  it("renders the catalog for a health check", () => {
-    const output = formatReviewSnapshot(snapshot, {
-      requestedTriggers: ["intent-health-check"],
-    });
-
-    expect(output).toContain("<intent_catalog>");
-    expect(output).toContain('"intentCatalog":"full"');
+    expect(output).toContain('"activeExperienceCount":1');
   });
 
   it("escapes user-controlled snapshot text", () => {
@@ -68,7 +50,7 @@ describe("formatReviewSnapshot", () => {
         ...snapshot,
         current: { ...snapshot.current, input: "<unsafe & value>" },
       },
-      { requestedTriggers: ["intent-health-check"] },
+      { requestedTriggers: ["experience-health-check"] },
     );
 
     expect(output).toContain("&lt;unsafe &amp; value&gt;");

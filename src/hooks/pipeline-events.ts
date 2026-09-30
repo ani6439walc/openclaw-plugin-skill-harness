@@ -1,18 +1,12 @@
 import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { logger } from "../../api.js";
 import { roundToDecimals } from "../normalize.js";
-import type {
-  IntentRoutingEvidence,
-  IntentRoutingSearchEvidence,
-  IntentTrigger,
-} from "../types.js";
 import type { PluginHookAgentContext } from "./types.js";
 
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
-export type PipelinePhase =
-  "pipeline" | "intent-match" | "skill-match" | IntentTrigger;
+export type PipelinePhase = "pipeline" | "skill-match" | "experience-match";
 
 export type PipelineState = "started" | "completed" | "failed";
 
@@ -42,8 +36,6 @@ export type PipelineMetadata = {
   collectionHits?: Partial<Record<"meta" | "body" | "references", number>>;
   injectedCollections?: Partial<Record<"meta" | "body" | "references", number>>;
   explain?: string;
-  searchEvidence?: IntentRoutingSearchEvidence;
-  routingEvidence?: IntentRoutingEvidence;
 };
 
 function cleanPipelineEventData(

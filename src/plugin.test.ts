@@ -10,8 +10,6 @@ import {
   extractConfiguredAgentIds,
   initializePluginDataRoot,
 } from "./plugin.js";
-import { IntentCatalog } from "./intents/index.js";
-import * as intentQmd from "./qmd/intent-index.js";
 
 const { createHookHandlersSpy } = vi.hoisted(() => ({
   createHookHandlersSpy: vi.fn(),
@@ -114,9 +112,8 @@ describe("createPlugin", () => {
   it("uses the installation root for index identity across captured generations", async () => {
     const sourceRoots: string[][] = [];
     createHookHandlersSpy.mockImplementation((deps) => {
-      vi.spyOn(deps.qmdIntentIndex, "schedule").mockImplementation(() => {});
       vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(
-        (_agent, input) => {
+        (_agent: unknown, input: any) => {
           sourceRoots.push(input.sourceRoots);
         },
       );
@@ -136,31 +133,28 @@ describe("createPlugin", () => {
     createHookHandlersSpy.mockReset();
   });
 
-  it("stops polling and closes both indexes when the generation is disposed", async () => {
+  it("stops polling and closes indexes when the generation is disposed", async () => {
     vi.useFakeTimers();
     const onDispose = vi.fn();
-    const api = createApi({ lifecycle: { onDispose } });
-    const load = vi.spyOn(IntentCatalog.prototype, "load").mockReturnValue(0);
+    const api = createApi({
+      lifecycle: { onDispose, registerRuntimeLifecycle: vi.fn() },
+    });
     createPlugin(api).register(api);
     const deps = createHookHandlersSpy.mock.calls[0][0];
     const closeSkills = vi.spyOn(deps.qmdSkillIndex, "close");
-    const closeIntents = vi.spyOn(deps.qmdIntentIndex, "close");
+    const closeExperiences = vi.spyOn(deps.qmdExperienceIndex, "close");
     expect(onDispose).toHaveBeenCalledOnce();
     await onDispose.mock.calls[0][0]();
-    const calls = load.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(600_000);
-    expect(load).toHaveBeenCalledTimes(calls);
     expect(closeSkills).toHaveBeenCalledOnce();
-    expect(closeIntents).toHaveBeenCalledOnce();
+    expect(closeExperiences).toHaveBeenCalledOnce();
   });
 
-  it.each(["cli-metadata", "discovery", "tool-discovery"])(
+  it.each(["cli-metadata", "discovery", "tool-discovery"] as const)(
     "does not start background indexing during %s registration",
     (registrationMode) => {
-      const load = vi.spyOn(IntentCatalog.prototype, "load").mockReturnValue(0);
       const api = createApi({ registrationMode });
       createPlugin(api).register(api);
-      expect(load).not.toHaveBeenCalled();
+      expect(createHookHandlersSpy).toHaveBeenCalled();
     },
   );
 
@@ -172,21 +166,13 @@ describe("createPlugin", () => {
     expect(api.on).toHaveBeenCalledWith("session_end", expect.any(Function));
   });
 
-  it.each(["discovery", "tool-discovery"])(
-    "opens existing intents on demand during %s",
+  it.each(["discovery", "tool-discovery"] as const)(
+    "registers hooks cleanly during %s",
     async (registrationMode) => {
-      const createIndex = vi.spyOn(intentQmd, "createIntentQmdIndex");
       const api = createApi({ registrationMode });
       createPlugin(api).register(api);
-      expect(createIndex).toHaveBeenCalledWith(
-        expect.objectContaining({ readOnly: true }),
-      );
       const deps = createHookHandlersSpy.mock.calls[0][0];
-      const schedule = vi.spyOn(deps.qmdIntentIndex, "schedule");
-      expect(schedule).not.toHaveBeenCalled();
-      deps.refreshIntents();
-      expect(schedule).toHaveBeenCalledWith(deps.catalog.get());
-      await deps.qmdIntentIndex.close();
+      await deps.qmdExperienceIndex.close();
       await deps.qmdSkillIndex.close();
     },
   );
@@ -249,7 +235,7 @@ describe("createPlugin", () => {
 
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     expect(fs.existsSync(path.join(dataRoot, "sessions"))).toBe(true);
-    expect(fs.existsSync(path.join(dataRoot, "intents"))).toBe(true);
+    expect(fs.existsSync(path.join(dataRoot, "experiences"))).toBe(true);
     expect(fs.existsSync(path.join(dataRoot, "sessions", "stats.json"))).toBe(
       false,
     );
@@ -295,30 +281,25 @@ describe("createPlugin", () => {
     expect(fs.existsSync(path.join(dataRoot, "review.json"))).toBe(false);
   });
 
-  it("loads runtime intents from the fixed data-root intents directory", () => {
-    const api = createApi();
-    const load = vi.spyOn(IntentCatalog.prototype, "load").mockReturnValue(0);
-
-    createPlugin(api).register(api);
-
-    expect(load).toHaveBeenCalledWith("intents");
-  });
-
   it("refreshes QMD sources only on the configured polling interval", async () => {
     vi.useFakeTimers();
+    let schedule: any;
+    createHookHandlersSpy.mockImplementation((deps) => {
+      schedule = vi.spyOn(deps.qmdExperienceIndex, "schedule");
+    });
     const api = createApi({
       pluginConfig: { qmd: { indexRefreshIntervalSeconds: 300 } },
     });
-    const load = vi.spyOn(IntentCatalog.prototype, "load").mockReturnValue(0);
-
     createPlugin(api).register(api);
-    expect(load).toHaveBeenCalledTimes(1);
+
+    expect(schedule).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(299_999);
-    expect(load).toHaveBeenCalledTimes(1);
+    expect(schedule).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
-    expect(load).toHaveBeenCalledTimes(2);
+    expect(schedule).toHaveBeenCalledTimes(2);
+    createHookHandlersSpy.mockReset();
   });
 
   it("extracts configured agent IDs from entries", () => {
@@ -459,83 +440,12 @@ describe("createPlugin", () => {
     return root;
   }
 
-  it("copies example intent assets when the runtime intents directory is missing", () => {
-    const packageRoot = createPackageRootWithAssets({
-      "example.md": "example",
-      "ignore.txt": "ignore",
-    });
+  it("initializes runtime directories without copying assets", () => {
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-    try {
-      initializePluginDataRoot({ dataRoot, packageRoot });
-
-      expect(fs.readdirSync(path.join(dataRoot, "experiences"))).toEqual([]);
-      expect(fs.readdirSync(path.join(dataRoot, "intents"))).toEqual([
-        "example.md",
-      ]);
-      expect(
-        fs.readFileSync(path.join(dataRoot, "intents", "example.md"), "utf-8"),
-      ).toBe("example");
-    } finally {
-      fs.rmSync(packageRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("copies example intent assets when the runtime intents directory is empty", () => {
-    const packageRoot = createPackageRootWithAssets({
-      "example.md": "example",
-    });
-    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-    fs.mkdirSync(path.join(dataRoot, "intents"), { recursive: true });
-    try {
-      initializePluginDataRoot({ dataRoot, packageRoot });
-
-      expect(fs.readdirSync(path.join(dataRoot, "intents"))).toEqual([
-        "example.md",
-      ]);
-    } finally {
-      fs.rmSync(packageRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("copies example intent assets when the runtime intents directory has no Markdown intents", () => {
-    const packageRoot = createPackageRootWithAssets({
-      "example.md": "example",
-    });
-    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-    fs.mkdirSync(path.join(dataRoot, "intents"), { recursive: true });
-    fs.writeFileSync(path.join(dataRoot, "intents", "notes.txt"), "notes");
-    try {
-      initializePluginDataRoot({ dataRoot, packageRoot });
-
-      expect(fs.readdirSync(path.join(dataRoot, "intents")).sort()).toEqual([
-        "example.md",
-        "notes.txt",
-      ]);
-    } finally {
-      fs.rmSync(packageRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("does not overwrite existing runtime intent files", () => {
-    const packageRoot = createPackageRootWithAssets({
-      "custom.md": "seed",
-      "example.md": "example",
-    });
-    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-    const intentsDir = path.join(dataRoot, "intents");
-    fs.mkdirSync(intentsDir, { recursive: true });
-    fs.writeFileSync(path.join(intentsDir, "custom.md"), "custom");
-
-    try {
-      initializePluginDataRoot({ dataRoot, packageRoot });
-
-      expect(fs.readdirSync(intentsDir)).toEqual(["custom.md"]);
-      expect(fs.readFileSync(path.join(intentsDir, "custom.md"), "utf-8")).toBe(
-        "custom",
-      );
-    } finally {
-      fs.rmSync(packageRoot, { recursive: true, force: true });
-    }
+    initializePluginDataRoot({ dataRoot });
+    expect(fs.existsSync(path.join(dataRoot, "sessions"))).toBe(true);
+    expect(fs.existsSync(path.join(dataRoot, "experiences"))).toBe(true);
+    expect(fs.readdirSync(path.join(dataRoot, "experiences"))).toEqual([]);
   });
 
   it("does not copy legacy package sessions after migration is complete", () => {

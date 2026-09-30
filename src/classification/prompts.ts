@@ -6,48 +6,7 @@ import {
 } from "../constants.js";
 import { xmlBlock } from "../xml-format.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
-import type {
-  AvailableSkill,
-  IntentCatalogEntry,
-  IntentionResult,
-} from "../types.js";
-
-function buildIntentCatalog(intents: readonly IntentCatalogEntry[]): string {
-  const intentBlocks = intents
-    .map((entry) => {
-      const lines: string[] = [];
-      if (entry.definition.triggers.length > 0) {
-        lines.push(`triggers:`);
-        lines.push(
-          ...entry.definition.triggers.map(
-            (trigger) => `- ${escapeXmlText(trigger)}`,
-          ),
-        );
-      }
-      if (entry.definition.examples.length > 0) {
-        lines.push(`examples:`);
-        lines.push(
-          ...entry.definition.examples.map(
-            (example) => `- ${escapeXmlText(example)}`,
-          ),
-        );
-      }
-      return xmlBlock(
-        "intent",
-        lines.join("\n"),
-        ` id="${escapeXmlAttribute(entry.id)}"`,
-      );
-    })
-    .join("\n");
-
-  return xmlBlock("intent_catalog", intentBlocks);
-}
-
-export function measureIntentCatalogCodePoints(
-  intents: readonly IntentCatalogEntry[],
-): number {
-  return Array.from(buildIntentCatalog(intents)).length;
-}
+import type { AvailableSkill } from "../types.js";
 
 export function normalizeKeywords(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -146,20 +105,12 @@ function selectAdvisoryHeader(
 }
 
 export function buildRoutingContext(params: {
-  result?: IntentionResult;
-  guidance?: string;
   matchedSkills?: readonly AvailableSkill[];
-  intentMatchedSkills?: readonly AvailableSkill[];
-  experiences?: readonly SkillExperienceEntry[];
   inputMatchedSkills?: readonly AvailableSkill[];
+  experiences?: readonly SkillExperienceEntry[];
 }): string {
   const matchedSkills: readonly AvailableSkill[] =
-    params.matchedSkills !== undefined
-      ? params.matchedSkills
-      : [
-          ...(params.intentMatchedSkills ?? []),
-          ...(params.inputMatchedSkills ?? []),
-        ];
+    params.matchedSkills ?? params.inputMatchedSkills ?? [];
   const experiences = params.experiences ?? [];
 
   if (matchedSkills.length === 0 && experiences.length === 0) return "";

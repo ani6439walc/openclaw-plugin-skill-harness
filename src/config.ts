@@ -126,6 +126,7 @@ const DEFAULT_REVIEW = {
   thinking: "medium",
   timeoutSeconds: 300,
   triggers: {
+    experienceHealthCheck: { enabled: true, everyTurns: 10 },
     intentHealthCheck: { enabled: true, everyTurns: 10 },
     routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
     capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
@@ -528,12 +529,18 @@ const ReviewSchema = z
     timeoutSeconds: boundedInt(300, 60, 1_800),
     triggers: z
       .object({
+        experienceHealthCheck: z
+          .object({
+            enabled: enabledSchema,
+            everyTurns: boundedInt(10, 1, 1_000),
+          })
+          .optional(),
         intentHealthCheck: z
           .object({
             enabled: enabledSchema,
             everyTurns: boundedInt(10, 1, 1_000),
           })
-          .catch(DEFAULT_REVIEW.triggers.intentHealthCheck),
+          .optional(),
         routingUncertainty: z
           .object({
             enabled: enabledSchema,
@@ -551,7 +558,19 @@ const ReviewSchema = z
           })
           .catch(DEFAULT_REVIEW.triggers.capabilityFit),
       })
-      .catch(DEFAULT_REVIEW.triggers),
+      .catch(DEFAULT_REVIEW.triggers)
+      .transform((val) => {
+        const healthCheck =
+          val.experienceHealthCheck ??
+          val.intentHealthCheck ??
+          DEFAULT_REVIEW.triggers.experienceHealthCheck;
+        return {
+          experienceHealthCheck: healthCheck,
+          intentHealthCheck: healthCheck,
+          routingUncertainty: val.routingUncertainty,
+          capabilityFit: val.capabilityFit,
+        };
+      }),
   })
   .catch(DEFAULT_REVIEW)
   .transform((val): ResolvedReviewConfig => ({

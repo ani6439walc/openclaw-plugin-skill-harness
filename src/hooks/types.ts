@@ -1,6 +1,5 @@
 import type { OpenClawPluginApi } from "../../api.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
-import type { defaultCatalog } from "../intents/index.js";
 import type { defaultTracker } from "../session/index.js";
 import type { defaultStatsAggregator } from "../stats/index.js";
 import type { IntentReviewLogWriter } from "../review/log-writer.js";
@@ -16,10 +15,9 @@ import type {
   JevUnifiedRoutingParams,
   runJevUnifiedRouting,
 } from "../classification/index.js";
-import type { ClassifiedIntentionResult, RoutingLlmResult } from "../types.js";
+import type { RoutingLlmResult } from "../types.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
-import type { IntentQmdIndex } from "../qmd/intent-index.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
 import type { SkillExperienceQmdIndex } from "../qmd/experience-index.js";
 import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
@@ -141,14 +139,11 @@ export type HookDeps = {
   api: OpenClawPluginApi;
   config: () => ResolvedSkillHarnessPluginConfig;
   refreshLiveConfigFromRuntime: () => void;
-  refreshIntents: (options?: { rebuildQmd?: boolean }) => void;
-  catalog?: typeof defaultCatalog;
   tracker?: typeof defaultTracker;
   statsAggregator?: typeof defaultStatsAggregator;
   skillInventoryResolver?: typeof resolveSkillInventory;
   clock?: () => Date;
   experienceCatalog?: SkillExperienceCatalog;
-  qmdIntentIndex?: IntentQmdIndex;
   qmdSkillIndex?: SkillQmdIndex;
   qmdExperienceIndex?: SkillExperienceQmdIndex;
   reviewScheduler?: IntentReviewScheduler | ReviewSchedulerLike;
@@ -161,9 +156,7 @@ export type HookDeps = {
   routingSubagent?: (
     params: JevUnifiedRoutingParams,
   ) => Promise<RoutingLlmResult | undefined>;
-  classifier?: (
-    params: unknown,
-  ) => Promise<ClassifiedIntentionResult | RoutingLlmResult | undefined>;
+  classifier?: (params: unknown) => Promise<RoutingLlmResult | undefined>;
   reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
     Partial<Pick<IntentReviewLogWriter, "completedSkillEpochKeys">>;
   getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;

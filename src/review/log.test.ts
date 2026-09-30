@@ -55,20 +55,20 @@ describe("review log", () => {
       processedEvents: {
         event: {
           processedAt: "2026-06-11T00:01:00.000Z",
-          triggers: ["intent-health-check"],
+          triggers: ["experience-health-check"],
           changeCount: 1,
           outcome: "applied",
           changes: [
             {
-              trigger: "intent-health-check",
-              targetKind: "intent-markdown",
+              trigger: "experience-health-check",
+              targetKind: "skill-experience",
               operation: "delete",
-              targetIntentIds: ["obsolete"],
-              dedupeKey: "obsolete-intent",
-              summary: "Remove an obsolete intent.",
+              targetExperienceIds: ["obsolete"],
+              dedupeKey: "obsolete-experience",
+              summary: "Remove an obsolete experience.",
               evidence: ["The catalog has a durable duplicate boundary."],
-              correctionGoal: "Remove the redundant runtime intent.",
-              suggestedChange: "Delete obsolete.md.",
+              correctionGoal: "Remove the redundant runtime experience.",
+              suggestedChange: "Delete obsolete experience.",
             },
           ],
         },

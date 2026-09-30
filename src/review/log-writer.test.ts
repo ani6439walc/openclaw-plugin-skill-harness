@@ -22,14 +22,14 @@ describe("IntentReviewLogWriter", () => {
   it("writes one v8 record for an applied review", async () => {
     const finding = {
       trigger: "capability-fit" as const,
-      targetKind: "intent-markdown" as const,
+      targetKind: "skill-experience" as const,
       operation: "refine" as const,
-      targetIntentIds: ["productivity"],
+      targetExperienceIds: ["productivity"] as [string],
       dedupeKey: "deploy-flow",
       summary: "Reusable deployment flow",
       evidence: ["Five related tool calls"],
       correctionGoal: "Preserve deployment workflow",
-      suggestedChange: "Updated productivity.md",
+      suggestedChange: "Updated productivity",
     };
 
     expect(
@@ -50,7 +50,7 @@ describe("IntentReviewLogWriter", () => {
           triggers: ["capability-fit"],
           changeCount: 1,
           outcome: "applied",
-          changes: [{ targetKind: "intent-markdown" }],
+          changes: [{ targetKind: "skill-experience" }],
         },
       },
     });
@@ -71,14 +71,14 @@ describe("IntentReviewLogWriter", () => {
 
     expect(
       await writer.record("next", source, [], {
-        triggers: ["intent-health-check"],
+        triggers: ["experience-health-check"],
       }),
     ).toBe(true);
     const persisted = JSON.parse(fs.readFileSync(logPath, "utf8"));
     expect(persisted).toMatchObject({ schemaVersion: 8 });
     expect(persisted.processedEvents).not.toHaveProperty("prior");
     expect(persisted.processedEvents.next.triggers).toEqual([
-      "intent-health-check",
+      "experience-health-check",
     ]);
   });
 
@@ -105,6 +105,8 @@ describe("IntentReviewLogWriter", () => {
       observedTurns: 20,
       usageTurns: 0,
       intentMatchedTurns: 0,
+      winnerFingerprint: "wf",
+      fingerprint: "fp",
     };
     expect(
       await writer.record("placement-event", source, [], {

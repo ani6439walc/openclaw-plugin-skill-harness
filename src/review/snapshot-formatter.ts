@@ -2,6 +2,7 @@ import type { AvailableSkill } from "../types.js";
 import { indentXmlLines } from "../xml-format.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { ReviewSnapshot } from "./types.js";
+import type { SkillExperienceEntry } from "../experiences/types.js";
 
 function escapeSnapshotText(value: unknown): string {
   return String(value ?? "")
@@ -22,19 +23,18 @@ type ReviewSnapshotBlockName =
   | "recent_turns"
   | "turn_metadata"
   | "user_input"
-  | "intent_metadata"
   | "skills_used"
   | "tool_calls"
   | "assistant_result"
   | "assistant_result_omission"
   | "agent_error"
-  | "matched_intent"
   | "skill"
   | "name"
   | "description"
   | "path"
   | "available_skills"
-  | "intent_catalog";
+  | "active_experiences"
+  | "experience";
 
 function wrapRequiredReviewSnapshotBlock(
   name: ReviewSnapshotBlockName,
@@ -63,27 +63,6 @@ function addDefined(
   value: unknown,
 ): void {
   if (value !== undefined) target[key] = value;
-}
-
-function formatIntentMetadata(
-  intent: ReviewSnapshot["current"]["intent"],
-  recommendationCandidates?: ReviewSnapshot["current"]["recommendationCandidates"],
-): string {
-  if (!intent && !recommendationCandidates?.length) return "";
-  const metadata: Record<string, unknown> = {};
-  addDefined(metadata, "intent", intent?.intent);
-  addDefined(metadata, "confidence", intent?.confidence);
-  addDefined(metadata, "reason", intent?.reason);
-  addDefined(metadata, "keywords", intent?.keywords);
-  if (recommendationCandidates?.length) {
-    metadata.recommendationCandidates = recommendationCandidates.map(
-      (candidate) => ({
-        name: candidate.name,
-        provenance: candidate.provenance,
-      }),
-    );
-  }
-  return stringifySnapshotJson(metadata);
 }
 
 type SnapshotToolCall = NonNullable<
@@ -277,6 +256,26 @@ function formatAvailableSkills(skills: readonly AvailableSkill[] | undefined) {
   );
 }
 
+function formatActiveExperiences(
+  experiences: readonly SkillExperienceEntry[] | undefined,
+): string | undefined {
+  if (!experiences || experiences.length === 0) return undefined;
+  return wrapOptionalReviewSnapshotBlock(
+    "active_experiences",
+    experiences
+      .map((exp) => {
+        const item: Record<string, unknown> = {
+          id: exp.id,
+          summary: exp.summary,
+          keywords: exp.keywords,
+          skills: exp.skills,
+        };
+        return `<experience>${stringifySnapshotJson(item)}</experience>`;
+      })
+      .join("\n"),
+  );
+}
+
 function formatReviewState(
   blockName: "current_turn" | "recent_turn",
   state: ReviewSnapshot["current"],
@@ -286,7 +285,8 @@ function formatReviewState(
   addDefined(metadata, "turnNumber", options.turnNumber);
   addDefined(metadata, "startedAt", state.timestamps?.start);
   addDefined(metadata, "endedAt", state.timestamps?.end);
-  addDefined(metadata, "routeProvenance", state.routeProvenance?.trigger);
+  addDefined(metadata, "matchedSkills", state.matchedSkills);
+  addDefined(metadata, "matchedExperiences", state.matchedExperiences);
   addDefined(metadata, "capabilityFit", state.capabilityFit);
 
   const fields = [
@@ -297,15 +297,6 @@ function formatReviewState(
     wrapOptionalReviewSnapshotBlock(
       "user_input",
       state.input?.trim() ? escapeSnapshotText(state.input) : "",
-    ),
-    wrapOptionalReviewSnapshotBlock(
-      "intent_metadata",
-      formatIntentMetadata(
-        state.intent,
-        blockName === "current_turn"
-          ? state.recommendationCandidates
-          : undefined,
-      ),
     ),
     state.skillsUsed?.length
       ? wrapRequiredReviewSnapshotBlock(
@@ -341,61 +332,7 @@ function formatReviewState(
   return wrapRequiredReviewSnapshotBlock("current_turn", content);
 }
 
-function formatMatchedIntent(snapshot: ReviewSnapshot): string | undefined {
-  const intent = snapshot.matchedIntent;
-  if (!intent) return undefined;
-  return wrapRequiredReviewSnapshotBlock(
-    "matched_intent",
-    [
-      wrapRequiredReviewSnapshotBlock(
-        "intent_metadata",
-        stringifySnapshotJson(formatIntentEntryMetadata(intent)),
-      ),
-    ]
-      .filter((field): field is string => field !== undefined)
-      .join("\n\n"),
-  );
-}
-
-function formatIntentEntryMetadata(
-  entry:
-    ReviewSnapshot["intentCatalog"][number] | ReviewSnapshot["matchedIntent"],
-): Record<string, unknown> {
-  if (!entry) return {};
-  const definition = "definition" in entry ? entry.definition : entry;
-  const metadata: Record<string, unknown> = {
-    id: entry.id,
-  };
-  metadata.triggers = [...definition.triggers];
-  metadata.examples = [...definition.examples];
-  if (definition.skills !== undefined) {
-    metadata.skills = [...definition.skills];
-  }
-  if ("guidance" in definition && definition.guidance !== undefined) {
-    metadata.guidance = definition.guidance;
-  }
-  if ("keywords" in definition && definition.keywords !== undefined) {
-    metadata.keywords = [...definition.keywords];
-  }
-  return metadata;
-}
-
-function formatIntentCatalog(
-  entries: readonly ReviewSnapshot["intentCatalog"][number][],
-): string | undefined {
-  return wrapOptionalReviewSnapshotBlock(
-    "intent_catalog",
-    entries
-      .map(
-        (entry) =>
-          `<intent>${stringifySnapshotJson(formatIntentEntryMetadata(entry))}</intent>`,
-      )
-      .join("\n"),
-  );
-}
-
 interface FormatReviewSnapshotOptions {
-  includeIntentCatalog?: boolean;
   requestedTriggers?: readonly ReviewTrigger[];
 }
 
@@ -403,20 +340,15 @@ function formatSnapshotManifest(
   snapshot: ReviewSnapshot,
   options: FormatReviewSnapshotOptions,
   availableSkillRenderedCodePointCount: number,
-  includesIntentCatalog: boolean,
 ): string {
   const manifest: Record<string, unknown> = {
     requestedTriggers: [...(options.requestedTriggers ?? [])],
-    currentIntent: snapshot.current.intent?.intent ?? null,
-    intentConfidence: snapshot.current.intent?.confidence ?? null,
-    routeProvenance: snapshot.current.routeProvenance?.trigger ?? null,
     recentTurnCount: snapshot.recent.length,
     currentSkillsUsedCount: snapshot.current.skillsUsed?.length ?? 0,
     currentToolCallCount: snapshot.current.toolCalls?.length ?? 0,
     availableSkillCount: snapshot.availableSkills?.length ?? 0,
     availableSkillRenderedCodePointCount,
-    matchedIntentPresent: snapshot.matchedIntent !== undefined,
-    intentCatalog: includesIntentCatalog ? "full" : "omitted",
+    activeExperienceCount: snapshot.activeExperiences?.length ?? 0,
   };
   return wrapRequiredReviewSnapshotBlock(
     "snapshot_manifest",
@@ -436,11 +368,9 @@ function formatSkillPlacementCandidate(
       reason: candidate.reason,
       observedTurns: candidate.observedTurns,
       usageTurns: candidate.usageTurns,
-      intentMatchedTurns: candidate.intentMatchedTurns,
       ...(candidate.adoptionRate !== undefined
         ? { adoptionRate: candidate.adoptionRate }
         : {}),
-      currentlyReferencedIntentIds: [...candidate.currentlyReferencedIntentIds],
     }),
   );
 }
@@ -474,14 +404,6 @@ export function formatReviewSnapshot(
   snapshot: ReviewSnapshot,
   options: FormatReviewSnapshotOptions = {},
 ): string {
-  const includesIntentCatalog =
-    options.includeIntentCatalog !== false &&
-    options.requestedTriggers?.some(
-      (trigger) =>
-        trigger === "intent-health-check" ||
-        trigger === "routing-uncertainty" ||
-        trigger === "capability-fit",
-    ) === true;
   const availableSkills = formatAvailableSkills(snapshot.availableSkills);
   const recent = wrapOptionalReviewSnapshotBlock(
     "recent_turns",
@@ -496,17 +418,15 @@ export function formatReviewSnapshot(
       snapshot,
       options,
       availableSkills ? Array.from(indentXmlLines(availableSkills)).length : 0,
-      includesIntentCatalog,
     ),
     formatReviewState("current_turn", snapshot.current, {
       turnNumber: snapshot.turnNumber,
     }),
-    formatMatchedIntent(snapshot),
     recent,
     availableSkills,
-    includesIntentCatalog
-      ? formatIntentCatalog(snapshot.intentCatalog)
-      : undefined,
+    formatActiveExperiences(snapshot.activeExperiences),
+    formatSkillPlacementCandidate(snapshot.skillPlacementCandidate),
+    formatSelectedPlacementSkill(snapshot.selectedPlacementSkill),
   ]
     .filter((block): block is string => block !== undefined)
     .join("\n\n");

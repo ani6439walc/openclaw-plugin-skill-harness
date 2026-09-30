@@ -63,7 +63,7 @@ export function sanitizeConversationText(text: string): string {
     .trim();
 }
 
-export function sanitizeHistoricalIntentInput(text: string): string {
+export function sanitizePromptInput(text: string): string {
   const input = text.trimStart();
   const assembledContextIndex = input.startsWith(
     OPENCLAW_ASSEMBLED_CONTEXT_HEADER,
@@ -96,6 +96,8 @@ export function sanitizeHistoricalIntentInput(text: string): string {
   return sanitizeConversationText(prompt.slice(requestStart, contextEnd));
 }
 
+export const sanitizeHistoricalIntentInput = sanitizePromptInput;
+
 function isHeartbeatMessage(role: string, text: string): boolean {
   const trimmed = text.trim();
   if (role === "assistant" && trimmed === "HEARTBEAT_OK") return true;
@@ -119,7 +121,7 @@ export function extractRecentTurns(
     const rawText = extractTextContent(message.content);
     const text =
       role === "user"
-        ? sanitizeHistoricalIntentInput(rawText)
+        ? sanitizePromptInput(rawText)
         : sanitizeConversationText(rawText);
     if (!text || isHeartbeatMessage(role, text)) continue;
 
@@ -159,9 +161,7 @@ export function extractLatestUserMessage(
       ) {
         continue;
       }
-      const text = sanitizeHistoricalIntentInput(
-        extractTextContent(message.content),
-      );
+      const text = sanitizePromptInput(extractTextContent(message.content));
       if (text && !isHeartbeatMessage("user", text)) {
         latestUserMessage = text;
         break;
@@ -175,5 +175,5 @@ export function extractLatestUserMessage(
   ) {
     return latestUserMessage;
   }
-  return prompt ? sanitizeHistoricalIntentInput(prompt) : latestUserMessage;
+  return prompt ? sanitizePromptInput(prompt) : latestUserMessage;
 }

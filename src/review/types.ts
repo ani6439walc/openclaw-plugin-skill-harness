@@ -1,13 +1,7 @@
 import type { ReviewTrigger } from "./triggers.js";
-import type { ReviewOperation } from "./log.js";
 import type { SkillPlacementCandidate } from "../stats/aggregator.js";
-import type {
-  AvailableSkill,
-  IntentCatalogEntry,
-  IntentDefinition,
-  IntentionResult,
-  IntentTrigger,
-} from "../types.js";
+import type { AvailableSkill } from "../types.js";
+import type { SkillExperienceEntry } from "../experiences/types.js";
 
 export interface ReviewRecommendationCandidate {
   name: string;
@@ -23,8 +17,8 @@ export type CapabilityFitEvidence = {
 
 export type ReviewState = {
   input?: string;
-  intent?: IntentionResult;
-  routeProvenance?: { trigger: IntentTrigger };
+  matchedSkills?: string[];
+  matchedExperiences?: string[];
   capabilityFit?: CapabilityFitEvidence;
   recommendationCandidates?: ReviewRecommendationCandidate[];
   skillsUsed?: Array<{
@@ -44,9 +38,7 @@ export type ReviewState = {
   timestamps?: { start?: string; end?: string };
 };
 
-export type SkillPlacementReviewCandidate = SkillPlacementCandidate & {
-  currentlyReferencedIntentIds: string[];
-};
+export type SkillPlacementReviewCandidate = SkillPlacementCandidate;
 
 export type SelectedPlacementSkill = Pick<
   AvailableSkill,
@@ -64,14 +56,10 @@ export type ReviewSnapshot = {
   turnNumber: number;
   current: ReviewState;
   recent: ReviewState[];
-  matchedIntent?: IntentCatalogEntry;
   availableSkills?: AvailableSkill[];
+  activeExperiences?: SkillExperienceEntry[];
   skillPlacementCandidate?: SkillPlacementReviewCandidate;
   selectedPlacementSkill?: SelectedPlacementSkill;
-  intentCatalog: Array<
-    { id: string } & Pick<IntentDefinition, "triggers" | "examples"> &
-      Partial<Pick<IntentDefinition, "keywords" | "skills" | "guidance">>
-  >;
 };
 
 type BaseReviewFinding = {
@@ -83,19 +71,12 @@ type BaseReviewFinding = {
   suggestedChange: string;
 };
 
-export type IntentMarkdownReviewFinding = BaseReviewFinding & {
-  targetKind: "intent-markdown";
-  operation: ReviewOperation;
-  targetIntentIds: string[];
-};
-
 export type SkillExperienceReviewFinding = BaseReviewFinding & {
   targetKind: "skill-experience";
   targetExperienceIds: [string];
 };
 
-export type ReviewFinding =
-  IntentMarkdownReviewFinding | SkillExperienceReviewFinding;
+export type ReviewFinding = SkillExperienceReviewFinding;
 
 export type ReviewSource = {
   sessionId: string;

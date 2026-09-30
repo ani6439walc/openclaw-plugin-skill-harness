@@ -16,7 +16,7 @@
     "properties": {
       "qmd": {
         "type": "object",
-        "description": "Required QMD remote services for mandatory hybrid intent routing and skill search. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
+        "description": "Required QMD remote services for skill and experience search. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
         "additionalProperties": false,
         "properties": {
           "timeoutMs": {
@@ -74,7 +74,7 @@
             "minimum": 0,
             "maximum": 86400,
             "default": 300,
-            "description": "Seconds between source checks for QMD intent and skill index refreshes; 0 disables subsequent automatic checks."
+            "description": "Seconds between source checks for QMD experience and skill index refreshes; 0 disables subsequent automatic checks."
           }
         },
         "required": ["embedding", "expansion"]
@@ -197,7 +197,7 @@
       },
       "routing": {
         "type": "object",
-        "description": "Pre-turn dynamic intent routing thresholds and fallback classifier.",
+        "description": "Pre-turn dynamic routing thresholds and candidate selection.",
         "additionalProperties": false,
         "properties": {
           "scope": {
@@ -210,7 +210,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Agent IDs eligible for intention scanning.",
+                "description": "Agent IDs eligible for dynamic routing.",
                 "default": ["main"]
               },
               "chatTypes": {
@@ -419,7 +419,7 @@
       },
       "review": {
         "type": "object",
-        "description": "Optional asynchronous post-turn Intent Review. It can update future runtime intents but never participates in the current route decision.",
+        "description": "Optional asynchronous post-turn Review. It evaluates turns and maintains experiences but never participates in the current route decision.",
         "additionalProperties": false,
         "properties": {
           "enabled": {
@@ -428,7 +428,7 @@
           },
           "model": {
             "type": "string",
-            "description": "Explicit dedicated model for Intent Review runs. If unset, inherits the top-level model before current-session and agent-primary resolution."
+            "description": "Explicit dedicated model for Review runs. If unset, inherits the top-level model before current-session and agent-primary resolution."
           },
           "modelFallback": {
             "type": "string",
@@ -446,7 +446,7 @@
               "adaptive",
               "max"
             ],
-            "description": "Thinking level for the Intent Review sub-agent.",
+            "description": "Thinking level for the Review sub-agent.",
             "default": "medium"
           },
           "timeoutSeconds": {
@@ -454,15 +454,32 @@
             "minimum": 60,
             "maximum": 1800,
             "default": 300,
-            "description": "Budget in seconds for each Intent Review sub-agent run."
+            "description": "Budget in seconds for each Review sub-agent run."
           },
           "triggers": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
+              "experienceHealthCheck": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "everyTurns": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 10
+                  }
+                }
+              },
               "intentHealthCheck": {
                 "type": "object",
                 "additionalProperties": false,
+                "description": "Deprecated alias for experienceHealthCheck.",
                 "properties": {
                   "enabled": {
                     "type": "boolean",
