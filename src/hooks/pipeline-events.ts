@@ -6,7 +6,8 @@ import type { PluginHookAgentContext } from "./types.js";
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
-export type PipelinePhase = "pipeline" | "skill-match" | "experience-match";
+export type PipelinePhase =
+  "pipeline" | "name-match" | "search" | "experience-search" | "rerank";
 
 export type PipelineState = "started" | "completed" | "failed";
 
@@ -20,7 +21,7 @@ export type PipelineMetadata = {
   basis?: string;
   keywords?: string[];
   changed?: boolean;
-  reason?: string;
+  reason?: string | string[];
   confidence?: number;
   result?: string | string[];
   error?: string;
@@ -30,12 +31,19 @@ export type PipelineMetadata = {
   experienceCandidates?: number;
   candidateCount?: number;
   injectedCount?: number;
+  selectedSkills?: string[];
+  selectedExperiences?: string[];
   injectedSkills?: string[];
   injectedExperiences?: string[];
   fallbackReason?: SkillCandidatePoolFallbackReason;
   collectionHits?: Partial<Record<"meta" | "body" | "references", number>>;
   injectedCollections?: Partial<Record<"meta" | "body" | "references", number>>;
   explain?: string;
+  status?:
+    "completed" | "disabled" | "unavailable" | "timeout" | "error" | "skipped";
+  minCandidateScore?: number;
+  matches?: { name: string; score: number }[];
+  hits?: { id: string; semanticScore: number | null }[];
 };
 
 function cleanPipelineEventData(

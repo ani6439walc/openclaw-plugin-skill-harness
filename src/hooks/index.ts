@@ -100,6 +100,17 @@ export type { HookDeps } from "./types.js";
 
 const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
 
+function eventError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Unknown error";
+  return message
+    .replace(/(bearer\s+)\S+/giu, "$1[redacted]")
+    .replace(
+      /(api[_-]?key|token|secret|password)\s*[:=]\s*\S+/giu,
+      "$1=[redacted]",
+    )
+    .slice(0, 240);
+}
+
 export function formatConversationExpansionContext(params: {
   conversation?: readonly RecentTurn[];
   candidateTokens?: readonly string[];
@@ -578,6 +589,7 @@ export function createHookHandlers(deps: HookDeps) {
   };
 
   async function discoverSkillCandidates(params: {
+    ctx: PluginHookAgentContext;
     routing: PromptBuildIdentity;
     refreshedConfig: ResolvedSkillHarnessPluginConfig;
     latestUserMessage: string;
@@ -630,6 +642,10 @@ export function createHookHandlers(deps: HookDeps) {
     let nameCandidates: SkillDiscoveryCandidate[] = [];
     let matchedTokens: string[] = [];
     let fallbackReason: SkillCandidatePoolFallbackReason | undefined;
+    let nameMatchStatus: "completed" | "disabled" | "error" =
+      policy.maxInjectedSkills === 0 ? "disabled" : "completed";
+    let nameMatchError: string | undefined;
+    const nameMatchStartedAtMs = Date.now();
 
     try {
       const nameMatchResult =
@@ -647,8 +663,32 @@ export function createHookHandlers(deps: HookDeps) {
       }));
       matchedTokens = nameMatchResult.matchedTokens;
     } catch (error) {
+      nameMatchStatus = "error";
+      nameMatchError = eventError(error);
       fallbackReason = "name-channel-unavailable";
       logger.warn("skill name candidate matching failed", { error });
+    } finally {
+      emitPipelineEvent(
+        params.ctx,
+        params.routing.resolvedSessionKey,
+        "name-match",
+        "completed",
+        {
+          status: nameMatchStatus,
+          result: nameCandidates.map((candidate) => candidate.skillName),
+          reason: matchedTokens,
+          confidence: nameCandidates.length
+            ? Math.max(...nameCandidates.map((candidate) => candidate.score))
+            : undefined,
+          ...(nameMatchError ? { error: nameMatchError } : {}),
+          candidateCount: nameCandidates.length,
+          matches: nameCandidates.map((candidate) => ({
+            name: candidate.skillName,
+            score: candidate.score,
+          })),
+          durationMs: Math.max(0, Date.now() - nameMatchStartedAtMs),
+        },
+      );
     }
 
     let retrievalCandidates: SkillDiscoveryCandidate[] = [];
@@ -661,13 +701,22 @@ export function createHookHandlers(deps: HookDeps) {
     });
 
     const searchSkills = async () => {
-      if (policy.maxInjectedSkills === 0) return;
-      if (!qmdSkillIndex) {
-        fallbackReason = "retrieval-unavailable";
-        return;
-      }
+      const searchStartedAtMs = Date.now();
+      let status:
+        "completed" | "disabled" | "unavailable" | "timeout" | "error" =
+        policy.maxInjectedSkills === 0 ? "disabled" : "unavailable";
+      let searchError: string | undefined;
+      let searchReason: string | undefined;
+      let searchConfidence: number | undefined;
+      let hits: { id: string; semanticScore: number | null }[] = [];
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
+        if (policy.maxInjectedSkills === 0) return;
+        if (!qmdSkillIndex) {
+          fallbackReason = "retrieval-unavailable";
+          searchError = "QMD skill index unavailable";
+          return;
+        }
         const timeout = new Promise<"timeout">((resolve) => {
           timer = setTimeout(() => resolve("timeout"), policy.search.timeoutMs);
         });
@@ -685,12 +734,20 @@ export function createHookHandlers(deps: HookDeps) {
           timeout,
         ]);
         if (outcome === "timeout") {
+          status = "timeout";
           fallbackReason = "retrieval-timeout";
+          searchError = "QMD skill search timed out";
         } else if ("error" in outcome) {
           throw outcome.error;
         } else if (outcome.hits === undefined) {
           fallbackReason = "retrieval-unavailable";
+          searchError = "QMD skill index unavailable";
         } else {
+          status = "completed";
+          hits = outcome.hits.map((hit) => ({
+            id: hit.name,
+            semanticScore: hit.semanticScore ?? null,
+          }));
           retrievalSemanticScores = outcome.hits.flatMap((hit) =>
             hit.semanticScore === undefined ? [] : [hit.semanticScore],
           );
@@ -729,12 +786,43 @@ export function createHookHandlers(deps: HookDeps) {
               retrievalCollections[col] += 1;
             }
           }
+          const topHit = outcome.hits.find((hit) =>
+            retrievalCandidates.some(
+              (candidate) => candidate.skillName === hit.name,
+            ),
+          );
+          if (topHit) {
+            searchReason = `#1 ${topHit.name} · RRF ${topHit.score.toFixed(4)}`;
+            searchConfidence = topHit.semanticScore;
+          }
         }
       } catch (error) {
+        status = "error";
+        searchError = eventError(error);
         fallbackReason = "retrieval-unavailable";
         logger.warn("skill candidate retrieval failed", { error });
       } finally {
         if (timer !== undefined) clearTimeout(timer);
+        emitPipelineEvent(
+          params.ctx,
+          params.routing.resolvedSessionKey,
+          "search",
+          "completed",
+          {
+            status,
+            result: retrievalCandidates.map((candidate) => candidate.skillName),
+            ...(searchReason ? { reason: searchReason } : {}),
+            ...(searchConfidence === undefined
+              ? {}
+              : { confidence: searchConfidence }),
+            ...(searchError ? { error: searchError } : {}),
+            minCandidateScore: policy.search.minCandidateScore,
+            hits,
+            candidateCount: retrievalCandidates.length,
+            collectionHits: retrievalCollections,
+            durationMs: Math.max(0, Date.now() - searchStartedAtMs),
+          },
+        );
       }
     };
 
@@ -749,9 +837,17 @@ export function createHookHandlers(deps: HookDeps) {
       candidateCount: 0,
     };
     const searchExperiences = async () => {
-      if (!qmdExperienceIndex || expPolicy.maxInjectedExperiences === 0) return;
+      const searchStartedAtMs = Date.now();
+      let searchError: string | undefined;
+      let searchReason: string | undefined;
+      let searchConfidence: number | undefined;
       let expTimer: ReturnType<typeof setTimeout> | undefined;
       try {
+        if (expPolicy.maxInjectedExperiences === 0) return;
+        if (!qmdExperienceIndex) {
+          searchError = "QMD experience index unavailable";
+          return;
+        }
         const timeout = new Promise<"timeout">((resolve) => {
           expTimer = setTimeout(
             () => resolve("timeout"),
@@ -771,6 +867,7 @@ export function createHookHandlers(deps: HookDeps) {
         ]);
         if (expOutcome === "timeout") {
           experienceRetrieval.status = "timeout";
+          searchError = "QMD experience search timed out";
         } else if ("error" in expOutcome) {
           experienceRetrieval.status = "error";
           throw expOutcome.error;
@@ -791,6 +888,11 @@ export function createHookHandlers(deps: HookDeps) {
               roundToDecimals(hit.semanticScore, 2) >=
               roundToDecimals(expPolicy.search.minCandidateScore, 2),
           );
+          const topHit = qualifiedHits[0];
+          if (topHit) {
+            searchReason = `#1 ${topHit.id} · RRF ${topHit.score.toFixed(4)}`;
+            searchConfidence = topHit.semanticScore;
+          }
           for (const hit of qualifiedHits) {
             const resolved = experienceCatalog?.resolve(hit.id);
             if (resolved) {
@@ -807,12 +909,36 @@ export function createHookHandlers(deps: HookDeps) {
             }
           }
           experienceRetrieval.candidateCount = candidateExperiences.length;
+        } else if (expOutcome !== "timeout" && !("error" in expOutcome)) {
+          searchError = "QMD experience index unavailable";
         }
       } catch (error) {
         experienceRetrieval.status = "error";
+        searchError = eventError(error);
         logger.warn("experience candidate retrieval failed", { error });
       } finally {
         if (expTimer !== undefined) clearTimeout(expTimer);
+        emitPipelineEvent(
+          params.ctx,
+          params.routing.resolvedSessionKey,
+          "experience-search",
+          "completed",
+          {
+            status: experienceRetrieval.status,
+            result: [
+              ...new Set(candidateExperiences.flatMap((entry) => entry.skills)),
+            ],
+            ...(searchReason ? { reason: searchReason } : {}),
+            ...(searchConfidence === undefined
+              ? {}
+              : { confidence: searchConfidence }),
+            ...(searchError ? { error: searchError } : {}),
+            minCandidateScore: experienceRetrieval.minCandidateScore,
+            hits: experienceRetrieval.hits,
+            candidateCount: experienceRetrieval.candidateCount,
+            durationMs: Math.max(0, Date.now() - searchStartedAtMs),
+          },
+        );
       }
     };
 
@@ -958,7 +1084,7 @@ export function createHookHandlers(deps: HookDeps) {
       return result;
     } catch (error) {
       emitPipelineEvent(ctx, sessionKey, "pipeline", "failed", {
-        error: "skill-harness pipeline execution failed",
+        error: eventError(error),
         durationMs: Math.max(0, Date.now() - startedAtMs),
       });
       throw error;
@@ -1048,6 +1174,7 @@ export function createHookHandlers(deps: HookDeps) {
         routing.resolvedSessionKey,
         async () => {
           const skillDiscoveryResult = await discoverSkillCandidates({
+            ctx,
             routing,
             refreshedConfig,
             latestUserMessage,
@@ -1064,6 +1191,12 @@ export function createHookHandlers(deps: HookDeps) {
           let confidence = 0;
           let matchedSkills: readonly AvailableSkill[] = [];
           let matchedExperiences: SkillExperienceEntry[] = [];
+          let selectedSkills: string[] = [];
+          let selectedExperiences: string[] = [];
+          let rerankStatus: "completed" | "skipped" | "unavailable" | "error" =
+            "skipped";
+          let rerankError: string | undefined;
+          const rerankStartedAtMs = Date.now();
           const visibleMap = new Map(
             skillDiscoveryResult.visibleSkills.map((s) => [
               canonicalIdentity(s.name),
@@ -1095,7 +1228,10 @@ export function createHookHandlers(deps: HookDeps) {
               });
 
               if (llmResult) {
+                rerankStatus = "completed";
                 confidence = llmResult.confidence;
+                selectedSkills = [...llmResult.skills];
+                selectedExperiences = [...(llmResult.experiences ?? [])];
                 const candidateExpMap = new Map(
                   skillDiscoveryResult.candidateExperiences.map((e) => [
                     e.id,
@@ -1130,10 +1266,14 @@ export function createHookHandlers(deps: HookDeps) {
                   })
                   .slice(0, refreshedConfig.routing.skills.maxInjectedSkills);
               } else {
+                rerankStatus = "unavailable";
+                rerankError = "Jev routing unavailable";
                 matchedSkills = [];
                 matchedExperiences = [];
               }
             } catch (error) {
+              rerankStatus = "error";
+              rerankError = eventError(error);
               logger.warn("routing selector execution failed", { error });
               matchedSkills = [];
               matchedExperiences = [];
@@ -1161,61 +1301,54 @@ export function createHookHandlers(deps: HookDeps) {
               };
             });
 
-          const explainSummary = injectedCandidates
-            .map((candidate) => {
-              const matched = unionPool.pool.find(
-                (p) => p.skillName === candidate.name,
-              );
-              const cols = candidate.collections?.join(",") ?? "none";
-              const top = candidate.topCollection
-                ? ` via ${candidate.topCollection}`
-                : "";
-              const score = matched
-                ? ` (score ${roundToDecimals(matched.score, 2)})`
-                : "";
-              return `${candidate.name} [${candidate.source}${top}: ${cols}${score}]`;
-            })
-            .join("; ");
-
-          const skillSources = [
-            ...new Set(
-              injectedCandidates.map((c) =>
-                c.source === "direct-retrieval" ? "qmd-search" : c.source,
+          const finalSkillNames = new Set(
+            matchedSkills.map((skill) => canonicalIdentity(skill.name)),
+          );
+          const contributedBy: string[] = [];
+          if (
+            skillDiscoveryResult.nameCandidates.some((candidate) =>
+              finalSkillNames.has(canonicalIdentity(candidate.skillName)),
+            )
+          ) {
+            contributedBy.push("name-match");
+          }
+          if (
+            skillDiscoveryResult.retrievalCandidates.some((candidate) =>
+              finalSkillNames.has(canonicalIdentity(candidate.skillName)),
+            )
+          ) {
+            contributedBy.push("search");
+          }
+          if (
+            matchedExperiences.some((experience) =>
+              experience.skills.some((skill) =>
+                finalSkillNames.has(canonicalIdentity(skill)),
               ),
-            ),
-          ];
+            )
+          ) {
+            contributedBy.push("experience-search");
+          }
 
           emitPipelineEvent(
             ctx,
             routing.resolvedSessionKey,
-            "skill-match",
+            "rerank",
             "completed",
             {
-              nameCandidates: skillDiscoveryResult.nameCandidates.length,
-              retrievalCandidates:
-                skillDiscoveryResult.retrievalCandidates.length,
+              status: rerankStatus,
+              result: matchedSkills.map((skill) => skill.name),
+              reason: contributedBy,
+              ...(rerankStatus === "completed" ? { confidence } : {}),
+              ...(rerankError ? { error: rerankError } : {}),
+              selectedSkills,
+              selectedExperiences,
               experienceCandidates:
                 skillDiscoveryResult.candidateExperiences.length,
-              candidateCount: unionPool.pool.length,
+              candidateCount: unionPool.candidateSkills.length,
               injectedCount: matchedSkills.length,
               injectedSkills: matchedSkills.map((s) => s.name),
               injectedExperiences: matchedExperiences.map((e) => e.id),
-              ...(skillSources.length > 0
-                ? { reason: skillSources.join(",") }
-                : {}),
-              result: matchedSkills.map((s) => s.name),
-              collectionHits: skillDiscoveryResult.retrievalCollections,
-              injectedCollections,
-              explain: explainSummary || "none",
-              ...(matchedSkills.length === 0 &&
-              matchedExperiences.length === 0 &&
-              skillDiscoveryResult.fallbackReason
-                ? { fallbackReason: skillDiscoveryResult.fallbackReason }
-                : {}),
-              durationMs: Math.max(
-                0,
-                Date.now() - skillDiscoveryResult.startedAtMs,
-              ),
+              durationMs: Math.max(0, Date.now() - rerankStartedAtMs),
             },
           );
 

@@ -24,7 +24,7 @@ it("rounds confidence to two decimal places before emitting", () => {
   emitPipelineEvent(
     { runId: "test-run" },
     "test-session",
-    "skill-match",
+    "name-match",
     "completed",
     {
       injectedSkills: ["meme-maker"],
@@ -39,7 +39,7 @@ it("rounds confidence to two decimal places before emitting", () => {
     stream: "plugin:skill-harness",
     data: {
       kind: "skill-harness.pipeline",
-      phase: "skill-match",
+      phase: "name-match",
       state: "completed",
       sessionKey: "test-session",
       injectedSkills: ["meme-maker"],

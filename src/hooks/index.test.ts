@@ -2894,12 +2894,22 @@ describe("createHookHandlers topic switch flow", () => {
     expect(result?.prependContext).toBeUndefined();
     expect(classifier).not.toHaveBeenCalled();
     expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "skill-match:completed",
+      "name-match:completed",
     );
+    expect(emittedPhaseStates(emitAgentEvent)).toContain("search:completed");
+    expect(emittedPhaseStates(emitAgentEvent)).toContain(
+      "experience-search:completed",
+    );
+    expect(emittedPhaseStates(emitAgentEvent)).toContain("rerank:completed");
     expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
     expect(emittedPhaseStates(emitAgentEvent).at(-1)).toBe(
       "pipeline:completed",
     );
+    expect(
+      emittedPipelineEvents(emitAgentEvent).find(
+        (entry) => entry.data.phase === "rerank",
+      )?.data,
+    ).toMatchObject({ status: "skipped", injectedSkills: [] });
     expect(emittedPipelineEvents(emitAgentEvent).at(-1)?.data).toEqual(
       expect.objectContaining({ durationMs: expect.any(Number) }),
     );
@@ -3315,11 +3325,11 @@ describe("createHookHandlers topic switch flow", () => {
       );
       expect(result?.prependContext).not.toContain("<intent");
       const skillEvent = emittedPipelineEvents(emitAgentEvent).find(
-        (e) => e.data.phase === "skill-match" && e.data.state === "completed",
+        (e) => e.data.phase === "rerank" && e.data.state === "completed",
       );
       expect(skillEvent?.data).toEqual(
         expect.objectContaining({
-          result: ["domain-test-skill"],
+          selectedSkills: ["domain-test-skill"],
           injectedCount: 1,
         }),
       );
@@ -3364,7 +3374,7 @@ describe("createHookHandlers topic switch flow", () => {
       };
     });
 
-    const { handlers } = createTopicFlowHarness({
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
       classifier,
       experienceCatalog: {
@@ -3425,6 +3435,52 @@ describe("createHookHandlers topic switch flow", () => {
       expect(result?.prependContext).toContain('<skill name="name-skill">');
       expect(result?.prependContext).toContain('<skill name="exp-skill">');
       expect(result?.prependContext).not.toContain('<skill name="qmd-skill">');
+      const phases = emittedPipelineEvents(emitAgentEvent);
+      const phaseNames = phases.map((entry) => entry.data.phase);
+      expect(phaseNames).toHaveLength(6);
+      expect(phaseNames[0]).toBe("pipeline");
+      expect(phaseNames[1]).toBe("name-match");
+      expect(phaseNames.slice(2, 4).sort()).toEqual([
+        "experience-search",
+        "search",
+      ]);
+      expect(phaseNames.slice(4)).toEqual(["rerank", "pipeline"]);
+      const dataFor = (phase: string) =>
+        phases.find((entry) => entry.data.phase === phase)?.data;
+      expect(dataFor("name-match")).toMatchObject({
+        status: "completed",
+        result: ["name-skill"],
+        reason: expect.arrayContaining(["name", "skill"]),
+        confidence: expect.any(Number),
+        matches: [{ name: "name-skill", score: expect.any(Number) }],
+        candidateCount: 1,
+      });
+      expect(dataFor("search")).toMatchObject({
+        status: "completed",
+        result: ["qmd-skill"],
+        reason: "#1 qmd-skill · RRF 0.8000",
+        confidence: 0.8,
+        hits: [{ id: "qmd-skill", semanticScore: 0.8 }],
+        candidateCount: 1,
+      });
+      expect(dataFor("experience-search")).toMatchObject({
+        status: "completed",
+        result: ["exp-skill"],
+        reason: "#1 e1 · RRF 0.8500",
+        confidence: 0.85,
+        hits: [{ id: "e1", semanticScore: 0.85 }],
+        candidateCount: 1,
+      });
+      expect(dataFor("rerank")).toMatchObject({
+        status: "completed",
+        result: ["name-skill", "exp-skill"],
+        reason: ["name-match", "experience-search"],
+        confidence: 0.9,
+        selectedSkills: ["name-skill"],
+        selectedExperiences: ["e1"],
+        injectedSkills: ["name-skill", "exp-skill"],
+        injectedExperiences: ["e1"],
+      });
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -3862,12 +3918,22 @@ describe("createHookHandlers topic switch flow", () => {
       expect(result?.prependContext).not.toContain("<input_matched_skills>");
       const skillMatchEvent = emittedPipelineEvents(emitAgentEvent).find(
         (entry) =>
-          entry.data.phase === "skill-match" &&
-          entry.data.state === "completed",
+          entry.data.phase === "rerank" && entry.data.state === "completed",
       );
-      expect(skillMatchEvent?.data).toEqual(
-        expect.objectContaining({ reason: "qmd-search", result: ["review"] }),
-      );
+      expect(skillMatchEvent?.data).toMatchObject({
+        selectedSkills: ["review"],
+        injectedSkills: ["review"],
+      });
+      expect(
+        emittedPipelineEvents(emitAgentEvent).find(
+          (entry) => entry.data.phase === "search",
+        )?.data,
+      ).toMatchObject({
+        result: ["review"],
+        reason: "#1 review · RRF 0.7000",
+        confidence: 0.9,
+        hits: [{ id: "review", semanticScore: 0.9 }],
+      });
       expect(record).toHaveBeenLastCalledWith(
         "session-1",
         expect.objectContaining({
@@ -3903,7 +3969,7 @@ describe("createHookHandlers topic switch flow", () => {
       .mockResolvedValue([
         { name: "kubernetes-deployer", score: 0.8, semanticScore: 0.9 },
       ]);
-    const { handlers } = createTopicFlowHarness({
+    const { handlers, emitAgentEvent } = createTopicFlowHarness({
       historicalIntents: [],
       qmdSkillIndex: { search },
       api: {
@@ -3973,22 +4039,21 @@ describe("createHookHandlers topic switch flow", () => {
         expect.objectContaining({ includeEvidence: true }),
       );
 
-      const skillMatchEvent = emittedPipelineEvents(emitAgentEvent).find(
+      const skillSearchEvent = emittedPipelineEvents(emitAgentEvent).find(
         (entry) =>
-          entry.data.phase === "skill-match" &&
-          entry.data.state === "completed",
+          entry.data.phase === "search" && entry.data.state === "completed",
       );
-      expect(skillMatchEvent?.data).toEqual(
+      expect(skillSearchEvent?.data).toEqual(
         expect.objectContaining({
-          reason: "qmd-search",
-          result: ["review"],
           collectionHits: { meta: 1, body: 1, references: 0 },
-          injectedCollections: { meta: 1, body: 1, references: 0 },
-          explain: expect.stringContaining(
-            "review [direct-retrieval via meta: meta,body",
-          ),
+          hits: [{ id: "review", semanticScore: 0.92 }],
         }),
       );
+      expect(
+        emittedPipelineEvents(emitAgentEvent).find(
+          (entry) => entry.data.phase === "rerank",
+        )?.data,
+      ).toMatchObject({ injectedSkills: ["review"] });
 
       expect(record).toHaveBeenLastCalledWith(
         "session-1",
@@ -4053,6 +4118,17 @@ describe("createHookHandlers topic switch flow", () => {
         SKILL_HARNESS_SYSTEM_CONTEXT,
       );
       expect(search).toHaveBeenCalledOnce();
+      expect(
+        emittedPipelineEvents(emitAgentEvent).find(
+          (entry) => entry.data.phase === "search",
+        )?.data,
+      ).toMatchObject({
+        status: "timeout",
+        result: [],
+        error: "QMD skill search timed out",
+        hits: [],
+        candidateCount: 0,
+      });
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -4389,6 +4465,16 @@ Current user request: fresh clean request with clean-skill
           (entry) => entry.data.phase === "intent-match",
         ),
       ).toHaveLength(0);
+      expect(
+        emittedPipelineEvents(emitAgentEvent).find(
+          (entry) => entry.data.phase === "rerank",
+        )?.data,
+      ).toMatchObject({
+        status: "error",
+        result: [],
+        error: "Subagent crashed",
+        injectedSkills: [],
+      });
       expect(record).toHaveBeenCalledWith(
         "session-1",
         expect.objectContaining({
