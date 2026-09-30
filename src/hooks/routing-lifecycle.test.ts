@@ -17,9 +17,20 @@ afterEach(() => {
 });
 
 describe("routing lifecycle with real session and stats persistence", () => {
-  it.each([true, false])(
-    "records experience-only and unmatched turns (hit=%s) and schedules review",
-    async (hasHit) => {
+  it.each([
+    "selected",
+    "selector-rejected",
+    "below-threshold",
+    "no-hits",
+    "unavailable",
+    "timeout",
+    "error",
+  ] as const)(
+    "records experience retrieval diagnostics (%s) and schedules review",
+    async (scenario) => {
+      const hasHit = scenario === "selected";
+      const hasCandidate =
+        scenario === "selected" || scenario === "selector-rejected";
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "routing-lifecycle-"));
       roots.push(root);
       const workspace = path.join(root, "workspace");
@@ -50,23 +61,25 @@ describe("routing lifecycle with real session and stats persistence", () => {
         ],
         weights: [1, 0.8, 0.5],
       });
-      const experienceSearch = vi.fn(async () =>
-        hasHit
-          ? [
-              {
-                id: "recovery",
-                skills: [],
-                score: fused.score,
-                semanticScore: 0.95,
-                matchedCollections: ["keywords", "summary", "body"],
-                evidence: [],
-              },
-            ]
-          : [],
-      );
+      const experienceSearch = vi.fn(async () => {
+        if (scenario === "timeout") return await new Promise<never>(() => {});
+        if (scenario === "error") throw new Error("search failed");
+        if (scenario === "unavailable") return undefined;
+        if (scenario === "no-hits") return [];
+        return [
+          {
+            id: "recovery",
+            skills: [],
+            score: fused.score,
+            semanticScore: scenario === "below-threshold" ? 0.39 : 0.95,
+            matchedCollections: ["keywords", "summary", "body"],
+            evidence: [],
+          },
+        ];
+      });
       const selector = vi.fn(async () => ({
         skills: [],
-        experiences: ["recovery"],
+        experiences: hasHit ? ["recovery"] : [],
         confidence: 0.4,
         reason: "Relevant recovery",
       }));
@@ -85,7 +98,10 @@ describe("routing lifecycle with real session and stats persistence", () => {
         experienceCatalog: new SkillExperienceCatalog(root),
         config: () =>
           resolveConfig({
-            routing: { skills: { maxInjectedSkills: 0 } },
+            routing: {
+              skills: { maxInjectedSkills: 0 },
+              experiences: { search: { timeoutMs: 100 } },
+            },
             review: {
               enabled: true,
               model: "test/reviewer",
@@ -126,10 +142,16 @@ describe("routing lifecycle with real session and stats persistence", () => {
       );
       expect(experienceSearch).toHaveBeenCalledOnce();
       expect(skillSearch).not.toHaveBeenCalled();
-      if (hasHit) {
+      if (hasCandidate) {
         expect(selector).toHaveBeenCalledOnce();
-        expect(result?.prependContext).toContain('<experience id="recovery">');
-        expect(result?.prependContext).not.toContain("<matched_skills>");
+        if (hasHit) {
+          expect(result?.prependContext).toContain(
+            '<experience id="recovery">',
+          );
+          expect(result?.prependContext).not.toContain("<matched_skills>");
+        } else {
+          expect(result?.prependContext).toBeUndefined();
+        }
       } else {
         expect(selector).not.toHaveBeenCalled();
         expect(result?.prependContext).toBeUndefined();
@@ -142,8 +164,39 @@ describe("routing lifecycle with real session and stats persistence", () => {
       expect(state).toMatchObject({
         matchedSkills: [],
         matchedExperiences: hasHit ? ["recovery"] : [],
-        confidence: hasHit ? 0.4 : 0,
+        confidence: hasCandidate ? 0.4 : 0,
       });
+      const expectedRetrieval = {
+        status:
+          scenario === "unavailable" ||
+          scenario === "timeout" ||
+          scenario === "error"
+            ? scenario
+            : "completed",
+        minCandidateScore: 0.4,
+        hits:
+          scenario === "unavailable" ||
+          scenario === "no-hits" ||
+          scenario === "timeout" ||
+          scenario === "error"
+            ? []
+            : [
+                {
+                  id: "recovery",
+                  semanticScore: scenario === "below-threshold" ? 0.39 : 0.95,
+                },
+              ],
+        candidateCount: hasCandidate ? 1 : 0,
+      };
+      expect(state?.inputSkillDiscovery?.experienceRetrieval).toEqual(
+        expectedRetrieval,
+      );
+      const savedSession = JSON.parse(
+        fs.readFileSync(path.join(root, "sessions", "session-1.json"), "utf8"),
+      );
+      expect(
+        savedSession.current.inputSkillDiscovery.experienceRetrieval,
+      ).toEqual(expectedRetrieval);
       expect(state?.intent?.result).toBeUndefined();
       const persisted = JSON.parse(
         fs.readFileSync(path.join(root, "stats.json"), "utf8"),

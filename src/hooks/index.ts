@@ -568,6 +568,9 @@ export function createHookHandlers(deps: HookDeps) {
     nameCandidates: SkillDiscoveryCandidate[];
     retrievalCandidates: SkillDiscoveryCandidate[];
     candidateExperiences: SkillExperienceEntry[];
+    experienceRetrieval: NonNullable<
+      InputSkillDiscovery["experienceRetrieval"]
+    >;
     retrievalSemanticScores: number[];
     retrievalCollections: Record<SkillCollectionKind, number>;
     fallbackReason?: SkillCandidatePoolFallbackReason;
@@ -598,6 +601,12 @@ export function createHookHandlers(deps: HookDeps) {
         nameCandidates: [],
         retrievalCandidates: [],
         candidateExperiences: [],
+        experienceRetrieval: {
+          status: "disabled",
+          minCandidateScore: expPolicy.search.minCandidateScore,
+          hits: [],
+          candidateCount: 0,
+        },
         retrievalSemanticScores: [],
         retrievalCollections,
         startedAtMs,
@@ -730,6 +739,15 @@ export function createHookHandlers(deps: HookDeps) {
     };
 
     const candidateExperiences: SkillExperienceEntry[] = [];
+    const experienceRetrieval: NonNullable<
+      InputSkillDiscovery["experienceRetrieval"]
+    > = {
+      status:
+        expPolicy.maxInjectedExperiences === 0 ? "disabled" : "unavailable",
+      minCandidateScore: expPolicy.search.minCandidateScore,
+      hits: [],
+      candidateCount: 0,
+    };
     const searchExperiences = async () => {
       if (!qmdExperienceIndex || expPolicy.maxInjectedExperiences === 0) return;
       let expTimer: ReturnType<typeof setTimeout> | undefined;
@@ -751,6 +769,18 @@ export function createHookHandlers(deps: HookDeps) {
             .catch((error) => ({ error })),
           timeout,
         ]);
+        if (expOutcome === "timeout") {
+          experienceRetrieval.status = "timeout";
+        } else if ("error" in expOutcome) {
+          experienceRetrieval.status = "error";
+          throw expOutcome.error;
+        } else if (expOutcome.hits) {
+          experienceRetrieval.status = "completed";
+          experienceRetrieval.hits = expOutcome.hits.map((hit) => ({
+            id: hit.id,
+            semanticScore: hit.semanticScore,
+          }));
+        }
         if (
           expOutcome !== "timeout" &&
           !("error" in expOutcome) &&
@@ -776,8 +806,10 @@ export function createHookHandlers(deps: HookDeps) {
               });
             }
           }
+          experienceRetrieval.candidateCount = candidateExperiences.length;
         }
       } catch (error) {
+        experienceRetrieval.status = "error";
         logger.warn("experience candidate retrieval failed", { error });
       } finally {
         if (expTimer !== undefined) clearTimeout(expTimer);
@@ -791,6 +823,7 @@ export function createHookHandlers(deps: HookDeps) {
       nameCandidates,
       retrievalCandidates,
       candidateExperiences,
+      experienceRetrieval,
       retrievalSemanticScores,
       retrievalCollections,
       fallbackReason,
@@ -1195,6 +1228,7 @@ export function createHookHandlers(deps: HookDeps) {
               skillDiscoveryResult.retrievalCandidates.length,
             retrievalSemanticScores:
               skillDiscoveryResult.retrievalSemanticScores,
+            experienceRetrieval: skillDiscoveryResult.experienceRetrieval,
             candidateCount: unionPool.pool.length,
             injectedSkills: injectedCandidates,
             retrievalCollections: skillDiscoveryResult.retrievalCollections,

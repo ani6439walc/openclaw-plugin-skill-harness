@@ -49,6 +49,12 @@ export type InputSkillDiscovery = {
   retrievalAttempted: boolean;
   retrievalCandidates: number;
   retrievalSemanticScores: number[];
+  experienceRetrieval?: {
+    status: "disabled" | "unavailable" | "timeout" | "error" | "completed";
+    minCandidateScore: number;
+    hits: Array<{ id: string; semanticScore: number }>;
+    candidateCount: number;
+  };
   candidateCount: number;
   injectedSkills: Array<{
     name: string;
