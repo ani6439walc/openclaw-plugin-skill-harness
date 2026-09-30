@@ -76,7 +76,7 @@ describe("runJevUnifiedRouting", () => {
     expect(result).toEqual({
       skills: ["git-tools"],
       experiences: [],
-      confidence: 1.0,
+      confidence: 0.85,
       reason: "jev → 1 skill: [git-tools]",
     });
   });
@@ -117,6 +117,7 @@ describe("runJevUnifiedRouting", () => {
     });
 
     expect(result?.skills).toEqual(["skill-2", "skill-3"]);
+    expect(result?.confidence).toBe(0.95);
     expect(result?.reason).toBe("jev → 2 skills: [skill-2, skill-3]");
   });
 
@@ -314,6 +315,7 @@ describe("runJevUnifiedRouting", () => {
     expect(result?.experiences).toEqual(["git-merge-conflict"]);
     expect(result?.skills).toContain("markdown-formatter");
     expect(result?.skills).toContain("git-tools");
+    expect(result?.confidence).toBe(0.95);
     expect(result?.reason).toContain("git-merge-conflict");
   });
 });

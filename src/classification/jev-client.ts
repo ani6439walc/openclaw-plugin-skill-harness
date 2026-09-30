@@ -236,11 +236,15 @@ export async function runJevUnifiedRouting(
     const expListStr = selectedExperiences.join(", ");
     const expCount = `${selectedExperiences.length} ${selectedExperiences.length === 1 ? "exp" : "exps"}`;
     const reason = `jev → ${skillCount}: [${skillListStr}]${selectedExperiences.length > 0 ? `, ${expCount}: [${expListStr}]` : ""}`;
+    const confidence = Math.max(
+      ...skillProbabilities.map(({ prob }) => prob),
+      ...experienceProbabilities.map(({ prob }) => prob),
+    );
 
     return {
       skills: selectedSkills,
       experiences: selectedExperiences,
-      confidence: 1.0,
+      confidence,
       reason,
     };
   } catch (err) {

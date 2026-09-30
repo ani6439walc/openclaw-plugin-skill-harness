@@ -50,7 +50,15 @@ function cleanPipelineEventData(
   data: Record<string, unknown>,
 ): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(data).filter(([, value]) => value !== undefined),
+    Object.entries(data).filter(
+      ([key, value]) =>
+        value !== undefined &&
+        !(
+          key === "reason" &&
+          ((typeof value === "string" && value.trim() === "") ||
+            (Array.isArray(value) && value.length === 0))
+        ),
+    ),
   );
 }
 

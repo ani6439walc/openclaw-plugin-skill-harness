@@ -48,3 +48,21 @@ it("rounds confidence to two decimal places before emitting", () => {
     },
   });
 });
+
+it("omits empty reasons before emitting", () => {
+  for (const reason of ["", "  ", []]) {
+    mockEmitAgentEvent.mockClear();
+
+    emitPipelineEvent(
+      { runId: "test-run" },
+      "test-session",
+      "rerank",
+      "completed",
+      { reason },
+    );
+
+    expect(mockEmitAgentEvent.mock.calls[0]?.[0].data).not.toHaveProperty(
+      "reason",
+    );
+  }
+});
