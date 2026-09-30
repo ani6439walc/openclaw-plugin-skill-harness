@@ -34,6 +34,9 @@ export interface PluginHookAgentContext {
   readonly messageProvider?: string;
   readonly channelId?: string;
   readonly trigger?: string;
+  readonly inputProvenance?: {
+    readonly kind: "external_user" | "inter_session" | "internal_system";
+  };
   readonly modelProviderId?: string;
   readonly modelId?: string;
 }

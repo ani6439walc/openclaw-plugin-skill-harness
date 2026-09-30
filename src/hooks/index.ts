@@ -1531,6 +1531,12 @@ export function createHookHandlers(deps: HookDeps) {
         sessionKey: resolvedSessionKey,
       };
       if (shouldSkipSkillSystemContext(resolvedContext)) return;
+      if (
+        ctx.inputProvenance?.kind === "inter_session" ||
+        ctx.inputProvenance?.kind === "internal_system" ||
+        isInternalUserTurn(event)
+      )
+        return;
 
       staticContextEligible = true;
       refreshLiveConfigFromRuntime();
@@ -1550,9 +1556,6 @@ export function createHookHandlers(deps: HookDeps) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       if (shouldSkipIntentAnalysis(resolvedContext)) {
-        return toPromptBuildResult(undefined, workingSetSkillsXml);
-      }
-      if (isInternalUserTurn(event)) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       if (!isEligibleInteractiveSession(resolvedContext)) {

@@ -2168,14 +2168,50 @@ describe("createHookHandlers internal turn guards", () => {
     vi.restoreAllMocks();
   });
 
-  it("injects static context for inter-session turns after refreshing config but without intents", async () => {
+  it.each(["inter_session", "internal_system"] as const)(
+    "skips a current %s turn even when the prompt and history look external",
+    async (kind) => {
+      const refreshLiveConfigFromRuntime = vi.fn();
+      const refreshIntents = vi.fn();
+      const handlers = createHookHandlers({
+        api: { config: {} } as OpenClawPluginApi,
+        config: () => resolveConfig({}),
+        refreshLiveConfigFromRuntime,
+        refreshIntents,
+      });
+
+      const result = await handlers.onBeforePromptBuild(
+        {
+          prompt: "subagent completion payload",
+          messages: [
+            {
+              role: "user",
+              content: "previous direct-user question",
+              provenance: { kind: "external_user" },
+            },
+          ],
+        },
+        {
+          trigger: "user",
+          inputProvenance: { kind },
+          agentId: "main",
+          sessionKey: "agent:main:direct:123",
+        },
+      );
+
+      expect(result).toBeUndefined();
+      expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
+      expect(refreshIntents).not.toHaveBeenCalled();
+    },
+  );
+
+  it("skips inter-session turns by transcript provenance when hook context lacks it", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
-    const refreshIntents = vi.fn();
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
       config: () => resolveConfig({}),
       refreshLiveConfigFromRuntime,
-      refreshIntents,
+      refreshIntents: vi.fn(),
     });
 
     const result = await handlers.onBeforePromptBuild(
@@ -2192,21 +2228,14 @@ describe("createHookHandlers internal turn guards", () => {
           },
         ],
       },
-      {
-        trigger: "user",
-        agentId: "main",
-        sessionKey: "agent:main:direct:123",
-      },
+      { trigger: "user", agentId: "main", sessionKey: "agent:main:direct:123" },
     );
 
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
-    expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
-    expect(refreshIntents).not.toHaveBeenCalled();
+    expect(result).toBeUndefined();
+    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
   });
 
-  it("injects static context for legacy inter-session marker turns", async () => {
+  it("skips legacy inter-session marker turns", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
@@ -2228,13 +2257,11 @@ describe("createHookHandlers internal turn guards", () => {
       },
     );
 
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
-    expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
+    expect(result).toBeUndefined();
+    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
   });
 
-  it("injects static context for protected internal completion envelopes", async () => {
+  it("skips protected internal completion envelopes", async () => {
     const refreshLiveConfigFromRuntime = vi.fn();
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
@@ -2259,10 +2286,8 @@ describe("createHookHandlers internal turn guards", () => {
       },
     );
 
-    expect(result).toEqual({
-      appendSystemContext: SKILL_HARNESS_SYSTEM_CONTEXT,
-    });
-    expect(refreshLiveConfigFromRuntime).toHaveBeenCalledOnce();
+    expect(result).toBeUndefined();
+    expect(refreshLiveConfigFromRuntime).not.toHaveBeenCalled();
   });
 
   it("injects static context for a scoped non-user trigger without dynamic work", async () => {
