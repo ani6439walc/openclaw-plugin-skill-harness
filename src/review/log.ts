@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ReviewSource } from "./types.js";
-import { REVIEW_TRIGGER_TYPES, type ReviewTrigger } from "./triggers.js";
+import { REVIEW_TRIGGER_TYPES } from "./triggers.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
 import type { SkillPlacementReason } from "../stats/aggregator.js";
@@ -47,8 +47,14 @@ export type SchemaRejectionReasonCounts = Partial<
   Record<SchemaRejectionReasonCode, number>
 >;
 
+const STORED_REVIEW_TRIGGERS = [
+  ...REVIEW_TRIGGER_TYPES,
+  "intent-health-check",
+] as const;
+type StoredReviewTrigger = (typeof STORED_REVIEW_TRIGGERS)[number];
+
 export type AppliedReviewChange = {
-  trigger: ReviewTrigger;
+  trigger: StoredReviewTrigger;
   targetKind: "skill-experience";
   operation?: ReviewOperation;
   targetExperienceIds: string[];
@@ -59,13 +65,25 @@ export type AppliedReviewChange = {
   suggestedChange: string;
 };
 
+// Historical intent edits remain audit data; they cannot become new review findings.
+type LegacyReviewChange = Omit<
+  AppliedReviewChange,
+  "targetKind" | "operation" | "targetExperienceIds"
+> & {
+  targetKind: "intent-markdown" | "skill-experience";
+  operation: ReviewOperation | "split" | "merge";
+  targetIntentIds: string[];
+  targetExperienceIds?: string[];
+};
+
 export type ProcessedEventRecord = {
   processedAt: string;
   source?: ReviewSource;
-  triggers: ReviewTrigger[];
+  triggers: StoredReviewTrigger[];
   changeCount: number;
   outcome: ProcessedEventOutcome;
-  changes?: AppliedReviewChange[];
+  changes?: (AppliedReviewChange | LegacyReviewChange)[];
+  changedIntentIds?: string[];
   changedExperienceIds?: string[];
   validationErrors?: string[];
   noFindingReasonCounts?: NoFindingReasonCounts;
@@ -136,7 +154,7 @@ const SchemaRejectionReasonCountsSchema = PositiveCountsSchema.refine((value) =>
 
 const ExperienceChangeSchema = z
   .object({
-    trigger: z.enum(REVIEW_TRIGGER_TYPES),
+    trigger: z.enum(STORED_REVIEW_TRIGGERS),
     targetKind: z.literal("skill-experience"),
     operation: z.enum(REVIEW_OPERATIONS).optional(),
     targetExperienceIds: z.array(z.string().trim().min(3)).min(1),
@@ -148,14 +166,24 @@ const ExperienceChangeSchema = z
   })
   .strict();
 
+const LegacyChangeSchema = ExperienceChangeSchema.extend({
+  targetKind: z.enum(["intent-markdown", "skill-experience"]),
+  operation: z.enum([...REVIEW_OPERATIONS, "split", "merge"]),
+  targetIntentIds: z.array(z.string()),
+  targetExperienceIds: z.array(z.string().trim().min(3)).optional(),
+}).strict();
+
 const ProcessedEventRecordSchema = z
   .object({
     processedAt: z.string(),
     source: ReviewSourceSchema.optional(),
-    triggers: z.array(z.enum(REVIEW_TRIGGER_TYPES)),
+    triggers: z.array(z.enum(STORED_REVIEW_TRIGGERS)),
     changeCount: z.number().int().nonnegative(),
     outcome: ProcessedEventOutcomeSchema,
-    changes: z.array(ExperienceChangeSchema).optional(),
+    changes: z
+      .array(z.union([ExperienceChangeSchema, LegacyChangeSchema]))
+      .optional(),
+    changedIntentIds: z.array(z.string()).optional(),
     changedExperienceIds: z.array(z.string()).optional(),
     validationErrors: z.array(z.string()).optional(),
     noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
@@ -200,7 +228,87 @@ export function createReviewLog(nowIso: string): ReviewLog {
   };
 }
 
+// These aliases existed in schema v7; they are accepted only during migration.
+const LEGACY_TRIGGER_MAP: Record<string, StoredReviewTrigger> = {
+  "successful-pattern": "intent-health-check",
+  "satisfaction-check": "intent-health-check",
+  "behavior-fix": "intent-health-check",
+  "entity-context": "intent-health-check",
+  "missing-intent": "routing-uncertainty",
+  "weak-intent": "routing-uncertainty",
+  "skill-candidate": "capability-fit",
+  "process-gap": "capability-fit",
+  "skill-placement": "capability-fit",
+};
+
 export function parseReviewLog(raw: unknown): ReviewLog {
+  if (
+    raw &&
+    typeof raw === "object" &&
+    "schemaVersion" in raw &&
+    raw.schemaVersion === 7
+  ) {
+    const legacy = z
+      .object({
+        createdAt: z.string(),
+        updatedAt: z.string(),
+        processedEvents: z.record(
+          z.string(),
+          z.record(z.string(), z.unknown()),
+        ),
+        reviewedSkillEpochs: z
+          .record(z.string(), z.record(z.string(), z.unknown()))
+          .default({}),
+      })
+      .parse(raw);
+    const mapTrigger = (trigger: unknown) =>
+      typeof trigger === "string"
+        ? (LEGACY_TRIGGER_MAP[trigger] ?? trigger)
+        : trigger;
+    const processedEvents: Record<string, ProcessedEventRecord> = {};
+    for (const [eventId, record] of Object.entries(legacy.processedEvents)) {
+      const parsed = ProcessedEventRecordSchema.safeParse({
+        ...record,
+        triggers: Array.isArray(record.triggers)
+          ? [...new Set(record.triggers.map(mapTrigger))]
+          : record.triggers,
+        changes: Array.isArray(record.changes)
+          ? record.changes.map((change) =>
+              change && typeof change === "object" && "trigger" in change
+                ? { ...change, trigger: mapTrigger(change.trigger) }
+                : change,
+            )
+          : record.changes,
+        noFindingReasonCounts: normalizedCounts(
+          record.noFindingReasonCounts,
+          NO_FINDING_REASON_CODES,
+        ),
+        schemaRejectionReasonCounts: normalizedCounts(
+          record.schemaRejectionReasonCounts,
+          SCHEMA_REJECTION_REASON_CODES,
+        ),
+      });
+      if (parsed.success) processedEvents[eventId] = parsed.data;
+    }
+    return ReviewLogSchema.parse({
+      schemaVersion: 8,
+      createdAt: legacy.createdAt,
+      updatedAt: legacy.updatedAt,
+      processedEvents,
+      reviewedSkillEpochs: Object.fromEntries(
+        Object.entries(legacy.reviewedSkillEpochs).map(([key, epoch]) => [
+          key,
+          {
+            ...epoch,
+            reason:
+              epoch.reason === "zero-recommendation-usage"
+                ? "zero-intent-match-usage"
+                : epoch.reason,
+          },
+        ]),
+      ),
+    });
+  }
   return ReviewLogSchema.parse(raw);
 }
 

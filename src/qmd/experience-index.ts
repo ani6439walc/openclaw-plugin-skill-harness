@@ -426,7 +426,7 @@ export function createSkillExperienceQmdIndex(params: {
   async function build(target: {
     entries: readonly SkillExperienceEntry[];
     fingerprint: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
     status = "building";
     let nextStore: QMDStore | undefined;
     try {
@@ -469,16 +469,13 @@ export function createSkillExperienceQmdIndex(params: {
         return true;
       };
 
-      if (params.readOnly) {
-        await refresh();
-        return;
-      }
       const locked = await withFileLock(databasePath, refresh, {
         maxWaitMs: 30 * 60 * 1000,
       });
       if (locked === undefined) {
         throw new Error("experience index build lock is busy");
       }
+      return true;
     } catch (error) {
       if (nextStore) await nextStore.close().catch(() => undefined);
       status = "failed";
@@ -487,10 +484,12 @@ export function createSkillExperienceQmdIndex(params: {
         INITIAL_RETRY_DELAY_MS * 2 ** (consecutiveFailures - 1),
         MAX_RETRY_DELAY_MS,
       );
+      desired ??= target;
       clearRetryTimer();
       retryTimer = setTimeout(() => {
-        if (!closed && desired) {
-          void runWorker();
+        retryTimer = undefined;
+        if (!closed && desired && !running) {
+          running = runWorker();
         }
       }, delay);
       logger.warn("failed to build QMD experience index", {
@@ -498,17 +497,22 @@ export function createSkillExperienceQmdIndex(params: {
         fingerprint: target.fingerprint,
         retryDelayMs: delay,
       });
+      return false;
     }
   }
 
   async function runWorker(): Promise<void> {
     try {
+      await initialization;
       while (!closed && desired) {
         const target = desired;
         desired = undefined;
         buildingFingerprint = target.fingerprint;
         try {
-          await build(target);
+          if (currentFingerprint === target.fingerprint && status === "ready") {
+            continue;
+          }
+          if (!(await build(target))) break;
         } finally {
           buildingFingerprint = undefined;
         }
@@ -527,7 +531,7 @@ export function createSkillExperienceQmdIndex(params: {
     );
   }
 
-  void openExistingIndex();
+  const initialization = openExistingIndex();
 
   return {
     schedule(entries) {
@@ -535,6 +539,7 @@ export function createSkillExperienceQmdIndex(params: {
       knownEntriesById = new Map(entries.map((e) => [e.id, e]));
       const fingerprint = snapshotFingerprint(entries, params.config());
       expectedFingerprint = fingerprint;
+      if (params.readOnly) return;
 
       if (currentFingerprint === fingerprint && status === "ready") {
         desired = undefined;
@@ -547,10 +552,12 @@ export function createSkillExperienceQmdIndex(params: {
 
       desired = { entries, fingerprint };
       if (!running) {
+        clearRetryTimer();
         running = runWorker();
       }
     },
     async search({ query, limit = 8, expansionContext }) {
+      await initialization;
       if (closed || !isReadyForCurrentCatalog() || !store) return;
       try {
         const searchLimit = Math.max(limit * 2, 20);
@@ -642,6 +649,7 @@ export function createSkillExperienceQmdIndex(params: {
       closed = true;
       desired = undefined;
       clearRetryTimer();
+      await initialization;
       await running;
       buildingFingerprint = undefined;
       const activeStore = store;

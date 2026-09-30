@@ -7,7 +7,6 @@ import type { SkillExperienceEntry } from "../experiences/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
 import {
   createSkillExperienceQmdIndex,
-  EXPERIENCE_COLLECTIONS,
   type SkillExperienceQmdIndex,
 } from "./experience-index.js";
 
@@ -58,6 +57,7 @@ describe("SkillExperienceQmdIndex", () => {
       await index.close();
       index = undefined;
     }
+    vi.useRealTimers();
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -145,8 +145,9 @@ describe("SkillExperienceQmdIndex", () => {
 
   it("handles empty or failed searches gracefully", async () => {
     const mockStore: Partial<QMDStore> = {
-      addCollection: vi.fn().mockResolvedValue(undefined),
       update: vi.fn().mockResolvedValue(undefined),
+      embed: vi.fn().mockResolvedValue({ errors: 0 }),
+      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
       search: vi.fn().mockRejectedValue(new Error("Network failure")),
       close: vi.fn().mockResolvedValue(undefined),
     };
@@ -170,5 +171,153 @@ describe("SkillExperienceQmdIndex", () => {
 
     const hits = await index.search({ query: "broken" });
     expect(hits).toBeUndefined();
+  });
+
+  function makeStore() {
+    return {
+      update: vi.fn().mockResolvedValue(undefined),
+      embed: vi.fn().mockResolvedValue({ errors: 0 }),
+      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
+      search: vi
+        .fn()
+        .mockResolvedValue([
+          { filepath: "keywords/image-analysis.md", score: 0.95 },
+        ]),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  it("waits for a read-only index to open and searches only the current catalog without writes", async () => {
+    const builtStore = makeStore();
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore: vi.fn().mockResolvedValue(builtStore),
+    });
+    index.schedule(MOCK_ENTRIES);
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+    await index.close();
+
+    const metadataPath = path.join(
+      tmpDir,
+      "qmd",
+      "experiences",
+      "metadata.json",
+    );
+    const metadata = await fs.readFile(metadataPath, "utf8");
+    const readStore = makeStore();
+    let finishOpen!: (store: QMDStore) => void;
+    const createStore = vi.fn().mockImplementation(
+      () =>
+        new Promise<QMDStore>((resolve) => {
+          finishOpen = resolve;
+        }),
+    );
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore,
+      readOnly: true,
+    });
+    index.schedule(MOCK_ENTRIES);
+    const search = index.search({ query: "screenshot" });
+    expect(readStore.search).not.toHaveBeenCalled();
+    finishOpen(readStore as unknown as QMDStore);
+    expect(await search).toEqual([
+      expect.objectContaining({
+        id: "image-analysis",
+        skills: ["cx", "vision"],
+      }),
+    ]);
+    expect(createStore).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ readOnly: true }),
+    );
+
+    index.schedule([{ ...MOCK_ENTRIES[0]!, body: "changed" }]);
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    expect(readStore.update).not.toHaveBeenCalled();
+    expect(readStore.embed).not.toHaveBeenCalled();
+    expect(createStore).toHaveBeenCalledTimes(1);
+    expect(await fs.readFile(metadataPath, "utf8")).toBe(metadata);
+  });
+
+  it("never builds a missing read-only index", async () => {
+    const createStore = vi.fn();
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore,
+      readOnly: true,
+    });
+    index.schedule(MOCK_ENTRIES);
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    expect(createStore).not.toHaveBeenCalled();
+    expect(await fs.readdir(tmpDir)).toEqual([]);
+  });
+
+  it("retries failed builds with backoff without another catalog refresh", async () => {
+    vi.useFakeTimers();
+    const mockStore = makeStore();
+    mockStore.embed
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockRejectedValueOnce(new Error("temporary failure"));
+    const createStore = vi.fn().mockResolvedValue(mockStore);
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore,
+    });
+    index.schedule(MOCK_ENTRIES);
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("failed"));
+    expect(createStore).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(createStore).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => expect(createStore).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("failed"));
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(createStore).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+    expect(createStore).toHaveBeenCalledTimes(3);
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+  });
+
+  it("retries the latest catalog queued during a failed build", async () => {
+    vi.useFakeTimers();
+    const mockStore = makeStore();
+    let failEmbed!: (reason: Error) => void;
+    mockStore.embed.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          failEmbed = reject;
+        }),
+    );
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore: vi.fn().mockResolvedValue(mockStore),
+    });
+    index.schedule(MOCK_ENTRIES);
+    await vi.waitFor(() => expect(mockStore.embed).toHaveBeenCalledTimes(1));
+    index.schedule([{ ...MOCK_ENTRIES[0]!, body: "new catalog content" }]);
+    failEmbed(new Error("temporary failure"));
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("failed"));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+    expect(
+      await fs.readFile(
+        path.join(
+          tmpDir,
+          "qmd",
+          "experiences",
+          "docs",
+          "body",
+          "image-analysis.md",
+        ),
+        "utf8",
+      ),
+    ).toBe("new catalog content\n");
   });
 });

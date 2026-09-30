@@ -56,6 +56,63 @@ describe("IntentReviewLogWriter", () => {
     });
   });
 
+  it("preserves legacy v8 audit history and epoch deduplication when recording a new event", async () => {
+    const prior = {
+      processedAt: "2026-06-11T00:00:00.000Z",
+      triggers: ["intent-health-check"],
+      changeCount: 1,
+      outcome: "applied",
+      changedIntentIds: ["build"],
+      changes: [
+        {
+          trigger: "intent-health-check",
+          targetKind: "intent-markdown",
+          operation: "refine",
+          targetIntentIds: ["build"],
+          dedupeKey: "refine-build",
+          summary: "Refine build workflow",
+          evidence: ["Verified command"],
+          correctionGoal: "Use current command",
+          suggestedChange: "Update body",
+        },
+      ],
+    };
+    const epochKey = "a".repeat(64);
+    const reviewedSkillEpochs = {
+      [epochKey]: {
+        agentId: "main",
+        skillName: "writer",
+        source: "workspace",
+        reason: "low-adoption",
+        completedAt: "2026-06-11T00:00:00.000Z",
+        outcome: "nofinding",
+        eventId: "prior",
+      },
+    };
+    const logPath = path.join(root, "review.json");
+    fs.writeFileSync(
+      logPath,
+      JSON.stringify({
+        schemaVersion: 8,
+        createdAt: "2026-06-11T00:00:00.000Z",
+        updatedAt: "2026-06-11T00:00:00.000Z",
+        processedEvents: { prior },
+        reviewedSkillEpochs,
+      }),
+    );
+    expect(writer.completedSkillEpochKeys()).toEqual(new Set([epochKey]));
+    expect(
+      await writer.record("next", source, [], {
+        triggers: ["experience-health-check"],
+        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+      }),
+    ).toBe(true);
+    const persisted = JSON.parse(fs.readFileSync(logPath, "utf8"));
+    expect(persisted.processedEvents.prior).toEqual(prior);
+    expect(persisted.reviewedSkillEpochs).toEqual(reviewedSkillEpochs);
+    expect(persisted.processedEvents.next).toBeDefined();
+  });
+
   it("replaces a legacy review log before recording a new event", async () => {
     const logPath = path.join(root, "review.json");
     fs.writeFileSync(

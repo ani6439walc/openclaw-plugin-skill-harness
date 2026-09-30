@@ -624,7 +624,7 @@ export class SkillExperienceCatalog {
 
   search(params: ExperienceSearchParams): SkillExperienceEntry[] {
     const entries =
-      params.skills && params.skills.length > 0
+      params.skills !== undefined
         ? this.listForSkills(params.skills)
         : this.listAll();
     const query = normalizeForComparison(params.query ?? "");

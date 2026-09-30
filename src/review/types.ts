@@ -17,6 +17,7 @@ export type CapabilityFitEvidence = {
 
 export type ReviewState = {
   input?: string;
+  confidence?: number;
   matchedSkills?: string[];
   matchedExperiences?: string[];
   capabilityFit?: CapabilityFitEvidence;
@@ -73,7 +74,7 @@ type BaseReviewFinding = {
 
 export type SkillExperienceReviewFinding = BaseReviewFinding & {
   targetKind: "skill-experience";
-  targetExperienceIds: [string];
+  targetExperienceIds: string[];
 };
 
 export type ReviewFinding = SkillExperienceReviewFinding;

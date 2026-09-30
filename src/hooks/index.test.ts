@@ -2869,9 +2869,7 @@ describe("createHookHandlers topic switch flow", () => {
       expect.objectContaining({
         current: expect.objectContaining({
           input: "進入 inventory 模式先 scan吧",
-          intent: expect.objectContaining({
-            trigger: "skill-only",
-          }),
+          matchedSkills: ["skill-harness"],
         }),
       }),
     );
@@ -2909,10 +2907,7 @@ describe("createHookHandlers topic switch flow", () => {
       "session-1",
       expect.objectContaining({
         current: expect.objectContaining({
-          intent: expect.objectContaining({
-            trigger: "skill-only",
-            intentMatchedSkills: [],
-          }),
+          matchedSkills: [],
         }),
       }),
     );
@@ -3025,10 +3020,7 @@ describe("createHookHandlers topic switch flow", () => {
         expect.objectContaining({
           current: expect.objectContaining({
             input: "git-operations",
-            intent: expect.objectContaining({
-              trigger: "skill-only",
-              intentMatchedSkills: ["git-operations"],
-            }),
+            matchedSkills: ["git-operations"],
           }),
         }),
       );
@@ -3081,10 +3073,7 @@ describe("createHookHandlers topic switch flow", () => {
         expect.objectContaining({
           current: expect.objectContaining({
             input: "git-operations",
-            intent: expect.objectContaining({
-              trigger: "skill-only",
-              intentMatchedSkills: ["git-operations"],
-            }),
+            matchedSkills: ["git-operations"],
           }),
         }),
       );
@@ -3338,10 +3327,7 @@ describe("createHookHandlers topic switch flow", () => {
         "session-1",
         expect.objectContaining({
           current: expect.objectContaining({
-            intent: expect.objectContaining({
-              trigger: "skill-only",
-              intentMatchedSkills: ["domain-test-skill"],
-            }),
+            matchedSkills: ["domain-test-skill"],
           }),
         }),
       );
@@ -3606,12 +3592,9 @@ describe("createHookHandlers topic switch flow", () => {
       "session-1",
       expect.objectContaining({
         current: expect.objectContaining({
-          intent: expect.objectContaining({
-            trigger: "skill-only",
-            inputSkillDiscovery: expect.objectContaining({
-              candidateCount: 0,
-              injectedSkills: [],
-            }),
+          inputSkillDiscovery: expect.objectContaining({
+            candidateCount: 0,
+            injectedSkills: [],
           }),
         }),
       }),
@@ -3889,16 +3872,12 @@ describe("createHookHandlers topic switch flow", () => {
         "session-1",
         expect.objectContaining({
           current: expect.objectContaining({
-            intent: expect.objectContaining({
-              inputSkillDiscovery: expect.objectContaining({
-                nameCandidates: 0,
-                retrievalAttempted: true,
-                retrievalCandidates: 1,
-                retrievalSemanticScores: [0.9],
-                injectedSkills: [
-                  { name: "review", source: "direct-retrieval" },
-                ],
-              }),
+            inputSkillDiscovery: expect.objectContaining({
+              nameCandidates: 0,
+              retrievalAttempted: true,
+              retrievalCandidates: 1,
+              retrievalSemanticScores: [0.9],
+              injectedSkills: [{ name: "review", source: "direct-retrieval" }],
             }),
           }),
         }),
@@ -4015,19 +3994,17 @@ describe("createHookHandlers topic switch flow", () => {
         "session-1",
         expect.objectContaining({
           current: expect.objectContaining({
-            intent: expect.objectContaining({
-              inputSkillDiscovery: expect.objectContaining({
-                retrievalCollections: { meta: 1, body: 1, references: 0 },
-                injectedCollections: { meta: 1, body: 1, references: 0 },
-                injectedSkills: [
-                  {
-                    name: "review",
-                    source: "direct-retrieval",
-                    collections: ["meta", "body"],
-                    topCollection: "meta",
-                  },
-                ],
-              }),
+            inputSkillDiscovery: expect.objectContaining({
+              retrievalCollections: { meta: 1, body: 1, references: 0 },
+              injectedCollections: { meta: 1, body: 1, references: 0 },
+              injectedSkills: [
+                {
+                  name: "review",
+                  source: "direct-retrieval",
+                  collections: ["meta", "body"],
+                  topCollection: "meta",
+                },
+              ],
             }),
           }),
         }),
@@ -4253,10 +4230,7 @@ Current user request: fresh clean request with clean-skill
         "session-1",
         expect.objectContaining({
           current: expect.objectContaining({
-            intent: expect.objectContaining({
-              trigger: "skill-only",
-              intentMatchedSkills: ["version-control"],
-            }),
+            matchedSkills: ["version-control"],
           }),
         }),
       );
@@ -4305,10 +4279,7 @@ Current user request: fresh clean request with clean-skill
         "session-1",
         expect.objectContaining({
           current: expect.objectContaining({
-            intent: expect.objectContaining({
-              trigger: "skill-only",
-              intentMatchedSkills: [],
-            }),
+            matchedSkills: [],
           }),
         }),
       );
@@ -4422,7 +4393,8 @@ Current user request: fresh clean request with clean-skill
         "session-1",
         expect.objectContaining({
           current: expect.objectContaining({
-            intent: expect.objectContaining({ trigger: "skill-only" }),
+            matchedSkills: expect.any(Array),
+            matchedExperiences: expect.any(Array),
           }),
         }),
       );

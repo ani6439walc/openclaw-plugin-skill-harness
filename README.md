@@ -140,7 +140,7 @@ The routing stages are:
 4. Run input skill discovery and experience retrieval in parallel:
    - Skill candidates come from deterministic typo-aware name matching and direct `SkillQmdIndex` retrieval (over metadata, bodies, and references with `minCandidateScore` default `0.6`).
    - Experience candidates come from `SkillExperienceQmdIndex` multi-collection retrieval (over `keywords: 1.0`, `summary: 0.8`, `body: 0.5` with `minCandidateScore` default `0.4`).
-5. The unified selector evaluates canonical skills and experiences from the candidate pools using Jev/LLM reranking against `relevanceThreshold` (default `0.6`), capping at `maxInjectedSkills` (default `8`) and `maxInjectedExperiences` (default `4`). An empty candidate pool needs no LLM call (0-call short-circuit); `maxInjectedSkills: 0` short-circuits skill discovery.
+5. The unified selector evaluates canonical skills and experiences from the candidate pools using Jev/LLM reranking against `relevanceThreshold` (default `0.6`), capping at `maxInjectedSkills` (default `8`) and `maxInjectedExperiences` (default `4`). An empty candidate pool needs no LLM call (0-call short-circuit); `maxInjectedSkills: 0` short-circuits skill discovery while experience retrieval remains enabled unless `maxInjectedExperiences` is also zero. Experience candidate thresholds use semantic evidence scores; RRF scores only determine ranking.
 6. Final injected skills are the union of selector-selected skills and skills associated with selector-selected experiences.
 7. Render decoupled optional `<matched_experiences>` and `<matched_skills>` blocks, record the completed turn in session tracking, and schedule configured background work.
 
@@ -385,7 +385,7 @@ Review keeps its runtime state at the data-root level:
 ~/.openclaw/plugins/skill-harness/review.json  # schema v8
 ```
 
-This plugin version supports the current schema-v8 Review log. It migrates compatible schema-v7 Review records by retaining ordinary processed events and placement epochs while discarding retired keyword-learning fields; malformed or older state remains fail-open.
+This plugin version supports the current schema-v8 Review log, preserving historical intent-review events and completed placement epochs on subsequent writes. It migrates compatible schema-v7 Review records by retaining ordinary processed events and placement epochs while discarding retired keyword-learning fields; malformed or older state remains fail-open.
 
 ### Human maintenance skill
 
@@ -462,7 +462,7 @@ Review investigates a trigger; it does not treat the trigger as proof. Validated
 
 A trigger starts an investigation; it is not evidence by itself. The reviewer evaluates trigger-specific evidence, durability, scope, and existing coverage, then makes the smallest valid change or records a no-finding result. Review findings produce `targetKind: "skill-experience"` updates to create, refine, or delete skill experiences.
 
-Every requested trigger needs a valid positive or no-finding decision. Missing or malformed decisions are recorded as `schema-rejected`. The reviewer operates within a sandboxed temporary workspace and can only modify experience definitions.
+Every requested trigger needs a valid positive or no-finding decision. Missing or malformed decisions are recorded as `schema-rejected`. The reviewer operates within a temporary workspace with enforced workspace-only file access. Every changed experience must have a positive finding, and every declared target must change. Only changed entries are validated against eligible skills, so unrelated existing entries do not block updates. Writeback rejects concurrent changes to the same experience and applies file removals as well as additions and edits.
 
 Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn finishes (default 30-second idle delay). Subsequent turns in the same session cancel previous pending timers and coalesce them into a single run, with pending entries capped by LRU eviction (default 32 sessions). Before executing, the scheduler checks if the system is actively processing embedded runs (`isSystemActive`); if busy, review is postponed by a 30-second retry delay. If OpenClaw Gateway is shutting down (`isDraining`), pending reviews abort immediately without executing. Review runs execute in the background detached from the hook scope (`runDetachedFromWorkScope`) with `sessionPersistence: "detached"`, and the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
 
@@ -478,7 +478,7 @@ Skill Harness keeps package files and runtime state separate. The paths below us
 | `~/.openclaw/plugins/skill-harness/stats.json`         | Fresh schema-v7 intent, route-reason score, input skill-match, intent-matched skill, tool, routing, projection, inventory, and daily telemetry. |
 | `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v8 Review outcomes, experience writes, and completed placement epochs; compatible v7 records migrate on load.                            |
 
-Session cleanup preserves the ended main-session record and removes only expired session JSON plus embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json` artifacts. It does not delete root-level runtime state, intents, skills, unrelated transcripts, or package files. Retained session intent state uses `intentMatchedSkills`; retired fields such as `recommendedSkills` and unknown intent fields are discarded when sessions are loaded rather than copied into the current schema. This cleanup never controls routing.
+Session cleanup preserves the ended main-session record and removes only expired session JSON plus embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json` artifacts. It does not delete root-level runtime state, intents, skills, unrelated transcripts, or package files. New routing state persists `matchedSkills`, `matchedExperiences`, `confidence`, and `inputSkillDiscovery` at the session-state top level, including empty selections. Statistics and Review accept these turns without requiring an intent. Historical session intent state retains `intentMatchedSkills`; retired fields such as `recommendedSkills` and unknown intent fields are discarded when sessions are loaded rather than copied into the current schema. This cleanup never controls routing.
 
 ### Interpreting observations
 

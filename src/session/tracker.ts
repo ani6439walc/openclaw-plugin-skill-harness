@@ -100,6 +100,7 @@ export interface SessionState {
   input?: string;
   matchedSkills?: string[];
   matchedExperiences?: string[];
+  confidence?: number;
   inputSkillDiscovery?: InputSkillDiscovery;
   intent?: IntentState;
   skillsUsed?: SkillRecord[];
@@ -241,6 +242,7 @@ function createReviewState(
     state.matchedSkills ?? state.intent?.intentMatchedSkills;
   return {
     input: sanitizeReviewInput(state.input),
+    confidence: state.confidence ?? state.intent?.result?.confidence,
     matchedSkills: matchedSkills ? [...matchedSkills] : undefined,
     matchedExperiences: state.matchedExperiences
       ? [...state.matchedExperiences]
@@ -467,6 +469,13 @@ function mergeSessionState(
   data: Partial<SessionState>,
 ): void {
   if (data.input !== undefined) current.input = data.input;
+  if (data.matchedSkills !== undefined)
+    current.matchedSkills = [...data.matchedSkills];
+  if (data.matchedExperiences !== undefined)
+    current.matchedExperiences = [...data.matchedExperiences];
+  if (data.confidence !== undefined) current.confidence = data.confidence;
+  if (data.inputSkillDiscovery !== undefined)
+    current.inputSkillDiscovery = data.inputSkillDiscovery;
   if (data.intent) {
     if (!current.intent) current.intent = {};
     if (data.intent.input !== undefined)
@@ -901,8 +910,8 @@ export class SessionTracker {
     if (
       !session ||
       !start ||
-      (!session.current.matchedSkills?.length &&
-        !session.current.matchedExperiences?.length &&
+      (session.current.matchedSkills === undefined &&
+        session.current.matchedExperiences === undefined &&
         !session.current.intent?.result)
     ) {
       return;
@@ -913,8 +922,8 @@ export class SessionTracker {
       session.current,
     ].filter(
       (state) =>
-        state.matchedSkills?.length ||
-        state.matchedExperiences?.length ||
+        state.matchedSkills !== undefined ||
+        state.matchedExperiences !== undefined ||
         state.intent?.result,
     );
     return {
@@ -948,8 +957,8 @@ export class SessionTracker {
     if (
       !target.timestamps?.end ||
       !eventId ||
-      (!target.matchedSkills?.length &&
-        !target.matchedExperiences?.length &&
+      (target.matchedSkills === undefined &&
+        target.matchedExperiences === undefined &&
         !target.intent?.result)
     ) {
       return;

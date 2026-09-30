@@ -1165,11 +1165,24 @@ describe("resolveConfig", () => {
       });
     });
 
+    it("accepts the manifest skill injection maximum and rejects values above it", () => {
+      expect(
+        resolveConfig({
+          routing: { skills: { maxInjectedSkills: 20 } },
+        }).routing.skills.maxInjectedSkills,
+      ).toBe(20);
+      expect(() =>
+        resolveConfig({
+          routing: { skills: { maxInjectedSkills: 21 } },
+        }),
+      ).toThrow();
+    });
+
     it("rejects invalid candidate policy boundaries and cross-field values", () => {
       for (const skillCandidates of [
         { search: { timeoutMs: 99 } },
         { nameMatch: { maxEditDistance: 3 } },
-        { maxInjectedSkills: 17 },
+        { maxInjectedSkills: 21 },
         { relevanceThreshold: 1.5 },
       ]) {
         expect(() => resolveConfig({ routing: { skillCandidates } })).toThrow();

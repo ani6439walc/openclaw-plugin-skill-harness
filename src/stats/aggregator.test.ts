@@ -88,6 +88,45 @@ describe("StatsAggregator", () => {
   });
 
   describe("create", () => {
+    it("records skill adoption, tools and daily totals without inventing an intent", () => {
+      const legacy = createState();
+      const state = createState({
+        intent: undefined,
+        matchedSkills: ["git-master", "dev-lifecycle"],
+        matchedExperiences: ["git-recovery"],
+        confidence: 0.8,
+        inputSkillDiscovery: legacy.intent!.inputSkillDiscovery,
+      });
+      expect(aggregator.isRecordable("skill-only", state)).toBe(true);
+      expect(aggregator.record("skill-only", state)).toBe(true);
+      expect(aggregator.record("skill-only", state)).toBe(false);
+      const stats = JSON.parse(
+        fs.readFileSync(path.join(tempDir, "stats.json"), "utf8"),
+      );
+      expect(stats.summary).toMatchObject({
+        turns: 1,
+        skillUsageCount: 1,
+        toolCallCount: 2,
+        averageConfidence: 0.8,
+      });
+      expect(stats.routing).toMatchObject({
+        intentMatchedTurns: 1,
+        adoptedTurns: 1,
+        intentMatchedSkillOpportunities: 2,
+        adoptedSkillOpportunities: 1,
+      });
+      expect(stats.tools.exec.calls).toBe(2);
+      expect(stats.daily["2026-06-11"]).toMatchObject({
+        turns: 1,
+        skills: { "git-master": 1 },
+        tools: { exec: 2 },
+      });
+      expect(stats.skillDiscovery.turns).toBe(1);
+      expect(stats.intents).toEqual({});
+      expect(stats.routing.byIntent).toEqual({});
+      expect(stats.daily["2026-06-11"].intents).toEqual({});
+    });
+
     it("returns a shared instance for the same plugin root", () => {
       const aggregator1 = StatsAggregator.create(tempDir);
       const aggregator2 = StatsAggregator.create(tempDir);

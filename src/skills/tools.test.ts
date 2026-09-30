@@ -219,6 +219,67 @@ describe("registerSkillTools", () => {
     expect(api.runtime.agent).not.toHaveProperty("runEmbeddedAgent");
   });
 
+  it.each([false, true])(
+    "returns no experience when every requested skill is invisible (QMD: %s)",
+    async (useQmd) => {
+      const tmp = fs.mkdtempSync(
+        path.join(os.tmpdir(), "skill-tools-private-"),
+      );
+      try {
+        const stateDir = path.join(tmp, "state");
+        const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+        const mainWorkspace = path.join(tmp, "main-workspace");
+        const analystWorkspace = path.join(tmp, "analyst-workspace");
+        const api = createApi(stateDir, {
+          main: mainWorkspace,
+          analyst: analystWorkspace,
+        });
+        writeSkill(mainWorkspace, "react");
+        writeSkill(analystWorkspace, "vue");
+        writeExperience(dataRoot, "vue", "private", "private analyst guidance");
+        const search = vi.fn().mockResolvedValue([
+          {
+            id: "private",
+            skills: ["vue"],
+            score: 0.03,
+            semanticScore: 0.95,
+            matchedCollections: ["body"],
+            evidence: [],
+          },
+        ]);
+        registerSkillTools(api, {
+          experienceCatalog: new SkillExperienceCatalog(dataRoot),
+          ...(useQmd
+            ? {
+                qmdExperienceIndex: {
+                  schedule: vi.fn(),
+                  search,
+                  getStatus: () => "ready" as const,
+                  close: vi.fn().mockResolvedValue(undefined),
+                },
+              }
+            : {}),
+        });
+        const tool = toolsForAgent(api, "main").get("skill_experience");
+        for (const query of [undefined, "private"]) {
+          const result = await runTool(tool, {
+            skills: ["vue"],
+            ...(query ? { query } : {}),
+          });
+          expect(result).toEqual({
+            success: true,
+            requested_skills: ["vue"],
+            unavailable_skills: ["vue"],
+            entries: [],
+          });
+        }
+        if (useQmd) expect(search).toHaveBeenCalledOnce();
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("uses the catalog canonical identity for the invoking agent visibility intersection", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const stateDir = path.join(tmp, "state");

@@ -5,11 +5,7 @@ import * as path from "node:path";
 import { z } from "zod";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
-import type {
-  ReviewFinding,
-  ReviewSnapshot,
-  SkillExperienceReviewFinding,
-} from "./types.js";
+import type { ReviewFinding, ReviewSnapshot } from "./types.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { formatReviewSnapshot } from "./snapshot-formatter.js";
@@ -401,16 +397,17 @@ Your purpose is to improve the quality, coverage, and precision of skill experie
 An experience captures a reusable problem/solution workflow, verified command sequence, or recovery pattern for complex tasks.
 Each experience lives in a subfolder: experiences/<id>/ containing:
 - summary.md: Exactly one concise plain-text summary sentence (max 240 code points).
-- keywords.md: Up to 12 concise keywords (one per line or comma-separated).
+- keywords.md: Up to 12 concise keywords (exactly one per line).
 - body.md: Structured Markdown detailing the reusable procedure, exact commands, pitfalls, and verification steps.
-- skills.md: (Optional) Associated skill names (one per line or comma-separated).
+- skills.md: (Optional) Associated skill names (exactly one per line; no comma-separated lists).
 
 Eligible observed skills for experiences: ${experienceSkillNames.length > 0 ? experienceSkillNames.join(", ") : "all visible skills"}.
 
 Hard rules:
 - Review only the requested triggers. Each trigger is independent and may return hasFinding=false.
 - Modify only files under experiences/<id>/ in the current workspace. Do not touch any files outside experiences/.
-- A positive finding must set targetKind="skill-experience" and targetExperienceIds to ["<id>"].
+- A positive finding must set targetKind="skill-experience" and targetExperienceIds to the IDs actually changed.
+- Every created, modified, or deleted experience must be covered by a positive finding; do not declare unchanged targets.
 
 Requested trigger reviews:
 ${triggerPrompts}
@@ -500,7 +497,7 @@ export function parseReviewFindingsDetailed(
       findings.push({
         trigger: finding.trigger as ReviewTrigger,
         targetKind: "skill-experience",
-        targetExperienceIds: [finding.targetExperienceIds[0]!],
+        targetExperienceIds: finding.targetExperienceIds,
         dedupeKey: finding.dedupeKey,
         summary: finding.summary,
         evidence: finding.evidence,
@@ -565,45 +562,32 @@ function withReviewWorkspaceOnlyFsPolicy(
   config: OpenClawPluginApi["config"],
   agentId: string,
 ): OpenClawPluginApi["config"] {
-  const current = (config as { current?: () => unknown })?.current?.() as
-    Record<string, unknown> | undefined;
-  if (!current || typeof current !== "object") return config;
-
-  const agents = (current.agents ?? {}) as Record<string, unknown>;
-  const defaults = (agents.defaults ?? {}) as Record<string, unknown>;
-  const agentEntries = (agents.entries ?? {}) as Record<string, unknown>;
-  const agentConfig = (agentEntries[agentId] ?? {}) as Record<string, unknown>;
-
-  const defaultTools = (defaults.tools ?? {}) as Record<string, unknown>;
-  const agentTools = (agentConfig.tools ?? {}) as Record<string, unknown>;
-  const defaultFsConfig = (defaultTools.fs ?? {}) as Record<string, unknown>;
-  const agentFsConfig = (agentTools.fs ?? {}) as Record<string, unknown>;
-
-  const next = {
-    ...current,
-    agents: {
-      ...agents,
-      defaults: {
-        ...defaults,
-        tools: {
-          ...defaultTools,
-          fs: { ...defaultFsConfig, workspaceOnly: true },
-        },
-      },
-      entries: {
-        ...agentEntries,
-        [agentId]: {
-          ...agentConfig,
-          tools: {
-            ...agentTools,
-            fs: { ...agentFsConfig, workspaceOnly: true },
+  const tools = config.tools;
+  const entries = config.agents?.entries;
+  const agentKey = Object.keys(entries ?? {}).find(
+    (key) => key.trim().toLowerCase() === agentId.trim().toLowerCase(),
+  );
+  return {
+    ...config,
+    tools: { ...tools, fs: { ...tools?.fs, workspaceOnly: true } },
+    ...(entries && agentKey
+      ? {
+          agents: {
+            ...config.agents,
+            entries: {
+              ...entries,
+              [agentKey]: {
+                ...entries[agentKey],
+                tools: {
+                  ...entries[agentKey]?.tools,
+                  fs: { ...entries[agentKey]?.tools?.fs, workspaceOnly: true },
+                },
+              },
+            },
           },
-        },
-      },
-    },
+        }
+      : {}),
   };
-
-  return next as OpenClawPluginApi["config"];
 }
 
 function snapshotExperienceFiles(
@@ -616,7 +600,11 @@ function snapshotExperienceFiles(
 
   for (const entry of fs.readdirSync(experienceDirectory).sort()) {
     const entryDir = path.join(experienceDirectory, entry);
-    if (!fs.existsSync(entryDir) || !fs.lstatSync(entryDir).isDirectory())
+    if (
+      !fs.existsSync(entryDir) ||
+      fs.lstatSync(entryDir).isSymbolicLink() ||
+      !fs.lstatSync(entryDir).isDirectory()
+    )
       continue;
     for (const file of fs.readdirSync(entryDir).sort()) {
       if (!file.endsWith(".md")) continue;
@@ -774,9 +762,43 @@ export async function runReviewSubagent(params: {
       afterExperienceFiles,
     );
 
+    const declaredIds = new Set(
+      parsed.findings.flatMap((finding) => finding.targetExperienceIds),
+    );
+    const reconciliationErrors = [
+      ...changedExperienceIds
+        .filter((id) => !declaredIds.has(id))
+        .map((id) => `${id}: modified without a positive finding`),
+      ...[...declaredIds]
+        .filter((id) => !changedExperienceIds.includes(id))
+        .map((id) => `${id}: positive finding has no matching modification`),
+    ];
+    if (reconciliationErrors.length > 0) {
+      return {
+        findings: [],
+        outcome: "validation-failed",
+        validationErrors: reconciliationErrors,
+      };
+    }
+
     if (changedExperienceIds.length > 0) {
+      // Validate the changed folders, not unrelated experiences associated with
+      // skills outside this turn's eligible set. Copy directories themselves so
+      // the validator still sees invalid files and symbolic links.
+      const validationRoot = path.join(workspaceDir, "validation");
+      const validationDirectory = path.join(validationRoot, "experiences");
+      fs.mkdirSync(validationDirectory, { recursive: true });
+      for (const id of changedExperienceIds) {
+        const source = path.join(workspaceExperienceDirectory, id);
+        if (fs.existsSync(source)) {
+          fs.cpSync(source, path.join(validationDirectory, id), {
+            recursive: true,
+            verbatimSymlinks: true,
+          });
+        }
+      }
       const validation = validateExperienceDirectory({
-        experienceDirectory: workspaceExperienceDirectory,
+        experienceDirectory: validationDirectory,
         visibleSkillsByAgent: params.visibleSkillsByAgent ?? {
           [params.agentId]: allowedExperienceSkills,
         },
@@ -792,26 +814,76 @@ export async function runReviewSubagent(params: {
       }
     }
 
-    // Persist changes
-    if (expDir && changedExperienceIds.length > 0) {
-      await withFileLock(expDir, async () => {
+    if (changedExperienceIds.length > 0) {
+      if (!expDir) {
+        return {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: ["No runtime experience directory configured"],
+        };
+      }
+      const conflicts = await withFileLock(expDir, async () => {
+        const unsafePaths = [
+          expDir,
+          ...changedExperienceIds.map((id) => path.join(expDir, id)),
+          ...beforeExperienceFiles.keys(),
+          ...afterExperienceFiles.keys(),
+        ].filter((entry) => {
+          const candidate = path.isAbsolute(entry)
+            ? entry
+            : path.join(expDir, entry);
+          return fs
+            .lstatSync(candidate, { throwIfNoEntry: false })
+            ?.isSymbolicLink();
+        });
+        if (unsafePaths.length > 0) return unsafePaths;
+        const currentFiles = snapshotExperienceFiles(expDir);
+        const concurrentlyChanged = new Set(
+          findChangedExperienceIds(beforeExperienceFiles, currentFiles),
+        );
+        const conflicts = changedExperienceIds.filter((id) =>
+          concurrentlyChanged.has(id),
+        );
+        if (conflicts.length > 0) return conflicts;
+
         fs.mkdirSync(expDir, { recursive: true });
         for (const expId of changedExperienceIds) {
-          const srcFolder = path.join(workspaceExperienceDirectory, expId);
           const destFolder = path.join(expDir, expId);
-          if (fs.existsSync(srcFolder)) {
-            fs.mkdirSync(destFolder, { recursive: true });
-            for (const file of fs.readdirSync(srcFolder)) {
-              fs.copyFileSync(
-                path.join(srcFolder, file),
-                path.join(destFolder, file),
-              );
+          // Apply only the snapshot's file delta. This also removes optional
+          // files deleted by the reviewer, while preserving unrelated files.
+          const files = new Set([
+            ...beforeExperienceFiles.keys(),
+            ...afterExperienceFiles.keys(),
+          ]);
+          for (const file of files) {
+            if (!file.startsWith(`${expId}/`)) continue;
+            const content = afterExperienceFiles.get(file);
+            const destination = path.join(expDir, file);
+            if (content === undefined) {
+              fs.rmSync(destination, { force: true });
+            } else if (content !== beforeExperienceFiles.get(file)) {
+              fs.mkdirSync(destFolder, { recursive: true });
+              fs.writeFileSync(destination, content);
             }
-          } else if (fs.existsSync(destFolder)) {
-            fs.rmSync(destFolder, { recursive: true, force: true });
+          }
+          if (
+            fs.existsSync(destFolder) &&
+            fs.readdirSync(destFolder).length === 0
+          ) {
+            fs.rmdirSync(destFolder);
           }
         }
+        return [];
       });
+      if (!conflicts || conflicts.length > 0) {
+        return {
+          findings: [],
+          outcome: "validation-failed",
+          validationErrors: conflicts?.map(
+            (id) => `${id}: runtime experience changed during review`,
+          ) ?? ["Could not acquire experience write lock"],
+        };
+      }
     }
 
     return {

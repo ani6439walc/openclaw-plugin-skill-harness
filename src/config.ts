@@ -301,7 +301,7 @@ const RoutingSkillsSchema = z
       .max(1)
       .optional()
       .default(0.6),
-    maxInjectedSkills: z.number().int().min(0).max(16).optional().default(8),
+    maxInjectedSkills: z.number().int().min(0).max(20).optional().default(8),
   })
   .strict()
   .optional()

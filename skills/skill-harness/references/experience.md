@@ -11,7 +11,7 @@ An experience directory consists of plain markdown files:
 - **`summary.md`** (Required): Plain-text summary of the problem and solution pattern (max 240 code points).
 - **`keywords.md`** (Required): Relevant keywords for fast keyword/lexical discovery, one per line (max 12 keywords, max 64 code points each).
 - **`body.md`** (Required): Concrete reusable workflow, durable steps, pitfalls, and guidelines (max 12,000 code points).
-- **`skills.md`** (Optional): Associated skill names (one per line) that this experience activates or depends upon.
+- **`skills.md`** (Optional): Associated skill names (exactly one per line; no comma-separated lists) that this experience activates or depends upon.
 
 ### Segment and ID Rules
 

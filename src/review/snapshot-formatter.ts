@@ -285,6 +285,7 @@ function formatReviewState(
   addDefined(metadata, "turnNumber", options.turnNumber);
   addDefined(metadata, "startedAt", state.timestamps?.start);
   addDefined(metadata, "endedAt", state.timestamps?.end);
+  addDefined(metadata, "confidence", state.confidence);
   addDefined(metadata, "matchedSkills", state.matchedSkills);
   addDefined(metadata, "matchedExperiences", state.matchedExperiences);
   addDefined(metadata, "capabilityFit", state.capabilityFit);

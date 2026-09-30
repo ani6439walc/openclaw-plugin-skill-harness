@@ -131,6 +131,25 @@ describe("SkillExperienceCatalog", () => {
     expect(catalog.listForSkills(["react"])).toEqual([]);
   });
 
+  it("distinguishes an empty skill filter from an omitted global filter", () => {
+    writeEntry("forms", { skills: ["react"] });
+    writeEntry("general", { skills: [] });
+    const catalog = new SkillExperienceCatalog(dataRoot);
+
+    expect(catalog.search({ skills: [] })).toEqual([]);
+    expect(catalog.search({ skills: [], query: "forms" })).toEqual([]);
+    expect(catalog.search({}).map((entry) => entry.id)).toEqual([
+      "forms",
+      "general",
+    ]);
+    expect(catalog.search({ query: "forms" }).map((entry) => entry.id)).toEqual(
+      ["forms", "general"],
+    );
+    expect(
+      catalog.search({ skills: ["react"] }).map((entry) => entry.id),
+    ).toEqual(["forms"]);
+  });
+
   it("ranks by id exact, exact keyword count, summary phrases, body phrases, then id", () => {
     writeEntry("forms", {
       skills: ["react"],

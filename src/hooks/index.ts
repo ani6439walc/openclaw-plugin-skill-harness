@@ -534,6 +534,7 @@ export function createHookHandlers(deps: HookDeps) {
     matchedSkills?: readonly AvailableSkill[];
     matchedExperiences?: readonly SkillExperienceEntry[];
     inputSkillDiscovery?: InputSkillDiscovery;
+    confidence: number;
   }): Promise<void> {
     if (!params.association) return;
     await tracker.mergeTurnAndPersist({
@@ -542,13 +543,11 @@ export function createHookHandlers(deps: HookDeps) {
       maxWaitMs: 0,
       data: {
         input: params.latestUserMessage,
-        intent: {
-          trigger: "skill-only",
-          intentMatchedSkills: params.matchedSkills?.map((s) => s.name),
-          ...(params.inputSkillDiscovery
-            ? { inputSkillDiscovery: params.inputSkillDiscovery }
-            : {}),
-        },
+        matchedSkills: params.matchedSkills?.map((skill) => skill.name) ?? [],
+        matchedExperiences:
+          params.matchedExperiences?.map((entry) => entry.id) ?? [],
+        inputSkillDiscovery: params.inputSkillDiscovery,
+        confidence: params.confidence,
       },
     });
   }
@@ -624,11 +623,14 @@ export function createHookHandlers(deps: HookDeps) {
     let fallbackReason: SkillCandidatePoolFallbackReason | undefined;
 
     try {
-      const nameMatchResult = matchAvailableSkillNamesWithTokens({
-        skills: visibleSkills,
-        input: params.latestUserMessage,
-        options: policy.nameMatch,
-      });
+      const nameMatchResult =
+        policy.maxInjectedSkills === 0
+          ? { candidates: [], matchedTokens: [] }
+          : matchAvailableSkillNamesWithTokens({
+              skills: visibleSkills,
+              input: params.latestUserMessage,
+              options: policy.nameMatch,
+            });
       nameCandidates = nameMatchResult.candidates.map((candidate) => ({
         ...candidate,
         collections: ["meta" as const],
@@ -650,6 +652,7 @@ export function createHookHandlers(deps: HookDeps) {
     });
 
     const searchSkills = async () => {
+      if (policy.maxInjectedSkills === 0) return;
       if (!qmdSkillIndex) {
         fallbackReason = "retrieval-unavailable";
         return;
@@ -755,7 +758,7 @@ export function createHookHandlers(deps: HookDeps) {
         ) {
           const qualifiedHits = expOutcome.hits.filter(
             (hit) =>
-              roundToDecimals(hit.score, 2) >=
+              roundToDecimals(hit.semanticScore, 2) >=
               roundToDecimals(expPolicy.search.minCandidateScore, 2),
           );
           for (const hit of qualifiedHits) {
@@ -992,7 +995,10 @@ export function createHookHandlers(deps: HookDeps) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
-      if (refreshedConfig.routing.skills.maxInjectedSkills === 0) {
+      if (
+        refreshedConfig.routing.skills.maxInjectedSkills === 0 &&
+        refreshedConfig.routing.experiences.maxInjectedExperiences === 0
+      ) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
@@ -1022,6 +1028,7 @@ export function createHookHandlers(deps: HookDeps) {
             maxInjectedSkills: refreshedConfig.routing.skills.maxInjectedSkills,
           });
 
+          let confidence = 0;
           let matchedSkills: readonly AvailableSkill[] = [];
           let matchedExperiences: SkillExperienceEntry[] = [];
           const visibleMap = new Map(
@@ -1055,6 +1062,7 @@ export function createHookHandlers(deps: HookDeps) {
               });
 
               if (llmResult) {
+                confidence = llmResult.confidence;
                 const candidateExpMap = new Map(
                   skillDiscoveryResult.candidateExperiences.map((e) => [
                     e.id,
@@ -1180,7 +1188,9 @@ export function createHookHandlers(deps: HookDeps) {
 
           const inputSkillDiscovery: InputSkillDiscovery = {
             nameCandidates: skillDiscoveryResult.nameCandidates.length,
-            retrievalAttempted: Boolean(qmdSkillIndex),
+            retrievalAttempted:
+              Boolean(qmdSkillIndex) &&
+              refreshedConfig.routing.skills.maxInjectedSkills > 0,
             retrievalCandidates:
               skillDiscoveryResult.retrievalCandidates.length,
             retrievalSemanticScores:
@@ -1204,6 +1214,7 @@ export function createHookHandlers(deps: HookDeps) {
             matchedSkills,
             matchedExperiences,
             inputSkillDiscovery,
+            confidence,
           });
 
           if (matchedSkills.length === 0 && matchedExperiences.length === 0) {

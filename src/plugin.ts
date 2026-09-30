@@ -175,6 +175,9 @@ export function createPlugin(
           return config.qmd;
         },
       });
+      if (!ownsBackgroundWork) {
+        qmdExperienceIndex.schedule(experienceCatalog.listAll());
+      }
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const reviewLogWriter = new IntentReviewLogWriter(dataRoot);
