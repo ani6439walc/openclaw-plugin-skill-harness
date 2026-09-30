@@ -22,14 +22,14 @@ describe("IntentReviewLogWriter", () => {
   it("writes one v8 record for an applied review", async () => {
     const finding = {
       trigger: "capability-fit" as const,
-      targetKind: "intent-markdown" as const,
+      targetKind: "skill-experience" as const,
       operation: "refine" as const,
-      targetIntentIds: ["productivity"],
+      targetExperienceIds: ["productivity"] as [string],
       dedupeKey: "deploy-flow",
       summary: "Reusable deployment flow",
       evidence: ["Five related tool calls"],
       correctionGoal: "Preserve deployment workflow",
-      suggestedChange: "Updated productivity.md",
+      suggestedChange: "Updated productivity",
     };
 
     expect(
@@ -50,10 +50,67 @@ describe("IntentReviewLogWriter", () => {
           triggers: ["capability-fit"],
           changeCount: 1,
           outcome: "applied",
-          changes: [{ targetKind: "intent-markdown" }],
+          changes: [{ targetKind: "skill-experience" }],
         },
       },
     });
+  });
+
+  it("preserves legacy v8 audit history and epoch deduplication when recording a new event", async () => {
+    const prior = {
+      processedAt: "2026-06-11T00:00:00.000Z",
+      triggers: ["intent-health-check"],
+      changeCount: 1,
+      outcome: "applied",
+      changedIntentIds: ["build"],
+      changes: [
+        {
+          trigger: "intent-health-check",
+          targetKind: "intent-markdown",
+          operation: "refine",
+          targetIntentIds: ["build"],
+          dedupeKey: "refine-build",
+          summary: "Refine build workflow",
+          evidence: ["Verified command"],
+          correctionGoal: "Use current command",
+          suggestedChange: "Update body",
+        },
+      ],
+    };
+    const epochKey = "a".repeat(64);
+    const reviewedSkillEpochs = {
+      [epochKey]: {
+        agentId: "main",
+        skillName: "writer",
+        source: "workspace",
+        reason: "low-adoption",
+        completedAt: "2026-06-11T00:00:00.000Z",
+        outcome: "nofinding",
+        eventId: "prior",
+      },
+    };
+    const logPath = path.join(root, "review.json");
+    fs.writeFileSync(
+      logPath,
+      JSON.stringify({
+        schemaVersion: 8,
+        createdAt: "2026-06-11T00:00:00.000Z",
+        updatedAt: "2026-06-11T00:00:00.000Z",
+        processedEvents: { prior },
+        reviewedSkillEpochs,
+      }),
+    );
+    expect(writer.completedSkillEpochKeys()).toEqual(new Set([epochKey]));
+    expect(
+      await writer.record("next", source, [], {
+        triggers: ["experience-health-check"],
+        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+      }),
+    ).toBe(true);
+    const persisted = JSON.parse(fs.readFileSync(logPath, "utf8"));
+    expect(persisted.processedEvents.prior).toEqual(prior);
+    expect(persisted.reviewedSkillEpochs).toEqual(reviewedSkillEpochs);
+    expect(persisted.processedEvents.next).toBeDefined();
   });
 
   it("replaces a legacy review log before recording a new event", async () => {
@@ -71,14 +128,14 @@ describe("IntentReviewLogWriter", () => {
 
     expect(
       await writer.record("next", source, [], {
-        triggers: ["intent-health-check"],
+        triggers: ["experience-health-check"],
       }),
     ).toBe(true);
     const persisted = JSON.parse(fs.readFileSync(logPath, "utf8"));
     expect(persisted).toMatchObject({ schemaVersion: 8 });
     expect(persisted.processedEvents).not.toHaveProperty("prior");
     expect(persisted.processedEvents.next.triggers).toEqual([
-      "intent-health-check",
+      "experience-health-check",
     ]);
   });
 
@@ -105,6 +162,8 @@ describe("IntentReviewLogWriter", () => {
       observedTurns: 20,
       usageTurns: 0,
       intentMatchedTurns: 0,
+      winnerFingerprint: "wf",
+      fingerprint: "fp",
     };
     expect(
       await writer.record("placement-event", source, [], {

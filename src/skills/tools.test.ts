@@ -59,12 +59,12 @@ function writeExperience(
   entryId: string,
   body: string,
 ): void {
-  const directory = path.join(dataRoot, "experiences", skill);
+  const directory = path.join(dataRoot, "experiences", entryId);
   fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(
-    path.join(directory, `${entryId}.md`),
-    `---\nskill: ${skill}\nsummary: ${entryId} summary\nkeywords: [${entryId}]\n---\n${body}\n`,
-  );
+  fs.writeFileSync(path.join(directory, "summary.md"), `${entryId} summary`);
+  fs.writeFileSync(path.join(directory, "keywords.md"), `- ${entryId}\n`);
+  fs.writeFileSync(path.join(directory, "body.md"), `${body}\n`);
+  fs.writeFileSync(path.join(directory, "skills.md"), `- ${skill}\n`);
 }
 
 function writeStats(
@@ -183,8 +183,8 @@ describe("registerSkillTools", () => {
     const experienceFile = path.join(
       dataRoot,
       "experiences",
-      "react",
-      "alpha.md",
+      "alpha",
+      "body.md",
     );
     const readBefore = fs.readFileSync(experienceFile, "utf8");
 
@@ -200,9 +200,11 @@ describe("registerSkillTools", () => {
       success: true,
       unavailable_skills: ["vue", "missing"],
     });
-    expect(
-      result.entries.map((entry: { identity: string }) => entry.identity),
-    ).toEqual(["react/alpha", "react/beta", "react/gamma"]);
+    expect(result.entries.map((entry: { id: string }) => entry.id)).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+    ]);
     expect(
       result.entries.map(
         (entry: { body: string }) => Array.from(entry.body).length,
@@ -216,6 +218,67 @@ describe("registerSkillTools", () => {
     expect(fs.readFileSync(experienceFile, "utf8")).toBe(readBefore);
     expect(api.runtime.agent).not.toHaveProperty("runEmbeddedAgent");
   });
+
+  it.each([false, true])(
+    "returns no experience when every requested skill is invisible (QMD: %s)",
+    async (useQmd) => {
+      const tmp = fs.mkdtempSync(
+        path.join(os.tmpdir(), "skill-tools-private-"),
+      );
+      try {
+        const stateDir = path.join(tmp, "state");
+        const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+        const mainWorkspace = path.join(tmp, "main-workspace");
+        const analystWorkspace = path.join(tmp, "analyst-workspace");
+        const api = createApi(stateDir, {
+          main: mainWorkspace,
+          analyst: analystWorkspace,
+        });
+        writeSkill(mainWorkspace, "react");
+        writeSkill(analystWorkspace, "vue");
+        writeExperience(dataRoot, "vue", "private", "private analyst guidance");
+        const search = vi.fn().mockResolvedValue([
+          {
+            id: "private",
+            skills: ["vue"],
+            score: 0.03,
+            semanticScore: 0.95,
+            matchedCollections: ["body"],
+            evidence: [],
+          },
+        ]);
+        registerSkillTools(api, {
+          experienceCatalog: new SkillExperienceCatalog(dataRoot),
+          ...(useQmd
+            ? {
+                qmdExperienceIndex: {
+                  schedule: vi.fn(),
+                  search,
+                  getStatus: () => "ready" as const,
+                  close: vi.fn().mockResolvedValue(undefined),
+                },
+              }
+            : {}),
+        });
+        const tool = toolsForAgent(api, "main").get("skill_experience");
+        for (const query of [undefined, "private"]) {
+          const result = await runTool(tool, {
+            skills: ["vue"],
+            ...(query ? { query } : {}),
+          });
+          expect(result).toEqual({
+            success: true,
+            requested_skills: ["vue"],
+            unavailable_skills: ["vue"],
+            entries: [],
+          });
+        }
+        if (useQmd) expect(search).toHaveBeenCalledOnce();
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("uses the catalog canonical identity for the invoking agent visibility intersection", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
@@ -244,7 +307,7 @@ describe("registerSkillTools", () => {
       success: true,
       requested_skills: ["react", "vue"],
       unavailable_skills: ["vue"],
-      entries: [expect.objectContaining({ identity: "react/forms" })],
+      entries: [expect.objectContaining({ id: "forms" })],
     });
   });
 

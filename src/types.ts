@@ -1,8 +1,3 @@
-export type ContextWindow = {
-  user: { turns: number; chars: number };
-  assistant: { turns: number; chars: number };
-};
-
 export type ThinkLevel =
   "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive" | "max";
 
@@ -13,7 +8,8 @@ export type ResolvedReviewConfig = {
   thinking: ThinkLevel;
   timeoutSeconds: number;
   triggers: {
-    intentHealthCheck: { enabled: boolean; everyTurns: number };
+    experienceHealthCheck: { enabled: boolean; everyTurns: number };
+    intentHealthCheck?: { enabled: boolean; everyTurns: number };
     routingUncertainty: { enabled: boolean; confidenceBelow: number };
     capabilityFit: {
       enabled: boolean;
@@ -42,27 +38,15 @@ export type ResolvedRoutingScopeConfig = {
 
 export type ResolvedScopeConfig = ResolvedRoutingScopeConfig;
 
-export type ResolvedRoutingIntentsConfig = {
-  keyword: {
-    directRouteMinScore: number;
-  };
-  hybrid: {
-    directRouteMinScore: number;
-    directRouteMinMargin: number;
-    minCandidateScore: number;
-  };
+export type ResolvedExperienceCandidateSearchConfig = {
+  minCandidateScore: number;
+  timeoutMs: number;
 };
 
-export type ResolvedRoutingIntentsThresholdsConfig =
-  ResolvedRoutingIntentsConfig;
-
-export type ResolvedClassifierConfig = {
-  model: string | undefined;
-  modelFallback: string | undefined;
-  thinking: ThinkLevel;
-  timeoutMs: number;
-  queryMode: "message" | "recent" | "full";
-  contextWindow: ContextWindow;
+export type ResolvedRoutingExperiencesConfig = {
+  search: ResolvedExperienceCandidateSearchConfig;
+  relevanceThreshold: number;
+  maxInjectedExperiences: number;
 };
 
 export type ResolvedSkillCandidateSearchConfig = {
@@ -79,27 +63,30 @@ export type ResolvedSkillCandidateNameMatchConfig = {
 export type ResolvedRoutingSkillsConfig = {
   search: ResolvedSkillCandidateSearchConfig;
   nameMatch: ResolvedSkillCandidateNameMatchConfig;
+  relevanceThreshold: number;
   maxInjectedSkills: number;
 };
 
 export type ResolvedSkillCandidatesConfig = ResolvedRoutingSkillsConfig;
 
 export type RoutingLlmResult = {
-  intent?: string;
   skills: string[];
+  experiences: string[];
   confidence: number;
   reason: string;
 };
 
 export type SkillRerankerResult = RoutingLlmResult;
 
+export type ContextWindow = {
+  user: { turns: number; chars: number };
+  assistant: { turns: number; chars: number };
+};
+
 export type ResolvedRoutingConfig = {
   scope: ResolvedRoutingScopeConfig;
-  intents: ResolvedRoutingIntentsConfig;
+  experiences: ResolvedRoutingExperiencesConfig;
   skills: ResolvedRoutingSkillsConfig;
-  model?: string;
-  modelFallback?: string;
-  thinking: ThinkLevel;
   timeoutMs: number;
   queryMode: "message" | "recent" | "full";
   contextWindow: ContextWindow;
@@ -142,104 +129,11 @@ export type ResolvedQmdConfig = {
 
 export type ResolvedSkillHarnessPluginConfig = {
   qmd: ResolvedQmdConfig;
+  jev: QmdEndpointConfig;
   skills: ResolvedSkillsConfig;
   routing: ResolvedRoutingConfig;
   review: ResolvedReviewConfig;
 };
-
-export type IntentDefinition = {
-  triggers: string[];
-  examples: string[];
-  skills?: string[];
-  keywords: string[];
-  guidance: string;
-};
-
-export type IntentCatalogEntry = {
-  id: string;
-  definition: IntentDefinition;
-};
-
-export type IntentProjectionSelectionReason =
-  | "authorized-history"
-  | "candidate-keyword"
-  | "intent-id"
-  | "qmd-hit"
-  | "recent-history";
-
-export type IntentProjectionSupportReason =
-  | "high-overall-confidence"
-  | "authorized-history"
-  | "exact-evidence"
-  | "qmd-retrieval";
-
-export type IntentRoutingSearchHit = {
-  intentId: string;
-  score: number;
-  collection: string;
-  explain?: unknown;
-};
-
-export type IntentRoutingRawSearchResult = {
-  filepath?: string;
-  file?: string;
-  displayPath?: string;
-  body?: string;
-  score: number;
-  explain?: unknown;
-};
-
-export type IntentRoutingSearchEvidence = {
-  query: string;
-  hits?: IntentRoutingSearchHit[];
-  rawResults?: IntentRoutingRawSearchResult[];
-  outcome:
-    | "routed"
-    | "below-threshold"
-    | "below-margin-threshold"
-    | "below-score-and-margin-threshold"
-    | "unrecognized-intent"
-    | "none"
-    | "unavailable";
-  directRouteMinScore: number;
-  directRouteMinMargin?: number;
-};
-
-export type IntentRoutingEvidence = {
-  keyword?: IntentRoutingSearchEvidence;
-  hybrid?: IntentRoutingSearchEvidence & { expansionContext?: string };
-};
-
-export type IntentProjectionTelemetry = {
-  decision: "projected" | "none" | "full-fallback";
-  effectiveInput: "projected" | "none" | "full-fallback";
-  fallbackReason?: string;
-  originalIntentCount: number;
-  candidateIntentCount: number;
-  originalCatalogCodePoints?: number;
-  candidateCatalogCodePoints?: number;
-  durationMs: number;
-  candidateIntentIds: string[];
-  candidateSelections: Array<{
-    intentId: string;
-    selectionReasons: IntentProjectionSelectionReason[];
-    matchedKeywords: string[];
-  }>;
-  supportReasons: IntentProjectionSupportReason[];
-  selectionReasons: IntentProjectionSelectionReason[];
-  matchedKeywords: string[];
-};
-
-export type IntentionResult = {
-  intent: string;
-  reason: string;
-  keywords?: string[];
-  confidence: number;
-};
-
-export type ClassifiedIntentionResult = IntentionResult;
-
-export type IntentTrigger = "qmd-keyword" | "qmd-hybrid" | "llm-classifier";
 
 export type AvailableSkill = {
   name: string;
@@ -247,15 +141,7 @@ export type AvailableSkill = {
   description: string;
 };
 
-export type HistoricalIntent = Pick<IntentionResult, "intent" | "keywords"> &
-  Partial<Pick<IntentionResult, "confidence">>;
-
-export type HistoricalIntentRecord = HistoricalIntent & {
-  input: string;
-};
-
 export type RecentTurn = {
   role: string;
   text: string;
-  historicalIntent?: HistoricalIntent;
 };

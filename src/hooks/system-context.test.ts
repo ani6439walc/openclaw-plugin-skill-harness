@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  SKILL_HARNESS_INTENT_CONTEXT,
+  SKILL_HARNESS_ROUTING_CONTEXT,
   SKILL_HARNESS_SYSTEM_CONTEXT,
 } from "./system-context.js";
 
@@ -39,23 +39,27 @@ describe("SKILL_HARNESS_SYSTEM_CONTEXT", () => {
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).not.toMatch(/\/[^\s`]+\/SKILL\.md/);
   });
 
-  it("separates intent-routing guidance from universal skill discovery guidance", () => {
+  it("defines routing context guidance without obsolete intent concepts", () => {
     expect(
-      SKILL_HARNESS_INTENT_CONTEXT.startsWith(
+      SKILL_HARNESS_ROUTING_CONTEXT.startsWith(
         "### Using Skill Harness context",
       ),
     ).toBe(true);
-    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain('<intent name="...">');
-    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("intent guidance");
-    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("matched_skills");
-    expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("intent_matched_skills");
-    expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("skill_candidates");
-    expect(SKILL_HARNESS_INTENT_CONTEXT).toContain("skill_experiences");
-    expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain(
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain('<intent name="...">');
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain("intent guidance");
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).toContain("matched_skills");
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain(
+      "intent_matched_skills",
+    );
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain("skill_candidates");
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).toContain("matched_experiences");
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain(
       "domain_skill_candidates",
     );
-    expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("Instruction Hint");
-    expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("## Skills (mandatory)");
-    expect(SKILL_HARNESS_INTENT_CONTEXT).not.toContain("skill_manage");
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain("Instruction Hint");
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain(
+      "## Skills (mandatory)",
+    );
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain("skill_manage");
   });
 });

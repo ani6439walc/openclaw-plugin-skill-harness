@@ -101,4 +101,35 @@ describe("buildCandidateSkillsUnionPool", () => {
     expect(union.candidateSkills.map((s) => s.name)).toEqual(["alpha", "beta"]);
     expect((union as Record<string, unknown>).fallbackSkills).toBeUndefined();
   });
+
+  it("builds candidate skills from experience-qmd sources and maps experienceHitsBySkill", () => {
+    const mockHit = {
+      identity: "alpha/test-exp",
+      skill: "alpha",
+      entryId: "test-exp",
+      score: 0.95,
+      semanticScore: 0.95,
+      collection: "skill-experiences",
+    };
+    const union = buildCandidateSkillsUnionPool({
+      visibleSkills: skills,
+      nameCandidates: [],
+      retrievalCandidates: [
+        { skillName: "beta", score: 0.7, source: "direct-retrieval" },
+      ],
+      experienceCandidates: [
+        {
+          skillName: "alpha",
+          score: 0.95,
+          source: "experience-qmd",
+          experienceHits: [mockHit],
+        },
+      ],
+    });
+
+    expect(union.pool).toHaveLength(2);
+    expect(union.candidateSkills.map((s) => s.name)).toEqual(["alpha", "beta"]);
+    expect(union.experienceHitsBySkill.get("alpha")).toEqual([mockHit]);
+    expect(union.experienceHitsBySkill.has("beta")).toBe(false);
+  });
 });

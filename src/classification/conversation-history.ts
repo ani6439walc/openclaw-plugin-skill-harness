@@ -1,8 +1,4 @@
-import type {
-  ContextWindow,
-  HistoricalIntentRecord,
-  RecentTurn,
-} from "../types.js";
+import type { ContextWindow, RecentTurn } from "../types.js";
 import {
   DEFAULT_RECENT_USER_TURNS,
   DEFAULT_RECENT_USER_CHARS,
@@ -12,54 +8,6 @@ import {
 
 function normalizeTurnText(text: string): string {
   return text.trim().replace(/\s+/g, " ");
-}
-
-export function attachHistoricalIntents(
-  conversation: RecentTurn[],
-  records: HistoricalIntentRecord[],
-  options: { latestInput?: string } = {},
-): RecentTurn[] {
-  const enriched = conversation.map((turn) => ({ ...turn }));
-  const normalizedLatestInput = options.latestInput
-    ? normalizeTurnText(options.latestInput)
-    : undefined;
-  let firstAttachableIndex = enriched.length - 1;
-
-  for (let index = enriched.length - 1; index >= 0; index--) {
-    const turn = enriched[index];
-    if (turn.role !== "user") continue;
-
-    if (
-      !normalizedLatestInput ||
-      normalizeTurnText(turn.text) === normalizedLatestInput
-    ) {
-      firstAttachableIndex = index - 1;
-    }
-    break;
-  }
-
-  const recordsByInput = new Map<string, HistoricalIntentRecord[]>();
-  for (const record of records) {
-    const normalizedInput = normalizeTurnText(record.input);
-    const matchingRecords = recordsByInput.get(normalizedInput) ?? [];
-    matchingRecords.push(record);
-    recordsByInput.set(normalizedInput, matchingRecords);
-  }
-
-  for (let turnIndex = firstAttachableIndex; turnIndex >= 0; turnIndex--) {
-    const turn = enriched[turnIndex];
-    if (turn.role !== "user") continue;
-
-    const record = recordsByInput.get(normalizeTurnText(turn.text))?.pop();
-    if (!record) continue;
-    const historicalIntent: RecentTurn["historicalIntent"] = {
-      intent: record.intent,
-    };
-    if (record.keywords?.length) historicalIntent.keywords = record.keywords;
-    turn.historicalIntent = historicalIntent;
-  }
-
-  return enriched;
 }
 
 export function limitConversationTurns(

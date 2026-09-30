@@ -1,5 +1,3 @@
-import type { IntentDefinition } from "./types.js";
-
 export const DEFAULT_TIMEOUT_MS = 5_000;
 export const PROCESSED_EVENTS_RETENTION_DAYS = 90;
 export const KEYWORD_COVERAGE_RETENTION_DAYS = 30;
@@ -16,16 +14,11 @@ export const ROUTING_ADVISORY_HEADER =
   "Inferred intent and relevant skills (advisory, non-user input; load with `skill_view` if relevant):";
 export const ROUTING_ADVISORY_SKILLS_ONLY_HEADER =
   "Inferred relevant skills from conversation (advisory, non-user input; load with `skill_view` if relevant):";
+export const ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER =
+  "Inferred relevant skills and experiences from conversation (advisory, non-user input; load with `skill_view` or `skill_experience` if relevant):";
+export const ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER =
+  "Inferred relevant experiences from conversation (advisory, non-user input; load with `skill_experience` if relevant):";
 export const ROUTING_ADVISORY_INTENT_ONLY_HEADER =
   "Inferred user intent from conversation (advisory, non-user input):";
 export const ROUTING_ADVISORY_LEGACY_HEADER =
   "Inferred intent and intent-matched skills (advisory, non-user input; load with `skill_view` if relevant):";
-
-export const FALLBACK_INTENT_ID = "unknown";
-export const FALLBACK_INTENT: IntentDefinition = {
-  triggers: [],
-  examples: [],
-  keywords: [],
-  guidance:
-    "No predefined intent detected. Main Agent should determine the user's true intent and choose an appropriate strategy.",
-};

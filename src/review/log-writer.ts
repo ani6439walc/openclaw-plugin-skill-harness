@@ -21,25 +21,10 @@ import {
 import type { ReviewTrigger } from "./triggers.js";
 
 function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
-  if (finding.targetKind === "skill-experience") {
-    return {
-      trigger: finding.trigger,
-      targetKind: "skill-experience",
-      operation: "create",
-      targetIntentIds: [],
-      targetExperienceIds: [...finding.targetExperienceIds],
-      dedupeKey: finding.dedupeKey,
-      summary: finding.summary,
-      evidence: [...finding.evidence],
-      correctionGoal: finding.correctionGoal,
-      suggestedChange: finding.suggestedChange,
-    };
-  }
   return {
     trigger: finding.trigger,
-    targetKind: "intent-markdown",
-    operation: finding.operation,
-    targetIntentIds: [...finding.targetIntentIds],
+    targetKind: "skill-experience",
+    targetExperienceIds: [...finding.targetExperienceIds],
     dedupeKey: finding.dedupeKey,
     summary: finding.summary,
     evidence: [...finding.evidence],

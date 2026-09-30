@@ -11,7 +11,6 @@ import {
 } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { resolveConfig } from "./config.js";
 import { canonicalIdentity } from "./normalize.js";
-import { IntentCatalog } from "./intents/index.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
@@ -24,13 +23,12 @@ import {
 } from "./skills/roots.js";
 import { suppressNativeSkillsOnStartup } from "./skills/suppress-native.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
-import { createIntentQmdIndex } from "./qmd/intent-index.js";
 import { createSkillQmdIndex } from "./qmd/skill-index.js";
+import { createSkillExperienceQmdIndex } from "./qmd/experience-index.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import {
-  intentsPath,
   experiencesPath,
   packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
@@ -39,46 +37,9 @@ import {
 } from "./file-utils.js";
 
 const PLUGIN_ID = "skill-harness";
-const EXAMPLE_INTENT_ASSETS_DIR = path.join(
-  "skills",
-  "skill-harness",
-  "assets",
-);
-
-function copyFileIfMissing(sourcePath: string, targetPath: string): void {
-  if (fs.existsSync(targetPath)) return;
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.copyFileSync(sourcePath, targetPath);
-}
-
-function hasMarkdownFiles(dir: string): boolean {
-  return (
-    fs.existsSync(dir) &&
-    fs
-      .readdirSync(dir, { withFileTypes: true })
-      .some((entry) => entry.isFile() && entry.name.endsWith(".md"))
-  );
-}
-
-function seedExampleIntents(dataRoot: string, packageRoot: string): void {
-  const sourceDir = path.join(packageRoot, EXAMPLE_INTENT_ASSETS_DIR);
-  const targetDir = intentsPath(dataRoot);
-  if (!fs.existsSync(sourceDir)) return;
-  if (hasMarkdownFiles(targetDir)) return;
-
-  fs.mkdirSync(targetDir, { recursive: true });
-  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-    copyFileIfMissing(
-      path.join(sourceDir, entry.name),
-      path.join(targetDir, entry.name),
-    );
-  }
-}
 
 export function initializePluginDataRoot({
   dataRoot,
-  packageRoot = defaultPackageRoot,
 }: {
   dataRoot: string;
   packageRoot?: string;
@@ -91,16 +52,6 @@ export function initializePluginDataRoot({
     logger.warn("failed to create skill-harness data root", {
       error: err,
       path: dataRoot,
-    });
-    return;
-  }
-
-  try {
-    seedExampleIntents(dataRoot, packageRoot);
-  } catch (err) {
-    logger.warn("failed to seed skill-harness example intents", {
-      error: err,
-      path: intentsPath(dataRoot),
     });
   }
 }
@@ -184,7 +135,7 @@ export function createPlugin(
     id: PLUGIN_ID,
     name: "Skill Harness",
     description:
-      "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
+      "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
     register() {
       const getWorkingSetSkills = createWorkingSetSkillsResolver(
         refreshLiveConfigFromRuntime,
@@ -208,16 +159,7 @@ export function createPlugin(
       let disposed = false;
       let refreshTimer: ReturnType<typeof setTimeout> | undefined;
       const nativeBundledSkillsDir = resolveOpenClawBundledSkillsDir();
-      const catalog = IntentCatalog.create(dataRoot);
       const experienceCatalog = new SkillExperienceCatalog(dataRoot);
-      const qmdIntentIndex = createIntentQmdIndex({
-        dataRoot,
-        readOnly: !ownsBackgroundWork,
-        config: () => {
-          refreshLiveConfigFromRuntime();
-          return config.qmd;
-        },
-      });
       const qmdSkillIndex = createSkillQmdIndex({
         dataRoot,
         config: () => {
@@ -225,16 +167,20 @@ export function createPlugin(
           return { qmd: config.qmd, skills: config.skills };
         },
       });
+      const qmdExperienceIndex = createSkillExperienceQmdIndex({
+        dataRoot,
+        readOnly: !ownsBackgroundWork,
+        config: () => {
+          refreshLiveConfigFromRuntime();
+          return config.qmd;
+        },
+      });
+      if (!ownsBackgroundWork) {
+        qmdExperienceIndex.schedule(experienceCatalog.listAll());
+      }
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const reviewLogWriter = new IntentReviewLogWriter(dataRoot);
-
-      const refreshRuntimeIntents = (options?: { rebuildQmd?: boolean }) => {
-        if (disposed) return;
-        catalog.load("intents");
-        if (options?.rebuildQmd || !ownsBackgroundWork)
-          qmdIntentIndex.schedule(catalog.get());
-      };
 
       const knownAgentIds = new Set<string>(["main"]);
       const collectKnownAgentIds = () => {
@@ -290,8 +236,7 @@ export function createPlugin(
       const refreshQmdIndexes = () => {
         if (disposed || !ownsBackgroundWork) return;
         refreshLiveConfigFromRuntime();
-        refreshRuntimeIntents();
-        qmdIntentIndex.schedule(catalog.get());
+        qmdExperienceIndex.schedule(experienceCatalog.listAll());
         for (const agentId of collectKnownAgentIds()) {
           scheduleSkillSearchIndex(agentId);
         }
@@ -316,7 +261,7 @@ export function createPlugin(
         await Promise.all([
           reviewScheduler.dispose(),
           qmdSkillIndex.close(),
-          qmdIntentIndex.close(),
+          qmdExperienceIndex.close(),
         ]);
       });
 
@@ -324,15 +269,13 @@ export function createPlugin(
         api: runtimeConfigApi,
         config: () => config,
         refreshLiveConfigFromRuntime,
-        refreshIntents: refreshRuntimeIntents,
-        catalog,
         tracker,
         statsAggregator,
         reviewLogWriter,
         reviewScheduler,
         getWorkingSetSkills,
-        qmdIntentIndex,
         qmdSkillIndex,
+        qmdExperienceIndex,
 
         bundledSkillsDir,
         nativeBundledSkillsDir,
@@ -359,6 +302,7 @@ export function createPlugin(
       api.on("session_end", handlers.onSessionEnd);
       registerSkillTools(api, {
         experienceCatalog,
+        qmdExperienceIndex,
         qmdSkillIndex,
         scheduleSkillSearchIndex,
         bundledSkillsDir: deps.bundledSkillsDir,

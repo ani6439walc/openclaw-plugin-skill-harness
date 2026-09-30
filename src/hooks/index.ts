@@ -5,14 +5,14 @@ import type {
 } from "../session/index.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
-import { defaultCatalog } from "../intents/index.js";
 import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
-import { runReviewSubagent } from "../review/subagent.js";
+import { getReviewModelRef, runReviewSubagent } from "../review/subagent.js";
 import type {
   CapabilityFitEvidence,
+  ReviewSnapshot,
   SelectedPlacementSkill,
   SkillPlacementReviewCandidate,
 } from "../review/types.js";
@@ -26,12 +26,7 @@ import {
   extractRecentTurns,
   extractToolText,
   isInternalUserTurn,
-  attachHistoricalIntents,
-  sanitizeHistoricalIntentInput,
-  getQmdCandidateLimits,
-  projectQmdIntentCandidates,
-  measureIntentCatalogCodePoints,
-  type IntentProjection,
+  sanitizePromptInput,
 } from "../classification/index.js";
 import {
   isAllowedChatId,
@@ -43,14 +38,9 @@ import {
   shouldSkipSkillSystemContext,
   resolveCanonicalSessionKeyFromSessionId,
 } from "../session/index.js";
-import { FALLBACK_INTENT_ID } from "../constants.js";
 import {
-  getModelRef,
-  getReviewModelRef,
-  runIntentionSubagent,
-  runUnifiedRoutingSubagent,
-} from "../classification/index.js";
-import {
+  runJevUnifiedRouting,
+  type JevUnifiedRoutingParams,
   buildRoutingContext,
   formatWorkingSetSkills,
 } from "../classification/index.js";
@@ -58,29 +48,18 @@ import {
   listAvailableSkills,
   resolveAvailableSkills,
   resolveSkillInventory,
-} from "../intents/index.js";
-import { experiencesPath, intentsPath, packageRoot } from "../file-utils.js";
-import type {
-  QmdIntentHit,
-  QmdIntentSearchEvidence,
-  QmdRawSearchResult,
-} from "../qmd/intent-index.js";
+} from "../skills/index.js";
+import { experiencesPath, packageRoot } from "../file-utils.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
+import type { SkillExperienceEntry } from "../experiences/index.js";
+import type { SkillExperienceHit } from "../qmd/experience-index.js";
 import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
 import { matchAvailableSkillNamesWithTokens } from "../skills/name-index.js";
 import {
   buildCandidateSkillsUnionPool,
   type SkillDiscoveryCandidate,
 } from "../skills/candidate-pool.js";
-import type {
-  HistoricalIntentRecord,
-  IntentCatalogEntry,
-  IntentProjectionTelemetry,
-  IntentRoutingEvidence,
-  IntentTrigger,
-  IntentionResult,
-  RoutingLlmResult,
-} from "../types.js";
+import type { RoutingLlmResult } from "../types.js";
 import {
   emitPipelineEvent,
   type SkillCandidatePoolFallbackReason,
@@ -114,23 +93,11 @@ import {
   resolveToolResultText,
 } from "./tool-tracking.js";
 import {
-  SKILL_HARNESS_INTENT_CONTEXT,
+  SKILL_HARNESS_ROUTING_CONTEXT,
   SKILL_HARNESS_SYSTEM_CONTEXT,
 } from "./system-context.js";
 export type { HookDeps } from "./types.js";
 
-function sanitizeHistoricalIntentRecords(
-  records: HistoricalIntentRecord[],
-): HistoricalIntentRecord[] {
-  return records.flatMap((record) => {
-    const input = sanitizeHistoricalIntentInput(record.input);
-    return input ? [{ ...record, input }] : [];
-  });
-}
-
-const MAX_PROJECTION_CANDIDATE_IDS = 128;
-const MAX_PROJECTION_MATCHED_KEYWORDS = 32;
-const MAX_PROJECTION_KEYWORD_CHARS = 200;
 const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
 
 export function formatConversationExpansionContext(params: {
@@ -236,69 +203,13 @@ async function resolveSelectedPlacementSkill(
   }
 }
 
-function measureProjectionCatalogs(
-  originalIntents: readonly IntentCatalogEntry[],
-  candidateIntents: readonly IntentCatalogEntry[],
-): Pick<
-  IntentProjectionTelemetry,
-  "originalCatalogCodePoints" | "candidateCatalogCodePoints"
-> {
-  try {
-    return {
-      originalCatalogCodePoints:
-        measureIntentCatalogCodePoints(originalIntents),
-      candidateCatalogCodePoints:
-        measureIntentCatalogCodePoints(candidateIntents),
-    };
-  } catch (error) {
-    logger.warn("failed to measure intent projection catalogs", { error });
-    return {};
-  }
-}
-
-function toIntentProjectionTelemetry(params: {
-  projection: IntentProjection;
-  originalIntents: readonly IntentCatalogEntry[];
-  durationMs: number;
-}): IntentProjectionTelemetry {
-  const { projection, originalIntents, durationMs } = params;
-  return {
-    decision: projection.decision,
-    effectiveInput: projection.decision,
-    ...(projection.fallbackReason
-      ? { fallbackReason: projection.fallbackReason }
-      : {}),
-    originalIntentCount: projection.originalIntentCount,
-    candidateIntentCount: projection.candidateIntentCount,
-    ...measureProjectionCatalogs(originalIntents, projection.candidateIntents),
-    durationMs,
-    candidateIntentIds: projection.candidateIntents
-      .slice(0, MAX_PROJECTION_CANDIDATE_IDS)
-      .map((intent) => intent.id),
-    candidateSelections: projection.candidateSelections
-      .slice(0, MAX_PROJECTION_CANDIDATE_IDS)
-      .map((selection) => ({
-        intentId: selection.intentId,
-        selectionReasons: [...selection.selectionReasons],
-        matchedKeywords: selection.matchedKeywords
-          .slice(0, MAX_PROJECTION_MATCHED_KEYWORDS)
-          .map((keyword) => keyword.slice(0, MAX_PROJECTION_KEYWORD_CHARS)),
-      })),
-    supportReasons: [...projection.supportReasons],
-    selectionReasons: [...projection.selectionReasons],
-    matchedKeywords: projection.matchedKeywords
-      .slice(0, MAX_PROJECTION_MATCHED_KEYWORDS)
-      .map((keyword) => keyword.slice(0, MAX_PROJECTION_KEYWORD_CHARS)),
-  };
-}
-
 function toPromptBuildResult(
   prependContext?: string,
   workingSetSkillsXml?: string,
-  includeIntentContext = true,
+  includeRoutingContext = true,
 ): PluginHookBeforePromptBuildResult {
-  const systemContext = includeIntentContext
-    ? `${SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_INTENT_CONTEXT}`
+  const systemContext = includeRoutingContext
+    ? `${SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_ROUTING_CONTEXT}`
     : SKILL_HARNESS_SYSTEM_CONTEXT;
   const appendSystemContext = workingSetSkillsXml
     ? `${systemContext}\n\n${workingSetSkillsXml}`
@@ -309,298 +220,21 @@ function toPromptBuildResult(
   };
 }
 
-function findIntentDefinition(
-  catalog: typeof defaultCatalog,
-  intent: string | undefined,
-) {
-  const intentId = intent?.match(/^([A-Za-z0-9_-]+)/)?.[1];
-  if (!intentId) return;
-  return catalog
-    .get()
-    .find((entry) => entry.id.toLowerCase() === intentId.toLowerCase());
-}
-
-function findIntentEntry<
-  T extends { id: string; definition: { guidance: string; skills?: string[] } },
->(intents: readonly T[], intent: string | undefined): T | undefined {
-  const intentId = intent?.match(/^([A-Za-z0-9_-]+)/)?.[1];
-  if (!intentId) return;
-  return intents.find(
-    (entry) => entry.id.toLowerCase() === intentId.toLowerCase(),
-  );
-}
-
-function resolveIntentId(intent: string | undefined): string | undefined {
-  return intent?.match(/^([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase();
-}
-
-function extractRawResultDocId(
-  candidatePath: string | undefined,
-): string | undefined {
-  if (!candidatePath) return undefined;
-  const cleanPath = candidatePath.replace(/^qmd:\/\/[^/]+\//, "");
-  const base = path.basename(cleanPath);
-  const match = /^(.+-\d+)\.md(?:\.identity\.yml)?$/u.exec(base);
-  return (
-    match?.[1]?.trim() ?? base.replace(/\.md(?:\.identity\.yml)?$/u, "").trim()
-  );
-}
-
-function intentIdFromCandidatePath(
-  candidatePath: string | undefined,
-): string | undefined {
-  const docId = extractRawResultDocId(candidatePath);
-  if (!docId) return undefined;
-  const match = /^(.+)-\d+$/u.exec(docId);
-  return match?.[1]?.trim() ?? docId;
-}
-
-function extractLexicalTraceChannels(trace: unknown): string | undefined {
-  if (!trace || typeof trace !== "object") return undefined;
-  const record = trace as Record<string, unknown>;
-  if (Array.isArray(record.contributions) && record.contributions.length > 0) {
-    const parts: string[] = [];
-    for (const c of record.contributions) {
-      if (
-        c &&
-        typeof c === "object" &&
-        typeof (c as Record<string, unknown>).channel === "string"
-      ) {
-        const channel = (c as Record<string, unknown>).channel as string;
-        const score = (c as Record<string, unknown>).backendScore;
-        if (typeof score === "number" && Number.isFinite(score)) {
-          parts.push(`${channel} ${roundToDecimals(score, 2)}`);
-        } else {
-          parts.push(channel);
-        }
-      }
-    }
-    if (parts.length > 0) return parts.join(", ");
-  }
-  if (Array.isArray(record.channels) && record.channels.length > 0) {
-    const used = record.channels
-      .filter(
-        (ch) =>
-          ch &&
-          typeof ch === "object" &&
-          (ch as Record<string, unknown>).status === "used" &&
-          typeof (ch as Record<string, unknown>).channel === "string",
-      )
-      .map((ch) => (ch as Record<string, unknown>).channel as string);
-    if (used.length > 0) return used.join(", ");
-  }
-  return undefined;
-}
-
-function truncateHitText(text: string, maxLen = 30): string {
-  const clean = text.trim().replace(/\s+/g, " ");
-  if (!clean) return "";
-  return clean.length > maxLen ? `${clean.slice(0, maxLen)}...` : clean;
-}
-
-function findMatchingKeywords(
-  message: string,
-  keywords: readonly string[],
-): string[] {
-  const normalizedMessage = message.toLowerCase();
-  const matched: string[] = [];
-  for (const keyword of keywords) {
-    const trimmed = keyword.trim();
-    if (!trimmed) continue;
-    const normalizedKeyword = trimmed.toLowerCase();
-    if (normalizedMessage.includes(normalizedKeyword)) {
-      matched.push(trimmed);
-    }
-  }
-  return matched;
-}
-
-export function buildKeywordRouteReason(params: {
-  intent: IntentCatalogEntry;
-  hit: QmdIntentHit;
-  query?: string;
-  directRouteMinScore: number;
-  rawResult?: QmdRawSearchResult;
-}): string {
-  const score = roundToDecimals(params.hit.score, 2);
-  const threshold = roundToDecimals(params.directRouteMinScore, 2);
-
-  let hitText = params.rawResult?.body
-    ? truncateHitText(params.rawResult.body)
-    : "";
-  if (!hitText && params.query) {
-    const matched = findMatchingKeywords(
-      params.query,
-      params.intent.definition.keywords,
-    );
-    if (matched.length > 0) {
-      hitText = matched.join(", ");
-    }
-  }
-
-  const candidatePath =
-    params.rawResult?.filepath ??
-    params.rawResult?.file ??
-    params.rawResult?.displayPath;
-  const docId = extractRawResultDocId(candidatePath) || params.intent.id;
-
-  const trace =
-    (params.rawResult as Record<string, unknown> | undefined)?.lexicalTrace ??
-    params.hit.explain;
-  const channels = extractLexicalTraceChannels(trace);
-
-  const meta = channels ? `[${docId} | ${channels}]` : `[${docId}]`;
-
-  if (hitText) {
-    return `"${hitText}" ${meta} → score ${score}/${threshold}`;
-  }
-  return `${meta} → score ${score}/${threshold}`;
-}
-
-export function extractHybridSignals(explain: unknown): string {
-  if (explain && typeof explain === "object") {
-    const record = explain as Record<string, unknown>;
-    if (record.rrf && typeof record.rrf === "object") {
-      const rrf = record.rrf as Record<string, unknown>;
-      if (Array.isArray(rrf.contributions) && rrf.contributions.length > 0) {
-        const types = new Set<string>();
-        for (const c of rrf.contributions) {
-          if (
-            c &&
-            typeof c === "object" &&
-            typeof (c as Record<string, unknown>).queryType === "string"
-          ) {
-            types.add((c as Record<string, unknown>).queryType as string);
-          }
-        }
-        if (types.size > 0) {
-          const order = ["lex", "vec", "hyde", "original"];
-          const sorted = order.filter((t) => types.has(t));
-          for (const t of types) {
-            if (!sorted.includes(t)) sorted.push(t);
-          }
-          return sorted.join(",");
-        }
-      }
-    }
-    const hasVector =
-      Array.isArray(record.vectorScores) && record.vectorScores.length > 0;
-    const hasFts =
-      Array.isArray(record.ftsScores) && record.ftsScores.length > 0;
-    if (hasVector && hasFts) return "lex,vec";
-    if (hasVector) return "vec";
-    if (hasFts) return "lex";
-  }
-  return "lex,vec,hyde";
-}
-
-export function buildQmdRouteReason(params: {
-  intent: IntentCatalogEntry;
-  hit: QmdIntentHit;
-  directRouteMinScore: number;
-  scoreMargin: number;
-  directRouteMinMargin: number;
-  rawResult?: QmdRawSearchResult;
-}): string {
-  const score = roundToDecimals(params.hit.score, 2);
-  const threshold = roundToDecimals(params.directRouteMinScore, 2);
-  const margin = roundToDecimals(params.scoreMargin, 2);
-  const minimumMargin = roundToDecimals(params.directRouteMinMargin, 2);
-
-  const rawSignals = extractHybridSignals(
-    params.hit.explain ?? params.rawResult?.explain,
-  );
-  const signals = rawSignals
-    .split(",")
-    .map((s) => s.trim())
-    .join(", ");
-
-  const hitText = params.rawResult?.body
-    ? truncateHitText(params.rawResult.body)
-    : "";
-  const meta = `[${signals}]`;
-  const scorePart = `score ${score}/${threshold} (margin ${margin}/${minimumMargin})`;
-
-  if (hitText) {
-    return `"${hitText}" ${meta} → ${scorePart}`;
-  }
-  return `${meta} → ${scorePart}`;
-}
-
-function buildQmdIntentResult(params: {
-  hit: QmdIntentHit;
-  intent: IntentCatalogEntry;
-  directRouteMinScore: number;
-  scoreMargin: number;
-  directRouteMinMargin: number;
-  rawResult?: QmdRawSearchResult;
-}): IntentionResult {
-  return {
-    intent: params.intent.id,
-    reason: buildQmdRouteReason({
-      intent: params.intent,
-      hit: params.hit,
-      directRouteMinScore: params.directRouteMinScore,
-      scoreMargin: params.scoreMargin,
-      directRouteMinMargin: params.directRouteMinMargin,
-      rawResult: params.rawResult,
-    }),
-    keywords: params.intent.definition.keywords.slice(0, 5),
-    confidence: params.hit.score,
-  };
-}
-
-function buildKeywordIntentResult(params: {
-  hit: QmdIntentHit;
-  intent: IntentCatalogEntry;
-  latestUserMessage?: string;
-  directRouteMinScore: number;
-  rawResult?: QmdRawSearchResult;
-}): IntentionResult {
-  return {
-    intent: params.intent.id,
-    reason: buildKeywordRouteReason({
-      intent: params.intent,
-      hit: params.hit,
-      query: params.latestUserMessage,
-      directRouteMinScore: params.directRouteMinScore,
-      rawResult: params.rawResult,
-    }),
-    keywords: params.intent.definition.keywords.slice(0, 5),
-    confidence: params.hit.score,
-  };
-}
-
-type PromptBuildClassification = {
-  trigger: IntentTrigger;
-  result: IntentionResult;
-  intentProjection?: IntentProjectionTelemetry;
-  routingEvidence?: IntentRoutingEvidence;
-};
-
 export function createHookHandlers(deps: HookDeps) {
-  const { api, config, refreshLiveConfigFromRuntime, refreshIntents } = deps;
-  const catalog = deps.catalog ?? defaultCatalog;
+  const { api, config, refreshLiveConfigFromRuntime } = deps;
   const tracker = deps.tracker ?? defaultTracker;
   const statsAggregator = deps.statsAggregator ?? defaultStatsAggregator;
   const skillInventoryResolver =
     deps.skillInventoryResolver ?? resolveSkillInventory;
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier;
-  const routingSubagent = deps.routingSubagent;
-  const effectiveRoutingSubagent: typeof runUnifiedRoutingSubagent =
-    routingSubagent ??
+  const routingSelector = deps.routingSelector ?? deps.routingSubagent;
+  const effectiveRoutingSelector: (
+    params: JevUnifiedRoutingParams,
+  ) => Promise<RoutingLlmResult | undefined> =
+    routingSelector ??
     (classifier
-      ? async (callParams) => {
-          if (callParams.resolvedIntent) {
-            return {
-              skills: (callParams.candidateSkills ?? [])
-                .slice(0, 4)
-                .map((s) => s.name),
-              confidence: 1.0,
-              reason: "Selected relevant candidate skills",
-            };
-          }
+      ? async (callParams: JevUnifiedRoutingParams) => {
           const classified = await classifier({
             api: callParams.api,
             config: callParams.config,
@@ -612,58 +246,25 @@ export function createHookHandlers(deps: HookDeps) {
             messageProvider: callParams.messageProvider,
             channelId: callParams.channelId,
             modelRef: callParams.modelRef,
-            intents: callParams.candidateIntents ?? [],
+            candidateSkills: callParams.candidateSkills,
+            candidateExperiences: callParams.candidateExperiences,
             dataRoot: callParams.dataRoot,
           });
           if (!classified) return undefined;
-          const matchedIntent = classified.intent
-            ? (callParams.candidateIntents ?? []).find(
-                (i) =>
-                  canonicalIdentity(i.id) ===
-                  canonicalIdentity(classified.intent),
-              )
-            : undefined;
-          const declaredSkills = matchedIntent?.definition.skills ?? [];
-          const candidateSkillNames = (callParams.candidateSkills ?? [])
-            .filter(
-              (s) =>
-                !(callParams.candidateIntents ?? []).some(
-                  (other) =>
-                    Boolean(classified.intent) &&
-                    canonicalIdentity(other.id) !==
-                      canonicalIdentity(classified.intent) &&
-                    (other.definition.skills ?? []).some(
-                      (name) =>
-                        canonicalIdentity(name) === canonicalIdentity(s.name),
-                    ),
-                ),
-            )
-            .map((s) => s.name);
-          const mockSkills = Array.isArray(
-            (classified as unknown as { skills?: unknown }).skills,
-          )
-            ? (classified as unknown as { skills: string[] }).skills
-            : undefined;
-          const combinedSkills =
-            mockSkills ??
-            [...new Set([...declaredSkills, ...candidateSkillNames])].slice(
-              0,
-              4,
-            );
           return {
-            intent: classified.intent,
-            skills: combinedSkills,
-            confidence: classified.confidence,
-            reason: classified.reason,
+            skills: classified.skills ?? [],
+            experiences: classified.experiences ?? [],
+            confidence: classified.confidence ?? 1.0,
+            reason: classified.reason ?? "Selected relevant candidate skills",
           };
         }
-      : runUnifiedRoutingSubagent);
+      : runJevUnifiedRouting);
   const clock = deps.clock ?? (() => new Date());
   const experienceCatalog =
     deps.experienceCatalog ??
     (deps.dataRoot ? new SkillExperienceCatalog(deps.dataRoot) : undefined);
-  const qmdIntentIndex = deps.qmdIntentIndex;
   const qmdSkillIndex = deps.qmdSkillIndex;
+  const qmdExperienceIndex = deps.qmdExperienceIndex;
 
   const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
     deps.reviewLogWriter ??
@@ -715,7 +316,6 @@ export function createHookHandlers(deps: HookDeps) {
         api,
         config: candidate.resolvedConfig,
         agentId: candidate.agentId,
-        intentDirectory: intentsPath(deps.dataRoot ?? "."),
         experienceDirectory: experiencesPath(deps.dataRoot ?? "."),
         allowedExperienceSkills,
         sessionKey: candidate.ctx.sessionKey ?? candidate.snapshot.sessionKey,
@@ -739,7 +339,6 @@ export function createHookHandlers(deps: HookDeps) {
         {
           triggers: candidate.triggers,
           outcome: reviewResult.outcome,
-          changedIntentIds: reviewResult.changedIntentIds,
           changedExperienceIds: reviewResult.changedExperienceIds,
           validationErrors: reviewResult.validationErrors,
           noFindingReasonCounts: reviewResult.noFindingReasonCounts,
@@ -747,10 +346,12 @@ export function createHookHandlers(deps: HookDeps) {
           skillPlacementCandidate: candidate.skillPlacementCandidate,
         },
       );
-      if (reviewResult.changedIntentIds?.length) {
-        refreshIntents({
-          rebuildQmd: reviewResult.routingSurfaceChanged === true,
-        });
+      if (
+        reviewResult.changedExperienceIds?.length &&
+        experienceCatalog &&
+        qmdExperienceIndex
+      ) {
+        qmdExperienceIndex.schedule(experienceCatalog.listAll());
       }
     } finally {
       if (candidate.skillPlacementCandidate) {
@@ -908,251 +509,32 @@ export function createHookHandlers(deps: HookDeps) {
 
   function buildConversationContext(
     event: PluginHookBeforePromptBuildEvent,
-    ctx: PluginHookAgentContext,
+    _ctx: PluginHookAgentContext,
     refreshedConfig: ResolvedSkillHarnessPluginConfig,
   ): {
     latestUserMessage: string;
-    historicalIntents: HistoricalIntentRecord[];
     conversation: ReturnType<typeof limitConversationTurns>;
   } {
     const latestUserMessage = extractLatestUserMessage(
       event.messages,
       event.prompt,
     );
-    const historicalIntents = sanitizeHistoricalIntentRecords(
-      ctx.sessionId ? tracker.getHistoricalIntentRecords(ctx.sessionId) : [],
-    );
-    const allTurns = attachHistoricalIntents(
-      extractRecentTurns(event.messages),
-      historicalIntents,
-      { latestInput: latestUserMessage },
-    );
     const conversation = limitConversationTurns(
-      allTurns,
+      extractRecentTurns(event.messages),
       refreshedConfig.routing.queryMode,
       refreshedConfig.routing.contextWindow,
     );
 
-    return { latestUserMessage, historicalIntents, conversation };
-  }
-
-  type IntentIndexSearchResult =
-    | {
-        hitType: "keyword";
-        hit: QmdIntentHit;
-        intent: IntentCatalogEntry;
-        rawResult?: QmdRawSearchResult;
-        routingEvidence: IntentRoutingEvidence;
-      }
-    | {
-        hitType: "hybrid";
-        hit: QmdIntentHit;
-        intent: IntentCatalogEntry;
-        scoreMargin: number;
-        rawResult?: QmdRawSearchResult;
-        routingEvidence: IntentRoutingEvidence;
-      }
-    | {
-        hitType: "miss";
-        qmdHits?: QmdIntentHit[];
-        hybridRawResults?: QmdIntentSearchEvidence["rawResults"];
-        routingEvidence?: IntentRoutingEvidence;
-        failures: string[];
-      };
-
-  async function searchIntentIndices(params: {
-    latestUserMessage: string;
-    conversation: ReturnType<typeof limitConversationTurns>;
-    availableIntents: readonly IntentCatalogEntry[];
-    refreshedConfig: ResolvedSkillHarnessPluginConfig;
-  }): Promise<IntentIndexSearchResult> {
-    const failures: string[] = [];
-    let keywordHits: QmdIntentHit[] | undefined;
-    let keywordRawResults: QmdIntentSearchEvidence["rawResults"] | undefined;
-    let routingEvidence: IntentRoutingEvidence | undefined;
-
-    // Step 1: QMD Keyword Search (BM25 searchLex)
-    if (qmdIntentIndex) {
-      try {
-        const keywordSearch = await qmdIntentIndex.searchKeywords({
-          query: params.latestUserMessage,
-          includeRawResults: true,
-        });
-        keywordHits = keywordSearch?.hits;
-        keywordRawResults = keywordSearch?.rawResults;
-      } catch (error) {
-        failures.push("qmd-keyword: keyword index unavailable");
-        logger.warn("keyword intent search failed", { error });
-      }
-      const topKeywordHit = keywordHits?.[0];
-      const matchedKeywordIntent = topKeywordHit
-        ? findIntentEntry(params.availableIntents, topKeywordHit.intentId)
-        : undefined;
-      const keywordMinScore =
-        params.refreshedConfig.routing.intents.keyword.directRouteMinScore;
-      const keywordOutcome =
-        keywordHits === undefined
-          ? "unavailable"
-          : !topKeywordHit
-            ? "none"
-            : !matchedKeywordIntent
-              ? "unrecognized-intent"
-              : roundToDecimals(topKeywordHit.score, 2) >=
-                  roundToDecimals(keywordMinScore, 2)
-                ? "routed"
-                : "below-threshold";
-      routingEvidence = {
-        keyword: {
-          query: params.latestUserMessage,
-          ...(keywordHits === undefined ? {} : { hits: keywordHits }),
-          ...(keywordRawResults === undefined
-            ? {}
-            : { rawResults: keywordRawResults }),
-          outcome: keywordOutcome,
-          directRouteMinScore: keywordMinScore,
-        },
-      };
-      if (
-        topKeywordHit &&
-        matchedKeywordIntent &&
-        roundToDecimals(topKeywordHit.score, 2) >=
-          roundToDecimals(keywordMinScore, 2)
-      ) {
-        const matchingRawResult =
-          keywordRawResults?.find((raw) => {
-            const candidatePath = raw.filepath ?? raw.file ?? raw.displayPath;
-            return (
-              intentIdFromCandidatePath(candidatePath)?.toLowerCase() ===
-              matchedKeywordIntent.id.toLowerCase()
-            );
-          }) ?? keywordRawResults?.[0];
-        return {
-          hitType: "keyword",
-          hit: topKeywordHit,
-          intent: matchedKeywordIntent,
-          rawResult: matchingRawResult,
-          routingEvidence,
-        };
-      }
-      if (keywordHits === undefined && failures.length === 0) {
-        failures.push("qmd-keyword: keyword index unavailable");
-      }
-    }
-
-    // Step 2: QMD Hybrid Search (Examples & Keywords) with Context Expansion
-    let qmdHits: QmdIntentHit[] | undefined;
-    let hybridRawResults: QmdIntentSearchEvidence["rawResults"] | undefined;
-    let topHit: QmdIntentHit | undefined;
-    if (qmdIntentIndex) {
-      const limits = getQmdCandidateLimits(params.availableIntents.length);
-      const expansionContext = formatConversationExpansionContext({
-        conversation: params.conversation,
-      });
-      try {
-        const hybridSearch =
-          await qmdIntentIndex.searchIntentExamplesAndKeywords({
-            query: params.latestUserMessage,
-            rawLimit: limits.rawLimit,
-            ...(expansionContext ? { expansionContext } : {}),
-            includeRawResults: true,
-          });
-        qmdHits = hybridSearch?.hits;
-        hybridRawResults = hybridSearch?.rawResults;
-      } catch (error) {
-        failures.push("qmd-hybrid: example/keyword index unavailable");
-        logger.warn("hybrid intent search failed", { error });
-      }
-      topHit = qmdHits?.[0];
-      const secondHit = qmdHits?.[1];
-      const topIntent = topHit
-        ? findIntentEntry(params.availableIntents, topHit.intentId)
-        : undefined;
-      const hybridThresholds = params.refreshedConfig.routing.intents.hybrid;
-      const scoreMargin =
-        topHit && secondHit
-          ? topHit.score - secondHit.score
-          : (topHit?.score ?? 0);
-      const satisfiesMargin =
-        !secondHit ||
-        roundToDecimals(scoreMargin, 2) >=
-          roundToDecimals(hybridThresholds.directRouteMinMargin, 2);
-      const hybridOutcome =
-        qmdHits === undefined
-          ? "unavailable"
-          : !topHit
-            ? "none"
-            : !topIntent
-              ? "unrecognized-intent"
-              : roundToDecimals(topHit.score, 2) <
-                  roundToDecimals(hybridThresholds.directRouteMinScore, 2)
-                ? satisfiesMargin
-                  ? "below-threshold"
-                  : "below-score-and-margin-threshold"
-                : !satisfiesMargin
-                  ? "below-margin-threshold"
-                  : "routed";
-      routingEvidence = {
-        ...routingEvidence,
-        hybrid: {
-          query: params.latestUserMessage,
-          ...(qmdHits === undefined ? {} : { hits: qmdHits }),
-          ...(hybridRawResults === undefined
-            ? {}
-            : { rawResults: hybridRawResults }),
-          outcome: hybridOutcome,
-          directRouteMinScore: hybridThresholds.directRouteMinScore,
-          directRouteMinMargin: hybridThresholds.directRouteMinMargin,
-          ...(expansionContext ? { expansionContext } : {}),
-        },
-      };
-      if (
-        topHit &&
-        topIntent &&
-        roundToDecimals(topHit.score, 2) >=
-          roundToDecimals(hybridThresholds.directRouteMinScore, 2) &&
-        satisfiesMargin
-      ) {
-        const matchingRawResult =
-          hybridRawResults?.find((raw) => {
-            const candidatePath = raw.filepath ?? raw.file ?? raw.displayPath;
-            return (
-              intentIdFromCandidatePath(candidatePath)?.toLowerCase() ===
-              topIntent.id.toLowerCase()
-            );
-          }) ?? hybridRawResults?.[0];
-        return {
-          hitType: "hybrid",
-          hit: topHit,
-          intent: topIntent,
-          scoreMargin,
-          rawResult: matchingRawResult,
-          routingEvidence,
-        };
-      }
-      if (qmdHits === undefined && failures.length < 2) {
-        failures.push("qmd-hybrid: example/keyword index unavailable");
-      }
-    }
-
-    return {
-      hitType: "miss",
-      qmdHits,
-      hybridRawResults,
-      routingEvidence,
-      failures,
-    };
+    return { latestUserMessage, conversation };
   }
 
   async function recordPromptBuildSession(params: {
     association?: TurnAssociation;
     latestUserMessage: string;
-    trigger: IntentTrigger;
-    result?: IntentionResult;
-    intentMatchedSkills?: string[];
-    intentProjection?: IntentProjectionTelemetry;
-    routingEvidence?: IntentRoutingEvidence;
+    matchedSkills?: readonly AvailableSkill[];
+    matchedExperiences?: readonly SkillExperienceEntry[];
     inputSkillDiscovery?: InputSkillDiscovery;
-    conversation: ReturnType<typeof limitConversationTurns>;
+    confidence: number;
   }): Promise<void> {
     if (!params.association) return;
     await tracker.mergeTurnAndPersist({
@@ -1161,46 +543,12 @@ export function createHookHandlers(deps: HookDeps) {
       maxWaitMs: 0,
       data: {
         input: params.latestUserMessage,
-        intent: {
-          trigger: params.trigger,
-          ...(params.result ? { result: params.result } : {}),
-          intentMatchedSkills: params.intentMatchedSkills,
-          ...(params.intentProjection
-            ? { intentProjection: params.intentProjection }
-            : {}),
-          ...(params.routingEvidence
-            ? { routingEvidence: params.routingEvidence }
-            : {}),
-          ...(params.inputSkillDiscovery
-            ? { inputSkillDiscovery: params.inputSkillDiscovery }
-            : {}),
-        },
+        matchedSkills: params.matchedSkills?.map((skill) => skill.name) ?? [],
+        matchedExperiences:
+          params.matchedExperiences?.map((entry) => entry.id) ?? [],
+        inputSkillDiscovery: params.inputSkillDiscovery,
+        confidence: params.confidence,
       },
-    });
-  }
-
-  async function recordPromptBuildResult(params: {
-    ctx: PluginHookAgentContext;
-    routing: PromptBuildIdentity;
-    latestUserMessage: string;
-    trigger: IntentTrigger;
-    result: IntentionResult;
-    intentMatchedSkills?: string[];
-    intentProjection?: IntentProjectionTelemetry;
-    routingEvidence?: IntentRoutingEvidence;
-    inputSkillDiscovery?: InputSkillDiscovery;
-    conversation: ReturnType<typeof limitConversationTurns>;
-  }): Promise<void> {
-    await recordPromptBuildSession({
-      association: params.routing.association,
-      latestUserMessage: params.latestUserMessage,
-      trigger: params.trigger,
-      result: params.result,
-      intentMatchedSkills: params.intentMatchedSkills,
-      intentProjection: params.intentProjection,
-      routingEvidence: params.routingEvidence,
-      inputSkillDiscovery: params.inputSkillDiscovery,
-      conversation: params.conversation,
     });
   }
 
@@ -1219,6 +567,7 @@ export function createHookHandlers(deps: HookDeps) {
     visibleSkills: AvailableSkill[];
     nameCandidates: SkillDiscoveryCandidate[];
     retrievalCandidates: SkillDiscoveryCandidate[];
+    candidateExperiences: SkillExperienceEntry[];
     retrievalSemanticScores: number[];
     retrievalCollections: Record<SkillCollectionKind, number>;
     fallbackReason?: SkillCandidatePoolFallbackReason;
@@ -1233,17 +582,22 @@ export function createHookHandlers(deps: HookDeps) {
   }): Promise<SkillCandidateDiscoveryResult> {
     const startedAtMs = Date.now();
     const policy = params.refreshedConfig.routing.skills;
+    const expPolicy = params.refreshedConfig.routing.experiences;
     const retrievalCollections: Record<SkillCollectionKind, number> = {
       meta: 0,
       body: 0,
       references: 0,
     };
 
-    if (policy.maxInjectedSkills === 0) {
+    if (
+      policy.maxInjectedSkills === 0 &&
+      expPolicy.maxInjectedExperiences === 0
+    ) {
       return {
         visibleSkills: [],
         nameCandidates: [],
         retrievalCandidates: [],
+        candidateExperiences: [],
         retrievalSemanticScores: [],
         retrievalCollections,
         startedAtMs,
@@ -1269,11 +623,14 @@ export function createHookHandlers(deps: HookDeps) {
     let fallbackReason: SkillCandidatePoolFallbackReason | undefined;
 
     try {
-      const nameMatchResult = matchAvailableSkillNamesWithTokens({
-        skills: visibleSkills,
-        input: params.latestUserMessage,
-        options: policy.nameMatch,
-      });
+      const nameMatchResult =
+        policy.maxInjectedSkills === 0
+          ? { candidates: [], matchedTokens: [] }
+          : matchAvailableSkillNamesWithTokens({
+              skills: visibleSkills,
+              input: params.latestUserMessage,
+              options: policy.nameMatch,
+            });
       nameCandidates = nameMatchResult.candidates.map((candidate) => ({
         ...candidate,
         collections: ["meta" as const],
@@ -1287,30 +644,35 @@ export function createHookHandlers(deps: HookDeps) {
 
     let retrievalCandidates: SkillDiscoveryCandidate[] = [];
     let retrievalSemanticScores: number[] = [];
+    let experienceCandidates: SkillDiscoveryCandidate[] = [];
 
     const expansionContext = formatConversationExpansionContext({
       conversation: params.conversation,
       candidateTokens: matchedTokens,
     });
 
-    const search = qmdSkillIndex
-      ? qmdSkillIndex.search({
-          agentId: params.routing.effectiveAgentId,
-          query: params.latestUserMessage,
-          limit: policy.maxInjectedSkills,
-          includeEvidence: true,
-          ...(expansionContext ? { expansionContext } : {}),
-        })
-      : undefined;
-
-    if (search) {
+    const searchSkills = async () => {
+      if (policy.maxInjectedSkills === 0) return;
+      if (!qmdSkillIndex) {
+        fallbackReason = "retrieval-unavailable";
+        return;
+      }
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const timeout = new Promise<"timeout">((resolve) => {
           timer = setTimeout(() => resolve("timeout"), policy.search.timeoutMs);
         });
         const outcome = await Promise.race([
-          search.then((hits) => ({ hits })).catch((error) => ({ error })),
+          qmdSkillIndex
+            .search({
+              agentId: params.routing.effectiveAgentId,
+              query: params.latestUserMessage,
+              limit: policy.maxInjectedSkills,
+              includeEvidence: true,
+              ...(expansionContext ? { expansionContext } : {}),
+            })
+            .then((hits) => ({ hits }))
+            .catch((error) => ({ error })),
           timeout,
         ]);
         if (outcome === "timeout") {
@@ -1365,14 +727,70 @@ export function createHookHandlers(deps: HookDeps) {
       } finally {
         if (timer !== undefined) clearTimeout(timer);
       }
-    } else {
-      fallbackReason = "retrieval-unavailable";
-    }
+    };
+
+    const candidateExperiences: SkillExperienceEntry[] = [];
+    const searchExperiences = async () => {
+      if (!qmdExperienceIndex || expPolicy.maxInjectedExperiences === 0) return;
+      let expTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const timeout = new Promise<"timeout">((resolve) => {
+          expTimer = setTimeout(
+            () => resolve("timeout"),
+            expPolicy.search.timeoutMs,
+          );
+        });
+        const expOutcome = await Promise.race([
+          qmdExperienceIndex
+            .search({
+              query: params.latestUserMessage,
+              limit: expPolicy.maxInjectedExperiences * 3,
+              ...(expansionContext ? { expansionContext } : {}),
+            })
+            .then((hits) => ({ hits }))
+            .catch((error) => ({ error })),
+          timeout,
+        ]);
+        if (
+          expOutcome !== "timeout" &&
+          !("error" in expOutcome) &&
+          expOutcome.hits
+        ) {
+          const qualifiedHits = expOutcome.hits.filter(
+            (hit) =>
+              roundToDecimals(hit.semanticScore, 2) >=
+              roundToDecimals(expPolicy.search.minCandidateScore, 2),
+          );
+          for (const hit of qualifiedHits) {
+            const resolved = experienceCatalog?.resolve(hit.id);
+            if (resolved) {
+              candidateExperiences.push(resolved);
+            } else {
+              candidateExperiences.push({
+                id: hit.id,
+                skills: [...hit.skills],
+                summary: "",
+                keywords: [],
+                body: "",
+                path: "",
+              });
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn("experience candidate retrieval failed", { error });
+      } finally {
+        if (expTimer !== undefined) clearTimeout(expTimer);
+      }
+    };
+
+    await Promise.all([searchSkills(), searchExperiences()]);
 
     return {
       visibleSkills,
       nameCandidates,
       retrievalCandidates,
+      candidateExperiences,
       retrievalSemanticScores,
       retrievalCollections,
       fallbackReason,
@@ -1562,8 +980,11 @@ export function createHookHandlers(deps: HookDeps) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
-      const { latestUserMessage, historicalIntents, conversation } =
-        buildConversationContext(event, ctx, refreshedConfig);
+      const { latestUserMessage, conversation } = buildConversationContext(
+        event,
+        ctx,
+        refreshedConfig,
+      );
       routing.association = await prepareTrackingTurn({
         ctx,
         routing,
@@ -1574,9 +995,10 @@ export function createHookHandlers(deps: HookDeps) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
-      refreshIntents();
-      if (catalog.count === 0) {
-        logger.debug("no intents loaded; skipping intention scan.");
+      if (
+        refreshedConfig.routing.skills.maxInjectedSkills === 0 &&
+        refreshedConfig.routing.experiences.maxInjectedExperiences === 0
+      ) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
@@ -1588,46 +1010,27 @@ export function createHookHandlers(deps: HookDeps) {
         hasModelId: Boolean(ctx.modelId),
       });
 
-      const availableIntents = catalog.get();
-
-      const modelRef = getModelRef(
-        api,
-        routing.effectiveAgentId,
-        refreshedConfig,
-        {
-          modelProviderId: ctx.modelProviderId,
-          modelId: ctx.modelId,
-        },
-      );
-
       return await runPromptBuildPipeline(
         ctx,
         routing.resolvedSessionKey,
         async () => {
-          const routingStartedAtMs = Date.now();
-          const [intentSearchResult, skillDiscoveryResult] = await Promise.all([
-            searchIntentIndices({
-              latestUserMessage,
-              conversation,
-              availableIntents,
-              refreshedConfig,
-            }),
-            discoverSkillCandidates({
-              routing,
-              refreshedConfig,
-              latestUserMessage,
-              conversation,
-            }),
-          ]);
+          const skillDiscoveryResult = await discoverSkillCandidates({
+            routing,
+            refreshedConfig,
+            latestUserMessage,
+            conversation,
+          });
 
-          let resolvedIntent: IntentCatalogEntry | undefined;
-          let result: IntentionResult | undefined;
-          let trigger: IntentTrigger;
-          let intentProjection: IntentProjectionTelemetry | undefined;
-          let routingEvidence = intentSearchResult.routingEvidence;
+          const unionPool = buildCandidateSkillsUnionPool({
+            visibleSkills: skillDiscoveryResult.visibleSkills,
+            nameCandidates: skillDiscoveryResult.nameCandidates,
+            retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
+            maxInjectedSkills: refreshedConfig.routing.skills.maxInjectedSkills,
+          });
+
+          let confidence = 0;
           let matchedSkills: readonly AvailableSkill[] = [];
-          let unionPool: ReturnType<typeof buildCandidateSkillsUnionPool>;
-
+          let matchedExperiences: SkillExperienceEntry[] = [];
           const visibleMap = new Map(
             skillDiscoveryResult.visibleSkills.map((s) => [
               canonicalIdentity(s.name),
@@ -1636,297 +1039,72 @@ export function createHookHandlers(deps: HookDeps) {
           );
 
           if (
-            intentSearchResult.hitType === "keyword" ||
-            intentSearchResult.hitType === "hybrid"
+            unionPool.candidateSkills.length === 0 &&
+            skillDiscoveryResult.candidateExperiences.length === 0
           ) {
-            resolvedIntent = intentSearchResult.intent;
-            trigger =
-              intentSearchResult.hitType === "keyword"
-                ? "qmd-keyword"
-                : "qmd-hybrid";
-            result =
-              intentSearchResult.hitType === "keyword"
-                ? buildKeywordIntentResult({
-                    hit: intentSearchResult.hit,
-                    intent: resolvedIntent,
-                    latestUserMessage,
-                    directRouteMinScore:
-                      refreshedConfig.routing.intents.keyword
-                        .directRouteMinScore,
-                    rawResult: intentSearchResult.rawResult,
-                  })
-                : buildQmdIntentResult({
-                    hit: intentSearchResult.hit,
-                    intent: resolvedIntent,
-                    directRouteMinScore:
-                      refreshedConfig.routing.intents.hybrid
-                        .directRouteMinScore,
-                    scoreMargin: intentSearchResult.scoreMargin,
-                    directRouteMinMargin:
-                      refreshedConfig.routing.intents.hybrid
-                        .directRouteMinMargin,
-                    rawResult: intentSearchResult.rawResult,
-                  });
-
-            emitPipelineEvent(
-              ctx,
-              routing.resolvedSessionKey,
-              "intent-match",
-              "completed",
-              {
-                result: result.intent,
-                confidence: result.confidence,
-                reason: `${trigger} → ${result.reason}`,
-                durationMs: Math.max(0, Date.now() - routingStartedAtMs),
-              },
-            );
-
-            unionPool = buildCandidateSkillsUnionPool({
-              visibleSkills: skillDiscoveryResult.visibleSkills,
-              nameCandidates: skillDiscoveryResult.nameCandidates,
-              retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
-              intentMatchedSkillNames: resolvedIntent.definition.skills,
-              maxInjectedSkills:
-                refreshedConfig.routing.skills.maxInjectedSkills,
-            });
-
-            if (unionPool.candidateSkills.length === 0 || !modelRef) {
-              matchedSkills = [];
-            } else {
-              try {
-                const llmResult = await effectiveRoutingSubagent({
-                  api,
-                  config: refreshedConfig,
-                  agentId: routing.effectiveAgentId,
-                  sessionKey: routing.resolvedSessionKey,
-                  sessionId: ctx.sessionId,
-                  conversation,
-                  latest: latestUserMessage,
-                  messageProvider: ctx.messageProvider,
-                  channelId: ctx.channelId,
-                  modelRef,
-                  resolvedIntent: {
-                    id: resolvedIntent.id,
-                    guidance: resolvedIntent.definition.guidance,
-                  },
-                  candidateSkills: unionPool.candidateSkills,
-                  dataRoot: deps.dataRoot,
-                });
-
-                if (llmResult) {
-                  matchedSkills = llmResult.skills
-                    .flatMap((name) => {
-                      const s = visibleMap.get(canonicalIdentity(name));
-                      return s ? [s] : [];
-                    })
-                    .slice(0, refreshedConfig.routing.skills.maxInjectedSkills);
-                } else {
-                  matchedSkills = [];
-                }
-              } catch (error) {
-                logger.warn("routing subagent execution failed", { error });
-                matchedSkills = [];
-              }
-            }
+            matchedSkills = [];
+            matchedExperiences = [];
           } else {
-            trigger = "llm-classifier";
-            const projectionStartedAtMs = Date.now();
-            let projection: IntentProjection;
             try {
-              projection = projectQmdIntentCandidates({
-                intents: availableIntents,
-                qmdHits: intentSearchResult.qmdHits,
-                histories: historicalIntents,
-                minCandidateScore:
-                  refreshedConfig.routing.intents.hybrid.minCandidateScore,
+              const llmResult = await effectiveRoutingSelector({
+                api,
+                config: refreshedConfig,
+                agentId: routing.effectiveAgentId,
+                sessionKey: routing.resolvedSessionKey,
+                sessionId: ctx.sessionId,
+                conversation,
+                latest: latestUserMessage,
+                messageProvider: ctx.messageProvider,
+                channelId: ctx.channelId,
+                candidateSkills: unionPool.candidateSkills,
+                candidateExperiences: skillDiscoveryResult.candidateExperiences,
+                dataRoot: deps.dataRoot,
               });
-            } catch (error) {
-              logger.warn("intent candidate projection failed; no candidates", {
-                error,
-              });
-              projection = {
-                decision: "none",
-                originalIntentCount: availableIntents.length,
-                candidateIntentCount: 0,
-                effectiveIntents: [],
-                candidateIntents: [],
-                projected: false,
-                supportReasons: [],
-                selectionReasons: [],
-                candidateSelections: [],
-                matchedKeywords: [],
-                fallbackReason: "selector-error",
-              };
-            }
-
-            intentProjection = toIntentProjectionTelemetry({
-              projection,
-              originalIntents: availableIntents,
-              durationMs: Math.max(0, Date.now() - projectionStartedAtMs),
-            });
-
-            const candidateIntentSkills = projection.effectiveIntents.flatMap(
-              (i) => i.definition.skills ?? [],
-            );
-
-            unionPool = buildCandidateSkillsUnionPool({
-              visibleSkills: skillDiscoveryResult.visibleSkills,
-              nameCandidates: skillDiscoveryResult.nameCandidates,
-              retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
-              intentMatchedSkillNames: candidateIntentSkills,
-              maxInjectedSkills:
-                refreshedConfig.routing.skills.maxInjectedSkills,
-            });
-
-            if (
-              (projection.effectiveIntents.length === 0 &&
-                unionPool.candidateSkills.length === 0) ||
-              !modelRef
-            ) {
-              matchedSkills = [];
-              if (intentSearchResult.failures.length > 0) {
-                emitPipelineEvent(
-                  ctx,
-                  routing.resolvedSessionKey,
-                  "intent-match",
-                  "failed",
-                  {
-                    error: intentSearchResult.failures.join("; "),
-                    durationMs: Math.max(0, Date.now() - routingStartedAtMs),
-                  },
-                );
-              }
-            } else {
-              let llmResult: RoutingLlmResult | undefined;
-              let llmFailed = false;
-              try {
-                llmResult = await effectiveRoutingSubagent({
-                  api,
-                  config: refreshedConfig,
-                  agentId: routing.effectiveAgentId,
-                  sessionKey: routing.resolvedSessionKey,
-                  sessionId: ctx.sessionId,
-                  conversation,
-                  latest: latestUserMessage,
-                  messageProvider: ctx.messageProvider,
-                  channelId: ctx.channelId,
-                  modelRef,
-                  ...(projection.effectiveIntents.length > 0
-                    ? { candidateIntents: projection.effectiveIntents }
-                    : {}),
-                  candidateSkills: unionPool.candidateSkills,
-                  dataRoot: deps.dataRoot,
-                });
-              } catch (error) {
-                llmFailed = true;
-                intentSearchResult.failures.push(
-                  "llm-classifier: classifier execution failed",
-                );
-                logger.warn("routing subagent execution failed", { error });
-              }
-
-              if (!llmResult && !llmFailed) {
-                intentSearchResult.failures.push(
-                  "llm-classifier: classifier returned no result",
-                );
-              }
 
               if (llmResult) {
-                if (
-                  llmResult.intent &&
-                  projection.effectiveIntents.length > 0
-                ) {
-                  resolvedIntent = findIntentEntry(
-                    availableIntents,
-                    llmResult.intent,
+                confidence = llmResult.confidence;
+                const candidateExpMap = new Map(
+                  skillDiscoveryResult.candidateExperiences.map((e) => [
+                    e.id,
+                    e,
+                  ]),
+                );
+                matchedExperiences = (llmResult.experiences ?? [])
+                  .flatMap((id: string) => {
+                    const e =
+                      candidateExpMap.get(id) ?? experienceCatalog?.resolve(id);
+                    return e ? [e] : [];
+                  })
+                  .slice(
+                    0,
+                    refreshedConfig.routing.experiences.maxInjectedExperiences,
                   );
-                  result = {
-                    intent: resolvedIntent
-                      ? resolvedIntent.id
-                      : llmResult.intent,
-                    reason: llmResult.reason,
-                    confidence: llmResult.confidence,
-                    ...(resolvedIntent
-                      ? {
-                          keywords: resolvedIntent.definition.keywords.slice(
-                            0,
-                            5,
-                          ),
-                        }
-                      : {}),
-                  };
-                  const formatClassifierReason = (
-                    reasonText: string | undefined,
-                  ): string => {
-                    if (!reasonText) return "llm-classifier → fallback";
-                    if (reasonText.startsWith("jev →")) return reasonText;
-                    return `llm-classifier → ${reasonText}`;
-                  };
 
-                  if (resolvedIntent) {
-                    emitPipelineEvent(
-                      ctx,
-                      routing.resolvedSessionKey,
-                      "intent-match",
-                      "completed",
-                      {
-                        result: result.intent,
-                        confidence: result.confidence,
-                        reason: formatClassifierReason(result.reason),
-                        durationMs: Math.max(
-                          0,
-                          Date.now() - routingStartedAtMs,
-                        ),
-                      },
-                    );
-                  } else {
-                    emitPipelineEvent(
-                      ctx,
-                      routing.resolvedSessionKey,
-                      "intent-match",
-                      "completed",
-                      {
-                        result: llmResult.intent,
-                        confidence: llmResult.confidence,
-                        reason: formatClassifierReason(llmResult.reason),
-                        durationMs: Math.max(
-                          0,
-                          Date.now() - routingStartedAtMs,
-                        ),
-                      },
-                    );
+                const unionSkillNames = new Set<string>();
+                for (const name of llmResult.skills) {
+                  unionSkillNames.add(canonicalIdentity(name));
+                }
+                for (const exp of matchedExperiences) {
+                  for (const sk of exp.skills) {
+                    unionSkillNames.add(canonicalIdentity(sk));
                   }
                 }
 
-                matchedSkills = llmResult.skills
+                matchedSkills = Array.from(unionSkillNames)
                   .flatMap((name) => {
-                    const s = visibleMap.get(canonicalIdentity(name));
+                    const s = visibleMap.get(name);
                     return s ? [s] : [];
                   })
                   .slice(0, refreshedConfig.routing.skills.maxInjectedSkills);
               } else {
                 matchedSkills = [];
-                if (intentSearchResult.failures.length === 3) {
-                  emitPipelineEvent(
-                    ctx,
-                    routing.resolvedSessionKey,
-                    "intent-match",
-                    "failed",
-                    {
-                      error: intentSearchResult.failures.join("; "),
-                      durationMs: Math.max(0, Date.now() - routingStartedAtMs),
-                    },
-                  );
-                }
+                matchedExperiences = [];
               }
+            } catch (error) {
+              logger.warn("routing selector execution failed", { error });
+              matchedSkills = [];
+              matchedExperiences = [];
             }
-          }
-
-          if (result) {
-            logger.debug("intention result", {
-              trigger,
-              intentResolved: Boolean(result.intent),
-            });
           }
 
           const injectedCollections: Record<SkillCollectionKind, number> = {
@@ -1967,14 +1145,12 @@ export function createHookHandlers(deps: HookDeps) {
             .join("; ");
 
           const skillSources = [
-            ...new Set(injectedCandidates.map((c) => c.source)),
-          ].map((src) =>
-            src === "name-match"
-              ? "name-match"
-              : src === "intent-matched"
-                ? "intent-matched"
-                : "qmd-search",
-          );
+            ...new Set(
+              injectedCandidates.map((c) =>
+                c.source === "direct-retrieval" ? "qmd-search" : c.source,
+              ),
+            ),
+          ];
 
           emitPipelineEvent(
             ctx,
@@ -1985,9 +1161,12 @@ export function createHookHandlers(deps: HookDeps) {
               nameCandidates: skillDiscoveryResult.nameCandidates.length,
               retrievalCandidates:
                 skillDiscoveryResult.retrievalCandidates.length,
+              experienceCandidates:
+                skillDiscoveryResult.candidateExperiences.length,
               candidateCount: unionPool.pool.length,
               injectedCount: matchedSkills.length,
               injectedSkills: matchedSkills.map((s) => s.name),
+              injectedExperiences: matchedExperiences.map((e) => e.id),
               ...(skillSources.length > 0
                 ? { reason: skillSources.join(",") }
                 : {}),
@@ -1996,6 +1175,7 @@ export function createHookHandlers(deps: HookDeps) {
               injectedCollections,
               explain: explainSummary || "none",
               ...(matchedSkills.length === 0 &&
+              matchedExperiences.length === 0 &&
               skillDiscoveryResult.fallbackReason
                 ? { fallbackReason: skillDiscoveryResult.fallbackReason }
                 : {}),
@@ -2008,7 +1188,9 @@ export function createHookHandlers(deps: HookDeps) {
 
           const inputSkillDiscovery: InputSkillDiscovery = {
             nameCandidates: skillDiscoveryResult.nameCandidates.length,
-            retrievalAttempted: Boolean(qmdSkillIndex),
+            retrievalAttempted:
+              Boolean(qmdSkillIndex) &&
+              refreshedConfig.routing.skills.maxInjectedSkills > 0,
             retrievalCandidates:
               skillDiscoveryResult.retrievalCandidates.length,
             retrievalSemanticScores:
@@ -2026,35 +1208,22 @@ export function createHookHandlers(deps: HookDeps) {
             ),
           };
 
-          const experiences =
-            experienceCatalog && matchedSkills.length > 0
-              ? experienceCatalog.listForSkills(
-                  matchedSkills.map((s) => s.name),
-                )
-              : [];
-
           await recordPromptBuildSession({
             association: routing.association,
             latestUserMessage,
-            trigger,
-            ...(result ? { result } : {}),
-            intentMatchedSkills: matchedSkills.map((s) => s.name),
-            ...(intentProjection ? { intentProjection } : {}),
-            ...(routingEvidence ? { routingEvidence } : {}),
+            matchedSkills,
+            matchedExperiences,
             inputSkillDiscovery,
-            conversation,
+            confidence,
           });
 
-          if (!resolvedIntent && matchedSkills.length === 0) {
+          if (matchedSkills.length === 0 && matchedExperiences.length === 0) {
             return toPromptBuildResult(undefined, workingSetSkillsXml);
           }
           return toPromptBuildResult(
             buildRoutingContext({
-              ...(result && resolvedIntent
-                ? { result, guidance: resolvedIntent.definition.guidance }
-                : {}),
               matchedSkills,
-              experiences,
+              experiences: matchedExperiences,
             }),
             workingSetSkillsXml,
           );
@@ -2243,10 +1412,6 @@ export function createHookHandlers(deps: HookDeps) {
     const state = tracker.getTurnState(sessionId, turnKey);
     if (!state) return;
 
-    const intentDefinition = findIntentDefinition(
-      catalog,
-      state.intent?.result?.intent,
-    );
     const agentId = tracker.getAgentId(sessionId)?.trim();
     if (agentId && !statsAggregator.isRecordable(sessionId, state)) return;
     let skillInventory:
@@ -2272,13 +1437,12 @@ export function createHookHandlers(deps: HookDeps) {
       }
     }
     const recorded = skillInventory
-      ? statsAggregator.record(sessionId, state, intentDefinition, {
+      ? statsAggregator.record(sessionId, state, undefined, {
           skillInventory,
         })
-      : statsAggregator.record(sessionId, state, intentDefinition);
+      : statsAggregator.record(sessionId, state);
     if (!recorded) return;
     return {
-      intentDefinition,
       agentId,
       skillInventoryObserved: skillInventory !== undefined,
     };
@@ -2286,14 +1450,13 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function buildReviewSnapshot(
     baseSnapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>,
-    intentDefinition: ReturnType<typeof findIntentDefinition>,
     agentId: string,
     skillPlacementCandidate?: SkillPlacementReviewCandidate,
     capabilityFit?: CapabilityFitEvidence,
   ) {
     const availableSkillNames = skillPlacementCandidate
       ? [skillPlacementCandidate.name]
-      : [...(intentDefinition?.definition.skills ?? [])];
+      : [];
     const resolvedAvailableSkills =
       availableSkillNames.length > 0
         ? await resolveAvailableSkills({
@@ -2328,27 +1491,10 @@ export function createHookHandlers(deps: HookDeps) {
         ...baseSnapshot.current,
         ...(capabilityFit ? { capabilityFit } : {}),
       },
-      matchedIntent: intentDefinition
-        ? {
-            id: intentDefinition.id,
-            definition: {
-              ...intentDefinition.definition,
-              triggers: [...intentDefinition.definition.triggers],
-              examples: [...intentDefinition.definition.examples],
-            },
-          }
-        : undefined,
       availableSkills: skillPlacementCandidate ? [] : resolvedAvailableSkills,
       ...(skillPlacementCandidate ? { skillPlacementCandidate } : {}),
       ...(selectedPlacementSkill ? { selectedPlacementSkill } : {}),
-      intentCatalog: catalog.get().map((entry) => ({
-        id: entry.id,
-        triggers: [...entry.definition.triggers],
-        examples: [...entry.definition.examples],
-        guidance: entry.definition.guidance,
-        skills: [...(entry.definition.skills ?? [])],
-        keywords: [...entry.definition.keywords],
-      })),
+      activeExperiences: experienceCatalog?.listAll() ?? [],
     };
   }
 
@@ -2472,18 +1618,7 @@ export function createHookHandlers(deps: HookDeps) {
           if (selected) {
             pendingSkillEpochKeys.add(selected.epochKey);
             ownsReservation = true;
-            const canonicalName = selected.name.trim().toLowerCase();
-            skillPlacementCandidate = {
-              ...selected,
-              currentlyReferencedIntentIds: catalog
-                .get()
-                .filter((entry) =>
-                  (entry.definition.skills ?? []).some(
-                    (name) => name.trim().toLowerCase() === canonicalName,
-                  ),
-                )
-                .map((entry) => entry.id),
-            };
+            skillPlacementCandidate = selected;
             if (!triggers.includes("capability-fit")) {
               triggers.push("capability-fit");
             }
@@ -2507,7 +1642,6 @@ export function createHookHandlers(deps: HookDeps) {
       });
       let snapshot = await buildReviewSnapshot(
         baseSnapshot,
-        agentEndStats.intentDefinition,
         agentId,
         skillPlacementCandidate,
         capabilityFit,
@@ -2539,7 +1673,6 @@ export function createHookHandlers(deps: HookDeps) {
         if (!modelRef) return;
         snapshot = await buildReviewSnapshot(
           baseSnapshot,
-          agentEndStats.intentDefinition,
           agentId,
           undefined,
           capabilityFit,

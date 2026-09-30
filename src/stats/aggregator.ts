@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { logger } from "../../api.js";
 import { resolveTurnEventId } from "../session/index.js";
 import type { SessionState } from "../session/index.js";
-import type { IntentCatalogEntry, IntentTrigger } from "../types.js";
 import {
   packageRoot,
   statsPath,
@@ -10,7 +9,6 @@ import {
   readJsonFile,
   safeWriteJson,
 } from "../file-utils.js";
-import { FALLBACK_INTENT_ID } from "../constants.js";
 import type { SkillInventoryItem, SkillSource } from "../skills/types.js";
 import { SKILL_SOURCE_ORDER } from "../skills/types.js";
 import { canonicalIdentity } from "../normalize.js";
@@ -42,7 +40,7 @@ const INTENT_ROUTE_REASONS = [
   "qmd-keyword",
   "qmd-hybrid",
   "llm-classifier",
-] as const satisfies readonly IntentTrigger[];
+] as const;
 const statsAggregatorCache = new Map<string, StatsAggregator>();
 
 type CountMap = Record<string, number>;
@@ -405,7 +403,7 @@ function emptyIntentRouteReasons(): Record<
 
 function resolveIntentId(
   resultIntent: string,
-  definition: IntentCatalogEntry | undefined,
+  definition: { id: string } | undefined,
 ): string {
   if (definition) return definition.id;
   return resultIntent.match(/^([A-Za-z0-9_-]+)/)?.[1] ?? resultIntent;
@@ -976,17 +974,17 @@ function loadStats(statsFilePath: string, eventTime: string): Stats {
 
 function recordSummaryStats(params: {
   stats: Stats;
-  result: RecordedIntentResult;
-  intentId: string;
+  confidence: number;
+  intentId?: string;
   skillsUsed: string[];
   toolCallCount: number;
   errored: boolean;
 }): void {
-  const { stats, result, intentId, skillsUsed, toolCallCount, errored } =
+  const { stats, confidence, intentId, skillsUsed, toolCallCount, errored } =
     params;
 
   stats.summary.averageConfidence = rate(
-    stats.summary.averageConfidence * stats.summary.turns + result.confidence,
+    stats.summary.averageConfidence * stats.summary.turns + confidence,
     stats.summary.turns + 1,
   );
   stats.summary.turns += 1;
@@ -997,7 +995,9 @@ function recordSummaryStats(params: {
   stats.summary.skillUsageCount += skillsUsed.length;
   stats.summary.toolCallCount += toolCallCount;
   stats.summary.unknownTurns +=
-    intentId.toLowerCase() === FALLBACK_INTENT_ID ? 1 : 0;
+    intentId?.toLowerCase() === "unknown" || intentId?.toLowerCase() === "other"
+      ? 1
+      : 0;
 }
 
 function recordIntentRouteStats(
@@ -1300,16 +1300,17 @@ function recordProjectionStats(
   const currentTurns = stats.projection.eligibleTurns;
   stats.projection.averageOriginalIntentCount = rate(
     stats.projection.averageOriginalIntentCount * currentTurns +
-      projection.originalIntentCount,
+      (projection.originalIntentCount ?? 0),
     currentTurns + 1,
   );
   stats.projection.averageCandidateIntentCount = rate(
     stats.projection.averageCandidateIntentCount * currentTurns +
-      projection.candidateIntentCount,
+      (projection.candidateIntentCount ?? 0),
     currentTurns + 1,
   );
   stats.projection.averageDurationMs = rate(
-    stats.projection.averageDurationMs * currentTurns + projection.durationMs,
+    stats.projection.averageDurationMs * currentTurns +
+      (projection.durationMs ?? 0),
     currentTurns + 1,
   );
   stats.projection.eligibleTurns += 1;
@@ -1342,11 +1343,15 @@ function recordProjectionStats(
       projection.fallbackReason,
     );
   }
-  for (const reason of new Set(projection.supportReasons)) {
-    incrementBoundedReason(stats.projection.supportReasons, reason);
+  for (const reason of new Set(projection.supportReasons ?? [])) {
+    if (typeof reason === "string") {
+      incrementBoundedReason(stats.projection.supportReasons, reason);
+    }
   }
-  for (const reason of new Set(projection.selectionReasons)) {
-    incrementBoundedReason(stats.projection.selectionReasons, reason);
+  for (const reason of new Set(projection.selectionReasons ?? [])) {
+    if (typeof reason === "string") {
+      incrementBoundedReason(stats.projection.selectionReasons, reason);
+    }
   }
 }
 
@@ -1413,7 +1418,7 @@ function incrementBoundedDailyAttribution(
 function recordDailyStats(params: {
   stats: Stats;
   date: string;
-  intentId: string;
+  intentId?: string;
   skillsUsed: string[];
   toolCalls: NonNullable<SessionState["toolCalls"]>;
   intentMatchedSkills: string[];
@@ -1441,25 +1446,27 @@ function recordDailyStats(params: {
   const daily = getOrCreateOwnRecordValue(stats.daily, date, createDailyBucket);
   daily.turns += 1;
   daily.erroredTurns += errored ? 1 : 0;
-  increment(daily.intents, intentId);
+  if (intentId !== undefined) increment(daily.intents, intentId);
   for (const skillName of skillsUsed) increment(daily.skills, skillName);
   for (const call of toolCalls) increment(daily.tools, call.name);
-  const outcomes = getOrCreateBoundedDailyAttributionEntry(
-    daily.intentOutcomes,
-    intentId,
-    emptyDailyIntentOutcomes,
-  );
-  outcomes.turns += 1;
-  outcomes.completedTurns += errored ? 0 : 1;
-  outcomes.erroredTurns += errored ? 1 : 0;
-  outcomes.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
-  outcomes.toolAssistedTurns += toolCalls.length > 0 ? 1 : 0;
+  if (intentId !== undefined) {
+    const outcomes = getOrCreateBoundedDailyAttributionEntry(
+      daily.intentOutcomes,
+      intentId,
+      emptyDailyIntentOutcomes,
+    );
+    outcomes.turns += 1;
+    outcomes.completedTurns += errored ? 0 : 1;
+    outcomes.erroredTurns += errored ? 1 : 0;
+    outcomes.skillAssistedTurns += skillsUsed.length > 0 ? 1 : 0;
+    outcomes.toolAssistedTurns += toolCalls.length > 0 ? 1 : 0;
+  }
   incrementRoutingAdoption(
     daily.routing,
     intentMatchedSkills.length,
     adoptedSkills.length,
   );
-  if (intentMatchedSkills.length > 0) {
+  if (intentMatchedSkills.length > 0 && intentId !== undefined) {
     incrementRoutingAdoption(
       getOrCreateBoundedDailyAttributionEntry(
         daily.intentRouting,
@@ -1743,7 +1750,15 @@ export class StatsAggregator {
     const result = state.intent?.result;
     const projection = state.intent?.intentProjection;
     const start = state.timestamps?.start;
-    if (!sessionId || (!result && !projection) || !start) return false;
+    if (
+      !sessionId ||
+      (!result &&
+        !projection &&
+        state.matchedSkills === undefined &&
+        state.matchedExperiences === undefined) ||
+      !start
+    )
+      return false;
 
     const statsFilePath = statsPath(this.pluginRoot);
     try {
@@ -1765,13 +1780,21 @@ export class StatsAggregator {
   record(
     sessionId: string | undefined,
     state: SessionState,
-    intentDefinition?: IntentCatalogEntry,
+    intentDefinition?: { id: string },
     options: StatsRecordOptions = {},
   ): boolean {
     const result = state.intent?.result;
     const projection = state.intent?.intentProjection;
     const start = state.timestamps?.start;
-    if (!sessionId || (!result && !projection) || !start) return false;
+    if (
+      !sessionId ||
+      (!result &&
+        !projection &&
+        state.matchedSkills === undefined &&
+        state.matchedExperiences === undefined) ||
+      !start
+    )
+      return false;
 
     const statsFilePath = statsPath(this.pluginRoot);
     try {
@@ -1786,7 +1809,11 @@ export class StatsAggregator {
       const date = eventTime.slice(0, 10);
       stats.updatedAt = eventTime;
       stats.processedEvents[eventId] = eventTime;
-      const skillsUsed = result
+      const routed =
+        Boolean(result) ||
+        state.matchedSkills !== undefined ||
+        state.matchedExperiences !== undefined;
+      const skillsUsed = routed
         ? [
             ...new Set(
               (state.skillsUsed ?? []).map((skill) =>
@@ -1795,16 +1822,22 @@ export class StatsAggregator {
             ),
           ]
         : [];
-      const intentMatchedSkills = result
+      const intentMatchedSkills = routed
         ? [
             ...new Set(
-              (state.intent?.intentMatchedSkills ?? []).map(canonicalIdentity),
+              (
+                state.matchedSkills ??
+                state.intent?.intentMatchedSkills ??
+                []
+              ).map(canonicalIdentity),
             ),
           ]
         : [];
 
-      if (result) {
-        const intentId = resolveIntentId(result.intent, intentDefinition);
+      if (routed) {
+        const intentId = result
+          ? resolveIntentId(result.intent, intentDefinition)
+          : undefined;
         const adoptedSkills = intentMatchedSkills.filter((skill) =>
           skillsUsed.includes(skill),
         );
@@ -1814,22 +1847,27 @@ export class StatsAggregator {
 
         recordSummaryStats({
           stats,
-          result,
+          confidence: state.confidence ?? result?.confidence ?? 0,
           intentId,
           skillsUsed,
           toolCallCount: toolCalls.length,
           errored,
         });
-        recordIntentStats({
-          stats,
-          intentId,
-          result,
-          routeReason: state.intent?.trigger,
-          eventTime,
-          skillsUsed,
-          toolCallCount: toolCalls.length,
-          errored,
-        });
+        if (result && intentId !== undefined) {
+          recordIntentStats({
+            stats,
+            intentId,
+            result,
+            routeReason:
+              state.intent?.trigger === "skill-only"
+                ? undefined
+                : (state.intent?.trigger as IntentRouteReason | undefined),
+            eventTime,
+            skillsUsed,
+            toolCallCount: toolCalls.length,
+            errored,
+          });
+        }
         recordSkillStats({
           stats,
           skillsUsed,
@@ -1843,19 +1881,22 @@ export class StatsAggregator {
             intentMatchedSkills.length,
             adoptedSkills.length,
           );
-          incrementRoutingAdoption(
-            getOrCreateOwnRecordValue(
-              stats.routing.byIntent,
-              intentId,
-              emptyRoutingCounts,
-            ),
-            intentMatchedSkills.length,
-            adoptedSkills.length,
-          );
+          if (intentId !== undefined) {
+            incrementRoutingAdoption(
+              getOrCreateOwnRecordValue(
+                stats.routing.byIntent,
+                intentId,
+                emptyRoutingCounts,
+              ),
+              intentMatchedSkills.length,
+              adoptedSkills.length,
+            );
+          }
         }
         recordToolStats({ stats, toolCalls, toolNames, eventTime });
         if (projection) recordProjectionStats(stats, projection);
-        const inputSkillDiscovery = state.intent?.inputSkillDiscovery;
+        const inputSkillDiscovery =
+          state.inputSkillDiscovery ?? state.intent?.inputSkillDiscovery;
         if (inputSkillDiscovery) {
           recordSkillDiscoveryStats(stats.skillDiscovery, inputSkillDiscovery);
         }

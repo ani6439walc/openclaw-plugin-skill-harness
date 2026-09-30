@@ -74,24 +74,20 @@ describe("resolveConfig", () => {
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
 
-      expect(result.routing.intents).toEqual({
-        keyword: {
-          directRouteMinScore: 0.85,
-        },
-        hybrid: {
-          directRouteMinScore: 0.9,
-          directRouteMinMargin: 0.08,
+      expect(result.routing.experiences).toEqual({
+        search: {
           minCandidateScore: 0.4,
+          timeoutMs: 15000,
         },
+        relevanceThreshold: 0.6,
+        maxInjectedExperiences: 4,
       });
-      expect(result.routing.intents.thresholds).toEqual(result.routing.intents);
-      expect(result.routing.thresholds).toEqual(result.routing.intents);
 
       expect(result.routing.queryMode).toBe(DEFAULT_QUERY_MODE);
       expect(result.routing.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
-      expect(result.routing.thinking).toBe("medium");
-      expect(result.routing.model).toBeUndefined();
-      expect(result.routing.modelFallback).toBeUndefined();
+      expect(result.routing).not.toHaveProperty("thinking");
+      expect(result.routing).not.toHaveProperty("model");
+      expect(result.routing).not.toHaveProperty("modelFallback");
       expect(result.routing.contextWindow.user.turns).toBe(
         DEFAULT_RECENT_USER_TURNS,
       );
@@ -146,8 +142,9 @@ describe("resolveConfig", () => {
       const result = resolveConfig({});
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
-      expect(result.routing.model).toBeUndefined();
-      expect(result.routing.modelFallback).toBeUndefined();
+      expect(result.routing).not.toHaveProperty("model");
+      expect(result.routing).not.toHaveProperty("modelFallback");
+      expect(result.jev).toBeDefined();
     });
 
     it("should use default values for non-object config", () => {
@@ -270,105 +267,62 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("routing & intents thresholds", () => {
-    it("resolves default routing thresholds when routing is omitted", () => {
-      expect(resolveConfig({}).routing.intents).toEqual({
-        keyword: {
-          directRouteMinScore: 0.85,
-        },
-        hybrid: {
-          directRouteMinScore: 0.9,
-          directRouteMinMargin: 0.08,
+  describe("routing & experiences", () => {
+    it("resolves default routing experiences when routing is omitted", () => {
+      expect(resolveConfig({}).routing.experiences).toEqual({
+        search: {
           minCandidateScore: 0.4,
+          timeoutMs: 15000,
         },
+        relevanceThreshold: 0.6,
+        maxInjectedExperiences: 4,
       });
-      expect(resolveConfig({}).routing.intents.thresholds).toEqual(
-        resolveConfig({}).routing.intents,
-      );
     });
 
-    it("accepts direct routing intents configuration", () => {
+    it("accepts custom routing experiences configuration", () => {
       expect(
         resolveConfig({
           routing: {
-            intents: {
-              keyword: { directRouteMinScore: 0.8 },
-              hybrid: {
-                directRouteMinScore: 0.95,
-                directRouteMinMargin: 0.05,
-                minCandidateScore: 0.3,
-              },
+            experiences: {
+              search: { minCandidateScore: 0.5 },
+              relevanceThreshold: 0.7,
+              maxInjectedExperiences: 6,
             },
           },
-        }).routing.intents,
+        }).routing.experiences,
       ).toEqual({
-        keyword: { directRouteMinScore: 0.8 },
-        hybrid: {
-          directRouteMinScore: 0.95,
-          directRouteMinMargin: 0.05,
-          minCandidateScore: 0.3,
-        },
+        search: { minCandidateScore: 0.5, timeoutMs: 15000 },
+        relevanceThreshold: 0.7,
+        maxInjectedExperiences: 6,
       });
     });
 
-    it("accepts legacy nested routing thresholds under intents", () => {
-      expect(
-        resolveConfig({
-          routing: {
-            intents: {
-              thresholds: {
-                keyword: { directRouteMinScore: 0.8 },
-                hybrid: {
-                  directRouteMinScore: 0.95,
-                  directRouteMinMargin: 0.05,
-                  minCandidateScore: 0.3,
-                },
-              },
-            } as never,
+    it("ignores legacy intents and thresholds gracefully", () => {
+      const resolved = resolveConfig({
+        routing: {
+          intents: {
+            keyword: { directRouteMinScore: 0.8 },
           },
-        }).routing.intents,
-      ).toEqual({
-        keyword: { directRouteMinScore: 0.8 },
-        hybrid: {
-          directRouteMinScore: 0.95,
-          directRouteMinMargin: 0.05,
-          minCandidateScore: 0.3,
-        },
-      });
-    });
-
-    it("migrates legacy flat routing thresholds backwards-compatibly", () => {
-      expect(
-        resolveConfig({
-          routing: {
-            thresholds: {
-              directRouteMinScore: 0.92,
-              minCandidateScore: 0.5,
-            } as never,
+          thresholds: {
+            directRouteMinScore: 0.9,
           },
-        }).routing.intents,
-      ).toEqual({
-        keyword: { directRouteMinScore: 0.92 },
-        hybrid: {
-          directRouteMinScore: 0.92,
-          directRouteMinMargin: 0.08,
-          minCandidateScore: 0.5,
-        },
+        } as never,
       });
+      expect(
+        (resolved.routing as Record<string, unknown>).intents,
+      ).toBeUndefined();
+      expect(
+        (resolved.routing as Record<string, unknown>).thresholds,
+      ).toBeUndefined();
     });
 
-    it("rejects out-of-range and non-monotonic routing thresholds", () => {
+    it("rejects out-of-range routing experiences configuration", () => {
       expect(() => resolveConfig({ routing: null })).toThrow();
       expect(() =>
         resolveConfig({
           routing: {
-            intents: {
-              thresholds: {
-                hybrid: {
-                  directRouteMinScore: 0.3,
-                  minCandidateScore: 0.7,
-                },
-              },
+            experiences: {
+              relevanceThreshold: 2.5,
             },
           },
         }),
@@ -391,11 +345,12 @@ describe("resolveConfig", () => {
             };
             routing?: {
               properties: {
-                intents?: {
-                  properties: Record<
-                    string,
-                    { properties: Record<string, { default?: number }> }
-                  >;
+                experiences?: {
+                  properties: {
+                    search: {
+                      properties: { minCandidateScore: { default?: number } };
+                    };
+                  };
                 };
               };
             };
@@ -418,9 +373,9 @@ describe("resolveConfig", () => {
         manifest.configSchema.properties.qmd.properties,
       ).not.toHaveProperty("rerank");
       expect(
-        manifest.configSchema.properties.routing?.properties.intents?.properties
-          .keyword.properties.directRouteMinScore.default,
-      ).toBe(0.85);
+        manifest.configSchema.properties.routing?.properties.experiences
+          ?.properties.search.properties.minCandidateScore.default,
+      ).toBe(0.4);
       for (const endpoint of ["embedding", "expansion"]) {
         expect(
           manifest.configSchema.properties.qmd.properties[endpoint]?.required,
@@ -594,6 +549,69 @@ describe("resolveConfig", () => {
       expect(result.qmd.jev?.apiKey).toBe("my-custom-jev-key");
     });
 
+    it("resolves top-level jev endpoint when configured at root", () => {
+      const mockConfig = {
+        models: {
+          providers: {
+            openrouter: {
+              baseUrl: "https://openrouter.ai/api/v1",
+              apiKey: "or-key",
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      const result = resolveConfig(
+        {
+          qmd: {
+            embedding: {
+              baseUrl: "https://example.com/v1",
+              model: "embed-model",
+            },
+            expansion: {
+              baseUrl: "https://example.com/v1",
+              model: "gemini-flash",
+            },
+          },
+          jev: {
+            model: "openrouter/typesafe/jev-latest",
+          },
+        },
+        { openClawConfig: mockConfig },
+      );
+
+      expect(result.jev).toEqual({
+        baseUrl: "https://openrouter.ai/api",
+        model: "typesafe/jev-latest",
+        apiKey: "or-key",
+      });
+      expect(result.qmd.jev).toEqual(result.jev);
+    });
+
+    it("prefers top-level jev when both top-level and qmd.jev are specified", () => {
+      const result = resolveConfig({
+        qmd: {
+          embedding: {
+            baseUrl: "https://example.com/v1",
+            model: "embed-model",
+          },
+          expansion: {
+            baseUrl: "https://example.com/v1",
+            model: "gemini-flash",
+          },
+          jev: {
+            apiKey: "legacy-key",
+          },
+        },
+        jev: {
+          apiKey: "top-level-key",
+        },
+      });
+
+      expect(result.jev?.apiKey).toBe("top-level-key");
+      expect(result.qmd.jev?.apiKey).toBe("top-level-key");
+    });
+
     it("resolves default skills.search weights and index refresh interval", () => {
       const manifest = JSON.parse(
         readFileSync(
@@ -759,18 +777,17 @@ describe("resolveConfig", () => {
       expect(result.review).not.toHaveProperty("keywordCoverage");
       expect(result.review.triggers).toEqual({
         intentHealthCheck: { enabled: true, everyTurns: 10 },
+        experienceHealthCheck: { enabled: true, everyTurns: 10 },
         routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
         capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
       });
     });
 
-    it("falls back for invalid classifier and review thinking levels", () => {
+    it("falls back for invalid review thinking levels", () => {
       const result = resolveConfig({
-        routing: { thinking: "invalid" as never },
         review: { thinking: "invalid" as never },
       });
 
-      expect(result.routing.thinking).toBe("medium");
       expect(result.review.thinking).toBe("medium");
     });
 
@@ -1070,16 +1087,14 @@ describe("resolveConfig", () => {
             allowedChatIds: {},
             deniedChatIds: 0,
           },
-          model: {},
-          modelFallback: [],
         } as never,
       });
       expect(result.routing.scope.agents).toEqual(["main"]);
       expect(result.routing.scope.chatTypes).toEqual(["direct"]);
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
-      expect(result.routing.model).toBeUndefined();
-      expect(result.routing.modelFallback).toBeUndefined();
+      expect(result.routing).not.toHaveProperty("model");
+      expect(result.routing).not.toHaveProperty("modelFallback");
     });
   });
 
@@ -1106,7 +1121,8 @@ describe("resolveConfig", () => {
           minJaccardScore: 0.5,
           genericTokens: [],
         },
-        maxInjectedSkills: 4,
+        relevanceThreshold: 0.6,
+        maxInjectedSkills: 8,
       });
     });
 
@@ -1144,15 +1160,30 @@ describe("resolveConfig", () => {
           minJaccardScore: 0.75,
           genericTokens: ["code", "review"],
         },
+        relevanceThreshold: 0.6,
         maxInjectedSkills: 3,
       });
+    });
+
+    it("accepts the manifest skill injection maximum and rejects values above it", () => {
+      expect(
+        resolveConfig({
+          routing: { skills: { maxInjectedSkills: 20 } },
+        }).routing.skills.maxInjectedSkills,
+      ).toBe(20);
+      expect(() =>
+        resolveConfig({
+          routing: { skills: { maxInjectedSkills: 21 } },
+        }),
+      ).toThrow();
     });
 
     it("rejects invalid candidate policy boundaries and cross-field values", () => {
       for (const skillCandidates of [
         { search: { timeoutMs: 99 } },
         { nameMatch: { maxEditDistance: 3 } },
-        { maxInjectedSkills: 5 },
+        { maxInjectedSkills: 21 },
+        { relevanceThreshold: 1.5 },
       ]) {
         expect(() => resolveConfig({ routing: { skillCandidates } })).toThrow();
       }
@@ -1186,25 +1217,17 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("optional fields", () => {
-    it("should handle optional model field", () => {
+  describe("removed routing model fields", () => {
+    it("does not expose removed model or modelFallback on routing config", () => {
       const withModel = resolveConfig({
-        routing: { model: "gpt-4" },
+        routing: { model: "gpt-4", modelFallback: "gpt-3.5" },
       });
-      expect(withModel.routing.model).toBe("gpt-4");
+      expect(withModel.routing).not.toHaveProperty("model");
+      expect(withModel.routing).not.toHaveProperty("modelFallback");
 
       const withoutModel = resolveConfig({});
-      expect(withoutModel.routing.model).toBeUndefined();
-    });
-
-    it("should handle optional modelFallback field", () => {
-      const withFallback = resolveConfig({
-        routing: { modelFallback: "gpt-3.5" },
-      });
-      expect(withFallback.routing.modelFallback).toBe("gpt-3.5");
-
-      const withoutFallback = resolveConfig({});
-      expect(withoutFallback.routing.modelFallback).toBeUndefined();
+      expect(withoutModel.routing).not.toHaveProperty("model");
+      expect(withoutModel.routing).not.toHaveProperty("modelFallback");
     });
   });
 });

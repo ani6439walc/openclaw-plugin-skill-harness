@@ -7,27 +7,6 @@ import {
   validateExperienceDirectory,
 } from "./catalog.js";
 
-function experience(
-  params: {
-    skill?: string;
-    summary?: string;
-    keywords?: readonly string[];
-    body?: string;
-    extra?: string;
-  } = {},
-): string {
-  return `---
-skill: ${params.skill ?? "react"}
-summary: ${params.summary ?? "Reliable React forms"}
-keywords:
-${(params.keywords ?? ["forms", "validation"])
-  .map((keyword) => `  - ${keyword}`)
-  .join("\n")}
-${params.extra ?? ""}---
-${params.body ?? "Use controlled inputs and validate at the boundary."}
-`;
-}
-
 describe("SkillExperienceCatalog", () => {
   let dataRoot: string;
   let experienceRoot: string;
@@ -42,23 +21,55 @@ describe("SkillExperienceCatalog", () => {
   });
 
   function writeEntry(
-    skill: string,
-    entryId: string,
-    content = experience({ skill }),
+    id: string,
+    params: {
+      skills?: readonly string[];
+      summary?: string;
+      keywords?: readonly string[];
+      body?: string;
+      extraFiles?: Record<string, string>;
+    } = {},
   ): string {
-    const directory = path.join(experienceRoot, skill);
+    const directory = path.join(experienceRoot, id);
     fs.mkdirSync(directory, { recursive: true });
-    const file = path.join(directory, `${entryId}.md`);
-    fs.writeFileSync(file, content);
-    return file;
+
+    const summary = params.summary ?? "Reliable React forms";
+    fs.writeFileSync(path.join(directory, "summary.md"), summary);
+
+    const keywords = params.keywords ?? ["forms", "validation"];
+    fs.writeFileSync(
+      path.join(directory, "keywords.md"),
+      keywords.map((k) => `- ${k}`).join("\n"),
+    );
+
+    const body =
+      params.body ?? "Use controlled inputs and validate at the boundary.";
+    fs.writeFileSync(path.join(directory, "body.md"), body);
+
+    if (params.skills !== undefined) {
+      fs.writeFileSync(
+        path.join(directory, "skills.md"),
+        params.skills.map((s) => `- ${s}`).join("\n"),
+      );
+    } else {
+      fs.writeFileSync(path.join(directory, "skills.md"), "- react\n");
+    }
+
+    if (params.extraFiles) {
+      for (const [name, content] of Object.entries(params.extraFiles)) {
+        fs.writeFileSync(path.join(directory, name), content);
+      }
+    }
+
+    return directory;
   }
 
   it("treats an absent root as an empty catalog", () => {
     const catalog = new SkillExperienceCatalog(dataRoot);
 
     expect(catalog.listForSkills(["react"])).toEqual([]);
-    expect(catalog.resolve("react/forms")).toBeUndefined();
-    expect(catalog.search({ skillNames: ["react"] })).toEqual([]);
+    expect(catalog.resolve("forms")).toBeUndefined();
+    expect(catalog.search({})).toEqual([]);
   });
 
   it("rejects a dangling symbolic-link root instead of treating it as absent", () => {
@@ -78,24 +89,31 @@ describe("SkillExperienceCatalog", () => {
     });
     const catalog = new SkillExperienceCatalog(dataRoot);
     expect(catalog.listForSkills(["react"])).toEqual([]);
-    expect(catalog.resolve("react/forms")).toBeUndefined();
+    expect(catalog.resolve("forms")).toBeUndefined();
   });
 
-  it("loads strict entries with stable skill/entry identity", () => {
-    const file = writeEntry("react", "forms");
-    const catalog = new SkillExperienceCatalog(dataRoot);
-
-    expect(catalog.resolve("react/forms")).toEqual({
-      identity: "react/forms",
-      skill: "react",
-      entryId: "forms",
+  it("loads strict entries with id and skills array", () => {
+    const dir = writeEntry("forms", {
+      skills: ["react", "web"],
       summary: "Reliable React forms",
       keywords: ["forms", "validation"],
       body: "Use controlled inputs and validate at the boundary.",
-      path: file,
+    });
+    const catalog = new SkillExperienceCatalog(dataRoot);
+
+    expect(catalog.resolve("forms")).toEqual({
+      id: "forms",
+      skills: ["react", "web"],
+      summary: "Reliable React forms",
+      keywords: ["forms", "validation"],
+      body: "Use controlled inputs and validate at the boundary.",
+      path: dir,
     });
     expect(catalog.listForSkills([" REACT "])).toEqual([
-      expect.objectContaining({ identity: "react/forms" }),
+      expect.objectContaining({ id: "forms" }),
+    ]);
+    expect(catalog.listForSkills(["web"])).toEqual([
+      expect.objectContaining({ id: "forms" }),
     ]);
     expect(catalog.resolve("../secrets/token")).toBeUndefined();
   });
@@ -104,135 +122,91 @@ describe("SkillExperienceCatalog", () => {
     const catalog = new SkillExperienceCatalog(dataRoot);
     expect(catalog.listForSkills(["react"])).toEqual([]);
 
-    const file = writeEntry("react", "forms");
-    expect(
-      catalog.listForSkills(["react"]).map((entry) => entry.identity),
-    ).toEqual(["react/forms"]);
+    const dir = writeEntry("forms");
+    expect(catalog.listForSkills(["react"]).map((entry) => entry.id)).toEqual([
+      "forms",
+    ]);
 
-    fs.unlinkSync(file);
+    fs.rmSync(dir, { recursive: true, force: true });
     expect(catalog.listForSkills(["react"])).toEqual([]);
   });
 
-  it("ranks by identity, exact keyword count, summary phrases, body phrases, then identity", () => {
-    writeEntry(
-      "react",
-      "forms",
-      experience({
-        skill: "react",
-        summary: "Forms only",
-        keywords: ["forms"],
-        body: "forms forms forms",
-      }),
-    );
-    writeEntry(
-      "react",
-      "keyword-rich",
-      experience({
-        skill: "react",
-        summary: "Other",
-        keywords: ["forms", "FORMS"],
-        body: "unrelated",
-      }),
-    );
-    writeEntry(
-      "react",
-      "summary-rich",
-      experience({
-        skill: "react",
-        summary: "forms forms",
-        keywords: ["other"],
-        body: "forms forms forms forms",
-      }),
-    );
+  it("distinguishes an empty skill filter from an omitted global filter", () => {
+    writeEntry("forms", { skills: ["react"] });
+    writeEntry("general", { skills: [] });
     const catalog = new SkillExperienceCatalog(dataRoot);
 
+    expect(catalog.search({ skills: [] })).toEqual([]);
+    expect(catalog.search({ skills: [], query: "forms" })).toEqual([]);
+    expect(catalog.search({}).map((entry) => entry.id)).toEqual([
+      "forms",
+      "general",
+    ]);
+    expect(catalog.search({ query: "forms" }).map((entry) => entry.id)).toEqual(
+      ["forms", "general"],
+    );
     expect(
-      catalog
-        .search({ skillNames: ["react"], query: "react/forms" })
-        .map((entry) => entry.identity),
-    ).toEqual(["react/forms"]);
+      catalog.search({ skills: ["react"] }).map((entry) => entry.id),
+    ).toEqual(["forms"]);
+  });
+
+  it("ranks by id exact, exact keyword count, summary phrases, body phrases, then id", () => {
+    writeEntry("forms", {
+      skills: ["react"],
+      summary: "Forms only",
+      keywords: ["forms"],
+      body: "forms forms forms",
+    });
+    writeEntry("keyword-rich", {
+      skills: ["react"],
+      summary: "Other",
+      keywords: ["forms", "FORMS"],
+      body: "unrelated",
+    });
+    writeEntry("summary-rich", {
+      skills: ["react"],
+      summary: "forms forms",
+      keywords: ["other"],
+      body: "forms forms forms forms",
+    });
+    const catalog = new SkillExperienceCatalog(dataRoot);
+
+    expect(catalog.search({ query: "forms" }).map((entry) => entry.id)).toEqual(
+      ["forms", "summary-rich"],
+    );
     expect(
-      catalog
-        .search({ skillNames: ["react"], query: "forms" })
-        .map((entry) => entry.identity),
-    ).toEqual(["react/forms", "react/summary-rich"]);
-    expect(
-      catalog
-        .search({ skillNames: ["react"], query: "", limit: 2 })
-        .map((entry) => entry.identity),
-    ).toEqual(["react/forms", "react/summary-rich"]);
+      catalog.search({ query: "", limit: 2 }).map((entry) => entry.id),
+    ).toEqual(["forms", "summary-rich"]);
   });
 
   it("normalizes NFKC, whitespace, and locale-independent lowercase for lookup and search", () => {
-    writeEntry(
-      "react",
-      "forms",
-      experience({
-        skill: "react",
-        summary: "ＦＯＲＭＳ   GUIDE",
-        keywords: ["ＦＯＲＭＳ"],
-      }),
-    );
+    writeEntry("forms", {
+      skills: ["react"],
+      summary: "ＦＯＲＭＳ   GUIDE",
+      keywords: ["ＦＯＲＭＳ"],
+    });
     const catalog = new SkillExperienceCatalog(dataRoot);
 
-    expect(
-      catalog.search({ skillNames: ["ＲＥＡＣＴ"], query: " forms  guide " }),
-    ).toEqual([expect.objectContaining({ identity: "react/forms" })]);
+    expect(catalog.search({ query: " forms  guide " })).toEqual([
+      expect.objectContaining({ id: "forms" }),
+    ]);
   });
 
-  it("rejects malformed schema, bounds, and parent mismatch during validation", () => {
-    writeEntry("react", "unknown", experience({ extra: "owner: agent\n" }));
-    writeEntry("react", "mismatch", experience({ skill: "vue" }));
-    writeEntry(
-      "react",
-      "long-summary",
-      experience({ summary: "😀".repeat(241) }),
-    );
-    writeEntry("react", "long-body", experience({ body: "😀".repeat(12_001) }));
-    writeEntry(
-      "react",
-      "long-keyword",
-      experience({ keywords: ["😀".repeat(65)] }),
-    );
-    writeEntry(
-      "react",
-      "duplicate-keyword",
-      experience({ keywords: ["Forms", " forms "] }),
-    );
-    writeEntry("react", "empty-keywords", experience({ keywords: [] }));
-    writeEntry(
-      "react",
-      "many-keywords",
-      experience({ keywords: Array.from({ length: 13 }, (_, i) => `k${i}`) }),
-    );
-    writeEntry("react", "malformed", "---\nskill: [\n---\nbody");
-
-    const result = validateExperienceDirectory({
-      experienceDirectory: experienceRoot,
-      visibleSkillsByAgent: { main: ["react", "vue"] },
+  it("rejects missing files, bounds, and invalid names during validation", () => {
+    writeEntry("unknown-files", { extraFiles: { "extra.txt": "not allowed" } });
+    writeEntry("long-summary", { summary: "😀".repeat(241) });
+    writeEntry("long-body", { body: "😀".repeat(12_001) });
+    writeEntry("long-keyword", { keywords: ["😀".repeat(65)] });
+    writeEntry("duplicate-keyword", { keywords: ["Forms", " forms "] });
+    writeEntry("empty-keywords", { keywords: [] });
+    writeEntry("many-keywords", {
+      keywords: Array.from({ length: 13 }, (_, i) => `k${i}`),
     });
+    writeEntry("invalid-skill", { skills: ["INVALID SKILL!"] });
 
-    expect(result.valid).toBe(false);
-    expect(result.entries).toEqual([]);
-    expect(result.errors.map((error) => error.file)).toEqual(
-      expect.arrayContaining([
-        "react/duplicate-keyword.md",
-        "react/empty-keywords.md",
-        "react/long-body.md",
-        "react/long-keyword.md",
-        "react/long-summary.md",
-        "react/malformed.md",
-        "react/many-keywords.md",
-        "react/mismatch.md",
-        "react/unknown.md",
-      ]),
-    );
-  });
-
-  it("reports non-object YAML frontmatter without aborting directory validation", () => {
-    writeEntry("react", "scalar", "---\nhello\n---\nbody");
-    writeEntry("react", "array", "---\n[]\n---\nbody");
-    writeEntry("react", "valid");
+    const incompleteDir = path.join(experienceRoot, "incomplete");
+    fs.mkdirSync(incompleteDir, { recursive: true });
+    fs.writeFileSync(path.join(incompleteDir, "summary.md"), "summary");
 
     const result = validateExperienceDirectory({
       experienceDirectory: experienceRoot,
@@ -240,64 +214,70 @@ describe("SkillExperienceCatalog", () => {
     });
 
     expect(result.valid).toBe(false);
-    expect(result.entries.map((entry) => entry.identity)).toEqual([
-      "react/valid",
-    ]);
-    expect(result.errors).toEqual(
+    expect(result.entries).toEqual([]);
+    expect(result.errors.map((error) => error.file)).toEqual(
       expect.arrayContaining([
-        {
-          file: "react/array.md",
-          message: "frontmatter must be an object",
-        },
-        {
-          file: "react/scalar.md",
-          message: "frontmatter must be an object",
-        },
+        "duplicate-keyword",
+        "empty-keywords",
+        "incomplete",
+        "invalid-skill",
+        "long-body",
+        "long-keyword",
+        "long-summary",
+        "many-keywords",
+        "unknown-files",
       ]),
     );
   });
 
-  it("validates every markdown file and reports skills invisible to every configured agent", () => {
-    writeEntry("react", "forms");
-    writeEntry("vue", "signals", experience({ skill: "vue" }));
-    writeEntry("secret", "token", experience({ skill: "secret" }));
+  it("validates every experience and reports skills invisible to every configured agent", () => {
+    writeEntry("forms", { skills: ["react"] });
+    writeEntry("signals", { skills: ["vue"] });
+    writeEntry("token", { skills: ["secret"] });
 
     const result = validateExperienceDirectory({
       experienceDirectory: experienceRoot,
       visibleSkillsByAgent: { main: ["react"], specialist: ["vue"] },
     });
 
-    expect(result.entries.map((entry) => entry.identity)).toEqual([
-      "react/forms",
-      "vue/signals",
+    expect(result.entries.map((entry) => entry.id)).toEqual([
+      "forms",
+      "signals",
     ]);
     expect(result.errors).toContainEqual({
-      file: "secret/token.md",
+      file: "token",
       message: "skill secret is not visible to any configured agent",
     });
   });
 
-  it("rejects invalid path segments, duplicate canonical identities, and symlinks", () => {
-    writeEntry("React", "forms", experience({ skill: "react" }));
-    writeEntry("react", "forms", experience({ skill: "react" }));
-    writeEntry("react", "bad name", experience({ skill: "react" }));
+  it("allows general experiences without skills", () => {
+    writeEntry("general-workflow", { skills: [] });
+
+    const result = validateExperienceDirectory({
+      experienceDirectory: experienceRoot,
+      visibleSkillsByAgent: { main: ["react"] },
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.entries.map((e) => e.id)).toEqual(["general-workflow"]);
+    expect(result.entries[0].skills).toEqual([]);
+  });
+
+  it("rejects invalid path segments, duplicate canonical ids, and symlinks", () => {
+    writeEntry("Forms", { skills: ["react"] });
+    writeEntry("forms", { skills: ["react"] });
+    writeEntry("bad name", { skills: ["react"] });
+
     const outside = fs.mkdtempSync(
       path.join(os.tmpdir(), "experience-outside-"),
     );
-    fs.writeFileSync(
-      path.join(outside, "leak.md"),
-      experience({ skill: "escape" }),
-    );
-    fs.symlinkSync(outside, path.join(experienceRoot, "escape"), "dir");
-    fs.symlinkSync(
-      path.join(outside, "leak.md"),
-      path.join(experienceRoot, "react", "linked.md"),
-    );
+    writeEntry("normal", { skills: ["react"] });
+    fs.symlinkSync(outside, path.join(experienceRoot, "linked-dir"), "dir");
 
     try {
       const result = validateExperienceDirectory({
         experienceDirectory: experienceRoot,
-        visibleSkillsByAgent: { main: ["react", "escape"] },
+        visibleSkillsByAgent: { main: ["react"] },
       });
 
       expect(result.valid).toBe(false);
@@ -305,40 +285,13 @@ describe("SkillExperienceCatalog", () => {
         /normalized/,
       );
       expect(result.errors.map((error) => error.message)).toContain(
-        "duplicate canonical identity react/forms",
+        "duplicate canonical id forms",
       );
       expect(result.errors.map((error) => error.message).join("\n")).toMatch(
-        /symbolic link|confined/,
+        /symbolic link/,
       );
-      const catalog = new SkillExperienceCatalog(dataRoot);
-      expect(catalog.listForSkills(["react"])).toEqual([
-        expect.objectContaining({ identity: "react/forms" }),
-      ]);
-      expect(catalog.resolve("escape/leak")).toBeUndefined();
-      expect(catalog.resolve("react/linked")).toBeUndefined();
     } finally {
       fs.rmSync(outside, { recursive: true, force: true });
     }
-  });
-
-  it("reports noncanonical Markdown extensions instead of silently skipping them", () => {
-    const directory = path.join(experienceRoot, "react");
-    fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(
-      path.join(directory, "forms.MD"),
-      experience({ skill: "react" }),
-    );
-
-    const result = validateExperienceDirectory({
-      experienceDirectory: experienceRoot,
-      visibleSkillsByAgent: { main: ["react"] },
-    });
-
-    expect(result.valid).toBe(false);
-    expect(result.entries).toEqual([]);
-    expect(result.errors).toContainEqual({
-      file: "react/forms.MD",
-      message: "experience Markdown filename must use the .md extension",
-    });
   });
 });

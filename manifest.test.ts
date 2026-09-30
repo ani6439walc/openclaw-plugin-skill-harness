@@ -83,12 +83,13 @@ describe("skill-harness manifest", () => {
     });
   });
 
-  it("does not apply null defaults to optional model strings", () => {
+  it("does not expose routing model fields and does not apply null defaults to review models", () => {
     const properties = manifest.configSchema.properties;
     const routingProps = properties.routing.properties;
+    expect(routingProps).not.toHaveProperty("model");
+    expect(routingProps).not.toHaveProperty("modelFallback");
+    expect(routingProps).not.toHaveProperty("thinking");
     for (const model of [
-      routingProps.model,
-      routingProps.modelFallback,
       properties.review.properties.model,
       properties.review.properties.modelFallback,
     ]) {
@@ -158,35 +159,32 @@ describe("skill-harness manifest", () => {
     expect(readme).toContain("no automatic migration or compatibility parser");
   });
 
-  it("matches the runtime thresholds schema for keyword and hybrid routing", () => {
-    const intents =
-      manifest.configSchema.properties.routing.properties.intents.properties;
-    expect(intents.keyword.properties.directRouteMinScore).toEqual({
-      type: "number",
-      minimum: 0,
-      maximum: 1,
-      default: 0.85,
-      description: expect.any(String),
-    });
-    expect(intents.hybrid.properties.directRouteMinScore).toEqual({
-      type: "number",
-      minimum: 0,
-      maximum: 1,
-      default: 0.9,
-      description: expect.any(String),
-    });
-    expect(intents.hybrid.properties.directRouteMinMargin).toEqual({
-      type: "number",
-      minimum: 0,
-      maximum: 1,
-      default: 0.08,
-      description: expect.any(String),
-    });
-    expect(intents.hybrid.properties.minCandidateScore).toEqual({
+  it("matches the runtime thresholds schema for experiences routing and removes intents", () => {
+    expect(
+      manifest.configSchema.properties.routing.properties.intents,
+    ).toBeUndefined();
+    const experiences =
+      manifest.configSchema.properties.routing.properties.experiences
+        .properties;
+    expect(experiences.search.properties.minCandidateScore).toEqual({
       type: "number",
       minimum: 0,
       maximum: 1,
       default: 0.4,
+      description: expect.any(String),
+    });
+    expect(experiences.relevanceThreshold).toEqual({
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.6,
+      description: expect.any(String),
+    });
+    expect(experiences.maxInjectedExperiences).toEqual({
+      type: "integer",
+      minimum: 0,
+      maximum: 20,
+      default: 4,
       description: expect.any(String),
     });
   });
@@ -213,5 +211,13 @@ describe("skill-harness manifest", () => {
       default: 1,
       description: expect.any(String),
     });
+  });
+
+  it("exposes jev at top level alongside qmd and requires jev.model", () => {
+    expect(manifest.configSchema.required).toEqual(["qmd", "jev"]);
+    expect(manifest.configSchema.properties.jev).toBeDefined();
+    expect(manifest.configSchema.properties.jev.type).toBe("object");
+    expect(manifest.configSchema.properties.jev.required).toEqual(["model"]);
+    expect(manifest.configSchema.properties.qmd.properties.jev).toBeUndefined();
   });
 });

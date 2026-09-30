@@ -2,14 +2,7 @@ import { getOrCache } from "../singleton.js";
 import path from "node:path";
 import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
-import type {
-  RecentTurn,
-  IntentionResult,
-  IntentTrigger,
-  IntentProjectionTelemetry,
-  IntentRoutingEvidence,
-  HistoricalIntentRecord,
-} from "../types.js";
+import type { RecentTurn } from "../types.js";
 import type { ReviewSnapshot, ReviewState } from "../review/types.js";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
@@ -23,7 +16,7 @@ import {
   withFileLock,
   writeJsonAtomic,
 } from "../file-utils.js";
-import { sanitizeHistoricalIntentInput } from "../classification/conversation.js";
+import { sanitizePromptInput } from "../classification/conversation.js";
 
 export const SESSION_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const EMBEDDED_AGENT_SESSION_SUFFIXES = [
@@ -59,7 +52,8 @@ export type InputSkillDiscovery = {
   candidateCount: number;
   injectedSkills: Array<{
     name: string;
-    source: "name-match" | "direct-retrieval" | "intent-matched";
+    source:
+      "name-match" | "direct-retrieval" | "intent-matched" | "experience-qmd";
     collections?: SkillCollectionKind[];
     topCollection?: SkillCollectionKind;
   }>;
@@ -73,19 +67,41 @@ export type InputSkillDiscovery = {
   durationMs: number;
 };
 
+export interface IntentProjectionTelemetry {
+  originalIntentCount?: number;
+  candidateIntentCount?: number;
+  durationMs?: number;
+  decision?: "projected" | "full-fallback";
+  originalCatalogCodePoints?: number;
+  candidateCatalogCodePoints?: number;
+  fallbackReason?: string;
+  supportReasons?: string[];
+  selectionReasons?: string[];
+  [key: string]: unknown;
+}
+
 export interface IntentState {
   input?: RecentTurn[];
-  trigger?: IntentTrigger;
-  result?: IntentionResult;
+  trigger?: string;
+  result?: {
+    intent: string;
+    confidence: number;
+    reason?: string;
+    keywords?: string[];
+  };
   intentMatchedSkills?: string[];
   intentProjection?: IntentProjectionTelemetry;
-  routingEvidence?: IntentRoutingEvidence;
   inputSkillDiscovery?: InputSkillDiscovery;
+  [key: string]: unknown;
 }
 
 export interface SessionState {
   turnKey?: string;
   input?: string;
+  matchedSkills?: string[];
+  matchedExperiences?: string[];
+  confidence?: number;
+  inputSkillDiscovery?: InputSkillDiscovery;
   intent?: IntentState;
   skillsUsed?: SkillRecord[];
   toolCalls?: Array<{
@@ -144,7 +160,7 @@ function truncate(value: string | undefined, maxChars: number) {
 
 function sanitizeReviewInput(value: string | undefined): string | undefined {
   if (!value) return;
-  return truncate(sanitizeHistoricalIntentInput(value), 1000) || undefined;
+  return truncate(sanitizePromptInput(value), 1000) || undefined;
 }
 
 const REVIEW_PARAM_MAX_CHARS = 500;
@@ -222,12 +238,15 @@ function createReviewState(
     includeRecommendationCandidates?: boolean;
   },
 ): ReviewState {
+  const matchedSkills =
+    state.matchedSkills ?? state.intent?.intentMatchedSkills;
   return {
     input: sanitizeReviewInput(state.input),
-    intent: state.intent?.result ? { ...state.intent.result } : undefined,
-    ...(state.intent?.trigger
-      ? { routeProvenance: { trigger: state.intent.trigger } }
-      : {}),
+    confidence: state.confidence ?? state.intent?.result?.confidence,
+    matchedSkills: matchedSkills ? [...matchedSkills] : undefined,
+    matchedExperiences: state.matchedExperiences
+      ? [...state.matchedExperiences]
+      : undefined,
     skillsUsed: state.skillsUsed?.map((skill) => ({ ...skill })),
     toolCalls: state.toolCalls?.map((call) => ({
       name: call.name,
@@ -450,6 +469,13 @@ function mergeSessionState(
   data: Partial<SessionState>,
 ): void {
   if (data.input !== undefined) current.input = data.input;
+  if (data.matchedSkills !== undefined)
+    current.matchedSkills = [...data.matchedSkills];
+  if (data.matchedExperiences !== undefined)
+    current.matchedExperiences = [...data.matchedExperiences];
+  if (data.confidence !== undefined) current.confidence = data.confidence;
+  if (data.inputSkillDiscovery !== undefined)
+    current.inputSkillDiscovery = data.inputSkillDiscovery;
   if (data.intent) {
     if (!current.intent) current.intent = {};
     if (data.intent.input !== undefined)
@@ -849,8 +875,10 @@ export class SessionTracker {
       for (const [sessionId, session] of this.sessionData.entries()) {
         if (session.sessionKey !== sessionKey) continue;
         if (
+          !session.current?.matchedSkills?.length &&
+          !session.current?.matchedExperiences?.length &&
           !session.current?.intent?.result &&
-          !session.current?.intent?.intentProjection
+          !session.current?.input
         ) {
           continue;
         }
@@ -867,7 +895,9 @@ export class SessionTracker {
       const state = this.sessionData.get(params.sessionId)?.current;
       if (
         this.hasIntentData(params.sessionId) ||
-        state?.intent?.intentProjection
+        state?.input ||
+        state?.matchedSkills?.length ||
+        state?.matchedExperiences?.length
       ) {
         return params.sessionId;
       }
@@ -877,12 +907,25 @@ export class SessionTracker {
   getReviewSnapshot(sessionId: string): ReviewSnapshot | undefined {
     const session = this.sessionData.get(sessionId);
     const start = session?.current.timestamps?.start;
-    if (!session || !start || !session.current.intent?.result) return;
+    if (
+      !session ||
+      !start ||
+      (session.current.matchedSkills === undefined &&
+        session.current.matchedExperiences === undefined &&
+        !session.current.intent?.result)
+    ) {
+      return;
+    }
 
     const completedStates = [
       ...(session.history ?? []),
       session.current,
-    ].filter((state) => state.intent?.result);
+    ].filter(
+      (state) =>
+        state.matchedSkills !== undefined ||
+        state.matchedExperiences !== undefined ||
+        state.intent?.result,
+    );
     return {
       sessionId,
       sessionKey: session.sessionKey,
@@ -895,7 +938,6 @@ export class SessionTracker {
       recent: completedStates
         .slice(-10, -1)
         .map((state) => createReviewState(state, { preserveFullResult: true })),
-      intentCatalog: [],
     };
   }
 
@@ -912,10 +954,24 @@ export class SessionTracker {
     if (matches.length !== 1) return;
     const { state: target, index: targetIndex } = matches[0];
     const eventId = resolveTurnEventId(sessionId, target);
-    if (!target.intent?.result || !target.timestamps?.end || !eventId) return;
+    if (
+      !target.timestamps?.end ||
+      !eventId ||
+      (target.matchedSkills === undefined &&
+        target.matchedExperiences === undefined &&
+        !target.intent?.result)
+    ) {
+      return;
+    }
     const throughTarget = ordered
       .slice(0, targetIndex + 1)
-      .filter((state) => state.intent?.result);
+      .filter(
+        (state) =>
+          state.input ||
+          state.matchedSkills?.length ||
+          state.matchedExperiences?.length ||
+          state.intent?.result,
+      );
     return {
       sessionId,
       sessionKey: session.sessionKey,
@@ -928,25 +984,7 @@ export class SessionTracker {
       recent: throughTarget
         .slice(-10, -1)
         .map((state) => createReviewState(state, { preserveFullResult: true })),
-      intentCatalog: [],
     };
-  }
-
-  getHistoricalIntentRecords(sessionId: string): HistoricalIntentRecord[] {
-    const session = this.sessionData.get(sessionId);
-    if (!session) return [];
-
-    return [...(session.history ?? []), session.current].flatMap((state) => {
-      const result = state.intent?.result;
-      if (!state.input || !result) return [];
-      const record: HistoricalIntentRecord = {
-        input: state.input,
-        intent: result.intent,
-        confidence: result.confidence,
-      };
-      if (result.keywords?.length) record.keywords = [...result.keywords];
-      return [record];
-    });
   }
 
   cleanup(sessionId: string, options: { deleteFile: boolean }): void {

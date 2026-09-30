@@ -1,3 +1,161 @@
+---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    configDependencies: {}
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.8.1
+        version: 12.8.1
+
+packages:
+
+  '@pnpm/exe.android-arm64@12.8.1':
+    resolution: {integrity: sha512-siDxcidfz5eM6L2tJfik+i2bbUEw8UC7MZ3Yl2HYdRmqbdhHGAOQACtOOu6QVW4Jul4/w5wVKm+wM8ACtgh1Pg==}
+    cpu: [arm64]
+    os: [android]
+
+  '@pnpm/exe.android-x64@12.8.1':
+    resolution: {integrity: sha512-0F/uqPRc3aN4vLHsa0f+6fTtmsigFQ9/yxEU43fionF//pNHEd5e97b3w/nKIgqYMCUQCJphmBRMA9Q8/wlo9Q==}
+    cpu: [x64]
+    os: [android]
+
+  '@pnpm/exe.darwin-arm64@12.8.1':
+    resolution: {integrity: sha512-/rwavvMQJsl2RIxOHBnDF+4Gk+fhQFAY4M3PQZoKskJOEnaJcygG9p1xby6wcQcbS4d9dIubv09CQhufTgfmpw==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@pnpm/exe.darwin-x64@12.8.1':
+    resolution: {integrity: sha512-htYt2gN7zqJKLhC99Ft6EUiO7myjZAZXfmGCTJUL1v+o7vE9hZdE1+fAkk4Oj1ZHNRti6b2woOxEkRkAusi8OQ==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@pnpm/exe.freebsd-x64@12.8.1':
+    resolution: {integrity: sha512-PB5BULNgytxvExoOXUUeseS/DcpPENs+cg3iA6xHHeaLT4ctEGKSGXEbuj7USeqvo8JBpAx039hivnbzGqDwnA==}
+    cpu: [x64]
+    os: [freebsd]
+
+  '@pnpm/exe.linux-arm64-musl@12.8.1':
+    resolution: {integrity: sha512-kKeyC/ArjrgdciQRBrOL0j9HtOI4gDRgoyP+eJ1CQKyadpKlf/DhDDyspXe07R3B9KagTVLUF2nlt6Dr5quFIg==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@pnpm/exe.linux-arm64@12.8.1':
+    resolution: {integrity: sha512-q4s9a9X2O3N9aeUFooW24orNrxvu20+jyVUFR5RanPCqOKKPBrgs2iywMkBBx1aXkkzdWT54/mfz8Be8sJlWEw==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.linux-ppc64@12.8.1':
+    resolution: {integrity: sha512-F7XSjKJthwCh/L6abZiMpAfo2Cm61SZIT3e4dfgiIjESndlWaXCnfLKngSgZ/SEMsdmHT6dud3+kWIB3tw0/xQ==}
+    cpu: [ppc64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.linux-riscv64@12.8.1':
+    resolution: {integrity: sha512-z1ecpIK/ZY08Unk69KWWE9867oaKUytGUjrHnBoGFAAhsK+q+0cfvBH+f5fWobJ7FX97leMlLO+gkJolddM45Q==}
+    cpu: [riscv64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.linux-s390x@12.8.1':
+    resolution: {integrity: sha512-KU6tnrBfu4uKXTq6N5qJwSm8FSrs9Wc8b5AUEsHK9bRXwNdsZ1/lRxG1++X29SKRW9OSNuDSjxASv5mAvGo1gA==}
+    cpu: [s390x]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.linux-x64-musl@12.8.1':
+    resolution: {integrity: sha512-eUE8BWJkDr2tJb/yrk0yVnszlmNqFarVxUlqiZ9BAkct28Nq/5g2H0tvMDmPA7fAQW3STNj+omJPPRVT+4s5sQ==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@pnpm/exe.linux-x64@12.8.1':
+    resolution: {integrity: sha512-8bDZ0lZlCdi2rvnFul7EYgcC7zKeWSe76y8JV2oXobaS8p9i9d6PSf6LgLtTM0fI7R9Oh4eLCbveXyNDMmvZ+g==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.win32-arm64@12.8.1':
+    resolution: {integrity: sha512-MsT0dlrRxnCRCHCaosNbhWpEiAFnFuMEu3KuDJDU41BXgTwiINxU8goloUSUDejWZUqKaUqNC/qUTihl9nFtqg==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@pnpm/exe.win32-x64@12.8.1':
+    resolution: {integrity: sha512-SWtPe0PsbTTk//gJND10tMdOfCYjrkq5+qV49hzVhY7xz2iJ339Rc+xwASlcvbwTfrvH39YNqpKYibD+CRGLwA==}
+    cpu: [x64]
+    os: [win32]
+
+  pnpm@12.8.1:
+    resolution: {integrity: sha512-9kupB1B/XOr+BsjTjmBS0BeURFgOwSed3Vv8EctIqoomRLZlmOB+dh2oSHKp/FfV+QK4f6SdAkGY1VhhKqu+RQ==}
+    engines: {node: '>=18.*'}
+    hasBin: true
+
+snapshots:
+
+  '@pnpm/exe.android-arm64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.android-x64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.darwin-arm64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.darwin-x64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.freebsd-x64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.linux-arm64-musl@12.8.1':
+    optional: true
+
+  '@pnpm/exe.linux-arm64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.linux-ppc64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.linux-riscv64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.linux-s390x@12.8.1':
+    optional: true
+
+  '@pnpm/exe.linux-x64-musl@12.8.1':
+    optional: true
+
+  '@pnpm/exe.linux-x64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.win32-arm64@12.8.1':
+    optional: true
+
+  '@pnpm/exe.win32-x64@12.8.1':
+    optional: true
+
+  pnpm@12.8.1:
+    optionalDependencies:
+      '@pnpm/exe.android-arm64': 12.8.1
+      '@pnpm/exe.android-x64': 12.8.1
+      '@pnpm/exe.darwin-arm64': 12.8.1
+      '@pnpm/exe.darwin-x64': 12.8.1
+      '@pnpm/exe.freebsd-x64': 12.8.1
+      '@pnpm/exe.linux-arm64': 12.8.1
+      '@pnpm/exe.linux-arm64-musl': 12.8.1
+      '@pnpm/exe.linux-ppc64': 12.8.1
+      '@pnpm/exe.linux-riscv64': 12.8.1
+      '@pnpm/exe.linux-s390x': 12.8.1
+      '@pnpm/exe.linux-x64': 12.8.1
+      '@pnpm/exe.linux-x64-musl': 12.8.1
+      '@pnpm/exe.win32-arm64': 12.8.1
+      '@pnpm/exe.win32-x64': 12.8.1
+
+---
 lockfileVersion: '9.0'
 
 settings:
@@ -21,15 +179,15 @@ importers:
         specifier: 2026.9.6
         version: 2026.9.6
       typebox:
-        specifier: 1.3.27
-        version: 1.3.27
+        specifier: 1.3.30
+        version: 1.3.30
       zod:
-        specifier: 4.5.4
-        version: 4.5.4
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       prettier:
-        specifier: 3.9.6
-        version: 3.9.6
+        specifier: 3.9.9
+        version: 3.9.9
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -2031,8 +2189,8 @@ packages:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
 
-  prettier@3.9.6:
-    resolution: {integrity: sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==}
+  prettier@3.9.9:
+    resolution: {integrity: sha512-Z/CJHIkdujO/OtN7nXUii0Rf3VT5SRuhjBA82Xvu2XhBUgX3nhP67T0LHceBdQLex7OOFGTox+Q5Yg8Jk2Qivg==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -2414,9 +2572,6 @@ packages:
     resolution: {integrity: sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA==}
     engines: {node: '>= 18'}
 
-  typebox@1.3.27:
-    resolution: {integrity: sha512-zu+jc1pcy4UiNThxikUr36f0Rybk9PEeCg/NE6adeWr/SKsdNO4EzZHYRDlv2YCVAfj3Odq3dESSo/jNyoBXzA==}
-
   typebox@1.3.30:
     resolution: {integrity: sha512-vRmBLzlaq9O9dvfGmI5CssLGvDC/R594kH6N/Q1uUU5VPO3PTgQMlWe/UVNdNVTr2EET+FX8BWZkFdYgxTglbQ==}
 
@@ -2666,9 +2821,6 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@4.5.4:
-    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
-
   zod@4.6.5:
     resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
@@ -2775,59 +2927,41 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@koromix/koffi-android-arm64@3.2.1':
-    optional: true
+  '@koromix/koffi-android-arm64@3.2.1': {}
 
-  '@koromix/koffi-android-x64@3.2.1':
-    optional: true
+  '@koromix/koffi-android-x64@3.2.1': {}
 
-  '@koromix/koffi-darwin-arm64@3.2.1':
-    optional: true
+  '@koromix/koffi-darwin-arm64@3.2.1': {}
 
-  '@koromix/koffi-darwin-x64@3.2.1':
-    optional: true
+  '@koromix/koffi-darwin-x64@3.2.1': {}
 
-  '@koromix/koffi-freebsd-arm64@3.2.1':
-    optional: true
+  '@koromix/koffi-freebsd-arm64@3.2.1': {}
 
-  '@koromix/koffi-freebsd-ia32@3.2.1':
-    optional: true
+  '@koromix/koffi-freebsd-ia32@3.2.1': {}
 
-  '@koromix/koffi-freebsd-x64@3.2.1':
-    optional: true
+  '@koromix/koffi-freebsd-x64@3.2.1': {}
 
-  '@koromix/koffi-linux-arm64@3.2.1':
-    optional: true
+  '@koromix/koffi-linux-arm64@3.2.1': {}
 
-  '@koromix/koffi-linux-arm@3.2.1':
-    optional: true
+  '@koromix/koffi-linux-arm@3.2.1': {}
 
-  '@koromix/koffi-linux-ia32@3.2.1':
-    optional: true
+  '@koromix/koffi-linux-ia32@3.2.1': {}
 
-  '@koromix/koffi-linux-loong64@3.2.1':
-    optional: true
+  '@koromix/koffi-linux-loong64@3.2.1': {}
 
-  '@koromix/koffi-linux-riscv64@3.2.1':
-    optional: true
+  '@koromix/koffi-linux-riscv64@3.2.1': {}
 
-  '@koromix/koffi-linux-x64@3.2.1':
-    optional: true
+  '@koromix/koffi-linux-x64@3.2.1': {}
 
-  '@koromix/koffi-openbsd-ia32@3.2.1':
-    optional: true
+  '@koromix/koffi-openbsd-ia32@3.2.1': {}
 
-  '@koromix/koffi-openbsd-x64@3.2.1':
-    optional: true
+  '@koromix/koffi-openbsd-x64@3.2.1': {}
 
-  '@koromix/koffi-win32-arm64@3.2.1':
-    optional: true
+  '@koromix/koffi-win32-arm64@3.2.1': {}
 
-  '@koromix/koffi-win32-ia32@3.2.1':
-    optional: true
+  '@koromix/koffi-win32-ia32@3.2.1': {}
 
-  '@koromix/koffi-win32-x64@3.2.1':
-    optional: true
+  '@koromix/koffi-win32-x64@3.2.1': {}
 
   '@kwsites/file-exists@1.1.1':
     dependencies:
@@ -2837,23 +2971,17 @@ snapshots:
 
   '@kwsites/promise-deferred@1.1.1': {}
 
-  '@lydell/node-pty-darwin-arm64@1.2.0-beta.15':
-    optional: true
+  '@lydell/node-pty-darwin-arm64@1.2.0-beta.15': {}
 
-  '@lydell/node-pty-darwin-x64@1.2.0-beta.15':
-    optional: true
+  '@lydell/node-pty-darwin-x64@1.2.0-beta.15': {}
 
-  '@lydell/node-pty-linux-arm64@1.2.0-beta.15':
-    optional: true
+  '@lydell/node-pty-linux-arm64@1.2.0-beta.15': {}
 
-  '@lydell/node-pty-linux-x64@1.2.0-beta.15':
-    optional: true
+  '@lydell/node-pty-linux-x64@1.2.0-beta.15': {}
 
-  '@lydell/node-pty-win32-arm64@1.2.0-beta.15':
-    optional: true
+  '@lydell/node-pty-win32-arm64@1.2.0-beta.15': {}
 
-  '@lydell/node-pty-win32-x64@1.2.0-beta.15':
-    optional: true
+  '@lydell/node-pty-win32-x64@1.2.0-beta.15': {}
 
   '@lydell/node-pty@1.2.0-beta.15':
     optionalDependencies:
@@ -2868,15 +2996,15 @@ snapshots:
     dependencies:
       '@opentelemetry/semantic-conventions': 1.43.0
       ws: 8.21.3
-      zod: 4.5.4
-      zod-to-json-schema: 3.25.2(zod@4.5.4)
+      zod: 4.6.5
+      zod-to-json-schema: 3.25.2(zod@4.6.5)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
   '@modelcontextprotocol/core@2.1.0':
     dependencies:
-      zod: 4.5.4
+      zod: 4.6.5
 
   '@modelcontextprotocol/sdk@1.30.0(zod@4.6.5)':
     dependencies:
@@ -2903,7 +3031,7 @@ snapshots:
   '@modelcontextprotocol/server@2.1.0':
     dependencies:
       '@modelcontextprotocol/core': 2.1.0
-      zod: 4.5.4
+      zod: 4.6.5
 
   '@mozilla/readability@0.6.0': {}
 
@@ -3047,26 +3175,19 @@ snapshots:
       - ws
       - zod
 
-  '@openclaw/fs-safe-darwin-arm64@0.18.1':
-    optional: true
+  '@openclaw/fs-safe-darwin-arm64@0.18.1': {}
 
-  '@openclaw/fs-safe-darwin-x64@0.18.1':
-    optional: true
+  '@openclaw/fs-safe-darwin-x64@0.18.1': {}
 
-  '@openclaw/fs-safe-linux-arm64-gnu@0.18.1':
-    optional: true
+  '@openclaw/fs-safe-linux-arm64-gnu@0.18.1': {}
 
-  '@openclaw/fs-safe-linux-arm64-musl@0.18.1':
-    optional: true
+  '@openclaw/fs-safe-linux-arm64-musl@0.18.1': {}
 
-  '@openclaw/fs-safe-linux-x64-gnu@0.18.1':
-    optional: true
+  '@openclaw/fs-safe-linux-x64-gnu@0.18.1': {}
 
-  '@openclaw/fs-safe-linux-x64-musl@0.18.1':
-    optional: true
+  '@openclaw/fs-safe-linux-x64-musl@0.18.1': {}
 
-  '@openclaw/fs-safe-win32-x64-msvc@0.18.1':
-    optional: true
+  '@openclaw/fs-safe-win32-x64-msvc@0.18.1': {}
 
   '@openclaw/fs-safe@0.18.1':
     optionalDependencies:
@@ -3221,23 +3342,17 @@ snapshots:
 
   '@tokenizer/token@0.3.0': {}
 
-  '@trycua/cua-driver-darwin-arm64@0.28.2':
-    optional: true
+  '@trycua/cua-driver-darwin-arm64@0.28.2': {}
 
-  '@trycua/cua-driver-darwin-x64@0.28.2':
-    optional: true
+  '@trycua/cua-driver-darwin-x64@0.28.2': {}
 
-  '@trycua/cua-driver-linux-arm64-gnu@0.28.2':
-    optional: true
+  '@trycua/cua-driver-linux-arm64-gnu@0.28.2': {}
 
-  '@trycua/cua-driver-linux-x64-gnu@0.28.2':
-    optional: true
+  '@trycua/cua-driver-linux-x64-gnu@0.28.2': {}
 
-  '@trycua/cua-driver-win32-arm64-msvc@0.28.2':
-    optional: true
+  '@trycua/cua-driver-win32-arm64-msvc@0.28.2': {}
 
-  '@trycua/cua-driver-win32-x64-msvc@0.28.2':
-    optional: true
+  '@trycua/cua-driver-win32-x64-msvc@0.28.2': {}
 
   '@trycua/cua-driver@0.28.2':
     dependencies:
@@ -3268,6 +3383,7 @@ snapshots:
   '@types/node@25.9.2':
     dependencies:
       undici-types: 7.24.6
+    optional: true
 
   '@types/retry@0.12.0': {}
 
@@ -3275,29 +3391,21 @@ snapshots:
 
   '@ubjs/core@0.31.0-3': {}
 
-  '@ubjs/node-darwin-arm64@0.31.0-3':
-    optional: true
+  '@ubjs/node-darwin-arm64@0.31.0-3': {}
 
-  '@ubjs/node-darwin-x64@0.31.0-3':
-    optional: true
+  '@ubjs/node-darwin-x64@0.31.0-3': {}
 
-  '@ubjs/node-linux-arm64-gnu@0.31.0-3':
-    optional: true
+  '@ubjs/node-linux-arm64-gnu@0.31.0-3': {}
 
-  '@ubjs/node-linux-arm64-musl@0.31.0-3':
-    optional: true
+  '@ubjs/node-linux-arm64-musl@0.31.0-3': {}
 
-  '@ubjs/node-linux-x64-gnu@0.31.0-3':
-    optional: true
+  '@ubjs/node-linux-x64-gnu@0.31.0-3': {}
 
-  '@ubjs/node-linux-x64-musl@0.31.0-3':
-    optional: true
+  '@ubjs/node-linux-x64-musl@0.31.0-3': {}
 
-  '@ubjs/node-win32-arm64-msvc@0.31.0-3':
-    optional: true
+  '@ubjs/node-win32-arm64-msvc@0.31.0-3': {}
 
-  '@ubjs/node-win32-x64-msvc@0.31.0-3':
-    optional: true
+  '@ubjs/node-win32-x64-msvc@0.31.0-3': {}
 
   '@ubjs/node@0.31.0-3':
     optionalDependencies:
@@ -4024,7 +4132,8 @@ snapshots:
 
   isexe@4.0.0: {}
 
-  jiti@2.7.0: {}
+  jiti@2.7.0:
+    optional: true
 
   jose@6.2.3: {}
 
@@ -4491,7 +4600,7 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  prettier@3.9.6: {}
+  prettier@3.9.9: {}
 
   pretty-bytes@6.1.1: {}
 
@@ -4889,7 +4998,8 @@ snapshots:
 
   ts-algebra@2.0.0: {}
 
-  tslib@2.8.1: {}
+  tslib@2.8.1:
+    optional: true
 
   tslog@5.2.0: {}
 
@@ -4899,8 +5009,6 @@ snapshots:
       media-typer: 1.1.0
       mime-types: 3.0.2
 
-  typebox@1.3.27: {}
-
   typebox@1.3.30: {}
 
   typescript@6.0.3: {}
@@ -4909,7 +5017,8 @@ snapshots:
 
   uint8array-extras@1.5.0: {}
 
-  undici-types@7.24.6: {}
+  undici-types@7.24.6:
+    optional: true
 
   undici@8.10.2: {}
 
@@ -5062,14 +5171,8 @@ snapshots:
 
   yoctocolors@2.2.0: {}
 
-  zod-to-json-schema@3.25.2(zod@4.5.4):
-    dependencies:
-      zod: 4.5.4
-
   zod-to-json-schema@3.25.2(zod@4.6.5):
     dependencies:
       zod: 4.6.5
-
-  zod@4.5.4: {}
 
   zod@4.6.5: {}

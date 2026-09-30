@@ -12,12 +12,10 @@ import { roundToDecimals } from "./normalize.js";
 import type {
   ContextWindow,
   QmdEndpointConfig,
-  ResolvedClassifierConfig,
   ResolvedQmdConfig,
   ResolvedReviewConfig,
   ResolvedRoutingConfig,
-  ResolvedRoutingIntentsConfig,
-  ResolvedRoutingIntentsThresholdsConfig,
+  ResolvedRoutingExperiencesConfig,
   ResolvedRoutingScopeConfig,
   ResolvedRoutingSkillsConfig,
   ResolvedScopeConfig,
@@ -62,24 +60,15 @@ const DEFAULT_ROUTING_SCOPE: ResolvedRoutingScopeConfig = {
 };
 const DEFAULT_SCOPE: ResolvedScopeConfig = DEFAULT_ROUTING_SCOPE;
 
-const DEFAULT_ROUTING_INTENTS: ResolvedRoutingIntentsConfig = {
-  keyword: { directRouteMinScore: 0.85 },
-  hybrid: {
-    directRouteMinScore: 0.9,
-    directRouteMinMargin: 0.08,
-    minCandidateScore: 0.4,
-  },
+const DEFAULT_ROUTING_EXPERIENCES: ResolvedRoutingExperiencesConfig = {
+  search: { minCandidateScore: 0.4, timeoutMs: undefined as never },
+  relevanceThreshold: 0.6,
+  maxInjectedExperiences: 4,
 };
-const DEFAULT_ROUTING_THRESHOLDS: ResolvedRoutingIntentsThresholdsConfig =
-  DEFAULT_ROUTING_INTENTS;
 
-const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
-  model: undefined,
-  modelFallback: undefined,
-  thinking: "medium",
-  timeoutMs: DEFAULT_TIMEOUT_MS,
-  queryMode: DEFAULT_QUERY_MODE,
-  contextWindow: DEFAULT_CONTEXT_WINDOW,
+const DEFAULT_JEV: QmdEndpointConfig = {
+  baseUrl: "",
+  model: "",
 };
 
 const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
@@ -89,18 +78,16 @@ const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
     minJaccardScore: 0.5,
     genericTokens: [],
   },
-  maxInjectedSkills: 4,
+  relevanceThreshold: 0.6,
+  maxInjectedSkills: 8,
 };
 
 const DEFAULT_SKILL_CANDIDATES = DEFAULT_ROUTING_SKILLS;
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
   scope: DEFAULT_ROUTING_SCOPE,
-  intents: DEFAULT_ROUTING_INTENTS,
+  experiences: DEFAULT_ROUTING_EXPERIENCES,
   skills: DEFAULT_ROUTING_SKILLS,
-  model: undefined,
-  modelFallback: undefined,
-  thinking: "medium",
   timeoutMs: DEFAULT_TIMEOUT_MS,
   queryMode: DEFAULT_QUERY_MODE,
   contextWindow: DEFAULT_CONTEXT_WINDOW,
@@ -139,6 +126,7 @@ const DEFAULT_REVIEW = {
   thinking: "medium",
   timeoutSeconds: 300,
   triggers: {
+    experienceHealthCheck: { enabled: true, everyTurns: 10 },
     intentHealthCheck: { enabled: true, everyTurns: 10 },
     routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
     capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
@@ -147,6 +135,7 @@ const DEFAULT_REVIEW = {
 
 const DEFAULT_CONFIG: ResolvedSkillHarnessPluginConfig = {
   qmd: DEFAULT_QMD,
+  jev: DEFAULT_JEV,
   skills: DEFAULT_SKILLS,
   routing: DEFAULT_ROUTING,
   review: DEFAULT_REVIEW,
@@ -229,126 +218,42 @@ const ThinkLevelSchema = z
   .enum(["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"])
   .catch("medium");
 
-const ClassifierSchema = z
+const ExperienceCandidatesSearchSchema = z
   .object({
-    model: z.string().optional().catch(undefined),
-    modelFallback: z.string().optional().catch(undefined),
-    thinking: ThinkLevelSchema,
-    timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
-    queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
-    contextWindow: ContextWindowSchema,
-  })
-  .catch(DEFAULT_CLASSIFIER)
-  .transform((val): ResolvedClassifierConfig => ({
-    model: val.model ?? undefined,
-    modelFallback: val.modelFallback ?? undefined,
-    thinking: val.thinking,
-    timeoutMs: val.timeoutMs,
-    queryMode: val.queryMode,
-    contextWindow: val.contextWindow,
-  }));
-
-const RoutingScoreSchema = (fallback: number) =>
-  z.number().min(0).max(1).optional().default(fallback);
-
-const KeywordThresholdsSchema = z
-  .object({
-    directRouteMinScore: RoutingScoreSchema(
-      DEFAULT_ROUTING_THRESHOLDS.keyword.directRouteMinScore,
-    ),
+    minCandidateScore: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.4),
+    timeoutMs: z.number().int().min(100).max(60_000).optional(),
   })
   .strict()
-  .default(DEFAULT_ROUTING_THRESHOLDS.keyword);
+  .optional()
+  .default(DEFAULT_ROUTING_EXPERIENCES.search);
 
-const HybridThresholdsSchema = z
+const RoutingExperiencesSchema = z
   .object({
-    directRouteMinScore: RoutingScoreSchema(
-      DEFAULT_ROUTING_THRESHOLDS.hybrid.directRouteMinScore,
-    ),
-    directRouteMinMargin: RoutingScoreSchema(
-      DEFAULT_ROUTING_THRESHOLDS.hybrid.directRouteMinMargin,
-    ),
-    minCandidateScore: RoutingScoreSchema(
-      DEFAULT_ROUTING_THRESHOLDS.hybrid.minCandidateScore,
-    ),
+    search: ExperienceCandidatesSearchSchema,
+    relevanceThreshold: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.6),
+    maxInjectedExperiences: z
+      .number()
+      .int()
+      .min(0)
+      .max(20)
+      .optional()
+      .default(4),
   })
   .strict()
-  .default(DEFAULT_ROUTING_THRESHOLDS.hybrid)
-  .superRefine((hybrid, context) => {
-    if (
-      roundToDecimals(hybrid.minCandidateScore, 2) >
-      roundToDecimals(hybrid.directRouteMinScore, 2)
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["minCandidateScore"],
-        message:
-          "minCandidateScore must be less than or equal to directRouteMinScore",
-      });
-    }
-  });
-
-const RoutingThresholdsSchema = z
-  .preprocess(
-    (raw) => {
-      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-        return {};
-      }
-      const record = raw as Record<string, unknown>;
-      if ("keyword" in record || "hybrid" in record) {
-        return record;
-      }
-      const legacyDirect =
-        typeof record.directRouteMinScore === "number"
-          ? record.directRouteMinScore
-          : undefined;
-      const legacyMinCandidate =
-        typeof record.minCandidateScore === "number"
-          ? record.minCandidateScore
-          : undefined;
-      if (legacyDirect !== undefined || legacyMinCandidate !== undefined) {
-        return {
-          keyword: {
-            ...(legacyDirect !== undefined
-              ? { directRouteMinScore: legacyDirect }
-              : {}),
-          },
-          hybrid: {
-            ...(legacyDirect !== undefined
-              ? { directRouteMinScore: legacyDirect }
-              : {}),
-            ...(legacyMinCandidate !== undefined
-              ? { minCandidateScore: legacyMinCandidate }
-              : {}),
-          },
-        };
-      }
-      return record;
-    },
-    z
-      .object({
-        keyword: KeywordThresholdsSchema.optional().default(
-          DEFAULT_ROUTING_THRESHOLDS.keyword,
-        ),
-        hybrid: HybridThresholdsSchema.optional().default(
-          DEFAULT_ROUTING_THRESHOLDS.hybrid,
-        ),
-      })
-      .strict(),
-  )
-  .default(DEFAULT_ROUTING_THRESHOLDS);
-
-const RoutingIntentsSchema = z
-  .preprocess((val) => {
-    if (val && typeof val === "object" && "thresholds" in val) {
-      const { thresholds, ...rest } = val as Record<string, unknown>;
-      if (thresholds && typeof thresholds === "object") {
-        return { ...(thresholds as Record<string, unknown>), ...rest };
-      }
-    }
-    return val;
-  }, RoutingThresholdsSchema)
-  .default(DEFAULT_ROUTING_INTENTS);
+  .optional()
+  .default(DEFAULT_ROUTING_EXPERIENCES);
 
 const GenericTokensSchema = z
   .array(z.string())
@@ -389,7 +294,14 @@ const RoutingSkillsSchema = z
   .object({
     search: SkillCandidatesSearchSchema,
     nameMatch: SkillCandidatesNameMatchSchema,
-    maxInjectedSkills: z.number().int().min(0).max(4).optional().default(4),
+    relevanceThreshold: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.6),
+    maxInjectedSkills: z.number().int().min(0).max(20).optional().default(8),
   })
   .strict()
   .optional()
@@ -398,11 +310,8 @@ const RoutingSkillsSchema = z
 const RoutingSchema = z
   .object({
     scope: ScopeSchema.optional().default(DEFAULT_ROUTING_SCOPE),
-    intents: RoutingIntentsSchema.optional().default(DEFAULT_ROUTING_INTENTS),
+    experiences: RoutingExperiencesSchema,
     skills: RoutingSkillsSchema,
-    model: z.string().optional().catch(undefined),
-    modelFallback: z.string().optional().catch(undefined),
-    thinking: ThinkLevelSchema,
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
     queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
     contextWindow: ContextWindowSchema,
@@ -443,28 +352,16 @@ function resolveRoutingConfig(
   ) {
     delete (routingInput.skills as Record<string, unknown>).enabled;
   }
-  if (routingInput.intents === undefined) {
-    if (routingInput.thresholds !== undefined) {
-      routingInput.intents = routingInput.thresholds;
-      delete routingInput.thresholds;
-    }
-  } else if (routingInput.thresholds !== undefined) {
-    delete routingInput.thresholds;
-  }
+  delete routingInput.intents;
+  delete routingInput.thresholds;
+  delete routingInput.model;
+  delete routingInput.modelFallback;
+  delete routingInput.thinking;
   if (
     routingInput.classifier !== undefined &&
     typeof routingInput.classifier === "object"
   ) {
     const c = routingInput.classifier as Record<string, unknown>;
-    if (routingInput.model === undefined && c.model !== undefined)
-      routingInput.model = c.model;
-    if (
-      routingInput.modelFallback === undefined &&
-      c.modelFallback !== undefined
-    )
-      routingInput.modelFallback = c.modelFallback;
-    if (routingInput.thinking === undefined && c.thinking !== undefined)
-      routingInput.thinking = c.thinking;
     if (routingInput.timeoutMs === undefined && c.timeoutMs !== undefined)
       routingInput.timeoutMs = c.timeoutMs;
     if (routingInput.queryMode === undefined && c.queryMode !== undefined)
@@ -479,6 +376,16 @@ function resolveRoutingConfig(
   const resolved = RoutingSchema.parse(routingInput);
   const out: ResolvedRoutingConfig = {
     ...resolved,
+    experiences: {
+      ...resolved.experiences,
+      search: {
+        ...resolved.experiences.search,
+        timeoutMs:
+          resolved.experiences.search.timeoutMs === undefined
+            ? qmdTimeoutMs
+            : resolved.experiences.search.timeoutMs,
+      },
+    },
     skills: {
       ...resolved.skills,
       search: {
@@ -490,34 +397,6 @@ function resolveRoutingConfig(
       },
     },
   };
-  Object.defineProperty(out, "classifier", {
-    get() {
-      return {
-        model: this.model,
-        modelFallback: this.modelFallback,
-        thinking: this.thinking,
-        timeoutMs: this.timeoutMs,
-        queryMode: this.queryMode,
-        contextWindow: this.contextWindow,
-      };
-    },
-    enumerable: false,
-    configurable: true,
-  });
-  Object.defineProperty(out, "thresholds", {
-    get() {
-      return this.intents;
-    },
-    enumerable: false,
-    configurable: true,
-  });
-  Object.defineProperty(out.intents, "thresholds", {
-    get() {
-      return this;
-    },
-    enumerable: false,
-    configurable: true,
-  });
   Object.defineProperty(out, "skillCandidates", {
     get() {
       return this.skills;
@@ -650,12 +529,18 @@ const ReviewSchema = z
     timeoutSeconds: boundedInt(300, 60, 1_800),
     triggers: z
       .object({
+        experienceHealthCheck: z
+          .object({
+            enabled: enabledSchema,
+            everyTurns: boundedInt(10, 1, 1_000),
+          })
+          .optional(),
         intentHealthCheck: z
           .object({
             enabled: enabledSchema,
             everyTurns: boundedInt(10, 1, 1_000),
           })
-          .catch(DEFAULT_REVIEW.triggers.intentHealthCheck),
+          .optional(),
         routingUncertainty: z
           .object({
             enabled: enabledSchema,
@@ -673,7 +558,19 @@ const ReviewSchema = z
           })
           .catch(DEFAULT_REVIEW.triggers.capabilityFit),
       })
-      .catch(DEFAULT_REVIEW.triggers),
+      .catch(DEFAULT_REVIEW.triggers)
+      .transform((val) => {
+        const healthCheck =
+          val.experienceHealthCheck ??
+          val.intentHealthCheck ??
+          DEFAULT_REVIEW.triggers.experienceHealthCheck;
+        return {
+          experienceHealthCheck: healthCheck,
+          intentHealthCheck: healthCheck,
+          routingUncertainty: val.routingUncertainty,
+          capabilityFit: val.capabilityFit,
+        };
+      }),
   })
   .catch(DEFAULT_REVIEW)
   .transform((val): ResolvedReviewConfig => ({
@@ -720,12 +617,14 @@ const QmdSchema = z
 const SkillHarnessConfigSchema = z
   .object({
     qmd: QmdSchema,
+    jev: QmdJevSchema,
     skills: z.unknown().optional(),
     routing: z.unknown().optional(),
     review: ReviewSchema.optional().default(DEFAULT_REVIEW),
   })
   .catch({
     qmd: DEFAULT_QMD,
+    jev: undefined,
     skills: DEFAULT_SKILLS,
     routing: DEFAULT_ROUTING,
     review: DEFAULT_REVIEW,
@@ -744,20 +643,21 @@ export function resolveConfig(
   });
   const resolvedExpansion = resolveQmdEndpoint(resolved.qmd.expansion, options);
 
-  let resolvedJev: QmdEndpointConfig | undefined = undefined;
-  if (
-    resolved.qmd.jev &&
-    (resolved.qmd.jev.model ||
-      resolved.qmd.jev.baseUrl ||
-      resolved.qmd.jev.apiKey)
-  ) {
-    const ep = resolveQmdEndpoint(resolved.qmd.jev, options);
-    resolvedJev = {
-      ...resolved.qmd.jev,
-      ...ep,
-      baseUrl: normalizeTypeSafeBaseUrl(ep.baseUrl) || ep.baseUrl,
-    };
-  }
+  const hasJevInput = Boolean(
+    (resolved.jev &&
+      (resolved.jev.model || resolved.jev.baseUrl || resolved.jev.apiKey)) ||
+    (resolved.qmd.jev &&
+      (resolved.qmd.jev.model ||
+        resolved.qmd.jev.baseUrl ||
+        resolved.qmd.jev.apiKey)),
+  );
+  const rawJev = resolved.jev ?? resolved.qmd.jev ?? DEFAULT_JEV;
+  const ep = resolveQmdEndpoint(rawJev, options);
+  const resolvedJev: QmdEndpointConfig = {
+    ...rawJev,
+    ...ep,
+    baseUrl: normalizeTypeSafeBaseUrl(ep.baseUrl) || ep.baseUrl,
+  };
 
   const timeoutMs = clampInt(
     resolved.qmd.timeoutMs,
@@ -788,8 +688,9 @@ export function resolveConfig(
         ...resolved.qmd.expansion,
         ...resolvedExpansion,
       },
-      ...(resolvedJev ? { jev: resolvedJev } : {}),
+      ...(hasJevInput ? { jev: resolvedJev } : {}),
     },
+    jev: resolvedJev,
     skills: resolvedSkills,
     routing: resolvedRouting,
     review: resolved.review,

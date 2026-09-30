@@ -24,13 +24,12 @@ it("rounds confidence to two decimal places before emitting", () => {
   emitPipelineEvent(
     { runId: "test-run" },
     "test-session",
-    "qmd-hybrid",
+    "skill-match",
     "completed",
     {
-      intent: "meme-maker",
+      injectedSkills: ["meme-maker"],
       confidence: 0.7688711881637573,
-      reason:
-        "QMD intent-examples-and-keywords match: meme-maker (vec,hyde,original)",
+      reason: "direct-retrieval",
     },
   );
 
@@ -40,13 +39,12 @@ it("rounds confidence to two decimal places before emitting", () => {
     stream: "plugin:skill-harness",
     data: {
       kind: "skill-harness.pipeline",
-      phase: "qmd-hybrid",
+      phase: "skill-match",
       state: "completed",
       sessionKey: "test-session",
-      intent: "meme-maker",
+      injectedSkills: ["meme-maker"],
       confidence: 0.77,
-      reason:
-        "QMD intent-examples-and-keywords match: meme-maker (vec,hyde,original)",
+      reason: "direct-retrieval",
     },
   });
 });

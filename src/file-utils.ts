@@ -50,10 +50,6 @@ export function resolvePluginDataRoot(
   return path.join(stateDir, "plugins", pluginId);
 }
 
-export function intentsPath(dataRoot: string): string {
-  return path.join(dataRoot, "intents");
-}
-
 export function experiencesPath(dataRoot: string): string {
   return path.join(dataRoot, "experiences");
 }

@@ -1,7 +1,7 @@
 {
   "id": "skill-harness",
   "name": "Skill Harness",
-  "description": "Pre-scans user intent before replies and injects routing context via before_prompt_build hook.",
+  "description": "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
   "activation": {
     "onStartup": true
   },
@@ -12,11 +12,11 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["qmd"],
+    "required": ["qmd", "jev"],
     "properties": {
       "qmd": {
         "type": "object",
-        "description": "Required QMD remote services for mandatory hybrid intent routing and skill search. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
+        "description": "Required QMD remote services for skill and experience search. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
         "additionalProperties": false,
         "properties": {
           "timeoutMs": {
@@ -69,34 +69,35 @@
               }
             }
           },
-          "jev": {
-            "type": "object",
-            "additionalProperties": false,
-            "description": "Optional TypeSafe Jev provider for hybrid intent classification and candidate reranking in QMD.",
-            "properties": {
-              "baseUrl": {
-                "type": "string",
-                "description": "Optional base URL for TypeSafe Jev. If omitted, resolved from the OpenClaw provider prefix in model or TYPESAFE_BASE_URL."
-              },
-              "model": {
-                "type": "string",
-                "description": "TypeSafe Jev model name or OpenClaw 'provider/model' reference (e.g. 'typesafe/jev-latest' or 'openrouter/typesafe/jev-latest')."
-              },
-              "apiKey": {
-                "type": "string",
-                "description": "Optional API key for TypeSafe Jev. If omitted, resolved from the OpenClaw provider, TYPESAFE_API_KEY, or environment."
-              }
-            }
-          },
           "indexRefreshIntervalSeconds": {
             "type": "integer",
             "minimum": 0,
             "maximum": 86400,
             "default": 300,
-            "description": "Seconds between source checks for QMD intent and skill index refreshes; 0 disables subsequent automatic checks."
+            "description": "Seconds between source checks for QMD experience and skill index refreshes; 0 disables subsequent automatic checks."
           }
         },
         "required": ["embedding", "expansion"]
+      },
+      "jev": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model"],
+        "description": "TypeSafe Jev provider for unified skill and experience candidate routing.",
+        "properties": {
+          "baseUrl": {
+            "type": "string",
+            "description": "Optional base URL for TypeSafe Jev. If omitted, resolved from the OpenClaw provider prefix in model or TYPESAFE_BASE_URL."
+          },
+          "model": {
+            "type": "string",
+            "description": "TypeSafe Jev model name or OpenClaw 'provider/model' reference (e.g. 'typesafe/jev-latest' or 'openrouter/typesafe/jev-latest')."
+          },
+          "apiKey": {
+            "type": "string",
+            "description": "Optional API key for TypeSafe Jev. If omitted, resolved from the OpenClaw provider, TYPESAFE_API_KEY, or environment."
+          }
+        }
       },
       "skills": {
         "type": "object",
@@ -196,7 +197,7 @@
       },
       "routing": {
         "type": "object",
-        "description": "Pre-turn dynamic intent routing thresholds and fallback classifier.",
+        "description": "Pre-turn dynamic routing thresholds and candidate selection.",
         "additionalProperties": false,
         "properties": {
           "scope": {
@@ -209,7 +210,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Agent IDs eligible for intention scanning.",
+                "description": "Agent IDs eligible for dynamic routing.",
                 "default": ["main"]
               },
               "chatTypes": {
@@ -240,54 +241,45 @@
             },
             "default": {}
           },
-          "intents": {
+          "experiences": {
             "type": "object",
-            "description": "Dynamic intent routing configuration and thresholds.",
+            "description": "Prompt-build input-matched experience candidate policy.",
             "additionalProperties": false,
             "properties": {
-              "keyword": {
+              "search": {
                 "type": "object",
-                "description": "Step 1 QMD keyword routing thresholds.",
                 "additionalProperties": false,
+                "description": "Direct SkillExperience retrieval used only while building prompt candidates.",
                 "properties": {
-                  "directRouteMinScore": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1,
-                    "default": 0.85,
-                    "description": "Inclusive BM25 score required for keyword direct routing bypass."
-                  }
-                },
-                "default": {}
-              },
-              "hybrid": {
-                "type": "object",
-                "description": "Step 2 QMD hybrid routing thresholds.",
-                "additionalProperties": false,
-                "properties": {
-                  "directRouteMinScore": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1,
-                    "default": 0.9,
-                    "description": "Inclusive semantic score required for hybrid direct routing bypass."
-                  },
-                  "directRouteMinMargin": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1,
-                    "default": 0.08,
-                    "description": "Minimum score margin between #1 and #2 candidates required for hybrid direct routing."
-                  },
                   "minCandidateScore": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
                     "default": 0.4,
-                    "description": "Inclusive semantic score required to consider an intent candidate."
+                    "description": "Inclusive semantic-evidence score required for a retrieved experience to enter the candidate pool."
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 60000,
+                    "description": "Optional millisecond override for prompt-build experience retrieval. Defaults to qmd.timeoutMs."
                   }
                 },
                 "default": {}
+              },
+              "relevanceThreshold": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.6,
+                "description": "Inclusive relevance threshold for candidate experience selection."
+              },
+              "maxInjectedExperiences": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 20,
+                "default": 4,
+                "description": "Maximum input-matched experiences injected into advisory context."
               }
             },
             "default": {}
@@ -348,44 +340,28 @@
                 },
                 "default": {}
               },
+              "relevanceThreshold": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.6,
+                "description": "Inclusive relevance threshold for candidate skill selection."
+              },
               "maxInjectedSkills": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 4,
-                "default": 4,
+                "maximum": 20,
+                "default": 8,
                 "description": "Maximum input-matched skills injected into advisory context."
               }
             },
             "default": {}
           },
-          "model": {
-            "type": "string",
-            "description": "Explicit lightweight model for the routing LLM (e.g. google/gemini-3-flash). If unset, resolves from current session model, agent primary model, then modelFallback."
-          },
-          "modelFallback": {
-            "type": "string",
-            "description": "Last-resort routing LLM model after explicit, current-session, and agent-primary resolution."
-          },
-          "thinking": {
-            "type": "string",
-            "enum": [
-              "off",
-              "minimal",
-              "low",
-              "medium",
-              "high",
-              "xhigh",
-              "adaptive",
-              "max"
-            ],
-            "description": "Thinking level for the routing LLM sub-agent.",
-            "default": "medium"
-          },
           "timeoutMs": {
             "type": "integer",
             "minimum": 1000,
             "maximum": 60000,
-            "description": "Budget in milliseconds for each routing LLM sub-agent run.",
+            "description": "Budget in milliseconds for unified routing.",
             "default": 5000
           },
           "queryMode": {
@@ -443,7 +419,7 @@
       },
       "review": {
         "type": "object",
-        "description": "Optional asynchronous post-turn Intent Review. It can update future runtime intents but never participates in the current route decision.",
+        "description": "Optional asynchronous post-turn Review. It evaluates turns and maintains experiences but never participates in the current route decision.",
         "additionalProperties": false,
         "properties": {
           "enabled": {
@@ -452,7 +428,7 @@
           },
           "model": {
             "type": "string",
-            "description": "Explicit dedicated model for Intent Review runs. If unset, inherits the top-level model before current-session and agent-primary resolution."
+            "description": "Explicit dedicated model for Review runs. If unset, inherits the top-level model before current-session and agent-primary resolution."
           },
           "modelFallback": {
             "type": "string",
@@ -470,7 +446,7 @@
               "adaptive",
               "max"
             ],
-            "description": "Thinking level for the Intent Review sub-agent.",
+            "description": "Thinking level for the Review sub-agent.",
             "default": "medium"
           },
           "timeoutSeconds": {
@@ -478,15 +454,32 @@
             "minimum": 60,
             "maximum": 1800,
             "default": 300,
-            "description": "Budget in seconds for each Intent Review sub-agent run."
+            "description": "Budget in seconds for each Review sub-agent run."
           },
           "triggers": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
+              "experienceHealthCheck": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "everyTurns": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 10
+                  }
+                }
+              },
               "intentHealthCheck": {
                 "type": "object",
                 "additionalProperties": false,
+                "description": "Deprecated alias for experienceHealthCheck.",
                 "properties": {
                   "enabled": {
                     "type": "boolean",

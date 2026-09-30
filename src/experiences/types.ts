@@ -1,7 +1,6 @@
 export interface SkillExperienceEntry {
-  identity: string;
-  skill: string;
-  entryId: string;
+  id: string;
+  skills: string[];
   summary: string;
   keywords: string[];
   body: string;
@@ -20,7 +19,7 @@ export interface ExperienceDirectoryValidationResult {
 }
 
 export interface ExperienceSearchParams {
-  skillNames: readonly string[];
   query?: string;
+  skills?: readonly string[];
   limit?: number;
 }

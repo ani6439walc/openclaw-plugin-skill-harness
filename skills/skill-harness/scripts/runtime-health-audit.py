@@ -82,12 +82,16 @@ def load_stats(path: Path) -> dict[str, Any]:
 
 
 def validate_route_reason_stats(value: dict[str, Any], path: Path) -> None:
-    intents = require_object(value, "intents", path)
+    intents = value.get("intents")
+    if not isinstance(intents, dict):
+        return
     for intent_id, intent_value in intents.items():
         if not isinstance(intent_value, dict):
             raise ValueError(f"{path} has invalid intents.{intent_id}")
         intent = intent_value
         route_reasons = intent.get("routeReasons")
+        if route_reasons is None:
+            continue
         if not isinstance(route_reasons, dict) or set(route_reasons) != set(ROUTE_REASONS):
             raise ValueError(f"{path} has invalid routeReasons for {intent_id}")
         for reason in ROUTE_REASONS:
@@ -129,13 +133,22 @@ def count_files(root: Path) -> tuple[int, int]:
 
 
 def qmd_health(qmd_root: Path) -> dict[str, Any]:
-    snapshot_root = qmd_root / "intents"
+    experiences_root = qmd_root / "experiences"
+    intents_root = qmd_root / "intents"
+    if (experiences_root / "experience-routing.sqlite").is_file() or (
+        experiences_root.is_dir() and not (intents_root / "intent-routing.sqlite").is_file()
+    ):
+        snapshot_root = experiences_root
+        database_path = snapshot_root / "experience-routing.sqlite"
+    else:
+        snapshot_root = intents_root
+        database_path = snapshot_root / "intent-routing.sqlite"
+
     snapshot_markdown_files = (
         sum(1 for _ in snapshot_root.rglob("*.md"))
         if snapshot_root.is_dir()
         else 0
     )
-    database_path = snapshot_root / "intent-routing.sqlite"
     unavailable = {
         "databaseStatus": "unavailable",
         "integrityCheck": None,
@@ -153,19 +166,28 @@ def qmd_health(qmd_root: Path) -> dict[str, Any]:
     try:
         with sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro", uri=True) as database:
             integrity_check = database.execute("PRAGMA integrity_check").fetchone()[0]
-            state = database.execute(
-                """
-                SELECT status, generation, lease_expires_at
-                FROM embedding_index_state
-                WHERE singleton = 1
-                """
-            ).fetchone()
-            indexed_documents = database.execute(
-                "SELECT COUNT(*) FROM documents WHERE active = 1"
-            ).fetchone()[0]
-            indexed_vectors = database.execute(
-                "SELECT COUNT(*) FROM content_vectors"
-            ).fetchone()[0]
+            try:
+                state = database.execute(
+                    """
+                    SELECT status, generation, lease_expires_at
+                    FROM embedding_index_state
+                    WHERE singleton = 1
+                    """
+                ).fetchone()
+            except sqlite3.Error:
+                state = None
+            try:
+                indexed_documents = database.execute(
+                    "SELECT COUNT(*) FROM documents WHERE active = 1"
+                ).fetchone()[0]
+            except sqlite3.Error:
+                indexed_documents = None
+            try:
+                indexed_vectors = database.execute(
+                    "SELECT COUNT(*) FROM content_vectors"
+                ).fetchone()[0]
+            except sqlite3.Error:
+                indexed_vectors = None
     except sqlite3.Error:
         return unavailable
 
@@ -173,6 +195,16 @@ def qmd_health(qmd_root: Path) -> dict[str, Any]:
     lease_active = (
         isinstance(lease_expires_at, (int, float))
         and lease_expires_at > time.time() * 1000
+    )
+    docs_match = (
+        indexed_documents == indexed_vectors
+        if indexed_documents is not None and indexed_vectors is not None
+        else None
+    )
+    snap_match = (
+        snapshot_markdown_files == indexed_documents
+        if indexed_documents is not None
+        else None
     )
     return {
         "databaseStatus": status,
@@ -182,8 +214,8 @@ def qmd_health(qmd_root: Path) -> dict[str, Any]:
         "snapshotMarkdownFiles": snapshot_markdown_files,
         "indexedDocuments": indexed_documents,
         "indexedVectors": indexed_vectors,
-        "documentsMatchVectors": indexed_documents == indexed_vectors,
-        "snapshotMatchesIndexedDocuments": snapshot_markdown_files == indexed_documents,
+        "documentsMatchVectors": docs_match,
+        "snapshotMatchesIndexedDocuments": snap_match,
     }
 
 
@@ -254,6 +286,7 @@ def review_change_summary(events: dict[str, Any]) -> dict[str, Any]:
     changes_by_trigger: Counter[str] = Counter()
     operations: Counter[str] = Counter()
     target_intents: Counter[str] = Counter()
+    target_experiences: Counter[str] = Counter()
     trigger_events: Counter[str] = Counter()
     nofinding_reasons: Counter[str] = Counter()
     schema_rejection_reasons: Counter[str] = Counter()
@@ -289,6 +322,11 @@ def review_change_summary(events: dict[str, Any]) -> dict[str, Any]:
                 for target_id in target_ids:
                     if isinstance(target_id, str):
                         target_intents[target_id] += 1
+            exp_ids = change.get("targetExperienceIds")
+            if isinstance(exp_ids, list):
+                for exp_id in exp_ids:
+                    if isinstance(exp_id, str):
+                        target_experiences[exp_id] += 1
         for field, counter in (
             ("noFindingReasonCounts", nofinding_reasons),
             ("schemaRejectionReasonCounts", schema_rejection_reasons),
@@ -315,6 +353,10 @@ def review_change_summary(events: dict[str, Any]) -> dict[str, Any]:
             "eventsByChangeCount": counter_dict(changes_per_event),
             "byTrigger": counter_dict(changes_by_trigger),
             "byOperation": counter_dict(operations),
+            "topTargetExperiences": [
+                {"experience": exp, "changes": count}
+                for exp, count in target_experiences.most_common(TOP_TARGETS)
+            ],
             "topTargetIntents": [
                 {"intent": intent, "changes": count}
                 for intent, count in target_intents.most_common(TOP_TARGETS)
@@ -597,6 +639,23 @@ def stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def count_experiences(root: Path) -> dict[str, int]:
+    if not root.is_dir():
+        return {"count": 0, "markdownFiles": 0, "bytes": 0}
+    dirs = [path for path in root.iterdir() if path.is_dir()]
+    markdown_files = 0
+    total_bytes = 0
+    for path in root.rglob("*.md"):
+        if path.is_file():
+            markdown_files += 1
+            total_bytes += path.stat().st_size
+    return {
+        "count": len(dirs),
+        "markdownFiles": markdown_files,
+        "bytes": total_bytes,
+    }
+
+
 def build_report(data_root: Path) -> dict[str, Any]:
     review_path = data_root / "review.json"
     stats_path = data_root / "stats.json"
@@ -612,6 +671,7 @@ def build_report(data_root: Path) -> dict[str, Any]:
     if changed:
         raise ValueError(f"runtime state changed while being read: {', '.join(changed)}")
 
+    experiences_info = count_experiences(data_root / "experiences")
     intent_paths = (
         sorted((data_root / "intents").glob("*.md"))
         if (data_root / "intents").is_dir()
@@ -636,6 +696,7 @@ def build_report(data_root: Path) -> dict[str, Any]:
             },
             "stats": stats_summary(stats),
             "sessions": session_health(data_root / "sessions", data_root / "agents"),
+            "experiences": experiences_info,
             "intents": {"markdownFiles": intent_files, "bytes": intent_bytes},
             "qmd": qmd_health(data_root / "qmd"),
         },
