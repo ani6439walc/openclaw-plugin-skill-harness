@@ -39,7 +39,70 @@ import {
   runDetachedFromWorkScope,
 } from "../subagent-runtime.js";
 import { withFileLock } from "../file-utils.js";
-import { extractPayloadText } from "../classification/index.js";
+import {
+  DEFAULT_PROVIDER,
+  parseModelRef,
+  resolveAgentEffectiveModelPrimary,
+} from "openclaw/plugin-sdk/agent-runtime";
+
+export function extractPayloadText(result: { payloads?: unknown[] }): string {
+  return ((result.payloads ?? []) as { text?: string }[])
+    .map((payload) => payload.text?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+type ModelRef = { provider: string; model: string };
+
+function resolveFirstModelRef(
+  refs: readonly (string | undefined)[],
+): ModelRef | undefined {
+  for (const ref of refs) {
+    if (!ref) continue;
+    try {
+      const parsed = parseModelRef(ref, DEFAULT_PROVIDER, {
+        allowManifestNormalization: false,
+        allowPluginNormalization: false,
+      });
+      if (parsed) return { provider: parsed.provider, model: parsed.model };
+    } catch (err) {
+      logger.debug("skipping invalid model ref", { error: err, modelRef: ref });
+    }
+  }
+  return;
+}
+
+function resolveModelRefChain(
+  api: OpenClawPluginApi,
+  agentId: string,
+  beforeAgent: readonly (string | undefined)[],
+  afterAgent: readonly (string | undefined)[] = [],
+): ModelRef | undefined {
+  const beforeAgentModel = resolveFirstModelRef(beforeAgent);
+  if (beforeAgentModel) return beforeAgentModel;
+
+  const agentModelRef = resolveAgentEffectiveModelPrimary(api.config, agentId);
+  return resolveFirstModelRef([agentModelRef, ...afterAgent]);
+}
+
+export function getReviewModelRef(
+  api: OpenClawPluginApi,
+  agentId: string,
+  config: ResolvedSkillHarnessPluginConfig,
+  currentRun: { modelProviderId?: string; modelId?: string },
+): ModelRef | undefined {
+  const currentModelRef =
+    currentRun.modelProviderId && currentRun.modelId
+      ? `${currentRun.modelProviderId}/${currentRun.modelId}`
+      : undefined;
+  return resolveModelRefChain(
+    api,
+    agentId,
+    [config.review.model, currentModelRef],
+    [config.review.modelFallback],
+  );
+}
 
 export interface ReviewSubagentResult {
   findings: ReviewFinding[];

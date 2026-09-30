@@ -12,7 +12,6 @@ import { roundToDecimals } from "./normalize.js";
 import type {
   ContextWindow,
   QmdEndpointConfig,
-  ResolvedClassifierConfig,
   ResolvedQmdConfig,
   ResolvedReviewConfig,
   ResolvedRoutingConfig,
@@ -67,13 +66,9 @@ const DEFAULT_ROUTING_EXPERIENCES: ResolvedRoutingExperiencesConfig = {
   maxInjectedExperiences: 4,
 };
 
-const DEFAULT_CLASSIFIER: ResolvedClassifierConfig = {
-  model: undefined,
-  modelFallback: undefined,
-  thinking: "medium",
-  timeoutMs: DEFAULT_TIMEOUT_MS,
-  queryMode: DEFAULT_QUERY_MODE,
-  contextWindow: DEFAULT_CONTEXT_WINDOW,
+const DEFAULT_JEV: QmdEndpointConfig = {
+  baseUrl: "",
+  model: "",
 };
 
 const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
@@ -93,9 +88,6 @@ const DEFAULT_ROUTING: ResolvedRoutingConfig = {
   scope: DEFAULT_ROUTING_SCOPE,
   experiences: DEFAULT_ROUTING_EXPERIENCES,
   skills: DEFAULT_ROUTING_SKILLS,
-  model: undefined,
-  modelFallback: undefined,
-  thinking: "medium",
   timeoutMs: DEFAULT_TIMEOUT_MS,
   queryMode: DEFAULT_QUERY_MODE,
   contextWindow: DEFAULT_CONTEXT_WINDOW,
@@ -142,6 +134,7 @@ const DEFAULT_REVIEW = {
 
 const DEFAULT_CONFIG: ResolvedSkillHarnessPluginConfig = {
   qmd: DEFAULT_QMD,
+  jev: DEFAULT_JEV,
   skills: DEFAULT_SKILLS,
   routing: DEFAULT_ROUTING,
   review: DEFAULT_REVIEW,
@@ -223,25 +216,6 @@ const ContextWindowSchema = z
 const ThinkLevelSchema = z
   .enum(["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"])
   .catch("medium");
-
-const ClassifierSchema = z
-  .object({
-    model: z.string().optional().catch(undefined),
-    modelFallback: z.string().optional().catch(undefined),
-    thinking: ThinkLevelSchema,
-    timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
-    queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
-    contextWindow: ContextWindowSchema,
-  })
-  .catch(DEFAULT_CLASSIFIER)
-  .transform((val): ResolvedClassifierConfig => ({
-    model: val.model ?? undefined,
-    modelFallback: val.modelFallback ?? undefined,
-    thinking: val.thinking,
-    timeoutMs: val.timeoutMs,
-    queryMode: val.queryMode,
-    contextWindow: val.contextWindow,
-  }));
 
 const ExperienceCandidatesSearchSchema = z
   .object({
@@ -337,9 +311,6 @@ const RoutingSchema = z
     scope: ScopeSchema.optional().default(DEFAULT_ROUTING_SCOPE),
     experiences: RoutingExperiencesSchema,
     skills: RoutingSkillsSchema,
-    model: z.string().optional().catch(undefined),
-    modelFallback: z.string().optional().catch(undefined),
-    thinking: ThinkLevelSchema,
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
     queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
     contextWindow: ContextWindowSchema,
@@ -382,20 +353,14 @@ function resolveRoutingConfig(
   }
   delete routingInput.intents;
   delete routingInput.thresholds;
+  delete routingInput.model;
+  delete routingInput.modelFallback;
+  delete routingInput.thinking;
   if (
     routingInput.classifier !== undefined &&
     typeof routingInput.classifier === "object"
   ) {
     const c = routingInput.classifier as Record<string, unknown>;
-    if (routingInput.model === undefined && c.model !== undefined)
-      routingInput.model = c.model;
-    if (
-      routingInput.modelFallback === undefined &&
-      c.modelFallback !== undefined
-    )
-      routingInput.modelFallback = c.modelFallback;
-    if (routingInput.thinking === undefined && c.thinking !== undefined)
-      routingInput.thinking = c.thinking;
     if (routingInput.timeoutMs === undefined && c.timeoutMs !== undefined)
       routingInput.timeoutMs = c.timeoutMs;
     if (routingInput.queryMode === undefined && c.queryMode !== undefined)
@@ -431,20 +396,6 @@ function resolveRoutingConfig(
       },
     },
   };
-  Object.defineProperty(out, "classifier", {
-    get() {
-      return {
-        model: this.model,
-        modelFallback: this.modelFallback,
-        thinking: this.thinking,
-        timeoutMs: this.timeoutMs,
-        queryMode: this.queryMode,
-        contextWindow: this.contextWindow,
-      };
-    },
-    enumerable: false,
-    configurable: true,
-  });
   Object.defineProperty(out, "skillCandidates", {
     get() {
       return this.skills;
@@ -673,16 +624,21 @@ export function resolveConfig(
   });
   const resolvedExpansion = resolveQmdEndpoint(resolved.qmd.expansion, options);
 
-  const rawJev = resolved.jev ?? resolved.qmd.jev;
-  let resolvedJev: QmdEndpointConfig | undefined = undefined;
-  if (rawJev && (rawJev.model || rawJev.baseUrl || rawJev.apiKey)) {
-    const ep = resolveQmdEndpoint(rawJev, options);
-    resolvedJev = {
-      ...rawJev,
-      ...ep,
-      baseUrl: normalizeTypeSafeBaseUrl(ep.baseUrl) || ep.baseUrl,
-    };
-  }
+  const hasJevInput = Boolean(
+    (resolved.jev &&
+      (resolved.jev.model || resolved.jev.baseUrl || resolved.jev.apiKey)) ||
+    (resolved.qmd.jev &&
+      (resolved.qmd.jev.model ||
+        resolved.qmd.jev.baseUrl ||
+        resolved.qmd.jev.apiKey)),
+  );
+  const rawJev = resolved.jev ?? resolved.qmd.jev ?? DEFAULT_JEV;
+  const ep = resolveQmdEndpoint(rawJev, options);
+  const resolvedJev: QmdEndpointConfig = {
+    ...rawJev,
+    ...ep,
+    baseUrl: normalizeTypeSafeBaseUrl(ep.baseUrl) || ep.baseUrl,
+  };
 
   const timeoutMs = clampInt(
     resolved.qmd.timeoutMs,
@@ -713,9 +669,9 @@ export function resolveConfig(
         ...resolved.qmd.expansion,
         ...resolvedExpansion,
       },
-      ...(resolvedJev ? { jev: resolvedJev } : {}),
+      ...(hasJevInput ? { jev: resolvedJev } : {}),
     },
-    ...(resolvedJev ? { jev: resolvedJev } : {}),
+    jev: resolvedJev,
     skills: resolvedSkills,
     routing: resolvedRouting,
     review: resolved.review,

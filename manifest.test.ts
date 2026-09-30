@@ -83,12 +83,13 @@ describe("skill-harness manifest", () => {
     });
   });
 
-  it("does not apply null defaults to optional model strings", () => {
+  it("does not expose routing model fields and does not apply null defaults to review models", () => {
     const properties = manifest.configSchema.properties;
     const routingProps = properties.routing.properties;
+    expect(routingProps).not.toHaveProperty("model");
+    expect(routingProps).not.toHaveProperty("modelFallback");
+    expect(routingProps).not.toHaveProperty("thinking");
     for (const model of [
-      routingProps.model,
-      routingProps.modelFallback,
       properties.review.properties.model,
       properties.review.properties.modelFallback,
     ]) {
@@ -212,9 +213,11 @@ describe("skill-harness manifest", () => {
     });
   });
 
-  it("exposes jev at top level alongside qmd and not under qmd properties", () => {
+  it("exposes jev at top level alongside qmd and requires jev.model", () => {
+    expect(manifest.configSchema.required).toEqual(["qmd", "jev"]);
     expect(manifest.configSchema.properties.jev).toBeDefined();
     expect(manifest.configSchema.properties.jev.type).toBe("object");
+    expect(manifest.configSchema.properties.jev.required).toEqual(["model"]);
     expect(manifest.configSchema.properties.qmd.properties.jev).toBeUndefined();
   });
 });

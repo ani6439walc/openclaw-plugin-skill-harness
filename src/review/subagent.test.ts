@@ -6,6 +6,7 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import {
   buildReviewPrompt,
+  getReviewModelRef,
   hasRoutingSurfaceChange,
   parseReviewFindings,
   runReviewSubagent,
@@ -649,5 +650,66 @@ describe("runReviewSubagent", () => {
     expect(
       fs.readdirSync(root).filter((file) => file.endsWith(".md")),
     ).toHaveLength(1);
+  });
+});
+
+describe("getReviewModelRef", () => {
+  const api = {
+    config: {
+      agents: { defaults: { model: { primary: "anthropic/agent-primary" } } },
+    },
+  } as unknown as OpenClawPluginApi;
+  const currentRun = {
+    modelProviderId: "openai",
+    modelId: "session-model",
+  };
+
+  it("applies the resolution priority to review models", () => {
+    expect(
+      getReviewModelRef(
+        api,
+        "main",
+        resolveConfig({
+          review: {
+            model: "bifrost/review-explicit",
+            modelFallback: "google/review-fallback",
+          },
+        }),
+        currentRun,
+      ),
+    ).toEqual({ provider: "bifrost", model: "review-explicit" });
+
+    expect(
+      getReviewModelRef(
+        api,
+        "main",
+        resolveConfig({
+          review: { modelFallback: "google/review-fallback" },
+        }),
+        currentRun,
+      ),
+    ).toEqual({ provider: "openai", model: "session-model" });
+
+    expect(
+      getReviewModelRef(
+        api,
+        "main",
+        resolveConfig({
+          review: { modelFallback: "google/review-fallback" },
+        }),
+        {},
+      ),
+    ).toEqual({ provider: "anthropic", model: "agent-primary" });
+
+    expect(
+      getReviewModelRef(
+        { config: {} } as OpenClawPluginApi,
+        "main",
+        resolveConfig({
+          review: { modelFallback: "google/review-fallback" },
+        }),
+        {},
+      ),
+    ).toEqual({ provider: "google", model: "review-fallback" });
   });
 });

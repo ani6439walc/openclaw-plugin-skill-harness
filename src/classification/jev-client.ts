@@ -20,14 +20,19 @@ export type JevUnifiedRoutingParams = {
   api: OpenClawPluginApi;
   config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
+  sessionKey?: string;
+  sessionId?: string;
   conversation?: RecentTurn[];
   latest: string;
-  modelRef: { provider: string; model: string };
+  messageProvider?: string;
+  channelId?: string;
+  modelRef?: { provider: string; model: string };
   resolvedIntent?: { id: string; guidance: string };
   candidateIntents?: readonly IntentCatalogEntry[];
   candidateSkills?: readonly AvailableSkill[];
   candidateExperiences?: readonly SkillExperienceEntry[];
   client?: TypeSafeClient;
+  dataRoot?: string;
 };
 
 export async function runJevUnifiedRouting(
@@ -37,7 +42,13 @@ export async function runJevUnifiedRouting(
     const pluginJev = params.config.jev ?? params.config.qmd.jev;
     const rawRef =
       pluginJev?.model ||
-      `${params.modelRef.provider}/${params.modelRef.model}`;
+      (params.modelRef
+        ? `${params.modelRef.provider}/${params.modelRef.model}`
+        : "");
+    if (!rawRef) {
+      logger.warn("Jev unified routing missing model configuration");
+      return undefined;
+    }
     const endpoint = resolveQmdEndpoint(
       {
         model: rawRef,

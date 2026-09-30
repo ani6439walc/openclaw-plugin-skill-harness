@@ -53,15 +53,6 @@ export type ResolvedRoutingExperiencesConfig = {
   maxInjectedExperiences: number;
 };
 
-export type ResolvedClassifierConfig = {
-  model: string | undefined;
-  modelFallback: string | undefined;
-  thinking: ThinkLevel;
-  timeoutMs: number;
-  queryMode: "message" | "recent" | "full";
-  contextWindow: ContextWindow;
-};
-
 export type ResolvedSkillCandidateSearchConfig = {
   minCandidateScore: number;
   timeoutMs: number;
@@ -96,9 +87,6 @@ export type ResolvedRoutingConfig = {
   scope: ResolvedRoutingScopeConfig;
   experiences: ResolvedRoutingExperiencesConfig;
   skills: ResolvedRoutingSkillsConfig;
-  model?: string;
-  modelFallback?: string;
-  thinking: ThinkLevel;
   timeoutMs: number;
   queryMode: "message" | "recent" | "full";
   contextWindow: ContextWindow;
@@ -141,7 +129,7 @@ export type ResolvedQmdConfig = {
 
 export type ResolvedSkillHarnessPluginConfig = {
   qmd: ResolvedQmdConfig;
-  jev?: QmdEndpointConfig;
+  jev: QmdEndpointConfig;
   skills: ResolvedSkillsConfig;
   routing: ResolvedRoutingConfig;
   review: ResolvedReviewConfig;

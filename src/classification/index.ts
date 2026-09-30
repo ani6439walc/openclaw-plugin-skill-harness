@@ -10,11 +10,10 @@ export {
 } from "./conversation.js";
 export {
   buildRoutingContext,
-  buildUnifiedRoutingPrompt,
   formatMatchedSkills,
   formatWorkingSetSkills,
   measureIntentCatalogCodePoints,
-  parseUnifiedRoutingResult,
+  normalizeKeywords,
 } from "./prompts.js";
 export {
   getQmdCandidateLimits,
@@ -26,10 +25,5 @@ export type {
   IntentProjectionSelectionReason,
   IntentProjectionSupportReason,
 } from "./candidates.js";
-export {
-  extractPayloadText,
-  getModelRef,
-  getReviewModelRef,
-  runIntentionSubagent,
-  runUnifiedRoutingSubagent,
-} from "./subagent.js";
+export { runJevUnifiedRouting } from "./jev-client.js";
+export type { JevUnifiedRoutingParams } from "./jev-client.js";

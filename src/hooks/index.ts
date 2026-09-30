@@ -10,7 +10,7 @@ import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
-import { runReviewSubagent } from "../review/subagent.js";
+import { getReviewModelRef, runReviewSubagent } from "../review/subagent.js";
 import type {
   CapabilityFitEvidence,
   SelectedPlacementSkill,
@@ -45,12 +45,8 @@ import {
 } from "../session/index.js";
 import { FALLBACK_INTENT_ID } from "../constants.js";
 import {
-  getModelRef,
-  getReviewModelRef,
-  runIntentionSubagent,
-  runUnifiedRoutingSubagent,
-} from "../classification/index.js";
-import {
+  runJevUnifiedRouting,
+  type JevUnifiedRoutingParams,
   buildRoutingContext,
   formatWorkingSetSkills,
 } from "../classification/index.js";
@@ -75,6 +71,7 @@ import {
   type SkillDiscoveryCandidate,
 } from "../skills/candidate-pool.js";
 import type {
+  ClassifiedIntentionResult,
   HistoricalIntentRecord,
   IntentCatalogEntry,
   IntentProjectionTelemetry,
@@ -589,11 +586,13 @@ export function createHookHandlers(deps: HookDeps) {
     deps.skillInventoryResolver ?? resolveSkillInventory;
   const reviewer = deps.reviewer ?? runReviewSubagent;
   const classifier = deps.classifier;
-  const routingSubagent = deps.routingSubagent;
-  const effectiveRoutingSubagent: typeof runUnifiedRoutingSubagent =
-    routingSubagent ??
+  const routingSelector = deps.routingSelector ?? deps.routingSubagent;
+  const effectiveRoutingSelector: (
+    params: JevUnifiedRoutingParams,
+  ) => Promise<RoutingLlmResult | undefined> =
+    routingSelector ??
     (classifier
-      ? async (callParams) => {
+      ? async (callParams: JevUnifiedRoutingParams) => {
           if (callParams.resolvedIntent) {
             return {
               skills: (callParams.candidateSkills ?? [])
@@ -606,7 +605,11 @@ export function createHookHandlers(deps: HookDeps) {
               reason: "Selected relevant candidate skills",
             };
           }
-          const classified = await classifier({
+          const classified = await (
+            classifier as (
+              params: unknown,
+            ) => Promise<ClassifiedIntentionResult | undefined>
+          )({
             api: callParams.api,
             config: callParams.config,
             agentId: callParams.agentId,
@@ -627,7 +630,7 @@ export function createHookHandlers(deps: HookDeps) {
             ? (callParams.candidateIntents ?? []).find(
                 (i) =>
                   canonicalIdentity(i.id) ===
-                  canonicalIdentity(classified.intent),
+                  canonicalIdentity(classified.intent ?? ""),
               )
             : undefined;
           const declaredSkills = matchedIntent?.definition.skills ?? [];
@@ -638,7 +641,7 @@ export function createHookHandlers(deps: HookDeps) {
                   (other) =>
                     Boolean(classified.intent) &&
                     canonicalIdentity(other.id) !==
-                      canonicalIdentity(classified.intent) &&
+                      canonicalIdentity(classified.intent ?? "") &&
                     (other.definition.skills ?? []).some(
                       (name) =>
                         canonicalIdentity(name) === canonicalIdentity(s.name),
@@ -672,7 +675,7 @@ export function createHookHandlers(deps: HookDeps) {
             reason: classified.reason,
           };
         }
-      : runUnifiedRoutingSubagent);
+      : runJevUnifiedRouting);
   const clock = deps.clock ?? (() => new Date());
   const experienceCatalog =
     deps.experienceCatalog ??
@@ -1458,16 +1461,6 @@ export function createHookHandlers(deps: HookDeps) {
         hasModelId: Boolean(ctx.modelId),
       });
 
-      const modelRef = getModelRef(
-        api,
-        routing.effectiveAgentId,
-        refreshedConfig,
-        {
-          modelProviderId: ctx.modelProviderId,
-          modelId: ctx.modelId,
-        },
-      );
-
       return await runPromptBuildPipeline(
         ctx,
         routing.resolvedSessionKey,
@@ -1496,15 +1489,14 @@ export function createHookHandlers(deps: HookDeps) {
           );
 
           if (
-            (unionPool.candidateSkills.length === 0 &&
-              skillDiscoveryResult.candidateExperiences.length === 0) ||
-            !modelRef
+            unionPool.candidateSkills.length === 0 &&
+            skillDiscoveryResult.candidateExperiences.length === 0
           ) {
             matchedSkills = [];
             matchedExperiences = [];
           } else {
             try {
-              const llmResult = await effectiveRoutingSubagent({
+              const llmResult = await effectiveRoutingSelector({
                 api,
                 config: refreshedConfig,
                 agentId: routing.effectiveAgentId,
@@ -1514,7 +1506,6 @@ export function createHookHandlers(deps: HookDeps) {
                 latest: latestUserMessage,
                 messageProvider: ctx.messageProvider,
                 channelId: ctx.channelId,
-                modelRef,
                 candidateSkills: unionPool.candidateSkills,
                 candidateExperiences: skillDiscoveryResult.candidateExperiences,
                 dataRoot: deps.dataRoot,
@@ -1528,7 +1519,7 @@ export function createHookHandlers(deps: HookDeps) {
                   ]),
                 );
                 matchedExperiences = (llmResult.experiences ?? [])
-                  .flatMap((id) => {
+                  .flatMap((id: string) => {
                     const e =
                       candidateExpMap.get(id) ?? experienceCatalog?.resolve(id);
                     return e ? [e] : [];
@@ -1559,7 +1550,7 @@ export function createHookHandlers(deps: HookDeps) {
                 matchedExperiences = [];
               }
             } catch (error) {
-              logger.warn("routing subagent execution failed", { error });
+              logger.warn("routing selector execution failed", { error });
               matchedSkills = [];
               matchedExperiences = [];
             }

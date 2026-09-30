@@ -85,9 +85,9 @@ describe("resolveConfig", () => {
 
       expect(result.routing.queryMode).toBe(DEFAULT_QUERY_MODE);
       expect(result.routing.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
-      expect(result.routing.thinking).toBe("medium");
-      expect(result.routing.model).toBeUndefined();
-      expect(result.routing.modelFallback).toBeUndefined();
+      expect(result.routing).not.toHaveProperty("thinking");
+      expect(result.routing).not.toHaveProperty("model");
+      expect(result.routing).not.toHaveProperty("modelFallback");
       expect(result.routing.contextWindow.user.turns).toBe(
         DEFAULT_RECENT_USER_TURNS,
       );
@@ -142,8 +142,9 @@ describe("resolveConfig", () => {
       const result = resolveConfig({});
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
-      expect(result.routing.model).toBeUndefined();
-      expect(result.routing.modelFallback).toBeUndefined();
+      expect(result.routing).not.toHaveProperty("model");
+      expect(result.routing).not.toHaveProperty("modelFallback");
+      expect(result.jev).toBeDefined();
     });
 
     it("should use default values for non-object config", () => {
@@ -781,13 +782,11 @@ describe("resolveConfig", () => {
       });
     });
 
-    it("falls back for invalid classifier and review thinking levels", () => {
+    it("falls back for invalid review thinking levels", () => {
       const result = resolveConfig({
-        routing: { thinking: "invalid" as never },
         review: { thinking: "invalid" as never },
       });
 
-      expect(result.routing.thinking).toBe("medium");
       expect(result.review.thinking).toBe("medium");
     });
 
@@ -1087,16 +1086,14 @@ describe("resolveConfig", () => {
             allowedChatIds: {},
             deniedChatIds: 0,
           },
-          model: {},
-          modelFallback: [],
         } as never,
       });
       expect(result.routing.scope.agents).toEqual(["main"]);
       expect(result.routing.scope.chatTypes).toEqual(["direct"]);
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
-      expect(result.routing.model).toBeUndefined();
-      expect(result.routing.modelFallback).toBeUndefined();
+      expect(result.routing).not.toHaveProperty("model");
+      expect(result.routing).not.toHaveProperty("modelFallback");
     });
   });
 
@@ -1206,25 +1203,17 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("optional fields", () => {
-    it("should handle optional model field", () => {
+  describe("removed routing model fields", () => {
+    it("does not expose removed model or modelFallback on routing config", () => {
       const withModel = resolveConfig({
-        routing: { model: "gpt-4" },
+        routing: { model: "gpt-4", modelFallback: "gpt-3.5" },
       });
-      expect(withModel.routing.model).toBe("gpt-4");
+      expect(withModel.routing).not.toHaveProperty("model");
+      expect(withModel.routing).not.toHaveProperty("modelFallback");
 
       const withoutModel = resolveConfig({});
-      expect(withoutModel.routing.model).toBeUndefined();
-    });
-
-    it("should handle optional modelFallback field", () => {
-      const withFallback = resolveConfig({
-        routing: { modelFallback: "gpt-3.5" },
-      });
-      expect(withFallback.routing.modelFallback).toBe("gpt-3.5");
-
-      const withoutFallback = resolveConfig({});
-      expect(withoutFallback.routing.modelFallback).toBeUndefined();
+      expect(withoutModel.routing).not.toHaveProperty("model");
+      expect(withoutModel.routing).not.toHaveProperty("modelFallback");
     });
   });
 });

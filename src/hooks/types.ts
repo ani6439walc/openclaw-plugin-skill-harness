@@ -13,9 +13,10 @@ import type {
   ReviewSchedulerLike,
 } from "../review/scheduler.js";
 import type {
-  runIntentionSubagent,
-  runUnifiedRoutingSubagent,
+  JevUnifiedRoutingParams,
+  runJevUnifiedRouting,
 } from "../classification/index.js";
+import type { ClassifiedIntentionResult, RoutingLlmResult } from "../types.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
 import type { SkillExperienceCatalog } from "../experiences/index.js";
 import type { IntentQmdIndex } from "../qmd/intent-index.js";
@@ -154,8 +155,15 @@ export type HookDeps = {
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],
   ) => Promise<ReviewSubagentResult | undefined>;
-  classifier?: typeof runIntentionSubagent;
-  routingSubagent?: typeof runUnifiedRoutingSubagent;
+  routingSelector?: (
+    params: JevUnifiedRoutingParams,
+  ) => Promise<RoutingLlmResult | undefined>;
+  routingSubagent?: (
+    params: JevUnifiedRoutingParams,
+  ) => Promise<RoutingLlmResult | undefined>;
+  classifier?: (
+    params: unknown,
+  ) => Promise<ClassifiedIntentionResult | RoutingLlmResult | undefined>;
   reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
     Partial<Pick<IntentReviewLogWriter, "completedSkillEpochKeys">>;
   getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;

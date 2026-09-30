@@ -3,7 +3,6 @@ import type { TypeSafeClient } from "@typesafe-ai/sdk";
 import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import { runJevUnifiedRouting } from "./jev-client.js";
-import { runUnifiedRoutingSubagent } from "./subagent.js";
 import type { AvailableSkill, IntentCatalogEntry } from "../types.js";
 
 describe("runJevUnifiedRouting", () => {
@@ -324,8 +323,7 @@ describe("runJevUnifiedRouting", () => {
     expect(result).toBeUndefined();
   });
 
-  it("routes through runJevUnifiedRouting when runUnifiedRoutingSubagent detects a Jev model", async () => {
-    const runEmbeddedAgent = vi.fn();
+  it("returns empty result when no candidate questions are evaluated in runJevUnifiedRouting", async () => {
     const api = {
       config: {
         models: {
@@ -338,13 +336,12 @@ describe("runJevUnifiedRouting", () => {
         },
       },
       runtime: {
-        agent: { runEmbeddedAgent },
+        agent: {},
         config: { current: () => ({}) },
       },
     } as unknown as OpenClawPluginApi;
 
-    // Test with model string containing "jev"
-    const result = await runUnifiedRoutingSubagent({
+    const result = await runJevUnifiedRouting({
       api,
       config: resolveConfig({}),
       agentId: "main",
@@ -354,9 +351,6 @@ describe("runJevUnifiedRouting", () => {
       candidateSkills: [],
     });
 
-    // runEmbeddedAgent should NOT have been called because it was intercepted by Jev routing
-    expect(runEmbeddedAgent).not.toHaveBeenCalled();
-    // And it returned the Jev empty evaluation result
     expect(result).toEqual({
       intent: undefined,
       skills: [],
