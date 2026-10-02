@@ -100,7 +100,7 @@ function snapshotFingerprint(
   return hash(
     JSON.stringify({
       schemaVersion: EXPERIENCE_INDEX_METADATA_SCHEMA_VERSION,
-      identityFormat: "json",
+      identityFormat: "path",
       entries: sorted.map((entry) => ({
         id: entry.id,
         skills: [...entry.skills].sort(),
@@ -266,15 +266,6 @@ export function createSkillExperienceQmdIndex(params: {
     writeJsonAtomic(metadataPath, meta);
   }
 
-  function sidecarIdentity(entry: SkillExperienceEntry, kind: string) {
-    return {
-      id: entry.id,
-      skills: entry.skills,
-      kind,
-      path: entry.path,
-    };
-  }
-
   async function writeSnapshot(
     entries: readonly SkillExperienceEntry[],
   ): Promise<
@@ -304,14 +295,11 @@ export function createSkillExperienceQmdIndex(params: {
       collectionName: string,
       entryId: string,
       content: string,
-      sidecar: ReturnType<typeof sidecarIdentity>,
     ) => {
       const colDir = path.join(docsRoot, collectionName);
       await fs.mkdir(colDir, { recursive: true });
       const mdPath = path.join(colDir, `${entryId}.md`);
-      const sidecarPath = `${mdPath}.identity.json`;
       currentFiles.add(mdPath);
-      currentFiles.add(sidecarPath);
 
       let existingMd: string | undefined;
       try {
@@ -322,36 +310,19 @@ export function createSkillExperienceQmdIndex(params: {
       if (existingMd !== content) {
         await fs.writeFile(mdPath, content, "utf8");
       }
-
-      try {
-        if (
-          JSON.stringify(readJsonFile<unknown>(sidecarPath)) ===
-          JSON.stringify(sidecar)
-        )
-          return;
-      } catch {
-        // Missing or malformed metadata is regenerated from the catalog.
-      }
-      writeJsonAtomic(sidecarPath, sidecar);
     };
 
     for (const entry of entries) {
       // 1. keywords
       const keywordsContent =
         entry.keywords.map((k) => `- ${k}`).join("\n") + "\n";
-      await writeDoc(
-        EXPERIENCE_KEYWORDS_COLLECTION,
-        entry.id,
-        keywordsContent,
-        sidecarIdentity(entry, "keywords"),
-      );
+      await writeDoc(EXPERIENCE_KEYWORDS_COLLECTION, entry.id, keywordsContent);
 
       // 2. summary
       await writeDoc(
         EXPERIENCE_SUMMARY_COLLECTION,
         entry.id,
         `${entry.summary.trim()}\n`,
-        sidecarIdentity(entry, "summary"),
       );
 
       // 3. body
@@ -359,7 +330,6 @@ export function createSkillExperienceQmdIndex(params: {
         EXPERIENCE_BODY_COLLECTION,
         entry.id,
         `${entry.body.trim()}\n`,
-        sidecarIdentity(entry, "body"),
       );
     }
 

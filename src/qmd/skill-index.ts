@@ -6,7 +6,7 @@ import path from "node:path";
 import type { createStore, QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
-import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
+import { withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { AvailableSkill } from "../skills/types.js";
 import type {
   ResolvedQmdConfig,
@@ -29,8 +29,6 @@ const MAX_EVIDENCE_PER_SKILL = 3;
 const BUILD_LOCK_BUSY = "BUILD_LOCK_BUSY";
 
 type QmdCreateStore = typeof createStore;
-
-type CollectionKind = "meta" | "body" | "reference";
 
 type SearchHit = {
   skillName: string;
@@ -218,33 +216,12 @@ function normalizeIndexedContent(content: string): string {
   return trimmed ? `${trimmed}\n` : "";
 }
 
-function identitySidecarBody(params: {
-  skill: AvailableSkill;
-  kind: CollectionKind;
-  relativePath: string;
-}): Record<string, string> {
-  return {
-    skill: params.skill.name,
-    source: params.skill.source ?? "extra",
-    kind: params.kind,
-    path: params.relativePath,
-  };
-}
-
 async function writeIndexedDocument(params: {
   contentPath: string;
-  skill: AvailableSkill;
-  kind: CollectionKind;
-  relativePath: string;
   content: string;
 }): Promise<void> {
   await fs.mkdir(path.dirname(params.contentPath), { recursive: true });
   const content = normalizeIndexedContent(params.content);
-  const identity = identitySidecarBody({
-    skill: params.skill,
-    kind: params.kind,
-    relativePath: params.relativePath,
-  });
   const writeIfChanged = async (target: string, next: string) => {
     try {
       if ((await fs.readFile(target, "utf8")) === next) return;
@@ -254,17 +231,6 @@ async function writeIndexedDocument(params: {
     await fs.writeFile(target, next, "utf8");
   };
   await writeIfChanged(params.contentPath, content);
-  const identityPath = `${params.contentPath}.identity.json`;
-  try {
-    if (
-      JSON.stringify(readJsonFile<unknown>(identityPath)) ===
-      JSON.stringify(identity)
-    )
-      return;
-  } catch {
-    // Missing or malformed identity metadata is regenerated from skill fields.
-  }
-  writeJsonAtomic(identityPath, identity);
 }
 
 function skillSnapshotCollections(
@@ -312,11 +278,7 @@ async function removeStaleSnapshotDocuments(
           .relative(docsRoot, target)
           .split(path.sep)
           .join("/");
-        const contentRelative = relative.endsWith(".identity.json")
-          ? relative.slice(0, -".identity.json".length)
-          : relative;
-        if (!expected.has(contentRelative))
-          await fs.rm(target, { force: true });
+        if (!expected.has(relative)) await fs.rm(target, { force: true });
       }),
     );
   }
@@ -348,9 +310,6 @@ export async function writeSkillSnapshot(params: {
     expected.add(`body/${skillSegment}/SKILL.md`);
     await writeIndexedDocument({
       contentPath: metaPath,
-      skill,
-      kind: "meta",
-      relativePath: "meta.md",
       content: `# ${skill.name}\n\n${skill.description}`.trim(),
     });
 
@@ -372,9 +331,6 @@ export async function writeSkillSnapshot(params: {
     }
     await writeIndexedDocument({
       contentPath: bodyPath,
-      skill,
-      kind: "body",
-      relativePath: "SKILL.md",
       content: stripMarkdownFrontmatter(bodyContent),
     });
 
@@ -397,9 +353,6 @@ export async function writeSkillSnapshot(params: {
       }
       await writeIndexedDocument({
         contentPath: targetPath,
-        skill,
-        kind: "reference",
-        relativePath: `references/${relative}`,
         content: stripMarkdownFrontmatter(content),
       });
     }
@@ -467,6 +420,7 @@ function parseStoreHits(params: {
   }[];
   collection: string;
   docsRoot?: string;
+  namesBySegment: ReadonlyMap<string, string | undefined>;
 }): SearchHit[] {
   const hits: SearchHit[] = [];
   for (const result of params.results) {
@@ -486,7 +440,11 @@ function parseStoreHits(params: {
           filepath,
           collection: params.collection,
         });
-        skillName = skillName ?? fromPath.skillName;
+        skillName =
+          skillName ??
+          (fromPath.skillName
+            ? params.namesBySegment.get(fromPath.skillName.toLowerCase())
+            : undefined);
         relativePath = relativePath ?? fromPath.relativePath;
         if (skillName && relativePath) break;
       }
@@ -665,19 +623,13 @@ export function createSkillQmdIndex(params: {
   ): Promise<void> {
     const target = mappingPath(agentId);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-    await fs.writeFile(
-      temporary,
-      JSON.stringify({
-        schemaVersion: 1,
-        fingerprint,
-        allowedSkillNames: [
-          ...(agents.get(agentId)?.allowedSkillNames ?? new Set<string>()),
-        ].sort(),
-      }),
-      "utf8",
-    );
-    await fs.rename(temporary, target);
+    writeJsonAtomic(target, {
+      schemaVersion: 1,
+      fingerprint,
+      allowedSkillNames: [
+        ...(agents.get(agentId)?.allowedSkillNames ?? []),
+      ].sort(),
+    });
   }
 
   async function loadExistingIndexCatalog(): Promise<void> {
@@ -1028,12 +980,12 @@ export function createSkillQmdIndex(params: {
 
   function scheduleLocked(agentId: string, input: SkillQmdScheduleInput): void {
     const agent = agentState(agentId);
-    agent.allowedSkillNames = new Set(
-      input.skills.map((skill) => skill.name.toLowerCase()),
-    );
     const scheduling = (async () => {
       await initialization;
       if (closed) return;
+      agent.allowedSkillNames = new Set(
+        input.skills.map((skill) => skill.name),
+      );
       const { qmd } = config();
       const fingerprint = skillIndexFingerprint({
         sourceRoots: input.sourceRoots,
@@ -1088,6 +1040,23 @@ export function createSkillQmdIndex(params: {
           body: 2,
           references: 1,
         };
+        const visibleNames = new Map(
+          [...agent.allowedSkillNames].map((name) => [
+            name.toLowerCase(),
+            name,
+          ]),
+        );
+        const namesBySegment = new Map<string, string | undefined>();
+        for (const name of agent.allowedSkillNames) {
+          const segment = decodeSkillSegment(
+            safePathSegment(name),
+          ).toLowerCase();
+          // Ambiguous segments must not attribute another skill's content.
+          namesBySegment.set(
+            segment,
+            namesBySegment.has(segment) ? undefined : name,
+          );
+        }
         const candidateLimit = Math.max(limit, DEFAULT_CANDIDATE_LIMIT);
         const collections = [
           { name: META_COLLECTION, weight: collectionWeights.meta },
@@ -1119,10 +1088,9 @@ export function createSkillQmdIndex(params: {
               }>,
               collection: collection.name,
               docsRoot: state.docsRoot,
+              namesBySegment,
             })
-              .filter((hit) =>
-                agent.allowedSkillNames.has(hit.skillName.toLowerCase()),
-              )
+              .filter((hit) => visibleNames.has(hit.skillName.toLowerCase()))
               .sort((left, right) => {
                 if (right.score !== left.score) return right.score - left.score;
                 return hitId(left).localeCompare(hitId(right));

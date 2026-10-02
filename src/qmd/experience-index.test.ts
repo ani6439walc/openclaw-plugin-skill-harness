@@ -126,18 +126,11 @@ describe("SkillExperienceQmdIndex", () => {
       ),
     ).toContain("- ocr");
     for (const kind of ["keywords", "summary", "body"]) {
-      const identity = JSON.parse(
-        await fs.readFile(
-          path.join(docsDir, kind, "image-analysis.md.identity.json"),
-          "utf8",
-        ),
-      );
-      expect(identity).toEqual({
-        id: MOCK_ENTRIES[0].id,
-        skills: MOCK_ENTRIES[0].skills,
-        kind,
-        path: MOCK_ENTRIES[0].path,
-      });
+      for (const suffix of [".identity.yml", ".identity.json"]) {
+        await expect(
+          fs.readFile(path.join(docsDir, kind, `image-analysis.md${suffix}`)),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+      }
     }
 
     const hits = await index.search({ query: "analyze screenshot" });
@@ -364,7 +357,7 @@ describe("SkillExperienceQmdIndex", () => {
     };
   }
 
-  it("refreshes legacy sidecars to JSON in the same database and cleans removed entries", async () => {
+  it("removes legacy sidecars in the same database and cleans removed entries", async () => {
     const fixture = await setupConnection();
     await index!.close();
     const indexRoot = path.join(tmpDir, "qmd", "experiences");
@@ -372,7 +365,7 @@ describe("SkillExperienceQmdIndex", () => {
     for (const kind of ["keywords", "summary", "body"]) {
       for (const entry of MOCK_ENTRIES) {
         const document = path.join(docsRoot, kind, `${entry.id}.md`);
-        await fs.rm(`${document}.identity.json`);
+        await fs.writeFile(`${document}.identity.json`, "{}");
         await fs.writeFile(
           `${document}.identity.yml`,
           "---\nid: legacy\n---\n",
@@ -401,18 +394,16 @@ describe("SkillExperienceQmdIndex", () => {
       await expect(
         fs.readFile(`${document}.identity.yml`),
       ).rejects.toMatchObject({ code: "ENOENT" });
-      expect(
-        JSON.parse(await fs.readFile(`${document}.identity.json`, "utf8")),
-      ).toMatchObject({ id: MOCK_ENTRIES[0].id, kind });
+      await expect(
+        fs.readFile(`${document}.identity.json`),
+      ).rejects.toMatchObject({ code: "ENOENT" });
     }
     const body = path.join(docsRoot, "body", `${MOCK_ENTRIES[0].id}.md`);
     await fs.utimes(body, new Date(1_000), new Date(1_000));
-    await fs.utimes(`${body}.identity.json`, new Date(1_000), new Date(1_000));
     index.schedule([MOCK_ENTRIES[0]]);
     await vi.waitFor(() => expect(store.update).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
     expect((await fs.stat(body)).mtimeMs).toBe(1_000);
-    expect((await fs.stat(`${body}.identity.json`)).mtimeMs).toBe(1_000);
     for (const kind of ["keywords", "summary", "body"]) {
       for (const suffix of [".identity.yml", ".identity.json"]) {
         await expect(

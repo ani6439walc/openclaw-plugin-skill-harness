@@ -172,7 +172,7 @@ describe("writeSkillSnapshot", () => {
     ).not.toContain("External body");
   });
 
-  it("materializes pure content docs and sidecar identity files", async () => {
+  it("materializes pure content docs without identity sidecars", async () => {
     const skill = await createSkillFixture({
       name: "travel-planning",
       description: "Plan trips",
@@ -223,19 +223,6 @@ describe("writeSkillSnapshot", () => {
       path.join(docsRoot, "references", segment, "nested", "hotels.md"),
       "utf8",
     );
-    const metaIdentity = await readFile(
-      path.join(docsRoot, "meta", segment, "meta.md.identity.json"),
-      "utf8",
-    );
-    const bodyIdentity = await readFile(
-      path.join(docsRoot, "body", segment, "SKILL.md.identity.json"),
-      "utf8",
-    );
-    const referenceIdentity = await readFile(
-      path.join(docsRoot, "references", segment, "airports.md.identity.json"),
-      "utf8",
-    );
-
     expect(meta).toBe("# travel-planning\n\nPlan trips\n");
     expect(meta).not.toContain("skill:");
     expect(meta).not.toContain("---");
@@ -246,75 +233,52 @@ describe("writeSkillSnapshot", () => {
     expect(reference).not.toContain("title: Airports");
     expect(reference).not.toContain("---");
     expect(nested).toBe("Hotel notes\n");
-    expect(JSON.parse(metaIdentity)).toEqual({
-      skill: skill.name,
-      source: skill.source,
-      kind: "meta",
-      path: "meta.md",
-    });
-    expect(JSON.parse(bodyIdentity)).toEqual({
-      skill: skill.name,
-      source: skill.source,
-      kind: "body",
-      path: "SKILL.md",
-    });
-    expect(JSON.parse(referenceIdentity)).toEqual({
-      skill: skill.name,
-      source: skill.source,
-      kind: "reference",
-      path: "references/airports.md",
-    });
+    for (const document of [
+      "meta/travel-planning/meta.md",
+      "body/travel-planning/SKILL.md",
+      "references/travel-planning/airports.md",
+    ]) {
+      for (const suffix of [".identity.yml", ".identity.json"]) {
+        await expect(
+          readFile(path.join(docsRoot, document + suffix)),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+      }
+    }
   });
 
-  it("replaces legacy YAML sidecars and preserves unchanged JSON and content", async () => {
+  it("removes legacy YAML and JSON sidecars without rewriting unchanged documents", async () => {
     const skill = await createSkillFixture({
-      name: "identity-json",
+      name: "legacy",
       description: "Metadata",
       body: "Body",
-      references: { "quoted.md": "Reference" },
+      references: { "note.md": "Reference" },
     });
-    const docsRoot = await mkdtemp(path.join(tmpdir(), "skill-json-"));
+    const docsRoot = await mkdtemp(path.join(tmpdir(), "skill-sidecars-"));
     roots.push(docsRoot);
     await writeSkillSnapshot({ docsRoot, skills: [skill] });
     const documents = [
-      "meta/identity-json/meta.md",
-      "body/identity-json/SKILL.md",
-      "references/identity-json/quoted.md",
+      "meta/legacy/meta.md",
+      "body/legacy/SKILL.md",
+      "references/legacy/note.md",
     ];
     for (const document of documents) {
-      await writeFile(
-        path.join(docsRoot, `${document}.identity.yml`),
-        "---\nskill: legacy\n---\n",
+      await fsPromises.utimes(
+        path.join(docsRoot, document),
+        new Date(1_000),
+        new Date(1_000),
       );
-      await rm(path.join(docsRoot, `${document}.identity.json`));
+      for (const suffix of [".identity.yml", ".identity.json"])
+        await writeFile(path.join(docsRoot, document + suffix), "legacy");
     }
     await writeSkillSnapshot({ docsRoot, skills: [skill] });
     for (const document of documents) {
-      await expect(
-        readFile(path.join(docsRoot, `${document}.identity.yml`)),
-      ).rejects.toMatchObject({ code: "ENOENT" });
       expect(
-        JSON.parse(
-          await readFile(
-            path.join(docsRoot, `${document}.identity.json`),
-            "utf8",
-          ),
-        ),
-      ).toMatchObject({ skill: skill.name });
-    }
-    const bodyPath = path.join(docsRoot, documents[1]);
-    const identityPath = `${bodyPath}.identity.json`;
-    const oldTime = new Date(1_000);
-    await fsPromises.utimes(bodyPath, oldTime, oldTime);
-    await fsPromises.utimes(identityPath, oldTime, oldTime);
-    await writeSkillSnapshot({ docsRoot, skills: [skill] });
-    expect((await fsPromises.stat(bodyPath)).mtimeMs).toBe(1_000);
-    expect((await fsPromises.stat(identityPath)).mtimeMs).toBe(1_000);
-    await writeSkillSnapshot({ docsRoot, skills: [] });
-    for (const document of documents) {
-      await expect(
-        readFile(path.join(docsRoot, `${document}.identity.json`)),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (await fsPromises.stat(path.join(docsRoot, document))).mtimeMs,
+      ).toBe(1_000);
+      for (const suffix of [".identity.yml", ".identity.json"])
+        await expect(
+          readFile(path.join(docsRoot, document + suffix)),
+        ).rejects.toMatchObject({ code: "ENOENT" });
     }
   });
 
@@ -818,6 +782,98 @@ describe("createSkillQmdIndex", () => {
     await expect(
       fsPromises.access(path.join(root, "qmd", "skills", "main")),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("restores hashed mixed-case names from persisted mappings without discovery rebuilds", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-long-names-"));
+    roots.push(root);
+    const name = "LongSkill".repeat(24);
+    const skill = await createSkillFixture({
+      name,
+      description: "Long skill",
+      body: "Body",
+    });
+    const segment = safePathSegment(name);
+    expect(segment).toHaveLength(24);
+    const hits = vi.fn(async ({ collection }: { collection: string }) => [
+      { filepath: `qmd://${collection}/${segment}/SKILL.md`, score: 0.9 },
+      { filepath: `qmd://${collection}/unknown-hash/SKILL.md`, score: 0.9 },
+    ]);
+    const store = createStoreDouble({ search: hits });
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn(async ({ dbPath }) => {
+        await writeFile(dbPath, "mock database");
+        return store;
+      }),
+    });
+    try {
+      scheduleSkills(index, "main", [skill]);
+      scheduleSkills(index, "other", []);
+      await vi.waitFor(() => expect(index.getStatus("main")).toBe("ready"));
+      expect(
+        (
+          await index.search({ agentId: "main", query: "long", limit: 10 })
+        )?.map((hit) => hit.name),
+      ).toEqual([name]);
+    } finally {
+      await index.close();
+    }
+    const reopenedStore = createStoreDouble({ search: hits });
+    const reopened = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn(async () => reopenedStore),
+    });
+    try {
+      expect(
+        (
+          await reopened.search({ agentId: "main", query: "long", limit: 10 })
+        )?.map((hit) => hit.name),
+      ).toEqual([name]);
+      expect(
+        await reopened.search({ agentId: "other", query: "long", limit: 10 }),
+      ).toEqual([]);
+      expect(reopenedStore.update).not.toHaveBeenCalled();
+      expect(reopenedStore.embed).not.toHaveBeenCalled();
+    } finally {
+      await reopened.close();
+    }
+    // Older mappings lowercased names. A full refresh must replace them with originals.
+    const mappingPath = path.join(root, "qmd", "skills", "agents", "main.json");
+    const mapping = JSON.parse(await readFile(mappingPath, "utf8"));
+    mapping.allowedSkillNames = [name.toLowerCase()];
+    await writeFile(mappingPath, JSON.stringify(mapping));
+    const refreshed = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: vi.fn(async () => createStoreDouble({ search: hits })),
+    });
+    try {
+      scheduleSkills(refreshed, "main", [skill]);
+      await vi.waitFor(async () =>
+        expect(
+          (
+            await refreshed.search({
+              agentId: "main",
+              query: "long",
+              limit: 10,
+            })
+          )?.map((hit) => hit.name),
+        ).toEqual([name]),
+      );
+      await vi.waitFor(async () =>
+        expect(
+          JSON.parse(await readFile(mappingPath, "utf8")).allowedSkillNames,
+        ).toEqual([name]),
+      );
+    } finally {
+      await refreshed.close();
+    }
+    expect(
+      JSON.parse(await readFile(mappingPath, "utf8")).allowedSkillNames,
+    ).toEqual([name]);
   });
 
   it("reopens the same database when connection settings change", async () => {
