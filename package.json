@@ -29,7 +29,9 @@
     "package.json",
     "openclaw.plugin.json",
     "dist",
-    "skills/**"
+    "skills/**",
+    "!skills/**/__pycache__/**",
+    "!skills/**/*.py[cod]"
   ],
   "openclaw": {
     "extensions": [

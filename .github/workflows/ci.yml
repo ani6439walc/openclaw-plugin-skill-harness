@@ -55,4 +55,6 @@ jobs:
         run: |
           pnpm run build
           pnpm run test:plugin-loader
+          python3 skills/skill-harness/scripts/test-runtime-health-audit.py
+          python3 skills/skill-harness/scripts/test-validate-experiences.py
           pnpm pack --dry-run

@@ -393,8 +393,14 @@ This plugin version supports the current schema-v8 Review log, preserving histor
 
 The bundled `skill-harness` skill has two explicit, user-triggered modes:
 
-- `experience`: inspects, drafts, refines, or prunes skill experiences under `<dataRoot>/experiences/<id>/` following `references/experience.md`;
-- `runtime-health`: runs the private, report-only runtime health audit for Review outcomes, QMD state, retention, and disk growth using `scripts/runtime-health-audit.py` and `references/runtime-health-audit.md`.
+- `experience`: inspects, drafts, refines, or prunes skill experiences under `<dataRoot>/experiences/<id>/` following `references/experience.md`; the read-only `scripts/validate-experiences.mjs` reuses the production validator with a complete per-agent visible-skill map;
+- `runtime-health`: runs the private, report-only audit for runtime statistics, skill query/injection/adoption, experience retrieval, completed Review outcomes, both QMD indexes, retention, and disk growth using `scripts/runtime-health-audit.py` and `references/runtime-health-audit.md`.
+
+From the package root, run `python3 skills/skill-harness/scripts/runtime-health-audit.py --days 7 --output /tmp/skill-harness-runtime-health.json`. The additive `analysis` report compares the last seven complete UTC days with the preceding seven, separates cumulative telemetry from daily and retained-session observations, and reports missing data rather than treating it as zero. `--days` accepts 1–90; retained sessions normally cover only about 14 days. Missing stats or Review logs yield unavailable sections; present unsupported schemas still fail the audit. `runtime.qmd.skills` adds aggregate managed skill-index health while existing experience-QMD fields remain compatible.
+
+These diagnostics support bounded checks of metadata, retrieval thresholds, relevance thresholds and injection limits; they never change settings. Skill adoption is recorded same-turn use, not routing accuracy. QMD injected-skill aggregates include experience-source skills, so they do not measure pure skill-search conversion. Review outcomes cover completed events and cannot reveal queue/running state. Reports cannot prove Gateway loaded the plugin. Keep output private and refer to the bundled workflow for coverage, denominators, and experiment guidance.
+
+For manual experiences, build a source checkout first (`pnpm run build`), then run `node skills/skill-harness/scripts/validate-experiences.mjs --experiences-dir /path/to/staged/experiences --visible-skills-file /path/to/private/visible-skills.json`. Installed packages contain the required built modules. The visibility JSON maps all configured agent IDs to complete visible skill-name arrays; validate in each agent’s context rather than extrapolating from a single agent. Exit 0 means valid against that supplied map; exit 1 reports input or experience errors without emitting experience bodies.
 
 ## Skill tools
 
@@ -605,7 +611,7 @@ Inspect:
 ls ~/.openclaw/plugins/skill-harness/experiences
 ```
 
-Experiences are created automatically by the Review subagent when tools are used or recovered, or can be added manually under `~/.openclaw/plugins/skill-harness/experiences/<id>/`.
+When optional Review is enabled (disabled by default), experiences can be created automatically by the Review subagent when tools are used or recovered, or can be added manually under `~/.openclaw/plugins/skill-harness/experiences/<id>/`.
 
 ## Documentation scope
 

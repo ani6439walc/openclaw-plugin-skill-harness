@@ -39,8 +39,16 @@ describe("skill-harness user-triggered modes", () => {
       fs.readdirSync(path.resolve("skills/skill-harness/references")).sort(),
     ).toEqual(supportedReferenceNames);
     expect(
-      fs.readdirSync(path.resolve("skills/skill-harness/scripts")).sort(),
-    ).toEqual(["runtime-health-audit.py", "test-runtime-health-audit.py"]);
+      fs
+        .readdirSync(path.resolve("skills/skill-harness/scripts"))
+        .filter((name) => name !== "__pycache__")
+        .sort(),
+    ).toEqual([
+      "runtime-health-audit.py",
+      "test-runtime-health-audit.py",
+      "test-validate-experiences.py",
+      "validate-experiences.mjs",
+    ]);
     expect(
       fs.existsSync(path.resolve("skills/skill-harness/references/extract.md")),
     ).toBe(false);

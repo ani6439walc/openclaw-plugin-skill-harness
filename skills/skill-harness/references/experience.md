@@ -32,4 +32,28 @@ An experience directory consists of plain markdown files:
 - **Refine**: Edit existing `.md` files to clarify steps, adjust keywords, or update linked skills based on observed tool usage.
 - **Prune / Delete**: Remove obsolete or duplicate experience directories.
 
-Background QMD indexers (`SkillExperienceQmdIndex`) will automatically re-index experiences upon detection of filesystem changes or scheduled refreshes.
+Managed QMD refreshes can re-index changed experience files when subsequent source checks are enabled.
+
+## Validate manual changes
+
+Use the production validator through the read-only bundled CLI. In a source checkout, first run `pnpm run build` from the package root; installed packages already contain `dist/`. The CLI reports `{ valid, entryCount, errors }` without experience bodies and exits 0 only when valid. Missing directories, unsupported arguments, malformed inputs, symlinks, invalid content, and invisible linked skills exit 1. It never creates or edits runtime files.
+
+Prepare a private JSON object mapping **every configured agent ID** to that agent’s complete visible skill names. In each agent’s own context, use `skill_list` with `limit: 100`, then follow `next_offset` until `has_more` is false; extract `skills[].name`. Preserve empty arrays for agents with no visible skills. Do not infer all-agent visibility from one agent or from an incomplete page. If you cannot obtain the complete visibility map, stop before declaring linked skills valid.
+
+For example, a visibility file has this shape (replace the example with observed IDs and names):
+
+```json
+{ "main": ["git"], "worker": [] }
+```
+
+Keep it outside the repository with private permissions. From the package root:
+
+```bash
+node skills/skill-harness/scripts/validate-experiences.mjs \
+  --experiences-dir /path/to/staged/experiences \
+  --visible-skills-file /path/to/private/visible-skills.json
+```
+
+Validate the staged experience tree before applying a manual maintenance batch, then validate the runtime tree after authorized edits. Resolve every reported error; the validator checks limits, allowed files, symlinks, canonical ID collisions, and whether each linked skill is visible to at least one supplied agent. It validates the supplied map’s shape but cannot prove the map is complete or current.
+
+Filesystem refresh is conditional: automatic checks follow the configured QMD refresh interval; setting it to zero disables subsequent automatic checks. Validation alone does not prove an index refreshed or a Gateway loaded the plugin.

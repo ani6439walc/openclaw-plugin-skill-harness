@@ -4,6 +4,11 @@
 from __future__ import annotations
 
 import json
+import importlib.util
+import shutil
+import sys
+from datetime import datetime, timezone
+from unittest.mock import patch
 import sqlite3
 import subprocess
 import tempfile
@@ -11,6 +16,10 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("runtime-health-audit.py")
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("runtime_health_audit", SCRIPT)
+audit = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(audit)
 
 
 class RuntimeHealthAuditTest(unittest.TestCase):
@@ -319,7 +328,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(report["runtime"]["experiences"]["markdownFiles"], 4)
         self.assertEqual(report["runtime"]["intents"]["markdownFiles"], 1)
         self.assertEqual(
-            report["runtime"]["qmd"],
+            {key: value for key, value in report["runtime"]["qmd"].items() if key != "skills"},
             {
                 "databaseStatus": "ready",
                 "integrityCheck": "ok",
@@ -362,7 +371,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         report = self.run_audit()
 
         self.assertEqual(
-            report["runtime"]["qmd"],
+            {key: value for key, value in report["runtime"]["qmd"].items() if key != "skills"},
             {
                 "databaseStatus": "unavailable",
                 "integrityCheck": None,
@@ -549,7 +558,7 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(report["runtime"]["experiences"]["count"], 1)
         self.assertEqual(report["runtime"]["experiences"]["markdownFiles"], 4)
         self.assertEqual(
-            report["runtime"]["qmd"],
+            {key: value for key, value in report["runtime"]["qmd"].items() if key != "skills"},
             {
                 "databaseStatus": "ready",
                 "integrityCheck": "ok",
@@ -562,6 +571,189 @@ class RuntimeHealthAuditTest(unittest.TestCase):
                 "snapshotMatchesIndexedDocuments": True,
             },
         )
+
+
+    def report_at(self, days: int = 7) -> dict:
+        return audit.build_report(self.root, days, datetime(2026, 8, 8, 12, tzinfo=timezone.utc))
+
+    def write_session(self, current: dict, history: list | None = None) -> None:
+        (self.root / "sessions" / "session.json").write_text(json.dumps({
+            "sessionId": "session", "current": current, "history": history or []}), encoding="utf-8")
+
+    def turn(self, key: str = "turn", date: str = "2026-08-01", skills: list | None = None,
+             experiences: list | None = None, used: list | None = None) -> dict:
+        return {"turnKey": key, "timestamps": {"start": date + "T00:01:00Z", "end": date + "T00:02:00Z"},
+                "matchedSkills": skills or [], "matchedExperiences": experiences or [],
+                "skillsUsed": [{"name": name, "path": "/private"} for name in (used or [])],
+                "confidence": 0.8, "input": "SECRET_TRANSCRIPT", "result": "SECRET_RESULT",
+                "toolCalls": [{"params": {"secret": "SECRET_PAYLOAD"}}],
+                "inputSkillDiscovery": {"candidateCount": 1, "durationMs": 12,
+                    "experienceRetrieval": {"status": "completed", "candidateCount": 1,
+                                            "minCandidateScore": 0.4, "hits": [{"id": "private-id", "semanticScore": 0.7}]}}}
+
+    def test_windows_missing_metrics_and_no_false_accuracy(self) -> None:
+        report = self.report_at()
+        recent = report["analysis"]["windows"]["recent"]
+        self.assertEqual(recent["start"], "2026-08-01T00:00:00+00:00")
+        self.assertEqual(recent["endExclusive"], "2026-08-08T00:00:00+00:00")
+        self.assertEqual(recent["daily"]["status"], "partial")
+        self.assertEqual(recent["daily"]["discoveryBuckets"], 0)
+        self.assertIsNone(recent["daily"]["skillDiscovery"]["nameMatch"]["hitTurns"]["rate"])
+        self.assertEqual(recent["review"]["eventCount"], 2)
+        self.assertEqual(recent["review"]["outcomeRates"]["applied"]["rate"], 0.5)
+        self.assertEqual(recent["review"]["queueState"], "unobserved")
+        previous = report["analysis"]["windows"]["previous"]
+        self.assertIsNone(previous["review"]["outcomeRates"]["applied"]["rate"])
+        cumulative = report["analysis"]["cumulative"]
+        self.assertTrue(cumulative["skills"]["topUnadopted"][0]["lowSample"])
+        self.assertNotIn("conversionRate", cumulative["skillDiscovery"]["qmdSearch"])
+
+    def test_session_dedup_experience_only_and_privacy(self) -> None:
+        old = self.turn(skills=["DISCARDED_SKILL"], used=["DISCARDED_SKILL"])
+        current = self.turn(experiences=["private-id"], used=["manual"])
+        self.write_session(current, [old])
+        report = self.report_at()
+        sessions = report["analysis"]["windows"]["recent"]["sessions"]
+        self.assertEqual(sessions["routedTurns"], 1)
+        self.assertEqual(sessions["selection"]["nonEmptyWithoutInjection"]["rate"], 0)
+        self.assertEqual(sessions["experienceRetrieval"]["selectedFromNonEmpty"]["rate"], 1)
+        self.assertEqual(sessions["skills"]["topUsedWithoutInjection"][0]["skill"], "manual")
+        self.assertEqual(report["analysis"]["sessionDataQuality"]["duplicateTurns"], 1)
+        for private in ("SECRET_TRANSCRIPT", "SECRET_RESULT", "SECRET_PAYLOAD", "/private", "private-id", "DISCARDED_SKILL"):
+            self.assertNotIn(private, json.dumps(report["analysis"]))
+
+    def test_completed_history_precedes_incomplete_current(self) -> None:
+        complete = self.turn(skills=["verified"], used=["verified"])
+        pending = self.turn(skills=["pending"])
+        del pending["timestamps"]["end"]
+        self.write_session(pending, [complete])
+        sessions = self.report_at()["analysis"]["windows"]["recent"]["sessions"]
+        self.assertEqual(sessions["skills"]["topUsed"][0]["skill"], "verified")
+        self.assertEqual(sessions["completeUsageTurns"], 1)
+
+    def test_empty_pool_unknown_pool_and_invalid_turns(self) -> None:
+        empty = self.turn("empty")
+        empty["inputSkillDiscovery"]["candidateCount"] = 0
+        empty["inputSkillDiscovery"]["experienceRetrieval"]["candidateCount"] = 0
+        unselected = self.turn("unselected")
+        unknown = self.turn("unknown")
+        del unknown["inputSkillDiscovery"]["candidateCount"]
+        invalid = self.turn("invalid")
+        invalid["timestamps"] = {"start": "invalid"}
+        unidentified = {"matchedSkills": [], "matchedExperiences": []}
+        self.write_session(empty, [unselected, unknown, invalid, unidentified])
+        report = self.report_at()
+        sessions = report["analysis"]["windows"]["recent"]["sessions"]
+        self.assertEqual(sessions["selection"]["emptyPoolTurns"], 1)
+        self.assertEqual(sessions["selection"]["nonEmptyWithoutInjection"], {"numerator": 1, "denominator": 1, "rate": 1})
+        self.assertEqual(report["analysis"]["sessionDataQuality"]["invalidTimestamps"], 1)
+        self.assertEqual(report["analysis"]["sessionDataQuality"]["unidentifiedTurns"], 1)
+
+    def test_experience_statuses_and_missing_scores(self) -> None:
+        rows = []
+        for status in ("completed", "disabled", "unavailable", "timeout", "error"):
+            row = self.turn(status)
+            row["inputSkillDiscovery"]["experienceRetrieval"] = {"status": status}
+            rows.append(row)
+        self.write_session(rows[0], rows[1:])
+        result = self.report_at()["analysis"]["windows"]["recent"]["sessions"]["experienceRetrieval"]
+        self.assertEqual(result["statuses"], {status: 1 for status in ("completed", "disabled", "unavailable", "timeout", "error")})
+        self.assertIsNone(result["candidateCount"])
+        self.assertIsNone(result["hitCount"])
+        self.assertIsNone(result["hitTurns"]["rate"])
+
+    def test_daily_comparison_excludes_today_and_uses_weighted_scores(self) -> None:
+        stats_path = self.root / "stats.json"
+        stats = json.loads(stats_path.read_text())
+        stats["attribution"]["startedAt"] = "2026-07-31T00:00:00Z"
+        base = stats["daily"]["2026-08-01"]
+        base["skillDiscovery"] = stats["skillDiscovery"]
+        base["skillRouting"] = {"value:example-skill": {"intentMatchedTurns": 2, "adoptedTurns": 1}}
+        import copy
+        stats["daily"]["2026-08-02"] = copy.deepcopy(base)
+        stats["daily"]["2026-08-02"]["skillDiscovery"]["qmdSearch"]["semanticScore"] = {"count": 1, "average": 0.5, "min": 0.5, "max": 0.5}
+        stats["daily"]["2026-07-31"] = copy.deepcopy(base)
+        stats["daily"]["2026-08-08"] = copy.deepcopy(base)
+        stats["daily"]["2026-08-08"]["turns"] = 1000
+        stats_path.write_text(json.dumps(stats))
+        windows = self.report_at()["analysis"]["windows"]
+        self.assertEqual(windows["recent"]["daily"]["turns"], 4)
+        self.assertEqual(windows["previous"]["daily"]["turns"], 2)
+        scores = windows["recent"]["daily"]["skillDiscovery"]["qmdSearch"]["semanticScore"]
+        self.assertEqual(scores["count"], 3)
+        self.assertEqual(scores["average"], 0.7)
+        self.assertEqual(windows["recent"]["daily"]["topUnadoptedSkills"][0]["unadoptedTurns"], 2)
+        stats["daily"]["2026-08-02"]["skillRouting"]["__other__"] = {"intentMatchedTurns": 1}
+        stats_path.write_text(json.dumps(stats))
+        self.assertEqual(self.report_at()["analysis"]["windows"]["recent"]["daily"]["topUnadoptedSkills"], [])
+
+    def test_missing_logs_and_read_race(self) -> None:
+        (self.root / "review.json").unlink()
+        report = self.report_at()
+        self.assertEqual(report["runtime"]["review"], {"status": "unavailable"})
+        self.assertEqual(set(report["provenance"]["stateSha256"]), {"stats.json"})
+        with patch.object(audit, "sha256", side_effect=["before", "after"]):
+            with self.assertRaisesRegex(ValueError, "changed while being read"):
+                self.report_at()
+        (self.root / "stats.json").unlink()
+        report = self.report_at()
+        self.assertEqual(report["runtime"]["stats"], {"status": "unavailable"})
+        self.assertEqual(report["analysis"]["cumulative"]["statsStatus"], "unavailable")
+
+    def test_review_outcomes_multi_trigger_and_applied_changes_only(self) -> None:
+        review_path = self.root / "review.json"
+        review = json.loads(review_path.read_text())
+        outcomes = ("applied", "nofinding", "parse-failed", "schema-rejected", "validation-failed", "subagent-error")
+        review["processedEvents"] = {name: {"processedAt": "2026-08-01T00:00:00Z", "outcome": name,
+            "triggers": ["capability-fit", "routing-uncertainty"], "changes": [{"trigger": "capability-fit", "operation": "create"}],
+            "summary": "PRIVATE_REVIEW", "evidence": ["PRIVATE_EVIDENCE"],
+            "schemaRejectionReasonCounts": {"missing-target": 1} if name == "schema-rejected" else {}} for name in outcomes}
+        review_path.write_text(json.dumps(review))
+        result = self.report_at()["analysis"]["windows"]["recent"]["review"]
+        self.assertEqual(result["eventCount"], 6)
+        self.assertEqual(result["triggerEvents"]["capability-fit"], 6)
+        self.assertEqual(result["changes"]["total"], 1)
+        self.assertEqual(result["schemaRejectionReasons"], {"missing-target": 1})
+        self.assertNotIn("PRIVATE", json.dumps(result))
+
+    def test_multiple_skill_indexes_and_broken_database(self) -> None:
+        root = self.root / "qmd" / "skills" / "indexes"
+        for fingerprint in ("secret-one", "secret-two", "missing", "corrupt"):
+            (root / fingerprint / "docs").mkdir(parents=True)
+        source = self.root / "qmd" / "intents" / "intent-routing.sqlite"
+        for fingerprint in ("secret-one", "secret-two"):
+            shutil.copyfile(source, root / fingerprint / "skill-search.sqlite")
+        database = sqlite3.connect(root / "secret-two" / "skill-search.sqlite")
+        database.execute("DELETE FROM content_vectors WHERE id = 2")
+        database.execute("UPDATE embedding_index_state SET lease_expires_at = ?", (10**15,))
+        database.commit()
+        database.close()
+        (root / "corrupt" / "skill-search.sqlite").write_text("broken")
+        result = self.report_at()["runtime"]["qmd"]["skills"]
+        self.assertEqual(result["indexCount"], 4)
+        self.assertEqual(result["unavailableCount"], 2)
+        self.assertEqual(result["activeLeaseCount"], 1)
+        self.assertEqual(result["documentVectorMismatchCount"], 1)
+        self.assertNotIn("secret", json.dumps(result))
+
+    def test_cohort_boundary_and_retention_coverage(self) -> None:
+        stats_path = self.root / "stats.json"
+        stats = json.loads(stats_path.read_text())
+        stats["attribution"]["startedAt"] = "2026-08-02T12:00:00Z"
+        stats_path.write_text(json.dumps(stats))
+        daily = self.report_at()["analysis"]["windows"]["recent"]["daily"]
+        self.assertEqual(daily["excludedPreCohortBuckets"], 1)
+        self.assertTrue(daily["cohortStartedDuringWindow"])
+        self.assertIsNone(daily["turns"])
+        sessions = self.report_at(30)["analysis"]["windows"]["recent"]["sessions"]
+        self.assertTrue(sessions["extendsBeforeRetention"])
+        self.assertIsNone(audit.iso_timestamp("2026-08-01T12:00:00"))
+
+    def test_cli_days_validation(self) -> None:
+        for days in ("0", "91", "invalid"):
+            result = subprocess.run(["python3", str(SCRIPT), "--data-root", str(self.root), "--stdout", "--days", days], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":

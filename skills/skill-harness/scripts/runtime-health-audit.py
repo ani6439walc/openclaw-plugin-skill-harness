@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import stat
@@ -13,7 +14,8 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from datetime import datetime, timezone
+from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +37,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", type=Path, default=default_data_root())
     parser.add_argument("--output", type=Path)
     parser.add_argument("--stdout", action="store_true")
+    parser.add_argument("--days", type=int, default=7)
     args = parser.parse_args()
+    if not 1 <= args.days <= 90:
+        parser.error("--days must be between 1 and 90")
     if args.stdout == (args.output is not None):
         parser.error("provide exactly one of --output or --stdout")
     return args
@@ -144,6 +149,10 @@ def qmd_health(qmd_root: Path) -> dict[str, Any]:
         snapshot_root = intents_root
         database_path = snapshot_root / "intent-routing.sqlite"
 
+    return qmd_database_health(snapshot_root, database_path)
+
+
+def qmd_database_health(snapshot_root: Path, database_path: Path) -> dict[str, Any]:
     snapshot_markdown_files = (
         sum(1 for _ in snapshot_root.rglob("*.md"))
         if snapshot_root.is_dir()
@@ -164,7 +173,7 @@ def qmd_health(qmd_root: Path) -> dict[str, Any]:
         return unavailable
 
     try:
-        with sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro", uri=True) as database:
+        with closing(sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro", uri=True)) as database:
             integrity_check = database.execute("PRAGMA integrity_check").fetchone()[0]
             try:
                 state = database.execute(
@@ -223,8 +232,9 @@ def iso_timestamp(value: Any) -> float | None:
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.timestamp() if parsed.tzinfo is not None else None
+    except (ValueError, OverflowError, OSError):
         return None
 
 
@@ -656,17 +666,375 @@ def count_experiences(root: Path) -> dict[str, int]:
     }
 
 
-def build_report(data_root: Path) -> dict[str, Any]:
+def skill_qmd_health(indexes_root: Path) -> dict[str, Any]:
+    roots = sorted(path for path in indexes_root.iterdir() if path.is_dir() and not path.is_symlink()) if indexes_root.is_dir() else []
+    rows = [qmd_database_health(root / "docs", root / "skill-search.sqlite") for root in roots]
+    return {
+        "status": "available" if rows else "unavailable",
+        "indexCount": len(rows),
+        "byStatus": counter_dict(Counter(row["databaseStatus"] for row in rows)),
+        "unavailableCount": sum(row["databaseStatus"] == "unavailable" for row in rows),
+        "integrityFailureCount": sum(row["integrityCheck"] not in (None, "ok") for row in rows),
+        "activeLeaseCount": sum(row["leaseActive"] is True for row in rows),
+        "documentVectorMismatchCount": sum(row["documentsMatchVectors"] is False for row in rows),
+        "unknownDocumentVectorCount": sum(row["documentsMatchVectors"] is None for row in rows),
+        "snapshotMismatchCount": sum(row["snapshotMatchesIndexedDocuments"] is False for row in rows),
+    }
+
+
+def observed_number(value: Any) -> int | float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
+        return value
+    return None
+
+
+def ratio(numerator: int | float | None, denominator: int | float | None) -> dict[str, Any]:
+    return {"numerator": numerator, "denominator": denominator,
+            "rate": round(numerator / denominator, 4) if numerator is not None and denominator else None}
+
+
+def nested(value: dict[str, Any], *keys: str) -> Any:
+    result: Any = value
+    for key in keys:
+        result = object_or_empty(result).get(key)
+    return result
+
+
+def observed_sum(rows: list[dict[str, Any]], *keys: str) -> int | float | None:
+    values = [observed_number(nested(row, *keys)) for row in rows]
+    return sum(values) if rows and all(value is not None for value in values) else None
+
+
+def numeric_summary(values: list[int | float]) -> dict[str, Any]:
+    return {"count": len(values), "average": round(sum(values) / len(values), 4) if values else None,
+            "min": min(values, default=None), "max": max(values, default=None)}
+
+
+def merged_score(rows: list[dict[str, Any]], *keys: str) -> dict[str, Any]:
+    count = 0
+    weighted = 0.0
+    minima: list[int | float] = []
+    maxima: list[int | float] = []
+    missing = 0
+    for row in rows:
+        score = object_or_empty(nested(row, *keys))
+        n = observed_number(score.get("count"))
+        average = observed_number(score.get("average"))
+        low = observed_number(score.get("min"))
+        high = observed_number(score.get("max"))
+        if n is None or (n > 0 and None in (average, low, high)):
+            missing += 1
+        elif n:
+            count += n
+            weighted += n * average
+            minima.append(low)
+            maxima.append(high)
+    return {"count": count, "average": round(weighted / count, 4) if count else None,
+            "min": min(minima, default=None), "max": max(maxima, default=None), "missingBuckets": missing}
+
+
+def merged_counts(rows: list[dict[str, Any]], *keys: str) -> dict[str, int | float]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        for key, value in object_or_empty(nested(row, *keys)).items():
+            n = observed_number(value)
+            if n is not None:
+                counts[key] += n
+    return counter_dict(counts)
+
+
+def discovery_analysis(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = observed_sum(rows, "turns")
+    attempts = observed_sum(rows, "qmdSearch", "attemptedTurns")
+    return {
+        "turns": total,
+        "nameMatch": {"hitTurns": ratio(observed_sum(rows, "nameMatch", "matchedTurns"), total),
+                      "candidates": observed_sum(rows, "nameMatch", "candidates")},
+        "qmdSearch": {"attemptedTurns": attempts,
+                      "hitTurns": ratio(observed_sum(rows, "qmdSearch", "matchedTurns"), attempts),
+                      "candidates": observed_sum(rows, "qmdSearch", "candidates"),
+                      "semanticScore": merged_score(rows, "qmdSearch", "semanticScore"),
+                      "collections": merged_counts(rows, "qmdSearch", "collections"),
+                      "collectionBuckets": sum(isinstance(nested(row, "qmdSearch", "collections"), dict) for row in rows),
+                      "injectedCollections": merged_counts(rows, "qmdSearch", "injectedCollections"),
+                      "injectedCollectionBuckets": sum(isinstance(nested(row, "qmdSearch", "injectedCollections"), dict) for row in rows),
+                      "injectedSkillCount": observed_sum(rows, "qmdSearch", "injectedSkills"),
+                      "injectedCountMeaning": "includes experience-source skills; not pure skill-search conversion"},
+        "pool": {"nonEmptyTurns": ratio(observed_sum(rows, "pool", "nonEmptyTurns"), total),
+                 "skillInjectedTurns": ratio(observed_sum(rows, "pool", "injectedTurns"), total),
+                 "candidates": observed_sum(rows, "pool", "candidates"),
+                 "injectedSkills": observed_sum(rows, "pool", "injectedSkills")},
+        "fallbackReasons": merged_counts(rows, "fallbackReasons"),
+        "durationMs": merged_score(rows, "durationMs"),
+    }
+
+
+def skill_rows(stats: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for name, value in object_or_empty(stats.get("skills")).items():
+        skill = object_or_empty(value)
+        injected = observed_number(skill.get("intentMatchedTurns"))
+        adopted = observed_number(skill.get("adoptedTurns"))
+        rows.append({"skill": name, "usageTurns": observed_number(skill.get("usageTurns")),
+                     "injectedTurns": injected, "adoptedTurns": adopted,
+                     "unadoptedTurns": injected - adopted if injected is not None and adopted is not None and adopted <= injected else None,
+                     "adoption": ratio(adopted, injected), "lowSample": injected is None or injected < 20,
+                     "lastUsedAt": skill.get("lastUsedAt"), "last7DaysUsage": observed_number(skill.get("last7DaysUsage")),
+                     "lifecycle": skill.get("lifecycle")})
+    return rows
+
+
+def ranked(rows: list[dict[str, Any]], metric: str) -> list[dict[str, Any]]:
+    eligible = [row for row in rows if observed_number(row.get(metric)) is not None and row[metric] > 0]
+    return sorted(eligible, key=lambda row: (-row[metric], row["skill"]))[:TOP_TARGETS]
+
+
+def review_analysis(review: dict[str, Any] | None, start: float, end: float) -> dict[str, Any]:
+    if review is None:
+        return {"status": "unavailable"}
+    events = object_or_empty(review.get("processedEvents"))
+    selected = {key: value for key, value in events.items()
+                if isinstance(value, dict) and (at := iso_timestamp(value.get("processedAt"))) is not None and start <= at < end}
+    summarized = {key: {**value, "changes": value.get("changes", []) if value.get("outcome") == "applied" else []} for key, value in selected.items()}
+    result = review_change_summary(summarized)
+    result["status"] = "observed-completed-events"
+    result["outcomeRates"] = {outcome: ratio(count, result["eventCount"]) for outcome, count in ((name, result["outcomes"].get(name, 0)) for name in ("applied", "nofinding", "schema-rejected", "parse-failed", "subagent-error", "validation-failed"))}
+    result["lastCompletedAt"] = max((value["processedAt"] for value in selected.values()), key=lambda value: iso_timestamp(value), default=None)
+    result["invalidTimestamps"] = sum(iso_timestamp(object_or_empty(value).get("processedAt")) is None for value in events.values())
+    result["queueState"] = "unobserved"
+    return result
+
+
+def name_list(value: Any, records: bool = False) -> set[str] | None:
+    if not isinstance(value, list):
+        return None
+    values = [object_or_empty(item).get("name") if records else item for item in value]
+    if not all(isinstance(name, str) and name.strip() for name in values):
+        return None
+    return set(values)
+
+
+def routing_observations(sessions_dir: Path) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    selected: dict[tuple[str, str], tuple[tuple[bool, bool], dict[str, Any]]] = {}
+    health = {"invalidFiles": 0, "unidentifiedTurns": 0, "invalidTimestamps": 0, "duplicateTurns": 0}
+    for path in sorted(sessions_dir.glob("*.json")):
+        try:
+            session = load_json(path)
+        except ValueError:
+            health["invalidFiles"] += 1
+            continue
+        session_id = session.get("sessionId")
+        if not isinstance(session_id, str) or not session_id.strip():
+            health["invalidFiles"] += 1
+            continue
+        history = session.get("history", [])
+        if not isinstance(history, list):
+            history = []
+        for current, raw in [(False, row) for row in history] + [(True, session.get("current"))]:
+            if not isinstance(raw, dict):
+                continue
+            timestamps = object_or_empty(raw.get("timestamps"))
+            end = iso_timestamp(timestamps.get("end"))
+            at = end if end is not None else iso_timestamp(timestamps.get("start"))
+            identity = raw.get("turnKey") or timestamps.get("start")
+            if not isinstance(identity, str) or not identity.strip():
+                health["unidentifiedTurns"] += 1
+                continue
+            if at is None:
+                health["invalidTimestamps"] += 1
+                continue
+            # Whitelist routing metadata. Never retain transcript or tool payload fields.
+            discovery = object_or_empty(raw.get("inputSkillDiscovery"))
+            record = {"at": at, "completed": end is not None,
+                      "skills": name_list(raw.get("matchedSkills")),
+                      "experiences": name_list(raw.get("matchedExperiences")),
+                      "used": name_list(raw.get("skillsUsed"), records=True),
+                      "confidence": observed_number(raw.get("confidence")),
+                      "discovery": {key: discovery.get(key) for key in (
+                          "candidateCount", "nameCandidates", "retrievalAttempted", "retrievalCandidates", "durationMs")},
+                      "experienceRetrieval": discovery.get("experienceRetrieval")}
+            key = (session_id, identity)
+            priority = (end is not None, current)
+            if key in selected:
+                health["duplicateTurns"] += 1
+            if key not in selected or priority > selected[key][0]:
+                selected[key] = (priority, record)
+    return [record for _, record in selected.values()], health
+
+
+def session_analysis(records: list[dict[str, Any]], start: float, end: float) -> dict[str, Any]:
+    rows = [row for row in records if start <= row["at"] < end]
+    routed = [row for row in rows if row["skills"] is not None and row["experiences"] is not None]
+    complete_usage = [row for row in routed if row["completed"] and row["used"] is not None]
+    usage: dict[str, Counter[str]] = {}
+    for row in complete_usage:
+        for skill in row["skills"] | row["used"]:
+            count = usage.setdefault(skill, Counter())
+            count["usageTurns"] += skill in row["used"]
+            count["injectedTurns"] += skill in row["skills"]
+            count["adoptedTurns"] += skill in row["skills"] & row["used"]
+            count["unadoptedTurns"] += skill in row["skills"] - row["used"]
+            count["usedWithoutInjectionTurns"] += skill in row["used"] - row["skills"]
+    skill_usage = [{"skill": skill, **dict(count), "adoption": ratio(count["adoptedTurns"], count["injectedTurns"]),
+                    "lowSample": count["injectedTurns"] < 20} for skill, count in usage.items()]
+    statuses: Counter[str] = Counter()
+    scores: list[int | float] = []
+    candidates = hits = selected = selected_count = 0
+    candidate_rows = candidate_with_hits = score_rows = 0
+    thresholds: Counter[str] = Counter()
+    for row in routed:
+        retrieval = object_or_empty(row["experienceRetrieval"])
+        status = retrieval.get("status")
+        statuses[status if status in ("completed", "disabled", "unavailable", "timeout", "error") else "unobserved"] += 1
+        if status != "completed":
+            continue
+        n = observed_number(retrieval.get("candidateCount"))
+        if n is not None:
+            candidate_rows += 1
+            candidates += n
+            candidate_with_hits += n > 0
+            if n > 0:
+                selected += bool(row["experiences"])
+                selected_count += len(row["experiences"])
+        entries = retrieval.get("hits")
+        if isinstance(entries, list):
+            hits += len(entries)
+            score_rows += 1
+            scores.extend(n for hit in entries if (n := observed_number(object_or_empty(hit).get("semanticScore"))) is not None)
+        threshold = observed_number(retrieval.get("minCandidateScore"))
+        if threshold is not None:
+            thresholds[str(threshold)] += 1
+    pool_rows = []
+    for row in routed:
+        skill_candidates = observed_number(row["discovery"].get("candidateCount"))
+        retrieval = object_or_empty(row["experienceRetrieval"])
+        exp_candidates = observed_number(retrieval.get("candidateCount"))
+        if skill_candidates is not None and exp_candidates is not None:
+            pool_rows.append((row, skill_candidates + exp_candidates > 0))
+    nonempty = [(row, present) for row, present in pool_rows if present]
+    confidence = [row["confidence"] for row in routed if row["confidence"] is not None and row["confidence"] <= 1]
+    durations = [value for row in routed if (value := observed_number(row["discovery"].get("durationMs"))) is not None]
+    return {
+        "status": "observed" if rows else "unavailable", "source": "retained-session-routing-fields",
+        "turns": len(rows), "routedTurns": len(routed), "completeUsageTurns": len(complete_usage),
+        "firstObservedAt": datetime.fromtimestamp(min((row["at"] for row in rows), default=start), timezone.utc).isoformat() if rows else None,
+        "lastObservedAt": datetime.fromtimestamp(max((row["at"] for row in rows), default=start), timezone.utc).isoformat() if rows else None,
+        "selection": {"poolObservedTurns": len(pool_rows), "emptyPoolTurns": len(pool_rows) - len(nonempty),
+                      "nonEmptyWithoutInjection": ratio(sum(not row["skills"] and not row["experiences"] for row, _ in nonempty), len(nonempty)),
+                      "skillInjectedTurns": sum(bool(row["skills"]) for row in routed),
+                      "experienceInjectedTurns": sum(bool(row["experiences"]) for row in routed),
+                      "injectedSkills": sum(len(row["skills"]) for row in routed),
+                      "injectedExperiences": sum(len(row["experiences"]) for row in routed),
+                      "confidence": numeric_summary(confidence), "discoveryDurationMs": numeric_summary(durations)},
+        "experienceRetrieval": {"statuses": counter_dict(statuses), "statusDenominator": len(routed),
+                                "candidateObservedTurns": candidate_rows, "hitTurns": ratio(candidate_with_hits, candidate_rows),
+                                "candidateCount": candidates if candidate_rows else None, "hitCount": hits if score_rows else None,
+                                "selectedFromNonEmpty": ratio(selected, candidate_with_hits),
+                                "selectedExperiencesFromNonEmpty": selected_count if candidate_rows else None,
+                                "semanticScore": numeric_summary(scores), "observedThresholds": counter_dict(thresholds)},
+        "skills": {"topUsed": ranked(skill_usage, "usageTurns"), "topUnadopted": ranked(skill_usage, "unadoptedTurns"),
+                   "topUsedWithoutInjection": ranked(skill_usage, "usedWithoutInjectionTurns")},
+    }
+
+
+def daily_skill_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    names = {name for row in rows for name in object_or_empty(row.get("skills"))}
+    names.update(key[6:] for row in rows for key in object_or_empty(row.get("skillRouting"))
+                 if key.startswith("value:"))
+    usage_complete = bool(rows) and all(isinstance(row.get("skills"), dict) for row in rows)
+    routing_complete = bool(rows) and all(isinstance(row.get("skillRouting"), dict)
+                                         and "__other__" not in row["skillRouting"] for row in rows)
+    result = []
+    for name in sorted(names):
+        usage = observed_sum([{"n": row["skills"].get(name, 0)} for row in rows], "n") if usage_complete else None
+        counts = []
+        if routing_complete:
+            for row in rows:
+                entries = row["skillRouting"]
+                counts.append(object_or_empty(entries["value:" + name]) if "value:" + name in entries
+                              else {"intentMatchedTurns": 0, "adoptedTurns": 0})
+        injected = observed_sum(counts, "intentMatchedTurns")
+        adopted = observed_sum(counts, "adoptedTurns")
+        result.append({
+            "skill": name, "usageTurns": usage, "injectedTurns": injected, "adoptedTurns": adopted,
+            "unadoptedTurns": injected - adopted if injected is not None and adopted is not None and adopted <= injected else None,
+            "adoption": ratio(adopted, injected), "lowSample": injected is None or injected < 20,
+        })
+    return result
+
+
+def decision_analysis(data_root: Path, stats: dict[str, Any] | None, review: dict[str, Any] | None,
+                      days: int, now: datetime | None) -> dict[str, Any]:
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    end = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    daily = object_or_empty((stats or {}).get("daily"))
+    records, session_data = routing_observations(data_root / "sessions")
+    cohort_start = iso_timestamp(nested(stats or {}, "attribution", "startedAt"))
+    cohort_date = datetime.fromtimestamp(cohort_start, timezone.utc).date().isoformat() if cohort_start is not None else None
+    windows = {}
+    for label, window_end in (("recent", end), ("previous", end - timedelta(days=days))):
+        start = window_end - timedelta(days=days)
+        dates = [(start + timedelta(days=i)).date().isoformat() for i in range(days)]
+        pre_cohort = [date for date in dates if cohort_date is not None and date < cohort_date and date in daily]
+        rows = [daily[date] for date in dates if isinstance(daily.get(date), dict) and (cohort_date is None or date >= cohort_date)]
+        cohort_partial = cohort_start is not None and start.timestamp() < cohort_start < window_end.timestamp()
+        discovery = [row["skillDiscovery"] for row in rows if isinstance(row.get("skillDiscovery"), dict)]
+        daily_skills = daily_skill_rows(rows)
+        windows[label] = {
+            "start": start.isoformat(), "endExclusive": window_end.isoformat(), "timezone": "UTC",
+            "daily": {"status": "available" if stats is not None and len(rows) == days and not cohort_partial else "partial" if rows else "unavailable",
+                      "source": "stats.daily", "expectedBuckets": days, "observedBuckets": len(rows),
+                      "discoveryBuckets": len(discovery), "excludedPreCohortBuckets": len(pre_cohort),
+                      "cohortStartedDuringWindow": cohort_partial, "turns": observed_sum(rows, "turns"),
+                      "erroredTurns": ratio(observed_sum(rows, "erroredTurns"), observed_sum(rows, "turns")),
+                      "skillDiscovery": discovery_analysis(discovery),
+                      "adoption": ratio(observed_sum(rows, "routing", "adoptedSkillOpportunities"), observed_sum(rows, "routing", "intentMatchedSkillOpportunities")),
+                      "toolCalls": sum(merged_counts(rows, "tools").values()) if rows and all(isinstance(row.get("tools"), dict) for row in rows) else None,
+                      "toolErrors": sum(merged_counts(rows, "toolErrors").values()) if rows and all(isinstance(row.get("toolErrors"), dict) for row in rows) else None,
+                      "topUsedSkills": ranked(daily_skills, "usageTurns"),
+                      "topUnadoptedSkills": ranked(daily_skills, "unadoptedTurns"),
+                      "skillRoutingOverflowBuckets": sum("__other__" in object_or_empty(row.get("skillRouting")) for row in rows)},
+            "sessions": session_analysis(records, start.timestamp(), window_end.timestamp()),
+            "review": review_analysis(review, start.timestamp(), window_end.timestamp()),
+        }
+        window = windows[label]
+        window["daily"]["toolErrorRate"] = ratio(window["daily"]["toolErrors"], window["daily"]["toolCalls"])
+        window["review"]["coverage"] = {"retentionDays": 90, "extendsBeforeRetention": start < now - timedelta(days=90)}
+        window["sessions"]["retentionDays"] = RETENTION_DAYS
+        window["sessions"]["extendsBeforeRetention"] = start < now - timedelta(days=RETENTION_DAYS)
+        window["sessions"]["coverage"] = "retained-observations-only; completeness cannot be established"
+    rows = skill_rows(stats or {})
+    return {
+        "generatedAt": now.isoformat(), "days": days, "windows": windows,
+        "cumulative": {"source": "stats.json since attribution.startedAt; review retained completed events",
+                       "statsStatus": "available" if stats is not None else "unavailable",
+                       "startedAt": nested(stats or {}, "attribution", "startedAt"),
+                       "statsUpdatedAt": (stats or {}).get("updatedAt"),
+                       "skillDiscovery": discovery_analysis([stats["skillDiscovery"]]) if stats is not None else {"status": "unavailable"},
+                       "skills": {"lowSampleInjectionThreshold": 20, "topUsed": ranked(rows, "usageTurns"),
+                                  "topUnadopted": ranked(rows, "unadoptedTurns")},
+                       "review": review_analysis(review, 0, now.timestamp())},
+        "sessionDataQuality": session_data,
+        "unobserved": ["Gateway plugin load", "Review enabled/queue/running state/duration/cost",
+                       "selector failure cause and phase latency", "routing precision/recall", "configuration-change attribution"],
+        "interpretation": ["Rates are observations, not accuracy or causal effects.",
+                           "Name and QMD candidates overlap; never sum channel counts as a unique pool.",
+                           "Daily skillRouting/toolErrors attribution keys are encoded and may overflow into __other__; daily usage names are raw.",
+                           "Review triggers overlap; outcome rates use completed events, not trigger counts.",
+                           "Repair index/data health before proposing threshold changes; low adoption alone does not justify deletion."],
+    }
+
+
+def build_report(data_root: Path, days: int = 7, now: datetime | None = None) -> dict[str, Any]:
     review_path = data_root / "review.json"
     stats_path = data_root / "stats.json"
-    for path in (review_path, stats_path):
-        if not path.is_file():
-            raise ValueError(f"missing required runtime state: {path}")
-
-    before_hashes = {path.name: sha256(path) for path in (review_path, stats_path)}
-    review = load_review_log(review_path)
-    stats = load_stats(stats_path)
-    after_hashes = {path.name: sha256(path) for path in (review_path, stats_path)}
+    present = [path for path in (review_path, stats_path) if path.is_file()]
+    before_hashes = {path.name: sha256(path) for path in present}
+    review = load_review_log(review_path) if review_path in present else None
+    stats = load_stats(stats_path) if stats_path in present else None
+    after_hashes = {path.name: sha256(path) for path in present}
+    if any(path.is_file() != (path in present) for path in (review_path, stats_path)):
+        raise ValueError("runtime state availability changed while being read")
     changed = sorted(name for name in before_hashes if before_hashes[name] != after_hashes[name])
     if changed:
         raise ValueError(f"runtime state changed while being read: {', '.join(changed)}")
@@ -679,6 +1047,9 @@ def build_report(data_root: Path) -> dict[str, Any]:
     )
     intent_files = len(intent_paths)
     intent_bytes = sum(path.stat().st_size for path in intent_paths)
+    analysis = decision_analysis(data_root, stats, review, days, now)
+    qmd = qmd_health(data_root / "qmd")
+    qmd["skills"] = skill_qmd_health(data_root / "qmd" / "skills" / "indexes")
     return {
         "schemaVersion": 1,
         "reportOnly": True,
@@ -693,13 +1064,14 @@ def build_report(data_root: Path) -> dict[str, Any]:
                 "updatedAt": review.get("updatedAt"),
                 "processedEvents": review_change_summary(review["processedEvents"]),
                 "reviewedSkillEpochCount": len(review["reviewedSkillEpochs"]),
-            },
-            "stats": stats_summary(stats),
+            } if review is not None else {"status": "unavailable"},
+            "stats": stats_summary(stats) if stats is not None else {"status": "unavailable"},
             "sessions": session_health(data_root / "sessions", data_root / "agents"),
             "experiences": experiences_info,
             "intents": {"markdownFiles": intent_files, "bytes": intent_bytes},
-            "qmd": qmd_health(data_root / "qmd"),
+            "qmd": qmd,
         },
+        "analysis": analysis,
         "privacy": {
             "sessionTextIncluded": False,
             "reviewSuggestionTextIncluded": False,
@@ -727,8 +1099,8 @@ def write_report(path: Path, rendered: str) -> None:
 def main() -> int:
     args = parse_args()
     try:
-        report = build_report(args.data_root)
-    except ValueError as error:
+        report = build_report(args.data_root, args.days)
+    except (ValueError, OSError) as error:
         print(f"runtime health audit failed: {error}", file=sys.stderr)
         return 1
     rendered = json.dumps(report, ensure_ascii=False, indent=2) + "\n"

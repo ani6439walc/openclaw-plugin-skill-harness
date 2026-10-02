@@ -1,6 +1,6 @@
 ---
 name: skill-harness
-description: "Inspect Skill Harness runtime health and maintain skill experiences on demand."
+description: "On explicit user request, maintain Skill Harness experiences or inspect runtime statistics, skill usage, routing diagnostics, and Review outcomes on demand."
 ---
 
 # Skill Harness
@@ -15,7 +15,7 @@ What does the user want?
 └─ Inspect runtime state, Review outcomes, or retention → runtime-health
 ```
 
-The reviewer subagent autonomously evaluates turns for capability fit and routing uncertainty, generating or refining experiences in `experiences/<id>/`.
+When optional Review is enabled (disabled by default), the reviewer subagent autonomously evaluates turns for capability fit and routing uncertainty, generating or refining experiences in `experiences/<id>/`.
 
 ## Mode: experience
 
@@ -23,13 +23,13 @@ Use this when the user asks to inspect, author, refine, or prune skill experienc
 
 ## Mode: runtime-health
 
-Use this when the user asks for Skill Harness health, Review outcome distributions, experience and skill discovery metrics, session retention, QMD state, or disk growth. Read and follow `references/runtime-health-audit.md`. Run the report-only `scripts/runtime-health-audit.py` locally, keep output private, and never modify runtime state from audit findings.
+Use this when the user asks for Skill Harness health, Review outcome distributions, experience and skill discovery metrics, session retention, QMD state, or disk growth. Read and follow `references/runtime-health-audit.md`. Run the report-only `scripts/runtime-health-audit.py` locally. Report data coverage first, then query/selection observations, skill usage, experience retrieval, Review outcomes, and suggested checks or bounded experiments with supporting sample counts. Keep output private and never modify runtime state from audit findings. A healthy report does not prove Gateway loaded the plugin.
 
 ## Shared safety rules
 
 - Keep runtime session text, tool payloads, Review evidence, and agent artifacts private.
 - Do not hand-edit `review.json`, `stats.json`, or raw session files.
-- Keep experience definitions focused, reusable, and self-contained: valid kebab-case directory name, plain-text summary, keywords, actionable body, and optional linked skill names.
+- Keep experience definitions focused, reusable, and self-contained: valid directory ID, plain-text summary, keywords, actionable body, and optional linked skill names. Prefer kebab-case; follow the validator’s actual ID rules. Validate manual changes with `scripts/validate-experiences.mjs` before relying on them.
 - Do not store secrets, keys, or user-private conversation data in experience files.
 
 ## Test prompts
