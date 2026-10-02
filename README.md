@@ -22,13 +22,14 @@ pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run test
 pnpm run build
+pnpm run test:plugin-loader
 pnpm pack --dry-run
 openclaw plugins install --link .
 ```
 
 `--link` keeps OpenClaw pointed at the checkout, so future local changes can be rebuilt and tested without reinstalling.
 
-Before enabling the plugin, add its mandatory QMD services to `openclaw.json`. Replace every placeholder with a reachable OpenAI-compatible endpoint and model:
+Before enabling the plugin, configure both mandatory QMD services and the TypeSafe Jev selector in `openclaw.json`. The provider prefixes below must resolve through your OpenClaw provider configuration (or use explicit endpoint credentials).
 
 ```json5
 {
@@ -37,6 +38,9 @@ Before enabling the plugin, add its mandatory QMD services to `openclaw.json`. R
       "skill-harness": {
         enabled: false,
         config: {
+          jev: {
+            model: "typesafe/jev-latest",
+          },
           qmd: {
             embedding: {
               // Specify model as 'provider/model' to auto-resolve baseUrl & apiKey from OpenClaw config,
@@ -54,7 +58,7 @@ Before enabling the plugin, add its mandatory QMD services to `openclaw.json`. R
 }
 ```
 
-Then enable and inspect the plugin:
+Before enabling, migrate native static selections and shared directories as described under [Static working-set migration](#static-working-set-migration): full startup defaults to normalizing native skill lists and clearing `skills.load.extraDirs`. Then enable and inspect the plugin:
 
 ```bash
 openclaw plugins enable skill-harness
@@ -109,7 +113,7 @@ graph TD
   M --> N[Record stats and optionally review the completed turn]
 ```
 
-Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Inter-session deliveries and internal-system turns are excluded using the hook's current-turn `inputProvenance`; older hosts fall back to transcript provenance or the runtime prompt marker. Its `<working_set_skills>` block is the ordered union of plugin-owned `skills.workingSet` and skills discovered from that agent's workspace `skills/` tree: the agent-specific working set precedes shared `defaults`, workspace-only skills append, and duplicate names retain their explicit-list position while resolving to the workspace-precedence skill content. Native OpenClaw `agents.*.skills` lists are not a plugin source after cutover. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `routing.scope.agents` option and chat scope limit dynamic routing only. QMD is mandatory for dynamic routing, powering symmetrical skill retrieval (over meta, body, and references) and experience retrieval (over keywords, summary, and body) to feed candidate pools for Jev/LLM reranking.
+Every non-excluded normal agent turn receives static skill-discovery context, regardless of chat allow/deny scope. Inter-session deliveries and internal-system turns are excluded using the hook's current-turn `inputProvenance`; older hosts fall back to transcript provenance or the runtime prompt marker. Its `<working_set_skills>` block is the ordered union of plugin-owned `skills.workingSet` and skills discovered from that agent's workspace `skills/` and workshop trees: the agent-specific working set precedes shared `defaults`, then workspace-only and workshop-only skills append in that order. `skills.includeWorkspaceSkills` and `skills.includeWorkshopSkills` control those automatic additions independently; they do not remove skills from discovery or explicit working sets. Duplicate names retain their first position and resolve according to root precedence. Native OpenClaw `agents.*.skills` lists are not a plugin source after cutover. Skills are formatted compactly without `<path>` tags (`<skill name="...">\n  ${description}\n</skill>`); agents inspect paths dynamically via `skill_list` or `skill_view` when needed. The plugin `routing.scope.agents` option and chat scope limit dynamic routing only. QMD is mandatory for dynamic routing, powering symmetrical skill retrieval (over meta, body, and references) and experience retrieval (over keywords, summary, and body) to feed candidate pools for Jev/LLM reranking.
 
 ### Skill discovery directories and precedence
 
@@ -121,12 +125,13 @@ Every agent resolves the following skill roots in order; unavailable directories
 4. **Personal agent** — `~/.agents/skills/`
 5. **Managed** — `~/.openclaw/skills/`
 6. **Shared** — each configured `plugins.entries.skill-harness.config.skills.sharedRoots` directory, in configured order
-7. **Plugin** — `~/.openclaw/plugin-skills/` (OpenClaw-generated plugin links), then the Skill Harness package's `skills/` fallback
+7. **Plugin links** — `~/.openclaw/plugin-skills/` (OpenClaw-generated plugin links)
 8. **Bundled** — OpenClaw's built-in skills directory, resolved from `OPENCLAW_BUNDLED_SKILLS_DIR`, the running Gateway checkout, or the installed `openclaw` package
+9. **Package fallback** — the Skill Harness package's `skills/` directory
 
-If the same skill name appears in more than one directory, the **first directory above wins**. Within one root, discovery is alphabetical; shared roots override plugin and bundled skills, plugin links win over the Skill Harness package fallback, and bundled OpenClaw skills win over that fallback. Shared roots are visible to every agent but never grant access to another agent's workspace or workshop tree. Built-in bundled skills include `gifgrep` and `meme-maker`.
+If the same skill name appears in more than one directory, the **first directory above wins**. Within one root, discovery is alphabetical; shared roots override plugin and bundled skills, plugin links win over the Skill Harness package fallback, and bundled OpenClaw skills win over that fallback. Shared roots are visible to every agent but never grant access to another agent's workspace or workshop tree.
 
-The static cutover boundary is explicit: `plugins.entries.skill-harness.config.skills.workingSet` is the only plugin-owned static skill source. By default startup normalizes `agents.defaults.skills` to `[]`, removes `agents.entries.<id>.skills`, and clears `skills.load.extraDirs`; configure intentionally shared directories with `plugins.entries.skill-harness.config.skills.sharedRoots` instead. Unknown or missing names in `skills.workingSet` are filtered when the prompt is built, while workspace-resolved skills are appended according to the precedence rules above.
+The static cutover boundary is explicit: `plugins.entries.skill-harness.config.skills.workingSet` is the only plugin-owned static skill source. By default startup normalizes `agents.defaults.skills` to `[]`, removes `agents.entries.<id>.skills`, and clears `skills.load.extraDirs`; configure intentionally shared directories with `plugins.entries.skill-harness.config.skills.sharedRoots` instead. Unknown or missing names in `skills.workingSet` are filtered when the prompt is built, while automatic workspace and workshop additions follow their respective include flags.
 
 ### Architecture and routing contract
 
@@ -143,14 +148,14 @@ The routing stages are:
    - Skill candidates come from deterministic typo-aware name matching and direct `SkillQmdIndex` retrieval (over metadata, bodies, and references with `minCandidateScore` default `0.6`).
    - Experience candidates come from `SkillExperienceQmdIndex` multi-collection retrieval (over `keywords: 1.0`, `summary: 0.8`, `body: 0.5` with `minCandidateScore` default `0.4`).
 5. The unified selector evaluates canonical skills and experiences from the candidate pools using Jev/LLM reranking against `relevanceThreshold` (default `0.6`), capping at `maxInjectedSkills` (default `8`) and `maxInjectedExperiences` (default `4`). An empty candidate pool needs no LLM call (0-call short-circuit); `maxInjectedSkills: 0` short-circuits skill discovery while experience retrieval remains enabled unless `maxInjectedExperiences` is also zero. Experience candidate thresholds use semantic evidence scores; RRF scores only determine ranking.
-6. Final injected skills are the union of selector-selected skills and skills associated with selector-selected experiences.
+6. Final injected skills are the visible union of selector-selected skills and skills associated with selector-selected experiences, capped by `maxInjectedSkills`. A zero skill limit permits experiences-only context.
 7. Render decoupled optional `<matched_experiences>` and `<matched_skills>` blocks, record the completed turn in session tracking, and schedule configured background work.
 
-QMD skill and experience snapshots and their SQLite databases live under `qmd/skills/` and `qmd/experiences/`. They refresh in the background, so a cold or unhealthy index fails open to the classifier.
+QMD skill and experience snapshots and their SQLite databases live under `qmd/skills/` and `qmd/experiences/`. They refresh in the background. A cold or unhealthy index contributes no QMD candidates; name matches or candidates from the other index can still reach Jev. With no candidates, routing skips Jev and injects no dynamic context.
 
 OpenClaw 2026.9.6 or later is required. Skill index identity uses the plugin's original installation directory, so captured plugin generations reuse existing indexes under `qmd/skills/indexes/`. Background indexing runs only during full registration; disposing a generation stops polling and retries and closes its QMD stores after active work finishes. Discovery instances open completed indexes read-only on demand and wait for initialization before searching. Missing, stale, or incomplete indexes remain unavailable until the full instance updates them; discovery never rebuilds or embeds. Existing indexes do not need to be deleted when upgrading.
 
-Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains decoupled selected experiences and selected skills; it never emits separate intent tags or input-skill wrappers. The plugin is fail-open: configuration, classification, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available.
+Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains decoupled selected experiences and selected skills; it never emits separate intent tags or input-skill wrappers. The plugin is fail-open: runtime routing, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available. Invalid plugin configuration can prevent loading at the manifest validation boundary.
 
 #### Context injection format
 
@@ -191,7 +196,7 @@ Format index.ts using prettier
 
 The prompt layout minimizes token consumption:
 
-- Dynamic routing context is separated from preceding turn metadata by a blank line, introduced by the concise single-line advisory header `Inferred relevant skills and experiences from conversation (advisory, non-user input; load with \`skill_view\` or \`skill_experience\` if relevant):`(or skills-only / experiences-only variants) preceding`<skill_harness_plugin>`.
+- Dynamic routing context is separated from preceding turn metadata by a blank line. The single-line advisory header shown above precedes `<skill_harness_plugin>`; skills-only and experiences-only variants name just the relevant loading tool.
 - `<matched_experiences>` contains selected experiences with their IDs, declared associated skills, and summaries; full experience bodies can be retrieved on demand via `skill_experience`.
 - `<matched_skills>` contains the union of selected skills and skills declared by selected experiences.
 - Skill file paths are omitted from prompt injection; agents inspect `path` dynamically via `skill_list` or `skill_view`.
@@ -279,47 +284,47 @@ Configure Skill Harness in `openclaw.json`:
 
 ### Important options
 
-| Option                                               | Default            | Purpose                                                                                                                                                                                                                                                                                                              |
-| ---------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `routing.scope.agents`                               | `["main"]`         | OpenClaw agent IDs eligible for dynamic routing.                                                                                                                                                                                                                                                                     |
-| `routing.scope.chatTypes`                            | `["direct"]`       | Chat types that may run dynamic routing (`"direct"`, `"group"`, `"channel"`, `"explicit"`).                                                                                                                                                                                                                          |
-| `routing.scope.allowedChatIds` / `deniedChatIds`     | `[]`               | Optional chat allow-list and deny-list for dynamic routing.                                                                                                                                                                                                                                                          |
-| `skills.workingSet.defaults` / `agents.<id>`         | `[]` / `{}`        | Plugin-owned static working-set source. The resolved per-agent order is agent-specific entries followed by shared defaults; workspace-only skills append. Unknown or malformed members are rejected.                                                                                                                 |
-| `skills.includeWorkspaceSkills`                      | `true`             | Whether to automatically discover and append workspace-only skills (`<workspaceDir>/skills/`) to the static working set. Setting to `false` suppresses workspace skills auto-loading.                                                                                                                                |
-| `skills.includeWorkshopSkills`                       | `true`             | Whether to automatically discover and append agent-specific workshop skills (`.openclaw/agents/<agentId>/agent/workshop-skills/`) to the static working set. Setting to `false` suppresses agent workshop skills auto-loading.                                                                                       |
-| `skills.suppressNativeSkillPrompt`                   | `true`             | When enabled, automatically ensures `agents.defaults.skills` is `[]` and removes `agents.entries.*.skills` in `openclaw.json` on startup to suppress duplicate native OpenClaw `<available_skills>` prompts. Setting to `false` disables startup mutation.                                                           |
-| `routing.experiences.search.minCandidateScore`       | `0.4`              | Inclusive semantic-evidence score required for a retrieved experience to enter the candidate pool.                                                                                                                                                                                                                   |
-| `routing.experiences.search.timeoutMs`               | `qmd.timeoutMs`    | Optional millisecond override for prompt-build experience retrieval; defaults to `qmd.timeoutMs`.                                                                                                                                                                                                                    |
-| `routing.experiences.relevanceThreshold`             | `0.6`              | Inclusive relevance threshold for candidate experience selection.                                                                                                                                                                                                                                                    |
-| `routing.experiences.maxInjectedExperiences`         | `4`                | Maximum advisory candidate experiences injected into context.                                                                                                                                                                                                                                                        |
-| `routing.queryMode` / `contextWindow`                | `"recent"` / unset | Scanner context and its limits.                                                                                                                                                                                                                                                                                      |
-| `routing.timeoutMs`                                  | `5000`             | Unified routing time budget in milliseconds.                                                                                                                                                                                                                                                                         |
-| `routing.skills.search.minCandidateScore`            | `0.6`              | Inclusive semantic-evidence threshold for a retrieved skill to be eligible for injection; it never uses RRF rank score.                                                                                                                                                                                              |
-| `routing.skills.search.timeoutMs`                    | `qmd.timeoutMs`    | Optional millisecond override for prompt-build retrieval and query expansion; defaults to `qmd.timeoutMs`.                                                                                                                                                                                                           |
-| `routing.skills.nameMatch.maxEditDistance`           | `2`                | Maximum classic Levenshtein distance for a name token typo.                                                                                                                                                                                                                                                          |
-| `routing.skills.nameMatch.minJaccardScore`           | `0.5`              | Inclusive typo-aware token-set Jaccard threshold.                                                                                                                                                                                                                                                                    |
-| `routing.skills.nameMatch.genericTokens`             | `[]`               | Normalized terms that block only a one-token auto-match; multi-token matching remains available.                                                                                                                                                                                                                     |
-| `routing.skills.relevanceThreshold`                  | `0.6`              | Inclusive relevance threshold for candidate skill selection.                                                                                                                                                                                                                                                         |
-| `routing.skills.maxInjectedSkills`                   | `8`                | Maximum advisory candidate skills injected into context.                                                                                                                                                                                                                                                             |
-| `skills.sharedRoots`                                 | `[]`               | Absolute local skill directories intentionally shared with every agent. They are resolved after agent-local, plugin, and bundled roots; duplicate names retain the higher-precedence root.                                                                                                                           |
-| `skills.suppressNativeExtraDirs`                     | `true`             | On startup, clears OpenClaw `skills.load.extraDirs`; migrate intentionally shared paths to `skills.sharedRoots`.                                                                                                                                                                                                     |
-| `skills.search.collectionWeights`                    | `3/2/1`            | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.                                                                                                                                                                                                                   |
-| `qmd.embedding` / `expansion`                        | required           | Remote endpoint and model for mandatory QMD hybrid routing. Supports OpenClaw `provider/model` syntax (e.g. `bifrost/text-embedding-3-small`) to auto-resolve `baseUrl` and `apiKey` from OpenClaw's `models.providers`. Explicit `baseUrl` and `apiKey` remain supported. `embedding.dimension` defaults to `1536`. |
-| `qmd.timeoutMs`                                      | `15000`            | Per-request QMD embedding and expansion timeout; also the default prompt-build candidate retrieval budget unless `routing.skills.search.timeoutMs` overrides it.                                                                                                                                                     |
-| `qmd.indexRefreshIntervalSeconds`                    | `300`              | Seconds between source checks for QMD experience and skill indexes; 0 disables subsequent automatic checks. Stale, incomplete, or unreadable state rebuilds automatically.                                                                                                                                           |
-| `jev.model` / `baseUrl` / `apiKey`                   | required (`model`) | Mandatory TypeSafe Jev provider for unified skill and experience candidate selection. Supports `provider/model` syntax to auto-resolve `baseUrl` and `apiKey`.                                                                                                                                                       |
-| `review.enabled`                                     | `false`            | Enables post-turn Review.                                                                                                                                                                                                                                                                                            |
-| `review.model` / `review.modelFallback`              | unset              | Review model and last-resort resolution fallback (defaults to current session model or agent primary model if unset).                                                                                                                                                                                                |
-| `review.thinking` / `timeoutSeconds`                 | `"medium"` / `300` | Review thinking level and time budget in seconds.                                                                                                                                                                                                                                                                    |
-| `review.triggers.experienceHealthCheck.everyTurns`   | `10`               | Fixed cadence for a bounded post-turn experience health check (legacy alias: `intentHealthCheck`).                                                                                                                                                                                                                   |
-| `review.triggers.routingUncertainty.confidenceBelow` | `0.5`              | Confidence below which fallback/uncertain routing receives bounded review.                                                                                                                                                                                                                                           |
-| `review.triggers.capabilityFit`                      | enabled, `5` / `2` | Tool-call/failure threshold and stats-selected-skill evidence for bounded capability review.                                                                                                                                                                                                                         |
+| Option                                               | Default                                         | Purpose                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `routing.scope.agents`                               | `["main"]`                                      | OpenClaw agent IDs eligible for dynamic routing.                                                                                                                                                                                                                                                                                                    |
+| `routing.scope.chatTypes`                            | `["direct"]`                                    | Chat types that may run dynamic routing (`"direct"`, `"group"`, `"channel"`, `"explicit"`).                                                                                                                                                                                                                                                         |
+| `routing.scope.allowedChatIds` / `deniedChatIds`     | `[]`                                            | Optional chat allow-list and deny-list for dynamic routing.                                                                                                                                                                                                                                                                                         |
+| `skills.workingSet.defaults` / `agents.<id>`         | `[]` / `{}`                                     | Plugin-owned static working-set source. The resolved per-agent order is agent-specific entries followed by shared defaults, then enabled workspace/workshop additions. Unknown fields or malformed values are rejected; unavailable skill names are filtered at prompt time.                                                                        |
+| `skills.includeWorkspaceSkills`                      | `true`                                          | Whether to automatically discover and append workspace-only skills (`<workspaceDir>/skills/`) to the static working set. Setting to `false` suppresses workspace skills auto-loading.                                                                                                                                                               |
+| `skills.includeWorkshopSkills`                       | `true`                                          | Whether to automatically discover and append agent-specific workshop skills (`.openclaw/agents/<agentId>/agent/workshop-skills/`) to the static working set. Setting to `false` suppresses agent workshop skills auto-loading.                                                                                                                      |
+| `skills.suppressNativeSkillPrompt`                   | `true`                                          | When enabled, automatically ensures `agents.defaults.skills` is `[]` and removes `agents.entries.*.skills` in `openclaw.json` on startup to suppress duplicate native OpenClaw `<available_skills>` prompts. Setting to `false` disables this native-list mutation; `suppressNativeExtraDirs` independently controls extra-directory normalization. |
+| `routing.experiences.search.minCandidateScore`       | `0.4`                                           | Inclusive semantic-evidence score required for a retrieved experience to enter the candidate pool.                                                                                                                                                                                                                                                  |
+| `routing.experiences.search.timeoutMs`               | `qmd.timeoutMs`                                 | Optional millisecond override for prompt-build experience retrieval; defaults to `qmd.timeoutMs`.                                                                                                                                                                                                                                                   |
+| `routing.experiences.relevanceThreshold`             | `0.6`                                           | Inclusive relevance threshold for candidate experience selection.                                                                                                                                                                                                                                                                                   |
+| `routing.experiences.maxInjectedExperiences`         | `4`                                             | Maximum selected experiences injected into context; zero disables experience retrieval.                                                                                                                                                                                                                                                             |
+| `routing.queryMode` / `contextWindow`                | `"recent"` / 5 turns, 1,000 characters per role | Query context and per-message limits for user and assistant history (`routing.contextWindow`).                                                                                                                                                                                                                                                      |
+| `routing.timeoutMs`                                  | `5000`                                          | Jev selection request timeout in milliseconds; QMD discovery has separate budgets.                                                                                                                                                                                                                                                                  |
+| `routing.skills.search.minCandidateScore`            | `0.6`                                           | Inclusive semantic-evidence threshold for a retrieved skill to be eligible for injection; it never uses RRF rank score.                                                                                                                                                                                                                             |
+| `routing.skills.search.timeoutMs`                    | `qmd.timeoutMs`                                 | Optional millisecond override for prompt-build retrieval and query expansion; defaults to `qmd.timeoutMs`.                                                                                                                                                                                                                                          |
+| `routing.skills.nameMatch.maxEditDistance`           | `2`                                             | Maximum classic Levenshtein distance for a name token typo.                                                                                                                                                                                                                                                                                         |
+| `routing.skills.nameMatch.minJaccardScore`           | `0.5`                                           | Inclusive typo-aware token-set Jaccard threshold.                                                                                                                                                                                                                                                                                                   |
+| `routing.skills.nameMatch.genericTokens`             | `[]`                                            | Normalized terms that block only a one-token auto-match; multi-token matching remains available.                                                                                                                                                                                                                                                    |
+| `routing.skills.relevanceThreshold`                  | `0.6`                                           | Inclusive relevance threshold for candidate skill selection.                                                                                                                                                                                                                                                                                        |
+| `routing.skills.maxInjectedSkills`                   | `8`                                             | Maximum final visible skills, including experience-associated skills; zero disables skill discovery and skill injection.                                                                                                                                                                                                                            |
+| `skills.sharedRoots`                                 | `[]`                                            | Absolute local skill directories intentionally shared with every agent. They are resolved after managed roots and before plugin links, bundled skills, and the package fallback; duplicate names retain the higher-precedence root.                                                                                                                 |
+| `skills.suppressNativeExtraDirs`                     | `true`                                          | On startup, clears OpenClaw `skills.load.extraDirs`; migrate intentionally shared paths to `skills.sharedRoots`.                                                                                                                                                                                                                                    |
+| `skills.search.collectionWeights`                    | `3/2/1`                                         | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.                                                                                                                                                                                                                                                  |
+| `qmd.embedding` / `expansion`                        | required                                        | Remote endpoint and model for mandatory QMD hybrid routing. Supports OpenClaw `provider/model` syntax (e.g. `bifrost/text-embedding-3-small`) to auto-resolve `baseUrl` and `apiKey` from OpenClaw's `models.providers`. Explicit `baseUrl` and `apiKey` remain supported. `embedding.dimension` defaults to `1536`.                                |
+| `qmd.timeoutMs`                                      | `15000`                                         | Per-request QMD embedding and expansion timeout; also the default prompt-build candidate retrieval budget unless the corresponding `routing.skills.search.timeoutMs` or `routing.experiences.search.timeoutMs` overrides it.                                                                                                                        |
+| `qmd.indexRefreshIntervalSeconds`                    | `300`                                           | Seconds between source checks for QMD experience and skill indexes; 0 disables subsequent automatic checks. Stale, incomplete, or unreadable state rebuilds automatically.                                                                                                                                                                          |
+| `jev.model` / `baseUrl` / `apiKey`                   | required (`model`)                              | Mandatory TypeSafe Jev provider for unified skill and experience candidate selection. Supports `provider/model` syntax to auto-resolve `baseUrl` and `apiKey`.                                                                                                                                                                                      |
+| `review.enabled`                                     | `false`                                         | Enables post-turn Review.                                                                                                                                                                                                                                                                                                                           |
+| `review.model` / `review.modelFallback`              | unset                                           | Review model and last-resort resolution fallback (defaults to current session model or agent primary model if unset).                                                                                                                                                                                                                               |
+| `review.thinking` / `timeoutSeconds`                 | `"medium"` / `300`                              | Review thinking level and time budget in seconds.                                                                                                                                                                                                                                                                                                   |
+| `review.triggers.experienceHealthCheck.everyTurns`   | `10`                                            | Fixed cadence for a bounded post-turn experience health check (legacy alias: `intentHealthCheck`).                                                                                                                                                                                                                                                  |
+| `review.triggers.routingUncertainty.confidenceBelow` | `0.5`                                           | Confidence below which fallback/uncertain routing receives bounded review.                                                                                                                                                                                                                                                                          |
+| `review.triggers.capabilityFit`                      | enabled, `5` / `2`                              | Tool-call/failure threshold and stats-selected-skill evidence for bounded capability review.                                                                                                                                                                                                                                                        |
 
 Review resolves models in this order: explicit configured model (`review.model`), current session model, agent primary model, then configured fallback (`review.modelFallback`). Unified routing uses mandatory TypeSafe Jev (`jev.model`) for constrained selection; errors, timeouts, and validation failures fail open without fallback retries.
 
 ### Upgrade from the removed instruction writer to mandatory QMD routing
 
-This release requires `plugins.entries.skill-harness.config.qmd` before OpenClaw loads the plugin. Before upgrading, add `embedding` and `expansion`; each endpoint requires `model` (which can use OpenClaw's `provider/model` syntax or pair with an explicit `baseUrl`). Remove any legacy `rerank` entry because the strict schema no longer accepts it. There is no classifier-only compatibility mode, and a missing or incomplete `qmd` block fails strict schema validation before the plugin runtime starts.
+The manifest requires both `plugins.entries.skill-harness.config.qmd` and top-level `jev` before OpenClaw loads the plugin. Configure `jev.model` for TypeSafe selection; a runtime compatibility parser does not make legacy `qmd.jev` valid in the manifest. Before upgrading, add QMD `embedding` and `expansion`; each endpoint requires `model` (which can use OpenClaw's `provider/model` syntax or pair with an explicit `baseUrl`). Remove any legacy `rerank` entry because the strict schema no longer accepts it. There is no classifier-only compatibility mode, and a missing or incomplete `qmd` block fails strict schema validation before the plugin runtime starts.
 
 This release also removes `plugins.entries.skill-harness.config.instruction`. OpenClaw validates the strict plugin config schema before the plugin runtime loads, so a retained `instruction` block prevents the upgraded plugin from loading.
 
@@ -354,7 +359,7 @@ Move static skill selections into the plugin-owned `skills.workingSet` block:
 }
 ```
 
-The plugin resolves an agent-specific list before shared defaults, then appends workspace-only skills. By default startup applies this cutover to `openclaw.json`: it empties `agents.defaults.skills`, removes every `agents.entries.<id>.skills`, and empties `skills.load.extraDirs`. Move directories that should be visible to every agent to `plugins.entries.skill-harness.config.skills.sharedRoots`; agent-local workspace and workshop directories remain automatic and retain precedence.
+The plugin resolves an agent-specific list before shared defaults, then appends workspace-only and workshop-only skills when their include flags are enabled. By default startup applies this cutover to `openclaw.json`: it empties `agents.defaults.skills`, removes every `agents.entries.<id>.skills`, and empties `skills.load.extraDirs`. Move directories that should be visible to every agent to `plugins.entries.skill-harness.config.skills.sharedRoots`; agent-local workspace and workshop directories remain automatic and retain precedence.
 
 ## Runtime experiences
 
@@ -368,7 +373,7 @@ Runtime experiences live under the OpenClaw state directory. With the default lo
   body.md
 ```
 
-Experiences are created organically by the Experience Review subagent upon observed tool usage and recovery, or authored on demand by the user. There are zero pre-seeded experiences.
+Experiences are created organically by the Experience Review subagent from reviewed tool and routing evidence, or authored on demand by the user. There are zero pre-seeded experiences.
 
 Experiences are stored as decoupled multi-to-multi folders (`experiences/<id>/`) containing plain text files:
 
@@ -406,41 +411,23 @@ For manual experiences, build a source checkout first (`pnpm run build`), then r
 
 Skill Harness registers four runtime tools for agents to discover, search, view, and inspect skills:
 
-| Tool               | Purpose                                                              |
-| ------------------ | -------------------------------------------------------------------- |
-| `skill_list`       | Broad inventory fallback for broad or uncertain tasks.               |
-| `skill_search`     | QMD hybrid discovery when injected intent-matched skills do not fit. |
-| `skill_view`       | Reads a visible skill or allowed support file before use.            |
-| `skill_experience` | Searches bounded runtime experiences for currently visible skills.   |
+| Tool               | Purpose                                                            |
+| ------------------ | ------------------------------------------------------------------ |
+| `skill_list`       | Broad inventory fallback for broad or uncertain tasks.             |
+| `skill_search`     | QMD hybrid discovery when injected skills do not fit.              |
+| `skill_view`       | Reads a visible skill or allowed support file before use.          |
+| `skill_experience` | Searches shared runtime experiences, optionally by visible skills. |
 
 ### Tool parameters and specifications
 
-- **`skill_list`**: Lists all available skills across bundled, workspace, and configured roots.
-  - **Inputs**: None.
-  - **Returns**: `{ skills: Array<{ name, description, path, source }> }`.
-  - **Note**: Because prompt injection (`<working_set_skills>` and `<matched_skills>`) omits file paths to conserve tokens, agents obtain the filesystem `path` through `skill_list` or view skill contents and reference files directly via `skill_view`.
+- **`skill_list`** lists visible skills with pagination. Optional inputs: `offset` (default `0`), `limit` (default `150`, capped at `500`), `show_stats` and `show_related` (both default `false`). Returns `{ success, total, count, offset, limit, has_more, next_offset?, skills }`. Each skill includes `name`, `description`, `source`, and `path`, with optional `usage_stats` and `related_skills`.
+- **`skill_search`** searches metadata, bodies, and references. Requires a non-empty `query` (trimmed and truncated to 1,000 Unicode code points). Optional inputs: `limit` (default `20`, capped at `100`), `show_evidence` (default `true`), `show_stats` and `show_related` (default `false`). Returns `{ success, query, total, count, limit, skills }`; each skill contains `name`, `description`, `source`, `score`, and requested optional evidence/statistics/relations. Search results omit paths; use `skill_list` or `skill_view` for paths. An unavailable index returns `success: false`.
+- **`skill_view`** requires `name`; optional `file_path` reads a relative support file under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`. A full skill response includes `success`, `name`, `description`, `content`, `path`, `skill_dir`, `linked_files`, usage statistics, relations, source, and readiness. A support-file response includes `success`, `name`, `file`, `content`, `file_type`, and relations.
+- **`skill_experience`** accepts `query` (at most 500 Unicode code points), `skills` (1–6 names), or both. Requested skill names are checked against the invoking agent's visible inventory. Returns `{ success, requested_skills, unavailable_skills, entries }`, with at most three entries, 2,000 code points per body and 5,000 total body code points. Query search tries QMD, then falls back to catalog search if no matches remain; it does not invoke Jev.
 
-- **`skill_search`**: Hybrid semantic/lexical discovery over skill metadata, full bodies, and references via QMD.
-  - **Inputs**:
-    - `query` (string, required): Task description or search keywords.
-    - `show_evidence` (boolean, optional, default `true`): When `true`, returns matching chunk text evidence for each hit. Set to `false` to omit snippets.
-    - `show_related` (boolean, optional, default `false`): When `true`, returns related skills based on capability links.
-  - **Returns**: `{ results: Array<{ name, description, path, score, evidence?, related_skills? }> }`.
+Experience storage and its QMD index are shared across agents. Query-only `skill_experience` searches and dynamic experience retrieval are not filtered by agent skill visibility; only explicit skill filters and final injected skill names apply that visibility check. Do not treat experience storage as an agent-private boundary.
 
-- **`skill_view`**: Inspects the full `SKILL.md` or an allowed support file of a visible skill.
-  - **Inputs**:
-    - `name` (string, required): Name of the visible skill.
-    - `path` (string, optional): Relative path to a support file within the skill directory (e.g., `references/...`).
-  - **Returns**: `{ name, content, path }`.
-
-- **`skill_experience`**: Searches bounded runtime experiences for currently visible skills.
-  - **Inputs**:
-    - `query` (string, optional): Search query (at most 500 Unicode code points).
-    - `skills` (string[], optional): Filter by 1 to 6 visible skill names.
-    - Either `query` or `skills` must be provided.
-  - Returns at most three matching entries, capping each body at 2,000 code points and total returned bodies at 5,000 code points. Reports unavailable requested skills separately and does not expose a catalog-wide experience inventory.
-
-`skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. Core visibility follows root precedence and disabled bundled-skill entries only; it is unchanged by this migration. Prompt-time automatic working-set injection is narrower and uses plugin-owned `skills.workingSet` plus workspace skills, not native OpenClaw agent skill lists.
+`skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. Core visibility follows root precedence and disabled bundled-skill entries only; it is unchanged by this migration. Prompt-time automatic working-set injection is narrower and uses plugin-owned `skills.workingSet` plus enabled workspace/workshop additions, not native OpenClaw agent skill lists.
 
 ## Review
 
@@ -464,7 +451,7 @@ Enable it with:
 
 Review investigates a trigger; it does not treat the trigger as proof. Validated findings can create, refine, or delete runtime skill experiences under `<dataRoot>/experiences/<id>/`. The reviewer never writes source files, bundled skills, OpenClaw config, memory files, or arbitrary paths.
 
-`experience-health-check` (legacy alias `intent-health-check`) runs at its configured cadence; `routing-uncertainty` examines low-confidence routing; `capability-fit` examines tool failure recovery and high-frequency tool usage. A trigger starts an investigation, not proof.
+`experience-health-check` (legacy alias `intent-health-check`) runs at its configured cadence; `routing-uncertainty` examines low-confidence routing; `capability-fit` examines tool-call/tool-failure thresholds and inventory-selected low-adoption or unused skill epochs. Tool errors do not establish successful recovery; the tracker does not associate failed calls with later recovery. A trigger starts an investigation, not proof.
 
 ### Review safeguards
 
@@ -472,19 +459,19 @@ A trigger starts an investigation; it is not evidence by itself. The reviewer ev
 
 Every requested trigger needs a valid positive or no-finding decision. Missing or malformed decisions are recorded as `schema-rejected`. The reviewer operates within a temporary workspace with enforced workspace-only file access. Every changed experience must have a positive finding, and every declared target must change. Only changed entries are validated against eligible skills, so unrelated existing entries do not block updates. Writeback rejects concurrent changes to the same experience and applies file removals as well as additions and edits.
 
-Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn finishes (default 30-second idle delay). Subsequent turns in the same session cancel previous pending timers and coalesce them into a single run, with pending entries capped by LRU eviction (default 32 sessions). Before executing, the scheduler checks if the system is actively processing embedded runs (`isSystemActive`); if busy, review is postponed by a 30-second retry delay. If OpenClaw Gateway is shutting down (`isDraining`), pending reviews abort immediately without executing. Review runs execute in the background detached from the hook scope (`runDetachedFromWorkScope`) with `sessionPersistence: "detached"`, and the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
+Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn finishes (default 30-second idle delay). A new candidate for the same agent/session replaces the previous pending candidate and resets its timer, with pending entries capped by LRU eviction (default 32 sessions). Before executing, the scheduler checks if the system is actively processing embedded runs (`isSystemActive`); if busy or another Review is in flight, review is postponed by a 30-second retry delay. Each scheduler runs at most one Review at a time. If OpenClaw Gateway is shutting down (`isDraining`), pending reviews abort immediately without executing. Review runs execute in the background detached from the hook scope (`runDetachedFromWorkScope`) with `sessionPersistence: "detached"`, and the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
 
 ## Runtime files and metrics
 
 Skill Harness keeps package files and runtime state separate. The paths below use the default local state directory.
 
-| Path                                                   | Purpose                                                                                                                                         |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `~/.openclaw/plugins/skill-harness/experiences/`       | Decoupled runtime skill experiences (`summary.md`, `keywords.md`, `body.md`, `skills.md`).                                                      |
-| `~/.openclaw/plugins/skill-harness/sessions/`          | Per-session JSON snapshots for audit and Review context.                                                                                        |
-| `~/.openclaw/plugins/skill-harness/agents/*/sessions/` | Embedded-agent session artifacts.                                                                                                               |
-| `~/.openclaw/plugins/skill-harness/stats.json`         | Fresh schema-v7 intent, route-reason score, input skill-match, intent-matched skill, tool, routing, projection, inventory, and daily telemetry. |
-| `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v8 Review outcomes, experience writes, and completed placement epochs; compatible v7 records migrate on load.                            |
+| Path                                                   | Purpose                                                                                                                  |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `~/.openclaw/plugins/skill-harness/experiences/`       | Decoupled runtime skill experiences (`summary.md`, `keywords.md`, `body.md`, `skills.md`).                               |
+| `~/.openclaw/plugins/skill-harness/sessions/`          | Per-session JSON snapshots for audit and Review context.                                                                 |
+| `~/.openclaw/plugins/skill-harness/agents/*/sessions/` | Embedded-agent session artifacts.                                                                                        |
+| `~/.openclaw/plugins/skill-harness/stats.json`         | Schema-v7 skill, tool, routing, projection, inventory, and daily telemetry, with historical intent compatibility fields. |
+| `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v8 Review outcomes, experience writes, and completed placement epochs; compatible v7 records migrate on load.     |
 
 Session cleanup preserves the ended main-session record and removes only expired session JSON plus embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json` artifacts. It does not delete root-level runtime state, intents, skills, unrelated transcripts, or package files. New routing state persists `matchedSkills`, `matchedExperiences`, `confidence`, and `inputSkillDiscovery` at the session-state top level, including empty selections. `inputSkillDiscovery.experienceRetrieval` records whether experience search completed, was unavailable, timed out, or failed, along with the candidate threshold, returned IDs and semantic scores, and the number that passed the threshold. Compare those candidates with `matchedExperiences` to see whether selection removed them. Statistics and Review accept these turns without requiring an intent. Historical session intent state retains `intentMatchedSkills`; retired fields such as `recommendedSkills` and unknown intent fields are discarded when sessions are loaded rather than copied into the current schema. This cleanup never controls routing.
 
@@ -494,7 +481,7 @@ Local observations are operational measurements, not synthetic benchmarks. An in
 
 ### Fresh schema-v7 statistics and attribution boundary
 
-Schema v7 starts a fresh telemetry cohort. It records per-intent selected route reasons (`qmd-keyword`, `qmd-hybrid`, and `llm-classifier`) with count, average score, minimum score, and maximum score. QMD scores use the selected retrieval hit score; classifier scores use classifier confidence. `skillDiscovery` separately records input skill matching: name-match and QMD search candidates, QMD semantic-score distribution, collection hit distribution (`meta`, `body`, `references`) for retrieved candidates and final injected skills, pre-injection candidate and injection counts, fallback reasons, and duration summaries. It does not retain user requests, snippets, QMD explanations, or per-hit score lists. Per-day maps include the same aggregate input skill-match telemetry alongside intent outcomes, intent routing, intent-matched skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
+Schema v7 starts a fresh telemetry cohort. Current turns record top-level selections, confidence, skill/tool usage, routing adoption, projection, inventory, and daily aggregates without creating an intent. Historical `state.intent.result` can still populate per-intent route reasons (`qmd-keyword`, `qmd-hybrid`, and `llm-classifier`) with count, average score, minimum score, and maximum score; those compatibility fields do not imply current intent classification. QMD evidence uses retrieval hit scores; selector confidence comes from Jev. `skillDiscovery` separately records input skill matching: name-match and QMD search candidates, QMD semantic-score distribution, collection hit distribution (`meta`, `body`, `references`) for retrieved candidates and final injected skills, pre-injection candidate and injection counts, fallback reasons, and duration summaries. It does not retain user requests, snippets, QMD explanations, or per-hit score lists. Per-day maps include the same aggregate input skill-match telemetry alongside intent outcomes, intent routing, intent-matched skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
 
 The runtime-health projection keeps one canonical `routing` block, one canonical `projection` block, and names retained processed events as `retainedProcessedEventCount`. It omits the duplicate `routingEffectiveness` / `projectionEfficiency` aliases and the internal `dailyDynamicKeyCardinality` diagnostic.
 
@@ -520,16 +507,21 @@ pnpm run format
 pnpm run typecheck
 pnpm run test
 pnpm run build
+pnpm run test:plugin-loader
+python3 skills/skill-harness/scripts/test-runtime-health-audit.py
+python3 skills/skill-harness/scripts/test-validate-experiences.py
+python3 .github/scripts/test_jules_pr_review.py
 pnpm pack --dry-run
 ```
 
-| Command               | Purpose                                                       |
-| --------------------- | ------------------------------------------------------------- |
-| `pnpm run format`     | Format Markdown, JSON, and TypeScript with Prettier.          |
-| `pnpm run typecheck`  | TypeScript check without emitting files.                      |
-| `pnpm run test`       | Run the Vitest suite.                                         |
-| `pnpm run build`      | Compile the plugin to `dist/`; it does not delete old output. |
-| `pnpm pack --dry-run` | Inspect package contents before publishing or installing.     |
+| Command                       | Purpose                                                       |
+| ----------------------------- | ------------------------------------------------------------- |
+| `pnpm run format`             | Format Markdown, JSON, and TypeScript with Prettier.          |
+| `pnpm run typecheck`          | TypeScript check without emitting files.                      |
+| `pnpm run test`               | Run the Vitest suite.                                         |
+| `pnpm run build`              | Compile the plugin to `dist/`; it does not delete old output. |
+| `pnpm run test:plugin-loader` | Load the built entry using Node.                              |
+| `pnpm pack --dry-run`         | Inspect package contents before publishing or installing.     |
 
 Because the current build command invokes `tsc` directly, it does not prune
 stale files already present in `dist/`. Always inspect `pnpm pack --dry-run`
@@ -537,26 +529,20 @@ after a build before publishing or linking a changed package.
 
 ### Navigate the codebase
 
-The implementation is organized by responsibility—plugin assembly, turn
-pipeline, intent/prompt contracts, skills and experiences, durable session and
-statistics state, and asynchronous Intent Review. The exact symbol and test
-locations are intentionally not maintained as a static file list: they move as
-the design evolves.
+Start with these implementation boundaries, then trace callers and colocated `*.test.ts` files with `rg`:
 
-For development work, start from the relevant domain in
-[AGENTS.md](AGENTS.md), then use CodeGraph to establish the current source,
-call paths, impact radius, and colocated tests:
+| Source                                                  | Responsibility                                                                               |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `src/plugin.ts`, `index.ts`, `api.ts`                   | Registration, live configuration, lifecycle ownership, and SDK boundary.                     |
+| `src/config.ts`, `src/types.ts`, `openclaw.plugin.json` | Runtime defaults/types and the strict public configuration contract.                         |
+| `src/hooks/`                                            | Turn eligibility, candidate discovery, prompt assembly, lifecycle events, and tool tracking. |
+| `src/classification/`                                   | Conversation sanitization, prompt rendering, and constrained Jev selection.                  |
+| `src/skills/`, `src/experiences/`, `src/qmd/`           | Visible skill roots/tools, experience validation/catalog, and managed search indexes.        |
+| `src/session/`, `src/stats/`                            | Persisted turn state, retention, usage, and aggregate telemetry.                             |
+| `src/review/`, `src/subagent-runtime.ts`                | Post-turn scheduling, isolated review execution, validation, and writeback.                  |
+| `skills/skill-harness/`                                 | User-triggered maintenance procedures and report/validation helpers.                         |
 
-```bash
-codegraph status .
-codegraph explore --path . 'before_prompt_build classification intent routing'
-```
-
-If the first query is too broad or misses, narrow it with `codegraph query` and
-`codegraph node`, then trace relationships with `codegraph callers`, `callees`,
-or `impact`. Use `affected` only as a file-level backstop; it cannot prove
-test-case coverage. Do not run index-changing commands such as `init`, `index`,
-or `sync` without explicit authorization.
+CI runs on Node.js 24 and 26. In addition to typecheck, Vitest, and build, it checks Prettier, loads the built plugin, runs the runtime-health and experience-validator Python suites plus `.github/scripts/test_jules_pr_review.py`, and inspects the package with `pnpm pack --dry-run`. Run the experience-validator suite after building because it imports production modules from `dist/`.
 
 ## Current implementation status
 
@@ -576,8 +562,8 @@ relevance thresholds; an empty candidate pool short-circuits without a model cal
 Every eligible normal agent still receives fixed skill-discovery context even when
 dynamic routing is skipped or fails.
 
-That fixed context is rendered from plugin-owned `skills.workingSet` plus workspace
-skills. Dynamic context records the final selected skills and experiences in session and
+That fixed context is rendered from plugin-owned `skills.workingSet` plus enabled workspace
+and workshop additions. Dynamic context records the final selected skills and experiences in session and
 stats state; it does not reuse OpenClaw's native agent skill lists, emit separate intent tags or
 skill metadata wrappers, or fall back to an unvetted heuristic skill list.
 
@@ -601,7 +587,7 @@ pnpm run build
 
 ### No routing context is injected
 
-Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the classifier model can resolve.
+Check that the plugin is enabled, the current agent and chat type are allowed, the chat ID is not denied, and the QMD endpoints and `jev.model` resolve. Check index readiness, candidate thresholds, relevance thresholds, and injection limits. Empty candidate pools or failed Jev selection intentionally produce no dynamic context.
 
 ### Runtime experiences
 
@@ -611,7 +597,7 @@ Inspect:
 ls ~/.openclaw/plugins/skill-harness/experiences
 ```
 
-When optional Review is enabled (disabled by default), experiences can be created automatically by the Review subagent when tools are used or recovered, or can be added manually under `~/.openclaw/plugins/skill-harness/experiences/<id>/`.
+When optional Review is enabled (disabled by default), experiences can be created automatically by the Review subagent after tool-call/tool-failure thresholds, inventory evidence, or routing uncertainty trigger an investigation, or can be added manually under `~/.openclaw/plugins/skill-harness/experiences/<id>/`.
 
 ## Documentation scope
 
