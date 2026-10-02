@@ -147,7 +147,7 @@ The routing stages are:
 4. Run input skill discovery and experience retrieval in parallel:
    - Skill candidates come from deterministic typo-aware name matching and direct `SkillQmdIndex` retrieval (over metadata, bodies, and references with `minCandidateScore` default `0.6`).
    - Experience candidates come from `SkillExperienceQmdIndex` multi-collection retrieval (over `keywords: 1.0`, `summary: 0.8`, `body: 0.5` with `minCandidateScore` default `0.4`).
-5. The unified selector evaluates canonical skills and experiences from the candidate pools using Jev/LLM reranking against `relevanceThreshold` (default `0.6`), capping at `maxInjectedSkills` (default `8`) and `maxInjectedExperiences` (default `4`). An empty candidate pool needs no LLM call (0-call short-circuit); `maxInjectedSkills: 0` short-circuits skill discovery while experience retrieval remains enabled unless `maxInjectedExperiences` is also zero. Experience candidate thresholds use semantic evidence scores; RRF scores only determine ranking.
+5. If `routing.skills.related.enabled` is enabled, expand bounded outgoing graph neighbors from the original skill candidates before selection (see [Skill relation graph](#skill-relation-graph)). The unified selector evaluates canonical skills and experiences from the candidate pools using Jev/LLM reranking against `relevanceThreshold` (default `0.6`), capping at `maxInjectedSkills` (default `8`) and `maxInjectedExperiences` (default `4`). An empty candidate pool needs no LLM call (0-call short-circuit); `maxInjectedSkills: 0` short-circuits skill discovery while experience retrieval remains enabled unless `maxInjectedExperiences` is also zero. Experience candidate thresholds use semantic evidence scores; RRF scores only determine ranking.
 6. Final injected skills are the visible union of selector-selected skills and skills associated with selector-selected experiences, capped by `maxInjectedSkills`. A zero skill limit permits experiences-only context.
 7. Render decoupled optional `<matched_experiences>` and `<matched_skills>` blocks, record the completed turn in session tracking, and schedule configured background work.
 
@@ -460,6 +460,138 @@ This is an intentional tradeoff: `skills.md` records associations, not required 
 
 `skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. Core visibility follows root precedence and disabled bundled-skill entries only; it is unchanged by this migration. Prompt-time automatic working-set injection is narrower and uses plugin-owned `skills.workingSet` plus enabled workspace/workshop additions, not native OpenClaw agent skill lists.
 
+## Skill relation graph
+
+### Importing author-declared skill relations
+
+Skill relationships live separately in private runtime state at
+`dataRoot/skill-relations/graph.jsonl`, with a companion `schema.yaml`.
+The graph uses the operation format of ontology v1.0.4. It preserves author
+reasons, classification scores and provenance; typed relations remain
+**unverified**, including `depends_on` and `conflicts_with`. They are hints,
+not executable prerequisites or conflict rules. `skill_view`, and list/search
+with `show_related`, expose relation type, verification status, source and
+original direction. Both endpoints must match the invoking agent's current
+visible winning skills.
+
+The six relation labels are `related`, `depends_on`, `composes_with`,
+`similar_to`, `conflicts_with`, and `specializes`. JSONL replays the upstream
+**five operations**: `create`, `update`, `delete`, `relate`, and `unrelate`.
+Only skills participating in imported edges need nodes; node counts need not
+match the visible inventory. The graph is separate from QMD indexes and is not
+removed by skill-index GC or session cleanup.
+
+Each tool relation has `name`, `reason`, `direction`, `relation_type`,
+`verification_status` (`unverified`), and `source` (`author-import`).
+`current-to-related` follows the stored edge; `related-to-current` describes an
+incoming edge with the original predicate unchanged. For example, an incoming
+`depends_on` means the other skill declared a dependency on the current skill,
+not the reverse. An empty author reason remains visible in tools but does not
+qualify for automatic candidate expansion.
+
+The one-time importer accepts YAML objects/arrays and JSON strings in
+`metadata.related-skills`. It does not edit skill files. Build first, then run
+these stages separately from the package root, substituting your own paths:
+
+```bash
+pnpm run build
+node skills/skill-harness/scripts/import-skill-relations.mjs preflight --source /path/to/skills --output /private/import-plan.json
+node skills/skill-harness/scripts/import-skill-relations.mjs sample --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
+node skills/skill-harness/scripts/import-skill-relations.mjs classify --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
+node skills/skill-harness/scripts/import-skill-relations.mjs apply --source /path/to/skills --checkpoint /private/import-checkpoint.json --data-root /path/to/plugin-data
+```
+
+Preflight makes no model requests and reports unresolved targets and estimated
+request count. Sample classifies the first at most 20 relations in the importer's stable order; it is not a random or representative sample. Classify explicitly runs
+the full catalog, reusing successful matching checkpoint entries and retrying
+failed batches. Sample/classify use the configured plugin Jev model and can
+incur provider charges. The CLI must receive the same provider environment
+variables as the Gateway; reading its config file does not hydrate service-only
+secrets. No credentials are written to checkpoints. Each request
+contains at most five relations, with at most two concurrent requests. Missing
+author reasons bypass the model and remain `related`; other classifications
+require a top score of at least 0.8 and a lead of at least 0.15. Failed model
+batches remain `related` and are reported in the checkpoint. These thresholds
+select a label, not a verified dependency.
+
+Inspect the private plan/checkpoint before apply. They contain skill paths,
+author reasons and bounded evidence and must not be committed or shared as
+public artifacts. Apply verifies the current skill identities, backs up an
+existing graph, and publishes the operation batch atomically under a lock.
+Identical reapplication does not duplicate edges. Other owners' relations are
+not overwritten; reported conflicts require separate resolution. No model
+requests are made by apply. Keep the source metadata until graph import and
+agent-visible tool output have been verified; removing only `related-skills`
+thereafter does not invalidate imported identities. Changes to other metadata,
+body content or winning source disable affected edges until explicitly reviewed
+and reimported. The graph is not periodically synchronized with source metadata.
+
+A missing or invalid graph leaves ordinary routing working without relations;
+runtime tools do not fall back to legacy metadata relationships. Do not edit the
+formal graph with the upstream ontology CLI while the plugin/importer may be
+writing: its writer does not participate in plugin locks. Keep graph backups and
+checkpoints outside the package. Importing a graph does not enable automatic
+relation expansion or deploy the plugin; `routing.skills.related.enabled`
+defaults to `false` so relation experiments can be observed separately from
+experience-quality changes.
+
+### Optional relation candidate expansion
+
+`routing.skills.related.enabled` defaults to `false` and is read from live
+configuration on each turn. When enabled, the first eight ranked name/QMD skill
+candidates seed one outgoing hop in the graph. Targets are sorted by canonical
+name and allocated round-robin, with at most two new targets per seed and eight
+new targets per turn. Original candidates remain; duplicates cost no addition
+quota. Experience associations never start traversal. Both endpoints must match
+the agent's current visible winning skills, and an author reason is required.
+
+The same Jev call evaluates the expanded candidates independently using at most
+two relation reasons per target (500 Unicode code points each), with explicit
+unverified labels. A `depends_on` label does not force loading and a
+`conflicts_with` label does not exclude combinations. Existing selection
+thresholds, timeouts and final injection limits still apply, including no
+fallback after selector failure. This is candidate discovery, not dependency
+resolution or automatic composition.
+
+Sessions and rerank events optionally include `relatedCandidates` (new candidate
+names). Injection attribution uses `related-declared`; these candidates count in
+the overall pool but never as QMD hits, semantic scores or collection
+contributions. Existing statistics are not recalculated. Empty or invalid graphs
+supply no relations, while normal name/QMD discovery continues.
+
+### Verify an imported graph after deployment
+
+Deploy the graph-capable plugin build and verify that the running Gateway loaded
+it. Import and deployment are independent: a valid graph on disk does not prove
+the running process can read it. Graph readers notice file changes on subsequent
+reads; importing into a running graph-capable build does not itself require a
+restart.
+
+Use the intended agent's tools with skills that have known imported edges:
+
+- `skill_view` with `{ "name": "<visible-skill>" }` should return
+  `related_skills` with the expected direction, type and unverified status.
+- `skill_list` with `{ "show_related": true, "limit": 500 }` checks inventory
+  relations; follow pagination to inspect the entire inventory.
+- `skill_search` with `{ "query": "<relevant-task>", "show_related": true }`
+  verifies retrieval and graph-backed relation output together. A successful
+  response with no search hits does not establish a graph failure.
+
+Tools read relations even while `routing.skills.related.enabled` is `false`.
+To test automatic expansion separately, set that field to `true` in the existing
+plugin configuration and run an eligible new turn with original skill candidates.
+Compare optional `inputSkillDiscovery.relatedCandidates`, rerank events and final
+injected skills; a related candidate can legitimately be rejected by Jev. Do not
+infer expansion from a successful `skill_view` call, or enable it merely to check
+an import.
+
+If expected edges are absent, check graph validity, both endpoints' current
+winning source/content identity, and agent visibility. Unknown operations or
+malformed/truncated JSONL make the graph unavailable; invalid or mismatched edges
+are not usable. Keep source metadata until agent-visible tool output has been
+verified, and retain private checkpoints/backups for recovery. Neither deployment
+nor import requires deleting indexes or resetting statistics.
+
 ## Review
 
 Review is disabled by default. When enabled, it examines completed turns for bounded health, routing-uncertainty, and capability-fit evidence. It never affects the route already selected for that turn.
@@ -505,6 +637,7 @@ Skill Harness keeps package files and runtime state separate. The paths below us
 | `~/.openclaw/plugins/skill-harness/agents/*/sessions/` | Embedded-agent session artifacts.                                                                                        |
 | `~/.openclaw/plugins/skill-harness/stats.json`         | Schema-v7 skill, tool, routing, projection, inventory, and daily telemetry, with historical intent compatibility fields. |
 | `~/.openclaw/plugins/skill-harness/review.json`        | Schema-v8 Review outcomes, experience writes, and completed placement epochs; compatible v7 records migrate on load.     |
+| `~/.openclaw/plugins/skill-harness/skill-relations/`   | Private graph.jsonl, schema.yaml, and any retained import checkpoints/backups.                                           |
 
 Session cleanup preserves the ended main-session record and removes only expired session JSON plus embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`, and `*.session.trajectory-path.json` artifacts. It does not delete root-level runtime state, intents, skills, unrelated transcripts, or package files. New routing state persists `matchedSkills`, `matchedExperiences`, `confidence`, and `inputSkillDiscovery` at the session-state top level, including empty selections. `inputSkillDiscovery.experienceRetrieval` records whether experience search completed, was unavailable, timed out, or failed, along with the candidate threshold, returned IDs and semantic scores, and the number that passed the threshold. Compare those candidates with `matchedExperiences` to see whether selection removed them. Statistics and Review accept these turns without requiring an intent. Historical session intent state retains `intentMatchedSkills`; a session containing retired fields such as `recommendedSkills` is rejected in its entirety on load, without migration. Other unknown intent fields that pass validation are not automatically removed.
 
@@ -566,16 +699,17 @@ after a build before publishing or linking a changed package.
 
 Start with these implementation boundaries, then trace callers and colocated `*.test.ts` files with `rg`:
 
-| Source                                                  | Responsibility                                                                               |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `src/plugin.ts`, `index.ts`, `api.ts`                   | Registration, live configuration, lifecycle ownership, and SDK boundary.                     |
-| `src/config.ts`, `src/types.ts`, `openclaw.plugin.json` | Runtime defaults/types and the strict public configuration contract.                         |
-| `src/hooks/`                                            | Turn eligibility, candidate discovery, prompt assembly, lifecycle events, and tool tracking. |
-| `src/classification/`                                   | Conversation sanitization, prompt rendering, and constrained Jev selection.                  |
-| `src/skills/`, `src/experiences/`, `src/qmd/`           | Visible skill roots/tools, experience validation/catalog, and managed search indexes.        |
-| `src/session/`, `src/stats/`                            | Persisted turn state, retention, usage, and aggregate telemetry.                             |
-| `src/review/`, `src/subagent-runtime.ts`                | Post-turn scheduling, isolated review execution, validation, and writeback.                  |
-| `skills/skill-harness/`                                 | User-triggered maintenance procedures and report/validation helpers.                         |
+| Source                                                             | Responsibility                                                                                        |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `src/plugin.ts`, `index.ts`, `api.ts`                              | Registration, live configuration, lifecycle ownership, and SDK boundary.                              |
+| `src/config.ts`, `src/types.ts`, `openclaw.plugin.json`            | Runtime defaults/types and the strict public configuration contract.                                  |
+| `src/hooks/`                                                       | Turn eligibility, candidate discovery, prompt assembly, lifecycle events, and tool tracking.          |
+| `src/classification/`                                              | Conversation sanitization, prompt rendering, and constrained Jev selection.                           |
+| `src/skills/`, `src/experiences/`, `src/qmd/`                      | Visible skill roots/tools, experience validation/catalog, and managed search indexes.                 |
+| `src/skills/relation-graph.ts`, `relation-import.ts`, `related.ts` | Graph replay/identity and publication, staged import/classification, and bounded candidate expansion. |
+| `src/session/`, `src/stats/`                                       | Persisted turn state, retention, usage, and aggregate telemetry.                                      |
+| `src/review/`, `src/subagent-runtime.ts`                           | Post-turn scheduling, isolated review execution, validation, and writeback.                           |
+| `skills/skill-harness/`                                            | User-triggered maintenance procedures and report/validation helpers.                                  |
 
 CI runs on Node.js 24 and 26. In addition to typecheck, Vitest, and build, it checks Prettier, loads the built plugin, runs the runtime-health and experience-validator Python suites plus `.github/scripts/test_jules_pr_review.py`, and inspects the package with `pnpm pack --dry-run`. Run the experience-validator suite after building because it imports production modules from `dist/`.
 
@@ -645,85 +779,3 @@ MIT.
 ---
 
 _🌸 Powered by Ani, Wan Jiun Wei © 2026_
-
-### Importing author-declared skill relations
-
-Skill relationships live separately in private runtime state at
-`dataRoot/skill-relations/graph.jsonl`, with a companion `schema.yaml`.
-The graph uses the operation format of ontology v1.0.4. It preserves author
-reasons, classification scores and provenance; typed relations remain
-**unverified**, including `depends_on` and `conflicts_with`. They are hints,
-not executable prerequisites or conflict rules. `skill_view`, and list/search
-with `show_related`, expose relation type, verification status, source and
-original direction. Both endpoints must match the invoking agent's current
-visible winning skills.
-
-The one-time importer accepts YAML objects/arrays and JSON strings in
-`metadata.related-skills`. It does not edit skill files. Build first, then run
-these stages separately from the package root, substituting your own paths:
-
-```bash
-pnpm run build
-node skills/skill-harness/scripts/import-skill-relations.mjs preflight --source /path/to/skills --output /private/import-plan.json
-node skills/skill-harness/scripts/import-skill-relations.mjs sample --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
-node skills/skill-harness/scripts/import-skill-relations.mjs classify --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
-node skills/skill-harness/scripts/import-skill-relations.mjs apply --source /path/to/skills --checkpoint /private/import-checkpoint.json --data-root /path/to/plugin-data
-```
-
-Preflight makes no model requests and reports unresolved targets and estimated
-request count. Sample classifies at most 20 relations. Classify explicitly runs
-the full catalog, reusing successful matching checkpoint entries and retrying
-failed batches. Sample/classify use the configured plugin Jev model and can
-incur provider charges. The CLI must receive the same provider environment
-variables as the Gateway; reading its config file does not hydrate service-only
-secrets. No credentials are written to checkpoints. Each request
-contains at most five relations, with at most two concurrent requests. Missing
-author reasons bypass the model and remain `related`; other classifications
-require a top score of at least 0.8 and a lead of at least 0.15. Failed model
-batches remain `related` and are reported in the checkpoint. These thresholds
-select a label, not a verified dependency.
-
-Inspect the private plan/checkpoint before apply. They contain skill paths,
-author reasons and bounded evidence and must not be committed or shared as
-public artifacts. Apply verifies the current skill identities, backs up an
-existing graph, and publishes the operation batch atomically under a lock.
-Identical reapplication does not duplicate edges. Other owners' relations are
-not overwritten; reported conflicts require separate resolution. No model
-requests are made by apply. Keep the source metadata until graph import and
-agent-visible tool output have been verified; removing only `related-skills`
-thereafter does not invalidate imported identities. Changes to other metadata,
-body content or winning source disable affected edges until explicitly reviewed
-and reimported. The graph is not periodically synchronized with source metadata.
-
-A missing or invalid graph leaves ordinary routing working without relations;
-runtime tools do not fall back to legacy metadata relationships. Do not edit the
-formal graph with the upstream ontology CLI while the plugin/importer may be
-writing: its writer does not participate in plugin locks. Keep graph backups and
-checkpoints outside the package. Importing a graph does not enable automatic
-relation expansion or deploy the plugin; `routing.skills.related.enabled`
-defaults to `false` so relation experiments can be observed separately from
-experience-quality changes.
-
-### Optional relation candidate expansion
-
-`routing.skills.related.enabled` defaults to `false` and is read from live
-configuration on each turn. When enabled, the first eight ranked name/QMD skill
-candidates seed one outgoing hop in the graph. Targets are sorted by canonical
-name and allocated round-robin, with at most two new targets per seed and eight
-new targets per turn. Original candidates remain; duplicates cost no addition
-quota. Experience associations never start traversal. Both endpoints must match
-the agent's current visible winning skills, and an author reason is required.
-
-The same Jev call evaluates the expanded candidates independently using at most
-two relation reasons per target (500 Unicode code points each), with explicit
-unverified labels. A `depends_on` label does not force loading and a
-`conflicts_with` label does not exclude combinations. Existing selection
-thresholds, timeouts and final injection limits still apply, including no
-fallback after selector failure. This is candidate discovery, not dependency
-resolution or automatic composition.
-
-Sessions and rerank events optionally include `relatedCandidates` (new candidate
-names). Injection attribution uses `related-declared`; these candidates count in
-the overall pool but never as QMD hits, semantic scores or collection
-contributions. Existing statistics are not recalculated. Empty or invalid graphs
-supply no relations, while normal name/QMD discovery continues.

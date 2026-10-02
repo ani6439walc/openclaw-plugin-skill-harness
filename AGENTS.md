@@ -90,6 +90,8 @@ Review output contracts must keep the positive JSON example and field types/limi
 
 Experience skill associations are not required dependencies. Preserve eligibility for experiences with no associated skills or with all associated skills invisible to the invoking agent; only final injected skills are visibility-filtered. Do not add an experience filter based on these associations without revisiting this explicit tradeoff. Observe unusable-guidance cases before introducing dependency semantics; skill visibility alone does not establish tool availability or knowledge access isolation.
 
+## Skill relation graph
+
 Author skill relations are imported once into private ontology-v1.0.4-compatible
 JSONL; runtime metadata is not a second relationship source. Keep the original
 reason, direction, provenance and unverified status. The importer must not edit
@@ -117,3 +119,30 @@ Do not introduce hard dependency/conflict rules, fabricated retrieval scores,
 new selection thresholds or fallback injection. `relatedCandidates` is optional
 session/event diagnostics; `related-declared` injection contributes to pool
 counts only, never QMD or collection attribution. Do not recalculate old stats.
+
+Keep graph implementation in `src/skills/relation-graph.ts`, import and fixed Jev
+classification in `relation-import.ts`, and bounded routing expansion in
+`related.ts`. Runtime tools never parse legacy declarations. Graph records use
+five operations (create/update/delete/relate/unrelate), distinct from the six
+relation labels. Preserve the pinned upstream fixture bytes and hash; its
+path-specific whitespace exception is intentional. Compatibility tests check
+validator error lists, not merely successful process exit, and use the existing
+YAML parser without adding a Python runtime dependency.
+
+Graph publication and plugin deployment are separate operations. Subsequent reads
+refresh a changed graph; graph-backed tools work with automatic expansion off.
+Verify deployed behavior through the intended agent's actual Gateway tools:
+`skill_view`, paginated `skill_list(show_related: true)`, and
+`skill_search(show_related: true)`. Preserve original predicate direction for
+incoming edges. Do not infer graph failure from an empty search result or infer
+automatic expansion from tool success. Validate routing separately with an
+eligible turn, optional related candidate diagnostics and final selections;
+Jev may reject any candidate. Do not enable the live switch for a read-only audit.
+
+Graph node counts cover participating skills, not necessarily every visible
+skill. Graphs, schemas, checkpoints and backups are private managed state outside
+QMD GC/session cleanup; never delete them as disposable index caches. Keep
+credentials in the execution environment or process memory and out of commands,
+logs and artifacts. Record deployment-specific counts, paths, sample outcomes
+and Gateway observations only in private project notes. Do not remove fork
+metadata before verifying the formal graph through the invoking agent's tools.
