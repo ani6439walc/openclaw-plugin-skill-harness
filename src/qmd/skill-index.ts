@@ -1272,6 +1272,12 @@ export function createSkillQmdIndex(params: {
           state.retiring = retiring;
           try {
             await retiring;
+          } catch (error) {
+            // Keep the store and its lease, but let unrelated indexes retire.
+            logger.warn("failed to close retired QMD skill index", {
+              error,
+              fingerprint: state.fingerprint,
+            });
           } finally {
             state.retiring = undefined;
           }

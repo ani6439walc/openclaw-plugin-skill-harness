@@ -83,6 +83,49 @@ describe("skill index maintenance lifecycle", () => {
     expect(await exists(await indexPath())).toBe(true);
   });
 
+  it("does not alias internal metadata when agent IDs contain dots", async () => {
+    const { index } = fixture();
+    await build(index);
+    const skillsRoot = path.join(root, "qmd/skills");
+    const state = { schemaVersion: 1, orphanSince: {}, retiredAgentSince: {} };
+    await fs.writeFile(path.join(skillsRoot, "gc.json"), JSON.stringify(state));
+    // A leftover reclamation guard must survive legacy directory cleanup.
+    await fs.mkdir(path.join(skillsRoot, "catalog.lock.reclaim"));
+    for (const agent of [
+      "gc.json",
+      "catalog",
+      "catalog.lock",
+      "catalog.lock.reclaim",
+    ])
+      await build(index, agent);
+    expect(
+      JSON.parse(await fs.readFile(path.join(skillsRoot, "gc.json"), "utf8")),
+    ).toEqual(state);
+    expect(await exists(path.join(skillsRoot, "catalog.lock.reclaim"))).toBe(
+      true,
+    );
+  });
+
+  it("retains a failed-close store lease while collecting unrelated orphans", async () => {
+    const { index, store } = fixture();
+    await build(index);
+    const dir = await indexPath();
+    const orphan = path.join(root, "qmd/skills/indexes", "a".repeat(64));
+    await fs.mkdir(orphan);
+    store.close.mockRejectedValue(new Error("close failed"));
+    active = [];
+    await index.maintenance!();
+    now += SKILL_INDEX_GC_GRACE_MS;
+    await index.maintenance!();
+    expect(store.close).toHaveBeenCalledTimes(2);
+    expect(await exists(dir)).toBe(true);
+    expect(await exists(path.join(root, "qmd/skills/agents/main.json"))).toBe(
+      true,
+    );
+    expect(await exists(orphan)).toBe(false);
+    store.close.mockResolvedValue(undefined);
+  });
+
   it("keeps a shared index and retires only the removed agent mapping", async () => {
     const { index } = fixture();
     active = ["main", "other"];
