@@ -334,6 +334,7 @@ Configure Skill Harness in `openclaw.json`:
 | `routing.skills.nameMatch.genericTokens`             | `[]`                                            | Normalized terms that block only a one-token auto-match; multi-token matching remains available.                                                                                                                                                                                                                                                    |
 | `routing.skills.relevanceThreshold`                  | `0.6`                                           | Inclusive relevance threshold for candidate skill selection.                                                                                                                                                                                                                                                                                        |
 | `routing.skills.maxInjectedSkills`                   | `8`                                             | Maximum final visible skills, including experience-associated skills; zero disables skill discovery and skill injection.                                                                                                                                                                                                                            |
+| `routing.skills.related.enabled`                     | `false`                                         | Expand bounded author-declared graph neighbors before Jev; unverified relations never force loading.                                                                                                                                                                                                                                                |
 | `skills.sharedRoots`                                 | `[]`                                            | Absolute local skill directories intentionally shared with every agent. They are resolved after managed roots and before plugin links, bundled skills, and the package fallback; duplicate names retain the higher-precedence root.                                                                                                                 |
 | `skills.suppressNativeExtraDirs`                     | `true`                                          | On startup, clears OpenClaw `skills.load.extraDirs`; migrate intentionally shared paths to `skills.sharedRoots`.                                                                                                                                                                                                                                    |
 | `skills.search.collectionWeights`                    | `3/2/1`                                         | Relative RRF weights for skill `meta`, `body`, and `references` collections during `skill_search`.                                                                                                                                                                                                                                                  |
@@ -454,6 +455,8 @@ Skill Harness registers four runtime tools for agents to discover, search, view,
 - **`skill_experience`** accepts `query` (at most 500 Unicode code points), `skills` (1–6 names), or both. Requested skill names are checked against the invoking agent's visible inventory. Returns `{ success, requested_skills, unavailable_skills, entries }`, with at most three entries, 2,000 code points per body and 5,000 total body code points. Query search tries QMD, then falls back to catalog search if no matches remain; it does not invoke Jev.
 
 Experience storage and its QMD index are shared across agents. Query-only `skill_experience` searches and dynamic experience retrieval are not filtered by agent skill visibility; only explicit skill filters and final injected skill names apply that visibility check. Do not treat experience storage as an agent-private boundary.
+
+This is an intentional tradeoff: `skills.md` records associations, not required dependencies. An experience with no associated skills, or with all associated skills invisible to the current agent, remains eligible for selection and injection. Filtering those experiences would also discard useful standalone guidance. Conversely, an association does not establish that the agent has the tools, permissions, or environment needed to carry out the guidance. Experience authors should make applicability and prerequisites explicit in the content. Keep the current behavior while observing whether such injections cause unusable guidance; consider a separate required-dependency contract only if concrete cases justify it. Knowledge access isolation would require an explicit experience visibility policy, not an inference from skill associations.
 
 `skill_list`, `skill_search`, and `skill_view` inventory every skill in the invoking agent's resolved roots. Core visibility follows root precedence and disabled bundled-skill entries only; it is unchanged by this migration. Prompt-time automatic working-set injection is narrower and uses plugin-owned `skills.workingSet` plus enabled workspace/workshop additions, not native OpenClaw agent skill lists.
 
@@ -642,3 +645,85 @@ MIT.
 ---
 
 _🌸 Powered by Ani, Wan Jiun Wei © 2026_
+
+### Importing author-declared skill relations
+
+Skill relationships live separately in private runtime state at
+`dataRoot/skill-relations/graph.jsonl`, with a companion `schema.yaml`.
+The graph uses the operation format of ontology v1.0.4. It preserves author
+reasons, classification scores and provenance; typed relations remain
+**unverified**, including `depends_on` and `conflicts_with`. They are hints,
+not executable prerequisites or conflict rules. `skill_view`, and list/search
+with `show_related`, expose relation type, verification status, source and
+original direction. Both endpoints must match the invoking agent's current
+visible winning skills.
+
+The one-time importer accepts YAML objects/arrays and JSON strings in
+`metadata.related-skills`. It does not edit skill files. Build first, then run
+these stages separately from the package root, substituting your own paths:
+
+```bash
+pnpm run build
+node skills/skill-harness/scripts/import-skill-relations.mjs preflight --source /path/to/skills --output /private/import-plan.json
+node skills/skill-harness/scripts/import-skill-relations.mjs sample --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
+node skills/skill-harness/scripts/import-skill-relations.mjs classify --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
+node skills/skill-harness/scripts/import-skill-relations.mjs apply --source /path/to/skills --checkpoint /private/import-checkpoint.json --data-root /path/to/plugin-data
+```
+
+Preflight makes no model requests and reports unresolved targets and estimated
+request count. Sample classifies at most 20 relations. Classify explicitly runs
+the full catalog, reusing successful matching checkpoint entries and retrying
+failed batches. Sample/classify use the configured plugin Jev model and can
+incur provider charges. The CLI must receive the same provider environment
+variables as the Gateway; reading its config file does not hydrate service-only
+secrets. No credentials are written to checkpoints. Each request
+contains at most five relations, with at most two concurrent requests. Missing
+author reasons bypass the model and remain `related`; other classifications
+require a top score of at least 0.8 and a lead of at least 0.15. Failed model
+batches remain `related` and are reported in the checkpoint. These thresholds
+select a label, not a verified dependency.
+
+Inspect the private plan/checkpoint before apply. They contain skill paths,
+author reasons and bounded evidence and must not be committed or shared as
+public artifacts. Apply verifies the current skill identities, backs up an
+existing graph, and publishes the operation batch atomically under a lock.
+Identical reapplication does not duplicate edges. Other owners' relations are
+not overwritten; reported conflicts require separate resolution. No model
+requests are made by apply. Keep the source metadata until graph import and
+agent-visible tool output have been verified; removing only `related-skills`
+thereafter does not invalidate imported identities. Changes to other metadata,
+body content or winning source disable affected edges until explicitly reviewed
+and reimported. The graph is not periodically synchronized with source metadata.
+
+A missing or invalid graph leaves ordinary routing working without relations;
+runtime tools do not fall back to legacy metadata relationships. Do not edit the
+formal graph with the upstream ontology CLI while the plugin/importer may be
+writing: its writer does not participate in plugin locks. Keep graph backups and
+checkpoints outside the package. Importing a graph does not enable automatic
+relation expansion or deploy the plugin; `routing.skills.related.enabled`
+defaults to `false` so relation experiments can be observed separately from
+experience-quality changes.
+
+### Optional relation candidate expansion
+
+`routing.skills.related.enabled` defaults to `false` and is read from live
+configuration on each turn. When enabled, the first eight ranked name/QMD skill
+candidates seed one outgoing hop in the graph. Targets are sorted by canonical
+name and allocated round-robin, with at most two new targets per seed and eight
+new targets per turn. Original candidates remain; duplicates cost no addition
+quota. Experience associations never start traversal. Both endpoints must match
+the agent's current visible winning skills, and an author reason is required.
+
+The same Jev call evaluates the expanded candidates independently using at most
+two relation reasons per target (500 Unicode code points each), with explicit
+unverified labels. A `depends_on` label does not force loading and a
+`conflicts_with` label does not exclude combinations. Existing selection
+thresholds, timeouts and final injection limits still apply, including no
+fallback after selector failure. This is candidate discovery, not dependency
+resolution or automatic composition.
+
+Sessions and rerank events optionally include `relatedCandidates` (new candidate
+names). Injection attribution uses `related-declared`; these candidates count in
+the overall pool but never as QMD hits, semantic scores or collection
+contributions. Existing statistics are not recalculated. Empty or invalid graphs
+supply no relations, while normal name/QMD discovery continues.

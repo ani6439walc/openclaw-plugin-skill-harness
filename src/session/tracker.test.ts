@@ -1,3 +1,4 @@
+import { StatsAggregator } from "../stats/aggregator.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   resolveTurnEventId,
@@ -94,6 +95,46 @@ describe("SessionTracker", () => {
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("preserves relation provenance from persisted sessions into statistics", async () => {
+    await persistSessionFixture(tracker, "related-session", {
+      agentId: "agent-a",
+      current: {
+        input: "primary workflow",
+        matchedSkills: ["neighbor"],
+        confidence: 0.9,
+        timestamps: {
+          start: "2026-10-03T00:00:00.000Z",
+          end: "2026-10-03T00:00:01.000Z",
+        },
+        inputSkillDiscovery: {
+          relatedCandidates: ["neighbor"],
+          nameCandidates: 1,
+          retrievalAttempted: false,
+          retrievalCandidates: 0,
+          retrievalSemanticScores: [],
+          candidateCount: 2,
+          injectedSkills: [{ name: "neighbor", source: "related-declared" }],
+          durationMs: 1,
+        },
+      },
+    });
+    const saved = JSON.parse(
+      fs.readFileSync(sessionsPath("related-session.json", tempDir), "utf8"),
+    );
+    expect(saved.current.inputSkillDiscovery.relatedCandidates).toEqual([
+      "neighbor",
+    ]);
+    expect(
+      StatsAggregator.create(tempDir).record("related-session", saved.current),
+    ).toBe(true);
+    const stats = JSON.parse(
+      fs.readFileSync(path.join(tempDir, "stats.json"), "utf8"),
+    );
+    expect(stats.skillDiscovery.pool.injectedSkills).toBe(1);
+    expect(stats.skillDiscovery.qmdSearch.injectedSkills).toBe(0);
+    expect(stats.skillDiscovery.qmdSearch.semanticScore.count).toBe(0);
   });
 
   describe("create", () => {

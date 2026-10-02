@@ -44,6 +44,7 @@ describe("skill-harness user-triggered modes", () => {
         .filter((name) => name !== "__pycache__")
         .sort(),
     ).toEqual([
+      "import-skill-relations.mjs",
       "runtime-health-audit.py",
       "test-runtime-health-audit.py",
       "test-validate-experiences.py",

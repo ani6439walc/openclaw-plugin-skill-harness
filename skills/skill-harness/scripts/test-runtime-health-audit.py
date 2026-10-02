@@ -662,6 +662,35 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertIsNone(result["hitCount"])
         self.assertIsNone(result["hitTurns"]["rate"])
 
+    def test_relation_only_selection_does_not_become_qmd_evidence(self) -> None:
+        stats_path = self.root / "stats.json"
+        stats = json.loads(stats_path.read_text())
+        discovery = stats["skillDiscovery"]
+        discovery["qmdSearch"] = {
+            "attemptedTurns": 0, "matchedTurns": 0, "candidates": 0,
+            "injectedSkills": 0, "semanticScore": {"count": 0},
+            "collections": {}, "injectedCollections": {},
+        }
+        discovery["pool"] = {"nonEmptyTurns": 1, "candidates": 2,
+                             "injectedTurns": 1, "injectedSkills": 1}
+        stats_path.write_text(json.dumps(stats))
+        turn = self.turn(skills=["related-skill"], used=["related-skill"])
+        turn["inputSkillDiscovery"].update({
+            "relatedCandidates": 1, "retrievalCandidates": 0,
+            "retrievalAttempted": False,
+            "injectedSkills": [{"name": "related-skill", "sources": ["related-declared"]}],
+        })
+        self.write_session(turn)
+        report = self.report_at()
+        discovery_report = report["analysis"]["cumulative"]["skillDiscovery"]
+        self.assertEqual(discovery_report["pool"]["injectedSkills"], 1)
+        qmd = discovery_report["qmdSearch"]
+        self.assertEqual(qmd["candidates"], 0)
+        self.assertEqual(qmd["injectedSkillCount"], 0)
+        self.assertEqual(qmd["semanticScore"]["count"], 0)
+        self.assertEqual(qmd["collections"], {})
+        self.assertEqual(qmd["injectedCollections"], {})
+
     def test_daily_comparison_excludes_today_and_uses_weighted_scores(self) -> None:
         stats_path = self.root / "stats.json"
         stats = json.loads(stats_path.read_text())

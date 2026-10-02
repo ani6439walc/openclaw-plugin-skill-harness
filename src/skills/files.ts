@@ -89,9 +89,12 @@ export async function readAvailableSkill(
 
   const skillDir = path.dirname(skill.location);
   const relatedSkills =
-    relatedSkillsBySkillName(await listAvailableSkills(params)).get(
-      skill.name.toLowerCase(),
-    ) ?? [];
+    (
+      await relatedSkillsBySkillName(
+        await listAvailableSkills(params),
+        params.api,
+      )
+    ).get(skill.name.toLowerCase()) ?? [];
   if (!params.filePath) {
     try {
       const resolved = await resolveConfinedFile(skillDir, skill.location);

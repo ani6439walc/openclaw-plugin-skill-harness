@@ -45,6 +45,7 @@ export interface ToolResultFallback {
 export type SkillCollectionKind = "meta" | "body" | "references";
 
 export type InputSkillDiscovery = {
+  relatedCandidates?: string[];
   nameCandidates: number;
   retrievalAttempted: boolean;
   retrievalCandidates: number;
@@ -59,7 +60,11 @@ export type InputSkillDiscovery = {
   injectedSkills: Array<{
     name: string;
     source:
-      "name-match" | "direct-retrieval" | "intent-matched" | "experience-qmd";
+      | "name-match"
+      | "direct-retrieval"
+      | "intent-matched"
+      | "experience-qmd"
+      | "related-declared";
     collections?: SkillCollectionKind[];
     topCollection?: SkillCollectionKind;
   }>;

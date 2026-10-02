@@ -1,0 +1,2 @@
+# Preserve byte-identical upstream fixture and its pinned checksum.
+src/skills/fixtures/ontology-1.0.4/ontology.py -whitespace

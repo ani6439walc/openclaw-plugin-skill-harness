@@ -3,6 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { registerSkillTools } from "./tools.js";
+import {
+  appendImportedRelations,
+  readSkillIdentity,
+  relationGraphPath,
+} from "./relation-graph.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import type { IntentCatalogEntry } from "../types.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
@@ -50,6 +55,30 @@ function writeSkill(
   fs.writeFileSync(
     path.join(skillDir, "SKILL.md"),
     `---\nname: ${name}\ndescription: ${description}\n${relatedSkillsFrontmatter}---\n\n# ${heading}\n`,
+  );
+}
+
+async function seedRelation(
+  stateDir: string,
+  fromRoot: string,
+  fromName: string,
+  toRoot: string,
+  toName: string,
+  reason: string,
+) {
+  const from = await readSkillIdentity({
+    name: fromName,
+    location: path.join(fromRoot, "skills", fromName, "SKILL.md"),
+  });
+  const to = await readSkillIdentity({
+    name: toName,
+    location: path.join(toRoot, "skills", toName, "SKILL.md"),
+  });
+  expect(from).toBeDefined();
+  expect(to).toBeDefined();
+  await appendImportedRelations(
+    path.join(stateDir, "plugins", "skill-harness"),
+    [{ from: from!, to: to!, type: "related", reason }],
   );
 }
 
@@ -704,6 +733,22 @@ describe("registerSkillTools", () => {
     writeSkill(workspaceDir, "react", {
       nextjs: "Next.js App Router and deployment.",
     });
+    await seedRelation(
+      path.join(tmp, "state"),
+      workspaceDir,
+      "nextjs",
+      workspaceDir,
+      "react",
+      "React fundamentals and patterns.",
+    );
+    await seedRelation(
+      path.join(tmp, "state"),
+      workspaceDir,
+      "react",
+      workspaceDir,
+      "nextjs",
+      "Next.js App Router and deployment.",
+    );
     registerSkillTools(api);
     const tools = toolsForAgent(api);
 
@@ -729,6 +774,9 @@ describe("registerSkillTools", () => {
         {
           name: "react",
           reason: "React fundamentals and patterns.",
+          relation_type: "related",
+          verification_status: "unverified",
+          source: "author-import",
           direction: "current-to-related",
         },
         {
@@ -748,6 +796,9 @@ describe("registerSkillTools", () => {
         {
           name: "nextjs",
           reason: "React fundamentals and patterns.",
+          relation_type: "related",
+          verification_status: "unverified",
+          source: "author-import",
           direction: "related-to-current",
         },
       ],
@@ -761,6 +812,9 @@ describe("registerSkillTools", () => {
         {
           name: "react",
           reason: "React fundamentals and patterns.",
+          relation_type: "related",
+          verification_status: "unverified",
+          source: "author-import",
           direction: "current-to-related",
         },
         {
@@ -772,6 +826,44 @@ describe("registerSkillTools", () => {
     });
   });
 
+  it("ignores metadata when graph is missing and stops displaying a corrupted graph", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-graph-"));
+    try {
+      const workspaceDir = path.join(tmp, "workspace"),
+        stateDir = path.join(tmp, "state");
+      writeSkill(workspaceDir, "a", {
+        b: "Old metadata must not be a fallback.",
+      });
+      writeSkill(workspaceDir, "b");
+      const api = createApi(stateDir, workspaceDir);
+      registerSkillTools(api, { bundledSkillsDir: "" });
+      const view = toolsForAgent(api).get("skill_view");
+      expect(await runTool(view, { name: "a" })).toMatchObject({
+        related_skills: [],
+      });
+      await seedRelation(stateDir, workspaceDir, "a", workspaceDir, "b", "");
+      expect(await runTool(view, { name: "a" })).toMatchObject({
+        related_skills: [
+          {
+            name: "b",
+            reason: "",
+            relation_type: "related",
+            verification_status: "unverified",
+          },
+        ],
+      });
+      fs.appendFileSync(
+        relationGraphPath(path.join(stateDir, "plugins", "skill-harness")),
+        '{"op":',
+      );
+      expect(await runTool(view, { name: "a" })).toMatchObject({
+        related_skills: [],
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("builds incoming related skills before pagination", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const workspaceDir = path.join(tmp, "workspace");
@@ -780,6 +872,14 @@ describe("registerSkillTools", () => {
       beta: "Alpha delegates the next step to beta.",
     });
     writeSkill(workspaceDir, "beta");
+    await seedRelation(
+      path.join(tmp, "state"),
+      workspaceDir,
+      "alpha",
+      workspaceDir,
+      "beta",
+      "Alpha delegates the next step to beta.",
+    );
     registerSkillTools(api);
     const tools = toolsForAgent(api);
 
@@ -818,6 +918,22 @@ describe("registerSkillTools", () => {
     writeSkill(stateDir, "shadowed", {
       target: "Must not survive workspace precedence.",
     });
+    await seedRelation(
+      stateDir,
+      stateDir,
+      "managed-source",
+      workspaceDir,
+      "target",
+      "Visible without source filter.",
+    );
+    await seedRelation(
+      stateDir,
+      stateDir,
+      "shadowed",
+      workspaceDir,
+      "target",
+      "Must not survive workspace precedence.",
+    );
     registerSkillTools(api);
     const tools = toolsForAgent(api);
 
@@ -924,6 +1040,14 @@ describe("registerSkillTools", () => {
         nextjs: "React is used by Next.js.",
       });
       writeSkill(workspaceDir, "nextjs");
+      await seedRelation(
+        stateDir,
+        workspaceDir,
+        "react",
+        workspaceDir,
+        "nextjs",
+        "React is used by Next.js.",
+      );
       const api = createApi(stateDir, workspaceDir);
       const qmdSkillIndex: SkillQmdIndex = {
         schedule: vi.fn(),

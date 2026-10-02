@@ -87,3 +87,33 @@ Release a lifetime lease only after its store closes successfully. A retired sto
 Discovery freshness belongs in the managed index search entrypoints so hooks and tools share the same behavior. Revalidate experience metadata against the latest catalog and embedding identity, and reread skill agent mappings/visible names on subsequent searches. Missing or invalid published state must fail open without a known-stale fallback; a later publication must recover in the same instance. Explicitly open discovery stores with `readOnly: true`; do not build, embed, publish mappings, or collect. Snapshot identity and visible names per acquired search operation. Reuse existing build/catalog locks and lifetime leases without nested catalog acquisition or holding catalog locks across store opening/model requests; drain operations before closing stores. Disposal must await discovery refresh/acquisition and retirement work.
 
 Review output contracts must keep the positive JSON example and field types/limits aligned with the validator. Schema rejection warnings expose only issue paths/codes/counts and the coarse reason, never rejected values, raw replies, or evidence. Expand nested union issues so diagnostics identify failing fields; union branches can also report alternative-shape failures. `missing-trigger-decision` means no valid decision survived for a requested trigger, not necessarily an absent `trigger` field. Preserve strict validation and detached persistence.
+
+Experience skill associations are not required dependencies. Preserve eligibility for experiences with no associated skills or with all associated skills invisible to the invoking agent; only final injected skills are visibility-filtered. Do not add an experience filter based on these associations without revisiting this explicit tradeoff. Observe unusable-guidance cases before introducing dependency semantics; skill visibility alone does not establish tool availability or knowledge access isolation.
+
+Author skill relations are imported once into private ontology-v1.0.4-compatible
+JSONL; runtime metadata is not a second relationship source. Keep the original
+reason, direction, provenance and unverified status. The importer must not edit
+fork skills, infer missing reasons, promote model scores to verified dependencies,
+or treat removed metadata as a deletion request. Use explicit preflight,
+limited-sample, full-classification and apply stages; paid model requests and
+formal graph writes must remain separate. Checkpoint reuse requires matching
+content identities, author evidence, model and classification version; invalid
+scores fail validation. Apply rechecks current identities and delegates locked,
+backed-up atomic graph publication to the graph domain. Do not log raw provider
+errors, credentials or evidence. Private graph, backup, preflight and checkpoint
+artifacts must never enter the package or repository. Removing only
+`related-skills` must preserve imported identities; other metadata/body/source
+changes disable affected edges. Upstream CLI file compatibility does not imply
+its writer participates in plugin locking or enforces plugin validation.
+
+Relation expansion is opt-in via `routing.skills.related.enabled` (default false,
+live configuration). Expand only outgoing author declarations from the first
+8 ranked original name/QMD candidates, one hop, round-robin, at most 2 new
+skills per seed and 8 per turn; alphabetize targets and do not charge duplicates.
+Require current visible winning identities and a nonempty original reason.
+Keep all originals; never seed from experiences. Pass at most 2 reasons of 500
+code points per target to the existing single Jev call, labeled unverified.
+Do not introduce hard dependency/conflict rules, fabricated retrieval scores,
+new selection thresholds or fallback injection. `relatedCandidates` is optional
+session/event diagnostics; `related-declared` injection contributes to pool
+counts only, never QMD or collection attribution. Do not recalculate old stats.

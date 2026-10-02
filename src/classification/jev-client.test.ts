@@ -81,6 +81,39 @@ describe("runJevUnifiedRouting", () => {
     });
   });
 
+  it("passes unverified relation evidence without forcing dependency selection", async () => {
+    const systemOne = vi.fn().mockResolvedValue({
+      answers: { "skill_git-tools": { type: "noul", noul: 0.1 } },
+    });
+    const result = await runJevUnifiedRouting({
+      api: dummyApi,
+      config: resolveConfig({}),
+      agentId: "main",
+      latest: "unrelated task",
+      modelRef: { provider: "typesafe", model: "jev-latest" },
+      candidateSkills: candidateSkills.slice(0, 1),
+      relatedEvidence: [
+        {
+          name: "git-tools",
+          from: "source",
+          relation_type: "depends_on",
+          verification_status: "unverified",
+          reason: "conditional reason",
+        },
+      ],
+      client: { systemOne } as unknown as TypeSafeClient,
+    });
+    expect(systemOne).toHaveBeenCalledOnce();
+    expect(systemOne.mock.calls[0][0].state.skill_relations[0]).toMatchObject({
+      relation_type: "depends_on",
+      verification_status: "unverified",
+    });
+    expect(systemOne.mock.calls[0][0].state.skill_relation_guidance).toContain(
+      "not instructions",
+    );
+    expect(result?.skills).toEqual([]);
+  });
+
   it("respects maxInjectedSkills and sorts descending by probability", async () => {
     const skills: AvailableSkill[] = [
       { name: "skill-1", location: "/1", description: "Skill 1" },

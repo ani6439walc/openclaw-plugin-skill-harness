@@ -61,3 +61,21 @@ A healthy report **does not prove Gateway loaded the plugin**. Review logs also 
 3. List at most three useful next checks or experiments. For each, include the supporting metric and sample count, a plausible alternative explanation, and a verification criterion. Change one variable at a time in a separately authorized experiment and compare equivalent periods and task samples.
 4. Use concrete conditional suggestions: low candidate hit rate with healthy indexes → inspect skill metadata/body and representative requests before testing a lower candidate threshold; many unadopted injections → inspect relevance and descriptions before testing a stricter relevance threshold or smaller injection limit; schema rejection → inspect Review output contracts; timeout/unavailable → investigate service/index health first. Do not invent an optimal numeric threshold from aggregate scores.
 5. Finish with unobserved signals that limit the decision. Reporting does not authorize config edits, telemetry resets, experience deletion, or Gateway restart.
+
+## Skill relation observations
+
+Treat ontology graph relations as unverified author-derived hints. A
+`depends_on` or `conflicts_with` label is not evidence of a necessary dependency,
+a proven conflict or a successful skill combination. Tool relation output keeps
+the original direction even for an incoming edge; the invoking agent must see
+both matching winning skills. Missing/invalid graph state should leave ordinary
+routing available without relation candidates.
+
+When comparing observation periods, record the graph import time and the
+separate `routing.skills.related.enabled` change time. Graph import alone does
+not enable automatic candidate expansion. Count relation-derived candidates
+separately from QMD hits and collection contributions; an author relation or Jev
+selection does not prove adoption or task benefit. Compare actual loading,
+execution outcomes, retries and user corrections. Keep graph/checkpoint contents,
+source paths and author evidence out of public reports. This audit does not run
+the importer, modify the graph, classify relationships or clear source metadata.

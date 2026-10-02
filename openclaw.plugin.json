@@ -353,6 +353,17 @@
                 "maximum": 20,
                 "default": 8,
                 "description": "Maximum input-matched skills injected into advisory context."
+              },
+              "related": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Expand one hop of unverified author-declared skill relations before Jev selection."
+                  }
+                }
               }
             },
             "default": {}

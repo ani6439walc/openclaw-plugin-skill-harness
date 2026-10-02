@@ -32,18 +32,9 @@ export interface SkillUsageStats {
   needs_review: boolean;
 }
 
-export interface DeclaredRelatedSkill {
-  name: string;
-  reason: string;
-}
-
 export type RelatedSkillDirection = "current-to-related" | "related-to-current";
-
-export interface RelatedSkillResult {
-  name: string;
-  reason: string;
-  direction: RelatedSkillDirection;
-}
+export type RelatedSkillResult =
+  import("./relation-graph.js").GraphRelatedSkill;
 
 export interface SkillRoot {
   path: string;
@@ -56,7 +47,6 @@ export interface AvailableSkill {
   location: string;
   description: string;
   source?: SkillSource;
-  relatedSkills?: DeclaredRelatedSkill[];
 }
 
 export interface SkillInventoryItem {

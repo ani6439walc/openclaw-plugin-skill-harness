@@ -1,0 +1,5 @@
+Ontology v1.0.4, author oswalpalash. Unmodified compatibility test fixture.
+Retrieved 2026-10-03 from:
+https://clawhub.ai/api/v1/skills/ontology/file?path=scripts%2Fontology.py&ownerHandle=oswalpalash&version=1.0.4
+SHA-256: 25e10809ab4f809f2fd3b475989a882e6fcdd9127655ec40fccf44d10f0c0491
+Only used by isolated test subprocesses; never shipped or executed by runtime.

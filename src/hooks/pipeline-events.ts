@@ -18,6 +18,7 @@ export type SkillCandidatePoolFallbackReason =
   | "empty-pool";
 
 export type PipelineMetadata = {
+  relatedCandidates?: string[];
   basis?: string;
   keywords?: string[];
   changed?: boolean;
