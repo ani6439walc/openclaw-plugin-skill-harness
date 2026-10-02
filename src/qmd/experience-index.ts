@@ -100,6 +100,7 @@ function snapshotFingerprint(
   return hash(
     JSON.stringify({
       schemaVersion: EXPERIENCE_INDEX_METADATA_SCHEMA_VERSION,
+      identityFormat: "path",
       entries: sorted.map((entry) => ({
         id: entry.id,
         skills: [...entry.skills].sort(),
@@ -265,15 +266,6 @@ export function createSkillExperienceQmdIndex(params: {
     writeJsonAtomic(metadataPath, meta);
   }
 
-  function sidecarYaml(entry: SkillExperienceEntry, kind: string): string {
-    return matter.stringify("", {
-      id: entry.id,
-      skills: entry.skills,
-      kind,
-      path: entry.path,
-    });
-  }
-
   async function writeSnapshot(
     entries: readonly SkillExperienceEntry[],
   ): Promise<
@@ -283,17 +275,17 @@ export function createSkillExperienceQmdIndex(params: {
       [EXPERIENCE_KEYWORDS_COLLECTION]: {
         path: path.join(docsRoot, EXPERIENCE_KEYWORDS_COLLECTION),
         pattern: "**/*.md",
-        ignore: ["**/*.identity.yml"],
+        ignore: ["**/*.identity.json", "**/*.identity.yml"],
       },
       [EXPERIENCE_SUMMARY_COLLECTION]: {
         path: path.join(docsRoot, EXPERIENCE_SUMMARY_COLLECTION),
         pattern: "**/*.md",
-        ignore: ["**/*.identity.yml"],
+        ignore: ["**/*.identity.json", "**/*.identity.yml"],
       },
       [EXPERIENCE_BODY_COLLECTION]: {
         path: path.join(docsRoot, EXPERIENCE_BODY_COLLECTION),
         pattern: "**/*.md",
-        ignore: ["**/*.identity.yml"],
+        ignore: ["**/*.identity.json", "**/*.identity.yml"],
       },
     };
 
@@ -303,14 +295,11 @@ export function createSkillExperienceQmdIndex(params: {
       collectionName: string,
       entryId: string,
       content: string,
-      sidecar: string,
     ) => {
       const colDir = path.join(docsRoot, collectionName);
       await fs.mkdir(colDir, { recursive: true });
       const mdPath = path.join(colDir, `${entryId}.md`);
-      const sidecarPath = `${mdPath}.identity.yml`;
       currentFiles.add(mdPath);
-      currentFiles.add(sidecarPath);
 
       let existingMd: string | undefined;
       try {
@@ -321,35 +310,19 @@ export function createSkillExperienceQmdIndex(params: {
       if (existingMd !== content) {
         await fs.writeFile(mdPath, content, "utf8");
       }
-
-      let existingSidecar: string | undefined;
-      try {
-        existingSidecar = await fs.readFile(sidecarPath, "utf8");
-      } catch {
-        // sidecar does not exist
-      }
-      if (existingSidecar !== sidecar) {
-        await fs.writeFile(sidecarPath, sidecar, "utf8");
-      }
     };
 
     for (const entry of entries) {
       // 1. keywords
       const keywordsContent =
         entry.keywords.map((k) => `- ${k}`).join("\n") + "\n";
-      await writeDoc(
-        EXPERIENCE_KEYWORDS_COLLECTION,
-        entry.id,
-        keywordsContent,
-        sidecarYaml(entry, "keywords"),
-      );
+      await writeDoc(EXPERIENCE_KEYWORDS_COLLECTION, entry.id, keywordsContent);
 
       // 2. summary
       await writeDoc(
         EXPERIENCE_SUMMARY_COLLECTION,
         entry.id,
         `${entry.summary.trim()}\n`,
-        sidecarYaml(entry, "summary"),
       );
 
       // 3. body
@@ -357,7 +330,6 @@ export function createSkillExperienceQmdIndex(params: {
         EXPERIENCE_BODY_COLLECTION,
         entry.id,
         `${entry.body.trim()}\n`,
-        sidecarYaml(entry, "body"),
       );
     }
 
@@ -379,7 +351,9 @@ export function createSkillExperienceQmdIndex(params: {
           }
         } else if (
           dirent.isFile() &&
-          (dirent.name.endsWith(".md") || dirent.name.endsWith(".identity.yml"))
+          (dirent.name.endsWith(".md") ||
+            dirent.name.endsWith(".identity.yml") ||
+            dirent.name.endsWith(".identity.json"))
         ) {
           if (!currentFiles.has(full)) {
             await fs.rm(full, { force: true });
