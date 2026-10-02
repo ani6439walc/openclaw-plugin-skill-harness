@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
+import { performance } from "node:perf_hooks";
+import { setTimeout as realDelay } from "node:timers/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -24,7 +26,23 @@ vi.mock("openclaw/plugin-sdk/agent-harness-runtime", () => ({
   emitAgentEvent: vi.fn(),
 }));
 const roots: string[] = [];
-afterEach(() => {
+const cleanup: Array<() => void> = [];
+const operations = new Set<Promise<unknown>>();
+function track<T>(operation: Promise<T>): Promise<T> {
+  operations.add(operation);
+  void operation.then(
+    () => operations.delete(operation),
+    () => operations.delete(operation),
+  );
+  return operation;
+}
+async function settleFixture() {
+  cleanup.splice(0).forEach((release) => release());
+  await until(() => operations.size === 0);
+}
+afterEach(async () => {
+  // Release gates and drain handlers before resetting mocks or removing files.
+  await settleFixture();
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.clearAllMocks();
@@ -50,17 +68,19 @@ const selected = {
   confidence: 0.9,
   reason: "relevant",
 };
-function deferred<T>() {
+function deferred<T>(cleanupValue: T) {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => {
     resolve = r;
   });
+  cleanup.push(() => resolve(cleanupValue));
   return { promise, resolve };
 }
 async function until(predicate: () => boolean) {
-  for (let i = 0; i < 1000; i++) {
+  const deadline = performance.now() + 5_000;
+  while (performance.now() < deadline) {
     if (predicate()) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await realDelay(5);
   }
   throw new Error("Fixture did not reach expected stage");
 }
@@ -101,6 +121,23 @@ function fixture() {
     },
     routingSelector: selector,
   });
+  let active = true;
+  cleanup.push(() => {
+    active = false;
+  });
+  const onBeforePromptBuild = handlers.onBeforePromptBuild;
+  handlers.onBeforePromptBuild = (event, ctx) =>
+    track(
+      onBeforePromptBuild(event, {
+        ...ctx,
+        hookInvocation: {
+          assertActive: () => {
+            if (!active) throw new Error("Fixture disposed");
+            ctx.hookInvocation?.assertActive();
+          },
+        },
+      }),
+    );
   return {
     tracker,
     search,
@@ -147,6 +184,19 @@ beforeAll(async () => {
 });
 
 describe("prompt routing deadlines", () => {
+  it("drains a blocked handler during early-exit cleanup before resetting mocks", async () => {
+    const f = fixture();
+    const search = deferred<[]>([]);
+    f.search.mockReturnValue(search.promise);
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const pending = f.handlers.onBeforePromptBuild(event, ctx);
+    await until(() => f.search.mock.calls.length > 0);
+    await settleFixture();
+    expect(operations.size).toBe(0);
+    expect((await pending)?.prependContext).toBeUndefined();
+    expect(f.selector).not.toHaveBeenCalled();
+  });
+
   it("uses enabled search budgets plus selection and overhead", () => {
     const config = resolveConfig({});
     expect(promptRoutingBudgetMs(config.routing)).toBe(21_500);
@@ -162,7 +212,7 @@ describe("prompt routing deadlines", () => {
 
   it("retains context after 12-second retrieval through the installed host", async () => {
     const f = fixture();
-    const search = deferred<[]>();
+    const search = deferred<[]>([]);
     f.search.mockReturnValue(search.promise);
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const runner = hostRunner({
@@ -195,7 +245,7 @@ describe("prompt routing deadlines", () => {
         routing: { experiences: { maxInjectedExperiences: 0 } },
       }),
     );
-    const search = deferred<[]>();
+    const search = deferred<[]>([]);
     f.search.mockReturnValue(search.promise);
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const runner = hostRunner({
@@ -217,7 +267,7 @@ describe("prompt routing deadlines", () => {
 
   it("bounds a stalled skill search and ignores its late result", async () => {
     const f = fixture();
-    const search = deferred<[]>();
+    const search = deferred<[]>([]);
     f.search.mockReturnValue(search.promise);
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const pending = f.handlers.onBeforePromptBuild(event, ctx);
@@ -242,7 +292,7 @@ describe("prompt routing deadlines", () => {
 
   it("does not commit selection to a superseded turn", async () => {
     const f = fixture();
-    const selection = deferred<typeof selected>();
+    const selection = deferred<typeof selected>(selected);
     f.selector.mockReturnValue(selection.promise);
     const pending = f.handlers.onBeforePromptBuild(event, ctx);
     await until(() => f.selector.mock.calls.length > 0);
@@ -267,7 +317,7 @@ describe("prompt routing deadlines", () => {
 
   it("fails open on selector timeout and ignores its late selection", async () => {
     const f = fixture();
-    const selection = deferred<typeof selected>();
+    const selection = deferred<typeof selected>(selected);
     f.selector.mockReturnValue(selection.promise);
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const pending = f.handlers.onBeforePromptBuild(event, ctx);
@@ -290,7 +340,7 @@ describe("prompt routing deadlines", () => {
 
   it("does not persist after the host invalidates the invocation", async () => {
     const f = fixture();
-    const search = deferred<[]>();
+    const search = deferred<[]>([]);
     f.search.mockReturnValue(search.promise);
     let active = true;
     const pending = f.handlers.onBeforePromptBuild(event, {
@@ -311,14 +361,18 @@ describe("prompt routing deadlines", () => {
 
   it("does not prepare an expired turn and releases its reservation for a retry", async () => {
     const f = fixture();
-    const release = deferred<void>();
+    const release = deferred<void>(undefined);
     const original = f.tracker.preparePromptTurn.bind(f.tracker);
     const prepare = vi
       .spyOn(f.tracker, "preparePromptTurn")
-      .mockImplementationOnce(async (params) => {
-        await release.promise;
-        return original(params);
-      });
+      .mockImplementationOnce((params) =>
+        track(
+          (async () => {
+            await release.promise;
+            return original(params);
+          })(),
+        ),
+      );
     let active = true;
     const invocation = {
       assertActive: () => {
@@ -347,14 +401,18 @@ describe("prompt routing deadlines", () => {
 
   it("rechecks validity inside a delayed persistence operation", async () => {
     const f = fixture();
-    const release = deferred<void>();
+    const release = deferred<void>(undefined);
     const original = f.tracker.mergeTurnAndPersist.bind(f.tracker);
     const merge = vi
       .spyOn(f.tracker, "mergeTurnAndPersist")
-      .mockImplementation(async (params) => {
-        await release.promise;
-        return original(params);
-      });
+      .mockImplementation((params) =>
+        track(
+          (async () => {
+            await release.promise;
+            return original(params);
+          })(),
+        ),
+      );
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const pending = f.handlers.onBeforePromptBuild(event, ctx);
     await until(() => merge.mock.calls.length > 0);
@@ -375,7 +433,7 @@ describe("prompt routing deadlines", () => {
 
   it("expires guards even when an operation completes after its deadline", async () => {
     vi.useFakeTimers();
-    const done = deferred<void>();
+    const done = deferred<void>(undefined);
     let guard!: () => void;
     const pending = withPromptDeadline(
       100,

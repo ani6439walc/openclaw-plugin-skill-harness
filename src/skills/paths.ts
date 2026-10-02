@@ -7,7 +7,17 @@ export async function resolveConfinedPath(
   candidate: string,
 ): Promise<string | undefined> {
   try {
-    const rootReal = await fs.realpath(root);
+    return await resolveFromRoot(await fs.realpath(root), candidate);
+  } catch {
+    return;
+  }
+}
+
+async function resolveFromRoot(
+  rootReal: string,
+  candidate: string,
+): Promise<string | undefined> {
+  try {
     const candidateReal = await fs.realpath(candidate);
     const relative = path.relative(rootReal, candidateReal);
     if (
@@ -26,7 +36,12 @@ export async function resolveConfinedFile(
   root: string,
   candidate: string,
 ): Promise<string | undefined> {
-  const resolved = await resolveConfinedPath(root, candidate);
+  return regularFile(await resolveConfinedPath(root, candidate));
+}
+
+async function regularFile(
+  resolved: string | undefined,
+): Promise<string | undefined> {
   if (!resolved) return;
   try {
     if ((await fs.stat(resolved)).isFile()) return resolved;
@@ -40,8 +55,14 @@ export async function listConfinedFiles(
   root: string,
   directory: string,
 ): Promise<string[]> {
+  let rootReal: string;
+  try {
+    rootReal = await fs.realpath(root);
+  } catch {
+    return [];
+  }
   async function walk(dir: string, ancestors: Set<string>): Promise<string[]> {
-    const resolved = await resolveConfinedPath(root, dir);
+    const resolved = await resolveFromRoot(rootReal, dir);
     if (!resolved || ancestors.has(resolved)) return [];
     const nextAncestors = new Set(ancestors).add(resolved);
     try {
@@ -51,7 +72,8 @@ export async function listConfinedFiles(
         a.name.localeCompare(b.name),
       )) {
         const entryPath = path.join(dir, entry.name);
-        if (await resolveConfinedFile(root, entryPath)) files.push(entryPath);
+        if (await regularFile(await resolveFromRoot(rootReal, entryPath)))
+          files.push(entryPath);
         else if (entry.isDirectory() || entry.isSymbolicLink())
           files.push(...(await walk(entryPath, nextAncestors)));
       }
