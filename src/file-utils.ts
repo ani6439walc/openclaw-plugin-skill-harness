@@ -245,26 +245,42 @@ function writeLockOwner(lockPath: string): void {
  * Never reclaim solely because mtime is old.
  */
 function tryReclaimOrphanedLock(lockPath: string): boolean {
-  const owner = readLockOwner(lockPath);
-  if (!owner) return false;
-  if (isProcessAlive(owner.pid)) {
-    const currentStartTime = readProcessStartTime(owner.pid);
-    if (owner.processStartTime && currentStartTime) {
-      if (owner.processStartTime === currentStartTime) return false;
-    } else if (!processStartedAfter(owner.pid, owner.createdAtMs)) {
-      return false;
-    }
+  // Serialize owner inspection and removal across reclaimers. Never reclaim this
+  // guard: ambiguous crash leftovers must not permit deleting a successor's lock.
+  const reclaimPath = `${lockPath}.reclaim`;
+  try {
+    fs.mkdirSync(reclaimPath);
+  } catch {
+    return false;
   }
   try {
-    fs.rmSync(lockPath, { recursive: true, force: true });
-    return true;
-  } catch (err: unknown) {
-    logger.warn("failed to reclaim orphaned file lock", {
-      error: err,
-      path: lockPath,
-      owner,
-    });
-    return false;
+    const owner = readLockOwner(lockPath);
+    if (!owner) return false;
+    if (isProcessAlive(owner.pid)) {
+      const currentStartTime = readProcessStartTime(owner.pid);
+      if (owner.processStartTime && currentStartTime) {
+        if (owner.processStartTime === currentStartTime) return false;
+      } else if (!processStartedAfter(owner.pid, owner.createdAtMs)) {
+        return false;
+      }
+    }
+    try {
+      fs.rmSync(lockPath, { recursive: true, force: true });
+      return true;
+    } catch (err: unknown) {
+      logger.warn("failed to reclaim orphaned file lock", {
+        error: err,
+        path: lockPath,
+        owner,
+      });
+      return false;
+    }
+  } finally {
+    try {
+      fs.rmdirSync(reclaimPath);
+    } catch {
+      /* Fail closed on uncertain ownership. */
+    }
   }
 }
 

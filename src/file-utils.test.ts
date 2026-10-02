@@ -19,6 +19,36 @@ import {
 } from "./file-utils.js";
 
 describe("FileLock", () => {
+  it("does not reuse a dead-owner decision while another reclaimer can replace the lock", async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "file-lock-reclaim-"),
+    );
+    const target = path.join(tempDir, "catalog");
+    const lock = `${target}.lock`;
+    fs.mkdirSync(lock);
+    writeJsonAtomic(path.join(lock, "owner.json"), {
+      pid: 2_147_483_647,
+      createdAtMs: 1,
+    });
+    fs.mkdirSync(`${lock}.reclaim`);
+    const contender = new FileLock(target);
+    try {
+      expect(await contender.acquire({ maxWaitMs: 0 })).toBe(false);
+      // The concurrent reclaimer finishes and a successor acquires the lock.
+      writeJsonAtomic(path.join(lock, "owner.json"), {
+        pid: process.pid,
+        createdAtMs: Date.now(),
+      });
+      fs.rmdirSync(`${lock}.reclaim`);
+      expect(await contender.acquire({ maxWaitMs: 0 })).toBe(false);
+      expect(
+        readJsonFile<{ pid: number }>(path.join(lock, "owner.json")).pid,
+      ).toBe(process.pid);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("supports zero-wait acquisition without entering the default retry loop", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-lock-test-"));
     const targetPath = path.join(tempDir, "session.json");

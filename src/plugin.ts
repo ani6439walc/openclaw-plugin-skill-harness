@@ -24,6 +24,7 @@ import {
 import { suppressNativeSkillsOnStartup } from "./skills/suppress-native.js";
 import { SkillExperienceCatalog } from "./experiences/index.js";
 import { createSkillQmdIndex } from "./qmd/skill-index.js";
+import { activeAgentIdsFromConfig } from "./qmd/active-agents.js";
 import { createSkillExperienceQmdIndex } from "./qmd/experience-index.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -162,8 +163,20 @@ export function createPlugin(
       let refreshTimer: ReturnType<typeof setTimeout> | undefined;
       const nativeBundledSkillsDir = resolveOpenClawBundledSkillsDir();
       const experienceCatalog = new SkillExperienceCatalog(dataRoot);
+      const activeAgentIds = (): string[] | undefined => {
+        try {
+          return activeAgentIdsFromConfig(
+            getRuntimeConfig(),
+            Object.keys(config.skills.workingSet.agents),
+          );
+        } catch {
+          return undefined;
+        }
+      };
       const qmdSkillIndex = createSkillQmdIndex({
         dataRoot,
+        readOnly: !ownsBackgroundWork,
+        activeAgentIds,
         config: () => {
           refreshLiveConfigFromRuntime();
           return { qmd: config.qmd, skills: config.skills };
@@ -186,14 +199,10 @@ export function createPlugin(
 
       const knownAgentIds = new Set<string>(["main"]);
       const collectKnownAgentIds = () => {
+        const currentAgentIds = activeAgentIds();
+        if (currentAgentIds) return currentAgentIds;
         for (const id of extractConfiguredAgentIds(api.config)) {
           knownAgentIds.add(id);
-        }
-        const currentRuntimeConfig = getRuntimeConfig();
-        if (currentRuntimeConfig) {
-          for (const id of extractConfiguredAgentIds(currentRuntimeConfig)) {
-            knownAgentIds.add(id);
-          }
         }
         for (const agentId of Object.keys(config.skills.workingSet.agents)) {
           knownAgentIds.add(agentId);
@@ -201,7 +210,7 @@ export function createPlugin(
         return knownAgentIds;
       };
 
-      const scheduleSkillSearchIndex = (agentId: string) => {
+      const scheduleSkillSearchIndex = (agentId: string, automatic = false) => {
         if (disposed || !ownsBackgroundWork) return;
         const normalizedAgentId = canonicalIdentity(agentId);
         if (!normalizedAgentId || normalizedAgentId === "defaults") return;
@@ -209,17 +218,27 @@ export function createPlugin(
         void nativeBundledSkillsDir
           .then(async (resolvedNativeBundledSkillsDir) => {
             if (disposed) return;
+            if (
+              automatic &&
+              activeAgentIds()?.includes(normalizedAgentId) === false
+            )
+              return;
             const skills = await listAvailableSkills({
-              api,
+              api: runtimeConfigApi,
               agentId: normalizedAgentId,
               nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
               sharedRoots: config.skills.sharedRoots,
             });
             if (disposed) return;
+            if (
+              automatic &&
+              activeAgentIds()?.includes(normalizedAgentId) === false
+            )
+              return;
             qmdSkillIndex.schedule(normalizedAgentId, {
               skills,
               sourceRoots: resolveSkillRoots({
-                api,
+                api: runtimeConfigApi,
                 agentId: normalizedAgentId,
                 bundledSkillsDir: bundledSkillsIdentityDir,
                 nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
@@ -240,8 +259,13 @@ export function createPlugin(
         refreshLiveConfigFromRuntime();
         qmdExperienceIndex.schedule(experienceCatalog.listAll());
         for (const agentId of collectKnownAgentIds()) {
-          scheduleSkillSearchIndex(agentId);
+          scheduleSkillSearchIndex(agentId, true);
         }
+        void qmdSkillIndex.maintenance?.().catch((error: unknown) => {
+          logger.warn("failed to maintain QMD skill indexes", {
+            errorType: error instanceof Error ? "Error" : typeof error,
+          });
+        });
       };
 
       const scheduleQmdIndexRefresh = () => {
