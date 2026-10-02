@@ -11,8 +11,9 @@ import {
   initializePluginDataRoot,
 } from "./plugin.js";
 
-const { createHookHandlersSpy } = vi.hoisted(() => ({
+const { createHookHandlersSpy, createSkillIndexSpy } = vi.hoisted(() => ({
   createHookHandlersSpy: vi.fn(),
+  createSkillIndexSpy: vi.fn(),
 }));
 
 vi.mock("./hooks/index.js", async (importOriginal) => {
@@ -28,12 +29,26 @@ vi.mock("./hooks/index.js", async (importOriginal) => {
   };
 });
 
+vi.mock("./qmd/skill-index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./qmd/skill-index.js")>();
+  return {
+    ...actual,
+    createSkillQmdIndex: (
+      ...args: Parameters<typeof actual.createSkillQmdIndex>
+    ) => {
+      createSkillIndexSpy(args[0]);
+      return actual.createSkillQmdIndex(...args);
+    },
+  };
+});
+
 describe("createPlugin", () => {
   let stateDir: string;
 
   beforeEach(() => {
     stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-state-"));
     createHookHandlersSpy.mockReset();
+    createSkillIndexSpy.mockReset();
   });
 
   afterEach(() => {
@@ -300,6 +315,84 @@ describe("createPlugin", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(schedule).toHaveBeenCalledTimes(2);
     createHookHandlersSpy.mockReset();
+  });
+
+  it.each(["full", "discovery", "tool-discovery", "cli-metadata"] as const)(
+    "runs orphan maintenance only for full registration (%s)",
+    async (registrationMode) => {
+      vi.useFakeTimers();
+      const maintenance = vi.fn().mockResolvedValue(undefined);
+      createHookHandlersSpy.mockImplementation((deps) => {
+        deps.qmdSkillIndex.maintenance = maintenance;
+        vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(() => {});
+      });
+      const onDispose = vi.fn();
+      const api = createApi({
+        registrationMode,
+        pluginConfig: { qmd: { indexRefreshIntervalSeconds: 300 } },
+        lifecycle: { onDispose, registerRuntimeLifecycle: vi.fn() },
+      });
+      createPlugin(api).register(api);
+      expect(createSkillIndexSpy.mock.calls[0][0].readOnly).toBe(
+        registrationMode !== "full",
+      );
+      expect(maintenance).toHaveBeenCalledTimes(
+        registrationMode === "full" ? 1 : 0,
+      );
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(maintenance).toHaveBeenCalledTimes(
+        registrationMode === "full" ? 2 : 0,
+      );
+      await onDispose.mock.calls[0][0]();
+    },
+  );
+
+  it("uses current authoritative agents for maintenance and stops refreshing removed agents", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let current: unknown = { agents: { entries: { coder: {} } } };
+    const schedule = vi.fn();
+    createHookHandlersSpy.mockImplementation((deps) => {
+      vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(schedule);
+      deps.qmdSkillIndex.maintenance = vi.fn().mockResolvedValue(undefined);
+    });
+    const onDispose = vi.fn();
+    const api = createApi({
+      config: { agents: { entries: { stale: {} } } },
+      pluginConfig: {
+        qmd: { indexRefreshIntervalSeconds: 300 },
+        skills: { workingSet: { agents: { writer: [] } } },
+      },
+      lifecycle: { onDispose, registerRuntimeLifecycle: vi.fn() },
+    });
+    api.runtime.config.current = (() =>
+      current) as typeof api.runtime.config.current;
+    createPlugin(api).register(api);
+    const { activeAgentIds } = createSkillIndexSpy.mock.calls[0][0];
+    expect(activeAgentIds()).toEqual(["main", "coder", "writer"]);
+    await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(3));
+    expect(schedule.mock.calls.map(([id]) => id).sort()).toEqual([
+      "coder",
+      "main",
+      "writer",
+    ]);
+    schedule.mockClear();
+    current = { agents: { entries: {} } };
+    await vi.advanceTimersByTimeAsync(300_000);
+    await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(2));
+    expect(schedule.mock.calls.map(([id]) => id).sort()).toEqual([
+      "main",
+      "writer",
+    ]);
+    expect(activeAgentIds()).toEqual(["main", "writer"]);
+    current = { agents: { entries: [] } };
+    expect(activeAgentIds()).toBeUndefined();
+    current = undefined;
+    expect(activeAgentIds()).toBeUndefined();
+    api.runtime.config.current = () => {
+      throw new Error("unavailable");
+    };
+    expect(activeAgentIds()).toBeUndefined();
+    await onDispose.mock.calls[0][0]();
   });
 
   it("extracts configured agent IDs from entries", () => {

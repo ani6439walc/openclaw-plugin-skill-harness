@@ -27,6 +27,8 @@ The script never outputs session text, tool parameters/results, Review suggestio
 - `analysis.cumulative` uses the stats attribution cohort, while its Review summary uses retained completed events. These are different populations. Never combine cumulative counts with daily or retained-session denominators.
 - Session summaries cover retained routing fields only, normally about 14 days. They can be partial even inside that period. Both session and Review period summaries flag windows extending beyond their respective 14-day and 90-day retention assumptions. They deduplicate session/turn identities, preferring completed turns and then current records. Report sample counts, invalid/unidentified timestamps, duplicates, and first/last observation times. Do not infer completeness from those dates.
 
+Skill-index reclamation uses separate lifetime file leases and 24-hour grace markers in `qmd/skills/gc.json`; this report does not expose those coordination records. An index without a current mapping may still be within its grace period or held open by another instance. Do not infer that it is safe to delete from report counts alone. Removed-agent mapping retirement depends on the complete live agent registry, followed by a separate index grace period.
+
 A healthy report **does not prove Gateway loaded the plugin**. Review logs also cannot prove whether Review is enabled, queued, running, or stuck.
 
 ## Decision reports
