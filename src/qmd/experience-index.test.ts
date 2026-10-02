@@ -5,6 +5,7 @@ import path from "node:path";
 import type { QMDStore } from "@wei840222/qmd";
 import type { SkillExperienceEntry } from "../experiences/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
+import { FileLock, withFileLock } from "../file-utils.js";
 import {
   createSkillExperienceQmdIndex,
   type SkillExperienceQmdIndex,
@@ -206,6 +207,10 @@ describe("SkillExperienceQmdIndex", () => {
       "metadata.json",
     );
     const metadata = await fs.readFile(metadataPath, "utf8");
+    await fs.writeFile(
+      path.join(tmpDir, "qmd", "experiences", "experience-routing.sqlite"),
+      "",
+    );
     const readStore = makeStore();
     let finishOpen!: (store: QMDStore) => void;
     const createStore = vi.fn().mockImplementation(
@@ -346,6 +351,10 @@ describe("SkillExperienceQmdIndex", () => {
     });
     index.schedule(MOCK_ENTRIES);
     await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+    await fs.writeFile(
+      path.join(tmpDir, "qmd", "experiences", "experience-routing.sqlite"),
+      "",
+    );
     return {
       first,
       next,
@@ -677,5 +686,256 @@ describe("SkillExperienceQmdIndex", () => {
     expect(fixture.createStore.mock.calls[2]?.[0]).toMatchObject({
       remoteRequestTimeoutMs: 3000,
     });
+  });
+  async function publish(
+    entries: readonly SkillExperienceEntry[],
+    config = DEFAULT_CONFIG,
+  ) {
+    const createStore = vi
+      .fn()
+      .mockImplementation(async ({ dbPath }: { dbPath: string }) => {
+        await fs.writeFile(dbPath, "");
+        return makeStore();
+      });
+    const full = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => config,
+      createStore,
+    });
+    try {
+      full.schedule(entries);
+      await vi.waitFor(async () =>
+        expect(await full.search({ query: "screenshot" })).toHaveLength(1),
+      );
+    } finally {
+      await full.close();
+    }
+  }
+
+  it("recovers the same discovery after full publication and follows live catalog and embedding changes", async () => {
+    let entries = MOCK_ENTRIES;
+    let config = DEFAULT_CONFIG;
+    const stores: ReturnType<typeof makeStore>[] = [];
+    const createStore = vi.fn().mockImplementation(async () => {
+      const store = makeStore();
+      stores.push(store);
+      return store;
+    });
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => config,
+      getEntries: () => entries,
+      createStore,
+      readOnly: true,
+    });
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    expect(createStore).not.toHaveBeenCalled();
+    await publish(entries);
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+    entries = [{ ...MOCK_ENTRIES[0], body: "new body", skills: ["new-skill"] }];
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    await publish(entries);
+    expect(await index.search({ query: "screenshot" })).toEqual([
+      expect.objectContaining({ skills: ["new-skill"] }),
+    ]);
+    config = {
+      ...DEFAULT_CONFIG,
+      embedding: { ...DEFAULT_CONFIG.embedding, dimension: 768 },
+    };
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    await publish(entries, config);
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+    expect(createStore).toHaveBeenCalledTimes(3);
+    for (const store of stores) {
+      expect(store.update).not.toHaveBeenCalled();
+      expect(store.embed).not.toHaveBeenCalled();
+    }
+    for (const [options] of createStore.mock.calls)
+      expect(options.readOnly).toBe(true);
+  });
+
+  it("recovers after invalid metadata, missing database, and a failed read-only open", async () => {
+    await publish(MOCK_ENTRIES);
+    const metadataPath = path.join(
+      tmpDir,
+      "qmd",
+      "experiences",
+      "metadata.json",
+    );
+    const dbPath = path.join(
+      tmpDir,
+      "qmd",
+      "experiences",
+      "experience-routing.sqlite",
+    );
+    const metadata = await fs.readFile(metadataPath, "utf8");
+    const createStore = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary open failure"))
+      .mockResolvedValue(makeStore());
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      getEntries: () => MOCK_ENTRIES,
+      createStore,
+      readOnly: true,
+    });
+    await fs.writeFile(metadataPath, "{broken");
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    await fs.writeFile(metadataPath, metadata);
+    await fs.rm(dbPath);
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    expect(createStore).not.toHaveBeenCalled();
+    await fs.writeFile(dbPath, "");
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+    expect(createStore).toHaveBeenCalledTimes(2);
+  });
+
+  it("drains old discovery searches, coalesces refreshes, and preserves their catalog snapshot", async () => {
+    let entries = MOCK_ENTRIES;
+    await publish(entries);
+    const first = makeStore();
+    const next = makeStore();
+    const createStore = vi
+      .fn()
+      .mockResolvedValue(next)
+      .mockResolvedValueOnce(first);
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      getEntries: () => entries,
+      createStore,
+      readOnly: true,
+    });
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+    first.search.mockClear();
+    const pending = deferred<{ filepath: string; score: number }[]>();
+    first.search.mockReturnValue(pending.promise);
+    const active = index.search({ query: "screenshot" });
+    await vi.waitFor(() => expect(first.search).toHaveBeenCalledTimes(3));
+    entries = [{ ...MOCK_ENTRIES[0], body: "new body", skills: ["new-skill"] }];
+    await publish(entries);
+    const waiting = index.search({ query: "screenshot" });
+    const another = index.search({ query: "screenshot" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(first.close).not.toHaveBeenCalled();
+    expect(
+      await withFileLock(
+        path.join(tmpDir, "qmd", "experiences", "experience-routing.sqlite"),
+        async () => true,
+        { maxWaitMs: 0 },
+      ),
+    ).toBe(true);
+    pending.resolve([{ filepath: "keywords/image-analysis.md", score: 0.9 }]);
+    expect(await active).toEqual([
+      expect.objectContaining({ skills: ["cx", "vision"] }),
+    ]);
+    for (const result of await Promise.all([waiting, another]))
+      expect(result).toEqual([
+        expect.objectContaining({ skills: ["new-skill"] }),
+      ]);
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(createStore).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains a discovery store after failed close and retries rotation", async () => {
+    let entries = MOCK_ENTRIES;
+    await publish(entries);
+    const first = makeStore();
+    const next = makeStore();
+    const createStore = vi
+      .fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValue(next);
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      getEntries: () => entries,
+      createStore,
+      readOnly: true,
+    });
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+    first.search.mockClear();
+    first.close.mockRejectedValueOnce(new Error("temporary close failure"));
+    entries = [
+      { ...MOCK_ENTRIES[0]!, body: "updated body", skills: ["updated-skill"] },
+    ];
+    await publish(entries);
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    expect(first.search).not.toHaveBeenCalled();
+    expect(createStore).toHaveBeenCalledOnce();
+    expect(await index.search({ query: "screenshot" })).toEqual([
+      expect.objectContaining({ skills: ["updated-skill"] }),
+    ]);
+    expect(first.close).toHaveBeenCalledTimes(2);
+    expect(createStore).toHaveBeenCalledTimes(2);
+    expect(next.update).not.toHaveBeenCalled();
+    expect(next.embed).not.toHaveBeenCalled();
+  });
+
+  it("fails open while the build lock is busy and recovers after release", async () => {
+    await publish(MOCK_ENTRIES);
+    const store = makeStore();
+    const createStore = vi.fn().mockResolvedValue(store);
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      getEntries: () => MOCK_ENTRIES,
+      createStore,
+      readOnly: true,
+    });
+    const lock = new FileLock(
+      path.join(tmpDir, "qmd", "experiences", "experience-routing.sqlite"),
+    );
+    expect(await lock.acquire({ maxWaitMs: 0 })).toBe(true);
+    try {
+      expect(await index.search({ query: "screenshot" })).toBeUndefined();
+      expect(createStore).not.toHaveBeenCalled();
+    } finally {
+      lock.release();
+    }
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+    expect(createStore).toHaveBeenCalledOnce();
+    expect(store.update).not.toHaveBeenCalled();
+    expect(store.embed).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a discovery store opened while the catalog changes or disposal starts", async () => {
+    let entries = MOCK_ENTRIES;
+    await publish(entries);
+    const pending = deferred<QMDStore>();
+    const stale = makeStore();
+    const next = makeStore();
+    const createStore = vi
+      .fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue(next);
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      getEntries: () => entries,
+      createStore,
+      readOnly: true,
+    });
+    const searching = index.search({ query: "screenshot" });
+    await vi.waitFor(() => expect(createStore).toHaveBeenCalledOnce());
+    entries = [{ ...MOCK_ENTRIES[0], body: "new body" }];
+    pending.resolve(stale as unknown as QMDStore);
+    expect(await searching).toBeUndefined();
+    expect(index.getStatus()).toBe("idle");
+    expect(stale.search).not.toHaveBeenCalled();
+    await publish(entries);
+    const opening = deferred<QMDStore>();
+    createStore.mockReturnValueOnce(opening.promise);
+    const replacement = index.search({ query: "screenshot" });
+    await vi.waitFor(() => expect(createStore).toHaveBeenCalledTimes(2));
+    const closing = index.close();
+    opening.resolve(next as unknown as QMDStore);
+    expect(await replacement).toBeUndefined();
+    await closing;
+    expect(next.close).toHaveBeenCalledOnce();
+    expect(next.search).not.toHaveBeenCalled();
+    index = undefined;
   });
 });
