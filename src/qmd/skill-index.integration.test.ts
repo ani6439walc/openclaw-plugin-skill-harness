@@ -185,6 +185,94 @@ function flattenedInputs(fixture: EmbeddingFixture, from = 0): string[] {
 }
 
 describe("createSkillQmdIndex real QMD integration", () => {
+  it("refreshes a live discovery mapping using read-only real SQLite stores", async () => {
+    const fixture = await createEmbeddingFixture();
+    const dataRoot = await mkdtemp(
+      path.join(tmpdir(), "skill-discovery-real-qmd-"),
+    );
+    roots.push(dataRoot);
+    const alpha = await createSkill({
+      name: "alpha",
+      description: "Alpha skill",
+      body: "alphadiscoverymarker",
+    });
+    const beta = await createSkill({
+      name: "beta",
+      description: "Beta skill",
+      body: "betadiscoverymarker",
+    });
+    let publications = 0;
+    const modes: Array<boolean | undefined> = [];
+    const trackedStore = async (options: StoreOptions): Promise<QMDStore> => {
+      modes.push(options.readOnly);
+      const store = await createStore(options);
+      store.search = async (query) =>
+        store.searchLex(query.query ?? "", {
+          collection: query.collection,
+          limit: query.limit,
+        });
+      const embed = store.embed.bind(store);
+      store.embed = async (options) => {
+        const result = await embed(options);
+        publications += 1;
+        return result;
+      };
+      return store;
+    };
+    const full = createSkillQmdIndex({
+      dataRoot,
+      config: () => configFor(fixture.baseUrl),
+      createStore: trackedStore,
+    });
+    const discovery = createSkillQmdIndex({
+      dataRoot,
+      readOnly: true,
+      config: () => configFor(fixture.baseUrl),
+      createStore: trackedStore,
+    });
+    const search = (query: string) =>
+      discovery.search({ agentId: "main", query, limit: 5 });
+    try {
+      expect(await search("alphadiscoverymarker")).toBeUndefined();
+      full.schedule("main", {
+        skills: [alpha],
+        sourceRoots: [path.dirname(alpha.location)],
+      });
+      await waitUntil(
+        () => publications === 1 && full.getStatus("main") === "ready",
+        "alpha publication",
+      );
+      await waitUntil(
+        async () =>
+          (await search("alphadiscoverymarker"))?.some(
+            (hit) => hit.name === "alpha",
+          ) === true,
+        "discovery alpha recovery",
+      );
+      full.schedule("main", {
+        skills: [beta],
+        sourceRoots: [path.dirname(beta.location)],
+      });
+      await waitUntil(
+        () => publications === 2 && full.getStatus("main") === "ready",
+        "beta publication",
+      );
+      await waitUntil(
+        async () =>
+          (await search("betadiscoverymarker"))?.some(
+            (hit) => hit.name === "beta",
+          ) === true,
+        "discovery beta switch",
+      );
+      expect(await search("alphadiscoverymarker")).toEqual([]);
+      expect(modes.filter((mode) => mode === true)).toHaveLength(2);
+      expect(publications).toBe(2);
+    } finally {
+      await discovery.close();
+      await full.close();
+    }
+  });
+
   it("incrementally embeds changed documents in one SQLite and lazy-opens it after restart", async () => {
     const fixture = await createEmbeddingFixture();
     const dataRoot = await mkdtemp(

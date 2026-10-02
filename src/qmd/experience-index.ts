@@ -221,6 +221,7 @@ export function createSkillExperienceQmdIndex(params: {
   config: () => ResolvedQmdConfig;
   createStore?: QmdCreateStore;
   readOnly?: boolean;
+  getEntries?: () => readonly SkillExperienceEntry[];
 }): SkillExperienceQmdIndex {
   const indexPath = path.join(params.dataRoot, "qmd", "experiences");
   const databasePath = path.join(indexPath, "experience-routing.sqlite");
@@ -230,6 +231,8 @@ export function createSkillExperienceQmdIndex(params: {
   let store: QMDStore | undefined;
   let connectionSignature: string | undefined;
   let opening: Promise<QMDStore | undefined> | undefined;
+  let refreshing: Promise<boolean> | undefined;
+  let storeFingerprint: string | undefined;
   let activeSearches = 0;
   let drained: Promise<void> | undefined;
   let resolveDrained: (() => void) | undefined;
@@ -378,20 +381,26 @@ export function createSkillExperienceQmdIndex(params: {
   function ensureStore(): Promise<QMDStore | undefined> {
     if (closed) return Promise.resolve(undefined);
     if (opening) return opening;
-    if (store && connectionSignature === storeConnection().signature)
+    if (
+      store &&
+      connectionSignature === storeConnection().signature &&
+      (!params.readOnly || storeFingerprint === expectedFingerprint)
+    )
       return Promise.resolve(store);
     const pending = (async () => {
       try {
         await drained;
         while (!closed) {
           const previous = store;
-          store = undefined;
-          connectionSignature = undefined;
           if (previous) await previous.close();
+          store = undefined;
+          storeFingerprint = undefined;
+          connectionSignature = undefined;
           if (closed) return;
           const connection = storeConnection();
           const createStore =
             params.createStore ?? (await import("@wei840222/qmd")).createStore;
+          const fingerprint = expectedFingerprint;
           const opened = await createStore({
             dbPath: databasePath,
             config: { collections: {}, models: connection.models },
@@ -399,6 +408,7 @@ export function createSkillExperienceQmdIndex(params: {
             remoteRequestTimeoutMs: connection.remoteRequestTimeoutMs,
           });
           store = opened;
+          storeFingerprint = fingerprint;
           connectionSignature = connection.signature;
           if (closed) return;
           if (connection.signature !== storeConnection().signature) continue;
@@ -416,11 +426,89 @@ export function createSkillExperienceQmdIndex(params: {
     return pending;
   }
 
+  function refreshDiscovery(): Promise<boolean> {
+    if (refreshing) return refreshing;
+    const pending = (async () => {
+      try {
+        const entries = params.getEntries?.() ?? [...knownEntriesById.values()];
+        knownEntriesById = new Map(entries.map((entry) => [entry.id, entry]));
+        expectedFingerprint = snapshotFingerprint(entries, params.config());
+        // Do not create a lock directory (or an empty SQLite database) when absent.
+        if (!(await fs.lstat(databasePath)).isFile()) return false;
+        if (
+          storeFingerprint !== expectedFingerprint ||
+          connectionSignature !== storeConnection().signature
+        )
+          await drained;
+        if (closed) return false;
+        const ready = await withFileLock(
+          databasePath,
+          async () => {
+            if (closed) return false;
+            const meta = readJsonFile<unknown>(metadataPath);
+            if (
+              !isExperienceIndexMetadata(meta) ||
+              meta.fingerprint !== expectedFingerprint
+            )
+              return false;
+            if (!(await fs.lstat(databasePath)).isFile()) return false;
+            // Retry a late connection change without holding the build lock
+            // while existing model requests finish.
+            if (
+              activeSearches > 0 &&
+              (storeFingerprint !== expectedFingerprint ||
+                connectionSignature !== storeConnection().signature)
+            )
+              return false;
+            const opened = await ensureStore();
+            if (!opened || closed) return false;
+            const latestEntries = params.getEntries?.() ?? [
+              ...knownEntriesById.values(),
+            ];
+            const latestFingerprint = snapshotFingerprint(
+              latestEntries,
+              params.config(),
+            );
+            const latestMeta = readJsonFile<unknown>(metadataPath);
+            if (
+              !isExperienceIndexMetadata(latestMeta) ||
+              latestMeta.fingerprint !== meta.fingerprint ||
+              latestFingerprint !== meta.fingerprint
+            )
+              return false;
+            knownEntriesById = new Map(
+              latestEntries.map((entry) => [entry.id, entry]),
+            );
+            currentFingerprint = meta.fingerprint;
+            status = "ready";
+            return true;
+          },
+          { maxWaitMs: 1_000 },
+        );
+        return ready === true;
+      } catch {
+        return false;
+      }
+    })();
+    refreshing = pending;
+    void pending.then((ready) => {
+      if (!ready && !closed) status = "idle";
+      if (refreshing === pending) refreshing = undefined;
+    });
+    return pending;
+  }
+
   async function acquireStore() {
-    while (!closed && status === "ready") {
-      const activeStore = await ensureStore();
+    while (!closed) {
+      if (params.readOnly && !(await refreshDiscovery())) return;
+      if (status !== "ready") return;
+      const activeStore = params.readOnly ? store : await ensureStore();
       if (!activeStore || closed || !isReadyForCurrentCatalog()) return;
-      if (opening || connectionSignature !== storeConnection().signature)
+      if (
+        refreshing ||
+        opening ||
+        connectionSignature !== storeConnection().signature
+      )
         continue;
       activeSearches += 1;
       if (activeSearches === 1) {
@@ -430,6 +518,7 @@ export function createSkillExperienceQmdIndex(params: {
       }
       return {
         store: activeStore,
+        entries: knownEntriesById,
         release() {
           activeSearches -= 1;
           if (activeSearches === 0) {
@@ -570,7 +659,9 @@ export function createSkillExperienceQmdIndex(params: {
     );
   }
 
-  const initialization = openExistingIndex();
+  const initialization = params.readOnly
+    ? Promise.resolve()
+    : openExistingIndex();
 
   return {
     schedule(entries) {
@@ -597,7 +688,7 @@ export function createSkillExperienceQmdIndex(params: {
     },
     async search({ query, limit = 8, expansionContext }) {
       await initialization;
-      if (closed || !isReadyForCurrentCatalog()) return;
+      if (closed || (!params.readOnly && !isReadyForCurrentCatalog())) return;
       let lease: Awaited<ReturnType<typeof acquireStore>>;
       try {
         lease = await acquireStore();
@@ -656,7 +747,7 @@ export function createSkillExperienceQmdIndex(params: {
           const rawHits = hitsById.get(fusedHit.id);
           if (!rawHits || rawHits.length === 0) continue;
 
-          const entry = knownEntriesById.get(fusedHit.id);
+          const entry = lease.entries.get(fusedHit.id);
           const skills = entry?.skills ?? [];
           const semanticScore = Math.max(
             ...rawHits.map((h) => h.semanticScore),
@@ -707,6 +798,7 @@ export function createSkillExperienceQmdIndex(params: {
       clearRetryTimer();
       await initialization;
       await running;
+      await refreshing;
       await opening;
       await drained;
       buildingFingerprint = undefined;

@@ -6,6 +6,10 @@ import path from "node:path";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { resolveConfig } from "../config.js";
+import type { QMDStore } from "@wei840222/qmd";
+import { createSkillExperienceQmdIndex } from "../qmd/experience-index.js";
+import { SkillExperienceCatalog } from "../experiences/catalog.js";
+import { registerSkillTools } from "../skills/tools.js";
 import {
   createHookHandlers,
   formatConversationExpansionContext,
@@ -3553,6 +3557,125 @@ describe("createHookHandlers topic switch flow", () => {
       );
       expect(occurrences).toHaveLength(1);
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers experience retrieval through hooks and tools after full registration publishes an index", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hook-discovery-refresh-"),
+    );
+    const dataRoot = path.join(tmp, "plugins", "skill-harness");
+    const directory = path.join(dataRoot, "experiences", "brainstorm");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(
+      path.join(directory, "summary.md"),
+      "Generate creative alternatives.",
+    );
+    fs.writeFileSync(
+      path.join(directory, "keywords.md"),
+      "- creative alternatives\n",
+    );
+    fs.writeFileSync(
+      path.join(directory, "body.md"),
+      "Try several distinct approaches.",
+    );
+    const catalog = new SkillExperienceCatalog(dataRoot);
+    const config = resolveConfig({}).qmd;
+    const stores: Array<{
+      update: ReturnType<typeof vi.fn>;
+      embed: ReturnType<typeof vi.fn>;
+    }> = [];
+    const createStore = vi.fn(
+      async (options: { dbPath: string; readOnly?: boolean }) => {
+        if (!options.readOnly) fs.writeFileSync(options.dbPath, "");
+        const store = {
+          update: vi.fn().mockResolvedValue(undefined),
+          embed: vi.fn().mockResolvedValue({ errors: 0 }),
+          getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
+          close: vi.fn().mockResolvedValue(undefined),
+          search: vi.fn().mockResolvedValue([
+            {
+              filepath: "keywords/brainstorm.md",
+              score: 0.9,
+              explain: { vectorScores: [0.9] },
+            },
+          ]),
+        };
+        stores.push(store);
+        return store as unknown as QMDStore;
+      },
+    );
+    const discovery = createSkillExperienceQmdIndex({
+      dataRoot,
+      readOnly: true,
+      config: () => config,
+      getEntries: () => catalog.listAll(),
+      createStore,
+    });
+    const full = createSkillExperienceQmdIndex({
+      dataRoot,
+      config: () => config,
+      createStore,
+    });
+    const { handlers, record } = createTopicFlowHarness({
+      historicalIntents: [],
+      configRaw: { routing: { skills: { maxInjectedSkills: 0 } } },
+      experienceCatalog: {
+        resolve: vi.fn((id: string) => catalog.resolve(id)),
+      },
+      qmdExperienceIndex: {
+        search: vi.fn((params) => discovery.search(params)),
+      },
+    });
+    const registerTool = vi.fn();
+    registerSkillTools({ registerTool } as unknown as OpenClawPluginApi, {
+      experienceCatalog: catalog,
+      qmdExperienceIndex: discovery,
+    });
+    const registration = registerTool.mock.calls.find(
+      ([, options]) => options?.name === "skill_experience",
+    );
+    const tool = registration![0]({ agentId: "main" });
+    const toolQuery = async () => {
+      const result = await tool.execute("test", {
+        query: "unlisted paraphrase",
+      });
+      return JSON.parse(result.content[0].text);
+    };
+    try {
+      await handlers.onBeforePromptBuild(event, ctx);
+      expect(
+        record.mock.calls.at(-1)?.[1].current.inputSkillDiscovery
+          .experienceRetrieval.status,
+      ).toBe("unavailable");
+      expect((await toolQuery()).entries).toEqual([]);
+      full.schedule(catalog.listAll());
+      await vi.waitFor(() => expect(full.getStatus()).toBe("ready"));
+      const result = await handlers.onBeforePromptBuild(event, {
+        ...ctx,
+        runId: "run-recovered",
+      });
+      expect(
+        record.mock.calls.at(-1)?.[1].current.inputSkillDiscovery
+          .experienceRetrieval,
+      ).toMatchObject({
+        status: "completed",
+        candidateCount: 1,
+      });
+      expect(result?.prependContext).toContain('id="brainstorm"');
+      expect((await toolQuery()).entries).toEqual([
+        expect.objectContaining({ id: "brainstorm" }),
+      ]);
+      const readStoreIndex = createStore.mock.calls.findIndex(
+        ([options]) => options.readOnly === true,
+      );
+      expect(readStoreIndex).toBeGreaterThanOrEqual(0);
+      expect(stores[readStoreIndex]!.update).not.toHaveBeenCalled();
+      expect(stores[readStoreIndex]!.embed).not.toHaveBeenCalled();
+    } finally {
+      await discovery.close();
+      await full.close();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

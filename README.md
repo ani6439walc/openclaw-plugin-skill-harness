@@ -161,6 +161,20 @@ Skill index reclamation runs during full-registration startup and the existing Q
 
 Retired agent mappings are recognized only from a complete, current runtime `agents.entries` registry, retaining implicit `main` and explicit working-set agent IDs. They have their own 24-hour grace period. Removing the last mapping starts the index's separate 24-hour grace, so reclaiming a removed agent's index can take at least 48 hours, or longer while it is in use. A remaining active agent always preserves a shared index. Incomplete runtime configuration skips agent retirement; absence of recent queries is never evidence of removal. Discovery instances participate in store leases but do not collect or rebuild. Setting `qmd.indexRefreshIntervalSeconds: 0` disables subsequent maintenance passes as well as refresh polling. Experiences, sessions, statistics, and Review data are outside this reclamation scope.
 
+The managed skill-index layout is:
+
+```text
+qmd/skills/
+  agents/<agent-key>.json       # fingerprint and original visible skill names
+  indexes/<fingerprint>/        # document snapshots, metadata, SQLite database
+  leases/<fingerprint>/*.lock/  # lifetime store ownership; not query activity
+  gc.json                      # schema v1: orphanSince and retiredAgentSince
+```
+
+Keep these files under plugin management; they do not require a new configuration setting or manual reset. Empty grace-period maps mean no pending reclamation was recorded, not that a sweep failed. Grace periods start when maintenance first observes an unreferenced index or retired agent, not from directory modification time. Reclamation occurs on a later eligible maintenance pass, so 24/48 hours are minimum delays, not exact deletion deadlines. If closing a retired store fails, its lease remains in place and maintenance continues for unrelated indexes.
+
+Discovery rechecks published indexes when searching, so a long-lived instance can recover after background indexing without being recreated. Experience searches compare current catalog/model identity with completed metadata and reopen the read-only store when needed. Skill searches reread the invoking agent's mapping, including its visible names, and switch indexes under lifetime-lease protection. Missing, invalid, or not-yet-published state contributes no candidates instead of falling back to a known-stale mapping. Searches already in progress retain their acquired version; store retirement waits for active work, and failed closes retain the lease. Discovery never builds, embeds, publishes mappings, or runs GC. These checks do not guarantee that a particular keyword produces a qualified retrieval hit or a Jev selection.
+
 **Upgrade requirement:** fully stop/restart all Gateway processes using this data root when introducing reclamation. Older plugin generations do not publish lifetime leases; a hot reload alone cannot establish that every old SQLite reader has stopped. No manual index deletion or telemetry reset is needed.
 
 Runtime state is separate from the package at `~/.openclaw/plugins/skill-harness/`. The static prompt never includes a runtime inventory. Dynamic context contains decoupled selected experiences and selected skills; it never emits separate intent tags or input-skill wrappers. The plugin is fail-open: runtime routing, statistics, and Review failures are logged while the main agent continues with whichever fixed or dynamic context remains available. Invalid plugin configuration can prevent loading at the manifest validation boundary.

@@ -6,7 +6,7 @@ import path from "node:path";
 import type { createStore, QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
-import { withFileLock, writeJsonAtomic } from "../file-utils.js";
+import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { AvailableSkill } from "../skills/types.js";
 import type {
   ResolvedQmdConfig,
@@ -567,6 +567,7 @@ export function createSkillQmdIndex(params: {
   const now = () => params.nowMs?.() ?? Date.now();
   const gc = createSkillIndexGc({ skillsRoot, nowMs: now });
   let maintenanceWork: Promise<void> | undefined;
+  let discoveryWork = Promise.resolve();
   const setTimer =
     params.setTimer ??
     ((callback: () => void, delayMs: number) => setTimeout(callback, delayMs));
@@ -732,7 +733,149 @@ export function createSkillQmdIndex(params: {
     }
   }
 
-  const initialization = loadExistingIndexCatalog();
+  const initialization = params.readOnly
+    ? Promise.resolve()
+    : loadExistingIndexCatalog();
+
+  type DiscoveryMapping = { fingerprint: string; names: Set<string> };
+
+  async function readDiscoveryMapping(
+    agentId: string,
+  ): Promise<DiscoveryMapping | undefined> {
+    try {
+      if (
+        !(await fs.lstat(mappingsRoot)).isDirectory() ||
+        !(await fs.lstat(mappingPath(agentId))).isFile()
+      )
+        return;
+      const value = readJsonFile<unknown>(mappingPath(agentId));
+      if (!value || typeof value !== "object") return;
+      const parsed = value as Record<string, unknown>;
+      if (
+        parsed.schemaVersion !== 1 ||
+        typeof parsed.fingerprint !== "string" ||
+        !/^[a-f0-9]{64}$/u.test(parsed.fingerprint) ||
+        !Array.isArray(parsed.allowedSkillNames) ||
+        !parsed.allowedSkillNames.every(
+          (name): name is string =>
+            typeof name === "string" && name.trim().length > 0,
+        )
+      )
+        return;
+      const root = path.join(indexesRoot, parsed.fingerprint);
+      if (
+        !(await fs.lstat(indexesRoot)).isDirectory() ||
+        !(await fs.lstat(root)).isDirectory() ||
+        !(await fs.lstat(path.join(root, "docs"))).isDirectory() ||
+        !(await fs.lstat(path.join(root, "skill-search.sqlite"))).isFile()
+      )
+        return;
+      return {
+        fingerprint: parsed.fingerprint,
+        names: new Set(parsed.allowedSkillNames),
+      };
+    } catch {
+      return;
+    }
+  }
+
+  function bindDiscovery(agentId: string, mapping?: DiscoveryMapping): void {
+    const agent = agentState(agentId);
+    if (agent.fingerprint !== mapping?.fingerprint && agent.fingerprint)
+      indexes.get(agent.fingerprint)?.agentIds.delete(agentId);
+    agent.fingerprint = mapping?.fingerprint;
+    agent.expectedFingerprint = mapping?.fingerprint;
+    agent.allowedSkillNames = mapping?.names ?? new Set();
+    if (mapping) {
+      const state = indexState(mapping.fingerprint);
+      state.agentIds.add(agentId);
+      state.usable = true;
+    }
+  }
+
+  // Only idle, unreferenced stores retire. A running search retries this on release.
+  function retireDiscoveryStores(): void {
+    if (!params.readOnly || closed) return;
+    for (const state of indexes.values()) {
+      if (
+        state.agentIds.size ||
+        state.activeOperations ||
+        state.opening ||
+        state.pinning ||
+        state.retiring ||
+        !state.releasePin
+      )
+        continue;
+      const retiring = (async () => {
+        try {
+          if (state.store) await state.store.close();
+          state.store = undefined;
+          state.connectionSignature = undefined;
+          state.releasePin?.();
+          state.releasePin = undefined;
+        } catch (error) {
+          logger.warn("failed to close retired QMD skill index", {
+            error,
+            fingerprint: state.fingerprint,
+          });
+        }
+      })();
+      state.retiring = retiring;
+      void retiring.finally(() => {
+        if (state.retiring === retiring) state.retiring = undefined;
+      });
+    }
+  }
+
+  function acquireDiscovery(agentId: string) {
+    const work = discoveryWork.then(async () => {
+      if (closed) return;
+      // Pin outside the catalog lock: acquire() itself takes that lock.
+      const mapping = await gc.withCatalog(() => readDiscoveryMapping(agentId));
+      if (!mapping || closed) {
+        bindDiscovery(agentId);
+        return;
+      }
+      const state = indexState(mapping.fingerprint);
+      if (!(await pinState(state, false)) || closed) {
+        bindDiscovery(agentId);
+        return;
+      }
+      const current = await gc.withCatalog(() => readDiscoveryMapping(agentId));
+      if (!current || current.fingerprint !== mapping.fingerprint || closed) {
+        bindDiscovery(agentId);
+        return;
+      }
+      bindDiscovery(agentId, current);
+      const lease = await acquireStore(state);
+      if (!lease) return;
+      let transferred = false;
+      try {
+        // Opening/rotation may have yielded across another process's publication.
+        const latest = await gc.withCatalog(() =>
+          readDiscoveryMapping(agentId),
+        );
+        if (!latest || latest.fingerprint !== current.fingerprint || closed) {
+          bindDiscovery(agentId);
+          return;
+        }
+        bindDiscovery(agentId, latest);
+        transferred = true;
+        return { state, lease, names: latest.names };
+      } finally {
+        if (!transferred) lease.release();
+      }
+    });
+    discoveryWork = work.then(
+      () => {
+        retireDiscoveryStores();
+      },
+      () => {
+        retireDiscoveryStores();
+      },
+    );
+    return work;
+  }
 
   function storeConnection() {
     const { qmd } = config();
@@ -784,9 +927,9 @@ export function createSkillQmdIndex(params: {
         await waitForOperations(state);
         while (!closed) {
           const previous = state.store;
+          if (previous) await previous.close();
           state.store = undefined;
           state.connectionSignature = undefined;
-          if (previous) await previous.close();
           if (closed) return;
           const connection = storeConnection();
           if (
@@ -802,6 +945,7 @@ export function createSkillQmdIndex(params: {
             params.createStore ?? (await import("@wei840222/qmd")).createStore;
           const store = await createQmdStore({
             dbPath: state.databasePath,
+            ...(params.readOnly ? { readOnly: true } : {}),
             config: {
               collections: skillSnapshotCollections(state.docsRoot),
               models: connection.models,
@@ -858,6 +1002,7 @@ export function createSkillQmdIndex(params: {
             state.resolveDrained?.();
             state.drained = undefined;
             state.resolveDrained = undefined;
+            retireDiscoveryStores();
           }
         },
       };
@@ -1072,13 +1217,21 @@ export function createSkillQmdIndex(params: {
       await initialization;
       if (closed) return;
       const normalizedAgentId = normalizeAgentId(agentId);
-      const agent = agents.get(normalizedAgentId);
-      if (!agent?.fingerprint) return;
-      const state = indexes.get(agent.fingerprint);
-      if (!state) return;
       let lease: Awaited<ReturnType<typeof acquireStore>>;
       try {
-        lease = await acquireStore(state);
+        const discovery = params.readOnly
+          ? await acquireDiscovery(normalizedAgentId)
+          : undefined;
+        const agent = agents.get(normalizedAgentId);
+        const state = params.readOnly
+          ? discovery?.state
+          : agent?.fingerprint
+            ? indexes.get(agent.fingerprint)
+            : undefined;
+        if (!state) return;
+        const allowedSkillNames =
+          discovery?.names ?? new Set(agent?.allowedSkillNames);
+        lease = discovery?.lease ?? (await acquireStore(state));
         if (!lease) return;
         const activeStore = lease.store;
 
@@ -1089,13 +1242,10 @@ export function createSkillQmdIndex(params: {
           references: 1,
         };
         const visibleNames = new Map(
-          [...agent.allowedSkillNames].map((name) => [
-            name.toLowerCase(),
-            name,
-          ]),
+          [...allowedSkillNames].map((name) => [name.toLowerCase(), name]),
         );
         const namesBySegment = new Map<string, string | undefined>();
-        for (const name of agent.allowedSkillNames) {
+        for (const name of allowedSkillNames) {
           const segment = decodeSkillSegment(
             safePathSegment(name),
           ).toLowerCase();
@@ -1340,6 +1490,7 @@ export function createSkillQmdIndex(params: {
       closed = true;
       await maintenanceWork;
       await initialization;
+      await discoveryWork;
       await Promise.all(
         [...agents.values()]
           .map((agent) => agent.scheduling)
@@ -1353,6 +1504,7 @@ export function createSkillQmdIndex(params: {
       );
       await Promise.all(
         [...indexes.values()].map(async (state) => {
+          await state.retiring;
           await state.pinning;
           await state.opening;
           await waitForOperations(state);

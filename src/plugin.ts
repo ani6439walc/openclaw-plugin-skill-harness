@@ -185,6 +185,7 @@ export function createPlugin(
       const qmdExperienceIndex = createSkillExperienceQmdIndex({
         dataRoot,
         readOnly: !ownsBackgroundWork,
+        getEntries: () => experienceCatalog.listAll(),
         config: () => {
           refreshLiveConfigFromRuntime();
           return config.qmd;
