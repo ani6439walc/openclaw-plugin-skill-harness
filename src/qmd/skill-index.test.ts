@@ -202,7 +202,7 @@ describe("writeSkillSnapshot", () => {
       "skill-references": {
         path: path.join(docsRoot, "references"),
         pattern: "**/*",
-        ignore: ["**/*.identity.yml"],
+        ignore: ["**/*.identity.json", "**/*.identity.yml"],
       },
     });
 
@@ -224,15 +224,15 @@ describe("writeSkillSnapshot", () => {
       "utf8",
     );
     const metaIdentity = await readFile(
-      path.join(docsRoot, "meta", segment, "meta.md.identity.yml"),
+      path.join(docsRoot, "meta", segment, "meta.md.identity.json"),
       "utf8",
     );
     const bodyIdentity = await readFile(
-      path.join(docsRoot, "body", segment, "SKILL.md.identity.yml"),
+      path.join(docsRoot, "body", segment, "SKILL.md.identity.json"),
       "utf8",
     );
     const referenceIdentity = await readFile(
-      path.join(docsRoot, "references", segment, "airports.md.identity.yml"),
+      path.join(docsRoot, "references", segment, "airports.md.identity.json"),
       "utf8",
     );
 
@@ -246,13 +246,76 @@ describe("writeSkillSnapshot", () => {
     expect(reference).not.toContain("title: Airports");
     expect(reference).not.toContain("---");
     expect(nested).toBe("Hotel notes\n");
-    expect(metaIdentity).toContain("skill: travel-planning");
-    expect(metaIdentity).toContain("kind: meta");
-    expect(metaIdentity).toContain("path: meta.md");
-    expect(bodyIdentity).toContain("kind: body");
-    expect(bodyIdentity).toContain("path: SKILL.md");
-    expect(referenceIdentity).toContain("kind: reference");
-    expect(referenceIdentity).toContain("path: references/airports.md");
+    expect(JSON.parse(metaIdentity)).toEqual({
+      skill: skill.name,
+      source: skill.source,
+      kind: "meta",
+      path: "meta.md",
+    });
+    expect(JSON.parse(bodyIdentity)).toEqual({
+      skill: skill.name,
+      source: skill.source,
+      kind: "body",
+      path: "SKILL.md",
+    });
+    expect(JSON.parse(referenceIdentity)).toEqual({
+      skill: skill.name,
+      source: skill.source,
+      kind: "reference",
+      path: "references/airports.md",
+    });
+  });
+
+  it("replaces legacy YAML sidecars and preserves unchanged JSON and content", async () => {
+    const skill = await createSkillFixture({
+      name: "identity-json",
+      description: "Metadata",
+      body: "Body",
+      references: { "quoted.md": "Reference" },
+    });
+    const docsRoot = await mkdtemp(path.join(tmpdir(), "skill-json-"));
+    roots.push(docsRoot);
+    await writeSkillSnapshot({ docsRoot, skills: [skill] });
+    const documents = [
+      "meta/identity-json/meta.md",
+      "body/identity-json/SKILL.md",
+      "references/identity-json/quoted.md",
+    ];
+    for (const document of documents) {
+      await writeFile(
+        path.join(docsRoot, `${document}.identity.yml`),
+        "---\nskill: legacy\n---\n",
+      );
+      await rm(path.join(docsRoot, `${document}.identity.json`));
+    }
+    await writeSkillSnapshot({ docsRoot, skills: [skill] });
+    for (const document of documents) {
+      await expect(
+        readFile(path.join(docsRoot, `${document}.identity.yml`)),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(
+        JSON.parse(
+          await readFile(
+            path.join(docsRoot, `${document}.identity.json`),
+            "utf8",
+          ),
+        ),
+      ).toMatchObject({ skill: skill.name });
+    }
+    const bodyPath = path.join(docsRoot, documents[1]);
+    const identityPath = `${bodyPath}.identity.json`;
+    const oldTime = new Date(1_000);
+    await fsPromises.utimes(bodyPath, oldTime, oldTime);
+    await fsPromises.utimes(identityPath, oldTime, oldTime);
+    await writeSkillSnapshot({ docsRoot, skills: [skill] });
+    expect((await fsPromises.stat(bodyPath)).mtimeMs).toBe(1_000);
+    expect((await fsPromises.stat(identityPath)).mtimeMs).toBe(1_000);
+    await writeSkillSnapshot({ docsRoot, skills: [] });
+    for (const document of documents) {
+      await expect(
+        readFile(path.join(docsRoot, `${document}.identity.json`)),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    }
   });
 
   it("encodes unsafe skill names into path-safe segments", () => {
@@ -288,7 +351,7 @@ describe("writeSkillSnapshot", () => {
     const segment = safePathSegment("escape-refs");
     const refsDir = path.join(docsRoot, "references", segment);
     const names = (await readdir(refsDir)).filter(
-      (name) => !name.endsWith(".identity.yml"),
+      (name) => !name.endsWith(".identity.json"),
     );
     expect(names).toEqual(["safe.md"]);
     await expect(readFile(path.join(refsDir, "safe.md"), "utf8")).resolves.toBe(

@@ -125,12 +125,20 @@ describe("SkillExperienceQmdIndex", () => {
         "utf8",
       ),
     ).toContain("- ocr");
-    expect(
-      await fs.readFile(
-        path.join(docsDir, "keywords", "image-analysis.md.identity.yml"),
-        "utf8",
-      ),
-    ).toContain("id: image-analysis");
+    for (const kind of ["keywords", "summary", "body"]) {
+      const identity = JSON.parse(
+        await fs.readFile(
+          path.join(docsDir, kind, "image-analysis.md.identity.json"),
+          "utf8",
+        ),
+      );
+      expect(identity).toEqual({
+        id: MOCK_ENTRIES[0].id,
+        skills: MOCK_ENTRIES[0].skills,
+        kind,
+        path: MOCK_ENTRIES[0].path,
+      });
+    }
 
     const hits = await index.search({ query: "analyze screenshot" });
     expect(hits).toBeDefined();
@@ -355,6 +363,66 @@ describe("SkillExperienceQmdIndex", () => {
       search: () => index!.search({ query: "screenshot" }),
     };
   }
+
+  it("refreshes legacy sidecars to JSON in the same database and cleans removed entries", async () => {
+    const fixture = await setupConnection();
+    await index!.close();
+    const indexRoot = path.join(tmpDir, "qmd", "experiences");
+    const docsRoot = path.join(indexRoot, "docs");
+    for (const kind of ["keywords", "summary", "body"]) {
+      for (const entry of MOCK_ENTRIES) {
+        const document = path.join(docsRoot, kind, `${entry.id}.md`);
+        await fs.rm(`${document}.identity.json`);
+        await fs.writeFile(
+          `${document}.identity.yml`,
+          "---\nid: legacy\n---\n",
+        );
+      }
+    }
+    const metadataPath = path.join(indexRoot, "metadata.json");
+    const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8"));
+    metadata.fingerprint = "legacy-yaml-snapshot";
+    await fs.writeFile(metadataPath, JSON.stringify(metadata));
+    const store = makeStore();
+    const createStore = vi.fn().mockResolvedValue(store);
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore,
+    });
+    index.schedule(MOCK_ENTRIES);
+    await vi.waitFor(() => expect(store.update).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+    expect(createStore.mock.calls[0]?.[0].dbPath).toBe(
+      fixture.createStore.mock.calls[0]?.[0].dbPath,
+    );
+    for (const kind of ["keywords", "summary", "body"]) {
+      const document = path.join(docsRoot, kind, `${MOCK_ENTRIES[0].id}.md`);
+      await expect(
+        fs.readFile(`${document}.identity.yml`),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(
+        JSON.parse(await fs.readFile(`${document}.identity.json`, "utf8")),
+      ).toMatchObject({ id: MOCK_ENTRIES[0].id, kind });
+    }
+    const body = path.join(docsRoot, "body", `${MOCK_ENTRIES[0].id}.md`);
+    await fs.utimes(body, new Date(1_000), new Date(1_000));
+    await fs.utimes(`${body}.identity.json`, new Date(1_000), new Date(1_000));
+    index.schedule([MOCK_ENTRIES[0]]);
+    await vi.waitFor(() => expect(store.update).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+    expect((await fs.stat(body)).mtimeMs).toBe(1_000);
+    expect((await fs.stat(`${body}.identity.json`)).mtimeMs).toBe(1_000);
+    for (const kind of ["keywords", "summary", "body"]) {
+      for (const suffix of [".identity.yml", ".identity.json"]) {
+        await expect(
+          fs.readFile(
+            path.join(docsRoot, kind, `${MOCK_ENTRIES[1].id}.md${suffix}`),
+          ),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+      }
+    }
+  });
 
   it.each(["endpoint", "key", "expansion", "jev", "timeout"])(
     "rotates %s without rebuilding content",

@@ -6,7 +6,7 @@ import path from "node:path";
 import type { createStore, QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
-import { withFileLock } from "../file-utils.js";
+import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { AvailableSkill } from "../skills/types.js";
 import type {
   ResolvedQmdConfig,
@@ -222,13 +222,13 @@ function identitySidecarBody(params: {
   skill: AvailableSkill;
   kind: CollectionKind;
   relativePath: string;
-}): string {
-  return matter.stringify("", {
+}): Record<string, string> {
+  return {
     skill: params.skill.name,
     source: params.skill.source ?? "extra",
     kind: params.kind,
     path: params.relativePath,
-  });
+  };
 }
 
 async function writeIndexedDocument(params: {
@@ -253,10 +253,18 @@ async function writeIndexedDocument(params: {
     }
     await fs.writeFile(target, next, "utf8");
   };
-  await Promise.all([
-    writeIfChanged(params.contentPath, content),
-    writeIfChanged(`${params.contentPath}.identity.yml`, identity),
-  ]);
+  await writeIfChanged(params.contentPath, content);
+  const identityPath = `${params.contentPath}.identity.json`;
+  try {
+    if (
+      JSON.stringify(readJsonFile<unknown>(identityPath)) ===
+      JSON.stringify(identity)
+    )
+      return;
+  } catch {
+    // Missing or malformed identity metadata is regenerated from skill fields.
+  }
+  writeJsonAtomic(identityPath, identity);
 }
 
 function skillSnapshotCollections(
@@ -274,7 +282,7 @@ function skillSnapshotCollections(
     [REFS_COLLECTION]: {
       path: path.join(docsRoot, "references"),
       pattern: "**/*",
-      ignore: ["**/*.identity.yml"],
+      ignore: ["**/*.identity.json", "**/*.identity.yml"],
     },
   };
 }
@@ -304,8 +312,8 @@ async function removeStaleSnapshotDocuments(
           .relative(docsRoot, target)
           .split(path.sep)
           .join("/");
-        const contentRelative = relative.endsWith(".identity.yml")
-          ? relative.slice(0, -".identity.yml".length)
+        const contentRelative = relative.endsWith(".identity.json")
+          ? relative.slice(0, -".identity.json".length)
           : relative;
         if (!expected.has(contentRelative))
           await fs.rm(target, { force: true });

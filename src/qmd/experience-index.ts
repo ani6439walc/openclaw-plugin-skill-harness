@@ -100,6 +100,7 @@ function snapshotFingerprint(
   return hash(
     JSON.stringify({
       schemaVersion: EXPERIENCE_INDEX_METADATA_SCHEMA_VERSION,
+      identityFormat: "json",
       entries: sorted.map((entry) => ({
         id: entry.id,
         skills: [...entry.skills].sort(),
@@ -265,13 +266,13 @@ export function createSkillExperienceQmdIndex(params: {
     writeJsonAtomic(metadataPath, meta);
   }
 
-  function sidecarYaml(entry: SkillExperienceEntry, kind: string): string {
-    return matter.stringify("", {
+  function sidecarIdentity(entry: SkillExperienceEntry, kind: string) {
+    return {
       id: entry.id,
       skills: entry.skills,
       kind,
       path: entry.path,
-    });
+    };
   }
 
   async function writeSnapshot(
@@ -283,17 +284,17 @@ export function createSkillExperienceQmdIndex(params: {
       [EXPERIENCE_KEYWORDS_COLLECTION]: {
         path: path.join(docsRoot, EXPERIENCE_KEYWORDS_COLLECTION),
         pattern: "**/*.md",
-        ignore: ["**/*.identity.yml"],
+        ignore: ["**/*.identity.json", "**/*.identity.yml"],
       },
       [EXPERIENCE_SUMMARY_COLLECTION]: {
         path: path.join(docsRoot, EXPERIENCE_SUMMARY_COLLECTION),
         pattern: "**/*.md",
-        ignore: ["**/*.identity.yml"],
+        ignore: ["**/*.identity.json", "**/*.identity.yml"],
       },
       [EXPERIENCE_BODY_COLLECTION]: {
         path: path.join(docsRoot, EXPERIENCE_BODY_COLLECTION),
         pattern: "**/*.md",
-        ignore: ["**/*.identity.yml"],
+        ignore: ["**/*.identity.json", "**/*.identity.yml"],
       },
     };
 
@@ -303,12 +304,12 @@ export function createSkillExperienceQmdIndex(params: {
       collectionName: string,
       entryId: string,
       content: string,
-      sidecar: string,
+      sidecar: ReturnType<typeof sidecarIdentity>,
     ) => {
       const colDir = path.join(docsRoot, collectionName);
       await fs.mkdir(colDir, { recursive: true });
       const mdPath = path.join(colDir, `${entryId}.md`);
-      const sidecarPath = `${mdPath}.identity.yml`;
+      const sidecarPath = `${mdPath}.identity.json`;
       currentFiles.add(mdPath);
       currentFiles.add(sidecarPath);
 
@@ -322,15 +323,16 @@ export function createSkillExperienceQmdIndex(params: {
         await fs.writeFile(mdPath, content, "utf8");
       }
 
-      let existingSidecar: string | undefined;
       try {
-        existingSidecar = await fs.readFile(sidecarPath, "utf8");
+        if (
+          JSON.stringify(readJsonFile<unknown>(sidecarPath)) ===
+          JSON.stringify(sidecar)
+        )
+          return;
       } catch {
-        // sidecar does not exist
+        // Missing or malformed metadata is regenerated from the catalog.
       }
-      if (existingSidecar !== sidecar) {
-        await fs.writeFile(sidecarPath, sidecar, "utf8");
-      }
+      writeJsonAtomic(sidecarPath, sidecar);
     };
 
     for (const entry of entries) {
@@ -341,7 +343,7 @@ export function createSkillExperienceQmdIndex(params: {
         EXPERIENCE_KEYWORDS_COLLECTION,
         entry.id,
         keywordsContent,
-        sidecarYaml(entry, "keywords"),
+        sidecarIdentity(entry, "keywords"),
       );
 
       // 2. summary
@@ -349,7 +351,7 @@ export function createSkillExperienceQmdIndex(params: {
         EXPERIENCE_SUMMARY_COLLECTION,
         entry.id,
         `${entry.summary.trim()}\n`,
-        sidecarYaml(entry, "summary"),
+        sidecarIdentity(entry, "summary"),
       );
 
       // 3. body
@@ -357,7 +359,7 @@ export function createSkillExperienceQmdIndex(params: {
         EXPERIENCE_BODY_COLLECTION,
         entry.id,
         `${entry.body.trim()}\n`,
-        sidecarYaml(entry, "body"),
+        sidecarIdentity(entry, "body"),
       );
     }
 
@@ -379,7 +381,9 @@ export function createSkillExperienceQmdIndex(params: {
           }
         } else if (
           dirent.isFile() &&
-          (dirent.name.endsWith(".md") || dirent.name.endsWith(".identity.yml"))
+          (dirent.name.endsWith(".md") ||
+            dirent.name.endsWith(".identity.yml") ||
+            dirent.name.endsWith(".identity.json"))
         ) {
           if (!currentFiles.has(full)) {
             await fs.rm(full, { force: true });
