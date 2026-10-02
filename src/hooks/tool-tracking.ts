@@ -43,7 +43,8 @@ export function isToolResultError(
   if (
     typeof message === "object" &&
     message !== null &&
-    (message as { isError?: unknown }).isError === true
+    ((message as { isError?: unknown }).isError === true ||
+      (message as { success?: unknown }).success === false)
   ) {
     return true;
   }

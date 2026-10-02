@@ -456,6 +456,21 @@ describe("skill indexer", () => {
       cacheTtlMs: 0,
       homeDir: path.join(tmp, "home"),
     });
+    expect(
+      await listAvailableSkills({
+        api,
+        agentId: "main",
+        source: "workspace",
+        bundledSkillsDir: "",
+        sharedRoots: [sharedRoot],
+        cacheTtlMs: 0,
+        homeDir: path.join(tmp, "home"),
+      }),
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "shared-skill" }),
+      ]),
+    );
     const otherSkills = await listAvailableSkills({
       api,
       agentId: "other",

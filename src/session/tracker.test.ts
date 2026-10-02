@@ -528,7 +528,7 @@ describe("SessionTracker", () => {
       ).toHaveLength(2);
     });
 
-    it("tracks distinct skills read through exec commands ending with SKILL.md", async () => {
+    it("tracks only skills with frontmatter evidence from exec output", async () => {
       await persistSessionFixture(tracker, "test-session-123", {
         current: {
           intent: {},
@@ -570,10 +570,6 @@ describe("SessionTracker", () => {
           name: "treemd",
           path: "/home/ani/.openclaw/skills/treemd/SKILL.md",
           description: "Tree docs.",
-        },
-        {
-          name: "gcp-cert-exam",
-          path: "skills/gcp-cert-exam/SKILL.md",
         },
       ]);
     });

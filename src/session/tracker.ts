@@ -349,9 +349,16 @@ function extractSkillViewInfo(toolResult: unknown): SkillRecord | undefined {
       name?: unknown;
       path?: unknown;
       skill_dir?: unknown;
+      content?: unknown;
       description?: unknown;
     };
-    if (result.success !== true || typeof result.name !== "string") return;
+    if (
+      result.success !== true ||
+      typeof result.name !== "string" ||
+      !result.name.trim()
+    )
+      return;
+    if (typeof result.content !== "string" || !result.content.trim()) return;
     const skillPath =
       typeof result.path === "string"
         ? result.path
@@ -385,7 +392,7 @@ function extractSkillInfoFromMarkdown(
 
   try {
     const parsed = matter(text);
-    if (parsed.data?.name && typeof parsed.data.name === "string") {
+    if (typeof parsed.data?.name === "string" && parsed.data.name.trim()) {
       return {
         name: parsed.data.name,
         path: filePath,
@@ -414,12 +421,7 @@ function extractExecSkillInfo(
   const filePath = extractTrailingSkillPath(command);
   if (!filePath) return;
 
-  const parsed = extractSkillInfoFromMarkdown(filePath, toolResult);
-  if (parsed) return parsed;
-
-  const skillName = path.basename(path.dirname(filePath));
-  if (!skillName || skillName === "." || skillName === path.sep) return;
-  return { name: skillName, path: filePath };
+  return extractSkillInfoFromMarkdown(filePath, toolResult);
 }
 
 function extractTrailingSkillPath(command: string): string | undefined {
@@ -462,7 +464,9 @@ function appendToolCalls(
   );
   current.toolCalls = [...existing, ...additions];
   const skillsFromToolCalls = additions.map((toolCall) =>
-    extractSkillInfo(toolCall.name, toolCall.params, toolCall.result),
+    toolCall.success === false || toolCall.error !== undefined
+      ? undefined
+      : extractSkillInfo(toolCall.name, toolCall.params, toolCall.result),
   );
   const skillsUsed = mergeUniqueSkills(current.skillsUsed, skillsFromToolCalls);
   if (skillsUsed) {
@@ -620,6 +624,7 @@ export class SessionTracker {
     input: string;
     startedAt: string;
     recentTurns?: readonly RecentTurn[];
+    assertActive?: () => void;
   }): Promise<PromptTurnPrepareResult> {
     const requestedRunId = params.runId?.trim();
     try {
@@ -628,6 +633,7 @@ export class SessionTracker {
           sessionId: params.sessionId,
           maxWaitMs: 0,
           mutate: (session) => {
+            params.assertActive?.();
             const current = session.current;
             if (params.recentTurns?.length) {
               const pairs: Array<{ user: string; assistant?: string }> = [];
@@ -728,12 +734,21 @@ export class SessionTracker {
     expectedTurnKey: string;
     data: Partial<SessionState>;
     maxWaitMs?: number;
+    assertActive?: () => void;
+    currentTurnOnly?: boolean;
   }): Promise<"applied" | "stale" | "retryable-failure"> {
     try {
       const outcome = await this.mutateSession({
         sessionId: params.sessionId,
         maxWaitMs: params.maxWaitMs,
         mutate: (session) => {
+          params.assertActive?.();
+          if (
+            params.currentTurnOnly &&
+            session.current.turnKey !== params.expectedTurnKey
+          ) {
+            return { result: "stale" as const, changed: false };
+          }
           const matches = [session.current, ...(session.history ?? [])].filter(
             (state) => state.turnKey === params.expectedTurnKey,
           );

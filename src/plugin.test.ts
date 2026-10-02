@@ -222,7 +222,7 @@ describe("createPlugin", () => {
       "before_prompt_build",
       expect.any(Function),
       {
-        timeoutMs: 11_500,
+        timeoutMs: 121_500,
         priority: -1,
       },
     );

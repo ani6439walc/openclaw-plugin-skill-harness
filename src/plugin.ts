@@ -36,6 +36,8 @@ import {
   sessionsDirPath,
 } from "./file-utils.js";
 
+import { MAX_PROMPT_HOOK_TIMEOUT_MS } from "./hooks/prompt-budget.js";
+
 const PLUGIN_ID = "skill-harness";
 
 export function initializePluginDataRoot({
@@ -290,7 +292,7 @@ export function createPlugin(
       scheduleQmdIndexRefresh();
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
-        timeoutMs: config.routing.timeoutMs * 2 + 1_500,
+        timeoutMs: MAX_PROMPT_HOOK_TIMEOUT_MS,
         priority: -1,
       });
       api.on("before_tool_call", handlers.onBeforeToolCall);
