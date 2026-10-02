@@ -125,6 +125,53 @@ async function waitFor(
 }
 
 describe("writeSkillSnapshot", () => {
+  it("indexes linked skill roots and internal reference aliases but rejects external skill bodies", async () => {
+    const skill = await createSkillFixture({
+      name: "linked",
+      description: "Linked skill",
+      body: "Allowed body",
+    });
+    const realRoot = path.dirname(skill.location);
+    const aliases = await mkdtemp(path.join(tmpdir(), "skill-harness-alias-"));
+    roots.push(aliases);
+    await symlink(realRoot, path.join(aliases, "linked"));
+    skill.location = path.join(aliases, "linked", "SKILL.md");
+    await mkdir(path.join(realRoot, "templates"));
+    await writeFile(
+      path.join(realRoot, "templates", "note.md"),
+      "Allowed template",
+    );
+    await symlink(
+      "../templates",
+      path.join(realRoot, "references", "templates"),
+    );
+    await symlink(".", path.join(realRoot, "references", "loop"));
+    const docsRoot = path.join(aliases, "docs");
+    await writeSkillSnapshot({ docsRoot, skills: [skill] });
+    expect(
+      await readFile(path.join(docsRoot, "body", "linked", "SKILL.md"), "utf8"),
+    ).toContain("Allowed body");
+    expect(
+      await readFile(
+        path.join(docsRoot, "references", "linked", "templates", "note.md"),
+        "utf8",
+      ),
+    ).toContain("Allowed template");
+    await rm(path.join(realRoot, "SKILL.md"));
+    await writeFile(
+      path.join(aliases, "external.md"),
+      "External body must not be copied",
+    );
+    await symlink(
+      path.join(aliases, "external.md"),
+      path.join(realRoot, "SKILL.md"),
+    );
+    await writeSkillSnapshot({ docsRoot, skills: [skill] });
+    expect(
+      await readFile(path.join(docsRoot, "body", "linked", "SKILL.md"), "utf8"),
+    ).not.toContain("External body");
+  });
+
   it("materializes pure content docs and sidecar identity files", async () => {
     const skill = await createSkillFixture({
       name: "travel-planning",
@@ -215,7 +262,7 @@ describe("writeSkillSnapshot", () => {
     expect(safePathSegment("meta.v2")).toBe("meta%2Ev2");
   });
 
-  it("skips reference symlinks that escape the references directory", async () => {
+  it("skips reference symlinks that escape the skill directory", async () => {
     const skill = await createSkillFixture({
       name: "escape-refs",
       description: "Has escaping refs",
@@ -710,7 +757,7 @@ describe("createSkillQmdIndex", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("does not rebuild when only non-index QMD settings change", async () => {
+  it("reopens the same database when connection settings change", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-qmd-skills-"),
     );
@@ -720,7 +767,9 @@ describe("createSkillQmdIndex", () => {
       description: "Stable config skill",
       body: "body",
     });
-    const createStore = vi.fn(async () => createStoreDouble({}));
+    const createStore = vi.fn(async (_options: unknown) =>
+      createStoreDouble({}),
+    );
     let config = qmdConfig;
     const index = createSkillQmdIndex({
       dataRoot: root,
@@ -749,13 +798,15 @@ describe("createSkillQmdIndex", () => {
       },
     };
     scheduleSkills(index, "main", [skill]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(createStore).toHaveBeenCalledTimes(1);
+    await index.search({ agentId: "main", query: "body", limit: 1 });
+    expect(createStore).toHaveBeenCalledTimes(2);
+    const first = createStore.mock.calls[0]?.[0] as { dbPath: string };
+    const second = createStore.mock.calls[1]?.[0] as { dbPath: string };
+    expect(second.dbPath).toBe(first.dbPath);
     await index.close();
   });
 
-  it("does not rebuild when only the embedding provider prefix changes", async () => {
+  it("preserves database identity when the embedding provider prefix changes", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-qmd-skills-"),
     );
@@ -765,7 +816,9 @@ describe("createSkillQmdIndex", () => {
       description: "Provider change skill",
       body: "body",
     });
-    const createStore = vi.fn(async () => createStoreDouble({}));
+    const createStore = vi.fn(async (_options: unknown) =>
+      createStoreDouble({}),
+    );
     let config: ResolvedQmdConfig = {
       ...qmdConfig,
       embedding: {
@@ -795,9 +848,11 @@ describe("createSkillQmdIndex", () => {
       },
     };
     scheduleSkills(index, "main", [skill]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(createStore).toHaveBeenCalledTimes(1);
+    await index.search({ agentId: "main", query: "body", limit: 1 });
+    expect(createStore).toHaveBeenCalledTimes(2);
+    const first = createStore.mock.calls[0]?.[0] as { dbPath: string };
+    const second = createStore.mock.calls[1]?.[0] as { dbPath: string };
+    expect(second.dbPath).toBe(first.dbPath);
     await index.close();
   });
 
@@ -1161,4 +1216,273 @@ describe("createSkillQmdIndex", () => {
 
     await index.close();
   });
+});
+
+describe("QMD skill connection lifecycle", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  }
+
+  async function setup(first: QMDStore = createStoreDouble({})) {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-qmd-connection-"));
+    roots.push(root);
+    const skill = await createSkillFixture({
+      name: "connection",
+      description: "Connection",
+      body: "body",
+    });
+    let current = structuredClone(qmdConfig);
+    const next = createStoreDouble({});
+    const createStore = vi
+      .fn(async (_options: unknown) => next)
+      .mockResolvedValueOnce(first);
+    const configProvider = vi.fn(() => current);
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: configProvider,
+      createStore: createStore as never,
+    });
+    scheduleSkills(index, "main", [skill]);
+    await waitFor(
+      () => index.getStatus("main") === "ready",
+      "initial store not ready",
+    );
+    return {
+      index,
+      skill,
+      first,
+      next,
+      createStore,
+      configProvider,
+      setConfig: (value: ResolvedQmdConfig) => {
+        current = value;
+      },
+      search: () => index.search({ agentId: "main", query: "query", limit: 3 }),
+    };
+  }
+
+  it.each(["endpoint", "key", "expansion", "jev", "timeout"])(
+    "applies changed %s without changing the index database",
+    async (field) => {
+      const fixture = await setup();
+      const current = structuredClone(qmdConfig);
+      if (field === "endpoint")
+        current.embedding.baseUrl = "https://next.test/v1";
+      if (field === "key") current.embedding.apiKey = "next-key";
+      if (field === "expansion") current.expansion.model = "next-model";
+      if (field === "jev")
+        current.jev = {
+          baseUrl: "https://jev.test",
+          model: "jev",
+          apiKey: "jev-key",
+        };
+      if (field === "timeout") current.timeoutMs = 4321;
+      fixture.setConfig(current);
+      await fixture.search();
+      expect(fixture.first.close).toHaveBeenCalledOnce();
+      expect(fixture.createStore).toHaveBeenCalledTimes(2);
+      const oldOptions = fixture.createStore.mock.calls[0]?.[0] as {
+        dbPath: string;
+      };
+      const options = fixture.createStore.mock.calls[1]?.[0] as {
+        dbPath: string;
+        config: { models: Record<string, unknown> };
+        remoteRequestTimeoutMs: number;
+      };
+      expect(options.dbPath).toBe(oldOptions.dbPath);
+      expect(options.config.models).toMatchObject({
+        embed_api_url: current.embedding.baseUrl,
+        embed_api_key: current.embedding.apiKey,
+        generate_api_model: current.expansion.model,
+      });
+      if (field === "jev")
+        expect(options.config.models).toMatchObject({
+          jev_base_url: current.jev?.baseUrl,
+          jev_api_key: "jev-key",
+        });
+      expect(options.remoteRequestTimeoutMs).toBe(current.timeoutMs);
+      expect(fixture.next.search).toHaveBeenCalledTimes(3);
+      await fixture.index.close();
+    },
+  );
+
+  it("drains all collection searches before coalescing config changes", async () => {
+    const pending = deferred<[]>();
+    const first = createStoreDouble({
+      search: vi.fn().mockReturnValue(pending.promise),
+    });
+    const fixture = await setup(first);
+    const active = fixture.search();
+    await waitFor(
+      () => vi.mocked(first.search).mock.calls.length === 3,
+      "search not started",
+    );
+    fixture.setConfig({ ...qmdConfig, timeoutMs: 2000 });
+    const waiting = fixture.search();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
+    const alsoWaiting = fixture.search();
+    expect(first.close).not.toHaveBeenCalled();
+    expect(first.search).toHaveBeenCalledTimes(3);
+    pending.resolve([]);
+    await Promise.all([active, waiting, alsoWaiting]);
+    expect(fixture.createStore).toHaveBeenCalledTimes(2);
+    expect(fixture.createStore.mock.calls[1]?.[0]).toMatchObject({
+      remoteRequestTimeoutMs: 3000,
+    });
+    expect(fixture.next.search).toHaveBeenCalledTimes(6);
+    await fixture.index.close();
+  });
+
+  it("waits for embedding before replacing its store", async () => {
+    const pending = deferred<{ errors: number }>();
+    const first = createStoreDouble({
+      embed: vi.fn().mockReturnValue(pending.promise),
+    });
+    const fixture = await setup(first);
+    fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
+    const search = fixture.search();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(first.close).not.toHaveBeenCalled();
+    expect(first.search).not.toHaveBeenCalled();
+    pending.resolve({ errors: 0 });
+    await search;
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(fixture.next.search).toHaveBeenCalledTimes(3);
+    await fixture.index.close();
+  });
+
+  it("fails open without using the previous store after reopen fails", async () => {
+    const fixture = await setup();
+    fixture.createStore.mockRejectedValueOnce(
+      new Error("connection unavailable"),
+    );
+    fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
+    expect(await fixture.search()).toBeUndefined();
+    expect(fixture.first.close).toHaveBeenCalledOnce();
+    expect(fixture.first.search).not.toHaveBeenCalled();
+    await fixture.search();
+    expect(fixture.next.search).toHaveBeenCalledTimes(3);
+    await fixture.index.close();
+  });
+
+  it("disposal waits for sibling searches even after one collection rejects", async () => {
+    const pending = deferred<[]>();
+    const search = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("search failed"))
+      .mockReturnValue(pending.promise);
+    const fixture = await setup(createStoreDouble({ search }));
+    const active = fixture.search();
+    await waitFor(() => search.mock.calls.length === 3, "search not started");
+    const closing = fixture.index.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fixture.first.close).not.toHaveBeenCalled();
+    pending.resolve([]);
+    expect(await active).toBeUndefined();
+    await closing;
+    expect(fixture.first.close).toHaveBeenCalledOnce();
+    expect(await fixture.search()).toBeUndefined();
+  });
+  it("waits for an in-flight refresh update before switching connections", async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const fixture = await setup(createStoreDouble({ update }));
+    await waitFor(
+      () => vi.mocked(fixture.first.getStatus).mock.calls.length > 0,
+      "initial refresh unfinished",
+    );
+    const pending = deferred<{}>();
+    update.mockReturnValueOnce(pending.promise);
+    scheduleSkills(fixture.index, "main", [fixture.skill]);
+    await waitFor(
+      () => update.mock.calls.length === 2,
+      "second update not started",
+    );
+    fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
+    const search = fixture.search();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fixture.first.close).not.toHaveBeenCalled();
+    pending.resolve({});
+    await search;
+    expect(fixture.first.close).toHaveBeenCalledOnce();
+    expect(fixture.next.search).toHaveBeenCalledTimes(3);
+    await fixture.index.close();
+  });
+
+  it("closes a newly opening store on disposal without lending it", async () => {
+    const fixture = await setup();
+    const pending = deferred<QMDStore>();
+    fixture.createStore.mockReturnValueOnce(pending.promise);
+    fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
+    const search = fixture.search();
+    await waitFor(
+      () => fixture.createStore.mock.calls.length === 2,
+      "replacement not opening",
+    );
+    const closing = fixture.index.close();
+    pending.resolve(fixture.next);
+    expect(await search).toBeUndefined();
+    await closing;
+    expect(fixture.next.search).not.toHaveBeenCalled();
+    expect(fixture.next.close).toHaveBeenCalledOnce();
+  });
+
+  it("never lends settings that became stale while a replacement was opening", async () => {
+    const fixture = await setup();
+    const pending = deferred<QMDStore>();
+    const intermediate = createStoreDouble({});
+    fixture.createStore.mockReturnValueOnce(pending.promise);
+    fixture.setConfig({ ...qmdConfig, timeoutMs: 2000 });
+    const search = fixture.search();
+    await waitFor(
+      () => fixture.createStore.mock.calls.length === 2,
+      "replacement not opening",
+    );
+    fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
+    pending.resolve(intermediate);
+    await search;
+    expect(intermediate.search).not.toHaveBeenCalled();
+    expect(intermediate.close).toHaveBeenCalledOnce();
+    expect(fixture.createStore.mock.calls[2]?.[0]).toMatchObject({
+      remoteRequestTimeoutMs: 3000,
+    });
+    expect(fixture.next.search).toHaveBeenCalledTimes(3);
+    await fixture.index.close();
+  });
+
+  it.each([1, 3])(
+    "fails open and releases operations when config read %s throws",
+    async (read) => {
+      const fixture = await setup();
+      await waitFor(
+        () => vi.mocked(fixture.first.getStatus).mock.calls.length > 0,
+        "initial refresh unfinished",
+      );
+      // The third read follows the two connection checks and an acquired lease.
+      for (let i = 1; i < read; i += 1) {
+        fixture.configProvider.mockReturnValueOnce(qmdConfig);
+      }
+      fixture.configProvider.mockImplementationOnce(() => {
+        throw new Error("invalid live config");
+      });
+      expect(await fixture.search()).toBeUndefined();
+      expect(fixture.first.search).not.toHaveBeenCalled();
+      fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
+      let finished = false;
+      const rotation = fixture.search().then(() => {
+        finished = true;
+      });
+      await waitFor(() => finished, "config failure leaked an operation lease");
+      await rotation;
+      expect(fixture.next.search).toHaveBeenCalledTimes(3);
+      await fixture.index.close();
+      expect(fixture.next.close).toHaveBeenCalledOnce();
+    },
+  );
 });

@@ -362,6 +362,7 @@ description: "Maintain Skill Harness intents on demand and inspect runtime healt
       success: true,
       name: "skill-harness",
       description: "Harness skills.",
+      content: "# Skill Harness\nFull skill instructions.",
       path: "/skills/skill-harness/SKILL.md",
       skill_dir: "/skills/skill-harness",
     });
@@ -2524,17 +2525,23 @@ describe("createHookHandlers topic switch flow", () => {
       }));
     const commitPromptRecommendation =
       params.commitPromptRecommendation ?? vi.fn().mockResolvedValue("applied");
+    const currentTurns = new Map<string, { turnKey: string }>();
     const tracker = {
+      getCurrentState: vi.fn((sessionId: string) =>
+        currentTurns.get(sessionId),
+      ),
       getHistoricalIntentRecords: vi
         .fn()
         .mockReturnValue(params.historicalIntents),
       resolveCurrentSessionId: vi.fn().mockReturnValue(undefined),
-      preparePromptTurn: vi.fn().mockImplementation(({ runId }) =>
-        Promise.resolve({
+      preparePromptTurn: vi.fn().mockImplementation(({ sessionId, runId }) => {
+        const turnKey = runId ?? "anonymous-turn";
+        currentTurns.set(sessionId, { turnKey });
+        return Promise.resolve({
           status: "applied",
-          identity: { turnKey: runId ?? "anonymous-turn", reused: false },
-        }),
-      ),
+          identity: { turnKey, reused: false },
+        });
+      }),
       mergeTurnAndPersist: vi.fn().mockImplementation(({ sessionId, data }) => {
         record(sessionId, { current: data });
         return Promise.resolve("applied");
@@ -4814,6 +4821,69 @@ Current user request: fresh clean request with clean-skill
     expect(systemContext).not.toContain("suppressed-workspace-skill");
     expect(systemContext).not.toContain("<working_set_skills>");
   });
+
+  it.each([
+    [true, true, false],
+    [true, false, false],
+    [false, true, false],
+    [false, false, false],
+    [true, true, true],
+    [true, false, true],
+    [false, true, true],
+    [false, false, true],
+  ])(
+    "uses the winning source with workspace=%s workshop=%s explicit=%s",
+    async (includeWorkspaceSkills, includeWorkshopSkills, explicit) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-winner-"));
+      try {
+        const stateDir = path.join(tmp, "state");
+        const workspaceDir = path.join(tmp, "workspace");
+        writeSkill(
+          path.join(workspaceDir, "skills"),
+          "duplicate",
+          "Workspace loses.",
+        );
+        writeSkill(
+          path.join(stateDir, "agents", "main", "agent", "workshop-skills"),
+          "duplicate",
+          "Workshop wins.",
+        );
+        const { handlers } = createTopicFlowHarness({
+          historicalIntents: [],
+          configRaw: {
+            skills: { includeWorkspaceSkills, includeWorkshopSkills },
+          },
+          api: {
+            runtime: {
+              state: { resolveStateDir: () => stateDir },
+              agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+            } as never,
+          },
+          bundledSkillsDir: "",
+          getWorkingSetSkills: vi
+            .fn()
+            .mockResolvedValue(explicit ? ["duplicate"] : []),
+        });
+        const result = await handlers.onBeforePromptBuild(
+          {
+            prompt: "unrelated",
+            messages: [{ role: "user", content: "unrelated" }],
+          } as never,
+          ctx,
+        );
+        const context = result?.appendSystemContext ?? "";
+        expect(context).not.toContain("Workspace loses.");
+        expect(context.includes("Workshop wins.")).toBe(
+          includeWorkshopSkills || explicit,
+        );
+        expect((context.match(/<skill name="duplicate">/g) ?? []).length).toBe(
+          includeWorkshopSkills || explicit ? 1 : 0,
+        );
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("automatically appends agent workshop skills when skills.includeWorkshopSkills is default", async () => {
     const tmp = fs.mkdtempSync(

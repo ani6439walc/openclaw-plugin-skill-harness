@@ -108,17 +108,9 @@ function snapshotFingerprint(
         bodyHash: hash(entry.body),
       })),
       qmd: {
-        timeoutMs: config.timeoutMs,
         embedding: {
-          baseUrl: config.embedding.baseUrl,
           model: normalizeEmbeddingModel(config.embedding.model),
-          apiKey: config.embedding.apiKey,
           dimension: config.embedding.dimension ?? null,
-        },
-        expansion: {
-          baseUrl: config.expansion.baseUrl,
-          model: config.expansion.model,
-          apiKey: config.expansion.apiKey,
         },
       },
     }),
@@ -235,6 +227,11 @@ export function createSkillExperienceQmdIndex(params: {
   const metadataPath = path.join(indexPath, "metadata.json");
 
   let store: QMDStore | undefined;
+  let connectionSignature: string | undefined;
+  let opening: Promise<QMDStore | undefined> | undefined;
+  let activeSearches = 0;
+  let drained: Promise<void> | undefined;
+  let resolveDrained: (() => void) | undefined;
   let status: SkillExperienceIndexStatus = "idle";
   let closed = false;
   let running: Promise<void> | undefined;
@@ -395,26 +392,90 @@ export function createSkillExperienceQmdIndex(params: {
     return collections;
   }
 
+  function storeConnection() {
+    const config = params.config();
+    const connection = {
+      models: buildStoreModels(config),
+      remoteRequestTimeoutMs: config.timeoutMs,
+    };
+    return { ...connection, signature: JSON.stringify(connection) };
+  }
+
+  function ensureStore(): Promise<QMDStore | undefined> {
+    if (closed) return Promise.resolve(undefined);
+    if (opening) return opening;
+    if (store && connectionSignature === storeConnection().signature)
+      return Promise.resolve(store);
+    const pending = (async () => {
+      try {
+        await drained;
+        while (!closed) {
+          const previous = store;
+          store = undefined;
+          connectionSignature = undefined;
+          if (previous) await previous.close();
+          if (closed) return;
+          const connection = storeConnection();
+          const createStore =
+            params.createStore ?? (await import("@wei840222/qmd")).createStore;
+          const opened = await createStore({
+            dbPath: databasePath,
+            config: { collections: {}, models: connection.models },
+            readOnly: true,
+            remoteRequestTimeoutMs: connection.remoteRequestTimeoutMs,
+          });
+          store = opened;
+          connectionSignature = connection.signature;
+          if (closed) return;
+          if (connection.signature !== storeConnection().signature) continue;
+          return opened;
+        }
+      } catch (error) {
+        logger.warn("failed to open QMD experience index", { error });
+        return;
+      }
+    })();
+    opening = pending;
+    void pending.finally(() => {
+      if (opening === pending) opening = undefined;
+    });
+    return pending;
+  }
+
+  async function acquireStore() {
+    while (!closed && status === "ready") {
+      const activeStore = await ensureStore();
+      if (!activeStore || closed || !isReadyForCurrentCatalog()) return;
+      if (opening || connectionSignature !== storeConnection().signature)
+        continue;
+      activeSearches += 1;
+      if (activeSearches === 1) {
+        drained = new Promise<void>((resolve) => {
+          resolveDrained = resolve;
+        });
+      }
+      return {
+        store: activeStore,
+        release() {
+          activeSearches -= 1;
+          if (activeSearches === 0) {
+            resolveDrained?.();
+            drained = undefined;
+            resolveDrained = undefined;
+          }
+        },
+      };
+    }
+  }
+
   async function openExistingIndex(): Promise<void> {
     try {
       const meta = readJsonFile<unknown>(metadataPath);
       if (!isExperienceIndexMetadata(meta)) {
         return;
       }
-      const resolvedConfig = params.config();
-      const createStore =
-        params.createStore ?? (await import("@wei840222/qmd")).createStore;
-      const opened = await createStore({
-        dbPath: databasePath,
-        config: { collections: {}, models: buildStoreModels(resolvedConfig) },
-        readOnly: true,
-        remoteRequestTimeoutMs: resolvedConfig.timeoutMs,
-      });
-      if (closed) {
-        await opened.close();
-        return;
-      }
-      store = opened;
+      const opened = await ensureStore();
+      if (!opened || closed) return;
       currentFingerprint = meta.fingerprint;
       status = "ready";
       resetRetryState();
@@ -431,19 +492,23 @@ export function createSkillExperienceQmdIndex(params: {
     let nextStore: QMDStore | undefined;
     try {
       await fs.mkdir(indexPath, { recursive: true });
-      const resolvedConfig = params.config();
+      await opening;
+      await drained;
+      if (closed) return true;
       const collections = await writeSnapshot(target.entries);
       const createStore =
         params.createStore ?? (await import("@wei840222/qmd")).createStore;
 
       const refresh = async () => {
+        if (closed) return true;
+        const connection = storeConnection();
         nextStore = await createStore({
           dbPath: databasePath,
           config: {
             collections,
-            models: buildStoreModels(resolvedConfig),
+            models: connection.models,
           },
-          remoteRequestTimeoutMs: resolvedConfig.timeoutMs,
+          remoteRequestTimeoutMs: connection.remoteRequestTimeoutMs,
         });
 
         await nextStore.update();
@@ -457,6 +522,7 @@ export function createSkillExperienceQmdIndex(params: {
 
         const active = store;
         store = nextStore;
+        connectionSignature = connection.signature;
         nextStore = undefined;
         currentFingerprint = target.fingerprint;
         status = "ready";
@@ -525,7 +591,6 @@ export function createSkillExperienceQmdIndex(params: {
   function isReadyForCurrentCatalog(): boolean {
     return (
       status === "ready" &&
-      store !== undefined &&
       currentFingerprint !== undefined &&
       currentFingerprint === expectedFingerprint
     );
@@ -558,12 +623,16 @@ export function createSkillExperienceQmdIndex(params: {
     },
     async search({ query, limit = 8, expansionContext }) {
       await initialization;
-      if (closed || !isReadyForCurrentCatalog() || !store) return;
+      if (closed || !isReadyForCurrentCatalog()) return;
+      let lease: Awaited<ReturnType<typeof acquireStore>>;
       try {
+        lease = await acquireStore();
+        if (!lease) return;
+        const activeStore = lease.store;
         const searchLimit = Math.max(limit * 2, 20);
-        const collectionHits = await Promise.all(
+        const collectionResults = await Promise.allSettled(
           EXPERIENCE_COLLECTIONS.map(async (collection) => {
-            const results = (await store!.search({
+            const results = (await activeStore.search({
               query: boundQmdQuery(query),
               collections: [collection.name],
               includeHyde: true,
@@ -585,6 +654,11 @@ export function createSkillExperienceQmdIndex(params: {
             return { collection, ranked };
           }),
         );
+
+        const collectionHits = collectionResults.map((result) => {
+          if (result.status === "rejected") throw result.reason;
+          return result.value;
+        });
 
         // Weighted Reciprocal Rank Fusion
         const fused = weightedReciprocalRankFusion({
@@ -642,15 +716,25 @@ export function createSkillExperienceQmdIndex(params: {
       } catch (error) {
         logger.warn("QMD experience search failed", { error });
         return;
+      } finally {
+        lease?.release();
       }
     },
-    getStatus: () => status,
+    getStatus() {
+      if (status === "ready") {
+        if (opening) return "building";
+        if (!store) return "failed";
+      }
+      return status;
+    },
     async close() {
       closed = true;
       desired = undefined;
       clearRetryTimer();
       await initialization;
       await running;
+      await opening;
+      await drained;
       buildingFingerprint = undefined;
       const activeStore = store;
       store = undefined;

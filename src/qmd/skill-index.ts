@@ -1,3 +1,4 @@
+import { listConfinedFiles, resolveConfinedFile } from "../skills/paths.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import type { Dirent } from "node:fs";
@@ -72,28 +73,6 @@ export interface SkillQmdIndex {
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function isPathInside(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return (
-    relative === "" ||
-    (!relative.startsWith("..") && !path.isAbsolute(relative))
-  );
-}
-
-async function resolveConfinedPath(
-  root: string,
-  candidate: string,
-): Promise<string | undefined> {
-  try {
-    const rootReal = await fs.realpath(root);
-    const candidateReal = await fs.realpath(candidate);
-    if (!isPathInside(rootReal, candidateReal)) return;
-    return candidateReal;
-  } catch {
-    return;
-  }
 }
 
 const COLLECTION_DIR_BY_NAME: Record<string, string> = {
@@ -221,48 +200,9 @@ export function safePathSegment(value: string): string {
 
 async function listReferenceFiles(skillDir: string): Promise<string[]> {
   const referencesRoot = path.join(skillDir, "references");
-  const confinedRoot = await resolveConfinedPath(skillDir, referencesRoot);
-  if (!confinedRoot) return [];
-  const rootReal = confinedRoot;
-  const files: string[] = [];
-
-  async function walk(dir: string): Promise<void> {
-    let entries: Dirent[];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch (error) {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === "ENOENT"
-      ) {
-        return;
-      }
-      return;
-    }
-    for (const entry of entries.sort((left, right) =>
-      left.name.localeCompare(right.name),
-    )) {
-      const entryPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!(await resolveConfinedPath(rootReal, entryPath))) {
-          continue;
-        }
-        await walk(entryPath);
-      } else if (entry.isFile() || entry.isSymbolicLink()) {
-        if (!(await resolveConfinedPath(rootReal, entryPath))) {
-          continue;
-        }
-        files.push(
-          path.relative(referencesRoot, entryPath).split(path.sep).join("/"),
-        );
-      }
-    }
-  }
-
-  await walk(referencesRoot);
-  return files;
+  return (await listConfinedFiles(skillDir, referencesRoot)).map((file) =>
+    path.relative(referencesRoot, file).split(path.sep).join("/"),
+  );
 }
 
 function stripMarkdownFrontmatter(raw: string): string {
@@ -408,7 +348,12 @@ export async function writeSkillSnapshot(params: {
 
     let bodyContent = "";
     try {
-      bodyContent = await fs.readFile(skill.location, "utf8");
+      const bodySource = await resolveConfinedFile(skillDir, skill.location);
+      if (!bodySource)
+        throw new Error(
+          "Skill body is outside the skill root or not a regular file",
+        );
+      bodyContent = await fs.readFile(bodySource, "utf8");
     } catch (error) {
       logger.warn("failed to read skill body for QMD snapshot", {
         error,
@@ -427,7 +372,7 @@ export async function writeSkillSnapshot(params: {
 
     for (const relative of await listReferenceFiles(skillDir)) {
       const sourcePath = path.join(skillDir, "references", relative);
-      const confinedSource = await resolveConfinedPath(skillDir, sourcePath);
+      const confinedSource = await resolveConfinedFile(skillDir, sourcePath);
       if (!confinedSource) continue;
       const targetPath = path.join(referencesRoot, skillSegment, relative);
       expected.add(`references/${skillSegment}/${relative}`);
@@ -594,6 +539,10 @@ type SharedIndexState = {
   status: SkillQmdIndexStatus;
   store?: QMDStore;
   opening?: Promise<QMDStore | undefined>;
+  connectionSignature?: string;
+  activeOperations: number;
+  drained?: Promise<void>;
+  resolveDrained?: () => void;
   refreshing?: Promise<void>;
   retryTimer?: unknown;
   consecutiveFailures: number;
@@ -682,6 +631,7 @@ export function createSkillQmdIndex(params: {
       agentIds: new Set(),
       skillsByAgent: new Map(),
       usable: false,
+      activeOperations: 0,
     };
     indexes.set(fingerprint, created);
     return created;
@@ -808,50 +758,68 @@ export function createSkillQmdIndex(params: {
 
   const initialization = loadExistingIndexCatalog();
 
-  async function createConfiguredStore(
-    state: SharedIndexState,
-  ): Promise<QMDStore> {
+  function storeConnection() {
     const { qmd } = config();
-    if (
-      !qmd.embedding.baseUrl ||
-      !qmd.embedding.model ||
-      !qmd.expansion.baseUrl ||
-      !qmd.expansion.model
-    ) {
-      throw new Error(
-        "QMD embedding and expansion endpoints must be configured.",
-      );
-    }
-    const createQmdStore =
-      params.createStore ?? (await import("@wei840222/qmd")).createStore;
-    return createQmdStore({
-      dbPath: state.databasePath,
-      config: {
-        collections: skillSnapshotCollections(state.docsRoot),
-        models: buildStoreModels(qmd),
-      },
+    const connection = {
+      models: buildStoreModels(qmd),
       remoteRequestTimeoutMs: qmd.timeoutMs,
-    });
+    };
+    return { ...connection, signature: JSON.stringify(connection) };
+  }
+
+  function waitForOperations(state: SharedIndexState): Promise<void> {
+    return state.drained ?? Promise.resolve();
   }
 
   function ensureStore(state: SharedIndexState): Promise<QMDStore | undefined> {
     if (closed) return Promise.resolve(undefined);
-    if (state.store) return Promise.resolve(state.store);
     if (state.opening) return state.opening;
+    if (
+      state.store &&
+      state.connectionSignature === storeConnection().signature
+    )
+      return Promise.resolve(state.store);
     const opening = (async () => {
       try {
-        await Promise.all([
-          fs.access(state.databasePath),
-          fs.access(state.docsRoot),
-        ]);
-        const store = await createConfiguredStore(state);
-        state.store = store;
-        state.status = "ready";
-        return store;
+        await waitForOperations(state);
+        while (!closed) {
+          const previous = state.store;
+          state.store = undefined;
+          state.connectionSignature = undefined;
+          if (previous) await previous.close();
+          if (closed) return;
+          const connection = storeConnection();
+          if (
+            !connection.models.embed_api_url ||
+            !connection.models.embed_api_model ||
+            !connection.models.generate_api_url ||
+            !connection.models.generate_api_model
+          )
+            throw new Error(
+              "QMD embedding and expansion endpoints must be configured.",
+            );
+          const createQmdStore =
+            params.createStore ?? (await import("@wei840222/qmd")).createStore;
+          const store = await createQmdStore({
+            dbPath: state.databasePath,
+            config: {
+              collections: skillSnapshotCollections(state.docsRoot),
+              models: connection.models,
+            },
+            remoteRequestTimeoutMs: connection.remoteRequestTimeoutMs,
+          });
+          state.store = store;
+          state.connectionSignature = connection.signature;
+          // Configuration can change while opening. Do not lend a stale store.
+          if (closed) return;
+          if (connection.signature !== storeConnection().signature) continue;
+          if (state.usable) state.status = "ready";
+          return store;
+        }
       } catch (error) {
         state.lastRefreshError = error;
         state.status = "failed";
-        logger.warn("failed to open persisted QMD skill index", {
+        logger.warn("failed to open QMD skill index", {
           error,
           fingerprint: state.fingerprint,
         });
@@ -863,6 +831,36 @@ export function createSkillQmdIndex(params: {
       if (state.opening === opening) state.opening = undefined;
     });
     return opening;
+  }
+
+  async function acquireStore(state: SharedIndexState) {
+    while (!closed) {
+      const store = await ensureStore(state);
+      if (!store || closed) return;
+      // Another caller may have begun a rotation while this caller resumed.
+      if (
+        state.opening ||
+        state.connectionSignature !== storeConnection().signature
+      )
+        continue;
+      state.activeOperations += 1;
+      if (state.activeOperations === 1) {
+        state.drained = new Promise<void>((resolve) => {
+          state.resolveDrained = resolve;
+        });
+      }
+      return {
+        store,
+        release() {
+          state.activeOperations -= 1;
+          if (state.activeOperations === 0) {
+            state.resolveDrained?.();
+            state.drained = undefined;
+            state.resolveDrained = undefined;
+          }
+        },
+      };
+    }
   }
 
   function clearRetryTimer(state: SharedIndexState): void {
@@ -948,46 +946,43 @@ export function createSkillQmdIndex(params: {
         try {
           await fs.mkdir(state.root, { recursive: true });
           const skills = mergedSkills(state);
-          const collections = await writeSkillSnapshot({
+          await writeSkillSnapshot({
             docsRoot: state.docsRoot,
             skills,
           });
-          let store = state.store;
-          if (!store) {
-            const { qmd } = config();
-            const createQmdStore =
-              params.createStore ??
-              (await import("@wei840222/qmd")).createStore;
-            store = await createQmdStore({
-              dbPath: state.databasePath,
-              config: {
-                collections,
-                models: buildStoreModels(qmd),
-              },
-              remoteRequestTimeoutMs: qmd.timeoutMs,
-            });
-            state.store = store;
+          const lease = await acquireStore(state);
+          if (!lease) {
+            if (!closed)
+              throw (
+                state.lastRefreshError ?? new Error("QMD store unavailable")
+              );
+            return true;
           }
-          await store.update();
-          if (closed) return true;
-          state.usable = true;
-          await bindAgents(state);
-          state.status = "ready";
-          if (closed) return true;
-          const embedResult = await store.embed();
-          const status = await store.getStatus();
-          state.needsEmbedding = status.needsEmbedding;
-          if (embedResult.errors > 0 || status.needsEmbedding > 0) {
-            recordRefreshProblem(
-              state,
-              new Error(
-                `QMD skill embedding incomplete (errors=${embedResult.errors}, needsEmbedding=${status.needsEmbedding})`,
-              ),
-            );
-          } else {
-            resetRetryState(state);
+          const { store } = lease;
+          try {
+            await store.update();
+            if (closed) return true;
+            state.usable = true;
+            await bindAgents(state);
+            state.status = "ready";
+            if (closed) return true;
+            const embedResult = await store.embed();
+            const status = await store.getStatus();
+            state.needsEmbedding = status.needsEmbedding;
+            if (embedResult.errors > 0 || status.needsEmbedding > 0) {
+              recordRefreshProblem(
+                state,
+                new Error(
+                  `QMD skill embedding incomplete (errors=${embedResult.errors}, needsEmbedding=${status.needsEmbedding})`,
+                ),
+              );
+            } else {
+              resetRetryState(state);
+            }
+            state.status = "ready";
+          } finally {
+            lease.release();
           }
-          state.status = "ready";
         } catch (error) {
           recordRefreshProblem(state, error);
         }
@@ -1073,24 +1068,26 @@ export function createSkillQmdIndex(params: {
       if (!agent?.fingerprint) return;
       const state = indexes.get(agent.fingerprint);
       if (!state) return;
-      const activeStore = state.store ?? (await ensureStore(state));
-      if (!activeStore) return;
-
-      const { skills } = config();
-      const collectionWeights = skills?.search?.collectionWeights ?? {
-        meta: 3,
-        body: 2,
-        references: 1,
-      };
-      const candidateLimit = Math.max(limit, DEFAULT_CANDIDATE_LIMIT);
-      const collections = [
-        { name: META_COLLECTION, weight: collectionWeights.meta },
-        { name: BODY_COLLECTION, weight: collectionWeights.body },
-        { name: REFS_COLLECTION, weight: collectionWeights.references },
-      ];
-
+      let lease: Awaited<ReturnType<typeof acquireStore>>;
       try {
-        const collectionHits = await Promise.all(
+        lease = await acquireStore(state);
+        if (!lease) return;
+        const activeStore = lease.store;
+
+        const { skills } = config();
+        const collectionWeights = skills?.search?.collectionWeights ?? {
+          meta: 3,
+          body: 2,
+          references: 1,
+        };
+        const candidateLimit = Math.max(limit, DEFAULT_CANDIDATE_LIMIT);
+        const collections = [
+          { name: META_COLLECTION, weight: collectionWeights.meta },
+          { name: BODY_COLLECTION, weight: collectionWeights.body },
+          { name: REFS_COLLECTION, weight: collectionWeights.references },
+        ];
+
+        const collectionResults = await Promise.allSettled(
           collections.map(async (collection) => {
             const results = await activeStore.search({
               query,
@@ -1126,6 +1123,10 @@ export function createSkillQmdIndex(params: {
           }),
         );
 
+        const collectionHits = collectionResults.map((result) => {
+          if (result.status === "rejected") throw result.reason;
+          return result.value;
+        });
         const fused = weightedReciprocalRankFusion({
           lists: collectionHits.map((entry) =>
             entry.ranked.map((hit) => ({ id: hitId(hit) })),
@@ -1198,6 +1199,8 @@ export function createSkillQmdIndex(params: {
       } catch (error) {
         logger.warn("QMD skill search failed", { error, agentId });
         return;
+      } finally {
+        lease?.release();
       }
     },
     getStatus(agentId) {
@@ -1223,6 +1226,7 @@ export function createSkillQmdIndex(params: {
       await Promise.all(
         [...indexes.values()].map(async (state) => {
           await state.opening;
+          await waitForOperations(state);
           const store = state.store;
           state.store = undefined;
           if (store) await store.close().catch(() => undefined);

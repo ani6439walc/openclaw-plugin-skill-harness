@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -61,6 +62,87 @@ function writeStats(stateDir: string): void {
 }
 
 describe("readAvailableSkill", () => {
+  it("follows linked skill roots and only lists readable files inside their real root", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-links-"));
+    try {
+      const workspaceDir = path.join(tmp, "workspace");
+      const external = path.join(tmp, "external");
+      writeSkill(external);
+      const realRoot = path.join(external, "skills", "writer");
+      fs.mkdirSync(path.join(workspaceDir, "skills"), { recursive: true });
+      fs.symlinkSync(realRoot, path.join(tmp, "first-link"));
+      fs.symlinkSync(
+        path.join(tmp, "first-link"),
+        path.join(workspaceDir, "skills", "writer"),
+      );
+      const refs = path.join(realRoot, "references");
+      fs.symlinkSync("style.md", path.join(refs, "alias.md"));
+      fs.symlinkSync("../templates", path.join(refs, "internal-dir"));
+      fs.writeFileSync(path.join(tmp, "outside.md"), "outside");
+      fs.symlinkSync(
+        path.join(tmp, "outside.md"),
+        path.join(refs, "outside.md"),
+      );
+      fs.symlinkSync(tmp, path.join(refs, "outside-dir"));
+      fs.symlinkSync("missing", path.join(refs, "dangling"));
+      fs.symlinkSync("cycle", path.join(refs, "cycle"));
+      fs.symlinkSync(".", path.join(refs, "parent-loop"));
+      execFileSync("mkfifo", [path.join(refs, "pipe")]);
+      const params = {
+        api: createApi(path.join(tmp, "state"), workspaceDir),
+        agentId: "main",
+        name: "writer",
+        cacheTtlMs: 0,
+      };
+      const main = await readAvailableSkill(params);
+      expect(main).toMatchObject({
+        success: true,
+        linked_files: {
+          references: [
+            "references/alias.md",
+            "references/internal-dir/note.md",
+            "references/style.md",
+          ],
+        },
+      });
+      for (const filePath of [
+        "references/style.md",
+        "references/alias.md",
+        "references/internal-dir/note.md",
+      ]) {
+        expect(await readAvailableSkill({ ...params, filePath })).toMatchObject(
+          { success: true },
+        );
+      }
+      for (const filePath of [
+        "references/outside.md",
+        "references/outside-dir/outside.md",
+        "references/dangling",
+        "references/cycle",
+        "references/pipe",
+        "references/internal-dir",
+        "../outside.md",
+      ]) {
+        expect(await readAvailableSkill({ ...params, filePath })).toMatchObject(
+          { success: false },
+        );
+      }
+      fs.renameSync(
+        path.join(realRoot, "SKILL.md"),
+        path.join(tmp, "external-skill.md"),
+      );
+      fs.symlinkSync(
+        path.join(tmp, "external-skill.md"),
+        path.join(realRoot, "SKILL.md"),
+      );
+      expect(await readAvailableSkill(params)).toMatchObject({
+        success: false,
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("reads main skill content and linked support files", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-files-"));
     const workspaceDir = path.join(tmp, "workspace");

@@ -10,6 +10,7 @@ import {
   resolveSkillIndexCacheTtlMs,
   resolveSkillRoots,
 } from "./roots.js";
+import { resolveConfinedFile } from "./paths.js";
 import { skillSourcePriority } from "./types.js";
 import type {
   AvailableSkill,
@@ -108,8 +109,12 @@ async function readSkillFile(
   requireComplete = false,
 ): Promise<IndexedSkill | undefined> {
   try {
-    const raw = await fs.readFile(filePath);
-    const resolvedFilePath = await fs.realpath(filePath);
+    const resolvedFilePath = await resolveConfinedFile(
+      path.dirname(filePath),
+      filePath,
+    );
+    if (!resolvedFilePath) return;
+    const raw = await fs.readFile(resolvedFilePath);
     const parsed = matter(raw.toString("utf-8"));
     const name =
       typeof parsed.data.name === "string"
@@ -476,10 +481,10 @@ export async function listAvailableSkills(
     for (const skill of index.values()) {
       const key = skill.name.toLowerCase();
       if (seen.has(key)) continue;
+      seen.add(key);
       if (source && skill.source?.toLowerCase() !== source) {
         continue;
       }
-      seen.add(key);
       skills.push(stripIndexOnlyFields(skill));
     }
   }

@@ -63,12 +63,17 @@ function cleanPipelineEventData(
 }
 
 export function emitPipelineEvent(
-  ctx: Pick<PluginHookAgentContext, "runId" | "sessionId">,
+  ctx: Pick<PluginHookAgentContext, "runId" | "sessionId" | "hookInvocation">,
   sessionKey: string | undefined,
   phase: PipelinePhase,
   state: PipelineState,
   metadata: PipelineMetadata = {},
 ): void {
+  try {
+    ctx.hookInvocation?.assertActive();
+  } catch {
+    return;
+  }
   const runId =
     ctx.runId?.trim() || sessionKey?.trim() || ctx.sessionId?.trim();
   if (!runId) {

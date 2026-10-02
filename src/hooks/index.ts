@@ -98,6 +98,8 @@ import {
 } from "./system-context.js";
 export type { HookDeps } from "./types.js";
 
+import { promptRoutingBudgetMs, withPromptDeadline } from "./prompt-budget.js";
+
 const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
 
 function eventError(error: unknown): string {
@@ -433,33 +435,42 @@ export function createHookHandlers(deps: HookDeps) {
       return reservation.association;
     }
 
-    const prepared = await tracker.preparePromptTurn({
-      sessionId,
-      sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
-      agentId: params.routing.effectiveAgentId,
-      runId,
-      input: params.latestUserMessage,
-      startedAt: new Date().toISOString(),
-      recentTurns: params.recentTurns,
-    });
-    if (prepared.status === "retryable-failure") {
+    try {
+      const prepared = await tracker.preparePromptTurn({
+        sessionId,
+        sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+        agentId: params.routing.effectiveAgentId,
+        runId,
+        input: params.latestUserMessage,
+        startedAt: new Date().toISOString(),
+        recentTurns: params.recentTurns,
+        assertActive: () => params.ctx.hookInvocation?.assertActive(),
+      });
+      params.ctx.hookInvocation?.assertActive();
+      if (prepared.status === "retryable-failure") {
+        if (reservation.status === "reserved") {
+          turnAssociations.release(reservation.token);
+        }
+        return;
+      }
+      const association = {
+        sessionId,
+        sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+        turnKey: prepared.identity.turnKey,
+      };
+      const bound =
+        reservation.status === "reserved"
+          ? runId
+            ? turnAssociations.bind(reservation.token, runId, association)
+            : turnAssociations.bindAnonymous(reservation.token, association)
+          : turnAssociations.bindExisting(runId, association);
+      return bound === "bound" ? association : undefined;
+    } catch (error) {
       if (reservation.status === "reserved") {
         turnAssociations.release(reservation.token);
       }
-      return;
+      throw error;
     }
-    const association = {
-      sessionId,
-      sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
-      turnKey: prepared.identity.turnKey,
-    };
-    const bound =
-      reservation.status === "reserved"
-        ? runId
-          ? turnAssociations.bind(reservation.token, runId, association)
-          : turnAssociations.bindAnonymous(reservation.token, association)
-        : turnAssociations.bindExisting(runId, association);
-    return bound === "bound" ? association : undefined;
   }
 
   function resolveAssociatedTurn(params: {
@@ -546,9 +557,13 @@ export function createHookHandlers(deps: HookDeps) {
     matchedExperiences?: readonly SkillExperienceEntry[];
     inputSkillDiscovery?: InputSkillDiscovery;
     confidence: number;
+    assertActive: () => void;
   }): Promise<void> {
+    params.assertActive();
     if (!params.association) return;
-    await tracker.mergeTurnAndPersist({
+    const result = await tracker.mergeTurnAndPersist({
+      assertActive: params.assertActive,
+      currentTurnOnly: true,
       sessionId: params.association.sessionId,
       expectedTurnKey: params.association.turnKey,
       maxWaitMs: 0,
@@ -561,6 +576,8 @@ export function createHookHandlers(deps: HookDeps) {
         confidence: params.confidence,
       },
     });
+    params.assertActive();
+    if (result === "stale") throw new Error("Prompt turn is no longer current");
   }
 
   function normalizeSkillCollection(
@@ -1072,12 +1089,21 @@ export function createHookHandlers(deps: HookDeps) {
   async function runPromptBuildPipeline<T>(
     ctx: PluginHookAgentContext,
     sessionKey: string | undefined,
-    operation: () => Promise<T>,
+    timeoutMs: number,
+    operation: (
+      ctx: PluginHookAgentContext,
+      assertActive: () => void,
+    ) => Promise<T>,
   ): Promise<T> {
     const startedAtMs = Date.now();
     emitPipelineEvent(ctx, sessionKey, "pipeline", "started");
     try {
-      const result = await operation();
+      const result = await withPromptDeadline(
+        timeoutMs,
+        () => ctx.hookInvocation?.assertActive(),
+        (assertActive) =>
+          operation({ ...ctx, hookInvocation: { assertActive } }, assertActive),
+      );
       emitPipelineEvent(ctx, sessionKey, "pipeline", "completed", {
         durationMs: Math.max(0, Date.now() - startedAtMs),
       });
@@ -1115,6 +1141,7 @@ export function createHookHandlers(deps: HookDeps) {
       )
         return;
 
+      ctx.hookInvocation?.assertActive();
       staticContextEligible = true;
       refreshLiveConfigFromRuntime();
       const refreshedConfig = config();
@@ -1144,6 +1171,7 @@ export function createHookHandlers(deps: HookDeps) {
         ctx,
         refreshedConfig,
       );
+      ctx.hookInvocation?.assertActive();
       routing.association = await prepareTrackingTurn({
         ctx,
         routing,
@@ -1172,7 +1200,20 @@ export function createHookHandlers(deps: HookDeps) {
       return await runPromptBuildPipeline(
         ctx,
         routing.resolvedSessionKey,
-        async () => {
+        promptRoutingBudgetMs(refreshedConfig.routing),
+        async (ctx, assertDeadlineActive) => {
+          const association = routing.association!;
+          const assertActive = () => {
+            assertDeadlineActive();
+            if (
+              tracker.getCurrentState(association.sessionId)?.turnKey !==
+              association.turnKey
+            ) {
+              throw new Error("Skill Harness prompt turn superseded");
+            }
+          };
+          ctx = { ...ctx, hookInvocation: { assertActive } };
+          assertActive();
           const skillDiscoveryResult = await discoverSkillCandidates({
             ctx,
             routing,
@@ -1181,6 +1222,7 @@ export function createHookHandlers(deps: HookDeps) {
             conversation,
           });
 
+          assertActive();
           const unionPool = buildCandidateSkillsUnionPool({
             visibleSkills: skillDiscoveryResult.visibleSkills,
             nameCandidates: skillDiscoveryResult.nameCandidates,
@@ -1212,20 +1254,27 @@ export function createHookHandlers(deps: HookDeps) {
             matchedExperiences = [];
           } else {
             try {
-              const llmResult = await effectiveRoutingSelector({
-                api,
-                config: refreshedConfig,
-                agentId: routing.effectiveAgentId,
-                sessionKey: routing.resolvedSessionKey,
-                sessionId: ctx.sessionId,
-                conversation,
-                latest: latestUserMessage,
-                messageProvider: ctx.messageProvider,
-                channelId: ctx.channelId,
-                candidateSkills: unionPool.candidateSkills,
-                candidateExperiences: skillDiscoveryResult.candidateExperiences,
-                dataRoot: deps.dataRoot,
-              });
+              const llmResult = await withPromptDeadline(
+                refreshedConfig.routing.timeoutMs,
+                assertActive,
+                async () =>
+                  effectiveRoutingSelector({
+                    api,
+                    config: refreshedConfig,
+                    agentId: routing.effectiveAgentId,
+                    sessionKey: routing.resolvedSessionKey,
+                    sessionId: ctx.sessionId,
+                    conversation,
+                    latest: latestUserMessage,
+                    messageProvider: ctx.messageProvider,
+                    channelId: ctx.channelId,
+                    candidateSkills: unionPool.candidateSkills,
+                    candidateExperiences:
+                      skillDiscoveryResult.candidateExperiences,
+                    dataRoot: deps.dataRoot,
+                  }),
+              );
+              assertActive();
 
               if (llmResult) {
                 rerankStatus = "completed";
@@ -1280,6 +1329,7 @@ export function createHookHandlers(deps: HookDeps) {
             }
           }
 
+          assertActive();
           const injectedCollections: Record<SkillCollectionKind, number> = {
             meta: 0,
             body: 0,
@@ -1329,29 +1379,6 @@ export function createHookHandlers(deps: HookDeps) {
             contributedBy.push("experience-search");
           }
 
-          emitPipelineEvent(
-            ctx,
-            routing.resolvedSessionKey,
-            "rerank",
-            "completed",
-            {
-              status: rerankStatus,
-              result: matchedSkills.map((skill) => skill.name),
-              reason: contributedBy,
-              ...(rerankStatus === "completed" ? { confidence } : {}),
-              ...(rerankError ? { error: rerankError } : {}),
-              selectedSkills,
-              selectedExperiences,
-              experienceCandidates:
-                skillDiscoveryResult.candidateExperiences.length,
-              candidateCount: unionPool.candidateSkills.length,
-              injectedCount: matchedSkills.length,
-              injectedSkills: matchedSkills.map((s) => s.name),
-              injectedExperiences: matchedExperiences.map((e) => e.id),
-              durationMs: Math.max(0, Date.now() - rerankStartedAtMs),
-            },
-          );
-
           const inputSkillDiscovery: InputSkillDiscovery = {
             nameCandidates: skillDiscoveryResult.nameCandidates.length,
             retrievalAttempted:
@@ -1376,6 +1403,7 @@ export function createHookHandlers(deps: HookDeps) {
           };
 
           await recordPromptBuildSession({
+            assertActive,
             association: routing.association,
             latestUserMessage,
             matchedSkills,
@@ -1383,6 +1411,29 @@ export function createHookHandlers(deps: HookDeps) {
             inputSkillDiscovery,
             confidence,
           });
+
+          emitPipelineEvent(
+            ctx,
+            routing.resolvedSessionKey,
+            "rerank",
+            "completed",
+            {
+              status: rerankStatus,
+              result: matchedSkills.map((skill) => skill.name),
+              reason: contributedBy,
+              ...(rerankStatus === "completed" ? { confidence } : {}),
+              ...(rerankError ? { error: rerankError } : {}),
+              selectedSkills,
+              selectedExperiences,
+              experienceCandidates:
+                skillDiscoveryResult.candidateExperiences.length,
+              candidateCount: unionPool.candidateSkills.length,
+              injectedCount: matchedSkills.length,
+              injectedSkills: matchedSkills.map((s) => s.name),
+              injectedExperiences: matchedExperiences.map((e) => e.id),
+              durationMs: Math.max(0, Date.now() - rerankStartedAtMs),
+            },
+          );
 
           if (matchedSkills.length === 0 && matchedExperiences.length === 0) {
             return toPromptBuildResult(undefined, workingSetSkillsXml);

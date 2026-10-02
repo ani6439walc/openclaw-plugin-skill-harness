@@ -27,6 +27,7 @@ import type {
 } from "./turn-associations.js";
 
 export interface PluginHookAgentContext {
+  readonly hookInvocation?: { readonly assertActive: () => void };
   readonly runId?: string;
   readonly agentId?: string;
   readonly sessionKey?: string;

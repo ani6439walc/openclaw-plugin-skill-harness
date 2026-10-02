@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { listConfinedFiles, resolveConfinedFile } from "./paths.js";
 import { findAvailableSkill, listAvailableSkills } from "./indexer.js";
 import { relatedSkillsBySkillName } from "./related.js";
 import type {
@@ -19,63 +20,14 @@ const SUPPORT_DIRECTORIES = [
 
 type SupportDirectory = (typeof SUPPORT_DIRECTORIES)[number];
 
-function isMissingPathError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ENOENT"
-  );
-}
-
-function skillDirFromSkillPath(skillPath: string): string {
-  return path.dirname(skillPath);
-}
-
-function relativeSupportPath(
-  dirName: SupportDirectory,
-  filePath: string,
-): string {
-  return path.join(dirName, filePath).split(path.sep).join("/");
-}
-
-async function listFilesRecursively(
-  root: string,
-  dirName: SupportDirectory,
-  dir: string,
-): Promise<string[]> {
-  let entries: import("node:fs").Dirent[];
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch (err) {
-    if (isMissingPathError(err)) return [];
-    return [];
-  }
-
-  const files: string[] = [];
-  for (const entry of entries.sort((left, right) =>
-    left.name.localeCompare(right.name),
-  )) {
-    const entryPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await listFilesRecursively(root, dirName, entryPath)));
-    } else if (entry.isFile() || entry.isSymbolicLink()) {
-      files.push(relativeSupportPath(dirName, path.relative(root, entryPath)));
-    }
-  }
-  return files;
-}
-
 export async function listLinkedSkillFiles(
   skillDir: string,
 ): Promise<LinkedSkillFiles | undefined> {
   const linkedFiles: LinkedSkillFiles = {};
   for (const dirName of SUPPORT_DIRECTORIES) {
-    const files = await listFilesRecursively(
-      path.join(skillDir, dirName),
-      dirName,
-      path.join(skillDir, dirName),
-    );
+    const files = (
+      await listConfinedFiles(skillDir, path.join(skillDir, dirName))
+    ).map((file) => path.relative(skillDir, file).split(path.sep).join("/"));
     if (files.length > 0) linkedFiles[dirName] = files;
   }
   return Object.keys(linkedFiles).length > 0 ? linkedFiles : undefined;
@@ -135,19 +87,24 @@ export async function readAvailableSkill(
     };
   }
 
-  const skillDir = skillDirFromSkillPath(skill.location);
+  const skillDir = path.dirname(skill.location);
   const relatedSkills =
     relatedSkillsBySkillName(await listAvailableSkills(params)).get(
       skill.name.toLowerCase(),
     ) ?? [];
   if (!params.filePath) {
     try {
+      const resolved = await resolveConfinedFile(skillDir, skill.location);
+      if (!resolved)
+        throw new Error(
+          "Skill file must be a regular file within the skill directory",
+        );
       const usageStats = await readSkillUsageStats(params);
       return {
         success: true,
         name: skill.name,
         description: skill.description,
-        content: await fs.readFile(skill.location, "utf-8"),
+        content: await fs.readFile(resolved, "utf-8"),
         path: skill.location,
         skill_dir: skillDir,
         linked_files: await listLinkedSkillFiles(skillDir),
@@ -175,11 +132,19 @@ export async function readAvailableSkill(
   }
 
   try {
+    const resolved = await resolveConfinedFile(
+      skillDir,
+      validation.resolvedPath,
+    );
+    if (!resolved)
+      throw new Error(
+        "Support file must be a regular file within the skill directory",
+      );
     return {
       success: true,
       name: skill.name,
       file: validation.normalizedFilePath,
-      content: await fs.readFile(validation.resolvedPath, "utf-8"),
+      content: await fs.readFile(resolved, "utf-8"),
       file_type: path.extname(validation.normalizedFilePath),
       related_skills: relatedSkills,
     };

@@ -222,6 +222,7 @@ describe("SkillExperienceQmdIndex", () => {
     index.schedule(MOCK_ENTRIES);
     const search = index.search({ query: "screenshot" });
     expect(readStore.search).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(createStore).toHaveBeenCalledOnce());
     finishOpen(readStore as unknown as QMDStore);
     expect(await search).toEqual([
       expect.objectContaining({
@@ -319,5 +320,303 @@ describe("SkillExperienceQmdIndex", () => {
         "utf8",
       ),
     ).toBe("new catalog content\n");
+  });
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((yes) => {
+      resolve = yes;
+    });
+    return { promise, resolve };
+  }
+
+  async function setupConnection() {
+    let config = structuredClone(DEFAULT_CONFIG);
+    const first = makeStore();
+    const next = makeStore();
+    const createStore = vi
+      .fn()
+      .mockResolvedValue(next)
+      .mockResolvedValueOnce(first);
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => config,
+      createStore,
+    });
+    index.schedule(MOCK_ENTRIES);
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+    return {
+      first,
+      next,
+      createStore,
+      setConfig(value: ResolvedQmdConfig) {
+        config = value;
+      },
+      search: () => index!.search({ query: "screenshot" }),
+    };
+  }
+
+  it.each(["endpoint", "key", "expansion", "jev", "timeout"])(
+    "rotates %s without rebuilding content",
+    async (field) => {
+      const fixture = await setupConnection();
+      const metadataPath = path.join(
+        tmpDir,
+        "qmd",
+        "experiences",
+        "metadata.json",
+      );
+      const metadata = await fs.readFile(metadataPath, "utf8");
+      const config = structuredClone(DEFAULT_CONFIG);
+      if (field === "endpoint")
+        config.embedding.baseUrl = "https://next.test/v1";
+      if (field === "key") config.embedding.apiKey = "next-key";
+      if (field === "expansion") config.expansion.model = "next-model";
+      if (field === "jev")
+        config.jev = {
+          baseUrl: "https://jev.test",
+          model: "jev",
+          apiKey: "jev-key",
+        };
+      if (field === "timeout") config.timeoutMs = 4321;
+      fixture.setConfig(config);
+      index!.schedule(MOCK_ENTRIES);
+      expect(await fixture.search()).toHaveLength(1);
+      expect(fixture.first.close).toHaveBeenCalledOnce();
+      expect(fixture.next.update).not.toHaveBeenCalled();
+      expect(fixture.next.embed).not.toHaveBeenCalled();
+      expect(fixture.createStore).toHaveBeenCalledTimes(2);
+      expect(fixture.createStore.mock.calls[1]?.[0]).toMatchObject({
+        dbPath: fixture.createStore.mock.calls[0]?.[0].dbPath,
+        readOnly: true,
+        config: {
+          models: {
+            embed_api_url: config.embedding.baseUrl,
+            embed_api_key: config.embedding.apiKey,
+            generate_api_model: config.expansion.model,
+          },
+        },
+        remoteRequestTimeoutMs: config.timeoutMs,
+      });
+      if (field === "jev")
+        expect(
+          fixture.createStore.mock.calls[1]?.[0].config.models,
+        ).toMatchObject({ jev_api_key: "jev-key" });
+      expect(await fs.readFile(metadataPath, "utf8")).toBe(metadata);
+    },
+  );
+
+  it("drains searches and coalesces changing connection settings", async () => {
+    const fixture = await setupConnection();
+    const pending = deferred<[]>();
+    fixture.first.search.mockReturnValue(pending.promise);
+    const active = fixture.search();
+    await vi.waitFor(() =>
+      expect(fixture.first.search).toHaveBeenCalledTimes(3),
+    );
+    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 2000 });
+    const waiting = fixture.search();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 3000 });
+    const another = fixture.search();
+    expect(fixture.first.close).not.toHaveBeenCalled();
+    pending.resolve([]);
+    await Promise.all([active, waiting, another]);
+    expect(fixture.first.search).toHaveBeenCalledTimes(3);
+    expect(fixture.createStore).toHaveBeenCalledTimes(2);
+    expect(fixture.createStore.mock.calls[1]?.[0]).toMatchObject({
+      remoteRequestTimeoutMs: 3000,
+    });
+  });
+
+  it("fails open on reopen failure and never falls back to old credentials", async () => {
+    const fixture = await setupConnection();
+    fixture.createStore.mockRejectedValueOnce(new Error("unavailable"));
+    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 3000 });
+    expect(await fixture.search()).toBeUndefined();
+    expect(index!.getStatus()).toBe("failed");
+    expect(fixture.first.search).not.toHaveBeenCalled();
+    expect(fixture.first.close).toHaveBeenCalledOnce();
+    expect(await fixture.search()).toHaveLength(1);
+    expect(index!.getStatus()).toBe("ready");
+  });
+
+  it("waits for all sibling searches during disposal even when one fails", async () => {
+    const fixture = await setupConnection();
+    const pending = deferred<[]>();
+    fixture.first.search
+      .mockRejectedValueOnce(new Error("failed"))
+      .mockReturnValue(pending.promise);
+    const active = fixture.search();
+    await vi.waitFor(() =>
+      expect(fixture.first.search).toHaveBeenCalledTimes(3),
+    );
+    const closing = index!.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fixture.first.close).not.toHaveBeenCalled();
+    pending.resolve([]);
+    expect(await active).toBeUndefined();
+    await closing;
+    index = undefined;
+    expect(fixture.first.close).toHaveBeenCalledOnce();
+  });
+
+  it("rebuild waits for active searches before update and closes the old store afterward", async () => {
+    const fixture = await setupConnection();
+    const pending = deferred<[]>();
+    fixture.first.search.mockReturnValue(pending.promise);
+    const active = fixture.search();
+    await vi.waitFor(() =>
+      expect(fixture.first.search).toHaveBeenCalledTimes(3),
+    );
+    index!.schedule([{ ...MOCK_ENTRIES[0]!, body: "changed" }]);
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("building"));
+    expect(fixture.next.update).not.toHaveBeenCalled();
+    expect(fixture.first.close).not.toHaveBeenCalled();
+    pending.resolve([]);
+    await active;
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+    expect(fixture.next.update).toHaveBeenCalledOnce();
+    expect(fixture.first.close).toHaveBeenCalledOnce();
+  });
+
+  it("read-only instances rotate connections without changing metadata or rebuilding", async () => {
+    await setupConnection();
+    await index!.close();
+    const metadataPath = path.join(
+      tmpDir,
+      "qmd",
+      "experiences",
+      "metadata.json",
+    );
+    const metadata = await fs.readFile(metadataPath, "utf8");
+    let config = DEFAULT_CONFIG;
+    const first = makeStore();
+    const next = makeStore();
+    const createStore = vi
+      .fn()
+      .mockResolvedValue(next)
+      .mockResolvedValueOnce(first);
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => config,
+      createStore,
+      readOnly: true,
+    });
+    index.schedule(MOCK_ENTRIES);
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+    config = { ...DEFAULT_CONFIG, timeoutMs: 3333 };
+    index.schedule(MOCK_ENTRIES);
+    expect(await index.search({ query: "screenshot" })).toHaveLength(1);
+    expect(createStore).toHaveBeenCalledTimes(2);
+    expect(first.update).not.toHaveBeenCalled();
+    expect(next.update).not.toHaveBeenCalled();
+    expect(next.embed).not.toHaveBeenCalled();
+    expect(await fs.readFile(metadataPath, "utf8")).toBe(metadata);
+  });
+
+  it("mismatched legacy metadata fails open read-only until a full refresh", async () => {
+    await setupConnection();
+    await index!.close();
+    const metadataPath = path.join(
+      tmpDir,
+      "qmd",
+      "experiences",
+      "metadata.json",
+    );
+    const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+      fingerprint: string;
+    };
+    metadata.fingerprint = "legacy-connection-dependent-fingerprint";
+    await fs.writeFile(metadataPath, JSON.stringify(metadata));
+    const readonly = makeStore();
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore: vi.fn().mockResolvedValue(readonly),
+      readOnly: true,
+    });
+    index.schedule(MOCK_ENTRIES);
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    expect(readonly.update).not.toHaveBeenCalled();
+    await index.close();
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore: vi
+        .fn()
+        .mockImplementation(() => Promise.resolve(makeStore())),
+    });
+    index.schedule(MOCK_ENTRIES);
+    await vi.waitFor(async () =>
+      expect(await index!.search({ query: "screenshot" })).toHaveLength(1),
+    );
+    expect(
+      (
+        JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+          fingerprint: string;
+        }
+      ).fingerprint,
+    ).not.toBe(metadata.fingerprint);
+  });
+
+  it("does not lend a replacement that became stale while opening", async () => {
+    const fixture = await setupConnection();
+    const pending = deferred<QMDStore>();
+    const stale = makeStore();
+    fixture.createStore.mockReturnValueOnce(pending.promise);
+    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 2000 });
+    const searching = fixture.search();
+    await vi.waitFor(() =>
+      expect(fixture.createStore).toHaveBeenCalledTimes(2),
+    );
+    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 3000 });
+    pending.resolve(stale as unknown as QMDStore);
+    expect(await searching).toHaveLength(1);
+    expect(stale.search).not.toHaveBeenCalled();
+    expect(stale.close).toHaveBeenCalledOnce();
+    expect(fixture.createStore.mock.calls[2]?.[0]).toMatchObject({
+      remoteRequestTimeoutMs: 3000,
+    });
+  });
+
+  it("closes a replacement that finishes opening during disposal", async () => {
+    const fixture = await setupConnection();
+    const pending = deferred<QMDStore>();
+    fixture.createStore.mockReturnValueOnce(pending.promise);
+    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 3000 });
+    const searching = fixture.search();
+    await vi.waitFor(() =>
+      expect(fixture.createStore).toHaveBeenCalledTimes(2),
+    );
+    const closing = index!.close();
+    pending.resolve(fixture.next as unknown as QMDStore);
+    expect(await searching).toBeUndefined();
+    await closing;
+    index = undefined;
+    expect(fixture.next.search).not.toHaveBeenCalled();
+    expect(fixture.next.close).toHaveBeenCalledOnce();
+  });
+
+  it("finishes embedding before applying newer connection settings", async () => {
+    const fixture = await setupConnection();
+    const pending = deferred<{ errors: number }>();
+    fixture.next.embed.mockReturnValue(pending.promise);
+    index!.schedule([{ ...MOCK_ENTRIES[0]!, body: "changed" }]);
+    await vi.waitFor(() => expect(fixture.next.embed).toHaveBeenCalledOnce());
+    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 3000 });
+    expect(await fixture.search()).toBeUndefined();
+    expect(fixture.next.close).not.toHaveBeenCalled();
+    const newest = makeStore();
+    fixture.createStore.mockResolvedValueOnce(newest);
+    pending.resolve({ errors: 0 });
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+    expect(await fixture.search()).toHaveLength(1);
+    expect(fixture.next.close).toHaveBeenCalledOnce();
+    expect(newest.update).not.toHaveBeenCalled();
+    expect(newest.search).toHaveBeenCalledTimes(3);
+    expect(fixture.createStore.mock.calls[2]?.[0]).toMatchObject({
+      remoteRequestTimeoutMs: 3000,
+    });
   });
 });
