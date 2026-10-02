@@ -319,12 +319,19 @@ function summarizeSchemaError(error: z.ZodError): {
   issueCodes: string[];
   issuePaths: string[];
 } {
+  const flattenIssues = (issues: z.ZodError["issues"]): z.ZodError["issues"] =>
+    issues.flatMap((issue) =>
+      issue.code === "invalid_union"
+        ? issue.errors.flatMap(flattenIssues)
+        : [issue],
+    );
+  const issues = flattenIssues(error.issues);
   return {
-    issueCount: error.issues.length,
-    issueCodes: [...new Set(error.issues.map((issue) => issue.code))],
+    issueCount: issues.length,
+    issueCodes: [...new Set(issues.map((issue) => issue.code))],
     issuePaths: [
       ...new Set(
-        error.issues.map((issue) =>
+        issues.map((issue) =>
           issue.path.length > 0 ? issue.path.join(".") : "(root)",
         ),
       ),
@@ -422,7 +429,15 @@ ${ULTRA_CONCISE_REVIEW_OUTPUT_STYLE}
 Decision completeness:
 - Every requested trigger must have at least one valid decision: one or more hasFinding=true items, or one hasFinding=false item.
 - For hasFinding=false items: reasonCode is optional (${NO_FINDING_REASON_CODE_LIST}).
-- For hasFinding=true items: targetKind="skill-experience", targetExperienceIds=["<id>"], dedupeKey, summary, evidence, correctionGoal, suggestedChange.
+- For hasFinding=true items, all fields in the positive example below are required. trigger must exactly match a requested trigger, and hasFinding must be a JSON boolean.
+- targetKind must be "skill-experience". targetExperienceIds must be an array of 1–10 changed experience IDs, each 3–129 characters.
+- dedupeKey: nonempty string, at most 120 characters. summary: nonempty string, at most 500 characters.
+- evidence: an array of at most 10 nonempty strings, each at most 1,000 characters; never a single string or object. Include only observed evidence, not inferred success or recovery.
+- correctionGoal: nonempty string, at most 1,000 characters. suggestedChange: nonempty string, at most 12,000 characters.
+- These JSON field limits are separate from the experience file limits above. Do not invent a positive finding just to match the example.
+
+Positive finding shape (illustrative placeholders; replace with observed evidence and IDs actually changed):
+{"findings":[{"trigger":"${triggers[0] ?? "capability-fit"}","hasFinding":true,"targetKind":"skill-experience","targetExperienceIds":["example-experience"],"dedupeKey":"example-change","summary":"What was improved","evidence":["Observed action and verified result"],"correctionGoal":"Reusable improvement supported by the evidence","suggestedChange":"Describe the experience files actually changed"}]}
 
 Fallback no-finding template:
 {"findings":[${exampleNoFindings}]}
@@ -475,7 +490,7 @@ export function parseReviewFindingsDetailed(
           schemaRejectionReasonCounts[reasonCode] =
             (schemaRejectionReasonCounts[reasonCode] ?? 0) + 1;
         }
-        logger.debug("dropping invalid review finding", {
+        logger.warn("dropping invalid review finding", {
           schemaRejectionReasonCode: reasonCode,
           ...summarizeSchemaError(result.error),
         });

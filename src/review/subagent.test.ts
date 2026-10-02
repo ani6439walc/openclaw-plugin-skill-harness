@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { OpenClawPluginApi } from "../../api.js";
+import { logger, type OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import {
   buildReviewPrompt,
   getReviewModelRef,
   hasRoutingSurfaceChange,
   parseReviewFindings,
+  parseReviewFindingsDetailed,
   runReviewSubagent,
 } from "./subagent.js";
 import type { ReviewSnapshot } from "./types.js";
@@ -528,5 +529,47 @@ describe("review writeback boundaries", () => {
     expect(buildReviewPrompt(snapshot, ["capability-fit"])).toContain(
       "Associated skill names (exactly one per line; no comma-separated lists)",
     );
+  });
+});
+
+describe("review output contract diagnostics", () => {
+  it("accepts the positive JSON example from the prompt", () => {
+    const prompt = buildReviewPrompt(snapshot, ["capability-fit"]);
+    const example = prompt
+      .split("\n")
+      .find(
+        (line) =>
+          line.startsWith('{"findings":') && line.includes('"hasFinding":true'),
+      );
+    expect(example).toBeDefined();
+    const parsed = parseReviewFindingsDetailed(example!, ["capability-fit"]);
+    expect(parsed?.findings).toHaveLength(1);
+    expect(parsed?.missingRequestedTriggers).toEqual([]);
+  });
+
+  it("logs nested schema paths and codes without rejected content", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const prompt = buildReviewPrompt(snapshot, ["capability-fit"]);
+    const example = prompt
+      .split("\n")
+      .find(
+        (line) =>
+          line.startsWith('{"findings":') && line.includes('"hasFinding":true'),
+      )!;
+    const response = JSON.parse(example);
+    response.findings[0].evidence = "PRIVATE-EVIDENCE-MUST-NOT-BE-LOGGED";
+    const parsed = parseReviewFindingsDetailed(JSON.stringify(response), [
+      "capability-fit",
+    ]);
+    expect(parsed?.findings).toEqual([]);
+    expect(parsed?.missingRequestedTriggers).toEqual(["capability-fit"]);
+    expect(warn).toHaveBeenCalledWith(
+      "dropping invalid review finding",
+      expect.objectContaining({
+        issuePaths: expect.arrayContaining(["evidence"]),
+        issueCodes: expect.arrayContaining(["invalid_type"]),
+      }),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("PRIVATE-EVIDENCE");
   });
 });
