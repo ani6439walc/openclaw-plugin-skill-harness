@@ -61,6 +61,7 @@ export type ResolvedSkillCandidateNameMatchConfig = {
 };
 
 export type ResolvedRoutingSkillsConfig = {
+  related: { enabled: boolean };
   search: ResolvedSkillCandidateSearchConfig;
   nameMatch: ResolvedSkillCandidateNameMatchConfig;
   relevanceThreshold: number;

@@ -1,3 +1,7 @@
+import {
+  appendImportedRelations,
+  readSkillIdentity,
+} from "../skills/relation-graph.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -2489,6 +2493,7 @@ describe("createHookHandlers topic switch flow", () => {
 
   function createTopicFlowHarness(params: {
     historicalIntents: unknown[];
+    dataRoot?: string;
     configRaw?: Parameters<typeof resolveConfig>[0];
     intents?: IntentCatalogEntry[];
     classifier?: ReturnType<typeof vi.fn>;
@@ -2669,6 +2674,7 @@ describe("createHookHandlers topic switch flow", () => {
       classifier: classifier as never,
       turnAssociations: params.turnAssociations,
       bundledSkillsDir: params.bundledSkillsDir,
+      dataRoot: params.dataRoot,
       getWorkingSetSkills: params.getWorkingSetSkills,
       experienceCatalog: params.experienceCatalog as never,
       qmdSkillIndex: params.qmdSkillIndex as never,
@@ -3291,6 +3297,82 @@ describe("createHookHandlers topic switch flow", () => {
     expect(record).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { enabled: false, selected: true },
+    { enabled: true, selected: true },
+    { enabled: true, selected: false },
+  ])(
+    "uses graph candidates with enabled=$enabled, selected=$selected",
+    async ({ enabled, selected }) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-relations-"));
+      const workspace = path.join(tmp, "workspace");
+      const dataRoot = path.join(tmp, "data");
+      const root = path.join(workspace, "skills");
+      writeSkill(root, "primary-workflow", "Primary workflow");
+      writeSkill(root, "supplementary-guidance", "Supplementary guidance");
+      const from = await readSkillIdentity({
+        name: "primary-workflow",
+        location: path.join(root, "primary-workflow/SKILL.md"),
+      });
+      const to = await readSkillIdentity({
+        name: "supplementary-guidance",
+        location: path.join(root, "supplementary-guidance/SKILL.md"),
+      });
+      await appendImportedRelations(dataRoot, [
+        {
+          from: from!,
+          to: to!,
+          type: "depends_on",
+          reason: "Only when extra help is useful.",
+        },
+      ]);
+      const { handlers, classifier, record } = createTopicFlowHarness({
+        historicalIntents: [],
+        dataRoot,
+        configRaw: { routing: { skills: { related: { enabled } } } },
+        ...(!selected
+          ? {
+              classifier: vi.fn().mockResolvedValue({
+                skills: [],
+                experiences: [],
+                confidence: 0.1,
+                reason: "rejected",
+              }),
+            }
+          : {}),
+        api: {
+          runtime: {
+            state: { resolveStateDir: () => path.join(tmp, "state") },
+            agent: { resolveAgentWorkspaceDir: () => workspace },
+          },
+        } as unknown as Partial<OpenClawPluginApi>,
+      });
+      try {
+        await handlers.onBeforePromptBuild(
+          {
+            prompt: "primary-workflow",
+            messages: [{ role: "user", content: "primary-workflow" }],
+          } as never,
+          ctx,
+        );
+        const names = classifier.mock.calls[0][0].candidateSkills.map(
+          (s: { name: string }) => s.name,
+        );
+        expect(names.includes("supplementary-guidance")).toBe(enabled);
+        const discovery =
+          record.mock.calls.at(-1)![1].current.inputSkillDiscovery;
+        expect(
+          discovery.injectedSkills.filter(
+            (s: { source: string }) => s.source === "related-declared",
+          ),
+        ).toHaveLength(enabled && selected ? 1 : 0);
+        expect(discovery.retrievalSemanticScores).toEqual([]);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("routes direct skill name matches into candidate pool and prompt context", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-name-match-"));

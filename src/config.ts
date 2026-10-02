@@ -72,6 +72,7 @@ const DEFAULT_JEV: QmdEndpointConfig = {
 };
 
 const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
+  related: { enabled: false },
   search: { minCandidateScore: 0.6, timeoutMs: undefined as never },
   nameMatch: {
     maxEditDistance: 2,
@@ -292,6 +293,11 @@ const SkillCandidatesNameMatchSchema = z
 
 const RoutingSkillsSchema = z
   .object({
+    related: z
+      .object({ enabled: z.boolean().optional().default(false) })
+      .strict()
+      .optional()
+      .default({ enabled: false }),
     search: SkillCandidatesSearchSchema,
     nameMatch: SkillCandidatesNameMatchSchema,
     relevanceThreshold: z

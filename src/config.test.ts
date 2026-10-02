@@ -1115,6 +1115,7 @@ describe("resolveConfig", () => {
   describe("skillCandidates", () => {
     it("resolves the complete default policy for legacy routing config", () => {
       expect(resolveConfig({}).routing.skills).toEqual({
+        related: { enabled: false },
         search: { minCandidateScore: 0.6, timeoutMs: 15_000 },
         nameMatch: {
           maxEditDistance: 2,
@@ -1124,6 +1125,16 @@ describe("resolveConfig", () => {
         relevanceThreshold: 0.6,
         maxInjectedSkills: 8,
       });
+    });
+
+    it("accepts opt-in related discovery and rejects unknown relation settings", () => {
+      expect(
+        resolveConfig({ routing: { skills: { related: { enabled: true } } } })
+          .routing.skills.related.enabled,
+      ).toBe(true);
+      expect(() =>
+        resolveConfig({ routing: { skills: { related: { force: true } } } }),
+      ).toThrow();
     });
 
     it("inherits qmd timeout for candidate retrieval unless overridden", () => {
@@ -1154,6 +1165,7 @@ describe("resolveConfig", () => {
       }).routing.skills;
 
       expect(policy).toEqual({
+        related: { enabled: false },
         search: { minCandidateScore: 0.7, timeoutMs: 250 },
         nameMatch: {
           maxEditDistance: 1,
