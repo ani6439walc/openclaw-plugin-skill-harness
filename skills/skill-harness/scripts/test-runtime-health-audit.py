@@ -745,6 +745,27 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(result["schemaRejectionReasons"], {"missing-target": 1})
         self.assertNotIn("PRIVATE", json.dumps(result))
 
+    def test_merge_delete_counts_preserve_unclassified_history(self) -> None:
+        review_path = self.root / "review.json"
+        review = json.loads(review_path.read_text())
+        changes = [
+            {"trigger": "capability-fit", "operation": "merge",
+             "targetExperienceIds": ["kept", "source"],
+             "sourceExperienceIds": ["source"], "retainedExperienceId": "kept"},
+            {"trigger": "capability-fit", "operation": "delete",
+             "targetExperienceIds": ["obsolete"]},
+            {"trigger": "capability-fit", "targetExperienceIds": ["historical"]},
+        ]
+        review["processedEvents"] = {
+            "operations": {"processedAt": "2026-08-01T00:00:00Z",
+                           "outcome": "applied", "triggers": ["capability-fit"],
+                           "changes": changes}
+        }
+        review_path.write_text(json.dumps(review))
+        result = self.report_at()["analysis"]["windows"]["recent"]["review"]
+        self.assertEqual(result["changes"]["byOperation"], {"merge": 1, "delete": 1})
+        self.assertEqual(result["changes"]["total"], 3)
+
     def test_multiple_skill_indexes_and_broken_database(self) -> None:
         root = self.root / "qmd" / "skills" / "indexes"
         for fingerprint in ("secret-one", "secret-two", "missing", "corrupt"):
@@ -787,4 +808,3 @@ class RuntimeHealthAuditTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -192,90 +192,88 @@ describe("registerSkillTools", () => {
     );
   });
 
-  it("returns only bounded experience for requested skills visible to the invoking agent", async () => {
+  it("returns five shared experiences by default while bounding bodies and visible associations", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const stateDir = path.join(tmp, "state");
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-    const mainWorkspace = path.join(tmp, "main-workspace");
-    const analystWorkspace = path.join(tmp, "analyst-workspace");
-    const api = createApi(stateDir, {
-      main: mainWorkspace,
-      analyst: analystWorkspace,
-    });
-    writeSkill(mainWorkspace, "react");
-    writeSkill(analystWorkspace, "vue");
-    writeExperience(dataRoot, "react", "alpha", "😀".repeat(2_500));
-    writeExperience(dataRoot, "react", "beta", "b".repeat(2_500));
-    writeExperience(dataRoot, "react", "gamma", "c".repeat(2_500));
-    writeExperience(dataRoot, "react", "ignored", "d".repeat(100));
-    writeExperience(dataRoot, "vue", "private", "private analyst guidance");
+    const workspace = path.join(tmp, "workspace");
+    const api = createApi(stateDir, workspace);
+    writeSkill(workspace, "react");
+    for (const id of ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]) {
+      writeExperience(
+        dataRoot,
+        id === "alpha" ? "react" : "vue",
+        id,
+        "😀".repeat(2_500),
+      );
+    }
     const experienceFile = path.join(
       dataRoot,
       "experiences",
       "alpha",
       "body.md",
     );
-    const readBefore = fs.readFileSync(experienceFile, "utf8");
-
+    const before = fs.readFileSync(experienceFile, "utf8");
     registerSkillTools(api, {
       experienceCatalog: new SkillExperienceCatalog(dataRoot),
     });
-    const tool = toolsForAgent(api, "main").get("skill_experience");
-    const result = await runTool(tool, {
-      skills: [" REACT ", "react", "vue", "missing"],
+    const result = await runTool(toolsForAgent(api).get("skill_experience"), {
+      query: "summary",
     });
-
-    expect(result).toMatchObject({
-      success: true,
-      unavailable_skills: ["vue", "missing"],
-    });
-    expect(result.entries.map((entry: { id: string }) => entry.id)).toEqual([
-      "alpha",
-      "beta",
-      "gamma",
-    ]);
+    expect(result).toMatchObject({ success: true });
+    expect(Object.keys(result)).toEqual(["success", "entries"]);
+    expect(result.entries).toHaveLength(5);
+    expect(
+      result.entries.find((entry: { id: string }) => entry.id === "alpha")
+        .skills,
+    ).toEqual(["react"]);
+    expect(
+      result.entries
+        .filter((entry: { id: string }) => entry.id !== "alpha")
+        .every((entry: { skills: string[] }) => entry.skills.length === 0),
+    ).toBe(true);
     expect(
       result.entries.map(
         (entry: { body: string }) => Array.from(entry.body).length,
       ),
-    ).toEqual([2_000, 2_000, 1_000]);
-    expect(result.entries).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ path: expect.anything() }),
-      ]),
+    ).toEqual([2_000, 2_000, 1_000, 0, 0]);
+    expect(result.entries.every((entry: object) => !("path" in entry))).toBe(
+      true,
     );
-    expect(fs.readFileSync(experienceFile, "utf8")).toBe(readBefore);
+    expect(fs.readFileSync(experienceFile, "utf8")).toBe(before);
     expect(api.runtime.agent).not.toHaveProperty("runEmbeddedAgent");
   });
 
   it.each([false, true])(
-    "returns no experience when every requested skill is invisible (QMD: %s)",
+    "keeps experiences with invisible or absent associations and honors show_skills (QMD: %s)",
     async (useQmd) => {
-      const tmp = fs.mkdtempSync(
-        path.join(os.tmpdir(), "skill-tools-private-"),
-      );
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-shared-"));
       try {
         const stateDir = path.join(tmp, "state");
         const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-        const mainWorkspace = path.join(tmp, "main-workspace");
-        const analystWorkspace = path.join(tmp, "analyst-workspace");
-        const api = createApi(stateDir, {
-          main: mainWorkspace,
-          analyst: analystWorkspace,
-        });
-        writeSkill(mainWorkspace, "react");
-        writeSkill(analystWorkspace, "vue");
-        writeExperience(dataRoot, "vue", "private", "private analyst guidance");
-        const search = vi.fn().mockResolvedValue([
-          {
-            id: "private",
+        const workspace = path.join(tmp, "workspace");
+        const api = createApi(stateDir, workspace);
+        writeSkill(workspace, "react");
+        writeExperience(dataRoot, "vue", "shared", "shared guidance");
+        writeExperience(dataRoot, "react", "mixed", "shared guidance");
+        fs.writeFileSync(
+          path.join(dataRoot, "experiences", "mixed", "skills.md"),
+          "react\nvue\n",
+        );
+        writeExperience(dataRoot, "react", "standalone", "shared guidance");
+        fs.rmSync(
+          path.join(dataRoot, "experiences", "standalone", "skills.md"),
+        );
+        const search = vi.fn().mockResolvedValue(
+          ["shared", "mixed", "standalone"].map((id) => ({
+            id,
             skills: ["vue"],
-            score: 0.03,
-            semanticScore: 0.95,
+            score: 0.9,
+            semanticScore: 0.9,
             matchedCollections: ["body"],
             evidence: [],
-          },
-        ]);
+          })),
+        );
         registerSkillTools(api, {
           experienceCatalog: new SkillExperienceCatalog(dataRoot),
           ...(useQmd
@@ -289,117 +287,154 @@ describe("registerSkillTools", () => {
               }
             : {}),
         });
-        const tool = toolsForAgent(api, "main").get("skill_experience");
-        for (const query of [undefined, "private"]) {
-          const result = await runTool(tool, {
-            skills: ["vue"],
-            ...(query ? { query } : {}),
-          });
-          expect(result).toEqual({
-            success: true,
-            requested_skills: ["vue"],
-            unavailable_skills: ["vue"],
-            entries: [],
-          });
-        }
-        if (useQmd) expect(search).toHaveBeenCalledOnce();
+        const tool = toolsForAgent(api).get("skill_experience");
+        const shown = await runTool(tool, { query: "shared", limit: 20 });
+        expect(shown.entries).toHaveLength(3);
+        expect(
+          shown.entries.find((entry: { id: string }) => entry.id === "shared")
+            .skills,
+        ).toEqual([]);
+        expect(
+          shown.entries.find((entry: { id: string }) => entry.id === "mixed")
+            .skills,
+        ).toEqual(["react"]);
+        expect(
+          shown.entries.find(
+            (entry: { id: string }) => entry.id === "standalone",
+          ).skills,
+        ).toEqual([]);
+        const hidden = await runTool(tool, {
+          query: "shared",
+          limit: 20,
+          show_skills: false,
+        });
+        expect(hidden.entries.map((entry: { id: string }) => entry.id)).toEqual(
+          shown.entries.map((entry: { id: string }) => entry.id),
+        );
+        expect(
+          hidden.entries.every((entry: object) => !("skills" in entry)),
+        ).toBe(true);
+        if (useQmd)
+          expect(search).toHaveBeenCalledWith({ query: "shared", limit: 20 });
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }
     },
   );
 
-  it("uses the catalog canonical identity for the invoking agent visibility intersection", async () => {
+  it("uses canonical identity when displaying visible associations", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const stateDir = path.join(tmp, "state");
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
-    const mainWorkspace = path.join(tmp, "main-workspace");
-    const analystWorkspace = path.join(tmp, "analyst-workspace");
-    const api = createApi(stateDir, {
-      main: mainWorkspace,
-      analyst: analystWorkspace,
-    });
-    writeSkill(mainWorkspace, "react");
-    writeSkill(analystWorkspace, "vue");
+    const workspace = path.join(tmp, "workspace");
+    const api = createApi(stateDir, workspace);
+    writeSkill(workspace, "ＲＥＡＣＴ");
     writeExperience(dataRoot, "react", "forms", "Use controlled forms.");
-    writeExperience(dataRoot, "vue", "signals", "Use explicit signals.");
-
     registerSkillTools(api, {
       experienceCatalog: new SkillExperienceCatalog(dataRoot),
     });
-    const result = await runTool(
-      toolsForAgent(api, "main").get("skill_experience"),
-      { skills: ["ＲＥＡＣＴ", "ＶＵＥ"] },
-    );
-
-    expect(result).toMatchObject({
-      success: true,
-      requested_skills: ["react", "vue"],
-      unavailable_skills: ["vue"],
-      entries: [expect.objectContaining({ id: "forms" })],
+    const result = await runTool(toolsForAgent(api).get("skill_experience"), {
+      query: "forms",
     });
+    expect(result.entries).toEqual([
+      expect.objectContaining({ id: "forms", skills: ["react"] }),
+    ]);
   });
 
-  it("validates skill count and Unicode query length at execution", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
-    const stateDir = path.join(tmp, "state");
-    const workspace = path.join(tmp, "workspace");
-    const api = createApi(stateDir, workspace);
-    writeSkill(workspace, "react");
-    registerSkillTools(api, {
-      experienceCatalog: new SkillExperienceCatalog(
-        path.join(stateDir, "plugins", "skill-harness"),
-      ),
-    });
-    const tool = toolsForAgent(api).get("skill_experience");
+  it.each([undefined, 0, -1, 1, 7, 20, 100, 2.9])(
+    "clamps the experience limit for catalog and QMD searches: %s",
+    async (requestedLimit) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-limits-"));
+      const stateDir = path.join(tmp, "state");
+      const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+      const api = createApi(stateDir, path.join(tmp, "workspace"));
+      for (let index = 0; index < 25; index++)
+        writeExperience(dataRoot, "vue", `entry-${index}`, "shared guidance");
+      const catalog = new SkillExperienceCatalog(dataRoot);
+      const search = vi
+        .fn()
+        .mockResolvedValue(
+          catalog.listAll().map((entry) => ({ id: entry.id })),
+        );
+      const expectedLimit = Math.min(
+        20,
+        Math.max(1, Math.trunc(requestedLimit ?? 5)),
+      );
+      for (const useQmd of [false, true]) {
+        api.registerTool.mockClear();
+        registerSkillTools(api, {
+          experienceCatalog: catalog,
+          ...(useQmd
+            ? {
+                qmdExperienceIndex: {
+                  schedule: vi.fn(),
+                  search,
+                  getStatus: () => "ready" as const,
+                  close: vi.fn().mockResolvedValue(undefined),
+                },
+              }
+            : {}),
+        });
+        const result = await runTool(
+          toolsForAgent(api).get("skill_experience"),
+          { query: "shared", limit: requestedLimit, show_skills: false },
+        );
+        expect(result.entries).toHaveLength(expectedLimit);
+        if (useQmd)
+          expect(search).toHaveBeenLastCalledWith({
+            query: "shared",
+            limit: expectedLimit,
+          });
+      }
+    },
+  );
 
-    await expect(runTool(tool, { skills: [] })).resolves.toMatchObject({
-      success: false,
-    });
-    await expect(
-      runTool(tool, { skills: ["react", 3] }),
-    ).resolves.toMatchObject({ success: false });
-    await expect(
-      runTool(tool, {
-        skills: Array.from({ length: 7 }, (_, index) => `s${index}`),
-      }),
-    ).resolves.toMatchObject({ success: false });
-    await expect(
-      runTool(tool, { skills: ["react"], query: "😀".repeat(501) }),
-    ).resolves.toEqual({
+  it("requires a query and validates its type and Unicode length at execution", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+    const api = createApi(path.join(tmp, "state"), path.join(tmp, "workspace"));
+    registerSkillTools(api);
+    const tool = toolsForAgent(api).get("skill_experience");
+    for (const params of [{}, { query: "  " }, { skills: ["react"] }]) {
+      await expect(runTool(tool, params)).resolves.toEqual({
+        success: false,
+        error: "query is required",
+      });
+    }
+    await expect(runTool(tool, { query: "😀".repeat(501) })).resolves.toEqual({
       success: false,
       error: "query must contain at most 500 Unicode code points",
     });
-    await expect(
-      runTool(tool, { skills: ["react"], query: 3 }),
-    ).resolves.toEqual({
+    await expect(runTool(tool, { query: 3 })).resolves.toEqual({
       success: false,
       error: "query must be a string",
     });
+    await expect(runTool(tool, { query: "😀".repeat(500) })).resolves.toEqual({
+      success: true,
+      entries: [],
+    });
+    const schema = (
+      tool as { parameters: { properties: object; required: string[] } }
+    ).parameters;
+    expect(Object.keys(schema.properties)).toEqual([
+      "query",
+      "limit",
+      "show_skills",
+    ]);
+    expect(schema.required).toEqual(["query"]);
   });
 
-  it("returns an explicit empty result when visible skills have no experience", async () => {
+  it("returns an explicit empty result when no experience matches the query", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const stateDir = path.join(tmp, "state");
-    const workspace = path.join(tmp, "workspace");
-    const api = createApi(stateDir, workspace);
-    writeSkill(workspace, "react");
+    const api = createApi(stateDir, path.join(tmp, "workspace"));
     registerSkillTools(api, {
       experienceCatalog: new SkillExperienceCatalog(
         path.join(stateDir, "plugins", "skill-harness"),
       ),
     });
-
     await expect(
-      runTool(toolsForAgent(api).get("skill_experience"), {
-        skills: ["react"],
-      }),
-    ).resolves.toEqual({
-      success: true,
-      requested_skills: ["react"],
-      unavailable_skills: [],
-      entries: [],
-    });
+      runTool(toolsForAgent(api).get("skill_experience"), { query: "unknown" }),
+    ).resolves.toEqual({ success: true, entries: [] });
   });
 
   it("searches visible skills through the QMD skill index", async () => {

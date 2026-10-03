@@ -5,7 +5,12 @@ import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
 import type { SkillPlacementReason } from "../stats/aggregator.js";
 
-export const REVIEW_OPERATIONS = ["create", "refine", "delete"] as const;
+export const REVIEW_OPERATIONS = [
+  "create",
+  "refine",
+  "merge",
+  "delete",
+] as const;
 export type ReviewOperation = (typeof REVIEW_OPERATIONS)[number];
 
 export const PROCESSED_EVENT_OUTCOMES = [
@@ -57,6 +62,8 @@ export type AppliedReviewChange = {
   trigger: StoredReviewTrigger;
   targetKind: "skill-experience";
   operation?: ReviewOperation;
+  sourceExperienceIds?: string[];
+  retainedExperienceId?: string;
   targetExperienceIds: string[];
   dedupeKey: string;
   summary: string;
@@ -152,26 +159,90 @@ const SchemaRejectionReasonCountsSchema = PositiveCountsSchema.refine((value) =>
   hasOnlyKeys(value, SCHEMA_REJECTION_REASON_CODES),
 ).transform((value): SchemaRejectionReasonCounts => value);
 
-const ExperienceChangeSchema = z
+const StoredExperienceIdSchema = z.string().trim().min(3).max(129);
+const ExperienceChangeShape = {
+  trigger: z.enum(STORED_REVIEW_TRIGGERS),
+  targetKind: z.literal("skill-experience"),
+  targetExperienceIds: z.array(StoredExperienceIdSchema).min(1),
+  dedupeKey: z.string().trim().min(1),
+  summary: z.string().trim().min(1),
+  evidence: z.array(z.string()),
+  correctionGoal: z.string().trim().min(1),
+  suggestedChange: z.string().trim().min(1),
+};
+
+const UnclassifiedExperienceChangeSchema = z
   .object({
-    trigger: z.enum(STORED_REVIEW_TRIGGERS),
-    targetKind: z.literal("skill-experience"),
-    operation: z.enum(REVIEW_OPERATIONS).optional(),
-    targetExperienceIds: z.array(z.string().trim().min(3)).min(1),
-    dedupeKey: z.string().trim().min(1),
-    summary: z.string().trim().min(1),
-    evidence: z.array(z.string()),
-    correctionGoal: z.string().trim().min(1),
-    suggestedChange: z.string().trim().min(1),
+    ...ExperienceChangeShape,
+    operation: z.undefined().optional(),
+    sourceExperienceIds: z.never().optional(),
+    retainedExperienceId: z.never().optional(),
   })
   .strict();
+const ClassifiedExperienceChangeSchema = z
+  .discriminatedUnion("operation", [
+    z
+      .object({
+        ...ExperienceChangeShape,
+        operation: z.enum(["create", "refine", "delete"]),
+        sourceExperienceIds: z.never().optional(),
+        retainedExperienceId: z.never().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        ...ExperienceChangeShape,
+        operation: z.literal("merge"),
+        sourceExperienceIds: z.array(StoredExperienceIdSchema).min(1).max(9),
+        retainedExperienceId: StoredExperienceIdSchema,
+      })
+      .strict(),
+  ])
+  .superRefine((change, ctx) => {
+    if (
+      new Set(change.targetExperienceIds).size !==
+      change.targetExperienceIds.length
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["targetExperienceIds"],
+        message: "Duplicate targets",
+      });
+    }
+    if (
+      change.operation === "merge" &&
+      (new Set(change.sourceExperienceIds).size !==
+        change.sourceExperienceIds.length ||
+        change.sourceExperienceIds.includes(change.retainedExperienceId))
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceExperienceIds"],
+        message:
+          "Merge sources must be distinct from each other and the retained ID",
+      });
+    }
+  });
+const ExperienceChangeSchema = z.union([
+  UnclassifiedExperienceChangeSchema,
+  ClassifiedExperienceChangeSchema,
+]);
 
-const LegacyChangeSchema = ExperienceChangeSchema.extend({
-  targetKind: z.enum(["intent-markdown", "skill-experience"]),
-  operation: z.enum([...REVIEW_OPERATIONS, "split", "merge"]),
-  targetIntentIds: z.array(z.string()),
-  targetExperienceIds: z.array(z.string().trim().min(3)).optional(),
-}).strict();
+const LegacyChangeSchema = z
+  .object({
+    ...ExperienceChangeShape,
+    targetKind: z.enum(["intent-markdown", "skill-experience"]),
+    operation: z.enum([...REVIEW_OPERATIONS, "split"]),
+    targetIntentIds: z.array(z.string()),
+    targetExperienceIds: z.array(StoredExperienceIdSchema).optional(),
+    sourceExperienceIds: z
+      .array(StoredExperienceIdSchema)
+      .min(1)
+      .max(9)
+      .optional(),
+    retainedExperienceId: StoredExperienceIdSchema.optional(),
+  })
+  .strict();
 
 const ProcessedEventRecordSchema = z
   .object({

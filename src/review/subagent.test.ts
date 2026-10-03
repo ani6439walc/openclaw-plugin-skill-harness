@@ -98,6 +98,54 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("capability-fit: Review focus:");
     expect(prompt).toContain("demonstrated recovery and verification");
   });
+
+  it.each([
+    "experience-health-check",
+    "routing-uncertainty",
+    "capability-fit",
+  ] as const)(
+    "requires coverage checks and bounds skill discovery for %s",
+    (trigger) => {
+      const prompt = buildReviewPrompt(snapshot, [trigger], undefined, [
+        "writer",
+      ]);
+      expect(prompt).toContain(
+        "Eligible observed skills for experiences: writer.",
+      );
+      expect(prompt).toContain("Before creating an experience");
+      expect(prompt).toContain("Refine the existing ID");
+      expect(prompt).toContain(
+        "You may merge two or more existing experiences",
+      );
+      expect(prompt).toContain("every deleted ID in targetExperienceIds");
+      expect(prompt).toContain("You may delete experiences");
+      expect(prompt).toContain("age alone do not justify deletion");
+      expect(prompt).toContain(
+        "Use exec only for necessary experience maintenance",
+      );
+      expect(prompt).toContain(
+        "never use .., $HOME, or absolute paths outside the temporary workspace",
+      );
+      expect(prompt).toContain("Prompt scope is not shell containment");
+      expect(prompt).toContain(
+        "use skill_search with a focused query, limit: 5",
+      );
+      expect(prompt).toContain(
+        "not complete workflows or evidence of execution",
+      );
+      expect(prompt).toContain(
+        "Search never expands the eligible observed skill list",
+      );
+    },
+  );
+
+  it("requires unassociated entries when no eligible observed skills exist", () => {
+    const prompt = buildReviewPrompt(snapshot, ["capability-fit"]);
+    expect(prompt).toContain(
+      "none; omit skills.md on entries you create or modify",
+    );
+    expect(prompt).not.toContain("all visible skills");
+  });
 });
 
 describe("parseReviewFindings", () => {
@@ -110,6 +158,7 @@ describe("parseReviewFindings", () => {
               trigger: "experience-health-check",
               hasFinding: true,
               targetKind: "skill-experience",
+              operation: "refine",
               targetExperienceIds: ["exp-tdd"],
               dedupeKey: "exp-tdd-refine",
               summary: "Refine keywords for TDD workflow",
@@ -125,6 +174,7 @@ describe("parseReviewFindings", () => {
       expect.objectContaining({
         trigger: "experience-health-check",
         targetKind: "skill-experience",
+        operation: "refine",
         targetExperienceIds: ["exp-tdd"],
       }),
     ]);
@@ -234,6 +284,7 @@ describe("runReviewSubagent", () => {
                       trigger: "experience-health-check",
                       hasFinding: true,
                       targetKind: "skill-experience",
+                      operation: "refine",
                       targetExperienceIds: ["exp-1"],
                       dedupeKey: "exp-1-refine",
                       summary: "Improve summary description",
@@ -272,6 +323,7 @@ describe("runReviewSubagent", () => {
     expect(result.changedExperienceIds).toEqual(["exp-1"]);
     expect(result.findings[0]).toMatchObject({
       targetKind: "skill-experience",
+      operation: "refine",
       targetExperienceIds: ["exp-1"],
     });
     expect(
@@ -305,6 +357,7 @@ describe("runReviewSubagent", () => {
                       trigger: "experience-health-check",
                       hasFinding: true,
                       targetKind: "skill-experience",
+                      operation: "refine",
                       targetExperienceIds: ["exp-1"],
                       dedupeKey: "exp-1-broken",
                       summary: "Invalid removal",
@@ -350,6 +403,11 @@ describe("review writeback boundaries", () => {
   async function review(
     edit: (workspace: string, runtime: string) => void,
     targets: string[] = ["exp-one"],
+    operation: "create" | "refine" | "merge" | "delete" = "refine",
+    mergeFields: {
+      sourceExperienceIds?: string[];
+      retainedExperienceId?: string;
+    } = {},
   ) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-boundary-"));
     tempRoots.push(root);
@@ -386,6 +444,8 @@ describe("review writeback boundaries", () => {
                         trigger: "capability-fit",
                         hasFinding: true,
                         targetKind: "skill-experience",
+                        operation,
+                        ...mergeFields,
                         targetExperienceIds: targets,
                         dedupeKey: "fix",
                         summary: "Refine workflow",
@@ -427,6 +487,15 @@ describe("review writeback boundaries", () => {
             entries: { main: { tools: { fs: { workspaceOnly: true } } } },
           },
         }),
+        toolsAllow: [
+          "ls",
+          "read",
+          "write",
+          "edit",
+          "exec",
+          "skill_experience",
+          "skill_search",
+        ],
       }),
     );
     expect(config.tools.fs.workspaceOnly).toBe(false);
@@ -499,12 +568,195 @@ describe("review writeback boundaries", () => {
   });
 
   it("applies a declared full deletion", async () => {
-    const { result, root } = await review((workspace) => {
-      fs.rmSync(path.join(workspace, "exp-one"), { recursive: true });
-    });
+    const { result, root } = await review(
+      (workspace, runtime) => {
+        fs.writeFileSync(path.join(runtime, "exp-one", ".residue"), "stale");
+        fs.rmSync(path.join(workspace, "exp-one"), { recursive: true });
+      },
+      ["exp-one"],
+      "delete",
+    );
     expect(result.outcome).toBe("applied");
     expect(fs.existsSync(path.join(root, "exp-one"))).toBe(false);
+    expect(result.findings[0]?.operation).toBe("delete");
   });
+
+  it.each(["create", "refine", "delete"] as const)(
+    "rejects a mismatched %s declaration before writeback",
+    async (operation) => {
+      const { result, root } = await review(
+        (workspace) => {
+          if (operation === "refine") {
+            fs.rmSync(path.join(workspace, "exp-one"), { recursive: true });
+          } else {
+            fs.writeFileSync(
+              path.join(workspace, "exp-one", "body.md"),
+              "Changed guidance.",
+            );
+          }
+        },
+        ["exp-one"],
+        operation,
+      );
+      expect(result.outcome).toBe("validation-failed");
+      expect(
+        fs.readFileSync(path.join(root, "exp-one", "body.md"), "utf8"),
+      ).toBe("Original procedure.");
+    },
+  );
+
+  it("rejects deletion that leaves the directory behind", async () => {
+    const { result, root } = await review(
+      (workspace) => {
+        const directory = path.join(workspace, "exp-one");
+        for (const file of fs.readdirSync(directory))
+          fs.rmSync(path.join(directory, file));
+      },
+      ["exp-one"],
+      "delete",
+    );
+    expect(result.outcome).toBe("validation-failed");
+    expect(fs.existsSync(path.join(root, "exp-one", "body.md"))).toBe(true);
+  });
+
+  it("applies a declared creation", async () => {
+    const { result, root } = await review(
+      (workspace) => {
+        fs.cpSync(
+          path.join(workspace, "exp-one"),
+          path.join(workspace, "exp-new"),
+          { recursive: true },
+        );
+      },
+      ["exp-new"],
+      "create",
+    );
+    expect(result.outcome).toBe("applied");
+    expect(fs.existsSync(path.join(root, "exp-new", "body.md"))).toBe(true);
+  });
+
+  it("removes merge-source residue while retaining an unchanged survivor", async () => {
+    const { result, root } = await review(
+      (workspace, runtime) => {
+        fs.writeFileSync(path.join(runtime, "exp-other", ".residue"), "stale");
+        fs.rmSync(path.join(workspace, "exp-other"), { recursive: true });
+      },
+      ["exp-other"],
+      "merge",
+      { sourceExperienceIds: ["exp-other"], retainedExperienceId: "exp-one" },
+    );
+    expect(result.outcome).toBe("applied");
+    expect(result.findings[0]).toMatchObject({
+      operation: "merge",
+      sourceExperienceIds: ["exp-other"],
+      retainedExperienceId: "exp-one",
+    });
+    expect(fs.existsSync(path.join(root, "exp-other"))).toBe(false);
+    expect(fs.readFileSync(path.join(root, "exp-one", "body.md"), "utf8")).toBe(
+      "Original procedure.",
+    );
+  });
+
+  it("rejects merge when the unchanged survivor is deleted concurrently", async () => {
+    const { result, root } = await review(
+      (workspace, runtime) => {
+        fs.rmSync(path.join(workspace, "exp-other"), { recursive: true });
+        fs.rmSync(path.join(runtime, "exp-one"), { recursive: true });
+      },
+      ["exp-other"],
+      "merge",
+      { sourceExperienceIds: ["exp-other"], retainedExperienceId: "exp-one" },
+    );
+    expect(result.outcome).toBe("validation-failed");
+    expect(fs.existsSync(path.join(root, "exp-other"))).toBe(true);
+    expect(result.validationErrors).toContain(
+      "exp-one: runtime experience changed during review",
+    );
+  });
+
+  it.each(["source-retained", "survivor-deleted", "new-survivor"] as const)(
+    "rejects invalid merge topology: %s",
+    async (scenario) => {
+      const retainedExperienceId =
+        scenario === "new-survivor" ? "exp-new" : "exp-one";
+      const targets =
+        scenario === "source-retained"
+          ? ["exp-other"]
+          : [
+              "exp-one",
+              "exp-other",
+              ...(scenario === "new-survivor" ? ["exp-new"] : []),
+            ];
+      const { result, root } = await review(
+        (workspace) => {
+          if (scenario === "source-retained") {
+            fs.writeFileSync(
+              path.join(workspace, "exp-other", "body.md"),
+              "Changed source.",
+            );
+          } else {
+            if (scenario === "new-survivor")
+              fs.cpSync(
+                path.join(workspace, "exp-one"),
+                path.join(workspace, "exp-new"),
+                { recursive: true },
+              );
+            fs.rmSync(path.join(workspace, "exp-one"), { recursive: true });
+            fs.rmSync(path.join(workspace, "exp-other"), { recursive: true });
+          }
+        },
+        targets,
+        "merge",
+        { sourceExperienceIds: ["exp-other"], retainedExperienceId },
+      );
+      expect(result.outcome).toBe("validation-failed");
+      expect(fs.existsSync(path.join(root, "exp-one"))).toBe(true);
+      expect(fs.existsSync(path.join(root, "exp-other"))).toBe(true);
+      expect(fs.existsSync(path.join(root, "exp-new"))).toBe(false);
+    },
+  );
+
+  it.each([false, true])(
+    "requires both the retained and deleted IDs for a merge (declared deletion: %s)",
+    async (declareDeletion) => {
+      const { result, root } = await review(
+        (workspace) => {
+          fs.writeFileSync(
+            path.join(workspace, "exp-one", "body.md"),
+            "Merged procedure with preserved verification steps.",
+          );
+          fs.rmSync(path.join(workspace, "exp-other"), { recursive: true });
+        },
+        declareDeletion ? ["exp-one", "exp-other"] : ["exp-one"],
+        "merge",
+        { sourceExperienceIds: ["exp-other"], retainedExperienceId: "exp-one" },
+      );
+      expect(result.outcome).toBe(
+        declareDeletion ? "applied" : "validation-failed",
+      );
+      expect(fs.existsSync(path.join(root, "exp-other"))).toBe(
+        !declareDeletion,
+      );
+      expect(
+        fs.readFileSync(path.join(root, "exp-one", "body.md"), "utf8"),
+      ).toBe(
+        declareDeletion
+          ? "Merged procedure with preserved verification steps."
+          : "Original procedure.",
+      );
+      if (declareDeletion) {
+        expect(result.findings[0]).toMatchObject({
+          operation: "merge",
+          sourceExperienceIds: ["exp-other"],
+          retainedExperienceId: "exp-one",
+        });
+        expect(result.findings[0]?.targetExperienceIds).toEqual([
+          "exp-one",
+          "exp-other",
+        ]);
+      }
+    },
+  );
 
   it("keeps every declared target for a multi-experience finding", async () => {
     const { result } = await review(
@@ -514,6 +766,7 @@ describe("review writeback boundaries", () => {
         }
       },
       ["exp-one", "exp-other"],
+      "delete",
     );
     expect(result.outcome).toBe("applied");
     expect(result.findings[0]?.targetExperienceIds).toEqual([
@@ -545,6 +798,64 @@ describe("review output contract diagnostics", () => {
     const parsed = parseReviewFindingsDetailed(example!, ["capability-fit"]);
     expect(parsed?.findings).toHaveLength(1);
     expect(parsed?.missingRequestedTriggers).toEqual([]);
+  });
+
+  it("accepts and preserves all operation examples from the prompt", () => {
+    const examples = buildReviewPrompt(snapshot, ["capability-fit"])
+      .split("\n")
+      .filter(
+        (line) =>
+          line.startsWith('{"findings":') && line.includes('"hasFinding":true'),
+      );
+    const findings = examples.flatMap(
+      (example) =>
+        parseReviewFindingsDetailed(example, ["capability-fit"])?.findings ??
+        [],
+    );
+    expect(findings.map((finding) => finding.operation)).toEqual([
+      "refine",
+      "merge",
+      "delete",
+    ]);
+    expect(findings[1]).toMatchObject({
+      sourceExperienceIds: ["duplicate-workflow"],
+      retainedExperienceId: "retained-workflow",
+    });
+  });
+
+  it.each([
+    "missing-operation",
+    "unknown-operation",
+    "missing-merge-fields",
+    "duplicate-sources",
+    "source-is-survivor",
+    "duplicate-targets",
+    "merge-fields-on-delete",
+  ])("rejects malformed operation metadata: %s", (scenario) => {
+    const example = buildReviewPrompt(snapshot, ["capability-fit"])
+      .split("\n")
+      .find(
+        (line) =>
+          line.startsWith('{"findings":') &&
+          line.includes('"operation":"merge"'),
+      )!;
+    const response = JSON.parse(example);
+    const finding = response.findings[0];
+    if (scenario === "missing-operation") delete finding.operation;
+    if (scenario === "unknown-operation") finding.operation = "split";
+    if (scenario === "missing-merge-fields") delete finding.sourceExperienceIds;
+    if (scenario === "duplicate-sources")
+      finding.sourceExperienceIds.push(finding.sourceExperienceIds[0]);
+    if (scenario === "source-is-survivor")
+      finding.sourceExperienceIds = [finding.retainedExperienceId];
+    if (scenario === "duplicate-targets")
+      finding.targetExperienceIds.push(finding.targetExperienceIds[0]);
+    if (scenario === "merge-fields-on-delete") finding.operation = "delete";
+    const parsed = parseReviewFindingsDetailed(JSON.stringify(response), [
+      "capability-fit",
+    ]);
+    expect(parsed?.findings).toEqual([]);
+    expect(parsed?.missingRequestedTriggers).toEqual(["capability-fit"]);
   });
 
   it("logs nested schema paths and codes without rejected content", () => {

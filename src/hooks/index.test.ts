@@ -1568,6 +1568,7 @@ description: Navigate Tokyo.
         {
           trigger: "capability-fit" as const,
           targetKind: "skill-experience" as const,
+          operation: "create" as const,
           targetExperienceIds: ["analysis/corrected-workflow"],
           dedupeKey: "analysis-corrected-workflow",
           summary: "Record the corrected workflow",
@@ -3722,6 +3723,7 @@ describe("createHookHandlers topic switch flow", () => {
     const toolQuery = async () => {
       const result = await tool.execute("test", {
         query: "unlisted paraphrase",
+        show_skills: false,
       });
       return JSON.parse(result.content[0].text);
     };

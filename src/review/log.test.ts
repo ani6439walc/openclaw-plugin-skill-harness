@@ -80,6 +80,51 @@ describe("review log", () => {
       "delete",
     );
   });
+
+  it("requires complete and coherent stored merge metadata", () => {
+    const change = {
+      trigger: "experience-health-check",
+      targetKind: "skill-experience",
+      operation: "merge",
+      sourceExperienceIds: ["obsolete"],
+      retainedExperienceId: "retained",
+      targetExperienceIds: ["obsolete", "retained"],
+      dedupeKey: "merge-experience",
+      summary: "Merge duplicate experiences.",
+      evidence: ["The procedures overlap."],
+      correctionGoal: "Keep one maintained workflow.",
+      suggestedChange: "Retain one experience and remove the source.",
+    };
+    const logWith = (value: Record<string, unknown>) => ({
+      schemaVersion: 8,
+      createdAt: "2026-06-11T00:00:00.000Z",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+      processedEvents: {
+        event: {
+          processedAt: "2026-06-11T00:01:00.000Z",
+          triggers: ["experience-health-check"],
+          changeCount: 1,
+          outcome: "applied",
+          changes: [value],
+        },
+      },
+      reviewedSkillEpochs: {},
+    });
+
+    expect(parseReviewLog(logWith(change))).toBeDefined();
+    for (const invalid of [
+      (() => {
+        const value = { ...change };
+        delete (value as Partial<typeof change>).sourceExperienceIds;
+        return value;
+      })(),
+      { ...change, sourceExperienceIds: ["obsolete", "obsolete"] },
+      { ...change, retainedExperienceId: "obsolete" },
+      { ...change, operation: "delete", sourceExperienceIds: ["obsolete"] },
+    ]) {
+      expect(() => parseReviewLog(logWith(invalid))).toThrow();
+    }
+  });
 });
 
 describe("historical review audit compatibility", () => {
