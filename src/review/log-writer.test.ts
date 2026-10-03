@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { IntentReviewLogWriter } from "./log-writer.js";
+import { parseReviewLog } from "./log.js";
+import type { ReviewFinding } from "./types.js";
 
 describe("IntentReviewLogWriter", () => {
   let root: string;
@@ -50,11 +52,75 @@ describe("IntentReviewLogWriter", () => {
           triggers: ["capability-fit"],
           changeCount: 1,
           outcome: "applied",
-          changes: [{ targetKind: "skill-experience" }],
+          changes: [{ targetKind: "skill-experience", operation: "refine" }],
         },
       },
     });
   });
+
+  it.each(["create", "refine", "merge", "delete"] as const)(
+    "persists %s metadata and preserves unclassified v8 history",
+    async (operation) => {
+      const finding: ReviewFinding = {
+        trigger: "capability-fit",
+        targetKind: "skill-experience",
+        targetExperienceIds:
+          operation === "merge" ? ["kept-entry", "old-entry"] : ["old-entry"],
+        dedupeKey: "change",
+        summary: "Reviewed experience",
+        evidence: ["Verified file changes"],
+        correctionGoal: "Keep useful guidance",
+        suggestedChange: "Applied the declared operation",
+        ...(operation === "merge"
+          ? {
+              operation,
+              sourceExperienceIds: ["old-entry"],
+              retainedExperienceId: "kept-entry",
+            }
+          : { operation }),
+      };
+      const oldChange = {
+        trigger: finding.trigger,
+        targetKind: finding.targetKind,
+        targetExperienceIds: ["historical-entry"],
+        dedupeKey: "historical",
+        summary: finding.summary,
+        evidence: finding.evidence,
+        correctionGoal: finding.correctionGoal,
+        suggestedChange: finding.suggestedChange,
+      };
+      const oldEvent = {
+        processedAt: "2026-06-11T00:00:00.000Z",
+        triggers: ["capability-fit"],
+        changeCount: 1,
+        outcome: "applied",
+        changes: [oldChange],
+      };
+      const logPath = path.join(root, "review.json");
+      fs.writeFileSync(
+        logPath,
+        JSON.stringify({
+          schemaVersion: 8,
+          createdAt: oldEvent.processedAt,
+          updatedAt: oldEvent.processedAt,
+          processedEvents: { old: oldEvent },
+          reviewedSkillEpochs: {},
+        }),
+      );
+      expect(
+        await writer.record("new", source, [finding], {
+          nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+          changedExperienceIds: finding.targetExperienceIds,
+        }),
+      ).toBe(true);
+      const log = parseReviewLog(JSON.parse(fs.readFileSync(logPath, "utf8")));
+      expect(log.processedEvents.old).toEqual(oldEvent);
+      expect(log.processedEvents.new?.changes?.[0]).toEqual(finding);
+      expect(log.processedEvents.new?.changedExperienceIds).toEqual(
+        finding.targetExperienceIds,
+      );
+    },
+  );
 
   it("preserves legacy v8 audit history and epoch deduplication when recording a new event", async () => {
     const prior = {

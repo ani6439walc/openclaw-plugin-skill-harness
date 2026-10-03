@@ -1,3 +1,4 @@
+import type { ReviewOperation } from "./log.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { SkillPlacementCandidate } from "../stats/aggregator.js";
 import type { AvailableSkill } from "../types.js";
@@ -75,7 +76,14 @@ type BaseReviewFinding = {
 export type SkillExperienceReviewFinding = BaseReviewFinding & {
   targetKind: "skill-experience";
   targetExperienceIds: string[];
-};
+} & (
+    | { operation: Exclude<ReviewOperation, "merge"> }
+    | {
+        operation: "merge";
+        sourceExperienceIds: string[];
+        retainedExperienceId: string;
+      }
+  );
 
 export type ReviewFinding = SkillExperienceReviewFinding;
 

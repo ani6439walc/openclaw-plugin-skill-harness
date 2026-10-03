@@ -5,7 +5,12 @@ import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
 import type { SkillPlacementReason } from "../stats/aggregator.js";
 
-export const REVIEW_OPERATIONS = ["create", "refine", "delete"] as const;
+export const REVIEW_OPERATIONS = [
+  "create",
+  "refine",
+  "merge",
+  "delete",
+] as const;
 export type ReviewOperation = (typeof REVIEW_OPERATIONS)[number];
 
 export const PROCESSED_EVENT_OUTCOMES = [
@@ -57,6 +62,8 @@ export type AppliedReviewChange = {
   trigger: StoredReviewTrigger;
   targetKind: "skill-experience";
   operation?: ReviewOperation;
+  sourceExperienceIds?: string[];
+  retainedExperienceId?: string;
   targetExperienceIds: string[];
   dedupeKey: string;
   summary: string;
@@ -157,6 +164,12 @@ const ExperienceChangeSchema = z
     trigger: z.enum(STORED_REVIEW_TRIGGERS),
     targetKind: z.literal("skill-experience"),
     operation: z.enum(REVIEW_OPERATIONS).optional(),
+    sourceExperienceIds: z
+      .array(z.string().trim().min(3).max(129))
+      .min(1)
+      .max(9)
+      .optional(),
+    retainedExperienceId: z.string().trim().min(3).max(129).optional(),
     targetExperienceIds: z.array(z.string().trim().min(3)).min(1),
     dedupeKey: z.string().trim().min(1),
     summary: z.string().trim().min(1),
@@ -168,7 +181,7 @@ const ExperienceChangeSchema = z
 
 const LegacyChangeSchema = ExperienceChangeSchema.extend({
   targetKind: z.enum(["intent-markdown", "skill-experience"]),
-  operation: z.enum([...REVIEW_OPERATIONS, "split", "merge"]),
+  operation: z.enum([...REVIEW_OPERATIONS, "split"]),
   targetIntentIds: z.array(z.string()),
   targetExperienceIds: z.array(z.string().trim().min(3)).optional(),
 }).strict();

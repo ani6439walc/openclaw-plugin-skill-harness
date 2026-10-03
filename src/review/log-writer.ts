@@ -24,7 +24,14 @@ function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
   return {
     trigger: finding.trigger,
     targetKind: "skill-experience",
+    operation: finding.operation,
     targetExperienceIds: [...finding.targetExperienceIds],
+    ...(finding.operation === "merge"
+      ? {
+          sourceExperienceIds: [...finding.sourceExperienceIds],
+          retainedExperienceId: finding.retainedExperienceId,
+        }
+      : {}),
     dedupeKey: finding.dedupeKey,
     summary: finding.summary,
     evidence: [...finding.evidence],

@@ -16,9 +16,9 @@ const MAX_SKILL_LIST_LIMIT = 500;
 const DEFAULT_SKILL_SEARCH_LIMIT = 20;
 const MAX_SKILL_SEARCH_LIMIT = 100;
 const MAX_SKILL_SEARCH_QUERY_CODE_POINTS = 1_000;
-const MAX_EXPERIENCE_SKILLS = 6;
+const DEFAULT_EXPERIENCE_LIMIT = 5;
 const MAX_EXPERIENCE_QUERY_CODE_POINTS = 500;
-const MAX_EXPERIENCE_ENTRIES = 3;
+const MAX_EXPERIENCE_LIMIT = 20;
 const MAX_EXPERIENCE_BODY_CODE_POINTS = 2_000;
 const MAX_EXPERIENCE_TOTAL_CODE_POINTS = 5_000;
 
@@ -400,45 +400,23 @@ export function registerSkillTools(
         name: "skill_experience",
         label: "Read Skill Experience",
         description:
-          "Read bounded, deterministic experience notes for requested skills visible to the current agent or search experience notes by query. This tool is read-only and does not invoke a model.",
+          "Search shared runtime experiences by query. Skill visibility only filters displayed associations, never experience eligibility. Results are bounded, read-only, and do not invoke a model.",
         parameters: Type.Object({
-          query: Type.Optional(
-            Type.String({ maxLength: MAX_EXPERIENCE_QUERY_CODE_POINTS }),
+          query: Type.String({ maxLength: MAX_EXPERIENCE_QUERY_CODE_POINTS }),
+          limit: Type.Optional(
+            Type.Number({
+              description:
+                "Maximum number of results. Defaults to 5 and is capped at 20.",
+            }),
           ),
-          skills: Type.Optional(
-            Type.Array(Type.String(), {
-              minItems: 1,
-              maxItems: MAX_EXPERIENCE_SKILLS,
+          show_skills: Type.Optional(
+            Type.Boolean({
+              description:
+                "Include associated skills visible to the current agent. Defaults to true. Does not filter experience results.",
             }),
           ),
         }),
         async execute(_toolCallId, params) {
-          const rawSkillsValue =
-            params && typeof params === "object"
-              ? (params as Record<string, unknown>).skills
-              : undefined;
-          let requestedSkills: string[] = [];
-          if (rawSkillsValue !== undefined) {
-            if (
-              !Array.isArray(rawSkillsValue) ||
-              rawSkillsValue.length < 1 ||
-              rawSkillsValue.length > MAX_EXPERIENCE_SKILLS ||
-              rawSkillsValue.some((value) => typeof value !== "string")
-            ) {
-              return jsonToolResult({
-                success: false,
-                error: "skills must contain between 1 and 6 names",
-              });
-            }
-            requestedSkills = canonicalSkillNames(rawSkillsValue as string[]);
-            if (requestedSkills.length === 0) {
-              return jsonToolResult({
-                success: false,
-                error: "skills must contain between 1 and 6 non-empty names",
-              });
-            }
-          }
-
           const rawQuery =
             params && typeof params === "object"
               ? (params as Record<string, unknown>).query
@@ -465,33 +443,21 @@ export function registerSkillTools(
             });
           }
 
-          if (requestedSkills.length === 0 && (!query || query.trim() === "")) {
+          if (!query || query.trim() === "") {
             return jsonToolResult({
               success: false,
-              error: "Either query or skills must be provided",
+              error: "query is required",
             });
           }
 
-          let availableSkills: string[] | undefined;
-          let unavailableSkills: string[] = [];
-          if (requestedSkills.length > 0) {
-            const inventory = await listAvailableSkills({
-              api,
-              agentId,
-              bundledSkillsDir: options.bundledSkillsDir,
-              nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
-              sharedRoots: options.getSharedRoots?.(),
-            });
-            const visibleNames = new Set(
-              canonicalSkillNames(inventory.map((skill) => skill.name)),
-            );
-            availableSkills = requestedSkills.filter((name) =>
-              visibleNames.has(name),
-            );
-            unavailableSkills = requestedSkills.filter(
-              (name) => !visibleNames.has(name),
-            );
-          }
+          const limit = Math.min(
+            MAX_EXPERIENCE_LIMIT,
+            Math.max(
+              1,
+              optionalIntegerParam(params, "limit") ?? DEFAULT_EXPERIENCE_LIMIT,
+            ),
+          );
+          const showSkills = booleanParam(params, "show_skills", true);
 
           let matches: SkillExperienceEntry[] = [];
           if (
@@ -502,7 +468,7 @@ export function registerSkillTools(
             try {
               const hits = await options.qmdExperienceIndex.search({
                 query,
-                limit: MAX_EXPERIENCE_ENTRIES * 2,
+                limit,
               });
               if (hits) {
                 const resolved = hits
@@ -510,15 +476,7 @@ export function registerSkillTools(
                   .filter((entry): entry is SkillExperienceEntry =>
                     Boolean(entry),
                   );
-                if (availableSkills !== undefined) {
-                  const skillSet = new Set(availableSkills);
-                  matches = resolved.filter((entry) =>
-                    entry.skills.some((skill) => skillSet.has(skill)),
-                  );
-                } else {
-                  matches = resolved;
-                }
-                matches = matches.slice(0, MAX_EXPERIENCE_ENTRIES);
+                matches = resolved.slice(0, limit);
               }
             } catch {
               // fallback
@@ -527,35 +485,49 @@ export function registerSkillTools(
 
           if (matches.length === 0 && options.experienceCatalog) {
             matches = options.experienceCatalog.search({
-              skills: availableSkills,
               query,
-              limit: MAX_EXPERIENCE_ENTRIES,
+              limit,
             });
           }
 
+          let visibleNames: ReadonlySet<string> = new Set();
+          if (showSkills && matches.length > 0) {
+            const inventory = await listAvailableSkills({
+              api,
+              agentId,
+              bundledSkillsDir: options.bundledSkillsDir,
+              nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
+              sharedRoots: options.getSharedRoots?.(),
+            });
+            visibleNames = new Set(
+              canonicalSkillNames(inventory.map((skill) => skill.name)),
+            );
+          }
+
           let remainingCodePoints = MAX_EXPERIENCE_TOTAL_CODE_POINTS;
-          const entries = matches.flatMap((entry) => {
-            if (remainingCodePoints <= 0) return [];
+          const entries = matches.map((entry) => {
             const body = truncateCodePoints(
               entry.body,
               Math.min(MAX_EXPERIENCE_BODY_CODE_POINTS, remainingCodePoints),
             );
             remainingCodePoints -= Array.from(body).length;
-            return [
-              {
-                id: entry.id,
-                skills: entry.skills,
-                summary: entry.summary,
-                keywords: entry.keywords,
-                body,
-              },
-            ];
+            return {
+              id: entry.id,
+              ...(showSkills
+                ? {
+                    skills: entry.skills.filter((skill) =>
+                      visibleNames.has(canonicalIdentity(skill)),
+                    ),
+                  }
+                : {}),
+              summary: entry.summary,
+              keywords: entry.keywords,
+              body,
+            };
           });
 
           return jsonToolResult({
             success: true,
-            requested_skills: requestedSkills,
-            unavailable_skills: unavailableSkills,
             entries,
           });
         },
