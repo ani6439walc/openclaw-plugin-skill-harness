@@ -310,6 +310,11 @@ and reports in private notes rather than README or AGENTS.
 
 ## Documentation boundaries
 
+The private project note is `~/productivity/projects/ai/skill-harness.md`
+(`/home/wei/productivity/projects/ai/skill-harness.md`). Keep project status,
+deployment observations, runtime audit results, and research follow-ups there;
+keep private runtime data out of repository documentation.
+
 README introduces the project, research context, architecture, behavior and user
 setup. Keep coding-agent contracts, schema migrations, concurrency, persistence,
 source maps and contributor checks here. User-triggered maintenance procedures
