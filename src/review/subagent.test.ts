@@ -120,7 +120,13 @@ describe("buildReviewPrompt", () => {
       expect(prompt).toContain("every deleted ID in targetExperienceIds");
       expect(prompt).toContain("You may delete experiences");
       expect(prompt).toContain("age alone do not justify deletion");
-      expect(prompt).toContain("Use exec for necessary workspace maintenance");
+      expect(prompt).toContain(
+        "Use exec only for necessary experience maintenance",
+      );
+      expect(prompt).toContain(
+        "never use .., $HOME, or absolute paths outside the temporary workspace",
+      );
+      expect(prompt).toContain("Prompt scope is not shell containment");
       expect(prompt).toContain(
         "use skill_search with a focused query, limit: 5",
       );
@@ -563,7 +569,8 @@ describe("review writeback boundaries", () => {
 
   it("applies a declared full deletion", async () => {
     const { result, root } = await review(
-      (workspace) => {
+      (workspace, runtime) => {
+        fs.writeFileSync(path.join(runtime, "exp-one", ".residue"), "stale");
         fs.rmSync(path.join(workspace, "exp-one"), { recursive: true });
       },
       ["exp-one"],
@@ -628,9 +635,10 @@ describe("review writeback boundaries", () => {
     expect(fs.existsSync(path.join(root, "exp-new", "body.md"))).toBe(true);
   });
 
-  it("merges into an unchanged existing survivor without declaring it changed", async () => {
+  it("removes merge-source residue while retaining an unchanged survivor", async () => {
     const { result, root } = await review(
-      (workspace) => {
+      (workspace, runtime) => {
+        fs.writeFileSync(path.join(runtime, "exp-other", ".residue"), "stale");
         fs.rmSync(path.join(workspace, "exp-other"), { recursive: true });
       },
       ["exp-other"],
