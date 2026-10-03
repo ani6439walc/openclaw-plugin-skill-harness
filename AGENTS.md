@@ -4,6 +4,22 @@
 
 This repository packages the `skill-harness` OpenClaw plugin. `index.ts` and `api.ts` are entry points; domains live in `src/` (`hooks/`, `classification/`, `skills/`, `session/`, `experiences/`, `qmd/`, `review/`, and `stats/`). Tests are colocated as `*.test.ts`. Bundled skill files and Python audits live under `skills/skill-harness/`. `src/config.ts` and `src/types.ts` define runtime defaults/types; `openclaw.plugin.json` defines the strict public plugin contract; `dist/` is untracked build output.
 
+### Implementation map
+
+Start with these implementation boundaries, then trace callers and colocated `*.test.ts` files with `rg`:
+
+| Source                                                             | Responsibility                                                                                        |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `src/plugin.ts`, `index.ts`, `api.ts`                              | Registration, live configuration, lifecycle ownership, and SDK boundary.                              |
+| `src/config.ts`, `src/types.ts`, `openclaw.plugin.json`            | Runtime defaults/types and the strict public configuration contract.                                  |
+| `src/hooks/`                                                       | Turn eligibility, candidate discovery, prompt assembly, lifecycle events, and tool tracking.          |
+| `src/classification/`                                              | Conversation sanitization, prompt rendering, and constrained Jev selection.                           |
+| `src/skills/`, `src/experiences/`, `src/qmd/`                      | Visible skill roots/tools, experience validation/catalog, and managed search indexes.                 |
+| `src/skills/relation-graph.ts`, `relation-import.ts`, `related.ts` | Graph replay/identity and publication, staged import/classification, and bounded candidate expansion. |
+| `src/session/`, `src/stats/`                                       | Persisted turn state, retention, usage, and aggregate telemetry.                                      |
+| `src/review/`, `src/subagent-runtime.ts`                           | Post-turn scheduling, isolated review execution, validation, and writeback.                           |
+| `skills/skill-harness/`                                            | User-triggered maintenance procedures and report/validation helpers.                                  |
+
 ## Build, Test, and Development Commands
 
 Use the pnpm release declared by `package.json#packageManager`. This field is the
@@ -146,3 +162,157 @@ credentials in the execution environment or process memory and out of commands,
 logs and artifacts. Record deployment-specific counts, paths, sample outcomes
 and Gateway observations only in private project notes. Do not remove fork
 metadata before verifying the formal graph through the invoking agent's tools.
+
+## Experience validation helpers
+
+For staged manual changes, build first, then run:
+
+```bash
+node skills/skill-harness/scripts/validate-experiences.mjs --experiences-dir /path/to/staged/experiences --visible-skills-file /path/to/private/visible-skills.json
+```
+
+The visibility JSON maps all configured agent IDs to complete visible skill-name
+arrays. Validate in each agent context rather than extrapolating one agent's
+inventory. Exit 0 means valid against the supplied map; exit 1 reports input or
+experience errors without emitting bodies. This helper is read-only and imports
+production validation from `dist/`. Summary/body limits are 240/12,000 Unicode
+code points; keywords allow 12 entries of 64 code points each.
+
+## Detailed tool contracts
+
+- **`skill_list`** lists visible skills with pagination. Optional inputs: `offset` (default `0`), `limit` (default `150`, capped at `500`), `show_stats` and `show_related` (both default `false`). Returns `{ success, total, count, offset, limit, has_more, next_offset?, skills }`. Each skill includes `name`, `description`, `source`, and `path`, with optional `usage_stats` and `related_skills`.
+- **`skill_search`** searches metadata, bodies, and references. Requires a non-empty `query` (trimmed and truncated to 1,000 Unicode code points). Optional inputs: `limit` (default `20`, capped at `100`), `show_evidence` (default `true`), `show_stats` and `show_related` (default `false`). Returns `{ success, query, total, count, limit, skills }`; each skill contains `name`, `description`, `source`, `score`, and requested optional evidence/statistics/relations. Search results omit paths; use `skill_list` or `skill_view` for paths. An unavailable index returns `success: false`.
+- **`skill_view`** requires `name`; optional `file_path` reads a relative support file under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`. A full skill response includes `success`, `name`, `description`, `content`, `path`, `skill_dir`, `linked_files`, usage statistics, relations, source, and readiness. A support-file response includes `success`, `name`, `file`, `content`, `file_type`, and relations.
+- **`skill_experience`** requires a non-empty `query` (at most 500 Unicode code points). Optional inputs: `limit` (default `5`, clamped to `1–20`) and `show_skills` (default `true`). Returns `{ success, entries }`; each entry includes `id`, `summary`, `keywords`, and `body`. When `show_skills` is true, `skills` contains only associations visible to the invoking agent, including an empty array when none are visible; when false, the field is omitted. The former `skills` input and `requested_skills` / `unavailable_skills` output fields have been removed. Bodies remain bounded to 2,000 code points each and 5,000 total; later entries retain their metadata with an empty body after the total budget is exhausted. Search tries QMD, then falls back to catalog search if no matches remain; it does not invoke Jev.
+
+## Reviewer execution and curation
+
+A trigger starts an investigation; it is not evidence by itself. The reviewer evaluates trigger-specific evidence, durability, scope, and existing coverage, then makes the smallest valid change or records a no-finding result. Review findings produce `targetKind: "skill-experience"` updates to create, refine, merge, or delete skill experiences.
+
+Every requested trigger needs a valid positive or no-finding decision. Missing or malformed decisions are recorded as `schema-rejected`. The reviewer operates within a temporary workspace with enforced workspace-only access for filesystem tools. `exec` follows the host execution policy; this plugin does not add sandbox isolation. Every changed experience must have exactly one positive finding, and every declared target must change. New positive findings require `operation: "create" | "refine" | "merge" | "delete"`, checked against actual before/after files before writeback. Only changed entries are validated against eligible skills, so unrelated existing entries do not block updates. Writeback rejects concurrent changes to the same experience or a merge survivor, including an unchanged survivor and applies file removals as well as additions and edits.
+
+Reviewer tools are `ls`, `read`, `write`, `edit`, `exec`, `skill_experience`, and `skill_search`. For every trigger, check existing experience coverage before creating an entry, prefer refining the existing ID for the same workflow, and return no finding when no concrete improvement is supported. Use `skill_experience` with `limit: 5` and read complete workspace files for likely matches; empty or bounded results do not prove coverage is absent. When skill applicability or terminology is unclear, use focused `skill_search` with `limit: 5`, evidence enabled, and statistics/relations disabled. Search snippets and scores are reference material, not execution evidence or complete workflows; an unavailable index does not prevent evidence-based review. Searches do not expand the eligible observed skills allowed in `skills.md`; if that list is empty, omit `skills.md` on created or modified entries. Filesystem tools retain workspace-only guards; the prompt restricts `exec` commands to experience maintenance in the temporary workspace.
+
+The reviewer may merge substantially overlapping experiences after reading their full contents, preserving useful verified guidance in one existing ID and deleting redundant entries. Different applicability or prerequisites require separate entries. It may also delete experiences proven useless, obsolete, or wholly superseded, preferring correction when useful guidance remains; age, low usage, missing search hits, or invisible associations alone do not justify deletion. Merge findings require `sourceExperienceIds` (1–9 distinct existing IDs fully removed) and `retainedExperienceId` (one distinct existing ID that remains). `targetExperienceIds` contains all sources and the retained ID only when its files changed; no other targets are allowed. Other operations omit merge fields. Deletion requires removal of the full directory; merely emptying or editing its files is rejected. `exec` supports workspace maintenance and directory removal; the prompt prohibits external paths, skill source changes, and background processes.
+
+The Review prompt includes refine, merge, and delete JSON examples with aligned field types/limits. Operation and merge metadata persist in schema-v8 `review.json`; existing v8 changes without operation metadata remain readable and are not reclassified. The runtime-health report counts new operations through its existing `byOperation` aggregate. Invalid findings emit warning-level schema issue paths and codes without rejected values or evidence text. `missing-trigger-decision` means no valid decision remained for a requested trigger; it can follow rejection of a finding that did contain `trigger`. Detached Review transcripts are not retained, so historical reason counts alone cannot identify the original invalid field. These diagnostics do not relax validation or guarantee successful experience learning.
+
+Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn finishes (default 30-second idle delay). A new candidate for the same agent/session replaces the previous pending candidate and resets its timer, with pending entries capped by LRU eviction (default 32 sessions). Before executing, the scheduler checks if the system is actively processing embedded runs (`isSystemActive`); if busy or another Review is in flight, review is postponed by a 30-second retry delay. Each scheduler runs at most one Review at a time. If OpenClaw Gateway is shutting down (`isDraining`), pending reviews abort immediately without executing. Review runs execute in the background detached from the hook scope (`runDetachedFromWorkScope`) with `sessionPersistence: "detached"`, and the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
+
+## Telemetry interpretation and retention
+
+Schema v7 starts a fresh telemetry cohort. Current turns record top-level selections, confidence, skill/tool usage, routing adoption, projection, inventory, and daily aggregates without creating an intent. Historical `state.intent.result` can still populate per-intent route reasons (`qmd-keyword`, `qmd-hybrid`, and `llm-classifier`) with count, average score, minimum score, and maximum score; those compatibility fields do not imply current intent classification. QMD evidence uses retrieval hit scores; selector confidence comes from Jev. `skillDiscovery` separately records input skill matching: name-match and QMD search candidates, QMD semantic-score distribution, collection hit distribution (`meta`, `body`, `references`) for retrieved candidates and final injected skills, pre-injection candidate and injection counts, fallback reasons, and duration summaries. It does not retain user requests, snippets, QMD explanations, or per-hit score lists. Per-day maps include the same aggregate input skill-match telemetry alongside intent outcomes, intent routing, intent-matched skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
+
+The runtime-health projection keeps one canonical `routing` block, one canonical `projection` block, and names retained processed events as `retainedProcessedEventCount`. It omits the duplicate `routingEffectiveness` / `projectionEfficiency` aliases and the internal `dailyDynamicKeyCardinality` diagnostic.
+
+Schema v7 does not migrate or rewrite schema-v1 through schema-v6 files: older telemetry is rejected fail-open and remains untouched. Inventory observations are agent-scoped: source, winning-path and content fingerprints, observation times and counts, same-turn usage, and intent-matched skill opportunities form an epoch. Source, winner, content, or visibility-continuity changes begin a new epoch; the fingerprints remain internal and are never exposed by skill tools.
+
+Rendered catalog sizes are Unicode code points, not provider-billed tokens.
+Adoption is same-turn use, not task success or routing accuracy. Related metadata
+and prose do not count as adoption. Projection eligibility can precede selector
+failure; Review outcomes belong to `review.json`, not synthesized stats.
+`inputSkillDiscovery.experienceRetrieval` records completion/unavailability/
+timeout/failure, thresholds, returned IDs and semantic scores; compare it with
+`matchedExperiences` to distinguish retrieval from selection.
+Session cleanup preserves the ended main-session record and removes only expired
+session JSON and embedded-agent `*.session.jsonl`, `*.session.trajectory.jsonl`,
+and `*.session.trajectory-path.json` artifacts. Never delete unrelated transcripts
+or root-level state during cleanup. Compatible Review v7 migration retains ordinary
+processed events and placement epochs, discarding retired keyword-learning fields;
+malformed/older logs fail open.
+
+## Advanced relation import procedure
+
+The one-time importer accepts YAML objects/arrays and JSON strings in
+`metadata.related-skills`. It does not edit skill files. Build first, then run
+these stages separately from the package root, substituting your own paths:
+
+```bash
+pnpm run build
+node skills/skill-harness/scripts/import-skill-relations.mjs preflight --source /path/to/skills --output /private/import-plan.json
+node skills/skill-harness/scripts/import-skill-relations.mjs sample --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
+node skills/skill-harness/scripts/import-skill-relations.mjs classify --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
+node skills/skill-harness/scripts/import-skill-relations.mjs apply --source /path/to/skills --checkpoint /private/import-checkpoint.json --data-root /path/to/plugin-data
+```
+
+Preflight makes no model requests and reports unresolved targets and estimated
+request count. Sample classifies the first at most 20 relations in the importer's stable order; it is not a random or representative sample. Classify explicitly runs
+the full catalog, reusing successful matching checkpoint entries and retrying
+failed batches. Sample/classify use the configured plugin Jev model and can
+incur provider charges. The CLI must receive the same provider environment
+variables as the Gateway; reading its config file does not hydrate service-only
+secrets. No credentials are written to checkpoints. Each request
+contains at most five relations, with at most two concurrent requests. Missing
+author reasons bypass the model and remain `related`; other classifications
+require a top score of at least 0.8 and a lead of at least 0.15. Failed model
+batches remain `related` and are reported in the checkpoint. These thresholds
+select a label, not a verified dependency.
+
+Inspect the private plan/checkpoint before apply. They contain skill paths,
+author reasons and bounded evidence and must not be committed or shared as
+public artifacts. Apply verifies the current skill identities, backs up an
+existing graph, and publishes the operation batch atomically under a lock.
+Identical reapplication does not duplicate edges. Other owners' relations are
+not overwritten; reported conflicts require separate resolution. No model
+requests are made by apply. Keep the source metadata until graph import and
+agent-visible tool output have been verified; removing only `related-skills`
+thereafter does not invalidate imported identities. Changes to other metadata,
+body content or winning source disable affected edges until explicitly reviewed
+and reimported. The graph is not periodically synchronized with source metadata.
+
+A missing or invalid graph leaves ordinary routing working without relations;
+runtime tools do not fall back to legacy metadata relationships. Do not edit the
+formal graph with the upstream ontology CLI while the plugin/importer may be
+writing: its writer does not participate in plugin locks. Keep graph backups and
+checkpoints outside the package. Importing a graph does not enable automatic
+relation expansion or deploy the plugin; `routing.skills.related.enabled`
+defaults to `false` so relation experiments can be observed separately from
+experience-quality changes.
+
+Relation labels are `related`, `depends_on`, `composes_with`,
+`similar_to`, `conflicts_with`, and `specializes`; an empty reason is visible in
+tools but cannot seed expansion. Incoming `depends_on` means the other skill
+points to the current skill; never reverse its predicate.
+
+## Configuration migration and runtime acceptance
+
+Keep lesser-used configuration aligned with `src/config.ts` and the manifest:
+name matching defaults to `maxEditDistance: 2`, `minJaccardScore: 0.5`, and an
+empty `genericTokens` list; generic tokens suppress only single-token automatic
+matches. Recent context defaults to five turns and 1,000 characters per role.
+Review model resolution is configured model → session model → agent primary →
+configured fallback. Selection has no fallback retries. Audit `--days` accepts
+1–90 and compares the last seven complete UTC days with the preceding seven;
+retained sessions normally cover about 14 days. Unsupported present schemas fail
+the audit; absent sections are unavailable. Review reports cover completed events,
+not queue/running state; QMD injected-skill aggregates include experience-source
+skills and do not measure pure skill-search conversion.
+
+Remove the entire legacy `instruction: { ... }` block from plugin configuration;
+there is no automatic migration or compatibility parser for this retired setting.
+
+Older deployments must add mandatory `qmd.embedding`, `qmd.expansion`, and
+`jev.model` before loading this version. Remove retired `instruction`, `rerank`,
+and legacy routing fields; the compatibility parser does not override strict
+manifest rejection. Migrate native static selections into `skills.workingSet`
+and intentionally shared `skills.load.extraDirs` into `skills.sharedRoots`
+before enabling default startup normalization. Prepare configuration changes,
+preconditions, Gateway restart impact and rollback together; apply only within
+the user's authorized scope. Do not reset telemetry or delete indexes as a
+routine upgrade step.
+
+Use `openclaw gateway status --deep --require-rpc`,
+`openclaw plugins inspect skill-harness --runtime --json`, and
+`openclaw plugins doctor` for runtime acceptance. Cold plugin inventory and local
+build/test results do not establish that the Gateway loaded the changed build.
+Verify actual tools through the intended agent. Keep deployment observations
+and reports in private notes rather than README or AGENTS.
+
+## Documentation boundaries
+
+README introduces the project, research context, architecture, behavior and user
+setup. Keep coding-agent contracts, schema migrations, concurrency, persistence,
+source maps and contributor checks here. User-triggered maintenance procedures
+belong in `skills/skill-harness/`. Research references explain design context;
+do not claim paper benchmark results as this plugin's measurements or imply that
+related-work algorithms are implemented without source evidence.
