@@ -57,23 +57,6 @@ const snapshot: ReviewSnapshot = {
     timestamps: { start: "2026-06-11T00:00:00.000Z" },
   },
   recent: [],
-  availableSkills: [
-    {
-      name: "test-driven-development",
-      description: "Drive changes with failing tests first.",
-      location: "/skills/test-driven-development/SKILL.md",
-    },
-  ],
-  activeExperiences: [
-    {
-      id: "exp-tdd",
-      path: "/experiences/exp-tdd",
-      summary: "Use red-green-refactor loop to fix test failures.",
-      keywords: ["test", "tdd", "failure"],
-      skills: ["test-driven-development"],
-      body: "Run pnpm test before modifying code.",
-    },
-  ],
 };
 
 describe("buildReviewPrompt", () => {
@@ -494,6 +477,7 @@ describe("review writeback boundaries", () => {
           "edit",
           "exec",
           "skill_experience",
+          "skill_list",
           "skill_search",
         ],
       }),

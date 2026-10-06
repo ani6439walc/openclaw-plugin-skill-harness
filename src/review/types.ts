@@ -2,7 +2,6 @@ import type { ReviewOperation } from "./log.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { SkillPlacementCandidate } from "../stats/aggregator.js";
 import type { AvailableSkill } from "../types.js";
-import type { SkillExperienceEntry } from "../experiences/types.js";
 
 export interface ReviewRecommendationCandidate {
   name: string;
@@ -58,8 +57,6 @@ export type ReviewSnapshot = {
   turnNumber: number;
   current: ReviewState;
   recent: ReviewState[];
-  availableSkills?: AvailableSkill[];
-  activeExperiences?: SkillExperienceEntry[];
   skillPlacementCandidate?: SkillPlacementReviewCandidate;
   selectedPlacementSkill?: SelectedPlacementSkill;
 };

@@ -1400,7 +1400,6 @@ description: Navigate Tokyo.
       expect.objectContaining({
         snapshot: expect.objectContaining({
           sessionId: "session-1",
-          availableSkills: [],
         }),
         triggers: [
           "experience-health-check",
@@ -2012,7 +2011,6 @@ description: Navigate Tokyo.
         triggers: ["capability-fit"],
         snapshot: expect.objectContaining({
           skillPlacementCandidate: candidate,
-          availableSkills: [],
           selectedPlacementSkill: {
             name: "source-driven-development",
             description: "Ground work in primary sources.",

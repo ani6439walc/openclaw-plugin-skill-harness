@@ -1,8 +1,6 @@
-import type { AvailableSkill } from "../types.js";
 import { indentXmlLines } from "../xml-format.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { ReviewSnapshot } from "./types.js";
-import type { SkillExperienceEntry } from "../experiences/types.js";
 
 function escapeSnapshotText(value: unknown): string {
   return String(value ?? "")
@@ -31,10 +29,7 @@ type ReviewSnapshotBlockName =
   | "skill"
   | "name"
   | "description"
-  | "path"
-  | "available_skills"
-  | "active_experiences"
-  | "experience";
+  | "path";
 
 function wrapRequiredReviewSnapshotBlock(
   name: ReviewSnapshotBlockName,
@@ -241,41 +236,6 @@ function formatAssistantResult(
   ].join("\n");
 }
 
-function formatAvailableSkills(skills: readonly AvailableSkill[] | undefined) {
-  return wrapOptionalReviewSnapshotBlock(
-    "available_skills",
-    skills
-      ?.map((skill) =>
-        formatSkill({
-          name: skill.name,
-          description: skill.description,
-          path: skill.location,
-        }),
-      )
-      .join("\n") ?? "",
-  );
-}
-
-function formatActiveExperiences(
-  experiences: readonly SkillExperienceEntry[] | undefined,
-): string | undefined {
-  if (!experiences || experiences.length === 0) return undefined;
-  return wrapOptionalReviewSnapshotBlock(
-    "active_experiences",
-    experiences
-      .map((exp) => {
-        const item: Record<string, unknown> = {
-          id: exp.id,
-          summary: exp.summary,
-          keywords: exp.keywords,
-          skills: exp.skills,
-        };
-        return `<experience>${stringifySnapshotJson(item)}</experience>`;
-      })
-      .join("\n"),
-  );
-}
-
 function formatReviewState(
   blockName: "current_turn" | "recent_turn",
   state: ReviewSnapshot["current"],
@@ -340,16 +300,12 @@ interface FormatReviewSnapshotOptions {
 function formatSnapshotManifest(
   snapshot: ReviewSnapshot,
   options: FormatReviewSnapshotOptions,
-  availableSkillRenderedCodePointCount: number,
 ): string {
   const manifest: Record<string, unknown> = {
     requestedTriggers: [...(options.requestedTriggers ?? [])],
     recentTurnCount: snapshot.recent.length,
     currentSkillsUsedCount: snapshot.current.skillsUsed?.length ?? 0,
     currentToolCallCount: snapshot.current.toolCalls?.length ?? 0,
-    availableSkillCount: snapshot.availableSkills?.length ?? 0,
-    availableSkillRenderedCodePointCount,
-    activeExperienceCount: snapshot.activeExperiences?.length ?? 0,
   };
   return wrapRequiredReviewSnapshotBlock(
     "snapshot_manifest",
@@ -405,7 +361,6 @@ export function formatReviewSnapshot(
   snapshot: ReviewSnapshot,
   options: FormatReviewSnapshotOptions = {},
 ): string {
-  const availableSkills = formatAvailableSkills(snapshot.availableSkills);
   const recent = wrapOptionalReviewSnapshotBlock(
     "recent_turns",
     snapshot.recent
@@ -415,17 +370,11 @@ export function formatReviewSnapshot(
       .join("\n"),
   );
   const blocks = [
-    formatSnapshotManifest(
-      snapshot,
-      options,
-      availableSkills ? Array.from(indentXmlLines(availableSkills)).length : 0,
-    ),
+    formatSnapshotManifest(snapshot, options),
     formatReviewState("current_turn", snapshot.current, {
       turnNumber: snapshot.turnNumber,
     }),
     recent,
-    availableSkills,
-    formatActiveExperiences(snapshot.activeExperiences),
     formatSkillPlacementCandidate(snapshot.skillPlacementCandidate),
     formatSelectedPlacementSkill(snapshot.selectedPlacementSkill),
   ]

@@ -13,35 +13,29 @@ const snapshot: ReviewSnapshot = {
     toolCalls: [{ name: "read", params: { path: "x" }, success: true }],
   },
   recent: [],
-  activeExperiences: [
-    {
-      id: "git-merge-conflict",
-      skills: ["git-tools"],
-      summary: "Resolve complex 3-way merge conflicts.",
-      keywords: ["git", "merge", "conflict"],
-      body: "Resolution steps",
-      path: "/experiences/git-merge-conflict",
-    },
-  ],
 };
 
 describe("formatReviewSnapshot", () => {
-  it("renders active experiences in snapshot", () => {
+  it("omits active_experiences and available_skills blocks from snapshot", () => {
     const output = formatReviewSnapshot(snapshot, {
       requestedTriggers: ["routing-uncertainty"],
     });
 
-    expect(output).toContain("<active_experiences>");
-    expect(output).toContain('"id":"git-merge-conflict"');
-    expect(output).toContain("Resolve complex 3-way merge conflicts.");
+    expect(output).not.toContain("<active_experiences>");
+    expect(output).not.toContain("<available_skills>");
+    expect(output).toContain("<current_turn>");
   });
 
-  it("renders manifest with experience counts", () => {
+  it("renders manifest with trigger and turn counts", () => {
     const output = formatReviewSnapshot(snapshot, {
       requestedTriggers: ["experience-health-check"],
     });
 
-    expect(output).toContain('"activeExperienceCount":1');
+    expect(output).toContain('"requestedTriggers":["experience-health-check"]');
+    expect(output).toContain('"recentTurnCount":0');
+    expect(output).toContain('"currentToolCallCount":1');
+    expect(output).not.toContain("activeExperienceCount");
+    expect(output).not.toContain("availableSkillCount");
   });
 
   it("escapes user-controlled snapshot text", () => {

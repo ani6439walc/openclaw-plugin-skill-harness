@@ -1750,10 +1750,8 @@ export function createHookHandlers(deps: HookDeps) {
         ...baseSnapshot.current,
         ...(capabilityFit ? { capabilityFit } : {}),
       },
-      availableSkills: skillPlacementCandidate ? [] : resolvedAvailableSkills,
       ...(skillPlacementCandidate ? { skillPlacementCandidate } : {}),
       ...(selectedPlacementSkill ? { selectedPlacementSkill } : {}),
-      activeExperiences: experienceCatalog?.listAll() ?? [],
     };
   }
 
