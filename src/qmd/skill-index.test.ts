@@ -1386,7 +1386,7 @@ describe("QMD skill connection lifecycle", () => {
     };
   }
 
-  it.each(["endpoint", "key", "expansion", "jev", "timeout"])(
+  it.each(["endpoint", "key", "expansion", "jev", "timeout", "cache"])(
     "applies changed %s without changing the index database",
     async (field) => {
       const fixture = await setup();
@@ -1402,6 +1402,8 @@ describe("QMD skill connection lifecycle", () => {
           apiKey: "jev-key",
         };
       if (field === "timeout") current.timeoutMs = 4321;
+      if (field === "cache")
+        current.embeddingCacheDir = "/shared/qmd-document-embeddings";
       fixture.setConfig(current);
       await fixture.search();
       expect(fixture.first.close).toHaveBeenCalledOnce();
@@ -1425,57 +1427,79 @@ describe("QMD skill connection lifecycle", () => {
           jev_base_url: current.jev?.baseUrl,
           jev_api_key: "jev-key",
         });
+      expect(options.config.models.embed_cache_dir).toBe(
+        current.embeddingCacheDir,
+      );
+      expect(fixture.next.update).not.toHaveBeenCalled();
+      expect(fixture.next.embed).not.toHaveBeenCalled();
       expect(options.remoteRequestTimeoutMs).toBe(current.timeoutMs);
       expect(fixture.next.search).toHaveBeenCalledTimes(3);
       await fixture.index.close();
     },
   );
 
-  it("drains all collection searches before coalescing config changes", async () => {
-    const pending = deferred<[]>();
-    const first = createStoreDouble({
-      search: vi.fn().mockReturnValue(pending.promise),
-    });
-    const fixture = await setup(first);
-    const active = fixture.search();
-    await waitFor(
-      () => vi.mocked(first.search).mock.calls.length === 3,
-      "search not started",
-    );
-    fixture.setConfig({ ...qmdConfig, timeoutMs: 2000 });
-    const waiting = fixture.search();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
-    const alsoWaiting = fixture.search();
-    expect(first.close).not.toHaveBeenCalled();
-    expect(first.search).toHaveBeenCalledTimes(3);
-    pending.resolve([]);
-    await Promise.all([active, waiting, alsoWaiting]);
-    expect(fixture.createStore).toHaveBeenCalledTimes(2);
-    expect(fixture.createStore.mock.calls[1]?.[0]).toMatchObject({
-      remoteRequestTimeoutMs: 3000,
-    });
-    expect(fixture.next.search).toHaveBeenCalledTimes(6);
-    await fixture.index.close();
-  });
+  it.each(["timeoutMs", "embeddingCacheDir"] as const)(
+    "drains all collection searches before coalescing config changes (%s)",
+    async (field) => {
+      const pending = deferred<[]>();
+      const first = createStoreDouble({
+        search: vi.fn().mockReturnValue(pending.promise),
+      });
+      const fixture = await setup(first);
+      const active = fixture.search();
+      await waitFor(
+        () => vi.mocked(first.search).mock.calls.length === 3,
+        "search not started",
+      );
+      fixture.setConfig({
+        ...qmdConfig,
+        [field]: field === "timeoutMs" ? 2000 : "/shared/cache-2000",
+      });
+      const waiting = fixture.search();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      fixture.setConfig({
+        ...qmdConfig,
+        [field]: field === "timeoutMs" ? 3000 : "/shared/cache-3000",
+      });
+      const alsoWaiting = fixture.search();
+      expect(first.close).not.toHaveBeenCalled();
+      expect(first.search).toHaveBeenCalledTimes(3);
+      pending.resolve([]);
+      await Promise.all([active, waiting, alsoWaiting]);
+      expect(fixture.createStore).toHaveBeenCalledTimes(2);
+      expect(fixture.createStore.mock.calls[1]?.[0]).toMatchObject(
+        field === "timeoutMs"
+          ? { remoteRequestTimeoutMs: 3000 }
+          : { config: { models: { embed_cache_dir: "/shared/cache-3000" } } },
+      );
+      expect(fixture.next.search).toHaveBeenCalledTimes(6);
+      await fixture.index.close();
+    },
+  );
 
-  it("waits for embedding before replacing its store", async () => {
-    const pending = deferred<{ errors: number }>();
-    const first = createStoreDouble({
-      embed: vi.fn().mockReturnValue(pending.promise),
-    });
-    const fixture = await setup(first);
-    fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
-    const search = fixture.search();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(first.close).not.toHaveBeenCalled();
-    expect(first.search).not.toHaveBeenCalled();
-    pending.resolve({ errors: 0 });
-    await search;
-    expect(first.close).toHaveBeenCalledOnce();
-    expect(fixture.next.search).toHaveBeenCalledTimes(3);
-    await fixture.index.close();
-  });
+  it.each(["timeoutMs", "embeddingCacheDir"] as const)(
+    "waits for embedding before replacing its store (%s)",
+    async (field) => {
+      const pending = deferred<{ errors: number }>();
+      const first = createStoreDouble({
+        embed: vi.fn().mockReturnValue(pending.promise),
+      });
+      const fixture = await setup(first);
+      fixture.setConfig({
+        ...qmdConfig,
+        [field]: field === "timeoutMs" ? 3000 : "/shared/cache-3000",
+      });
+      const search = fixture.search();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(first.close).not.toHaveBeenCalled();
+      expect(first.search).not.toHaveBeenCalled();
+      pending.resolve({ errors: 0 });
+      await search;
+      expect(first.close).toHaveBeenCalledOnce();
+      expect(fixture.next.search).toHaveBeenCalledTimes(3);
+      await fixture.index.close();
+    },
+  );
 
   it("fails open without using the previous store after reopen fails", async () => {
     const fixture = await setup();
@@ -1509,30 +1533,36 @@ describe("QMD skill connection lifecycle", () => {
     expect(fixture.first.close).toHaveBeenCalledOnce();
     expect(await fixture.search()).toBeUndefined();
   });
-  it("waits for an in-flight refresh update before switching connections", async () => {
-    const update = vi.fn().mockResolvedValue({});
-    const fixture = await setup(createStoreDouble({ update }));
-    await waitFor(
-      () => vi.mocked(fixture.first.getStatus).mock.calls.length > 0,
-      "initial refresh unfinished",
-    );
-    const pending = deferred<{}>();
-    update.mockReturnValueOnce(pending.promise);
-    scheduleSkills(fixture.index, "main", [fixture.skill]);
-    await waitFor(
-      () => update.mock.calls.length === 2,
-      "second update not started",
-    );
-    fixture.setConfig({ ...qmdConfig, timeoutMs: 3000 });
-    const search = fixture.search();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(fixture.first.close).not.toHaveBeenCalled();
-    pending.resolve({});
-    await search;
-    expect(fixture.first.close).toHaveBeenCalledOnce();
-    expect(fixture.next.search).toHaveBeenCalledTimes(3);
-    await fixture.index.close();
-  });
+  it.each(["timeoutMs", "embeddingCacheDir"] as const)(
+    "waits for an in-flight refresh update before switching connections (%s)",
+    async (field) => {
+      const update = vi.fn().mockResolvedValue({});
+      const fixture = await setup(createStoreDouble({ update }));
+      await waitFor(
+        () => vi.mocked(fixture.first.getStatus).mock.calls.length > 0,
+        "initial refresh unfinished",
+      );
+      const pending = deferred<{}>();
+      update.mockReturnValueOnce(pending.promise);
+      scheduleSkills(fixture.index, "main", [fixture.skill]);
+      await waitFor(
+        () => update.mock.calls.length === 2,
+        "second update not started",
+      );
+      fixture.setConfig({
+        ...qmdConfig,
+        [field]: field === "timeoutMs" ? 3000 : "/shared/cache-3000",
+      });
+      const search = fixture.search();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fixture.first.close).not.toHaveBeenCalled();
+      pending.resolve({});
+      await search;
+      expect(fixture.first.close).toHaveBeenCalledOnce();
+      expect(fixture.next.search).toHaveBeenCalledTimes(3);
+      await fixture.index.close();
+    },
+  );
 
   it("closes a newly opening store on disposal without lending it", async () => {
     const fixture = await setup();

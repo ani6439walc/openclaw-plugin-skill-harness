@@ -117,6 +117,7 @@ export type ResolvedSkillsConfig = {
 };
 
 export type ResolvedQmdConfig = {
+  embeddingCacheDir?: string;
   timeoutMs: number;
   indexRefreshIntervalSeconds: number;
   embedding: Required<

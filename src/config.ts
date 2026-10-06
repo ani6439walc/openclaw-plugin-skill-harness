@@ -612,6 +612,7 @@ const QmdJevSchema = z
 
 const QmdSchema = z
   .object({
+    embeddingCacheDir: z.string().trim().min(1).optional().catch(undefined),
     timeoutMs: z.number().optional().catch(undefined),
     indexRefreshIntervalSeconds: boundedInt(300, 0, 86_400),
     embedding: QmdEmbeddingSchema,
@@ -675,6 +676,9 @@ export function resolveConfig(
 
   return {
     qmd: {
+      ...(resolved.qmd.embeddingCacheDir
+        ? { embeddingCacheDir: resolved.qmd.embeddingCacheDir }
+        : {}),
       timeoutMs,
       indexRefreshIntervalSeconds: clampInt(
         resolved.qmd.indexRefreshIntervalSeconds,

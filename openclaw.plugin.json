@@ -16,7 +16,7 @@
     "properties": {
       "qmd": {
         "type": "object",
-        "description": "Required QMD remote services for skill and experience search. Each service may use an OpenAI-compatible endpoint and an optional direct API key.",
+        "description": "Required QMD remote services for skill and experience search. Embedding supports native Voyage or OpenAI-compatible endpoints; services accept optional direct API keys.",
         "additionalProperties": false,
         "properties": {
           "timeoutMs": {
@@ -25,6 +25,12 @@
             "maximum": 60000,
             "description": "QMD remote embedding and query-expansion request budget in milliseconds. Defaults to timeoutMs."
           },
+          "embeddingCacheDir": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Optional shared document embedding cache directory for all skill and experience stores, including other processes using the same directory. Supports disk or tmpfs; omitted uses memory cache only. Absolute paths are recommended; relative paths resolve from process cwd, not dataRoot."
+          },
           "embedding": {
             "type": "object",
             "additionalProperties": false,
@@ -32,7 +38,7 @@
             "properties": {
               "baseUrl": {
                 "type": "string",
-                "description": "Optional base URL for OpenAI-compatible embeddings. If omitted, resolved from the OpenClaw provider prefix in model."
+                "description": "Optional base URL for native Voyage or OpenAI-compatible embeddings. If omitted, resolved from the OpenClaw provider prefix in model."
               },
               "model": {
                 "type": "string",
@@ -46,7 +52,7 @@
                 "type": "integer",
                 "minimum": 1,
                 "default": 1536,
-                "description": "Embedding vector dimension. Defaults to 1536."
+                "description": "Embedding vector dimension. Defaults to 1536; set 1024 explicitly for voyage-4."
               }
             }
           },

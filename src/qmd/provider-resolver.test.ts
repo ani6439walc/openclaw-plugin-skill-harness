@@ -10,6 +10,57 @@ import type { OpenClawConfig } from "../../api.js";
 import type { ResolvedQmdConfig } from "../types.js";
 
 describe("resolveQmdEndpoint", () => {
+  it.each(["voyage", "voyageai"])(
+    "resolves %s using the native Voyage endpoint and key",
+    (provider) => {
+      expect(
+        resolveQmdEndpoint(
+          { model: `${provider}/voyage-4`, dimension: 1024 },
+          {
+            env: {
+              VOYAGE_API_KEY: " voyage-key ",
+              OPENAI_API_KEY: "unrelated-key",
+            },
+          },
+        ),
+      ).toEqual({
+        baseUrl: "https://api.voyageai.com/v1",
+        model: "voyage-4",
+        apiKey: "voyage-key",
+        dimension: 1024,
+      });
+      expect(
+        resolveQmdEndpoint(
+          { model: `${provider}/voyage-4` },
+          {
+            env: { OPENAI_API_KEY: "unrelated-key" },
+          },
+        ).apiKey,
+      ).toBeUndefined();
+    },
+  );
+
+  it("preserves explicit Voyage connection settings ahead of aliases and env", () => {
+    expect(
+      resolveQmdEndpoint(
+        {
+          model: "voyageai/voyage-4",
+          dimension: 1024,
+          baseUrl: "https://voyage.example/v1",
+          apiKey: "explicit-key",
+        },
+        {
+          env: { VOYAGE_API_KEY: "env-key" },
+        },
+      ),
+    ).toEqual({
+      baseUrl: "https://voyage.example/v1",
+      model: "voyage-4",
+      apiKey: "explicit-key",
+      dimension: 1024,
+    });
+  });
+
   it("preserves explicit baseUrl and apiKey", () => {
     const result = resolveQmdEndpoint({
       baseUrl: "https://explicit.example.com/v1",
@@ -436,6 +487,36 @@ describe("buildStoreModels", () => {
     timeoutMs: 15000,
     indexRefreshIntervalSeconds: 300,
   };
+
+  it.each([undefined, "", "   "])(
+    "omits an unset or blank cache directory: %s",
+    (embeddingCacheDir) => {
+      expect(
+        buildStoreModels({ ...baseConfig, embeddingCacheDir }),
+      ).not.toHaveProperty("embed_cache_dir");
+    },
+  );
+
+  it("passes a shared cache directory and native Voyage settings to QMD", () => {
+    const models = buildStoreModels({
+      ...baseConfig,
+      embeddingCacheDir: "  /dev/shm/shared-embeddings  ",
+      embedding: {
+        baseUrl: "https://api.voyageai.com/v1",
+        model: "voyage-4",
+        apiKey: "voyage-key",
+        dimension: 1024,
+      },
+    });
+    expect(models).toMatchObject({
+      embed_cache_dir: "/dev/shm/shared-embeddings",
+      embed_api_url: "https://api.voyageai.com/v1",
+      embed_api_model: "voyage-4",
+      embed_api_key: "voyage-key",
+      embed_dimension: 1024,
+    });
+    expect(models).not.toHaveProperty("embed_provider");
+  });
 
   it("resolves Jev endpoint when config.jev has only baseUrl and no model", () => {
     const config: ResolvedQmdConfig = {

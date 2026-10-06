@@ -1,4 +1,7 @@
 import { createServer, type Server } from "node:http";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { stat } from "node:fs/promises";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { scheduler } from "node:timers/promises";
@@ -8,6 +11,7 @@ import { createStore, type QMDStore, type StoreOptions } from "@wei840222/qmd";
 import type { AvailableSkill } from "../skills/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
 import { createSkillQmdIndex } from "./skill-index.js";
+import { createSkillExperienceQmdIndex } from "./experience-index.js";
 
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -15,6 +19,7 @@ const servers: Server[] = [];
 interface EmbeddingFixture {
   baseUrl: string;
   inputs: string[][];
+  requests: Array<Record<string, unknown>>;
   failNextEmbeddingRequests(count: number): void;
 }
 
@@ -33,6 +38,7 @@ afterEach(async () => {
 
 async function createEmbeddingFixture(): Promise<EmbeddingFixture> {
   const inputs: string[][] = [];
+  const requests: Array<Record<string, unknown>> = [];
   let remainingFailures = 0;
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -46,7 +52,9 @@ async function createEmbeddingFixture(): Promise<EmbeddingFixture> {
         input: unknown;
         model: unknown;
         dimensions: unknown;
+        output_dimension: unknown;
       };
+      requests.push(parsed);
       const batch = Array.isArray(parsed.input)
         ? parsed.input.filter(
             (value): value is string => typeof value === "string",
@@ -70,7 +78,11 @@ async function createEmbeddingFixture(): Promise<EmbeddingFixture> {
         return;
       }
       const dimension =
-        typeof parsed.dimensions === "number" ? parsed.dimensions : 1536;
+        typeof parsed.output_dimension === "number"
+          ? parsed.output_dimension
+          : typeof parsed.dimensions === "number"
+            ? parsed.dimensions
+            : 1536;
       const model =
         typeof parsed.model === "string"
           ? parsed.model
@@ -115,6 +127,7 @@ async function createEmbeddingFixture(): Promise<EmbeddingFixture> {
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     inputs,
+    requests,
     failNextEmbeddingRequests(count) {
       remainingFailures = count;
     },
@@ -149,6 +162,7 @@ async function createSkill(params: {
 function configFor(baseUrl: string): ResolvedQmdConfig {
   return {
     timeoutMs: 5_000,
+    indexRefreshIntervalSeconds: 300,
     embedding: {
       baseUrl,
       model: "text-embedding-3-small",
@@ -570,4 +584,332 @@ describe("createSkillQmdIndex real QMD integration", () => {
     expect(index.getStatus("main")).toBe("ready");
     await index.close();
   }, 30_000);
+});
+
+describe("Voyage SDK upgrade", () => {
+  it("sends native Voyage payloads and shares the configured document cache with another process", async () => {
+    const fixture = await createEmbeddingFixture();
+    const root = await mkdtemp(path.join(tmpdir(), "voyage-cache-"));
+    roots.push(root);
+    const skill = await createSkill({
+      name: "voyage",
+      description: "Voyage fixture",
+      body: "voyagecachemarker",
+    });
+    const config = configFor(fixture.baseUrl);
+    config.embedding = {
+      ...config.embedding,
+      model: "voyage-4",
+      dimension: 1024,
+    };
+    config.embeddingCacheDir = path.join(root, "cache");
+    let opened: StoreOptions | undefined;
+    let active: QMDStore | undefined;
+    let embedded = false;
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => config,
+      createStore: async (options) => {
+        opened = options;
+        active = await createStore(options);
+        const embed = active.embed.bind(active);
+        active.embed = async (options) => {
+          const result = await embed(options);
+          embedded = true;
+          return result;
+        };
+        return active;
+      },
+    });
+    try {
+      index.schedule("main", {
+        skills: [skill],
+        sourceRoots: [path.dirname(skill.location)],
+      });
+      await waitUntil(() => embedded, "Voyage embedding");
+      expect((await active!.getStatus()).needsEmbedding).toBe(0);
+      expect(fixture.requests.length).toBeGreaterThan(0);
+      expect(
+        fixture.requests.every(
+          (request) =>
+            request.input_type === "document" &&
+            request.output_dimension === 1024 &&
+            request.model === "voyage-4" &&
+            !("dimensions" in request),
+        ),
+      ).toBe(true);
+      expect(
+        (
+          await stat(
+            path.join(
+              config.embeddingCacheDir,
+              "document-embeddings-v1.sqlite",
+            ),
+          )
+        ).size,
+      ).toBeGreaterThan(0);
+      const beforeReuse = fixture.requests.length;
+      // A fresh process cannot hit the first store's in-memory embedding cache.
+      await promisify(execFile)(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `
+        import { createStore } from "@wei840222/qmd";
+        const store = await createStore(JSON.parse(process.argv[1]));
+        try {
+          await store.update();
+          const result = await store.embed();
+          if (result.errors || (await store.getStatus()).needsEmbedding) throw new Error("incomplete embedding");
+        } finally { await store.close(); }
+      `,
+          JSON.stringify({
+            ...opened,
+            dbPath: path.join(root, "second.sqlite"),
+          }),
+        ],
+        { cwd: process.cwd(), timeout: 15_000 },
+      );
+      expect(fixture.requests).toHaveLength(beforeReuse);
+      expect(await active!.searchVector("voyagecachemarker")).not.toHaveLength(
+        0,
+      );
+      expect(fixture.requests.at(-1)).toMatchObject({
+        input_type: "query",
+        output_dimension: 1024,
+        model: "voyage-4",
+      });
+    } finally {
+      await index.close();
+    }
+  }, 30_000);
+
+  it.each(["skills", "experiences"] as const)(
+    "requires an explicit one-time rebuild for an OpenAI-compatible Voyage %s database",
+    async (kind) => {
+      const fixture = await createEmbeddingFixture();
+      const root = await mkdtemp(path.join(tmpdir(), "voyage-upgrade-"));
+      roots.push(root);
+      const config = configFor(fixture.baseUrl);
+      config.embedding = {
+        ...config.embedding,
+        model: "voyage-4",
+        dimension: 1024,
+      };
+      const skill = await createSkill({
+        name: "legacy",
+        description: "Legacy Voyage fixture",
+        body: "legacyvoyagemarker",
+      });
+      const entries = [
+        {
+          id: "legacy",
+          summary: "Legacy Voyage fixture",
+          keywords: ["voyage"],
+          body: "legacyvoyagemarker",
+          skills: [],
+          path: root,
+        },
+      ];
+      let opened: StoreOptions | undefined;
+      let complete = false;
+      // Reproduce 2026.9.30's OpenAI-compatible provider identity and vectors.
+      const legacyStore = async (options: StoreOptions) => {
+        opened = options;
+        const store = await createStore({
+          ...options,
+          config: {
+            ...options.config,
+            models: { ...options.config?.models, embed_provider: "openai" },
+          },
+        });
+        const embed = store.embed.bind(store);
+        store.embed = async (options) => {
+          const result = await embed(options);
+          complete = true;
+          return result;
+        };
+        return store;
+      };
+      const skillIndex =
+        kind === "skills"
+          ? createSkillQmdIndex({
+              dataRoot: root,
+              config: () => config,
+              createStore: legacyStore,
+            })
+          : undefined;
+      const experienceIndex =
+        kind === "experiences"
+          ? createSkillExperienceQmdIndex({
+              dataRoot: root,
+              config: () => config,
+              createStore: legacyStore,
+            })
+          : undefined;
+      try {
+        skillIndex?.schedule("main", {
+          skills: [skill],
+          sourceRoots: [path.dirname(skill.location)],
+        });
+        experienceIndex?.schedule(entries);
+        await waitUntil(() => complete, "legacy Voyage fixture");
+      } finally {
+        await skillIndex?.close();
+        await experienceIndex?.close();
+      }
+      expect(fixture.requests.length).toBeGreaterThan(0);
+      expect(
+        fixture.requests.every(
+          (request) =>
+            request.dimensions === 1024 && !("input_type" in request),
+        ),
+      ).toBe(true);
+      const reopenedStores: QMDStore[] = [];
+      const refreshErrors: unknown[] = [];
+      const nativeStore = async (options: StoreOptions) => {
+        const store = await createStore(options);
+        reopenedStores.push(store);
+        const search = store.search.bind(store);
+        // Keep real hybrid retrieval but avoid a generator request in this fixture.
+        store.search = (options) => search({ ...options, expansion: "skip" });
+        const embed = store.embed.bind(store);
+        store.embed = async (options) => {
+          try {
+            return await embed(options);
+          } catch (error) {
+            refreshErrors.push(error);
+            throw error;
+          }
+        };
+        return store;
+      };
+      const reopen = (readOnly: boolean) => {
+        const skills =
+          kind === "skills"
+            ? createSkillQmdIndex({
+                dataRoot: root,
+                config: () => config,
+                createStore: nativeStore,
+                readOnly,
+              })
+            : undefined;
+        const experiences =
+          kind === "experiences"
+            ? createSkillExperienceQmdIndex({
+                dataRoot: root,
+                config: () => config,
+                createStore: nativeStore,
+                readOnly,
+                getEntries: () => entries,
+              })
+            : undefined;
+        skills?.schedule("main", {
+          skills: [skill],
+          sourceRoots: [path.dirname(skill.location)],
+        });
+        experiences?.schedule(entries);
+        return {
+          search: () =>
+            skills
+              ? skills.search({
+                  agentId: "main",
+                  query: "legacyvoyagemarker",
+                  limit: 5,
+                })
+              : experiences!.search({ query: "legacyvoyagemarker", limit: 5 }),
+          status: () =>
+            skills ? skills.getStatus("main") : experiences!.getStatus(),
+          close: async () => {
+            await skills?.close();
+            await experiences?.close();
+          },
+        };
+      };
+      const upgraded = reopen(false);
+      const requestsBeforeRefresh = fixture.requests.length;
+      try {
+        await waitUntil(
+          () => upgraded.status() === "ready",
+          "upgraded plugin readiness",
+        );
+        // Readiness includes lexical retrieval; it does not establish vector compatibility.
+        expect(await upgraded.search()).not.toHaveLength(0);
+        if (kind === "skills") {
+          await waitUntil(
+            () => refreshErrors.length > 0,
+            "incompatible skill refresh",
+          );
+          expect(refreshErrors[0]).toMatchObject({ code: "IDENTITY_MISMATCH" });
+        } else {
+          // Matching experience metadata skips embedding on ordinary startup.
+          expect(refreshErrors).toHaveLength(0);
+        }
+        expect(upgraded.status()).toBe("ready");
+        expect(fixture.requests).toHaveLength(requestsBeforeRefresh);
+        expect(reopenedStores.length).toBeGreaterThan(0);
+        for (const store of reopenedStores) {
+          expect(
+            (await store.getStatus()).diagnostics?.embedding,
+          ).toMatchObject({
+            provider: { id: "voyageai" },
+            identity: { compatible: false },
+          });
+        }
+      } finally {
+        await upgraded.close();
+      }
+      const native = await createStore(opened!);
+      try {
+        expect(
+          (await native.getStatus()).diagnostics?.embedding.identity.compatible,
+        ).toBe(false);
+        const requestsBefore = fixture.requests.length;
+        expect(await native.searchVector("legacyvoyagemarker")).toEqual([]);
+        await native.update();
+        await expect(native.embed()).rejects.toMatchObject({
+          code: "IDENTITY_MISMATCH",
+        });
+        expect(fixture.requests).toHaveLength(requestsBefore);
+        expect((await native.embed({ force: true })).errors).toBe(0);
+        expect(
+          (await native.getStatus()).diagnostics?.embedding.build.state,
+        ).toBe("ready");
+        expect(
+          (await native.getStatus()).diagnostics?.embedding.identity.compatible,
+        ).toBe(true);
+        expect(
+          await native.searchVector("legacyvoyagemarker"),
+        ).not.toHaveLength(0);
+        const requestsAfter = fixture.requests.length;
+        expect((await native.embed()).docsProcessed).toBe(0);
+        expect(fixture.requests).toHaveLength(requestsAfter);
+      } finally {
+        await native.close();
+      }
+      reopenedStores.length = 0;
+      const discovery = reopen(true);
+      try {
+        expect(await discovery.search()).not.toHaveLength(0);
+        expect(discovery.status()).toBe("ready");
+        expect(reopenedStores.length).toBeGreaterThan(0);
+        for (const store of reopenedStores) {
+          expect(
+            (await store.getStatus()).diagnostics?.embedding,
+          ).toMatchObject({
+            provider: { id: "voyageai" },
+            identity: { compatible: true },
+            build: { state: "ready" },
+          });
+          expect(
+            await store.searchVector("legacyvoyagemarker"),
+          ).not.toHaveLength(0);
+        }
+      } finally {
+        await discovery.close();
+      }
+    },
+    30_000,
+  );
 });

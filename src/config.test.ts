@@ -12,6 +12,51 @@ import {
 } from "./constants.js";
 
 describe("resolveConfig", () => {
+  it.each([undefined, "", "   ", 42])(
+    "omits invalid or absent embedding cache directories: %s",
+    (embeddingCacheDir) => {
+      expect(
+        resolveConfig({ qmd: { embeddingCacheDir } }).qmd,
+      ).not.toHaveProperty("embeddingCacheDir");
+    },
+  );
+
+  it("preserves the trimmed shared cache path and explicit Voyage dimension", () => {
+    const result = resolveConfig(
+      {
+        qmd: {
+          embeddingCacheDir: "  /dev/shm/qmd-embeddings  ",
+          embedding: { model: "voyageai/voyage-4", dimension: 1024 },
+        },
+      },
+      { env: { VOYAGE_API_KEY: "voyage-key" } },
+    );
+    expect(result.qmd.embeddingCacheDir).toBe("/dev/shm/qmd-embeddings");
+    expect(result.qmd.embedding).toEqual({
+      baseUrl: "https://api.voyageai.com/v1",
+      model: "voyage-4",
+      apiKey: "voyage-key",
+      dimension: 1024,
+    });
+    expect(
+      resolveConfig({ qmd: { embedding: { model: "voyageai/voyage-4" } } }).qmd
+        .embedding.dimension,
+    ).toBe(1536);
+  });
+
+  it("declares an optional nonblank cache path in the public manifest", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"),
+    );
+    const qmd = manifest.configSchema.properties.qmd;
+    expect(qmd.required).not.toContain("embeddingCacheDir");
+    expect(qmd.properties.embeddingCacheDir.type).toBe("string");
+    expect(qmd.properties.embeddingCacheDir.minLength).toBe(1);
+    const nonblank = new RegExp(qmd.properties.embeddingCacheDir.pattern);
+    expect(nonblank.test(" \t ")).toBe(false);
+    expect(nonblank.test(" /tmp/cache ")).toBe(true);
+  });
+
   describe("default values", () => {
     it("declares the working-set manifest contract with no configured default", () => {
       const manifest = JSON.parse(

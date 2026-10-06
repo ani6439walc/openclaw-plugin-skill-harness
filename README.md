@@ -124,6 +124,39 @@ Merge this entry into your existing `openclaw.json`:
 
 All three model settings are required. The example's `bifrost` and `typesafe` providers must already exist in OpenClaw's provider configuration. `provider/model` resolves endpoint and credentials from that configuration. Alternatively, configure `baseUrl`, `model`, and `apiKey` explicitly on each endpoint. `qmd.embedding.dimension` defaults to `1536`; set it to match your embedding model.
 
+#### Shared document embedding cache and Voyage
+
+Set optional `qmd.embeddingCacheDir` to share document embeddings across skill and experience stores, agents, and processes that use the same directory. Without it, QMD uses its in-memory cache. The plugin forwards the directory unchanged after trimming whitespace; it does not append agent or generation names. QMD expands `~`; relative paths use the process working directory, **not** `dataRoot`. Prefer an absolute path on persistent disk, or tmpfs such as `/dev/shm` when RAM usage and loss on reboot are acceptable.
+
+The QMD cache retains successful document embeddings for up to two hours, bounded to 2,000 entries / 64 MiB of payload (SQLite adds overhead). Identity, credentials, and exact formatted input must match. It does not persist query embeddings or expansion results. Cache misses sharing a directory serialize while the remote request runs; waiting respects the request timeout. Cache failure falls back to ordinary embedding, so this is not a permanent exactly-once guarantee. Changing the directory reopens stores after active operations drain without changing index fingerprints or rebuilding vectors. Read-only discovery does not create the disk cache.
+
+For native Voyage, merge this complete model configuration into the plugin config, retaining your configured expansion and Jev providers:
+
+```json5
+{
+  qmd: {
+    embeddingCacheDir: "/dev/shm/skill-harness-qmd-embeddings",
+    embedding: { model: "voyageai/voyage-4", dimension: 1024 },
+    expansion: { model: "bifrost/gpt-4o-mini" },
+  },
+  jev: { model: "typesafe/jev-latest" },
+}
+```
+
+`voyage/` and `voyageai/` resolve to the official endpoint and `VOYAGE_API_KEY` from the Gateway environment when explicit or configured provider values are absent. Set `dimension: 1024` explicitly: the plugin retains its existing `1536` default. QMD supplies Voyage's native `input_type` and `output_dimension` fields ([Voyage API reference](https://docs.voyageai.com/reference/embeddings-api)). A custom gateway must accept that native protocol; a provider prefix selects connection settings, not the HTTP protocol.
+
+#### Upgrading existing Voyage indexes
+
+QMD `2026.10.6` uses a native Voyage identity. Existing vectors produced by the older OpenAI-compatible provider are incompatible even when model, dimension, and endpoint are unchanged. Ordinary refresh does not authorize destructive rebuilding. Lexical search may still work, and plugin `ready` alone does not prove vector readiness.
+
+Use a separately approved, one-time maintenance window:
+
+1. Enumerate the distinct skill databases referenced by `dataRoot/qmd/skills/agents/` mappings under `dataRoot/qmd/skills/indexes/<fingerprint>/skill-search.sqlite`, plus `dataRoot/qmd/experiences/experience-routing.sqlite`. Inspect each database with the new resolved models and `readOnly: true`; check `getStatus().diagnostics.embedding.identity.compatible`. Confirm the exact affected databases and embedding request cost before rebuilding.
+2. Stop **all** Gateway generations and other users of these databases. Back up the affected stores and managed metadata while quiescent. Preserve snapshots, mappings, leases, `gc.json`, and experience metadata; do not delete index directories or rewrite identity fields.
+3. Open each affected database with the installed QMD SDK, its exact `dbPath`, and the complete `config: { collections, models }` using its existing managed collection definitions and the new resolved Voyage settings. Preserve collection contexts and global context if present. Supplying inline config reconciles the database collections: do not omit `collections` or replace them with an empty object. Call `await store.embed({ force: true })` once per database, with no collection restriction, and always close the store. This replaces its vectors, makes new API requests, and bypasses the document cache; do not add `force` to recurring refreshes.
+4. Require zero embedding errors, `needsEmbedding === 0`, compatible identity and ready embedding build diagnostics, then verify `searchVector()` on known indexed content. Reopen read-only and recheck before restarting the Gateway. A subsequent ordinary `embed()` should process zero unchanged documents. If any database fails, keep maintenance paused and inspect diagnostics or restore the quiescent backup; do not resume with an assumed successful rebuild.
+5. Restart with the new plugin and verify searches through each intended agent's actual Gateway tools. Check semantic diagnostics separately from lexical results. Local tests do not establish deployed readiness.
+
 ### 3. Choose the static working set
 
 Before enabling, move any native static skill selections into the plugin's `skills.workingSet`, and move intentionally shared `skills.load.extraDirs` paths into `skills.sharedRoots`:

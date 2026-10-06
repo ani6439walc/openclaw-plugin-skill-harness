@@ -424,7 +424,7 @@ describe("SkillExperienceQmdIndex", () => {
     }
   });
 
-  it.each(["endpoint", "key", "expansion", "jev", "timeout"])(
+  it.each(["endpoint", "key", "expansion", "jev", "timeout", "cache"])(
     "rotates %s without rebuilding content",
     async (field) => {
       const fixture = await setupConnection();
@@ -447,6 +447,8 @@ describe("SkillExperienceQmdIndex", () => {
           apiKey: "jev-key",
         };
       if (field === "timeout") config.timeoutMs = 4321;
+      if (field === "cache")
+        config.embeddingCacheDir = "/shared/qmd-document-embeddings";
       fixture.setConfig(config);
       index!.schedule(MOCK_ENTRIES);
       expect(await fixture.search()).toHaveLength(1);
@@ -470,32 +472,46 @@ describe("SkillExperienceQmdIndex", () => {
         expect(
           fixture.createStore.mock.calls[1]?.[0].config.models,
         ).toMatchObject({ jev_api_key: "jev-key" });
+      expect(
+        fixture.createStore.mock.calls[1]?.[0].config.models.embed_cache_dir,
+      ).toBe(config.embeddingCacheDir);
       expect(await fs.readFile(metadataPath, "utf8")).toBe(metadata);
     },
   );
 
-  it("drains searches and coalesces changing connection settings", async () => {
-    const fixture = await setupConnection();
-    const pending = deferred<[]>();
-    fixture.first.search.mockReturnValue(pending.promise);
-    const active = fixture.search();
-    await vi.waitFor(() =>
-      expect(fixture.first.search).toHaveBeenCalledTimes(3),
-    );
-    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 2000 });
-    const waiting = fixture.search();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 3000 });
-    const another = fixture.search();
-    expect(fixture.first.close).not.toHaveBeenCalled();
-    pending.resolve([]);
-    await Promise.all([active, waiting, another]);
-    expect(fixture.first.search).toHaveBeenCalledTimes(3);
-    expect(fixture.createStore).toHaveBeenCalledTimes(2);
-    expect(fixture.createStore.mock.calls[1]?.[0]).toMatchObject({
-      remoteRequestTimeoutMs: 3000,
-    });
-  });
+  it.each(["timeoutMs", "embeddingCacheDir"] as const)(
+    "drains searches and coalesces changing connection settings (%s)",
+    async (field) => {
+      const fixture = await setupConnection();
+      const pending = deferred<[]>();
+      fixture.first.search.mockReturnValue(pending.promise);
+      const active = fixture.search();
+      await vi.waitFor(() =>
+        expect(fixture.first.search).toHaveBeenCalledTimes(3),
+      );
+      fixture.setConfig({
+        ...DEFAULT_CONFIG,
+        [field]: field === "timeoutMs" ? 2000 : "/shared/cache-2000",
+      });
+      const waiting = fixture.search();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      fixture.setConfig({
+        ...DEFAULT_CONFIG,
+        [field]: field === "timeoutMs" ? 3000 : "/shared/cache-3000",
+      });
+      const another = fixture.search();
+      expect(fixture.first.close).not.toHaveBeenCalled();
+      pending.resolve([]);
+      await Promise.all([active, waiting, another]);
+      expect(fixture.first.search).toHaveBeenCalledTimes(3);
+      expect(fixture.createStore).toHaveBeenCalledTimes(2);
+      expect(fixture.createStore.mock.calls[1]?.[0]).toMatchObject(
+        field === "timeoutMs"
+          ? { remoteRequestTimeoutMs: 3000 }
+          : { config: { models: { embed_cache_dir: "/shared/cache-3000" } } },
+      );
+    },
+  );
 
   it("fails open on reopen failure and never falls back to old credentials", async () => {
     const fixture = await setupConnection();
@@ -666,27 +682,35 @@ describe("SkillExperienceQmdIndex", () => {
     expect(fixture.next.close).toHaveBeenCalledOnce();
   });
 
-  it("finishes embedding before applying newer connection settings", async () => {
-    const fixture = await setupConnection();
-    const pending = deferred<{ errors: number }>();
-    fixture.next.embed.mockReturnValue(pending.promise);
-    index!.schedule([{ ...MOCK_ENTRIES[0]!, body: "changed" }]);
-    await vi.waitFor(() => expect(fixture.next.embed).toHaveBeenCalledOnce());
-    fixture.setConfig({ ...DEFAULT_CONFIG, timeoutMs: 3000 });
-    expect(await fixture.search()).toBeUndefined();
-    expect(fixture.next.close).not.toHaveBeenCalled();
-    const newest = makeStore();
-    fixture.createStore.mockResolvedValueOnce(newest);
-    pending.resolve({ errors: 0 });
-    await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
-    expect(await fixture.search()).toHaveLength(1);
-    expect(fixture.next.close).toHaveBeenCalledOnce();
-    expect(newest.update).not.toHaveBeenCalled();
-    expect(newest.search).toHaveBeenCalledTimes(3);
-    expect(fixture.createStore.mock.calls[2]?.[0]).toMatchObject({
-      remoteRequestTimeoutMs: 3000,
-    });
-  });
+  it.each(["timeoutMs", "embeddingCacheDir"] as const)(
+    "finishes embedding before applying newer connection settings (%s)",
+    async (field) => {
+      const fixture = await setupConnection();
+      const pending = deferred<{ errors: number }>();
+      fixture.next.embed.mockReturnValue(pending.promise);
+      index!.schedule([{ ...MOCK_ENTRIES[0]!, body: "changed" }]);
+      await vi.waitFor(() => expect(fixture.next.embed).toHaveBeenCalledOnce());
+      fixture.setConfig({
+        ...DEFAULT_CONFIG,
+        [field]: field === "timeoutMs" ? 3000 : "/shared/cache-3000",
+      });
+      expect(await fixture.search()).toBeUndefined();
+      expect(fixture.next.close).not.toHaveBeenCalled();
+      const newest = makeStore();
+      fixture.createStore.mockResolvedValueOnce(newest);
+      pending.resolve({ errors: 0 });
+      await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+      expect(await fixture.search()).toHaveLength(1);
+      expect(fixture.next.close).toHaveBeenCalledOnce();
+      expect(newest.update).not.toHaveBeenCalled();
+      expect(newest.search).toHaveBeenCalledTimes(3);
+      expect(fixture.createStore.mock.calls[2]?.[0]).toMatchObject(
+        field === "timeoutMs"
+          ? { remoteRequestTimeoutMs: 3000 }
+          : { config: { models: { embed_cache_dir: "/shared/cache-3000" } } },
+      );
+    },
+  );
   async function publish(
     entries: readonly SkillExperienceEntry[],
     config = DEFAULT_CONFIG,

@@ -23,6 +23,8 @@ export interface ResolveQmdEndpointOptions {
 
 const WELL_KNOWN_PROVIDER_BASE_URLS: Readonly<Record<string, string>> = {
   openai: "https://api.openai.com/v1",
+  voyage: "https://api.voyageai.com/v1",
+  voyageai: "https://api.voyageai.com/v1",
   openrouter: "https://openrouter.ai/api/v1",
   anthropic: "https://api.anthropic.com",
   groq: "https://api.groq.com/openai/v1",
@@ -85,7 +87,10 @@ function extractFallbackEnvApiKey(
   env: NodeJS.ProcessEnv,
 ): string | undefined {
   const normalized = providerKey.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-  const specificVar = `${normalized}_API_KEY`;
+  const specificVar =
+    normalized === "VOYAGE" || normalized === "VOYAGEAI"
+      ? "VOYAGE_API_KEY"
+      : `${normalized}_API_KEY`;
   return env[specificVar]?.trim() || undefined;
 }
 
@@ -316,7 +321,10 @@ export function buildStoreModels(config: ResolvedQmdConfig) {
     config.jev ??
     (isJevModel(config.expansion.model) ? config.expansion : undefined);
 
+  const embeddingCacheDir = config.embeddingCacheDir?.trim();
+
   return {
+    ...(embeddingCacheDir ? { embed_cache_dir: embeddingCacheDir } : {}),
     embed_api_url: config.embedding.baseUrl,
     embed_api_model: config.embedding.model,
     ...(config.embedding.apiKey
