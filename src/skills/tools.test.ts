@@ -389,6 +389,107 @@ describe("registerSkillTools", () => {
     },
   );
 
+  it.each(["idle", "building", "failed"] as const)(
+    "attempts semantic experience search from %s without a readiness precheck",
+    async (status) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+      try {
+        const stateDir = path.join(tmp, "state");
+        const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+        const api = createApi(stateDir, path.join(tmp, "workspace"));
+        writeExperience(
+          dataRoot,
+          "vue",
+          "verification",
+          "Check repository evidence.",
+        );
+        const query =
+          "distinguishing verified completion from inferred success";
+        const catalog = new SkillExperienceCatalog(dataRoot);
+        expect(catalog.search({ query })).toEqual([]);
+        const search = vi.fn().mockResolvedValue([{ id: "verification" }]);
+        const getStatus = vi.fn(() => status);
+        registerSkillTools(api, {
+          experienceCatalog: catalog,
+          qmdExperienceIndex: {
+            schedule: vi.fn(),
+            search,
+            getStatus,
+            close: vi.fn().mockResolvedValue(undefined),
+          },
+        });
+        const result = await runTool(
+          toolsForAgent(api).get("skill_experience"),
+          {
+            query,
+            show_skills: false,
+          },
+        );
+        expect(result.entries).toEqual([
+          expect.objectContaining({ id: "verification" }),
+        ]);
+        expect(search).toHaveBeenCalledExactlyOnceWith({ query, limit: 5 });
+        expect(getStatus).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(["unavailable", "empty", "unresolved", "error"] as const)(
+    "falls back to the experience catalog when semantic search is %s",
+    async (outcome) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
+      try {
+        const stateDir = path.join(tmp, "state");
+        const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+        const api = createApi(stateDir, path.join(tmp, "workspace"));
+        writeExperience(
+          dataRoot,
+          "vue",
+          "verification",
+          "Check repository evidence.",
+        );
+        const search = vi.fn();
+        if (outcome === "error")
+          search.mockRejectedValue(new Error("unavailable"));
+        else
+          search.mockResolvedValue(
+            outcome === "unavailable"
+              ? undefined
+              : outcome === "empty"
+                ? []
+                : [{ id: "missing" }],
+          );
+        registerSkillTools(api, {
+          experienceCatalog: new SkillExperienceCatalog(dataRoot),
+          qmdExperienceIndex: {
+            schedule: vi.fn(),
+            search,
+            getStatus: () => "idle" as const,
+            close: vi.fn().mockResolvedValue(undefined),
+          },
+        });
+        const result = await runTool(
+          toolsForAgent(api).get("skill_experience"),
+          {
+            query: "verification",
+            show_skills: false,
+          },
+        );
+        expect(result.entries).toEqual([
+          expect.objectContaining({ id: "verification" }),
+        ]);
+        expect(search).toHaveBeenCalledExactlyOnceWith({
+          query: "verification",
+          limit: 5,
+        });
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("requires a query and validates its type and Unicode length at execution", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const api = createApi(path.join(tmp, "state"), path.join(tmp, "workspace"));

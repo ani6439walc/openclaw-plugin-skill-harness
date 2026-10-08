@@ -460,11 +460,8 @@ export function registerSkillTools(
           const showSkills = booleanParam(params, "show_skills", true);
 
           let matches: SkillExperienceEntry[] = [];
-          if (
-            query &&
-            options.qmdExperienceIndex &&
-            options.qmdExperienceIndex.getStatus() === "ready"
-          ) {
+          if (query && options.qmdExperienceIndex) {
+            // Discovery indexes initialize and revalidate freshness inside search().
             try {
               const hits = await options.qmdExperienceIndex.search({
                 query,
