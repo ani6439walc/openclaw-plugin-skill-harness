@@ -1,6 +1,7 @@
 import {
   definePluginEntry,
   logger,
+  setApiLogger,
   type OpenClawConfig,
   type OpenClawPluginApi,
   type OpenClawPluginDefinition,
@@ -96,6 +97,9 @@ export function createPlugin(
 ): OpenClawPluginDefinition & {
   register: NonNullable<OpenClawPluginDefinition["register"]>;
 } {
+  if (api.logger) {
+    setApiLogger(api.logger);
+  }
   const canAccessRuntime = api.registrationMode !== "cli-metadata";
   const getRuntimeConfig = (): OpenClawConfig | undefined => {
     if (!canAccessRuntime) return undefined;
