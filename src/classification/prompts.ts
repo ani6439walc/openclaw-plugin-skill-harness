@@ -115,7 +115,11 @@ export function buildRoutingContext(params: {
 
   if (matchedSkills.length === 0 && experiences.length === 0) return "";
 
-  const blocks: string[] = [];
+  const header = selectAdvisoryHeader(
+    matchedSkills.length > 0,
+    experiences.length > 0,
+  );
+  const blocks: string[] = [header];
   if (experiences.length > 0) {
     blocks.push(formatMatchedExperiences(experiences));
   }
@@ -123,12 +127,7 @@ export function buildRoutingContext(params: {
     blocks.push(formatInputMatchedSkills(matchedSkills));
   }
 
-  const taggedContent = xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
-  const header = selectAdvisoryHeader(
-    matchedSkills.length > 0,
-    experiences.length > 0,
-  );
-  return `${header}\n${taggedContent}`;
+  return xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));
 }
 
 export function formatWorkingSetSkills(

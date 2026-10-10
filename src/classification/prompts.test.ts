@@ -64,7 +64,7 @@ describe("buildRoutingContext", () => {
     });
 
     expect(result).toContain(
-      `${ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER}\n<skill_harness_plugin>`,
+      `<skill_harness_plugin>\n  ${ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER}`,
     );
     expect(result).toContain("<skill_harness_plugin>");
     expect(result).not.toContain("<intent ");
@@ -90,9 +90,8 @@ describe("buildRoutingContext", () => {
     expect(result).not.toContain("<body>");
     expect(result).not.toContain("/private/SKILL.md");
     expect(result).not.toContain("/private/experience.md");
-    expect(
-      result.startsWith(ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER),
-    ).toBe(true);
+    expect(result.startsWith("<skill_harness_plugin>")).toBe(true);
+    expect(result).toContain(ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER);
     expect(result).not.toContain("<<<BEGIN_SKILL_HARNESS_CONTEXT>>>");
     expect(result).not.toContain("<<<END_SKILL_HARNESS_CONTEXT>>>");
     expect(result.endsWith("</skill_harness_plugin>")).toBe(true);
@@ -142,9 +141,8 @@ describe("buildRoutingContext", () => {
     });
     expect(expOnly).toContain('<experience id="standalone"');
     expect(expOnly).not.toContain("<matched_skills>");
-    expect(expOnly.startsWith(ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER)).toBe(
-      true,
-    );
+    expect(expOnly.startsWith("<skill_harness_plugin>")).toBe(true);
+    expect(expOnly).toContain(ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER);
   });
   it("escapes adversarial input-matched skill descriptions", () => {
     const result = formatInputMatchedSkills([
@@ -225,7 +223,8 @@ describe("buildRoutingContext", () => {
       experiences: [],
     });
 
-    expect(result.startsWith(ROUTING_ADVISORY_SKILLS_ONLY_HEADER)).toBe(true);
+    expect(result.startsWith("<skill_harness_plugin>")).toBe(true);
+    expect(result).toContain(ROUTING_ADVISORY_SKILLS_ONLY_HEADER);
     expect(result).toContain("<matched_skills>");
   });
 

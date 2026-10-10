@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
+  ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
 } from "../constants.js";
 import {
   sanitizeConversationText,
@@ -78,6 +79,22 @@ PATH: darling/projects/personal/減肥.md (detailed weight loss journey & diet r
 我之前都吃甚麼`;
 
     expect(sanitizeConversationText(raw)).toBe("我之前都吃甚麼");
+  });
+
+  it("strips routing block when advisory header is inside skill_harness_plugin", () => {
+    const raw = `<skill_harness_plugin>
+  ${ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER}
+  <matched_experiences>
+    <experience id="exp-1">desc</experience>
+  </matched_experiences>
+  <matched_skills>
+    <skill name="skill-1">desc</skill>
+  </matched_skills>
+</skill_harness_plugin>
+
+進入 inventory 模式先 scan吧`;
+
+    expect(sanitizeConversationText(raw)).toBe("進入 inventory 模式先 scan吧");
   });
 });
 
