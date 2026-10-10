@@ -2,7 +2,7 @@
   "name": "skill-harness",
   "displayName": "Skill Harness",
   "description": "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
-  "version": "2026.9.6",
+  "version": "2026.9.9",
   "license": "MIT",
   "author": "Ani <ani6439walc@gmail.com>",
   "contributors": [
@@ -38,12 +38,12 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.9.6",
-      "minGatewayVersion": "2026.9.6"
+      "pluginApi": ">=2026.9.9",
+      "minGatewayVersion": "2026.9.9"
     },
     "build": {
-      "openclawVersion": "2026.9.6",
-      "pluginSdkVersion": "2026.9.6"
+      "openclawVersion": "2026.9.9",
+      "pluginSdkVersion": "2026.9.9"
     }
   },
   "scripts": {
@@ -61,7 +61,7 @@
     "zod": "4.6.5"
   },
   "peerDependencies": {
-    "openclaw": "2026.9.6"
+    "openclaw": "2026.9.9"
   },
   "devDependencies": {
     "typescript": "6.0.3",
