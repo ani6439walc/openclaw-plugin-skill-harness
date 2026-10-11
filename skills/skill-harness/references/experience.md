@@ -11,7 +11,7 @@ An experience directory consists of plain markdown files:
 - **`summary.md`** (Required): Plain-text summary of the problem and solution pattern (max 240 code points).
 - **`keywords.md`** (Required): Relevant keywords for fast keyword/lexical discovery, one per line (max 12 keywords, max 64 code points each).
 - **`body.md`** (Required): Concrete reusable workflow, durable steps, pitfalls, and guidelines (max 12,000 code points).
-- **`skills.md`** (Optional): Associated skill names (exactly one per line; no comma-separated lists) that this experience activates or depends upon.
+- **`skills.md`** (Optional): Associated skill names (exactly one per line; no comma-separated lists) that may assist with applying this experience. These are discovery hints, not automatic activation or required dependencies.
 
 ### Segment and ID Rules
 
@@ -24,6 +24,8 @@ An experience directory consists of plain markdown files:
 2. **Privacy**: Never include private user data, absolute local machine paths, secrets, API keys, or raw turn transcripts.
 3. **Decoupled Skills**: Link only real, relevant skills in `skills.md` that directly assist with executing the pattern.
 4. **Focused Guidance**: Keep `summary.md` concise for high-precision retrieval ranking, and provide actionable, self-contained steps in `body.md`.
+
+Retrieved experiences contribute their visible associated skills to the unified candidate pool; Jev scores those skills independently. Selecting an experience does not force selection of a skill. A selected summary appears once under its highest-ranked final associated skill, or standalone when none is selected. Empty, invisible or rejected associations do not exclude an experience.
 
 ## Lifecycle Operations
 

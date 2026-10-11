@@ -1,3 +1,6 @@
+import { canonicalIdentity } from "../normalize.js";
+import { RELATION_RELEVANCE_THRESHOLD } from "../skills/related.js";
+import type { RelationDecision } from "../skills/related.js";
 import {
   ROUTING_ADVISORY_SKILLS_ONLY_HEADER,
   ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
@@ -61,11 +64,31 @@ export function formatMatchedExperiences(
   return xmlBlock("matched_experiences", lines.join("\n"));
 }
 
-function formatSkillXml(skill: AvailableSkill): string {
+function formatSkillXml(
+  skill: AvailableSkill,
+  relations: readonly RelationDecision[] = [],
+  experiences: readonly SkillExperienceEntry[] = [],
+): string {
   const lines: string[] = [];
   if (skill.description) {
     lines.push(escapeXmlText(skill.description));
   }
+  for (const relation of relations) {
+    if (
+      !relation.injected ||
+      relation.score < RELATION_RELEVANCE_THRESHOLD ||
+      relation.skill !== skill.name
+    )
+      continue;
+    lines.push(
+      xmlBlock(
+        "relation",
+        escapeXmlText(relation.reason),
+        ` from="${escapeXmlAttribute(relation.from)}" to="${escapeXmlAttribute(relation.to)}" type="${escapeXmlAttribute(relation.relation_type)}" verification="unverified"`,
+      ),
+    );
+  }
+  lines.push(...experiences.map(formatExperienceXml));
   return xmlBlock(
     "skill",
     lines.join("\n"),
@@ -77,8 +100,17 @@ function formatSkillXmlBlock(
   tag: string,
   skills: AvailableSkill[] | undefined,
   attributes = "",
+  relations: readonly RelationDecision[] = [],
+  experiencesBySkill: ReadonlyMap<
+    string,
+    readonly SkillExperienceEntry[]
+  > = new Map(),
 ): string {
-  const body = skills?.map((skill) => formatSkillXml(skill)).join("\n");
+  const body = skills
+    ?.map((skill) =>
+      formatSkillXml(skill, relations, experiencesBySkill.get(skill.name)),
+    )
+    .join("\n");
   return xmlBlock(tag, body ?? "", attributes);
 }
 
@@ -108,10 +140,35 @@ export function buildRoutingContext(params: {
   matchedSkills?: readonly AvailableSkill[];
   inputMatchedSkills?: readonly AvailableSkill[];
   experiences?: readonly SkillExperienceEntry[];
+  relationDecisions?: readonly RelationDecision[];
 }): string {
   const matchedSkills: readonly AvailableSkill[] =
     params.matchedSkills ?? params.inputMatchedSkills ?? [];
-  const experiences = params.experiences ?? [];
+  const experiences = [
+    ...new Map(
+      (params.experiences ?? []).map((experience) => [
+        experience.id,
+        experience,
+      ]),
+    ).values(),
+  ];
+  const experiencesBySkill = new Map<string, SkillExperienceEntry[]>();
+  const standalone: SkillExperienceEntry[] = [];
+  for (const experience of experiences) {
+    // matchedSkills is in descending selector score order, with stable name ties.
+    const anchor = matchedSkills.find((skill) =>
+      experience.skills.some(
+        (name) => canonicalIdentity(name) === canonicalIdentity(skill.name),
+      ),
+    );
+    if (!anchor) {
+      standalone.push(experience);
+      continue;
+    }
+    const entries = experiencesBySkill.get(anchor.name) ?? [];
+    entries.push(experience);
+    experiencesBySkill.set(anchor.name, entries);
+  }
 
   if (matchedSkills.length === 0 && experiences.length === 0) return "";
 
@@ -120,11 +177,19 @@ export function buildRoutingContext(params: {
     experiences.length > 0,
   );
   const blocks: string[] = [header];
-  if (experiences.length > 0) {
-    blocks.push(formatMatchedExperiences(experiences));
+  if (standalone.length > 0) {
+    blocks.push(formatMatchedExperiences(standalone));
   }
   if (matchedSkills.length > 0) {
-    blocks.push(formatInputMatchedSkills(matchedSkills));
+    blocks.push(
+      formatSkillXmlBlock(
+        "matched_skills",
+        [...matchedSkills],
+        "",
+        params.relationDecisions,
+        experiencesBySkill,
+      ),
+    );
   }
 
   return xmlBlock(SKILL_HARNESS_PLUGIN_TAG, blocks.join("\n"));

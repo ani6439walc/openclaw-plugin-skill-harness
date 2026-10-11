@@ -127,33 +127,50 @@ describe("StatsAggregator", () => {
       expect(stats.daily["2026-06-11"].intents).toEqual({});
     });
 
-    it("counts relation injection in the pool without attributing it to QMD", () => {
-      const state = createState({
-        intent: undefined,
-        matchedSkills: ["related-skill"],
-        confidence: 0.9,
-        inputSkillDiscovery: {
-          nameCandidates: 1,
-          retrievalAttempted: false,
-          retrievalCandidates: 0,
-          retrievalSemanticScores: [],
-          relatedCandidates: ["related-skill"],
-          candidateCount: 2,
-          injectedSkills: [
-            { name: "related-skill", source: "related-declared" },
-          ],
-          durationMs: 1,
-        },
-      });
-      expect(aggregator.record("related-turn", state)).toBe(true);
-      const stats = JSON.parse(
-        fs.readFileSync(path.join(tempDir, "stats.json"), "utf8"),
-      );
-      expect(stats.skillDiscovery.pool.injectedSkills).toBe(1);
-      expect(stats.skillDiscovery.qmdSearch.injectedSkills).toBe(0);
-      expect(stats.skillDiscovery.qmdSearch.candidates).toBe(0);
-      expect(stats.skillDiscovery.nameMatch.injectedSkills).toBe(0);
-    });
+    it.each(["related-declared", "experience-associated"] as const)(
+      "counts %s injection in the pool without attributing it to QMD",
+      (source) => {
+        const state = createState({
+          intent: undefined,
+          matchedSkills: ["related-skill"],
+          confidence: 0.9,
+          inputSkillDiscovery: {
+            nameCandidates: 1,
+            retrievalAttempted: false,
+            retrievalCandidates: 0,
+            retrievalSemanticScores: [],
+            relatedCandidates: ["related-skill"],
+            relationDecisions: [
+              {
+                skill: "related-skill",
+                from: "background",
+                to: "related-skill",
+                from_description: "Background context",
+                to_description: "Target context",
+                relation_type: "depends_on",
+                verification_status: "unverified",
+                reason: "Author reason",
+                score: 1,
+                injected: true,
+              },
+            ],
+            candidateCount: 2,
+            injectedSkills: [{ name: "related-skill", source }],
+            durationMs: 1,
+          },
+        });
+        expect(aggregator.record("related-turn", state)).toBe(true);
+        const stats = JSON.parse(
+          fs.readFileSync(path.join(tempDir, "stats.json"), "utf8"),
+        );
+        expect(stats.skillDiscovery.pool.injectedSkills).toBe(1);
+        expect(stats.skillDiscovery.qmdSearch.injectedSkills).toBe(0);
+        expect(stats.skillDiscovery.qmdSearch.candidates).toBe(0);
+        expect(stats.skillDiscovery.nameMatch.injectedSkills).toBe(0);
+        expect(stats.summary.averageConfidence).toBe(0.9);
+        expect(stats.skills.background).toBeUndefined();
+      },
+    );
 
     it("returns a shared instance for the same plugin root", () => {
       const aggregator1 = StatsAggregator.create(tempDir);

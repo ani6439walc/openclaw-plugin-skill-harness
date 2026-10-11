@@ -46,7 +46,7 @@ A healthy report **does not prove Gateway loaded the plugin**. Review logs also 
 
 - Adoption is same-turn recorded skill use, not task correctness or routing precision. Used-without-injection can reflect static working sets or manual discovery; it is not measured recall failure. Fewer than 20 injections is marked low sample, a reporting convention rather than a runtime rule. Never prune a skill solely because adoption is low.
 - Current usage requires successful complete `skill_view` output or successful `read`/`exec` output with parseable skill frontmatter and a nonempty name. Failed calls, `ls`, empty/unrecognizable truncated output, and command paths alone are not adoption evidence. Historical aggregates can contain false positives from the earlier interpretation; existing statistics are not recalculated or rewritten. Treat periods spanning this change as mixed evidence.
-- Name matching and QMD can overlap. Use the recorded unique pool rather than summing channel counts. Existing aggregate QMD injected-skill counts include experience-source skills; do not calculate pure skill-search conversion from them. Collection counts are retrieval evidence, not causal contributions or independent accuracy scores.
+- Name matching and QMD can overlap. Use the recorded unique pool rather than summing channel counts. Experience associations contribute individually scored skill candidates, not automatic post-selection injections. Existing aggregate QMD injected-skill counts include experience-source skills and historical behavior; do not calculate pure skill-search conversion from them. Collection counts are retrieval evidence, not causal contributions or independent accuracy scores.
 - Confidence is selector confidence, not retrieval similarity or calibrated accuracy. A nonempty pool with no injection does not identify selector failure versus an intentional rejection. Exact selector failure reasons, stage latency, model costs, and true precision/recall are unobserved.
 - Session selection requires both matched-skill and matched-experience arrays. Usage comparisons require completed turns with usage records. Missing fields reduce coverage instead of counting as empty selections. Experience candidate statistics use completed retrievals with observed candidate counts.
 - Daily usage names are raw; daily `skillRouting` and `toolErrors` keys are encoded and may overflow into `__other__`. Overflow makes per-skill injection/adoption comparison unavailable; aggregate rates remain usable. Do not subtract usage and injection totals from different populations.
@@ -79,3 +79,11 @@ selection does not prove adoption or task benefit. Compare actual loading,
 execution outcomes, retries and user corrections. Keep graph/checkpoint contents,
 source paths and author evidence out of public reports. This audit does not run
 the importer, modify the graph, classify relationships or clear source metadata.
+
+Relation relevance scores and XML hints are distinct from candidate expansion.
+Optional `relationDecisions` record scores and whether the anchor survived final
+selection; a high relation score does not select either endpoint or validate a
+dependency. Background endpoint names are not injected or adopted skills. Selected
+experience summaries may be nested in a skill or standalone; placement is not a
+separate selection, injection or usage event. Compare periods across routing
+changes separately and do not rewrite historical aggregates.

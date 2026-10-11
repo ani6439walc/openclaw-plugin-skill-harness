@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCandidateSkillsUnionPool,
+  buildSkillCandidateSuperset,
   selectSkillCandidates,
 } from "./candidate-pool.js";
 
@@ -131,5 +132,90 @@ describe("buildCandidateSkillsUnionPool", () => {
     expect(union.candidateSkills.map((s) => s.name)).toEqual(["alpha", "beta"]);
     expect(union.experienceHitsBySkill.get("alpha")).toEqual([mockHit]);
     expect(union.experienceHitsBySkill.has("beta")).toBe(false);
+  });
+});
+
+describe("buildSkillCandidateSuperset", () => {
+  const gamma = { name: "gamma", description: "Gamma", location: "/gamma" };
+  const delta = { name: "delta", description: "Delta", location: "/delta" };
+  const experience = {
+    id: "exp",
+    summary: "Shared guidance",
+    keywords: ["task"],
+    body: "Body",
+    path: "/exp",
+    skills: ["ALPHA", "gamma", "hidden", "gamma"],
+  };
+
+  it("preserves ranked originals then visible associations then expanded extras without fabricating scores", () => {
+    const result = buildSkillCandidateSuperset({
+      originals: [skills[1], skills[0]],
+      nameCandidates: [
+        { skillName: "ALPHA", score: 0.8, source: "name-match" },
+      ],
+      retrievalCandidates: [
+        { skillName: "beta", score: 0.9, source: "direct-retrieval" },
+        { skillName: "alpha", score: 0.7, source: "direct-retrieval" },
+      ],
+      experiences: [experience],
+      expanded: [skills[0], gamma, delta],
+      expandedNames: ["gamma", "delta"],
+      visibleSkills: [...skills, gamma, delta],
+      enabled: true,
+    });
+    expect(result.candidateSkills.map((skill) => skill.name)).toEqual([
+      "beta",
+      "alpha",
+      "gamma",
+      "delta",
+    ]);
+    expect(result.candidateSources).toEqual({
+      beta: ["direct-retrieval"],
+      alpha: ["name-match", "direct-retrieval", "experience-associated"],
+      gamma: ["experience-associated", "related-declared"],
+      delta: ["related-declared"],
+    });
+    expect(result.candidateSkills).toEqual([
+      skills[1],
+      skills[0],
+      gamma,
+      delta,
+    ]);
+    expect(result.candidateSkills.every((skill) => !("score" in skill))).toBe(
+      true,
+    );
+  });
+
+  it("uses visible winning identities for canonical association names and drops invisible endpoints", () => {
+    const result = buildSkillCandidateSuperset({
+      originals: [],
+      nameCandidates: [],
+      retrievalCandidates: [],
+      experiences: [experience],
+      expanded: [{ ...delta, name: "hidden" }],
+      expandedNames: ["hidden"],
+      visibleSkills: [skills[0], gamma],
+      enabled: true,
+    });
+    expect(result.candidateSkills).toEqual([skills[0], gamma]);
+    expect(result.candidateSources).toEqual({
+      alpha: ["experience-associated"],
+      gamma: ["experience-associated"],
+    });
+  });
+
+  it("keeps the entire skill pool empty when skill discovery is disabled", () => {
+    const result = buildSkillCandidateSuperset({
+      originals: skills,
+      nameCandidates: [{ skillName: "alpha", score: 1, source: "name-match" }],
+      retrievalCandidates: [],
+      experiences: [experience],
+      expanded: [gamma],
+      expandedNames: ["gamma"],
+      visibleSkills: [...skills, gamma],
+      enabled: false,
+    });
+    expect(result.candidateSkills).toEqual([]);
+    expect(result.candidateSources).toEqual({});
   });
 });

@@ -18,6 +18,7 @@ export type SkillCandidatePoolFallbackReason =
   | "empty-pool";
 
 export type PipelineMetadata = {
+  relationDecisions?: import("../skills/related.js").RelationDecision[];
   relatedCandidates?: string[];
   basis?: string;
   keywords?: string[];

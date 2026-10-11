@@ -1,3 +1,4 @@
+import { canonicalIdentity } from "../normalize.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import {
   resolvePluginDataRoot,
@@ -38,21 +39,23 @@ export function expandRelatedCandidates(
   evidence: RelatedCandidateEvidence[];
 } {
   const visible = new Map(
-    visibleSkills.map((skill) => [skill.name.toLowerCase(), skill]),
+    visibleSkills.map((skill) => [canonicalIdentity(skill.name), skill]),
   );
-  const seen = new Set(candidates.map((skill) => skill.name.toLowerCase()));
+  const seen = new Set(
+    candidates.map((skill) => canonicalIdentity(skill.name)),
+  );
   const candidateSkills = [...candidates];
   const added: string[] = [];
   const evidence: RelatedCandidateEvidence[] = [];
   const seeds = candidates.slice(0, 8).map((skill) => ({
     name: skill.name,
     added: 0,
-    edges: [...(graph.get(skill.name.toLowerCase()) ?? [])]
+    edges: [...(graph.get(canonicalIdentity(skill.name)) ?? [])]
       .filter(
         (edge) =>
           edge.direction === "current-to-related" &&
           edge.reason.trim() &&
-          edge.name.toLowerCase() !== skill.name.toLowerCase(),
+          canonicalIdentity(edge.name) !== canonicalIdentity(skill.name),
       )
       .sort((a, b) => a.name.localeCompare(b.name)),
   }));
@@ -63,9 +66,9 @@ export function expandRelatedCandidates(
     for (const seed of seeds) {
       while (seed.edges.length) {
         const edge = seed.edges.shift()!;
-        const target = visible.get(edge.name.toLowerCase());
+        const target = visible.get(canonicalIdentity(edge.name));
         if (!target) continue;
-        const key = target.name.toLowerCase();
+        const key = canonicalIdentity(target.name);
         const isNew = !seen.has(key);
         if (isNew && (seed.added >= 2 || added.length >= 8)) continue;
         if (evidence.filter((item) => item.name === target.name).length < 2) {
@@ -88,4 +91,91 @@ export function expandRelatedCandidates(
     }
   }
   return { candidateSkills, added, evidence };
+}
+
+/** Task relevance is independent of skill relevance and graph verification. */
+export interface RelationEvidence {
+  skill: string;
+  from: string;
+  to: string;
+  from_description: string;
+  to_description: string;
+  relation_type: RelatedSkillResult["relation_type"];
+  verification_status: "unverified";
+  reason: string;
+}
+
+export interface RelationDecision extends RelationEvidence {
+  score: number;
+  injected: boolean;
+}
+
+export const RELATION_RELEVANCE_THRESHOLD = 0.8;
+
+/** Include visible non-candidate endpoints without adding skill questions. */
+export function collectRelationEvidence(
+  candidates: readonly AvailableSkill[],
+  visibleSkills: readonly AvailableSkill[],
+  graph: ReadonlyMap<string, readonly RelatedSkillResult[]>,
+): RelationEvidence[] {
+  const visible = new Map(
+    visibleSkills.map((skill) => [canonicalIdentity(skill.name), skill]),
+  );
+  const result: RelationEvidence[] = [];
+  const seen = new Set<string>();
+  // Round robin prevents the first few candidates exhausting the evidence budget.
+  const queues = candidates.map((candidate) => {
+    const current = visible.get(canonicalIdentity(candidate.name));
+    if (!current) return [];
+    return [...(graph.get(canonicalIdentity(current.name)) ?? [])]
+      .filter(
+        (edge) =>
+          edge.reason.trim() &&
+          canonicalIdentity(edge.name) !== canonicalIdentity(current.name),
+      )
+      .sort(
+        (a, b) =>
+          a.name.localeCompare(b.name) ||
+          a.direction.localeCompare(b.direction) ||
+          a.relation_type.localeCompare(b.relation_type),
+      )
+      .flatMap((edge) => {
+        const other = visible.get(canonicalIdentity(edge.name));
+        if (!other) return [];
+        const [from, to] =
+          edge.direction === "current-to-related"
+            ? [current, other]
+            : [other, current];
+        const key = JSON.stringify([
+          current.name,
+          from.name,
+          edge.relation_type,
+          to.name,
+        ]);
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [
+          {
+            skill: current.name,
+            from: from.name,
+            to: to.name,
+            from_description: Array.from(from.description)
+              .slice(0, 1000)
+              .join(""),
+            to_description: Array.from(to.description).slice(0, 1000).join(""),
+            relation_type: edge.relation_type,
+            verification_status: "unverified" as const,
+            reason: Array.from(edge.reason).slice(0, 500).join(""),
+          },
+        ];
+      })
+      .slice(0, 2);
+  });
+  for (let round = 0; round < 2; round++) {
+    for (const queue of queues) {
+      if (queue[round]) result.push(queue[round]);
+      if (result.length >= 16) return result;
+    }
+  }
+  return result;
 }

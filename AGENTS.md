@@ -54,7 +54,7 @@ Keep package assets separate from runtime state. There are zero pre-seeded exper
 
 The public manifest requires `qmd.embedding.model`, `qmd.expansion.model`, and top-level `jev.model`. Keep examples valid against the manifest, not just the more permissive compatibility parser in `resolveConfig()`. Jev uses `routing.timeoutMs`; candidate searches use their separate search budgets, defaulting to `qmd.timeoutMs`. Invalid manifest configuration can prevent loading; runtime fail-open behavior does not bypass host validation.
 
-The dynamic pipeline runs input skill discovery and experience retrieval in parallel. Direct skill evidence combines bounded typo-aware name matching (strip URLs before tokenization) and managed `SkillQmdIndex` retrieval over meta/body/references (`minCandidateScore` default 0.6). Experience evidence uses managed `SkillExperienceQmdIndex` multi-collection retrieval over keywords, summary, and body (`minCandidateScore` default 0.4). Unified selection runs one constrained call (TypeSafe Jev) only when the pool of visible skill candidates and/or shared experience candidates is non-empty; an empty candidate pool short-circuits without a model call; `maxInjectedSkills: 0` short-circuits skill discovery; model, parsing, or validation failure injects no heuristic fallback skills. Final injected skills are the visible union of selector-selected skills and skills associated with selector-selected experiences, capped by `maxInjectedSkills`; zero permits experiences-only injection. The final renderer emits decoupled optional `<matched_experiences>` and `<matched_skills>` blocks only (no `<intent>` block is emitted). Topic checkers (`previousTopic`), runtime task complexity scoring (`complexity`), classifier `suggestion` fields, session curation (`curation` / `curationAppliedCount`), instruction writers, legacy `routing.intents` configuration, legacy `routing.model`, `routing.modelFallback`, `routing.thinking`, routing subagent fallback, legacy `fastpath` / `candidate` frontmatter fields, and legacy pseudo-headers (`[Skill Harness Context...]`, `[User Message]:`) are obsolete and strictly forbidden. Do not use OpenClaw core's reserved `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>` delimiters in plugin prompt output as core runtime logic strips them from visible turns; these delimiters are sanitizer-only input boundaries.
+The dynamic pipeline runs input skill discovery and experience retrieval in parallel. Direct skill evidence combines bounded typo-aware name matching (strip URLs before tokenization) and managed `SkillQmdIndex` retrieval over meta/body/references (`minCandidateScore` default 0.6). Experience evidence uses managed `SkillExperienceQmdIndex` multi-collection retrieval over keywords, summary, and body (`minCandidateScore` default 0.4). Unified selection runs one constrained call (TypeSafe Jev) only when the pool of visible skill candidates and/or shared experience candidates is non-empty; an empty candidate pool short-circuits without a model call; `maxInjectedSkills: 0` short-circuits skill discovery; model, parsing, or validation failure injects no heuristic fallback skills. The unified skill pool contains name/QMD hits, visible skills associated with every retrieved experience candidate, and bounded relation expansion seeded only by original name/QMD hits. Score every skill independently and retain only selector-selected visible names, ranked by Jev score with a locale-independent name tie-break (UTF-16 string order; experience ties use IDs) and capped by `maxInjectedSkills`; do not append associations after selection in either Jev or hooks. Zero permits experiences-only injection. The renderer emits optional `<matched_skills>` and standalone `<matched_experiences>` blocks, with each selected experience attached once to the highest-ranked final associated skill when available (no `<intent>` block). Topic checkers (`previousTopic`), runtime task complexity scoring (`complexity`), classifier `suggestion` fields, session curation (`curation` / `curationAppliedCount`), instruction writers, legacy `routing.intents` configuration, legacy `routing.model`, `routing.modelFallback`, `routing.thinking`, routing subagent fallback, legacy `fastpath` / `candidate` frontmatter fields, and legacy pseudo-headers (`[Skill Harness Context...]`, `[User Message]:`) are obsolete and strictly forbidden. Do not use OpenClaw core's reserved `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>` delimiters in plugin prompt output as core runtime logic strips them from visible turns; these delimiters are sanitizer-only input boundaries.
 
 Runtime experiences live in decoupled multi-to-multi folders under `dataRoot/experiences/<id>/` containing required `summary.md`, `keywords.md`, and `body.md`, plus optional `skills.md`. Experiences and their QMD index are shared across agents: dynamic retrieval and `skill_experience` searches are not filtered by agent skill visibility. The tool accepts no `skills` filter; `show_skills` only filters displayed associations to visible names, and final injected skills are visibility-filtered; do not describe experiences as agent-private. Managed QMD indexes for skills and experiences reside respectively under `dataRoot/qmd/skills/` and `dataRoot/qmd/experiences/`. Review is disabled by default, uses only `experience-health-check` (with `intent-health-check` as configuration alias), `routing-uncertainty`, and `capability-fit`, writes schema-v8 state with compatible v7 migration, and runs embedded sessions with detached persistence while the host cleans only the temporary workspace.
 
@@ -66,7 +66,7 @@ Prompt injection follows a compact attribute layout to minimize prompt tokens:
 
 - Plugin-owned `skills.workingSet` is the only static working-set source: `agents.<id>` precedes `defaults`, then workspace-only and workshop-only skills append in that order, controlled independently by `includeWorkspaceSkills` and `includeWorkshopSkills` (both default `true`). These flags affect automatic prompt additions, not discovery or explicitly named skills. When `skills.suppressNativeSkillPrompt` is enabled (default `true`), the plugin idempotently ensures `agents.defaults.skills` is `[]` and removes `agents.entries.*.skills` in `openclaw.json` on startup to suppress OpenClaw core's native automatic skill prompt without infinite reload loops; otherwise those lists are not a static source and are not normalized. Independently, `skills.suppressNativeExtraDirs` defaults to `true` and clears `skills.load.extraDirs`; use `skills.sharedRoots` for intentionally shared directories. Startup normalization belongs only to full registration and must stay idempotent. Static prompt injection uses `### Working set skills` / `<working_set_skills>`, filters unavailable names, and never renders paths.
 - Dynamic context follows the turn timestamp with blank-line separation and one advisory header inside `<skill_harness_plugin>`. The header starts with `Inferred relevant skills and experiences from conversation`, `Inferred relevant skills from conversation`, or `Inferred relevant experiences from conversation`, according to the non-empty blocks; it labels the content advisory/non-user input and names the relevant loading tools. Keep the exact strings in `src/constants.ts` aligned with renderer tests.
-- Inside `<skill_harness_plugin>`, experiences use `<matched_experiences>` with `<experience id="${id}" [skills="${skills}"]>`, containing only the summary; skills use `<matched_skills>` with `<skill name="${name}">`, containing the description. Escape interpolated values. Do not emit `<context_policy>`, `<skill_metadata>`, retired candidate wrappers, or runtime boundary delimiters.
+- Inside `<skill_harness_plugin>`, skills use `<matched_skills>` with `<skill name="${name}">`, containing the description, relevant relations, and attached selected experiences. Each selected experience uses `<experience id="${id}" [skills="${skills}"]>` containing only the summary; attach once to the highest-scored final associated skill, otherwise put it in standalone `<matched_experiences>`. Preserve experiences with no/hidden/rejected associations and do not duplicate summaries. Escape interpolated values. Do not emit `<context_policy>`, `<skill_metadata>`, retired candidate wrappers, or runtime boundary delimiters.
 - Static context uses `### Working set skills`, followed by ``When relevant, load with `skill_view` before proceeding:`` and `<working_set_skills>` containing the same compact skill elements. Never emit `<path>` elements; agents query paths and contents through `skill_list` and `skill_view`.
 - QMD model configuration supports `provider/model` syntax to auto-resolve `baseUrl` and `apiKey`; `embedding.dimension` defaults to `1536`.
 
@@ -129,12 +129,43 @@ live configuration). Expand only outgoing author declarations from the first
 8 ranked original name/QMD candidates, one hop, round-robin, at most 2 new
 skills per seed and 8 per turn; alphabetize targets and do not charge duplicates.
 Require current visible winning identities and a nonempty original reason.
+Use canonicalIdentity() for graph/visibility lookups, expansion deduplication
+and self comparisons; preserve original names in output.
 Keep all originals; never seed from experiences. Pass at most 2 reasons of 500
 code points per target to the existing single Jev call, labeled unverified.
 Do not introduce hard dependency/conflict rules, fabricated retrieval scores,
-new selection thresholds or fallback injection. `relatedCandidates` is optional
+new skill selection thresholds or fallback injection. `relatedCandidates` is optional
 session/event diagnostics; `related-declared` injection contributes to pool
 counts only, never QMD or collection attribution. Do not recalculate old stats.
+
+With the same switch enabled, collect relation relevance evidence independently
+from candidate expansion: at most two incoming/outgoing relations per candidate,
+16 questions total, preserving original `from`/`to`. Anchor each relation to the
+candidate being described. Both endpoints require current visible winning
+identities and a nonempty author reason; include each endpoint's name and
+bounded description (1,000 code points) even if the other endpoint is not a
+candidate. That background endpoint does not become a candidate, receive its own
+skill question, or consume an injection slot. Reasons are bounded to 500 code
+points. All six predicates remain unverified advisory evidence.
+
+Expose explicit crosslinked Jev state: `skill_candidates` entries carry
+name/description/sources/experience_ids/relation_ids; `experience_candidates`
+carry id/summary/visible_associated_skills; `skill_relation_evidence` carries
+question id (`relation_0`, etc.), anchor/direction and bounded endpoint evidence.
+Questions reference their state entries. Noncandidate endpoints remain background;
+experience association or relation relevance must never force a skill selection.
+
+Score relation task relevance in the existing single Jev call, separately from
+skill relevance. Render only relations scoring at least 0.8 whose anchor survives
+final skill selection, as escaped `<relation>` children within that skill's XML.
+Preserve direction, type, original reason and unverified status; do not generate
+reasons or imply verified prerequisites/order. Relation scores never boost skill
+scores, routing confidence or injection capacity. Optional `relationDecisions`
+session/event diagnostics retain evidence, score and final `injected` status;
+background names are not injected/adopted skills and must not contribute to QMD
+scores or collection counts. No graph/schema/stats migration is needed. Existing
+live-enabled deployments gain this behavior on upgrade; local tests are not
+Gateway verification.
 
 Keep graph implementation in `src/skills/relation-graph.ts`, import and fixed Jev
 classification in `relation-import.ts`, and bounded routing expansion in

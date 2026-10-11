@@ -110,6 +110,20 @@ describe("SessionTracker", () => {
         },
         inputSkillDiscovery: {
           relatedCandidates: ["neighbor"],
+          relationDecisions: [
+            {
+              skill: "neighbor",
+              from: "background",
+              to: "neighbor",
+              from_description: "Background context",
+              to_description: "Target context",
+              relation_type: "depends_on",
+              verification_status: "unverified",
+              reason: "Author reason",
+              score: 1,
+              injected: true,
+            },
+          ],
           nameCandidates: 1,
           retrievalAttempted: false,
           retrievalCandidates: 0,
@@ -126,6 +140,9 @@ describe("SessionTracker", () => {
     expect(saved.current.inputSkillDiscovery.relatedCandidates).toEqual([
       "neighbor",
     ]);
+    expect(
+      saved.current.inputSkillDiscovery.relationDecisions[0],
+    ).toMatchObject({ from: "background", score: 1, injected: true });
     expect(
       StatsAggregator.create(tempDir).record("related-session", saved.current),
     ).toBe(true);

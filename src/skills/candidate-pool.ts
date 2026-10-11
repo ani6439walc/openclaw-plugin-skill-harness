@@ -138,3 +138,61 @@ export function buildCandidateSkillsUnionPool(params: {
     experienceHitsBySkill,
   };
 }
+
+/** Associations supply candidates, never scores or automatic selections. */
+export function buildSkillCandidateSuperset(params: {
+  originals: readonly AvailableSkill[];
+  nameCandidates: readonly SkillDiscoveryCandidate[];
+  retrievalCandidates: readonly SkillDiscoveryCandidate[];
+  experiences: readonly import("../experiences/types.js").SkillExperienceEntry[];
+  expanded: readonly AvailableSkill[];
+  expandedNames: readonly string[];
+  visibleSkills: readonly AvailableSkill[];
+  enabled: boolean;
+}): {
+  candidateSkills: AvailableSkill[];
+  candidateSources: Record<string, string[]>;
+} {
+  const candidateSkills: AvailableSkill[] = [];
+  const candidateSources: Record<string, string[]> = Object.create(null);
+  if (!params.enabled) return { candidateSkills, candidateSources };
+  const visible = new Map(
+    params.visibleSkills.map((skill) => [canonicalIdentity(skill.name), skill]),
+  );
+  const add = (name: string, source: string) => {
+    const skill = visible.get(canonicalIdentity(name));
+    if (!skill) return;
+    if (!candidateSources[skill.name]) {
+      candidateSources[skill.name] = [];
+      candidateSkills.push(skill);
+    }
+    if (!candidateSources[skill.name].includes(source))
+      candidateSources[skill.name].push(source);
+  };
+  for (const skill of params.originals) {
+    if (
+      params.nameCandidates.some(
+        (candidate) =>
+          canonicalIdentity(candidate.skillName) ===
+          canonicalIdentity(skill.name),
+      )
+    )
+      add(skill.name, "name-match");
+    if (
+      params.retrievalCandidates.some(
+        (candidate) =>
+          canonicalIdentity(candidate.skillName) ===
+          canonicalIdentity(skill.name),
+      )
+    )
+      add(skill.name, "direct-retrieval");
+  }
+  for (const experience of params.experiences) {
+    for (const name of experience.skills) add(name, "experience-associated");
+  }
+  for (const skill of params.expanded) {
+    if (params.expandedNames.includes(skill.name))
+      add(skill.name, "related-declared");
+  }
+  return { candidateSkills, candidateSources };
+}

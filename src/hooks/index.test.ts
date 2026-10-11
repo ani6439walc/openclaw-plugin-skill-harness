@@ -3373,6 +3373,101 @@ describe("createHookHandlers topic switch flow", () => {
     },
   );
 
+  it.each([
+    { enabled: true, selected: true, score: 0.8, injected: true },
+    { enabled: true, selected: true, score: 0.79, injected: false },
+    { enabled: true, selected: false, score: 0.99, injected: false },
+    { enabled: false, selected: true, score: 0.99, injected: false },
+  ])(
+    "scores non-candidate relations and renders only selected relevant evidence: %j",
+    async ({ enabled, selected, score, injected }) => {
+      const tmp = fs.mkdtempSync(
+        path.join(os.tmpdir(), "hook-relation-scoring-"),
+      );
+      const workspace = path.join(tmp, "workspace");
+      const root = path.join(workspace, "skills");
+      const dataRoot = path.join(tmp, "data");
+      writeSkill(root, "noncandidate-source", "Source skill description");
+      writeSkill(root, "candidate-target", "Target skill description");
+      const from = await readSkillIdentity({
+        name: "noncandidate-source",
+        location: path.join(root, "noncandidate-source/SKILL.md"),
+      });
+      const to = await readSkillIdentity({
+        name: "candidate-target",
+        location: path.join(root, "candidate-target/SKILL.md"),
+      });
+      await appendImportedRelations(dataRoot, [
+        {
+          from: from!,
+          to: to!,
+          type: "depends_on",
+          reason: "Original author guidance",
+        },
+      ]);
+      const classifier = vi.fn().mockImplementation(async (params) => ({
+        skills: selected ? ["candidate-target"] : [],
+        experiences: [],
+        confidence: 0.7,
+        reason: "selected",
+        relationDecisions: params.relationEvidence.map((e: object) => ({
+          ...e,
+          score,
+          injected: false,
+        })),
+      }));
+      const { handlers, record } = createTopicFlowHarness({
+        historicalIntents: [],
+        dataRoot,
+        classifier,
+        configRaw: {
+          routing: { skills: { related: { enabled }, maxInjectedSkills: 1 } },
+        },
+        api: {
+          runtime: {
+            state: { resolveStateDir: () => path.join(tmp, "state") },
+            agent: { resolveAgentWorkspaceDir: () => workspace },
+          },
+        } as unknown as Partial<OpenClawPluginApi>,
+      });
+      try {
+        const result = await handlers.onBeforePromptBuild(
+          {
+            prompt: "candidate-target",
+            messages: [{ role: "user", content: "candidate-target" }],
+          } as never,
+          ctx,
+        );
+        expect(classifier).toHaveBeenCalledOnce();
+        const params = classifier.mock.calls[0][0];
+        expect(
+          params.candidateSkills.map((skill: { name: string }) => skill.name),
+        ).toEqual(["candidate-target"]);
+        expect(params.relationEvidence).toHaveLength(enabled ? 1 : 0);
+        if (enabled) {
+          expect(params.relationEvidence[0]).toMatchObject({
+            skill: "candidate-target",
+            from: "noncandidate-source",
+            to: "candidate-target",
+            from_description: "Source skill description",
+          });
+          const saved = record.mock.calls.at(-1)![1].current;
+          expect(saved.inputSkillDiscovery.relationDecisions[0]).toMatchObject({
+            score,
+            injected,
+          });
+          expect(saved.inputSkillDiscovery.retrievalSemanticScores).toEqual([]);
+          expect(saved.confidence).toBe(0.7);
+        }
+        const serialized = JSON.stringify(result);
+        expect(serialized.includes("<relation ")).toBe(injected);
+        if (injected) expect(serialized).toContain("Original author guidance");
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("routes direct skill name matches into candidate pool and prompt context", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-name-match-"));
     const workspace = path.join(tmp, "workspace");
@@ -3518,6 +3613,10 @@ describe("createHookHandlers topic switch flow", () => {
       const candidateNames = passedCandidates.map((c: any) => c.name);
       expect(candidateNames).toContain("name-skill");
       expect(candidateNames).toContain("qmd-skill");
+      expect(candidateNames).toContain("exp-skill");
+      expect(classifier.mock.calls[0][0].candidateSources["exp-skill"]).toEqual(
+        ["experience-associated"],
+      );
 
       const passedExperiences =
         classifier.mock.calls[0][0].candidateExperiences;
@@ -3525,7 +3624,8 @@ describe("createHookHandlers topic switch flow", () => {
       expect(experienceIds).toContain("e1");
 
       expect(result?.prependContext).toContain('<skill name="name-skill">');
-      expect(result?.prependContext).toContain('<skill name="exp-skill">');
+      expect(result?.prependContext).not.toContain('<skill name="exp-skill">');
+      expect(result?.prependContext).toContain("<matched_experiences>");
       expect(result?.prependContext).not.toContain('<skill name="qmd-skill">');
       const phases = emittedPipelineEvents(emitAgentEvent);
       const phaseNames = phases.map((entry) => entry.data.phase);
@@ -3565,18 +3665,120 @@ describe("createHookHandlers topic switch flow", () => {
       });
       expect(dataFor("rerank")).toMatchObject({
         status: "completed",
-        result: ["name-skill", "exp-skill"],
-        reason: ["name-match", "experience-search"],
+        result: ["name-skill"],
+        reason: ["name-match"],
         confidence: 0.9,
         selectedSkills: ["name-skill"],
         selectedExperiences: ["e1"],
-        injectedSkills: ["name-skill", "exp-skill"],
+        injectedSkills: ["name-skill"],
         injectedExperiences: ["e1"],
       });
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it.each([true, false])(
+    "scores experience-only candidate relations without using associations as expansion seeds (selected=%s)",
+    async (selected) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-exp-only-pool-"));
+      const workspace = path.join(tmp, "workspace");
+      const root = path.join(workspace, "skills");
+      const dataRoot = path.join(tmp, "data");
+      writeSkill(root, "associated-workflow", "Associated workflow");
+      writeSkill(root, "related-background", "Background description");
+      const from = await readSkillIdentity({
+        name: "associated-workflow",
+        location: path.join(root, "associated-workflow/SKILL.md"),
+      });
+      const to = await readSkillIdentity({
+        name: "related-background",
+        location: path.join(root, "related-background/SKILL.md"),
+      });
+      await appendImportedRelations(dataRoot, [
+        {
+          from: from!,
+          to: to!,
+          type: "composes_with",
+          reason: "Author evidence",
+        },
+      ]);
+      const entry = {
+        id: "candidate-experience",
+        summary: "Reusable guidance",
+        body: "Private full body",
+        keywords: [],
+        skills: ["associated-workflow", "invisible"],
+        path: "/mock",
+      };
+      const classifier = vi.fn().mockImplementation(async (params) => ({
+        skills: selected ? ["associated-workflow"] : [],
+        experiences: [entry.id],
+        confidence: 0.9,
+        relationDecisions: params.relationEvidence.map((e: object) => ({
+          ...e,
+          score: 0.9,
+          injected: false,
+        })),
+      }));
+      const { handlers, record } = createTopicFlowHarness({
+        historicalIntents: [],
+        dataRoot,
+        classifier,
+        configRaw: { routing: { skills: { related: { enabled: true } } } },
+        experienceCatalog: { resolve: () => entry },
+        qmdExperienceIndex: {
+          search: vi.fn().mockResolvedValue([
+            {
+              id: entry.id,
+              score: 0.8,
+              semanticScore: 0.8,
+              skills: entry.skills,
+            },
+          ]),
+        },
+        api: {
+          runtime: {
+            state: { resolveStateDir: () => path.join(tmp, "state") },
+            agent: { resolveAgentWorkspaceDir: () => workspace },
+          },
+        } as unknown as Partial<OpenClawPluginApi>,
+      });
+      try {
+        const result = await handlers.onBeforePromptBuild(
+          {
+            prompt: "investigate this problem",
+            messages: [{ role: "user", content: "investigate this problem" }],
+          } as never,
+          ctx,
+        );
+        const params = classifier.mock.calls[0][0];
+        expect(
+          params.candidateSkills.map((skill: { name: string }) => skill.name),
+        ).toEqual(["associated-workflow"]);
+        expect(params.relationEvidence[0]).toMatchObject({
+          to: "related-background",
+          to_description: "Background description",
+        });
+        const discovery =
+          record.mock.calls.at(-1)![1].current.inputSkillDiscovery;
+        expect(discovery.relatedCandidates).toBeUndefined();
+        expect(discovery.candidateCount).toBe(1);
+        expect(discovery.injectedSkills).toHaveLength(selected ? 1 : 0);
+        if (selected)
+          expect(discovery.injectedSkills[0]).toMatchObject({
+            source: "experience-associated",
+          });
+        expect(result?.prependContext?.includes("<matched_experiences>")).toBe(
+          !selected,
+        );
+        expect(result?.prependContext).toContain("Reusable guidance");
+        expect(result?.prependContext).not.toContain("Private full body");
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("deduplicates skills discovered across multiple sources in the candidate pool", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-dedup-pool-"));
@@ -3837,7 +4039,7 @@ describe("createHookHandlers topic switch flow", () => {
       );
 
       expect(result?.prependContext).toContain('<skill name="exp-skill">');
-      expect(result?.prependContext).toContain("<matched_experiences>");
+      expect(result?.prependContext).not.toContain("<matched_experiences>");
       expect(result?.prependContext).toContain('id="hit-exp"');
       expect(result?.prependContext).not.toContain("unhit-exp");
     } finally {
@@ -4155,7 +4357,13 @@ describe("createHookHandlers topic switch flow", () => {
               retrievalAttempted: true,
               retrievalCandidates: 1,
               retrievalSemanticScores: [0.9],
-              injectedSkills: [{ name: "review", source: "direct-retrieval" }],
+              injectedSkills: [
+                {
+                  name: "review",
+                  source: "direct-retrieval",
+                  sources: ["direct-retrieval"],
+                },
+              ],
             }),
           }),
         }),
@@ -4278,6 +4486,7 @@ describe("createHookHandlers topic switch flow", () => {
                 {
                   name: "review",
                   source: "direct-retrieval",
+                  sources: ["direct-retrieval"],
                   collections: ["meta", "body"],
                   topCollection: "meta",
                 },
