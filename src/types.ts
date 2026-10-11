@@ -71,6 +71,7 @@ export type ResolvedRoutingSkillsConfig = {
 export type ResolvedSkillCandidatesConfig = ResolvedRoutingSkillsConfig;
 
 export type RoutingLlmResult = {
+  relationDecisions?: import("./skills/related.js").RelationDecision[];
   skills: string[];
   experiences: string[];
   confidence: number;

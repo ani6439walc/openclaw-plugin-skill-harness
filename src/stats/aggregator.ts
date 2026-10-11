@@ -1284,7 +1284,10 @@ function recordSkillDiscoveryStats(
   target.pool.injectedSkills += discovery.injectedSkills.length;
   for (const skill of discovery.injectedSkills) {
     if (skill.source === "name-match") target.nameMatch.injectedSkills += 1;
-    else if (skill.source !== "related-declared")
+    else if (
+      skill.source !== "related-declared" &&
+      skill.source !== "experience-associated"
+    )
       target.qmdSearch.injectedSkills += 1;
   }
   if (discovery.fallbackReason)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expandRelatedCandidates } from "./related.js";
+import { collectRelationEvidence, expandRelatedCandidates } from "./related.js";
 import type { AvailableSkill, RelatedSkillResult } from "./types.js";
 const skill = (name: string): AvailableSkill => ({
   name,
@@ -110,5 +110,96 @@ describe("declared relation candidates", () => {
         graph,
       ).added,
     ).toEqual([]);
+  });
+});
+
+describe("relation relevance evidence", () => {
+  it("includes visible noncandidate descriptions and preserves incoming and outgoing directions", () => {
+    const candidates = [skill("B")];
+    const visible = [skill("A"), ...candidates, skill("C")];
+    const evidence = collectRelationEvidence(
+      candidates,
+      visible,
+      new Map([
+        [
+          "b",
+          [
+            edge("A", { direction: "related-to-current" }),
+            edge("C", { relation_type: "composes_with" }),
+          ],
+        ],
+      ]),
+    );
+    expect(evidence).toEqual([
+      expect.objectContaining({
+        skill: "B",
+        from: "A",
+        to: "B",
+        from_description: "A",
+        to_description: "B",
+        relation_type: "depends_on",
+      }),
+      expect.objectContaining({
+        skill: "B",
+        from: "B",
+        to: "C",
+        from_description: "B",
+        to_description: "C",
+        relation_type: "composes_with",
+      }),
+    ]);
+    expect(candidates.map((item) => item.name)).toEqual(["B"]);
+  });
+
+  it("does not expose invisible, self, reasonless or repeated relations", () => {
+    const evidence = collectRelationEvidence(
+      [skill("B")],
+      [skill("A"), skill("B")],
+      new Map([
+        [
+          "b",
+          [
+            edge("hidden"),
+            edge("B"),
+            edge("A", { reason: " " }),
+            edge("A"),
+            edge("A"),
+          ],
+        ],
+      ]),
+    );
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({ skill: "B", from: "B", to: "A" });
+  });
+
+  it("bounds per-anchor and overall evidence and truncates Unicode by code point", () => {
+    const candidates = Array.from({ length: 12 }, (_, index) =>
+      skill(`seed${index}`),
+    );
+    const targets = Array.from({ length: 3 }, (_, index) => ({
+      ...skill(`target${index}`),
+      description: "😀".repeat(1100),
+    }));
+    const graph = new Map(
+      candidates.map((candidate) => [
+        candidate.name.toLowerCase(),
+        targets.map((target) =>
+          edge(target.name, { reason: "😀".repeat(600) }),
+        ),
+      ]),
+    );
+    const evidence = collectRelationEvidence(
+      candidates,
+      [...candidates, ...targets],
+      graph,
+    );
+    expect(evidence).toHaveLength(16);
+    for (const candidate of candidates) {
+      expect(
+        evidence.filter((item) => item.skill === candidate.name).length,
+      ).toBeLessThanOrEqual(2);
+    }
+    expect(Array.from(evidence[0].reason)).toHaveLength(500);
+    expect(Array.from(evidence[0].to_description)).toHaveLength(1000);
   });
 });

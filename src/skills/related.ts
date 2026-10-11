@@ -89,3 +89,90 @@ export function expandRelatedCandidates(
   }
   return { candidateSkills, added, evidence };
 }
+
+/** Task relevance is independent of skill relevance and graph verification. */
+export interface RelationEvidence {
+  skill: string;
+  from: string;
+  to: string;
+  from_description: string;
+  to_description: string;
+  relation_type: RelatedSkillResult["relation_type"];
+  verification_status: "unverified";
+  reason: string;
+}
+
+export interface RelationDecision extends RelationEvidence {
+  score: number;
+  injected: boolean;
+}
+
+export const RELATION_RELEVANCE_THRESHOLD = 0.8;
+
+/** Include visible non-candidate endpoints without adding skill questions. */
+export function collectRelationEvidence(
+  candidates: readonly AvailableSkill[],
+  visibleSkills: readonly AvailableSkill[],
+  graph: ReadonlyMap<string, readonly RelatedSkillResult[]>,
+): RelationEvidence[] {
+  const visible = new Map(
+    visibleSkills.map((skill) => [skill.name.toLowerCase(), skill]),
+  );
+  const result: RelationEvidence[] = [];
+  const seen = new Set<string>();
+  // Round robin prevents the first few candidates exhausting the evidence budget.
+  const queues = candidates.map((candidate) => {
+    const current = visible.get(candidate.name.toLowerCase());
+    if (!current) return [];
+    return [...(graph.get(current.name.toLowerCase()) ?? [])]
+      .filter(
+        (edge) =>
+          edge.reason.trim() &&
+          edge.name.toLowerCase() !== current.name.toLowerCase(),
+      )
+      .sort(
+        (a, b) =>
+          a.name.localeCompare(b.name) ||
+          a.direction.localeCompare(b.direction) ||
+          a.relation_type.localeCompare(b.relation_type),
+      )
+      .flatMap((edge) => {
+        const other = visible.get(edge.name.toLowerCase());
+        if (!other) return [];
+        const [from, to] =
+          edge.direction === "current-to-related"
+            ? [current, other]
+            : [other, current];
+        const key = JSON.stringify([
+          current.name,
+          from.name,
+          edge.relation_type,
+          to.name,
+        ]);
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [
+          {
+            skill: current.name,
+            from: from.name,
+            to: to.name,
+            from_description: Array.from(from.description)
+              .slice(0, 1000)
+              .join(""),
+            to_description: Array.from(to.description).slice(0, 1000).join(""),
+            relation_type: edge.relation_type,
+            verification_status: "unverified" as const,
+            reason: Array.from(edge.reason).slice(0, 500).join(""),
+          },
+        ];
+      })
+      .slice(0, 2);
+  });
+  for (let round = 0; round < 2; round++) {
+    for (const queue of queues) {
+      if (queue[round]) result.push(queue[round]);
+      if (result.length >= 16) return result;
+    }
+  }
+  return result;
+}

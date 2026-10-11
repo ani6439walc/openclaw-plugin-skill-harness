@@ -44,6 +44,7 @@ flowchart TD
   G[Optional author-relation graph] -.-> S
   S --> J[One constrained Jev selection call]
   E --> J
+  G -. Bounded relation relevance questions .-> J
   W --> C[Agent context]
   J --> C
   C --> A[Agent loads guidance and executes tools]
@@ -67,11 +68,11 @@ flowchart TD
 
 1. Add skill-discovery guidance and the configured static working-set descriptions. Automatic workspace/workshop additions can be controlled separately.
 2. For eligible agents and chats, search skill and experience candidates in parallel using the conversation context. Skill discovery combines typo-aware name matching with QMD retrieval.
-3. If candidates exist, make one constrained Jev selection call. An empty pool skips selection entirely.
-4. Inject selected experience summaries and the visible union of directly selected skills and skills associated with selected experiences, subject to the configured limits.
+3. Build one deduplicated skill pool from name/QMD hits and visible skills associated with all retrieved experience candidates. Optional relation expansion starts only from the original name/QMD hits. If candidates exist, make one constrained Jev call that independently scores every skill, experience and bounded relation; an empty pool skips selection.
+4. Inject only individually selected skills and experiences, subject to their separate configured limits. Selecting an experience does not automatically select its associated skills.
 5. The agent uses `skill_view` to load skill instructions and `skill_experience` to search detailed experience before applying relevant guidance.
 
-Dynamic context contains optional `<matched_experiences>` and `<matched_skills>` blocks. It is labeled advisory, non-user input. Full skill documents and the entire catalog are not automatically inserted.
+Dynamic context contains optional `<matched_skills>` and standalone `<matched_experiences>` blocks. Each selected experience summary appears once: inside its highest-scored final associated skill, or standalone if no associated skill survives selection. Skills are ordered by Jev score with a stable name tie-break. Experiences with no associations, invisible associations or rejected associated skills remain eligible. Placement never boosts skill scores or requires loading a skill. The context is advisory, non-user input; full documents and the entire catalog are not inserted.
 
 Runtime search or selection failures let the main agent continue with available static context. Failed selection does not inject an unchecked fallback list. Invalid configuration can still prevent the plugin from loading.
 
@@ -279,7 +280,15 @@ An imported author-relation graph can expose related skills through `skill_view`
 }
 ```
 
-Expansion adds a bounded outgoing hop from original skill candidates to the same Jev selection call. Relations remain unverified; dependency/conflict labels do not force loading or exclude combinations. This setting defaults to false, and importing a graph is a separate step. See the [staged import procedure in AGENTS.md](AGENTS.md#advanced-relation-import-procedure).
+Expansion adds a bounded outgoing hop from the first eight original skill candidates: at most two new skills per seed and eight per turn, distributed round-robin. It remains one hop, and experiences do not seed expansion.
+
+When enabled, the same Jev call also scores the task relevance of graph relations independently from skill relevance. For each skill candidate, it considers at most two incoming/outgoing author relations (16 questions total), preserving their original direction. Both endpoints must be visible, identity-matching winning skills with a nonempty author reason. The other endpoint may be outside the candidate pool: its name and description are supplied as background, without creating a candidate or using an injection slot. Reasons are bounded to 500 Unicode code points and each endpoint description to 1,000.
+
+The Jev state exposes `skill_candidates` with names, descriptions, discovery sources, `experience_ids` and `relation_ids`; `experience_candidates` with IDs, summaries and visible associated skill names; and `skill_relation_evidence` with stable question IDs such as `relation_0`, anchor, direction, endpoint descriptions and author reasons. Questions point to these entries so candidate provenance and the scored relation are explicit. Background endpoints remain outside `skill_candidates` unless independently discovered.
+
+Only relations scoring at least 0.8 are rendered as `<relation>` children inside the final injected anchor skill's XML. Each child preserves `from`, `to`, type, author reason and `unverified` status; scores stay in optional session/event diagnostics. Relation scores never change skill scores, routing confidence or injection caps. A related endpoint is not automatically loaded, and the prompt does not claim that prerequisites or execution order have been verified. All six relation types remain advisory, including dependency/conflict labels.
+
+This setting defaults to false and controls both expansion and relation relevance hints. Importing a graph is a separate step. Existing deployments with the switch enabled gain the relation questions and XML hints after upgrading; no graph/schema migration or statistics rewrite is required. See the [staged import procedure in AGENTS.md](AGENTS.md#advanced-relation-import-procedure).
 
 ## Configuration reference
 

@@ -1,4 +1,9 @@
-import { expandRelatedCandidates } from "../skills/related.js";
+import type { RelationDecision } from "../skills/related.js";
+import {
+  expandRelatedCandidates,
+  collectRelationEvidence,
+  RELATION_RELEVANCE_THRESHOLD,
+} from "../skills/related.js";
 import { resolveRelationGraph } from "../skills/relation-graph.js";
 import { canonicalIdentity, roundToDecimals } from "../normalize.js";
 import type {
@@ -59,6 +64,7 @@ import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
 import { matchAvailableSkillNamesWithTokens } from "../skills/name-index.js";
 import {
   buildCandidateSkillsUnionPool,
+  buildSkillCandidateSuperset,
   type SkillDiscoveryCandidate,
 } from "../skills/candidate-pool.js";
 import type { RoutingLlmResult } from "../types.js";
@@ -262,12 +268,18 @@ export function createHookHandlers(deps: HookDeps) {
             channelId: callParams.channelId,
             modelRef: callParams.modelRef,
             candidateSkills: callParams.candidateSkills,
+            candidateSources: callParams.candidateSources,
+            visibleSkillNames: callParams.visibleSkillNames,
             relatedEvidence: callParams.relatedEvidence,
+            relationEvidence: callParams.relationEvidence,
             candidateExperiences: callParams.candidateExperiences,
             dataRoot: callParams.dataRoot,
           });
           if (!classified) return undefined;
           return {
+            ...(classified.relationDecisions
+              ? { relationDecisions: classified.relationDecisions }
+              : {}),
             skills: classified.skills ?? [],
             experiences: classified.experiences ?? [],
             confidence: classified.confidence ?? 1.0,
@@ -1233,26 +1245,48 @@ export function createHookHandlers(deps: HookDeps) {
             maxInjectedSkills: refreshedConfig.routing.skills.maxInjectedSkills,
           });
 
-          const related =
+          const relationGraph =
             refreshedConfig.routing.skills.related.enabled &&
             refreshedConfig.routing.skills.maxInjectedSkills > 0 &&
-            unionPool.candidateSkills.length > 0 &&
+            (unionPool.candidateSkills.length > 0 ||
+              skillDiscoveryResult.candidateExperiences.some(
+                (experience) => experience.skills.length > 0,
+              )) &&
             deps.dataRoot
-              ? expandRelatedCandidates(
-                  unionPool.candidateSkills,
+              ? await resolveRelationGraph(
+                  deps.dataRoot,
                   skillDiscoveryResult.visibleSkills,
-                  await resolveRelationGraph(
-                    deps.dataRoot,
-                    skillDiscoveryResult.visibleSkills,
-                  ),
                 )
-              : {
-                  candidateSkills: [...unionPool.candidateSkills],
-                  added: [],
-                  evidence: [],
-                };
+              : new Map();
+          const related = refreshedConfig.routing.skills.related.enabled
+            ? expandRelatedCandidates(
+                unionPool.candidateSkills,
+                skillDiscoveryResult.visibleSkills,
+                relationGraph,
+              )
+            : {
+                candidateSkills: [...unionPool.candidateSkills],
+                added: [],
+                evidence: [],
+              };
+          const superset = buildSkillCandidateSuperset({
+            originals: unionPool.candidateSkills,
+            nameCandidates: skillDiscoveryResult.nameCandidates,
+            retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
+            experiences: skillDiscoveryResult.candidateExperiences,
+            expanded: related.candidateSkills,
+            expandedNames: related.added,
+            visibleSkills: skillDiscoveryResult.visibleSkills,
+            enabled: refreshedConfig.routing.skills.maxInjectedSkills > 0,
+          });
+          const relationEvidence = collectRelationEvidence(
+            superset.candidateSkills,
+            skillDiscoveryResult.visibleSkills,
+            relationGraph,
+          );
           assertActive();
 
+          let relationDecisions: RelationDecision[] = [];
           let confidence = 0;
           let matchedSkills: readonly AvailableSkill[] = [];
           let matchedExperiences: SkillExperienceEntry[] = [];
@@ -1270,7 +1304,7 @@ export function createHookHandlers(deps: HookDeps) {
           );
 
           if (
-            related.candidateSkills.length === 0 &&
+            superset.candidateSkills.length === 0 &&
             skillDiscoveryResult.candidateExperiences.length === 0
           ) {
             matchedSkills = [];
@@ -1291,8 +1325,13 @@ export function createHookHandlers(deps: HookDeps) {
                     latest: latestUserMessage,
                     messageProvider: ctx.messageProvider,
                     channelId: ctx.channelId,
-                    candidateSkills: related.candidateSkills,
+                    candidateSkills: superset.candidateSkills,
+                    candidateSources: superset.candidateSources,
+                    visibleSkillNames: skillDiscoveryResult.visibleSkills.map(
+                      (skill) => skill.name,
+                    ),
                     relatedEvidence: related.evidence,
+                    relationEvidence,
                     candidateExperiences:
                       skillDiscoveryResult.candidateExperiences,
                     dataRoot: deps.dataRoot,
@@ -1302,6 +1341,7 @@ export function createHookHandlers(deps: HookDeps) {
 
               if (llmResult) {
                 rerankStatus = "completed";
+                relationDecisions = llmResult.relationDecisions ?? [];
                 confidence = llmResult.confidence;
                 selectedSkills = [...llmResult.skills];
                 selectedExperiences = [...(llmResult.experiences ?? [])];
@@ -1322,20 +1362,18 @@ export function createHookHandlers(deps: HookDeps) {
                     refreshedConfig.routing.experiences.maxInjectedExperiences,
                   );
 
-                const unionSkillNames = new Set<string>();
-                for (const name of llmResult.skills) {
-                  unionSkillNames.add(canonicalIdentity(name));
-                }
-                for (const exp of matchedExperiences) {
-                  for (const sk of exp.skills) {
-                    unionSkillNames.add(canonicalIdentity(sk));
-                  }
-                }
-
-                matchedSkills = Array.from(unionSkillNames)
+                const candidates = new Set(
+                  superset.candidateSkills.map((skill) =>
+                    canonicalIdentity(skill.name),
+                  ),
+                );
+                matchedSkills = [
+                  ...new Set(llmResult.skills.map(canonicalIdentity)),
+                ]
+                  .filter((name) => candidates.has(name))
                   .flatMap((name) => {
-                    const s = visibleMap.get(name);
-                    return s ? [s] : [];
+                    const skill = visibleMap.get(name);
+                    return skill ? [skill] : [];
                   })
                   .slice(0, refreshedConfig.routing.skills.maxInjectedSkills);
               } else {
@@ -1381,14 +1419,35 @@ export function createHookHandlers(deps: HookDeps) {
           const finalSkillNames = new Set(
             matchedSkills.map((skill) => canonicalIdentity(skill.name)),
           );
-          for (const name of related.added) {
-            if (finalSkillNames.has(canonicalIdentity(name)))
-              injectedCandidates.push({ name, source: "related-declared" });
+          relationDecisions = relationDecisions.map((decision) => ({
+            ...decision,
+            injected:
+              decision.score >= RELATION_RELEVANCE_THRESHOLD &&
+              finalSkillNames.has(canonicalIdentity(decision.skill)),
+          }));
+          for (const skill of matchedSkills) {
+            const sources = superset.candidateSources[skill.name] ?? [];
+            const recorded = injectedCandidates.find(
+              (candidate) => candidate.name === skill.name,
+            );
+            if (recorded) {
+              recorded.sources = sources;
+            } else {
+              injectedCandidates.push({
+                name: skill.name,
+                source: sources.includes("experience-associated")
+                  ? "experience-associated"
+                  : "related-declared",
+                sources,
+              });
+            }
           }
           const contributedBy: string[] = [];
           if (
             injectedCandidates.some(
-              (candidate) => candidate.source === "related-declared",
+              (candidate) =>
+                candidate.sources?.includes("related-declared") ??
+                candidate.source === "related-declared",
             )
           )
             contributedBy.push("related-declared");
@@ -1407,13 +1466,11 @@ export function createHookHandlers(deps: HookDeps) {
             contributedBy.push("search");
           }
           if (
-            matchedExperiences.some((experience) =>
-              experience.skills.some((skill) =>
-                finalSkillNames.has(canonicalIdentity(skill)),
-              ),
+            injectedCandidates.some((candidate) =>
+              candidate.sources?.includes("experience-associated"),
             )
           ) {
-            contributedBy.push("experience-search");
+            contributedBy.push("experience-associated");
           }
 
           const inputSkillDiscovery: InputSkillDiscovery = {
@@ -1426,10 +1483,11 @@ export function createHookHandlers(deps: HookDeps) {
             retrievalSemanticScores:
               skillDiscoveryResult.retrievalSemanticScores,
             experienceRetrieval: skillDiscoveryResult.experienceRetrieval,
-            candidateCount: related.candidateSkills.length,
+            candidateCount: superset.candidateSkills.length,
             ...(related.added.length
               ? { relatedCandidates: related.added }
               : {}),
+            ...(relationDecisions.length ? { relationDecisions } : {}),
             injectedSkills: injectedCandidates,
             retrievalCollections: skillDiscoveryResult.retrievalCollections,
             injectedCollections,
@@ -1467,8 +1525,9 @@ export function createHookHandlers(deps: HookDeps) {
               selectedExperiences,
               experienceCandidates:
                 skillDiscoveryResult.candidateExperiences.length,
-              candidateCount: related.candidateSkills.length,
+              candidateCount: superset.candidateSkills.length,
               relatedCandidates: related.added,
+              ...(relationDecisions.length ? { relationDecisions } : {}),
               injectedCount: matchedSkills.length,
               injectedSkills: matchedSkills.map((s) => s.name),
               injectedExperiences: matchedExperiences.map((e) => e.id),
@@ -1483,6 +1542,7 @@ export function createHookHandlers(deps: HookDeps) {
             buildRoutingContext({
               matchedSkills,
               experiences: matchedExperiences,
+              relationDecisions,
             }),
             workingSetSkillsXml,
           );
