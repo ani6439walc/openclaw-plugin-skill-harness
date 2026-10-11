@@ -329,6 +329,8 @@ Runtime state lives separately from package files under `~/.openclaw/plugins/ski
 | No new experience appears           | Review is disabled by default. When enabled, a valid investigation can still conclude there is nothing durable to add.                                                        |
 | Duplicate skill inventories         | Check native prompt suppression and migrate static selections to `skills.workingSet`.                                                                                         |
 
+Skill-index refresh warnings include a JSON diagnostic suffix with the index fingerprint, failure phase, a fixed reason code, whether an existing store remains searchable, consecutive failures, and retry delay. A recovery message records the previous failure count when a later refresh and embedding check succeed. These fields survive the host's single-string logger contract; raw errors, provider responses and credentials are excluded. Unknown failures use `operation-failed`. A refresh warning alone does not mean searches are unavailable.
+
 ## Contributing
 
 Implementation contracts, source navigation, migrations, and development checks are maintained in [AGENTS.md](AGENTS.md). User-triggered maintenance workflows are in the [bundled skill](skills/skill-harness/SKILL.md).

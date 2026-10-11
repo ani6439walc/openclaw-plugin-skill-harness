@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QMDStore } from "@wei840222/qmd";
+import { resetApiLogger, setApiLogger } from "../../api.js";
+import { createSkillIndexGc } from "./skill-index-gc.js";
 import type { AvailableSkill } from "../skills/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
 import {
@@ -30,6 +32,7 @@ afterEach(async () => {
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
   vi.restoreAllMocks();
+  resetApiLogger();
   nowMs = 1_000;
 });
 
@@ -552,6 +555,172 @@ describe("createSkillQmdIndex", () => {
     await index.close();
   });
 
+  it.each([
+    ["store-open", "LEASE_BUSY", "embedding-lease-busy", false],
+    ["update", "SQLITE_BUSY", "database-busy", false],
+    ["embed", "ETIMEDOUT", "request-timeout", true],
+    ["status", "secret-provider-code", "operation-failed", true],
+  ] as const)(
+    "persists safe %s failure and recovery through a single-string host logger",
+    async (phase, code, reason, searchable) => {
+      const root = await mkdtemp(path.join(tmpdir(), "qmd-safe-diagnostic-"));
+      roots.push(root);
+      const warn = vi.fn();
+      const info = vi.fn();
+      setApiLogger({
+        warn: (message) => warn(message),
+        info: (message) => info(message),
+      });
+      const error = Object.assign(
+        new Error("private query provider response api-key=secret"),
+        { code },
+      );
+      const store = createStoreDouble({});
+      const createStore = vi.fn(async () => store);
+      if (phase === "store-open") createStore.mockRejectedValueOnce(error);
+      else
+        (
+          store[phase === "status" ? "getStatus" : phase] as ReturnType<
+            typeof vi.fn
+          >
+        ).mockRejectedValueOnce(error);
+      const timers: Array<{ callback: () => void; delayMs: number }> = [];
+      const index = createSkillQmdIndex({
+        dataRoot: root,
+        config: () => qmdConfig,
+        createStore: createStore as never,
+        nowMs: () => nowMs,
+        setTimer: (callback, delayMs) => {
+          const timer = { callback, delayMs };
+          timers.push(timer);
+          return timer;
+        },
+        clearTimer: () => undefined,
+      });
+      try {
+        index.schedule("main", { skills: [], sourceRoots: ["/fixture"] });
+        await waitFor(() => timers.length === 1, "failure did not arm retry");
+        const call = warn.mock.calls.find(([message]) =>
+          message.includes("failed to refresh QMD skill index"),
+        )!;
+        expect(call).toHaveLength(1);
+        const fields = JSON.parse(call[0].slice(call[0].indexOf("{")));
+        expect(fields).toEqual({
+          fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+          phase,
+          reason,
+          searchable,
+          consecutiveFailures: 1,
+          retryDelayMs: 5000,
+        });
+        expect(call[0]).not.toContain("private query");
+        expect(call[0]).not.toContain("api-key");
+        expect(call[0]).not.toContain("secret-provider-code");
+        const timer = timers.shift()!;
+        nowMs += timer.delayMs;
+        timer.callback();
+        await waitFor(
+          () =>
+            info.mock.calls.some(([message]) =>
+              message.includes("QMD skill index refresh recovered"),
+            ),
+          "recovery diagnostic missing",
+        );
+        const recovered = info.mock.calls.find(([message]) =>
+          message.includes("QMD skill index refresh recovered"),
+        )!;
+        expect(recovered).toHaveLength(1);
+        expect(
+          JSON.parse(recovered[0].slice(recovered[0].indexOf("{"))),
+        ).toEqual({
+          fingerprint: fields.fingerprint,
+          previousFailures: 1,
+          searchable: true,
+        });
+        expect(index.getStatus("main")).toBe("ready");
+      } finally {
+        await index.close();
+      }
+    },
+  );
+
+  it("records catalog publication contention and subsequent recovery without changing retry timing", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "qmd-catalog-diagnostic-"));
+    roots.push(root);
+    const gc = createSkillIndexGc({
+      skillsRoot: path.join(root, "qmd/skills"),
+    });
+    const warn = vi.fn();
+    const info = vi.fn();
+    setApiLogger({
+      warn: (message) => warn(message),
+      info: (message) => info(message),
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held: Promise<unknown> | undefined;
+    const store = createStoreDouble({
+      update: vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          let acquired!: () => void;
+          const ready = new Promise<void>((resolve) => {
+            acquired = resolve;
+          });
+          held = gc.withCatalog(async () => {
+            acquired();
+            await gate;
+            return true;
+          });
+          await ready;
+        })
+        .mockResolvedValue({}),
+    });
+    const timers: Array<() => void> = [];
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: (async () => store) as never,
+      nowMs: () => nowMs,
+      setTimer: (callback) => {
+        timers.push(callback);
+        return callback;
+      },
+      clearTimer: () => undefined,
+    });
+    try {
+      index.schedule("main", { skills: [], sourceRoots: ["/fixture"] });
+      await vi.waitFor(() => expect(timers).toHaveLength(1), { timeout: 3000 });
+      const message = warn.mock.calls.find(([message]) =>
+        message.includes("failed to refresh QMD skill index"),
+      )![0];
+      expect(JSON.parse(message.slice(message.indexOf("{")))).toMatchObject({
+        phase: "mapping",
+        reason: "catalog-unavailable",
+        consecutiveFailures: 1,
+        retryDelayMs: 5000,
+      });
+      release();
+      await held;
+      nowMs += 5000;
+      timers.shift()!();
+      await waitFor(
+        () =>
+          info.mock.calls.some(([message]) =>
+            message.includes("refresh recovered"),
+          ),
+        "catalog retry did not recover",
+      );
+      expect(index.getStatus("main")).toBe("ready");
+    } finally {
+      release();
+      await held;
+      await index.close();
+    }
+  });
+
   it("keeps partial embeddings searchable and retries the same store", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "skill-harness-partial-qmd-"),
@@ -563,6 +732,12 @@ describe("createSkillQmdIndex", () => {
       body: "partial",
     });
     const pendingTimers: Array<() => void> = [];
+    const warn = vi.fn();
+    const info = vi.fn();
+    setApiLogger({
+      warn: (message) => warn(message),
+      info: (message) => info(message),
+    });
     const store = createStoreDouble({
       search: vi.fn().mockResolvedValue([
         {
@@ -602,6 +777,14 @@ describe("createSkillQmdIndex", () => {
         ?.name,
     ).toBe("partial");
     expect(pendingTimers).toHaveLength(1);
+    const warning = warn.mock.calls.find(([message]) =>
+      message.includes("failed to refresh QMD skill index"),
+    )![0];
+    expect(JSON.parse(warning.slice(warning.indexOf("{")))).toMatchObject({
+      phase: "embed",
+      reason: "embedding-incomplete",
+      searchable: true,
+    });
     pendingTimers.shift()?.();
     await waitFor(
       () => (store.embed as ReturnType<typeof vi.fn>).mock.calls.length === 2,

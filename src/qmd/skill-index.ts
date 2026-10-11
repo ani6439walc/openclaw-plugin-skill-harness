@@ -28,6 +28,48 @@ const MAX_RETRY_DELAY_MS = 60_000;
 const DEFAULT_CANDIDATE_LIMIT = 40;
 const MAX_EVIDENCE_PER_SKILL = 3;
 const BUILD_LOCK_BUSY = "BUILD_LOCK_BUSY";
+const CATALOG_BUSY = "CATALOG_BUSY";
+type RefreshPhase =
+  | "lifetime-pin"
+  | "build-lock"
+  | "snapshot"
+  | "store-open"
+  | "update"
+  | "mapping"
+  | "embed"
+  | "status";
+
+function refreshFailureReason(error: unknown): string {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? error.code
+      : undefined;
+  switch (code) {
+    case CATALOG_BUSY:
+      return "catalog-unavailable";
+    case BUILD_LOCK_BUSY:
+      return "build-lock-busy";
+    case "PIN_UNAVAILABLE":
+      return "lifetime-pin-unavailable";
+    case "EMBEDDING_INCOMPLETE":
+      return "embedding-incomplete";
+    case "LEASE_BUSY":
+      return "embedding-lease-busy";
+    case "SQLITE_BUSY":
+    case "SQLITE_LOCKED":
+      return "database-busy";
+    case "ETIMEDOUT":
+    case "ESOCKETTIMEDOUT":
+      return "request-timeout";
+    case "EACCES":
+    case "EPERM":
+      return "permission-denied";
+    case "ENOENT":
+      return "file-missing";
+    default:
+      return "operation-failed";
+  }
+}
 
 type QmdCreateStore = typeof createStore;
 
@@ -646,7 +688,10 @@ export function createSkillQmdIndex(params: {
       gc.markReferenced(fingerprint);
       return true;
     });
-    if (!written) throw new Error("QMD skill catalog is busy");
+    if (!written)
+      throw Object.assign(new Error("QMD skill catalog is busy"), {
+        code: CATALOG_BUSY,
+      });
   }
 
   async function loadExistingIndexCatalog(): Promise<void> {
@@ -1017,6 +1062,11 @@ export function createSkillQmdIndex(params: {
 
   function resetRetryState(state: SharedIndexState): void {
     clearRetryTimer(state);
+    if (state.consecutiveFailures > 0) {
+      logger.info(
+        `QMD skill index refresh recovered ${JSON.stringify({ fingerprint: state.fingerprint, previousFailures: state.consecutiveFailures, searchable: state.usable })}`,
+      );
+    }
     state.consecutiveFailures = 0;
     state.nextRetryAtMs = 0;
     state.lastRefreshError = undefined;
@@ -1042,7 +1092,11 @@ export function createSkillQmdIndex(params: {
     }, delayMs);
   }
 
-  function recordRefreshProblem(state: SharedIndexState, error: unknown): void {
+  function recordRefreshProblem(
+    state: SharedIndexState,
+    error: unknown,
+    phase: RefreshPhase,
+  ): void {
     state.consecutiveFailures += 1;
     const delayMs = Math.min(
       INITIAL_RETRY_DELAY_MS * 2 ** (state.consecutiveFailures - 1),
@@ -1051,11 +1105,17 @@ export function createSkillQmdIndex(params: {
     state.nextRetryAtMs = now() + delayMs;
     state.lastRefreshError = error;
     state.status = state.usable ? "ready" : "failed";
-    logger.warn("failed to refresh QMD skill index", {
-      error,
-      delayMs,
-      fingerprint: state.fingerprint,
-    });
+    // The host PluginLogger accepts a single string; only fixed safe fields survive.
+    logger.warn(
+      `failed to refresh QMD skill index ${JSON.stringify({
+        fingerprint: state.fingerprint,
+        phase,
+        reason: refreshFailureReason(error),
+        searchable: state.usable,
+        consecutiveFailures: state.consecutiveFailures,
+        retryDelayMs: delayMs,
+      })}`,
+    );
     armRetry(state);
   }
 
@@ -1089,20 +1149,29 @@ export function createSkillQmdIndex(params: {
     if (!state.store) state.status = "building";
     if (!(await pinState(state, true))) {
       if (!closed)
-        recordRefreshProblem(state, new Error("QMD skill catalog is busy"));
+        recordRefreshProblem(
+          state,
+          Object.assign(new Error("QMD skill catalog is busy"), {
+            code: "PIN_UNAVAILABLE",
+          }),
+          "lifetime-pin",
+        );
       return;
     }
+    let phase: RefreshPhase = "build-lock";
     const locked = await withFileLock(
       state.root,
       async () => {
         if (closed) return true;
         try {
+          phase = "snapshot";
           await fs.mkdir(state.root, { recursive: true });
           const skills = mergedSkills(state);
           await writeSkillSnapshot({
             docsRoot: state.docsRoot,
             skills,
           });
+          phase = "store-open";
           const lease = await acquireStore(state);
           if (!lease) {
             if (!closed)
@@ -1113,21 +1182,26 @@ export function createSkillQmdIndex(params: {
           }
           const { store } = lease;
           try {
+            phase = "update";
             await store.update();
             if (closed) return true;
             state.usable = true;
+            phase = "mapping";
             await bindAgents(state);
             state.status = "ready";
             if (closed) return true;
+            phase = "embed";
             const embedResult = await store.embed();
+            phase = "status";
             const status = await store.getStatus();
             state.needsEmbedding = status.needsEmbedding;
             if (embedResult.errors > 0 || status.needsEmbedding > 0) {
               recordRefreshProblem(
                 state,
-                new Error(
-                  `QMD skill embedding incomplete (errors=${embedResult.errors}, needsEmbedding=${status.needsEmbedding})`,
-                ),
+                Object.assign(new Error("QMD skill embedding incomplete"), {
+                  code: "EMBEDDING_INCOMPLETE",
+                }),
+                "embed",
               );
             } else {
               resetRetryState(state);
@@ -1137,7 +1211,7 @@ export function createSkillQmdIndex(params: {
             lease.release();
           }
         } catch (error) {
-          recordRefreshProblem(state, error);
+          recordRefreshProblem(state, error, phase);
         }
         return true;
       },
@@ -1149,6 +1223,7 @@ export function createSkillQmdIndex(params: {
         Object.assign(new Error("skill index refresh lock is busy"), {
           code: BUILD_LOCK_BUSY,
         }),
+        "build-lock",
       );
     }
   }
