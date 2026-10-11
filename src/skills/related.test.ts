@@ -20,6 +20,27 @@ const edge = (
 });
 
 describe("declared relation candidates", () => {
+  it("uses canonical identities for graph lookup, targets, self edges and duplicates", () => {
+    const anchor = skill("Ａ");
+    const existing = skill("Ｂ");
+    const target = skill("Ｃ");
+    const graph = new Map([
+      ["a", [edge(" a "), edge(" b "), edge(" c "), edge("Ｃ")]],
+    ]);
+    const result = expandRelatedCandidates(
+      [anchor, existing],
+      [anchor, existing, target],
+      graph,
+    );
+    expect(result.candidateSkills).toEqual([anchor, existing, target]);
+    expect(result.added).toEqual(["Ｃ"]);
+    expect(result.evidence.map(({ name, from }) => ({ name, from }))).toEqual([
+      { name: "Ｂ", from: "Ａ" },
+      { name: "Ｃ", from: "Ａ" },
+      { name: "Ｃ", from: "Ａ" },
+    ]);
+  });
+
   it("round robins the first eight seeds, with two per seed and eight total", () => {
     const seeds = Array.from({ length: 10 }, (_, i) => skill(`seed${i}`));
     const targets = Array.from({ length: 30 }, (_, i) =>
@@ -114,6 +135,25 @@ describe("declared relation candidates", () => {
 });
 
 describe("relation relevance evidence", () => {
+  it("resolves NFKC and trimmed identities while preserving names and direction", () => {
+    const anchor = skill("Ａ");
+    const target = skill("Ｂ");
+    const graph = new Map([["a", [edge(" a "), edge(" b "), edge("Ｂ")]]]);
+    const result = collectRelationEvidence(
+      [skill(" a ")],
+      [anchor, target],
+      graph,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      skill: "Ａ",
+      from: "Ａ",
+      to: "Ｂ",
+      from_description: "Ａ",
+      to_description: "Ｂ",
+    });
+  });
+
   it("includes visible noncandidate descriptions and preserves incoming and outgoing directions", () => {
     const candidates = [skill("B")];
     const visible = [skill("A"), ...candidates, skill("C")];

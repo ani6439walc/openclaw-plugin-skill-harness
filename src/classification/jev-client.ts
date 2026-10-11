@@ -307,7 +307,11 @@ export async function runJevUnifiedRouting(
       params.config.routing.experiences?.maxInjectedExperiences ?? 4;
     const qualifyingExperiences = experienceProbabilities
       .filter((ep) => ep.prob >= expThreshold)
-      .sort((a, b) => b.prob - a.prob || a.entry.id.localeCompare(b.entry.id))
+      .sort(
+        (a, b) =>
+          b.prob - a.prob ||
+          (a.entry.id < b.entry.id ? -1 : a.entry.id > b.entry.id ? 1 : 0),
+      )
       .slice(0, maxExperiences);
     const selectedExperiences = qualifyingExperiences.map((ep) => ep.entry.id);
 
@@ -317,7 +321,10 @@ export async function runJevUnifiedRouting(
     const maxSkills = params.config.routing.skills.maxInjectedSkills ?? 8;
     const directQualifyingSkills = skillProbabilities
       .filter((sp) => sp.prob >= skillThreshold)
-      .sort((a, b) => b.prob - a.prob || a.name.localeCompare(b.name))
+      .sort(
+        (a, b) =>
+          b.prob - a.prob || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+      )
       .map((sp) => sp.name);
 
     const selectedSkills = directQualifyingSkills.slice(0, maxSkills);

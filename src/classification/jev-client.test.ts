@@ -356,6 +356,52 @@ describe("runJevUnifiedRouting", () => {
     expect(result?.skills).toEqual(["git-tools", "markdown-formatter"]);
   });
 
+  it("breaks equal skill and experience scores by locale-independent string order", async () => {
+    for (const names of [
+      ["ä", "z", "Z"],
+      ["Z", "z", "ä"],
+    ]) {
+      const skills = names.map((name) => ({
+        name,
+        description: name,
+        location: `/${name}`,
+      }));
+      const experiences: SkillExperienceEntry[] = names.map((id) => ({
+        id,
+        summary: id,
+        skills: [],
+        keywords: [],
+        body: "",
+        path: `/experiences/${id}`,
+      }));
+      const answers = Object.fromEntries(
+        names.flatMap((name) => [
+          [`skill_${name}`, { type: "noul", noul: 0.9 }],
+          [`exp_${name}`, { type: "noul", noul: 0.9 }],
+        ]),
+      );
+      const result = await runJevUnifiedRouting({
+        api: dummyApi,
+        config: resolveConfig({
+          routing: {
+            skills: { maxInjectedSkills: 2 },
+            experiences: { maxInjectedExperiences: 2 },
+          },
+        }),
+        agentId: "main",
+        latest: "review documentation",
+        modelRef: { provider: "typesafe", model: "jev-latest" },
+        candidateSkills: skills,
+        candidateExperiences: experiences,
+        client: {
+          systemOne: vi.fn().mockResolvedValue({ answers }),
+        } as unknown as TypeSafeClient,
+      });
+      expect(result?.skills).toEqual(["Z", "z"]);
+      expect(result?.experiences).toEqual(["Z", "z"]);
+    }
+  });
+
   it("respects maxInjectedSkills and sorts descending by probability", async () => {
     const skills: AvailableSkill[] = [
       { name: "skill-1", location: "/1", description: "Skill 1" },
