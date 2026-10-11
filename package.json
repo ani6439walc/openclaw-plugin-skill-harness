@@ -1,15 +1,15 @@
 {
-  "name": "skill-harness",
+  "name": "@ani6439walc/openclaw-plugin-skill-harness",
   "displayName": "Skill Harness",
   "description": "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
   "version": "2026.9.9",
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
   "license": "MIT",
   "author": "Ani <ani6439walc@gmail.com>",
   "contributors": [
     "Wan, Jiun Wei <wei840222@gmail.com>"
   ],
-  "packageManager": "pnpm@12.8.1",
-  "type": "module",
   "homepage": "https://github.com/ani6439walc/openclaw-plugin-skill-harness#readme",
   "repository": {
     "type": "git",
@@ -25,7 +25,6 @@
   ],
   "files": [
     "README.md",
-    "docs/**",
     "package.json",
     "openclaw.plugin.json",
     "dist",
@@ -50,8 +49,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'",
     "test": "vitest run",
-    "build": "tsc",
-    "test:plugin-loader": "node --input-type=module --eval \"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); require('./dist/index.js');\""
+    "build": "tsc"
   },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0",
