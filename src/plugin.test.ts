@@ -4,6 +4,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { OpenClawPluginApi } from "../api.js";
 import { logger } from "../api.js";
+import * as skills from "./skills/index.js";
+import * as skillRoots from "./skills/roots.js";
 import {
   createWorkingSetSkillsResolver,
   createPlugin,
@@ -349,6 +351,11 @@ describe("createPlugin", () => {
 
   it("uses current authoritative agents for maintenance and stops refreshing removed agents", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Registry scheduling is the contract here, not filesystem discovery latency.
+    vi.spyOn(skillRoots, "resolveOpenClawBundledSkillsDir").mockResolvedValue(
+      undefined,
+    );
+    vi.spyOn(skills, "listAvailableSkills").mockResolvedValue([]);
     let current: unknown = { agents: { entries: { coder: {} } } };
     const schedule = vi.fn();
     createHookHandlersSpy.mockImplementation((deps) => {
@@ -369,7 +376,8 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
     const { activeAgentIds } = createSkillIndexSpy.mock.calls[0][0];
     expect(activeAgentIds()).toEqual(["main", "coder", "writer"]);
-    await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(3));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(schedule).toHaveBeenCalledTimes(3);
     expect(schedule.mock.calls.map(([id]) => id).sort()).toEqual([
       "coder",
       "main",
@@ -378,7 +386,7 @@ describe("createPlugin", () => {
     schedule.mockClear();
     current = { agents: { entries: {} } };
     await vi.advanceTimersByTimeAsync(300_000);
-    await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(2));
+    expect(schedule).toHaveBeenCalledTimes(2);
     expect(schedule.mock.calls.map(([id]) => id).sort()).toEqual([
       "main",
       "writer",
