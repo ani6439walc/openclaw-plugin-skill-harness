@@ -217,5 +217,4 @@ describe("IntentReviewLogWriter", () => {
       processedEvents: { "event-1": expect.any(Object) },
     });
   });
-
 });

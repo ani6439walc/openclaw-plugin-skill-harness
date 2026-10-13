@@ -17,10 +17,7 @@ import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { getReviewModelRef, runReviewSubagent } from "../review/subagent.js";
-import type {
-  CapabilityFitEvidence,
-  ReviewSnapshot,
-} from "../review/types.js";
+import type { CapabilityFitEvidence, ReviewSnapshot } from "../review/types.js";
 import { createIntentReviewScheduler } from "../review/scheduler.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -1799,10 +1796,7 @@ export function createHookHandlers(deps: HookDeps) {
         snapshot: baseSnapshot,
         config: resolvedConfig,
       });
-      const snapshot = await buildReviewSnapshot(
-        baseSnapshot,
-        capabilityFit,
-      );
+      const snapshot = await buildReviewSnapshot(baseSnapshot, capabilityFit);
 
       enqueueReviewRun({
         ctx,
