@@ -1,5 +1,5 @@
 {
-  "name": "@ani6439walc/openclaw-plugin-skill-harness",
+  "name": "@wei840222/openclaw-plugin-skill-harness",
   "displayName": "Skill Harness",
   "description": "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
   "version": "2026.10.2",
