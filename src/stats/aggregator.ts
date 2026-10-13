@@ -20,7 +20,6 @@ const DAILY_RETENTION_MS = 90 * DAY_MS;
 const RECENT_WINDOW_MS = 7 * DAY_MS;
 const REVIEW_MIN_INTENT_MATCHES = 5;
 const REVIEW_ADOPTION_THRESHOLD = 0.7;
-const SKILL_PLACEMENT_MIN_OBSERVED_TURNS = 20;
 const MAX_PROJECTION_REASON_KEYS = 32;
 const MAX_PROJECTION_REASON_CODE_POINTS = 80;
 const OTHER_PROJECTION_REASON = "other";
@@ -190,22 +189,6 @@ interface AgentSkillInventoryObservation {
 interface SkillInventoryStats {
   startedAt: string;
   agents: Record<string, AgentSkillInventoryObservation>;
-}
-
-export type SkillPlacementReason = "low-adoption" | "zero-intent-match-usage";
-
-export interface SkillPlacementCandidate {
-  epochKey: string;
-  agentId: string;
-  name: string;
-  source: SkillSource;
-  winnerFingerprint: string;
-  fingerprint: string;
-  reason: SkillPlacementReason;
-  observedTurns: number;
-  usageTurns: number;
-  intentMatchedTurns: number;
-  adoptionRate?: number;
 }
 
 type Stats = {
@@ -1557,26 +1540,6 @@ function getOrCreateOwnRecordValue<T>(
   return value;
 }
 
-function skillPlacementEpochKey(params: {
-  inventoryStartedAt: string;
-  agentId: string;
-  skill: SkillInventoryObservation;
-}): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify([
-        params.inventoryStartedAt,
-        params.agentId,
-        canonicalIdentity(params.skill.name),
-        params.skill.source,
-        params.skill.winnerFingerprint,
-        params.skill.fingerprint,
-        params.skill.firstSeenTurn,
-      ]),
-    )
-    .digest("hex");
-}
-
 function recordSkillInventoryObservation(params: {
   stats: Stats;
   agentId: string;
@@ -1676,73 +1639,6 @@ export class StatsAggregator {
         path: statsFilePath,
       });
       return new Set();
-    }
-  }
-
-  selectSkillPlacementCandidate(
-    agentId: string,
-    excludedEpochKeys: ReadonlySet<string> = new Set(),
-  ): SkillPlacementCandidate | undefined {
-    const statsFilePath = statsPath(this.pluginRoot);
-    try {
-      const stats = loadStats(statsFilePath, new Date().toISOString());
-      const agent = ownRecordValue(stats.skillInventory.agents, agentId);
-      if (!agent) return undefined;
-
-      const candidates = Object.values(agent.skills)
-        .filter((skill) => skill.lastSeenTurn === agent.observedTurns)
-        .flatMap((skill): SkillPlacementCandidate[] => {
-          const globalSkill = ownRecordValue(
-            stats.skills,
-            canonicalIdentity(skill.name),
-          );
-          const reason: SkillPlacementReason | undefined =
-            globalSkill?.needsReview
-              ? "low-adoption"
-              : skill.observedTurns >= SKILL_PLACEMENT_MIN_OBSERVED_TURNS &&
-                  skill.intentMatchedTurns === 0 &&
-                  skill.usageTurns === 0
-                ? "zero-intent-match-usage"
-                : undefined;
-          if (!reason) return [];
-
-          return [
-            {
-              epochKey: skillPlacementEpochKey({
-                inventoryStartedAt: stats.skillInventory.startedAt,
-                agentId,
-                skill,
-              }),
-              agentId,
-              name: skill.name,
-              source: skill.source,
-              winnerFingerprint: skill.winnerFingerprint,
-              fingerprint: skill.fingerprint,
-              reason,
-              observedTurns: skill.observedTurns,
-              usageTurns: skill.usageTurns,
-              intentMatchedTurns: skill.intentMatchedTurns,
-              ...(reason === "low-adoption"
-                ? { adoptionRate: globalSkill?.adoptionRate }
-                : {}),
-            },
-          ];
-        })
-        .filter((candidate) => !excludedEpochKeys.has(candidate.epochKey))
-        .sort(
-          (left, right) =>
-            Number(right.reason === "low-adoption") -
-              Number(left.reason === "low-adoption") ||
-            compareCanonicalSkillNames(left.name, right.name),
-        );
-
-      return candidates[0];
-    } catch (error) {
-      logger.warn("failed to select skill placement candidate", {
-        error,
-        path: statsFilePath,
-      });
-      return undefined;
     }
   }
 

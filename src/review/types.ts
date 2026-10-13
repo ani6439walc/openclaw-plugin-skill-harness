@@ -1,6 +1,5 @@
 import type { ReviewOperation } from "./log.js";
 import type { ReviewTrigger } from "./triggers.js";
-import type { SkillPlacementCandidate } from "../stats/aggregator.js";
 import type { AvailableSkill } from "../types.js";
 
 export interface ReviewRecommendationCandidate {
@@ -9,7 +8,7 @@ export interface ReviewRecommendationCandidate {
 }
 
 export type CapabilityFitEvidence = {
-  source: "tool-call-threshold" | "tool-failure-threshold" | "skill-placement";
+  source: "tool-call-threshold" | "tool-failure-threshold";
   observedSkillNames: string[];
   turnHasToolErrors: boolean;
   recoveryVerified: boolean;
@@ -39,16 +38,6 @@ export type ReviewState = {
   timestamps?: { start?: string; end?: string };
 };
 
-export type SkillPlacementReviewCandidate = SkillPlacementCandidate;
-
-export type SelectedPlacementSkill = Pick<
-  AvailableSkill,
-  "name" | "description"
-> & {
-  content: string;
-  omittedCodePointCount?: number;
-};
-
 export type ReviewSnapshot = {
   sessionId: string;
   sessionKey?: string;
@@ -57,8 +46,6 @@ export type ReviewSnapshot = {
   turnNumber: number;
   current: ReviewState;
   recent: ReviewState[];
-  skillPlacementCandidate?: SkillPlacementReviewCandidate;
-  selectedPlacementSkill?: SelectedPlacementSkill;
 };
 
 type BaseReviewFinding = {

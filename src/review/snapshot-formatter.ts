@@ -313,50 +313,6 @@ function formatSnapshotManifest(
   );
 }
 
-function formatSkillPlacementCandidate(
-  candidate: ReviewSnapshot["skillPlacementCandidate"],
-): string | undefined {
-  if (!candidate) return undefined;
-  return wrapRequiredReviewSnapshotBlock(
-    "skill_placement_candidate",
-    stringifySnapshotJson({
-      name: candidate.name,
-      source: candidate.source,
-      reason: candidate.reason,
-      observedTurns: candidate.observedTurns,
-      usageTurns: candidate.usageTurns,
-      ...(candidate.adoptionRate !== undefined
-        ? { adoptionRate: candidate.adoptionRate }
-        : {}),
-    }),
-  );
-}
-
-function formatSelectedPlacementSkill(
-  skill: ReviewSnapshot["selectedPlacementSkill"],
-): string | undefined {
-  if (!skill) return undefined;
-  return wrapRequiredReviewSnapshotBlock(
-    "selected_placement_skill",
-    [
-      wrapRequiredReviewSnapshotBlock(
-        "skill_metadata",
-        stringifySnapshotJson({
-          name: skill.name,
-          description: skill.description,
-          ...(skill.omittedCodePointCount !== undefined
-            ? { omittedCodePointCount: skill.omittedCodePointCount }
-            : {}),
-        }),
-      ),
-      wrapRequiredReviewSnapshotBlock(
-        "skill_content",
-        escapeSnapshotText(skill.content),
-      ),
-    ].join("\n\n"),
-  );
-}
-
 export function formatReviewSnapshot(
   snapshot: ReviewSnapshot,
   options: FormatReviewSnapshotOptions = {},
@@ -375,8 +331,6 @@ export function formatReviewSnapshot(
       turnNumber: snapshot.turnNumber,
     }),
     recent,
-    formatSkillPlacementCandidate(snapshot.skillPlacementCandidate),
-    formatSelectedPlacementSkill(snapshot.selectedPlacementSkill),
   ]
     .filter((block): block is string => block !== undefined)
     .join("\n\n");

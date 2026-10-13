@@ -7,7 +7,6 @@ import {
   withFileLock,
 } from "../file-utils.js";
 import type { ReviewFinding, ReviewSource } from "./types.js";
-import type { SkillPlacementCandidate } from "../stats/aggregator.js";
 import {
   createReviewLog,
   ReviewLogSchema,
@@ -85,7 +84,6 @@ export class IntentReviewLogWriter {
       validationErrors?: readonly string[];
       noFindingReasonCounts?: NoFindingReasonCounts;
       schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
-      skillPlacementCandidate?: SkillPlacementCandidate;
     } = {},
   ): Promise<boolean> {
     if (!eventId) return false;
@@ -107,30 +105,6 @@ export class IntentReviewLogWriter {
         const changes = findings.map(appliedChangeFromFinding);
         const outcome =
           options.outcome ?? (changes.length > 0 ? "applied" : "nofinding");
-        const candidate = options.skillPlacementCandidate;
-        if (
-          candidate &&
-          (outcome === "applied" || outcome === "nofinding") &&
-          Object.hasOwn(log.reviewedSkillEpochs, candidate.epochKey)
-        ) {
-          return false;
-        }
-        if (candidate && (outcome === "applied" || outcome === "nofinding")) {
-          Object.defineProperty(log.reviewedSkillEpochs, candidate.epochKey, {
-            configurable: true,
-            enumerable: true,
-            value: {
-              agentId: candidate.agentId,
-              skillName: candidate.name,
-              source: candidate.source,
-              reason: candidate.reason,
-              completedAt: nowIso,
-              outcome,
-              eventId,
-            },
-            writable: true,
-          });
-        }
         log.processedEvents[eventId] = {
           processedAt: nowIso,
           source,

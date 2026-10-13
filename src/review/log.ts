@@ -3,7 +3,7 @@ import type { ReviewSource } from "./types.js";
 import { REVIEW_TRIGGER_TYPES } from "./triggers.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
-import type { SkillPlacementReason } from "../stats/aggregator.js";
+export type SkillPlacementReason = "low-adoption" | "zero-intent-match-usage";
 
 export const REVIEW_OPERATIONS = [
   "create",
