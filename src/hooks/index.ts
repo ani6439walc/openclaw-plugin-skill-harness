@@ -20,8 +20,6 @@ import { getReviewModelRef, runReviewSubagent } from "../review/subagent.js";
 import type {
   CapabilityFitEvidence,
   ReviewSnapshot,
-  SelectedPlacementSkill,
-  SkillPlacementReviewCandidate,
 } from "../review/types.js";
 import { createIntentReviewScheduler } from "../review/scheduler.js";
 import { createHash } from "node:crypto";
@@ -108,8 +106,6 @@ export type { HookDeps } from "./types.js";
 
 import { promptRoutingBudgetMs, withPromptDeadline } from "./prompt-budget.js";
 
-const MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS = 12_000;
-
 function eventError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unknown error";
   return message
@@ -158,70 +154,6 @@ export function formatConversationExpansionContext(params: {
   }
 
   return sections.join("\n\n");
-}
-
-function truncateSelectedPlacementSkillContent(content: string): {
-  content: string;
-  omittedCodePointCount?: number;
-} {
-  const codePoints = Array.from(content);
-  if (codePoints.length <= MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS) {
-    return { content };
-  }
-  const headLength = Math.floor(MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS / 2);
-  const tailLength = MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS - headLength;
-  return {
-    content: `${codePoints.slice(0, headLength).join("")}\n\n${codePoints.slice(-tailLength).join("")}`,
-    omittedCodePointCount:
-      codePoints.length - MAX_SELECTED_PLACEMENT_SKILL_CODE_POINTS,
-  };
-}
-
-async function resolveSelectedPlacementSkill(
-  candidate: SkillPlacementReviewCandidate,
-  availableSkills: readonly AvailableSkill[],
-  skillInventory: readonly SkillInventoryItem[] | undefined,
-): Promise<SelectedPlacementSkill | undefined> {
-  const matchesInventory = skillInventory?.filter(
-    (skill) =>
-      skill.name.trim().toLowerCase() === candidate.name.trim().toLowerCase() &&
-      skill.source === candidate.source &&
-      skill.winnerFingerprint === candidate.winnerFingerprint &&
-      skill.fingerprint === candidate.fingerprint,
-  );
-  if (matchesInventory?.length !== 1) return;
-  const canonicalName = candidate.name.trim().toLowerCase();
-  const matches = availableSkills.filter(
-    (skill) => skill.name.trim().toLowerCase() === canonicalName,
-  );
-  if (matches.length !== 1) return;
-  const selected = matches[0]!;
-  try {
-    const realpath = await fs.realpath(selected.location);
-    const content = await fs.readFile(realpath);
-    if (
-      createHash("sha256").update(realpath).digest("hex") !==
-        candidate.winnerFingerprint ||
-      createHash("sha256").update(content).digest("hex") !==
-        candidate.fingerprint
-    ) {
-      return;
-    }
-    const bounded = truncateSelectedPlacementSkillContent(
-      content.toString("utf-8"),
-    );
-    return {
-      name: selected.name,
-      description: selected.description,
-      ...bounded,
-    };
-  } catch (error) {
-    logger.warn("failed to read selected placement skill", {
-      error,
-      skillName: selected.name,
-    });
-    return;
-  }
 }
 
 function toPromptBuildResult(
@@ -303,7 +235,6 @@ export function createHookHandlers(deps: HookDeps) {
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
   const recordedToolCalls = new Set<string>();
-  const pendingSkillEpochKeys = new Set<string>();
   const turnAssociations =
     deps.turnAssociations ?? new TurnAssociationRegistry();
 
@@ -371,7 +302,6 @@ export function createHookHandlers(deps: HookDeps) {
           validationErrors: reviewResult.validationErrors,
           noFindingReasonCounts: reviewResult.noFindingReasonCounts,
           schemaRejectionReasonCounts: reviewResult.schemaRejectionReasonCounts,
-          skillPlacementCandidate: candidate.skillPlacementCandidate,
         },
       );
       if (
@@ -382,17 +312,7 @@ export function createHookHandlers(deps: HookDeps) {
         qmdExperienceIndex.schedule(experienceCatalog.listAll());
       }
     } finally {
-      if (candidate.skillPlacementCandidate) {
-        pendingSkillEpochKeys.delete(
-          candidate.skillPlacementCandidate.epochKey,
-        );
-      }
-    }
-  });
-
-  reviewScheduler.setOnDiscard((candidate) => {
-    if (candidate.skillPlacementCandidate) {
-      pendingSkillEpochKeys.delete(candidate.skillPlacementCandidate.epochKey);
+      // Intent review run complete
     }
   });
 
@@ -1769,49 +1689,14 @@ export function createHookHandlers(deps: HookDeps) {
 
   async function buildReviewSnapshot(
     baseSnapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>,
-    agentId: string,
-    skillPlacementCandidate?: SkillPlacementReviewCandidate,
     capabilityFit?: CapabilityFitEvidence,
   ) {
-    const availableSkillNames = skillPlacementCandidate
-      ? [skillPlacementCandidate.name]
-      : [];
-    const resolvedAvailableSkills =
-      availableSkillNames.length > 0
-        ? await resolveAvailableSkills({
-            api,
-            agentId,
-            bundledSkillsDir,
-            nativeBundledSkillsDir: await nativeBundledSkillsDir,
-            sharedRoots: sharedRoots(),
-            skillNames: [...new Set(availableSkillNames)],
-          })
-        : [];
-    const skillInventory = skillPlacementCandidate
-      ? await skillInventoryResolver({
-          api,
-          agentId,
-          bundledSkillsDir,
-          nativeBundledSkillsDir: await nativeBundledSkillsDir,
-          sharedRoots: sharedRoots(),
-        })
-      : undefined;
-    const selectedPlacementSkill = skillPlacementCandidate
-      ? await resolveSelectedPlacementSkill(
-          skillPlacementCandidate,
-          resolvedAvailableSkills,
-          skillInventory,
-        )
-      : undefined;
     return {
       ...baseSnapshot,
-      ...(skillPlacementCandidate ? { agentId } : {}),
       current: {
         ...baseSnapshot.current,
         ...(capabilityFit ? { capabilityFit } : {}),
       },
-      ...(skillPlacementCandidate ? { skillPlacementCandidate } : {}),
-      ...(selectedPlacementSkill ? { selectedPlacementSkill } : {}),
     };
   }
 
@@ -1822,7 +1707,6 @@ export function createHookHandlers(deps: HookDeps) {
     modelRef: NonNullable<ReturnType<typeof getReviewModelRef>>;
     snapshot: Awaited<ReturnType<typeof buildReviewSnapshot>>;
     triggers: readonly ReviewTrigger[];
-    skillPlacementCandidate?: SkillPlacementReviewCandidate;
   }): boolean {
     try {
       return reviewScheduler.schedule({
@@ -1833,7 +1717,6 @@ export function createHookHandlers(deps: HookDeps) {
         modelRef: params.modelRef,
         snapshot: params.snapshot,
         triggers: params.triggers,
-        skillPlacementCandidate: params.skillPlacementCandidate,
       });
     } catch (error) {
       logger.warn("failed to enqueue Intent Review", { error });
@@ -1844,7 +1727,6 @@ export function createHookHandlers(deps: HookDeps) {
   function resolveCapabilityFitEvidence(params: {
     snapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>;
     config: ResolvedSkillHarnessPluginConfig;
-    skillPlacementCandidate?: SkillPlacementReviewCandidate;
   }): CapabilityFitEvidence | undefined {
     const observedSkillNames = [
       ...new Set(
@@ -1853,16 +1735,6 @@ export function createHookHandlers(deps: HookDeps) {
         ),
       ),
     ];
-    if (params.skillPlacementCandidate) {
-      return {
-        source: "skill-placement",
-        observedSkillNames,
-        turnHasToolErrors: (params.snapshot.current.toolCalls ?? []).some(
-          (call) => call.error !== undefined,
-        ),
-        recoveryVerified: false,
-      };
-    }
 
     const toolCalls = params.snapshot.current.toolCalls ?? [];
     const toolFailureCount = toolCalls.filter(
@@ -1914,104 +1786,34 @@ export function createHookHandlers(deps: HookDeps) {
       baseSnapshot.turnNumber,
       reviewConfig.triggers,
     );
-    let skillPlacementCandidate: SkillPlacementReviewCandidate | undefined;
-    let ownsReservation = false;
     try {
-      if (
-        reviewConfig.triggers.capabilityFit.enabled &&
-        agentEndStats.agentId &&
-        agentEndStats.skillInventoryObserved
-      ) {
-        const completedEpochKeys = reviewLogWriter.completedSkillEpochKeys?.();
-        if (completedEpochKeys) {
-          const excludedEpochKeys = new Set([
-            ...completedEpochKeys,
-            ...pendingSkillEpochKeys,
-          ]);
-          const selected = statsAggregator.selectSkillPlacementCandidate(
-            agentEndStats.agentId,
-            excludedEpochKeys,
-          );
-          if (selected) {
-            pendingSkillEpochKeys.add(selected.epochKey);
-            ownsReservation = true;
-            skillPlacementCandidate = selected;
-            if (!triggers.includes("capability-fit")) {
-              triggers.push("capability-fit");
-            }
-          }
-        }
-      }
       if (triggers.length === 0) return;
 
-      let agentId = skillPlacementCandidate
-        ? agentEndStats.agentId!
-        : (ctx.agentId ?? baseSnapshot.agentId ?? "main");
-      let modelRef = getReviewModelRef(api, agentId, resolvedConfig, {
+      const agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
+      const modelRef = getReviewModelRef(api, agentId, resolvedConfig, {
         modelProviderId: ctx.modelProviderId,
         modelId: ctx.modelId,
       });
       if (!modelRef) return;
-      let capabilityFit = resolveCapabilityFitEvidence({
+      const capabilityFit = resolveCapabilityFitEvidence({
         snapshot: baseSnapshot,
         config: resolvedConfig,
-        skillPlacementCandidate,
       });
-      let snapshot = await buildReviewSnapshot(
+      const snapshot = await buildReviewSnapshot(
         baseSnapshot,
-        agentId,
-        skillPlacementCandidate,
         capabilityFit,
       );
-      const placementSkillName = skillPlacementCandidate?.name
-        .trim()
-        .toLowerCase();
-      if (placementSkillName && !snapshot.selectedPlacementSkill) {
-        pendingSkillEpochKeys.delete(skillPlacementCandidate!.epochKey);
-        ownsReservation = false;
-        skillPlacementCandidate = undefined;
-        capabilityFit = resolveCapabilityFitEvidence({
-          snapshot: baseSnapshot,
-          config: resolvedConfig,
-        });
-        if (!capabilityFit) {
-          const capabilityTriggerIndex = triggers.indexOf("capability-fit");
-          if (capabilityTriggerIndex >= 0) {
-            triggers.splice(capabilityTriggerIndex, 1);
-          }
-        }
-        if (triggers.length === 0) return;
 
-        agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
-        modelRef = getReviewModelRef(api, agentId, resolvedConfig, {
-          modelProviderId: ctx.modelProviderId,
-          modelId: ctx.modelId,
-        });
-        if (!modelRef) return;
-        snapshot = await buildReviewSnapshot(
-          baseSnapshot,
-          agentId,
-          undefined,
-          capabilityFit,
-        );
-      }
-
-      const enqueued = enqueueReviewRun({
+      enqueueReviewRun({
         ctx,
         resolvedConfig,
         agentId,
         modelRef,
         snapshot,
         triggers,
-        skillPlacementCandidate,
       });
-      if (enqueued) ownsReservation = false;
     } catch (error) {
       logger.warn("failed to prepare Intent Review", { error });
-    } finally {
-      if (ownsReservation && skillPlacementCandidate) {
-        pendingSkillEpochKeys.delete(skillPlacementCandidate.epochKey);
-      }
     }
   }
 

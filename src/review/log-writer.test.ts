@@ -218,33 +218,4 @@ describe("IntentReviewLogWriter", () => {
     });
   });
 
-  it("preserves skill-placement epoch idempotency", async () => {
-    const candidate = {
-      epochKey: "a".repeat(64),
-      agentId: "main",
-      name: "unused-skill",
-      source: "workspace" as const,
-      reason: "zero-intent-match-usage" as const,
-      observedTurns: 20,
-      usageTurns: 0,
-      intentMatchedTurns: 0,
-      winnerFingerprint: "wf",
-      fingerprint: "fp",
-    };
-    expect(
-      await writer.record("placement-event", source, [], {
-        outcome: "nofinding",
-        skillPlacementCandidate: candidate,
-      }),
-    ).toBe(true);
-    expect(writer.completedSkillEpochKeys()).toEqual(
-      new Set([candidate.epochKey]),
-    );
-    expect(
-      await writer.record("placement-event-retry", source, [], {
-        outcome: "nofinding",
-        skillPlacementCandidate: candidate,
-      }),
-    ).toBe(false);
-  });
 });

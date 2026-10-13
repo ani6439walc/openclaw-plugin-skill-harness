@@ -1,6 +1,6 @@
 import { logger } from "../../api.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
-import type { ReviewSnapshot, SkillPlacementReviewCandidate } from "./types.js";
+import type { ReviewSnapshot } from "./types.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { PluginHookAgentContext } from "../hooks/types.js";
 import {
@@ -20,7 +20,6 @@ export interface ReviewCandidate {
   modelRef: { provider: string; model: string };
   snapshot: ReviewSnapshot;
   triggers: readonly ReviewTrigger[];
-  skillPlacementCandidate?: SkillPlacementReviewCandidate;
 }
 
 export type ReviewRunner = (
