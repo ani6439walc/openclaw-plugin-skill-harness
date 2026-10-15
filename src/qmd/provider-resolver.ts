@@ -1,10 +1,10 @@
 import type { OpenClawConfig } from "../../api.js";
-import type { ResolvedQmdConfig } from "../types.js";
+import type { ResolvedQmdConfig, SecretRef } from "../types.js";
 
 export interface RawQmdEndpointInput {
   baseUrl?: string;
   model?: string;
-  apiKey?: string;
+  apiKey?: string | SecretRef | unknown;
   dimension?: number;
 }
 
@@ -226,8 +226,10 @@ export function resolveQmdEndpoint(
     }
   }
 
-  const explicitApiKey = rawEndpoint.apiKey?.trim();
-  let resolvedApiKey: string | undefined = explicitApiKey || undefined;
+  let resolvedApiKey: string | undefined;
+  if (rawEndpoint.apiKey !== undefined && rawEndpoint.apiKey !== null) {
+    resolvedApiKey = extractApiKeyFromProvider(rawEndpoint.apiKey, env);
+  }
 
   // 1. Check model-specific apiKey under providerEntry.models first
   if (

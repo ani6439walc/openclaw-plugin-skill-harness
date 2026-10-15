@@ -19,6 +19,12 @@ export type ResolvedReviewConfig = {
   };
 };
 
+export type SecretRef = {
+  source?: string;
+  provider?: string;
+  id: string;
+};
+
 export type QmdEndpointConfig = {
   baseUrl?: string;
   model?: string;

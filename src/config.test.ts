@@ -657,6 +657,40 @@ describe("resolveConfig", () => {
       expect(result.qmd.jev?.apiKey).toBe("top-level-key");
     });
 
+    it("resolves apiKey specified as a SecretRef object in jev and qmd.embedding", () => {
+      const result = resolveConfig(
+        {
+          qmd: {
+            embedding: {
+              model: "custom/embed",
+              apiKey: {
+                source: "env",
+                provider: "default",
+                id: "EMBED_SECRET",
+              },
+            },
+            expansion: {
+              model: "custom/expand",
+            },
+          },
+          jev: {
+            model: "custom/jev",
+            apiKey: { source: "env", id: "JEV_SECRET" },
+          },
+        },
+        {
+          env: {
+            EMBED_SECRET: "resolved-embed-val",
+            JEV_SECRET: "resolved-jev-val",
+          },
+        },
+      );
+
+      expect(result.qmd.embedding.apiKey).toBe("resolved-embed-val");
+      expect(result.jev?.apiKey).toBe("resolved-jev-val");
+      expect(result.qmd.jev?.apiKey).toBe("resolved-jev-val");
+    });
+
     it("resolves default skills.search weights and index refresh interval", () => {
       const manifest = JSON.parse(
         readFileSync(

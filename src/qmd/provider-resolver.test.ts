@@ -213,6 +213,20 @@ describe("resolveQmdEndpoint", () => {
     expect(result.apiKey).toBe("token-abc");
   });
 
+  it("resolves apiKey directly provided as a SecretRef object", () => {
+    const env = { DIRECT_SECRET_KEY: "direct-secret-val" } as NodeJS.ProcessEnv;
+
+    const result = resolveQmdEndpoint(
+      {
+        model: "custom/model-v1",
+        apiKey: { source: "env", provider: "default", id: "DIRECT_SECRET_KEY" },
+      },
+      { env },
+    );
+
+    expect(result.apiKey).toBe("direct-secret-val");
+  });
+
   it("falls back to well-known default baseUrls and environment variables", () => {
     const env = {
       OPENAI_API_KEY: "openai-test-key",

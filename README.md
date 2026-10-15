@@ -123,7 +123,7 @@ Merge this entry into your existing `openclaw.json`:
 }
 ```
 
-All three model settings are required. The example's `bifrost` and `typesafe` providers must already exist in OpenClaw's provider configuration. `provider/model` resolves endpoint and credentials from that configuration. Alternatively, configure `baseUrl`, `model`, and `apiKey` explicitly on each endpoint. `qmd.embedding.dimension` defaults to `1536`; set it to match your embedding model.
+All three model settings are required. The example's `bifrost` and `typesafe` providers must already exist in OpenClaw's provider configuration. `provider/model` resolves endpoint and credentials from that configuration. Alternatively, configure `baseUrl`, `model`, and `apiKey` (string or SecretRef object) explicitly on each endpoint. `qmd.embedding.dimension` defaults to `1536`; set it to match your embedding model.
 
 #### Shared document embedding cache and Voyage
 

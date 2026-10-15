@@ -588,10 +588,21 @@ const ReviewSchema = z
     triggers: val.triggers,
   }));
 
+const SecretRefSchema = z.object({
+  source: z.string().optional(),
+  provider: z.string().optional(),
+  id: z.string().min(1),
+});
+
+const EndpointApiKeySchema = z
+  .union([z.string().trim(), SecretRefSchema])
+  .optional()
+  .catch(undefined);
+
 const QmdEndpointObjectSchema = z.object({
   baseUrl: z.string().trim().catch(""),
   model: z.string().trim().catch(""),
-  apiKey: z.string().trim().optional().catch(undefined),
+  apiKey: EndpointApiKeySchema,
 });
 const QmdEndpointSchema = QmdEndpointObjectSchema.catch({
   baseUrl: "",
@@ -605,7 +616,7 @@ const QmdJevSchema = z
   .object({
     baseUrl: z.string().trim().optional().catch(undefined),
     model: z.string().trim().optional().catch(undefined),
-    apiKey: z.string().trim().optional().catch(undefined),
+    apiKey: EndpointApiKeySchema,
   })
   .optional()
   .catch(undefined);

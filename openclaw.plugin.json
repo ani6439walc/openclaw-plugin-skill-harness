@@ -45,8 +45,20 @@
                 "description": "Embedding model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/text-embedding-3-small')."
               },
               "apiKey": {
-                "type": "string",
-                "description": "Optional API key for embeddings. If omitted, resolved from the OpenClaw provider or environment."
+                "description": "Optional API key or SecretRef object for embeddings. If omitted, resolved from the OpenClaw provider or environment.",
+                "anyOf": [
+                  { "type": "string" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["id"],
+                    "properties": {
+                      "source": { "type": "string" },
+                      "provider": { "type": "string" },
+                      "id": { "type": "string" }
+                    }
+                  }
+                ]
               },
               "dimension": {
                 "type": "integer",
@@ -70,8 +82,20 @@
                 "description": "Expansion model name or OpenClaw 'provider/model' reference (e.g. 'bifrost/gpt-4o-mini')."
               },
               "apiKey": {
-                "type": "string",
-                "description": "Optional API key for expansion. If omitted, resolved from the OpenClaw provider or environment."
+                "description": "Optional API key or SecretRef object for expansion. If omitted, resolved from the OpenClaw provider or environment.",
+                "anyOf": [
+                  { "type": "string" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["id"],
+                    "properties": {
+                      "source": { "type": "string" },
+                      "provider": { "type": "string" },
+                      "id": { "type": "string" }
+                    }
+                  }
+                ]
               }
             }
           },
@@ -100,8 +124,20 @@
             "description": "TypeSafe Jev model name or OpenClaw 'provider/model' reference (e.g. 'typesafe/jev-latest' or 'openrouter/typesafe/jev-latest')."
           },
           "apiKey": {
-            "type": "string",
-            "description": "Optional API key for TypeSafe Jev. If omitted, resolved from the OpenClaw provider, TYPESAFE_API_KEY, or environment."
+            "description": "Optional API key or SecretRef object for TypeSafe Jev. If omitted, resolved from the OpenClaw provider, TYPESAFE_API_KEY, or environment.",
+            "anyOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id"],
+                "properties": {
+                  "source": { "type": "string" },
+                  "provider": { "type": "string" },
+                  "id": { "type": "string" }
+                }
+              }
+            ]
           }
         }
       },
