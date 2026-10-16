@@ -328,7 +328,7 @@ export function buildStoreModels(config: ResolvedQmdConfig) {
   return {
     ...(embeddingCacheDir ? { embed_cache_dir: embeddingCacheDir } : {}),
     embed_api_url: config.embedding.baseUrl,
-    embed_api_model: config.embedding.model,
+    embed_api_model: normalizeEmbeddingModel(config.embedding.model),
     ...(config.embedding.apiKey
       ? { embed_api_key: config.embedding.apiKey }
       : {}),
