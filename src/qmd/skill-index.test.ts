@@ -833,6 +833,95 @@ describe("createSkillQmdIndex", () => {
       "partial retry did not resume",
     );
     expect(createStore).toHaveBeenCalledTimes(1);
+    expect(store.embed).toHaveBeenNthCalledWith(1, undefined);
+    expect(store.embed).toHaveBeenNthCalledWith(2, undefined);
+    await index.close();
+  });
+
+  it("forces the next embed only after a vector-space identity mismatch", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-identity-"));
+    roots.push(root);
+    const pendingTimers: Array<() => void> = [];
+    const embed = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("vector space changed"), {
+          code: "IDENTITY_MISMATCH",
+        }),
+      )
+      .mockResolvedValueOnce({ errors: 0 });
+    const store = createStoreDouble({
+      embed,
+      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
+    });
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: (async () => store) as never,
+      nowMs: () => nowMs,
+      setTimer: (callback) => {
+        pendingTimers.push(callback);
+        return callback;
+      },
+      clearTimer: () => undefined,
+    });
+
+    index.schedule("main", { skills: [], sourceRoots: ["/fixture"] });
+    await waitFor(() => pendingTimers.length === 1, "identity retry missing");
+    pendingTimers.shift()?.();
+    await waitFor(() => embed.mock.calls.length === 2, "forced embed missing");
+    expect(embed).toHaveBeenNthCalledWith(1, undefined);
+    expect(embed).toHaveBeenNthCalledWith(2, { force: true });
+    expect(index.getStatus("main")).toBe("ready");
+    await index.close();
+  });
+
+  it("keeps the forced embed when a later retry fails before it runs", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "skill-harness-identity-sticky-"),
+    );
+    roots.push(root);
+    const pendingTimers: Array<() => void> = [];
+    const embed = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("vector space changed"), {
+          code: "IDENTITY_MISMATCH",
+        }),
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error("timed out"), { code: "ETIMEDOUT" }),
+      )
+      .mockResolvedValueOnce({ errors: 0 });
+    const store = createStoreDouble({
+      embed,
+      getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
+    });
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore: (async () => store) as never,
+      nowMs: () => nowMs,
+      setTimer: (callback) => {
+        pendingTimers.push(callback);
+        return callback;
+      },
+      clearTimer: () => undefined,
+    });
+
+    index.schedule("main", { skills: [], sourceRoots: ["/fixture"] });
+    await waitFor(() => pendingTimers.length === 1, "identity retry missing");
+    pendingTimers.shift()?.();
+    await waitFor(() => pendingTimers.length === 1, "timeout retry missing");
+    pendingTimers.shift()?.();
+    await waitFor(
+      () => embed.mock.calls.length === 3,
+      "sticky forced embed missing",
+    );
+    expect(embed).toHaveBeenNthCalledWith(1, undefined);
+    expect(embed).toHaveBeenNthCalledWith(2, { force: true });
+    expect(embed).toHaveBeenNthCalledWith(3, { force: true });
+    expect(index.getStatus("main")).toBe("ready");
     await index.close();
   });
 

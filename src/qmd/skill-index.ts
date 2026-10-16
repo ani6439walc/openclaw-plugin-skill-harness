@@ -54,6 +54,8 @@ function refreshFailureReason(error: unknown): string {
       return "lifetime-pin-unavailable";
     case "EMBEDDING_INCOMPLETE":
       return "embedding-incomplete";
+    case "IDENTITY_MISMATCH":
+      return "embedding-identity-mismatch";
     case "LEASE_BUSY":
       return "embedding-lease-busy";
     case "SQLITE_BUSY":
@@ -605,6 +607,8 @@ type SharedIndexState = {
   consecutiveFailures: number;
   nextRetryAtMs: number;
   needsEmbedding: number;
+  /** Next embed clears vectors. Only a vector-space mismatch sets this. */
+  forceEmbeddingRebuild: boolean;
   lastRefreshError?: unknown;
   agentIds: Set<string>;
   skillsByAgent: Map<string, readonly AvailableSkill[]>;
@@ -688,6 +692,7 @@ export function createSkillQmdIndex(params: {
       sourceRoots: [...sourceRoots],
       status: "idle",
       consecutiveFailures: 0,
+      forceEmbeddingRebuild: false,
       nextRetryAtMs: 0,
       needsEmbedding: 0,
       agentIds: new Set(),
@@ -1148,6 +1153,10 @@ export function createSkillQmdIndex(params: {
     );
     state.nextRetryAtMs = now() + delayMs;
     state.lastRefreshError = error;
+    // Sticky until embed returns. A later timeout must not drop the forced rebuild.
+    if (phase === "embed" && errorCode(error) === "IDENTITY_MISMATCH") {
+      state.forceEmbeddingRebuild = true;
+    }
     state.status = state.usable ? "ready" : "failed";
     // The host PluginLogger accepts a single string; only fixed safe fields survive.
     logger.warn(
@@ -1236,7 +1245,10 @@ export function createSkillQmdIndex(params: {
             state.status = "ready";
             if (closed) return true;
             phase = "embed";
-            const embedResult = await store.embed();
+            const embedResult = await store.embed(
+              state.forceEmbeddingRebuild ? { force: true } : undefined,
+            );
+            state.forceEmbeddingRebuild = false;
             phase = "status";
             const status = await store.getStatus();
             state.needsEmbedding = status.needsEmbedding;
