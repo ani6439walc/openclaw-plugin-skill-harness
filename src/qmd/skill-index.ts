@@ -1153,8 +1153,10 @@ export function createSkillQmdIndex(params: {
     );
     state.nextRetryAtMs = now() + delayMs;
     state.lastRefreshError = error;
-    state.forceEmbeddingRebuild =
-      phase === "embed" && errorCode(error) === "IDENTITY_MISMATCH";
+    // Sticky until embed returns. A later timeout must not drop the forced rebuild.
+    if (phase === "embed" && errorCode(error) === "IDENTITY_MISMATCH") {
+      state.forceEmbeddingRebuild = true;
+    }
     state.status = state.usable ? "ready" : "failed";
     // The host PluginLogger accepts a single string; only fixed safe fields survive.
     logger.warn(
