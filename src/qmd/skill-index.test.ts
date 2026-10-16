@@ -18,11 +18,51 @@ import type { AvailableSkill } from "../skills/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
 import {
   createSkillQmdIndex,
+  safeErrorDiagnostic,
   safePathSegment,
   skillIndexFingerprint,
   skillIdentityFromDocsPath,
   writeSkillSnapshot,
 } from "./skill-index.js";
+
+describe("safeErrorDiagnostic", () => {
+  it("keeps name, code, and a truncated redacted message", () => {
+    const error = Object.assign(
+      new Error(
+        `upstream rejected api-key="***" Authorization: Bearer *** ${"sk-"}liveSecretValue ${"x".repeat(300)}`,
+      ),
+      { code: "PROVIDER_REJECTED", cause: new Error("nested secret=***") },
+    );
+    error.name = "EmbeddingProviderError";
+
+    const diagnostic = safeErrorDiagnostic(error);
+
+    expect(diagnostic.errorName).toBe("EmbeddingProviderError");
+    expect(diagnostic.errorCode).toBe("PROVIDER_REJECTED");
+    expect(diagnostic.errorMessage.startsWith("upstream rejected api-key=")).toBe(
+      true,
+    );
+    expect(diagnostic.errorMessage).toContain("Authorization: Bearer ");
+    expect(diagnostic.errorMessage.endsWith("...")).toBe(true);
+    expect(diagnostic.errorMessage.length).toBeLessThanOrEqual(180);
+    expect(diagnostic.errorMessage).not.toContain("***");
+    expect(diagnostic.errorMessage).not.toContain("liveSecret");
+    expect(JSON.stringify(diagnostic)).not.toContain("nested secret");
+    expect(diagnostic).not.toHaveProperty("stack");
+    expect(diagnostic).not.toHaveProperty("cause");
+  });
+
+  it("omits non-string codes", () => {
+    expect(
+      safeErrorDiagnostic(
+        Object.assign(new Error("sqlite busy"), { code: 5 }),
+      ),
+    ).toEqual({
+      errorName: "Error",
+      errorMessage: "sqlite busy",
+    });
+  });
+});
 
 const roots: string[] = [];
 let nowMs = 1_000;
@@ -559,7 +599,7 @@ describe("createSkillQmdIndex", () => {
     ["store-open", "LEASE_BUSY", "embedding-lease-busy", false],
     ["update", "SQLITE_BUSY", "database-busy", false],
     ["embed", "ETIMEDOUT", "request-timeout", true],
-    ["status", "secret-provider-code", "operation-failed", true],
+    ["status", "PROVIDER_REJECTED", "operation-failed", true],
   ] as const)(
     "persists safe %s failure and recovery through a single-string host logger",
     async (phase, code, reason, searchable) => {
@@ -612,10 +652,14 @@ describe("createSkillQmdIndex", () => {
           searchable,
           consecutiveFailures: 1,
           retryDelayMs: 5000,
+          errorName: "Error",
+          errorCode: code,
+          errorMessage: expect.stringContaining(
+            "private query provider response api-key=",
+          ),
         });
-        expect(call[0]).not.toContain("private query");
-        expect(call[0]).not.toContain("api-key");
-        expect(call[0]).not.toContain("secret-provider-code");
+        expect(call[0]).not.toContain("***");
+        expect(call[0]).not.toContain("sk-");
         const timer = timers.shift()!;
         nowMs += timer.delayMs;
         timer.callback();

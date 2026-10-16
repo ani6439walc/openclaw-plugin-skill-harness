@@ -39,11 +39,12 @@ type RefreshPhase =
   | "embed"
   | "status";
 
+const DIAGNOSTIC_MESSAGE_MAX = 180;
+const SECRET_ASSIGNMENT =
+  /((?:api[-_]?key|authorization|token|secret|password|credential)["']?\s*[:=]\s*(?:bearer\s+)?)(?:"[^"]*"|'[^']*'|\S+)/gi;
+
 function refreshFailureReason(error: unknown): string {
-  const code =
-    error && typeof error === "object" && "code" in error
-      ? error.code
-      : undefined;
+  const code = errorCode(error);
   switch (code) {
     case CATALOG_BUSY:
       return "catalog-unavailable";
@@ -69,6 +70,49 @@ function refreshFailureReason(error: unknown): string {
     default:
       return "operation-failed";
   }
+}
+
+function errorCode(error: unknown): unknown {
+  return error && typeof error === "object" && "code" in error
+    ? error.code
+    : undefined;
+}
+
+/** Name, code, and a redacted message. Never stack, cause, or raw provider bodies. */
+export function safeErrorDiagnostic(error: unknown): {
+  errorName?: string;
+  errorCode?: string;
+  errorMessage: string;
+} {
+  const name =
+    error instanceof Error
+      ? error.name
+      : error && typeof error === "object" && "name" in error
+        ? String(error.name)
+        : undefined;
+  const code = errorCode(error);
+  const raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "non-error throw";
+  const redacted = raw
+    .replace(SECRET_ASSIGNMENT, "$1[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim();
+  const errorMessage =
+    redacted.length > DIAGNOSTIC_MESSAGE_MAX
+      ? `${redacted.slice(0, DIAGNOSTIC_MESSAGE_MAX - 3)}...`
+      : redacted;
+  return {
+    ...(name ? { errorName: name.slice(0, 80) } : {}),
+    ...(typeof code === "string" && code.length > 0 && code.length <= 80
+      ? { errorCode: code }
+      : {}),
+    errorMessage: errorMessage || "empty error message",
+  };
 }
 
 type QmdCreateStore = typeof createStore;
@@ -767,8 +811,8 @@ export function createSkillQmdIndex(params: {
         agent.allowedSkillNames = new Set(
           Array.isArray(parsed.allowedSkillNames)
             ? parsed.allowedSkillNames.filter(
-                (value): value is string => typeof value === "string",
-              )
+              (value): value is string => typeof value === "string",
+            )
             : [],
         );
         shared.agentIds.add(agentId);
@@ -1114,6 +1158,7 @@ export function createSkillQmdIndex(params: {
         searchable: state.usable,
         consecutiveFailures: state.consecutiveFailures,
         retryDelayMs: delayMs,
+        ...safeErrorDiagnostic(error),
       })}`,
     );
     armRetry(state);

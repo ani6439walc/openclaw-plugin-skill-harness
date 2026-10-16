@@ -354,8 +354,10 @@ do not claim paper benchmark results as this plugin's measurements or imply that
 related-work algorithms are implemented without source evidence.
 
 QMD skill refresh diagnostics must survive the host PluginLogger's single-string
-contract. Encode only explicit safe fields in the diagnostic message: fingerprint,
-phase, fixed reason, searchable, failure count and retry delay; log recovery only
-after update/publication/embedding verification succeeds. Do not serialize raw
-errors, messages, provider responses, queries or credentials. Unknown error codes
-map to operation-failed. Preserve retry, lock, discovery and lease behavior.
+contract. Encode fingerprint, phase, fixed reason, searchable, failure count,
+retry delay, and a redacted error diagnostic (`errorName`, string `errorCode`,
+truncated `errorMessage`). Log recovery only after update/publication/embedding
+verification succeeds. Redact credential assignments and `sk-` tokens before
+logging. Do not serialize stacks, causes, raw provider bodies, queries, or
+credentials. Unknown error codes still map to `operation-failed`. Preserve retry,
+lock, discovery and lease behavior.
