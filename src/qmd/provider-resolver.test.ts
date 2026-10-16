@@ -562,6 +562,28 @@ describe("buildStoreModels", () => {
     expect(models.jev_api_key).toBe("jev-key");
   });
 
+  it.each([
+    "text-embedding-3-small",
+    "openai/text-embedding-3-small",
+    "bifrost/text-embedding-3-small",
+  ])("sends %s to QMD without the provider prefix", (model) => {
+    const models = buildStoreModels({
+      ...baseConfig,
+      embedding: {
+        baseUrl: "https://bifrost.example.test/openai/v1",
+        model,
+        apiKey: "embed-key",
+        dimension: 1536,
+      },
+    });
+    expect(models).toMatchObject({
+      embed_api_url: "https://bifrost.example.test/openai/v1",
+      embed_api_model: "text-embedding-3-small",
+      embed_api_key: "embed-key",
+      embed_dimension: 1536,
+    });
+  });
+
   it("does not populate Jev store models when no Jev config or model is present", () => {
     const models = buildStoreModels(baseConfig);
     expect(models).not.toHaveProperty("jev_base_url");

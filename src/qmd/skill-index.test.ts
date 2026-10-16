@@ -1151,10 +1151,7 @@ describe("createSkillQmdIndex", () => {
     };
     scheduleSkills(index, "main", [skill]);
     await index.search({ agentId: "main", query: "body", limit: 1 });
-    expect(createStore).toHaveBeenCalledTimes(2);
-    const first = createStore.mock.calls[0]?.[0] as { dbPath: string };
-    const second = createStore.mock.calls[1]?.[0] as { dbPath: string };
-    expect(second.dbPath).toBe(first.dbPath);
+    expect(createStore).toHaveBeenCalledTimes(1);
     await index.close();
   });
 

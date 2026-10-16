@@ -49,7 +49,8 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'",
     "test": "vitest run",
-    "build": "tsc"
+    "build": "tsc",
+    "test:plugin-loader": "node --input-type=module --eval \"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); require('./dist/index.js');\""
   },
   "dependencies": {
     "@typesafe-ai/sdk": "0.6.0",
