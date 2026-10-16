@@ -39,9 +39,9 @@ describe("safeErrorDiagnostic", () => {
 
     expect(diagnostic.errorName).toBe("EmbeddingProviderError");
     expect(diagnostic.errorCode).toBe("PROVIDER_REJECTED");
-    expect(diagnostic.errorMessage.startsWith("upstream rejected api-key=")).toBe(
-      true,
-    );
+    expect(
+      diagnostic.errorMessage.startsWith("upstream rejected api-key="),
+    ).toBe(true);
     expect(diagnostic.errorMessage).toContain("Authorization: Bearer ");
     expect(diagnostic.errorMessage.endsWith("...")).toBe(true);
     expect(diagnostic.errorMessage.length).toBeLessThanOrEqual(180);
@@ -54,9 +54,7 @@ describe("safeErrorDiagnostic", () => {
 
   it("omits non-string codes", () => {
     expect(
-      safeErrorDiagnostic(
-        Object.assign(new Error("sqlite busy"), { code: 5 }),
-      ),
+      safeErrorDiagnostic(Object.assign(new Error("sqlite busy"), { code: 5 })),
     ).toEqual({
       errorName: "Error",
       errorMessage: "sqlite busy",

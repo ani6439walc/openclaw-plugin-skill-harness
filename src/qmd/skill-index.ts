@@ -811,8 +811,8 @@ export function createSkillQmdIndex(params: {
         agent.allowedSkillNames = new Set(
           Array.isArray(parsed.allowedSkillNames)
             ? parsed.allowedSkillNames.filter(
-              (value): value is string => typeof value === "string",
-            )
+                (value): value is string => typeof value === "string",
+              )
             : [],
         );
         shared.agentIds.add(agentId);
