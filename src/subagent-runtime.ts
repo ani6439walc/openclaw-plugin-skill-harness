@@ -1,27 +1,18 @@
-import type { AsyncLocalStorage } from "node:async_hooks";
+import type { OpenClawPluginApi } from "../api.js";
 import { isRecord } from "./guards.js";
 
-/**
- * Executes a background task detached from OpenClaw's turn-scoped AsyncWorkScope.
- *
- * OpenClaw tracks turns via AsyncWorkScope in an AsyncLocalStorage singleton.
- * Background review tasks run after the turn finishes, at which point the parent
- * AsyncWorkScope has already drained and transitioned to 'closed'. If the background
- * task inherits that closed scope, calling runEmbeddedAgent immediately throws
- * "Async work scope is closed".
- *
- * Exiting openclaw.asyncWorkScope allows the subagent to establish its own root
- * AsyncWorkScope while preserving other runtime contexts like pluginRuntimeGatewayRequestScope.
- */
-export function runDetachedFromWorkScope<T>(fn: () => T): T {
-  const scopeKey = Symbol.for("openclaw.asyncWorkScope");
-  const scopeStorage = (globalThis as Record<symbol, unknown>)[scopeKey] as
-    AsyncLocalStorage<unknown> | undefined;
+export type BackgroundRunner = NonNullable<
+  OpenClawPluginApi["lifecycle"]["runInBackgroundContext"]
+>;
 
-  if (scopeStorage && typeof scopeStorage.exit === "function") {
-    return scopeStorage.exit(fn);
-  }
-  return fn();
+/** Unmanaged API hosts have no instance context to detach or retain. */
+export function createBackgroundRunner(
+  lifecycle:
+    Pick<OpenClawPluginApi["lifecycle"], "runInBackgroundContext"> | undefined,
+): BackgroundRunner {
+  return lifecycle?.runInBackgroundContext
+    ? (run) => lifecycle.runInBackgroundContext!(run)
+    : (run) => run();
 }
 
 export function buildEmbeddedSubagentRunDefaults() {
@@ -48,17 +39,6 @@ export function isGatewayDrainingError(error: unknown): boolean {
     candidate.message === "Gateway is draining; new tasks are not accepted" ||
     candidate.message === "gateway is draining for restart"
   );
-}
-
-export function isGatewayDraining(): boolean {
-  try {
-    const admissionKey = Symbol.for("openclaw.gatewayWorkAdmissionState");
-    const state = (globalThis as Record<symbol, unknown>)[admissionKey] as
-      { restartDraining?: boolean } | undefined;
-    return state?.restartDraining === true;
-  } catch {
-    return false;
-  }
 }
 
 export function formatEmbeddedError(error: unknown): string | undefined {

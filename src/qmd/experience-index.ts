@@ -4,6 +4,7 @@ import path from "node:path";
 import type { QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
+import type { BackgroundRunner } from "../subagent-runtime.js";
 import { safeErrorClassification } from "../error-diagnostics.js";
 import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
@@ -222,8 +223,26 @@ export function createSkillExperienceQmdIndex(params: {
   config: () => ResolvedQmdConfig;
   createStore?: QmdCreateStore;
   readOnly?: boolean;
+  runInBackgroundContext?: BackgroundRunner;
   getEntries?: () => readonly SkillExperienceEntry[];
 }): SkillExperienceQmdIndex {
+  const runInBackgroundContext =
+    params.runInBackgroundContext ?? ((run) => run());
+  const runBackgroundTask = (
+    run: () => void | Promise<void>,
+  ): Promise<void> => {
+    const failed = (error: unknown) => {
+      logger.warn("QMD experience background work failed", {
+        errorType: error instanceof Error ? "Error" : typeof error,
+      });
+    };
+    try {
+      return Promise.resolve(runInBackgroundContext(run)).catch(failed);
+    } catch (error) {
+      failed(error);
+      return Promise.resolve();
+    }
+  };
   const indexPath = path.join(params.dataRoot, "qmd", "experiences");
   const databasePath = path.join(indexPath, "experience-routing.sqlite");
   const docsRoot = path.join(indexPath, "docs");
@@ -633,14 +652,26 @@ export function createSkillExperienceQmdIndex(params: {
         INITIAL_RETRY_DELAY_MS * 2 ** (consecutiveFailures - 1),
         MAX_RETRY_DELAY_MS,
       );
-      desired ??= target;
-      clearRetryTimer();
-      retryTimer = setTimeout(() => {
-        retryTimer = undefined;
-        if (!closed && desired && !running) {
-          running = runWorker();
+      if (!closed) {
+        desired ??= target;
+        clearRetryTimer();
+        try {
+          retryTimer = runInBackgroundContext(() =>
+            setTimeout(() => {
+              retryTimer = undefined;
+              if (closed) return Promise.resolve();
+              return runBackgroundTask(() => {
+                if (desired) return startWorker();
+              });
+            }, delay),
+          );
+        } catch (admissionError) {
+          logger.warn("QMD experience retry admission failed", {
+            errorType:
+              admissionError instanceof Error ? "Error" : typeof admissionError,
+          });
         }
-      }, delay);
+      }
       logger.warn(
         `failed to build QMD experience index ${JSON.stringify({
           fingerprint: target.fingerprint,
@@ -675,6 +706,17 @@ export function createSkillExperienceQmdIndex(params: {
     }
   }
 
+  function startWorker(): Promise<void> {
+    if (closed) return Promise.resolve();
+    if (running) return running;
+    const work = runBackgroundTask(runWorker);
+    running = work;
+    void work.then(() => {
+      if (running === work) running = undefined;
+    });
+    return work;
+  }
+
   function isReadyForCurrentCatalog(): boolean {
     return (
       status === "ready" &&
@@ -685,30 +727,34 @@ export function createSkillExperienceQmdIndex(params: {
 
   const initialization = params.readOnly
     ? Promise.resolve()
-    : openExistingIndex();
+    : runBackgroundTask(openExistingIndex);
 
   return {
     schedule(entries) {
-      if (closed) return;
-      knownEntriesById = new Map(entries.map((e) => [e.id, e]));
-      const fingerprint = snapshotFingerprint(entries, params.config());
-      expectedFingerprint = fingerprint;
-      if (params.readOnly) return;
+      const schedule = () => {
+        if (closed) return;
+        knownEntriesById = new Map(entries.map((e) => [e.id, e]));
+        const fingerprint = snapshotFingerprint(entries, params.config());
+        expectedFingerprint = fingerprint;
+        if (params.readOnly) return;
 
-      if (currentFingerprint === fingerprint && status === "ready") {
-        desired = undefined;
-        return;
-      }
-      if (buildingFingerprint === fingerprint) {
-        desired = undefined;
-        return;
-      }
+        if (currentFingerprint === fingerprint && status === "ready") {
+          desired = undefined;
+          return;
+        }
+        if (buildingFingerprint === fingerprint) {
+          desired = undefined;
+          return;
+        }
 
-      desired = { entries, fingerprint };
-      if (!running) {
-        clearRetryTimer();
-        running = runWorker();
-      }
+        desired = { entries, fingerprint };
+        if (!running) {
+          clearRetryTimer();
+          return startWorker();
+        }
+      };
+      if (params.readOnly) schedule();
+      else void runBackgroundTask(schedule);
     },
     async search({ query, limit = 8, expansionContext }) {
       await initialization;

@@ -27,7 +27,7 @@ import {
   extractEmbeddedRunError,
   formatEmbeddedError,
   isGatewayDrainingError,
-  runDetachedFromWorkScope,
+  createBackgroundRunner,
 } from "../subagent-runtime.js";
 import { withFileLock } from "../file-utils.js";
 import {
@@ -820,6 +820,11 @@ export async function runReviewSubagent(params: {
   dataRoot?: string;
   abortSignal?: AbortSignal;
 }): Promise<ReviewSubagentResult> {
+  const signals = [params.abortSignal, params.api.lifecycle?.signal].filter(
+    (signal): signal is AbortSignal => signal !== undefined,
+  );
+  const abortSignal = signals.length ? AbortSignal.any(signals) : undefined;
+  if (abortSignal?.aborted) return { findings: [], outcome: "subagent-error" };
   const runId = `skill-harness-review-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   const suffix = crypto
     .createHash("sha1")
@@ -856,7 +861,7 @@ export async function runReviewSubagent(params: {
   );
 
   try {
-    const result = await runDetachedFromWorkScope(() =>
+    const result = await createBackgroundRunner(params.api.lifecycle)(() =>
       params.api.runtime.agent.runEmbeddedAgent({
         sessionId: runId,
         sessionKey,
@@ -880,9 +885,10 @@ export async function runReviewSubagent(params: {
         toolsAllow: buildReviewToolsAllow(),
         disableTools: false,
         thinkLevel: params.config.review.thinking,
-        abortSignal: params.abortSignal,
+        abortSignal,
       }),
     );
+    abortSignal?.throwIfAborted();
     const embeddedError = extractEmbeddedRunError(result);
     if (embeddedError) {
       logger.warn("review subagent returned an error", {
@@ -1006,6 +1012,7 @@ export async function runReviewSubagent(params: {
         ]),
       ];
       const conflicts = await withFileLock(expDir, async () => {
+        abortSignal?.throwIfAborted();
         const unsafePaths = [
           expDir,
           ...conflictCheckIds.map((id) => path.join(expDir, id)),
@@ -1088,7 +1095,7 @@ export async function runReviewSubagent(params: {
     };
   } catch (err) {
     const isAbort =
-      params.abortSignal?.aborted ||
+      abortSignal?.aborted ||
       (err instanceof Error && err.name === "AbortError");
     if (!isGatewayDrainingError(err) && !isAbort) {
       logger.warn("review subagent error", {

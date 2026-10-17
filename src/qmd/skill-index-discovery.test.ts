@@ -57,6 +57,11 @@ function fixture(readOnly = true) {
     dataRoot: root,
     config: () => config,
     readOnly,
+    runInBackgroundContext: readOnly
+      ? () => {
+          throw new Error("discovery must retain its foreground caller");
+        }
+      : undefined,
     createStore,
   });
   instances.push(index);

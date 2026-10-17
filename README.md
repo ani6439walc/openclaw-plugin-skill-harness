@@ -110,6 +110,7 @@ Merge this entry into your existing `openclaw.json`:
     entries: {
       "skill-harness": {
         enabled: false,
+        hooks: { allowConversationAccess: true },
         config: {
           qmd: {
             embedding: { model: "bifrost/text-embedding-3-small" },
@@ -124,6 +125,8 @@ Merge this entry into your existing `openclaw.json`:
 ```
 
 All three model settings are required. The example's `bifrost` and `typesafe` providers must already exist in OpenClaw's provider configuration. `provider/model` resolves endpoint and credentials from that configuration. Alternatively, configure `baseUrl`, `model`, and `apiKey` (string or SecretRef object) explicitly on each endpoint. `qmd.embedding.dimension` defaults to `1536`; set it to match your embedding model.
+
+External plugins need `hooks.allowConversationAccess: true` to register conversation hooks, including automatic prompt routing and end-of-turn Review. Keep `hooks` beside `config`, not inside it. Prompt injection is allowed by default; an explicit `hooks.allowPromptInjection: false` disables the prompt hook even with conversation access. The plugin does not grant itself these permissions. See [OpenClaw hook permissions](https://docs.openclaw.ai/plugins/hooks#permissions-and-scope).
 
 #### Shared document embedding cache and Voyage
 
@@ -192,7 +195,9 @@ openclaw plugins inspect skill-harness --runtime --json
 openclaw plugins doctor
 ```
 
-The runtime inspection checks the running Gateway; `plugins list` alone only checks inventory. Indexes are built and refreshed in the background, so a newly installed plugin may initially have no semantic search results.
+`plugins inspect --runtime` loads the plugin in the inspecting CLI process and reports local registration, configuration, and blocked-hook diagnostics; it does not inspect the running Gateway's loaded instance. `gateway status --deep --require-rpc` checks Gateway availability. Verify the deployed build separately through the intended agent's actual `skill_list`, `skill_view`, and `skill_search` tools, then send an eligible direct-chat request and check Gateway logs and the resulting routing context. Indexes are built and refreshed in the background, so a newly installed plugin may initially have no semantic search results. See [OpenClaw hook troubleshooting](https://docs.openclaw.ai/plugins/hooks#troubleshooting).
+
+After rebuilding an existing linked installation, use `openclaw plugins reload skill-harness` to replace the plugin instance, then repeat those checks. Local build, test, and CLI inspection results establish local compatibility; they do not prove that a running Gateway loaded the changed build.
 
 ## Using Skill Harness
 

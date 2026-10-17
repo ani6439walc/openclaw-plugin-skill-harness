@@ -16,6 +16,7 @@ import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
 import { createIntentReviewScheduler } from "./review/scheduler.js";
+import { createBackgroundRunner } from "./subagent-runtime.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
 import {
@@ -165,6 +166,28 @@ export function createPlugin(
         api.registrationMode === undefined || api.registrationMode === "full";
       let disposed = false;
       let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+      const runInBackgroundContext = createBackgroundRunner(api.lifecycle);
+      const backgroundWork = new Set<Promise<void>>();
+      const runBackgroundTask = (run: () => Promise<void>): Promise<void> => {
+        if (disposed) return Promise.resolve();
+        let work: Promise<void>;
+        try {
+          work = runInBackgroundContext(run);
+        } catch (error) {
+          work = Promise.reject(error);
+        }
+        const settled = work
+          .catch((error: unknown) => {
+            if (!disposed) {
+              logger.warn("plugin background task failed", {
+                errorType: error instanceof Error ? "Error" : typeof error,
+              });
+            }
+          })
+          .finally(() => backgroundWork.delete(settled));
+        backgroundWork.add(settled);
+        return settled;
+      };
       const nativeBundledSkillsDir = resolveOpenClawBundledSkillsDir();
       const experienceCatalog = new SkillExperienceCatalog(dataRoot);
       const activeAgentIds = (): string[] | undefined => {
@@ -180,6 +203,7 @@ export function createPlugin(
       const qmdSkillIndex = createSkillQmdIndex({
         dataRoot,
         readOnly: !ownsBackgroundWork,
+        runInBackgroundContext,
         activeAgentIds,
         config: () => {
           refreshLiveConfigFromRuntime();
@@ -189,6 +213,7 @@ export function createPlugin(
       const qmdExperienceIndex = createSkillExperienceQmdIndex({
         dataRoot,
         readOnly: !ownsBackgroundWork,
+        runInBackgroundContext,
         getEntries: () => experienceCatalog.listAll(),
         config: () => {
           refreshLiveConfigFromRuntime();
@@ -216,12 +241,15 @@ export function createPlugin(
       };
 
       const scheduleSkillSearchIndex = (agentId: string, automatic = false) => {
-        if (disposed || !ownsBackgroundWork) return;
+        if (disposed || !ownsBackgroundWork) return Promise.resolve();
         const normalizedAgentId = canonicalIdentity(agentId);
-        if (!normalizedAgentId || normalizedAgentId === "defaults") return;
+        if (!normalizedAgentId || normalizedAgentId === "defaults") {
+          return Promise.resolve();
+        }
         knownAgentIds.add(normalizedAgentId);
-        void nativeBundledSkillsDir
-          .then(async (resolvedNativeBundledSkillsDir) => {
+        return runBackgroundTask(async () => {
+          try {
+            const resolvedNativeBundledSkillsDir = await nativeBundledSkillsDir;
             if (disposed) return;
             if (
               automatic &&
@@ -250,51 +278,81 @@ export function createPlugin(
                 sharedRoots: config.skills.sharedRoots,
               }).map((root) => root.path),
             });
-          })
-          .catch((error: unknown) => {
+          } catch (error: unknown) {
             logger.warn("failed to schedule QMD skill search index", {
               errorType: error instanceof Error ? "Error" : typeof error,
               scheduled: false,
             });
-          });
+          }
+        });
       };
 
-      const refreshQmdIndexes = () => {
+      const refreshQmdIndexes = async () => {
         if (disposed || !ownsBackgroundWork) return;
         refreshLiveConfigFromRuntime();
         qmdExperienceIndex.schedule(experienceCatalog.listAll());
-        for (const agentId of collectKnownAgentIds()) {
-          scheduleSkillSearchIndex(agentId, true);
-        }
-        void qmdSkillIndex.maintenance?.().catch((error: unknown) => {
-          logger.warn("failed to maintain QMD skill indexes", {
-            errorType: error instanceof Error ? "Error" : typeof error,
-          });
-        });
+        await Promise.all([
+          ...Array.from(collectKnownAgentIds(), (agentId) =>
+            scheduleSkillSearchIndex(agentId, true),
+          ),
+          qmdSkillIndex.maintenance?.(),
+        ]);
       };
 
       const scheduleQmdIndexRefresh = () => {
         if (disposed || !ownsBackgroundWork) return;
         const intervalSeconds = config.qmd.indexRefreshIntervalSeconds;
         if (intervalSeconds <= 0) return;
-        refreshTimer = setTimeout(() => {
-          refreshQmdIndexes();
-          scheduleQmdIndexRefresh();
-        }, intervalSeconds * 1_000);
+        refreshTimer = runInBackgroundContext(() =>
+          setTimeout(() => {
+            refreshTimer = undefined;
+            return runBackgroundTask(async () => {
+              try {
+                await refreshQmdIndexes();
+              } finally {
+                scheduleQmdIndexRefresh();
+              }
+            });
+          }, intervalSeconds * 1_000),
+        );
         refreshTimer.unref();
       };
 
-      const reviewScheduler = createIntentReviewScheduler();
-
-      api.lifecycle?.onDispose?.(async () => {
-        disposed = true;
-        if (refreshTimer !== undefined) clearTimeout(refreshTimer);
-        await Promise.all([
-          reviewScheduler.dispose(),
-          qmdSkillIndex.close(),
-          qmdExperienceIndex.close(),
-        ]);
+      const reviewScheduler = createIntentReviewScheduler({
+        signal: api.lifecycle?.signal,
+        runInBackgroundContext,
       });
+      let stopping: Promise<void> | undefined;
+      const stopBackgroundWork = (): Promise<void> => {
+        if (stopping) return stopping;
+        disposed = true;
+        api.lifecycle?.signal?.removeEventListener("abort", onLifecycleAbort);
+        if (refreshTimer !== undefined) {
+          clearTimeout(refreshTimer);
+          refreshTimer = undefined;
+        }
+        stopping = (async () => {
+          await Promise.all([reviewScheduler.dispose(), ...backgroundWork]);
+          await Promise.all([
+            qmdSkillIndex.close(),
+            qmdExperienceIndex.close(),
+          ]);
+        })();
+        return stopping;
+      };
+      const onLifecycleAbort = () => {
+        void stopBackgroundWork().catch(() => {
+          logger.warn("failed to stop plugin background resources");
+        });
+      };
+      api.lifecycle?.onDispose?.(stopBackgroundWork);
+      if (api.lifecycle?.signal?.aborted) {
+        onLifecycleAbort();
+      } else {
+        api.lifecycle?.signal?.addEventListener("abort", onLifecycleAbort, {
+          once: true,
+        });
+      }
 
       const deps: HookDeps = {
         api: runtimeConfigApi,
@@ -317,7 +375,7 @@ export function createPlugin(
       const handlers = createHookHandlers(deps);
 
       refreshLiveConfigFromRuntime();
-      refreshQmdIndexes();
+      void runBackgroundTask(refreshQmdIndexes);
       scheduleQmdIndexRefresh();
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
@@ -331,6 +389,7 @@ export function createPlugin(
       api.on("message_sending", handlers.onMessageSending);
       api.on("agent_end", handlers.onAgentEnd);
       api.on("session_end", handlers.onSessionEnd);
+      api.on("gateway_stop", stopBackgroundWork);
       registerSkillTools(api, {
         experienceCatalog,
         qmdExperienceIndex,
@@ -346,10 +405,12 @@ export function createPlugin(
         (config.skills.suppressNativeSkillPrompt ||
           config.skills.suppressNativeExtraDirs)
       ) {
-        void suppressNativeSkillsOnStartup({
-          api,
-          suppressNativeSkillPrompt: config.skills.suppressNativeSkillPrompt,
-          suppressNativeExtraDirs: config.skills.suppressNativeExtraDirs,
+        void runBackgroundTask(async () => {
+          await suppressNativeSkillsOnStartup({
+            api,
+            suppressNativeSkillPrompt: config.skills.suppressNativeSkillPrompt,
+            suppressNativeExtraDirs: config.skills.suppressNativeExtraDirs,
+          });
         });
       }
     },
