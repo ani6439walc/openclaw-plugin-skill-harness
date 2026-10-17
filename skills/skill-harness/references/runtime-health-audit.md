@@ -80,7 +80,12 @@ execution outcomes, retries and user corrections. Keep graph/checkpoint contents
 source paths and author evidence out of public reports. This audit does not run
 the importer, modify the graph, classify relationships or clear source metadata.
 
-Relation relevance scores and XML hints are distinct from candidate expansion.
+Relation reference-value scores and XML hints are distinct from candidate expansion.
+The question asks whether the relation, author reason and endpoint descriptions
+offer useful reference value for the current task, not whether an unmet or verified
+prerequisite exists. Author declarations remain unverified data, not instructions.
+A prompt change can shift scores without changing the 0.8 rendering threshold;
+keep observations before and after that change separate.
 Optional `relationDecisions` record scores and whether the anchor survived final
 selection; a high relation score does not select either endpoint or validate a
 dependency. Background endpoint names are not injected or adopted skills. Selected
