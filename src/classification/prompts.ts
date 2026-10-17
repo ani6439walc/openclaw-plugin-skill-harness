@@ -1,7 +1,7 @@
 import { canonicalIdentity } from "../normalize.js";
-import { RELATION_RELEVANCE_THRESHOLD } from "../skills/related.js";
 import type { RelationDecision } from "../skills/related.js";
 import {
+  DEFAULT_RELATION_RELEVANCE_THRESHOLD,
   ROUTING_ADVISORY_SKILLS_ONLY_HEADER,
   ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
   ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER,
@@ -68,6 +68,7 @@ function formatSkillXml(
   skill: AvailableSkill,
   relations: readonly RelationDecision[] = [],
   experiences: readonly SkillExperienceEntry[] = [],
+  relationRelevanceThreshold = DEFAULT_RELATION_RELEVANCE_THRESHOLD,
 ): string {
   const lines: string[] = [];
   if (skill.description) {
@@ -76,7 +77,7 @@ function formatSkillXml(
   for (const relation of relations) {
     if (
       !relation.injected ||
-      relation.score < RELATION_RELEVANCE_THRESHOLD ||
+      relation.score < relationRelevanceThreshold ||
       relation.skill !== skill.name
     )
       continue;
@@ -105,10 +106,16 @@ function formatSkillXmlBlock(
     string,
     readonly SkillExperienceEntry[]
   > = new Map(),
+  relationRelevanceThreshold = DEFAULT_RELATION_RELEVANCE_THRESHOLD,
 ): string {
   const body = skills
     ?.map((skill) =>
-      formatSkillXml(skill, relations, experiencesBySkill.get(skill.name)),
+      formatSkillXml(
+        skill,
+        relations,
+        experiencesBySkill.get(skill.name),
+        relationRelevanceThreshold,
+      ),
     )
     .join("\n");
   return xmlBlock(tag, body ?? "", attributes);
@@ -141,6 +148,7 @@ export function buildRoutingContext(params: {
   inputMatchedSkills?: readonly AvailableSkill[];
   experiences?: readonly SkillExperienceEntry[];
   relationDecisions?: readonly RelationDecision[];
+  relationRelevanceThreshold?: number;
 }): string {
   const matchedSkills: readonly AvailableSkill[] =
     params.matchedSkills ?? params.inputMatchedSkills ?? [];
@@ -188,6 +196,7 @@ export function buildRoutingContext(params: {
         "",
         params.relationDecisions,
         experiencesBySkill,
+        params.relationRelevanceThreshold,
       ),
     );
   }

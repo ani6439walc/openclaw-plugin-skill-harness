@@ -110,8 +110,6 @@ export interface RelationDecision extends RelationEvidence {
   injected: boolean;
 }
 
-export const RELATION_RELEVANCE_THRESHOLD = 0.8;
-
 /** Include visible non-candidate endpoints without adding skill questions. */
 export function collectRelationEvidence(
   candidates: readonly AvailableSkill[],

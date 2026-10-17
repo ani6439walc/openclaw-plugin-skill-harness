@@ -4,6 +4,7 @@ import { resolveConfig, clampInt } from "./config.js";
 import type { OpenClawConfig } from "../api.js";
 import {
   DEFAULT_QUERY_MODE,
+  DEFAULT_RELATION_RELEVANCE_THRESHOLD,
   DEFAULT_TIMEOUT_MS,
   DEFAULT_RECENT_USER_TURNS,
   DEFAULT_RECENT_ASSISTANT_TURNS,
@@ -1194,7 +1195,7 @@ describe("resolveConfig", () => {
   describe("skillCandidates", () => {
     it("resolves the complete default policy for legacy routing config", () => {
       expect(resolveConfig({}).routing.skills).toEqual({
-        related: { enabled: false },
+        related: { enabled: false, relevanceThreshold: 0.8 },
         search: { minCandidateScore: 0.6, timeoutMs: 15_000 },
         nameMatch: {
           maxEditDistance: 2,
@@ -1214,6 +1215,63 @@ describe("resolveConfig", () => {
       expect(() =>
         resolveConfig({ routing: { skills: { related: { force: true } } } }),
       ).toThrow();
+    });
+
+    it("preserves enabled-only relation settings with the shared default threshold", () => {
+      expect(
+        resolveConfig({ routing: { skills: { related: { enabled: true } } } })
+          .routing.skills.related,
+      ).toEqual({
+        enabled: true,
+        relevanceThreshold: DEFAULT_RELATION_RELEVANCE_THRESHOLD,
+      });
+      expect(DEFAULT_RELATION_RELEVANCE_THRESHOLD).toBe(0.8);
+      expect(
+        resolveConfig({ routing: { skills: { related: {} } } }).routing.skills
+          .related,
+      ).toEqual({ enabled: false, relevanceThreshold: 0.8 });
+    });
+
+    it.each([0, 0.4, 1])(
+      "accepts relation relevance threshold %s",
+      (threshold) => {
+        expect(
+          resolveConfig({
+            routing: { skills: { related: { relevanceThreshold: threshold } } },
+          }).routing.skills.related,
+        ).toEqual({ enabled: false, relevanceThreshold: threshold });
+      },
+    );
+
+    it.each([NaN, Infinity, -Infinity, "0.8", -0.01, 1.01])(
+      "rejects invalid relation relevance threshold %s",
+      (threshold) => {
+        expect(() =>
+          resolveConfig({
+            routing: { skills: { related: { relevanceThreshold: threshold } } },
+          }),
+        ).toThrow();
+      },
+    );
+
+    it("declares bounded optional relation relevance in the strict public manifest", () => {
+      const manifest = JSON.parse(
+        readFileSync(
+          new URL("../openclaw.plugin.json", import.meta.url),
+          "utf8",
+        ),
+      );
+      const related =
+        manifest.configSchema.properties.routing.properties.skills.properties
+          .related;
+      expect(related.additionalProperties).toBe(false);
+      expect(related.required ?? []).not.toContain("relevanceThreshold");
+      expect(related.properties.relevanceThreshold).toMatchObject({
+        type: "number",
+        minimum: 0,
+        maximum: 1,
+        default: DEFAULT_RELATION_RELEVANCE_THRESHOLD,
+      });
     });
 
     it("inherits qmd timeout for candidate retrieval unless overridden", () => {
@@ -1244,7 +1302,7 @@ describe("resolveConfig", () => {
       }).routing.skills;
 
       expect(policy).toEqual({
-        related: { enabled: false },
+        related: { enabled: false, relevanceThreshold: 0.8 },
         search: { minCandidateScore: 0.7, timeoutMs: 250 },
         nameMatch: {
           maxEditDistance: 1,

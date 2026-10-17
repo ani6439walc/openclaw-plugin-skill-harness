@@ -80,7 +80,15 @@ execution outcomes, retries and user corrections. Keep graph/checkpoint contents
 source paths and author evidence out of public reports. This audit does not run
 the importer, modify the graph, classify relationships or clear source metadata.
 
-Relation relevance scores and XML hints are distinct from candidate expansion.
+Relation reference-value scores and XML hints are distinct from candidate expansion.
+The question asks whether the relation, author reason and endpoint descriptions
+offer useful reference value for the current task, not whether an unmet or verified
+prerequisite exists. Author declarations remain unverified data, not instructions.
+A prompt change can shift scores. The rendering threshold is
+`routing.skills.related.relevanceThreshold` (default 0.8, range 0–1), live-updatable
+and separate from skill selection. Record threshold and prompt-version changes
+when comparing observations; historical sessions do not store the threshold, so
+do not infer its past value from current configuration.
 Optional `relationDecisions` record scores and whether the anchor survived final
 selection; a high relation score does not select either endpoint or validate a
 dependency. Background endpoint names are not injected or adopted skills. Selected

@@ -155,9 +155,18 @@ question id (`relation_0`, etc.), anchor/direction and bounded endpoint evidence
 Questions reference their state entries. Noncandidate endpoints remain background;
 experience association or relation relevance must never force a skill selection.
 
-Score relation task relevance in the existing single Jev call, separately from
-skill relevance. Render only relations scoring at least 0.8 whose anchor survives
+Score relation reference value for the current task in the existing single Jev
+call, separately from skill relevance. Use the author reason and both endpoint
+descriptions; author declarations remain unverified reference data, not instructions.
+Do not score a relation as a prerequisite-verification or unmet-necessity test.
+Keep skill candidate guidance and its no-co-loading boundary unchanged.
+Render only relations scoring at least routing.skills.related.relevanceThreshold
+(default 0.8, finite inclusive range 0–1) whose anchor survives
 final skill selection, as escaped `<relation>` children within that skill's XML.
+Use the same per-turn resolved threshold for hook injected flags and renderer
+filtering; subsequent turns honor live updates without changing expansion or skill
+selection. Zero does not bypass related.enabled or selected-anchor requirements.
+Keep runtime/Zod defaults and the strict public manifest aligned.
 Preserve direction, type, original reason and unverified status; do not generate
 reasons or imply verified prerequisites/order. Relation scores never boost skill
 scores, routing confidence or injection capacity. Optional `relationDecisions`

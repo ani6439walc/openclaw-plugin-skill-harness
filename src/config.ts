@@ -2,6 +2,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   DEFAULT_QUERY_MODE,
+  DEFAULT_RELATION_RELEVANCE_THRESHOLD,
   DEFAULT_TIMEOUT_MS,
   DEFAULT_RECENT_USER_TURNS,
   DEFAULT_RECENT_ASSISTANT_TURNS,
@@ -72,7 +73,10 @@ const DEFAULT_JEV: QmdEndpointConfig = {
 };
 
 const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
-  related: { enabled: false },
+  related: {
+    enabled: false,
+    relevanceThreshold: DEFAULT_RELATION_RELEVANCE_THRESHOLD,
+  },
   search: { minCandidateScore: 0.6, timeoutMs: undefined as never },
   nameMatch: {
     maxEditDistance: 2,
@@ -294,10 +298,19 @@ const SkillCandidatesNameMatchSchema = z
 const RoutingSkillsSchema = z
   .object({
     related: z
-      .object({ enabled: z.boolean().optional().default(false) })
+      .object({
+        enabled: z.boolean().optional().default(false),
+        relevanceThreshold: z
+          .number()
+          .finite()
+          .min(0)
+          .max(1)
+          .optional()
+          .default(DEFAULT_RELATION_RELEVANCE_THRESHOLD),
+      })
       .strict()
       .optional()
-      .default({ enabled: false }),
+      .default(DEFAULT_ROUTING_SKILLS.related),
     search: SkillCandidatesSearchSchema,
     nameMatch: SkillCandidatesNameMatchSchema,
     relevanceThreshold: z

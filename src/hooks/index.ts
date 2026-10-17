@@ -2,7 +2,6 @@ import type { RelationDecision } from "../skills/related.js";
 import {
   expandRelatedCandidates,
   collectRelationEvidence,
-  RELATION_RELEVANCE_THRESHOLD,
 } from "../skills/related.js";
 import { resolveRelationGraph } from "../skills/relation-graph.js";
 import { canonicalIdentity, roundToDecimals } from "../normalize.js";
@@ -1343,7 +1342,8 @@ export function createHookHandlers(deps: HookDeps) {
           relationDecisions = relationDecisions.map((decision) => ({
             ...decision,
             injected:
-              decision.score >= RELATION_RELEVANCE_THRESHOLD &&
+              decision.score >=
+                refreshedConfig.routing.skills.related.relevanceThreshold &&
               finalSkillNames.has(canonicalIdentity(decision.skill)),
           }));
           for (const skill of matchedSkills) {
@@ -1464,6 +1464,8 @@ export function createHookHandlers(deps: HookDeps) {
               matchedSkills,
               experiences: matchedExperiences,
               relationDecisions,
+              relationRelevanceThreshold:
+                refreshedConfig.routing.skills.related.relevanceThreshold,
             }),
             workingSetSkillsXml,
           );
