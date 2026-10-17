@@ -1,8 +1,8 @@
 allowBuilds:
+  "@wei840222/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/373d6fe4af0b9bbcea0eda8c03489d30da267934": true
   "@google/genai": true
   esbuild: true
   koffi: true
-  node-llama-cpp: true
   openclaw: true
   protobufjs: true
   sharp: true

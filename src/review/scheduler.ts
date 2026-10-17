@@ -28,6 +28,7 @@ export interface ReviewSchedulerLike {
   schedule(candidate: ReviewCandidate): boolean;
   setRunner(runner: ReviewRunner): void;
   setOnDiscard(onDiscard: (candidate: ReviewCandidate) => void): void;
+  isDisposed?(): boolean;
 }
 
 export interface IntentReviewSchedulerDeps {

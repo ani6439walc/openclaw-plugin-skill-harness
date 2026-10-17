@@ -1410,6 +1410,113 @@ description: Navigate Tokyo.
     expect(recordStats).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "disabled",
+    "no-trigger",
+    "aborted",
+    "disposed",
+    "expired-hook",
+    "missing-turn",
+    "active",
+  ])("loads Review only for an eligible active turn (%s)", async (scenario) => {
+    const controller = new AbortController();
+    let disposed = false;
+    let expired = false;
+    const state = {
+      turnKey: "run-1",
+      input: "fixture request",
+      matchedSkills: [],
+      confidence: scenario === "no-trigger" ? 1 : 0.2,
+      timestamps: {
+        start: "2026-10-18T00:00:00.000Z",
+        end: "2026-10-18T00:00:01.000Z",
+      },
+    };
+    const snapshot = {
+      sessionId: "session-1",
+      agentId: "main",
+      eventId: "fixture-turn-event",
+      turnNumber: 1,
+      current: state,
+      recent: [],
+    };
+    const getSnapshot = vi
+      .spyOn(defaultTracker, "getReviewSnapshotForTurn")
+      .mockReturnValue(snapshot as never);
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+    const scheduler = {
+      ...createMockReviewScheduler(),
+      isDisposed: () => disposed,
+    };
+    const module = {
+      getReviewModelRef: vi.fn(() => ({
+        provider: "fixture",
+        model: "fixture-review",
+      })),
+      runReviewSubagent: vi
+        .fn()
+        .mockResolvedValue({ findings: [], outcome: "nofinding" }),
+    };
+    let release!: (value: typeof module) => void;
+    const loading = new Promise<typeof module>((resolve) => {
+      release = resolve;
+    });
+    const loadReviewSubagent = vi.fn(() => loading);
+    const { handlers } = createFinalizedTurnHarness(state, {
+      api: { lifecycle: { signal: controller.signal } as never },
+      deps: {
+        config: () =>
+          resolveConfig({
+            review: {
+              enabled: scenario !== "disabled",
+              model: "fixture/review",
+            },
+          }),
+        reviewScheduler: scheduler,
+        loadReviewSubagent,
+        skillInventoryResolver: vi.fn().mockResolvedValue([]),
+        reviewLogWriter: { record: vi.fn() },
+      },
+    });
+    const finishing = handlers.onAgentEnd(
+      { messages: [] } as never,
+      {
+        sessionId: "session-1",
+        agentId: "main",
+        hookInvocation: {
+          assertActive: () => {
+            if (expired) throw new Error("fixture invocation expired");
+          },
+        },
+      } as never,
+    );
+    if (scenario === "disabled" || scenario === "no-trigger") {
+      await finishing;
+      expect(loadReviewSubagent).not.toHaveBeenCalled();
+      expect(scheduler.schedule).not.toHaveBeenCalled();
+      return;
+    }
+    try {
+      await vi.waitFor(() => expect(loadReviewSubagent).toHaveBeenCalledOnce());
+      if (scenario === "aborted") controller.abort();
+      if (scenario === "disposed") disposed = true;
+      if (scenario === "expired-hook") expired = true;
+      if (scenario === "missing-turn") getSnapshot.mockReturnValue(undefined);
+    } finally {
+      release(module);
+      await finishing;
+    }
+    if (scenario !== "active") {
+      expect(scheduler.schedule).not.toHaveBeenCalled();
+      expect(module.runReviewSubagent).not.toHaveBeenCalled();
+    } else {
+      expect(scheduler.schedule).toHaveBeenCalledOnce();
+      expect(module.runReviewSubagent).not.toHaveBeenCalled();
+      await scheduler.flush();
+      expect(module.runReviewSubagent).toHaveBeenCalledOnce();
+    }
+  });
+
   it("enqueues enabled multi-trigger review without awaiting it", async () => {
     const snapshot = {
       sessionId: "session-1",
