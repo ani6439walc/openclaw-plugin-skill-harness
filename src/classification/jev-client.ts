@@ -192,7 +192,7 @@ export async function runJevUnifiedRouting(
 
     // Execute System One decisions
     const response = await client.systemOne({
-      state: state as EntryType,
+      state: state as Record<string, EntryType>,
       model,
       questions,
     });
