@@ -4,6 +4,7 @@ import path from "node:path";
 import type { QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
+import { safeErrorClassification } from "../error-diagnostics.js";
 import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
@@ -553,6 +554,7 @@ export function createSkillExperienceQmdIndex(params: {
   }): Promise<boolean> {
     status = "building";
     let nextStore: QMDStore | undefined;
+    let phase = "snapshot";
     try {
       await fs.mkdir(indexPath, { recursive: true });
       await opening;
@@ -565,6 +567,7 @@ export function createSkillExperienceQmdIndex(params: {
       const refresh = async () => {
         if (closed) return true;
         const connection = storeConnection();
+        phase = "store-open";
         nextStore = await createStore({
           dbPath: databasePath,
           config: {
@@ -574,23 +577,37 @@ export function createSkillExperienceQmdIndex(params: {
           remoteRequestTimeoutMs: connection.remoteRequestTimeoutMs,
         });
 
+        phase = "update";
         await nextStore.update();
+        phase = "embed";
         const embedResult = await nextStore.embed();
+        phase = "status";
         const indexStatus = await nextStore.getStatus();
         if (embedResult.errors > 0 || indexStatus.needsEmbedding > 0) {
-          throw new Error(
-            `QMD experience index embedding is incomplete (errors=${embedResult.errors}, needsEmbedding=${indexStatus.needsEmbedding}).`,
-          );
+          phase = "embed";
+          throw Object.assign(new Error("Experience embedding incomplete"), {
+            code: "EMBEDDING_INCOMPLETE",
+          });
         }
 
+        phase = "publication";
+        persistFingerprint(target.fingerprint);
         const active = store;
         store = nextStore;
         connectionSignature = connection.signature;
         nextStore = undefined;
         currentFingerprint = target.fingerprint;
         status = "ready";
+        const previousFailures = consecutiveFailures;
         resetRetryState();
-        persistFingerprint(target.fingerprint);
+        if (previousFailures > 0) {
+          logger.info(
+            `QMD experience index build recovered ${JSON.stringify({
+              fingerprint: target.fingerprint,
+              previousFailures,
+            })}`,
+          );
+        }
 
         if (active) {
           await active.close().catch(() => undefined);
@@ -598,11 +615,14 @@ export function createSkillExperienceQmdIndex(params: {
         return true;
       };
 
+      phase = "lock";
       const locked = await withFileLock(databasePath, refresh, {
         maxWaitMs: 30 * 60 * 1000,
       });
       if (locked === undefined) {
-        throw new Error("experience index build lock is busy");
+        throw Object.assign(new Error("Experience index build lock busy"), {
+          code: "BUILD_LOCK_BUSY",
+        });
       }
       return true;
     } catch (error) {
@@ -621,11 +641,15 @@ export function createSkillExperienceQmdIndex(params: {
           running = runWorker();
         }
       }, delay);
-      logger.warn("failed to build QMD experience index", {
-        error,
-        fingerprint: target.fingerprint,
-        retryDelayMs: delay,
-      });
+      logger.warn(
+        `failed to build QMD experience index ${JSON.stringify({
+          fingerprint: target.fingerprint,
+          phase,
+          ...safeErrorClassification(error),
+          consecutiveFailures,
+          retryDelayMs: delay,
+        })}`,
+      );
       return false;
     }
   }

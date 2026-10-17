@@ -31,7 +31,7 @@ Retrieved experiences contribute their visible associated skills to the unified 
 
 - **Inspect**: Query `<dataRoot>/experiences/` to examine active patterns.
 - **Draft**: Create a new folder `<dataRoot>/experiences/<id>/` with valid `summary.md`, `keywords.md`, `body.md`, and optional `skills.md`.
-- **Refine**: Edit existing `.md` files to clarify steps, adjust keywords, or update linked skills based on observed tool usage.
+- **Refine**: Read the full existing files first. Replace superseded guidance and consolidate repeated steps instead of appending an incident log; preserve applicability, prerequisites, useful verified steps and unresolved limits. Deduplicate keywords. Count Unicode code points and keyword entries, then reread the complete changed files before validation. Do not truncate useful guidance or create a synonymous card to bypass limits; if no concrete improvement fits, keep the original unchanged.
 - **Prune / Delete**: Remove obsolete or duplicate experience directories.
 
 Managed QMD refreshes can re-index changed experience files when subsequent source checks are enabled.

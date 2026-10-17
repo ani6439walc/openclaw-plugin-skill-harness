@@ -254,6 +254,8 @@ Remove the example `model` line to use the session/agent model. Default triggers
 
 The reviewer has `ls`, `read`, `write`, `edit`, `exec`, `skill_experience`, and `skill_search`. Review may incur additional model costs and may create, refine, merge, or delete runtime experiences.
 
+Refinement consolidates existing guidance rather than appending an incident log: read the full entry, replace superseded sections, preserve verified prerequisites and outcomes, and check Unicode limits before finishing. Summaries allow 240 code points, bodies 12,000, and keywords up to 12 entries of 64 code points each. If no useful improvement fits safely, leave the entry unchanged and return no finding. Validation remains strict; these instructions do not guarantee model compliance.
+
 ### Maintain experience manually
 
 Load the bundled `skill-harness` skill and request its `experience` workflow to inspect, draft, refine, or prune experience. It checks existing coverage and validates entries before applying changes. See the [experience procedure](skills/skill-harness/references/experience.md).
@@ -330,6 +332,10 @@ Runtime state lives separately from package files under `~/.openclaw/plugins/ski
 | Duplicate skill inventories         | Check native prompt suppression and migrate static selections to `skills.workingSet`.                                                                                         |
 
 Skill-index refresh warnings include a JSON diagnostic suffix with the index fingerprint, failure phase, a fixed reason code, whether an existing store remains searchable, consecutive failures, retry delay, and a redacted error diagnostic (`errorName`, string `errorCode`, truncated `errorMessage`). A recovery message records the previous failure count when a later refresh and embedding check succeed. These fields survive the host's single-string logger contract. Credential assignments and `sk-` tokens are redacted; stacks, causes, raw provider bodies, queries, and credentials are excluded. Unknown failures use `operation-failed`. A refresh warning alone does not mean searches are unavailable.
+
+Inventory failures now identify the root category, operation phase and fixed error classification without exposing filesystem paths or source content. Experience-index build warnings identify the phase, fingerprint, consecutive failures and retry delay; recovery is recorded after successful publication. These diagnostics use fixed classifications rather than raw error messages.
+
+An `agent_end` taking 25 seconds emits one slow warning with its current finalization, inventory, statistics or Review-preparation phase. If it later settles, a completion message records elapsed time and outcome. This observes slow work without cancelling it or extending the host timeout; an unsettled warning alone does not prove the cause of a timeout.
 
 ## Contributing
 

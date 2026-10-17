@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { logger } from "../../api.js";
+import { logger, setApiLogger, resetApiLogger } from "../../api.js";
 import {
   findAvailableSkill,
   listAvailableSkills,
@@ -188,6 +188,61 @@ describe("skill indexer", () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  it.each(["traversal", "frontmatter"])(
+    "logs safe complete inventory %s diagnostics without returning partial skills",
+    async (failure) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+      const workspaceDir = path.join(tmp, "workspace");
+      const stateDir = path.join(tmp, "state");
+      const skillsDir = path.join(workspaceDir, "skills");
+      writeSkillAt(
+        path.join(skillsDir, "visible"),
+        "visible",
+        "Visible skill.",
+      );
+      if (failure === "traversal")
+        fs.symlinkSync("loop", path.join(skillsDir, "loop"));
+      else {
+        fs.mkdirSync(path.join(skillsDir, "private-name"));
+        fs.writeFileSync(
+          path.join(skillsDir, "private-name", "SKILL.md"),
+          "---\nname: [private-key\n---\nprivate-body",
+        );
+      }
+      const warn = vi.fn();
+      setApiLogger({ warn: (message) => warn(message) });
+      try {
+        expect(
+          await resolveSkillInventory({
+            api: createApi(stateDir, workspaceDir),
+            agentId: "main",
+            bundledSkillsDir: "",
+            cacheTtlMs: 0,
+            homeDir: path.join(tmp, "home"),
+          }),
+        ).toBeUndefined();
+        const messages = warn.mock.calls.map(([message]) => message);
+        const message = messages.find((message) =>
+          message.includes("failed to resolve complete skill inventory "),
+        )!;
+        expect(JSON.parse(message.slice(message.indexOf("{")))).toEqual({
+          rootCategory: "workspace",
+          phase: failure === "traversal" ? "stat" : "parse-frontmatter",
+          reason:
+            failure === "traversal" ? "symlink-cycle" : "operation-failed",
+          ...(failure === "traversal" ? { code: "ELOOP" } : {}),
+        });
+        expect(messages.join(" ")).not.toContain(tmp);
+        expect(messages.join(" ")).not.toMatch(
+          /private-key|private-name|private-body/,
+        );
+      } finally {
+        resetApiLogger();
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("refreshes the index using the configured skill watcher debounce", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
