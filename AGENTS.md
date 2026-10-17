@@ -38,7 +38,7 @@ instead of duplicating a version in workflow YAML.
 - `python3 skills/skill-harness/scripts/test-validate-experiences.py`: test the experience validator after building its production imports in `dist/`.
 - `python3 .github/scripts/test_jules_pr_review.py`: test the CI review helper.
 
-CI uses Node.js 24 and 26 and runs formatting, typecheck, Vitest, all three Python suites, build, loader, and dry-pack checks. `tsc` does not prune stale `dist/` files; inspect package contents before handoff of package changes.
+CI uses Node.js 24 and 26 and runs formatting, typecheck, Vitest, all three Python suites, build, loader, and dry-pack checks. `pnpm run build` prunes `dist/` before invoking `tsc`; inspect the actual tarball before handoff of package changes.
 
 ## Coding Style & Naming Conventions
 
@@ -411,3 +411,9 @@ lock, discovery and lease behavior.
 New inventory, experience-build and agent_end diagnostics use safeErrorClassification() from src/error-diagnostics.ts: fixed reasons and allowlisted codes only. Encode explicit fields into one logger string; do not include arbitrary error messages/names, paths, queries, evidence, stack/cause or credentials. Keep this stricter contract distinct from existing skill-index redacted diagnostics. Inventory failures retain unavailable semantics and report the failing root category/operation, never a partial complete inventory. Experience recovery follows successful metadata publication. Agent-end slow warnings fire once at 25 seconds, report the active phase, clear/unref their timer and never cancel work, extend host timeouts or change finalization deduplication.
 
 Review refinement must read full entries, consolidate repeated guidance and replace superseded sections while preserving useful prerequisites and verified boundaries. Enforce file limits separately from finding JSON limits: summary 240/body 12,000 Unicode code points; up to 12 keywords of 64 each. Count with existing workspace exec, reread final files, restore drafts and return no finding when no safe improvement fits. Do not truncate, bypass limits with duplicate entries or add automatic model retries.
+
+## Remote-only QMD and loader validation
+
+QMD uses configured remote providers only; preserve BM25, CJK, AST, CLI and MCP without local inference or model downloads. Existing local settings and indexes remain readable for lexical search and diagnosis; vector conversion requires an explicit whole-database remote rebuild, never automatic identity adoption or deletion. Preserve existing remote provider ordering. Review execution loads after enabled/trigger checks and must recheck lifecycle cancellation, disposal, hook validity and originating turn after asynchronous preparation. Pipeline events stay synchronous. Catalog operations queue FIFO per coordinator before starting the existing one-second external lock deadline; zero-wait maintenance skips busy queues. Keep operation diagnostics name-free.
+
+Use `.github/scripts/measure-plugin-loader.mjs` only with independently installed tarballs and a private output directory. It creates isolated profiles for five timed fresh processes and one separate capacity process per build using the same Node/OpenClaw. Keep machine-specific timing and snapshot metrics outside the repository; CLI loader improvements do not establish whole-Gateway startup improvements. Never operate the live Gateway as part of this benchmark.

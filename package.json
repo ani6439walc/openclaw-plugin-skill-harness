@@ -30,7 +30,11 @@
     "dist",
     "skills/**",
     "!skills/**/__pycache__/**",
-    "!skills/**/*.py[cod]"
+    "!skills/**/*.py[cod]",
+    "!dist/**/*.map",
+    "!dist/**/*.test.*",
+    "!skills/**/test-*",
+    "!skills/**/test_*"
   ],
   "openclaw": {
     "extensions": [
@@ -49,12 +53,12 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'",
     "test": "vitest run",
-    "build": "tsc",
+    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && tsc",
     "test:plugin-loader": "node --input-type=module --eval \"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); require('./dist/index.js');\""
   },
   "dependencies": {
     "@typesafe-ai/sdk": "0.7.0",
-    "@wei840222/qmd": "2026.10.18",
+    "@wei840222/qmd": "git+https://github.com/wei840222/qmd.git#6e1c065ccb5ff04c8fdcca1a6dcdf5099e4dacf3",
     "gray-matter": "4.0.3",
     "typebox": "1.3.37",
     "zod": "4.6.7"

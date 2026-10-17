@@ -80,6 +80,8 @@ Runtime search or selection failures let the main agent continue with available 
 
 Review is disabled by default. When enabled, experience-health cadence, uncertain routing, or capability-fit evidence can schedule a background investigation. A trigger does not itself prove that an experience should be written.
 
+The Review execution module loads only after Review is enabled and a trigger survives evaluation. After asynchronous loading and snapshot preparation, the plugin rechecks lifecycle cancellation, scheduler disposal, host hook validity, and the originating turn before queueing work. Pipeline events remain synchronous. QMD itself remains loaded on demand.
+
 The reviewer checks existing coverage before creating an entry, prefers refining an existing procedure, and can merge overlapping experiences or remove guidance proven obsolete, useless, or superseded. A no-finding outcome is valid. Changes are checked against the declared operation, actual file changes, eligible observed skills, and concurrent updates before writeback.
 
 Review operates on experience copies in a temporary workspace. Filesystem tools are workspace-restricted; `exec` follows the host execution policy and has no additional shell sandbox supplied by this plugin. Its prompt limits commands to experience maintenance. Review does not train model weights or authorize edits to skill sources.
@@ -129,6 +131,12 @@ All three model settings are required. The example's `bifrost` and `typesafe` pr
 External plugins need `hooks.allowConversationAccess: true` to register conversation hooks, including automatic prompt routing and end-of-turn Review. Keep `hooks` beside `config`, not inside it. Prompt injection is allowed by default; an explicit `hooks.allowPromptInjection: false` disables the prompt hook even with conversation access. The plugin does not grant itself these permissions. See [OpenClaw hook permissions](https://docs.openclaw.ai/plugins/hooks#permissions-and-scope).
 
 #### Shared document embedding cache and Voyage
+
+The bundled QMD runtime uses remote models only. BM25, document reads, Chinese segmentation, AST chunking, CLI, and MCP remain available; local inference, model downloads, GPU initialization, local tokenization, and local model fallback are retired. Configure the existing embedding, expansion, and Jev fields above. Missing remote configuration produces an explicit model-operation error without choosing a provider or uploading documents. Pure lexical QMD operations require no model. `qmd pull` now explains the retirement and exits nonzero.
+
+Old local QMD configurations and indexes remain readable for lexical search and diagnostics. They are never automatically rewritten, cleared, or adopted into a remote embedding identity. To convert vectors, configure a remote provider and follow the explicit whole-database rebuild procedure below; preserve the existing collection definitions and back up the index first. Existing remote index formats and provider ordering are unchanged. Local inference SDK entry points are breaking changes; see QMD's remote-only compatibility notes.
+
+This review branch pins QMD to an exact Git commit until its remote-only package is published manually. After publication, replace that pin with the published version and regenerate the lockfile; do not assume an unpublished prerelease exists on npm.
 
 Set optional `qmd.embeddingCacheDir` to share document embeddings across skill and experience stores, agents, and processes that use the same directory. Without it, QMD uses its in-memory cache. The plugin forwards the directory unchanged after trimming whitespace; it does not append agent or generation names. QMD expands `~`; relative paths use the process working directory, **not** `dataRoot`. Prefer an absolute path on persistent disk, or tmpfs such as `/dev/shm` when RAM usage and loss on reboot are acceptable.
 
@@ -354,3 +362,15 @@ Implementation contracts, source navigation, migrations, and development checks 
 ## License
 
 MIT.
+
+### Package and isolated loader validation
+
+`pnpm run build` removes stale `dist/` files before compilation. The published tarball includes runtime output and bundled maintenance resources, excluding source maps and test helpers. Inspect the actual `pnpm pack` tarball and its installed dependency closure; a source-tree build alone does not prove package contents.
+
+For a reproducible loader comparison, extract and independently install baseline and candidate tarballs in temporary directories. Use the same OpenClaw and Node versions, then run:
+
+```sh
+node .github/scripts/measure-plugin-loader.mjs /path/to/openclaw/openclaw.mjs /tmp/baseline/package /tmp/candidate/package /path/to/private/results
+```
+
+The script alternates five timed fresh processes per build and runs a separate capacity process per build, calls the real `plugins inspect --runtime` loader in isolated profiles with fixed empty workspaces and mock endpoint configuration, and records loader time, total CLI time, and captured package/file/logical-byte counts. It does not clear OS caches or connect to a live Gateway. Keep machine-specific results private. A lower measured loader median supports a plugin loading improvement; it does not establish an improvement in every Gateway startup phase, and timing is not a CI threshold.

@@ -16,7 +16,7 @@ import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
-import { getReviewModelRef, runReviewSubagent } from "../review/subagent.js";
+import type { getReviewModelRef } from "../review/subagent.js";
 import type { CapabilityFitEvidence, ReviewSnapshot } from "../review/types.js";
 import { createIntentReviewScheduler } from "../review/scheduler.js";
 import { createBackgroundRunner } from "../subagent-runtime.js";
@@ -179,7 +179,16 @@ export function createHookHandlers(deps: HookDeps) {
   const statsAggregator = deps.statsAggregator ?? defaultStatsAggregator;
   const skillInventoryResolver =
     deps.skillInventoryResolver ?? resolveSkillInventory;
-  const reviewer = deps.reviewer ?? runReviewSubagent;
+  const loadReviewSubagent =
+    deps.loadReviewSubagent ?? (() => import("../review/subagent.js"));
+  const reviewer: NonNullable<HookDeps["reviewer"]> =
+    deps.reviewer ??
+    (async (params) => {
+      if (params.abortSignal?.aborted) return;
+      const { runReviewSubagent } = await loadReviewSubagent();
+      if (params.abortSignal?.aborted) return;
+      return runReviewSubagent(params);
+    });
   const classifier = deps.classifier;
   const routingSelector = deps.routingSelector ?? deps.routingSubagent;
   const effectiveRoutingSelector: (
@@ -1799,6 +1808,25 @@ export function createHookHandlers(deps: HookDeps) {
     try {
       if (triggers.length === 0) return;
 
+      const isReviewPreparationActive = () => {
+        if (api.lifecycle?.signal?.aborted || reviewScheduler.isDisposed?.())
+          return false;
+        try {
+          ctx.hookInvocation?.assertActive();
+        } catch {
+          return false;
+        }
+        return (
+          tracker.getReviewSnapshotForTurn(
+            association.sessionId,
+            association.turnKey,
+          )?.eventId === baseSnapshot.eventId
+        );
+      };
+      if (!isReviewPreparationActive()) return;
+      const { getReviewModelRef } = await loadReviewSubagent();
+      if (!isReviewPreparationActive()) return;
+
       const agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
       const modelRef = getReviewModelRef(api, agentId, resolvedConfig, {
         modelProviderId: ctx.modelProviderId,
@@ -1810,6 +1838,7 @@ export function createHookHandlers(deps: HookDeps) {
         config: resolvedConfig,
       });
       const snapshot = await buildReviewSnapshot(baseSnapshot, capabilityFit);
+      if (!isReviewPreparationActive()) return;
 
       enqueueReviewRun({
         ctx,

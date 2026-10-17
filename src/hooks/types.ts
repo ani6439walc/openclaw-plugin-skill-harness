@@ -134,6 +134,12 @@ export type HookDeps = {
   qmdSkillIndex?: SkillQmdIndex;
   qmdExperienceIndex?: SkillExperienceQmdIndex;
   reviewScheduler?: IntentReviewScheduler | ReviewSchedulerLike;
+  loadReviewSubagent?: () => Promise<
+    Pick<
+      typeof import("../review/subagent.js"),
+      "getReviewModelRef" | "runReviewSubagent"
+    >
+  >;
   reviewer?: (
     params: Parameters<typeof runReviewSubagent>[0],
   ) => Promise<ReviewSubagentResult | undefined>;
