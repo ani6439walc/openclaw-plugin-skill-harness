@@ -58,7 +58,7 @@
   },
   "dependencies": {
     "@typesafe-ai/sdk": "0.7.0",
-    "@wei840222/qmd": "git+https://github.com/wei840222/qmd.git#373d6fe4af0b9bbcea0eda8c03489d30da267934",
+    "@wei840222/qmd": "git+https://github.com/wei840222/qmd.git#6e1c065ccb5ff04c8fdcca1a6dcdf5099e4dacf3",
     "gray-matter": "4.0.3",
     "typebox": "1.3.37",
     "zod": "4.6.7"

@@ -1,5 +1,5 @@
 allowBuilds:
-  "@wei840222/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/373d6fe4af0b9bbcea0eda8c03489d30da267934": true
+  "@wei840222/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/6e1c065ccb5ff04c8fdcca1a6dcdf5099e4dacf3": true
   "@google/genai": true
   esbuild: true
   koffi: true
