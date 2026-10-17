@@ -742,20 +742,24 @@ export function createSkillQmdIndex(params: {
     fingerprint: string,
   ): Promise<void> {
     const target = mappingPath(agentId);
-    const written = await gc.withCatalog(async () => {
-      await fs.mkdir(mappingsRoot, { recursive: true });
-      if (!(await fs.lstat(mappingsRoot)).isDirectory())
-        throw new Error("Unsafe QMD mapping directory");
-      writeJsonAtomic(target, {
-        schemaVersion: 1,
-        fingerprint,
-        allowedSkillNames: [
-          ...(agents.get(agentId)?.allowedSkillNames ?? []),
-        ].sort(),
-      });
-      gc.markReferenced(fingerprint);
-      return true;
-    });
+    const written = await gc.withCatalog(
+      async () => {
+        await fs.mkdir(mappingsRoot, { recursive: true });
+        if (!(await fs.lstat(mappingsRoot)).isDirectory())
+          throw new Error("Unsafe QMD mapping directory");
+        writeJsonAtomic(target, {
+          schemaVersion: 1,
+          fingerprint,
+          allowedSkillNames: [
+            ...(agents.get(agentId)?.allowedSkillNames ?? []),
+          ].sort(),
+        });
+        gc.markReferenced(fingerprint);
+        return true;
+      },
+      1_000,
+      "mapping-publish",
+    );
     if (!written)
       throw Object.assign(new Error("QMD skill catalog is busy"), {
         code: CATALOG_BUSY,
@@ -944,7 +948,11 @@ export function createSkillQmdIndex(params: {
     const work = discoveryWork.then(async () => {
       if (closed) return;
       // Pin outside the catalog lock: acquire() itself takes that lock.
-      const mapping = await gc.withCatalog(() => readDiscoveryMapping(agentId));
+      const mapping = await gc.withCatalog(
+        () => readDiscoveryMapping(agentId),
+        1_000,
+        "discovery-read",
+      );
       if (!mapping || closed) {
         bindDiscovery(agentId);
         return;
@@ -954,7 +962,11 @@ export function createSkillQmdIndex(params: {
         bindDiscovery(agentId);
         return;
       }
-      const current = await gc.withCatalog(() => readDiscoveryMapping(agentId));
+      const current = await gc.withCatalog(
+        () => readDiscoveryMapping(agentId),
+        1_000,
+        "discovery-read",
+      );
       if (!current || current.fingerprint !== mapping.fingerprint || closed) {
         bindDiscovery(agentId);
         return;
@@ -965,8 +977,10 @@ export function createSkillQmdIndex(params: {
       let transferred = false;
       try {
         // Opening/rotation may have yielded across another process's publication.
-        const latest = await gc.withCatalog(() =>
-          readDiscoveryMapping(agentId),
+        const latest = await gc.withCatalog(
+          () => readDiscoveryMapping(agentId),
+          1_000,
+          "discovery-read",
         );
         if (!latest || latest.fingerprint !== current.fingerprint || closed) {
           bindDiscovery(agentId);
@@ -1609,43 +1623,47 @@ export function createSkillQmdIndex(params: {
               ?.map((id) => safePathSegment(normalizeAgentId(id))),
         });
         // A new schedule may have acquired a lease after collection released the lock.
-        await gc.withCatalog(async () => {
-          const missing = async (target: string) => {
-            try {
-              await fs.lstat(target);
-              return false;
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code === "ENOENT")
-                return true;
-              throw error;
+        await gc.withCatalog(
+          async () => {
+            const missing = async (target: string) => {
+              try {
+                await fs.lstat(target);
+                return false;
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT")
+                  return true;
+                throw error;
+              }
+            };
+            for (const fingerprint of result.removedIndexes) {
+              const state = indexes.get(fingerprint);
+              if (
+                state &&
+                !state.pinning &&
+                !state.releasePin &&
+                !state.refreshing &&
+                !state.opening &&
+                (await missing(state.root))
+              )
+                indexes.delete(fingerprint);
             }
-          };
-          for (const fingerprint of result.removedIndexes) {
-            const state = indexes.get(fingerprint);
-            if (
-              state &&
-              !state.pinning &&
-              !state.releasePin &&
-              !state.refreshing &&
-              !state.opening &&
-              (await missing(state.root))
-            )
-              indexes.delete(fingerprint);
-          }
-          for (const key of result.removedAgents) {
-            if (!(await missing(path.join(mappingsRoot, `${key}.json`))))
-              continue;
-            for (const [id, agent] of agents) {
-              if (safePathSegment(id) === key && !agent.scheduling) {
-                agents.delete(id);
-                for (const state of indexes.values()) {
-                  state.agentIds.delete(id);
-                  state.skillsByAgent.delete(id);
+            for (const key of result.removedAgents) {
+              if (!(await missing(path.join(mappingsRoot, `${key}.json`))))
+                continue;
+              for (const [id, agent] of agents) {
+                if (safePathSegment(id) === key && !agent.scheduling) {
+                  agents.delete(id);
+                  for (const state of indexes.values()) {
+                    state.agentIds.delete(id);
+                    state.skillsByAgent.delete(id);
+                  }
                 }
               }
             }
-          }
-        });
+          },
+          1_000,
+          "maintenance",
+        );
       }).catch((error) => {
         logger.warn("QMD skill index maintenance skipped", { error });
       });
@@ -1671,6 +1689,7 @@ export function createSkillQmdIndex(params: {
           .map((state) => state.refreshing)
           .filter((value): value is Promise<void> => value !== undefined),
       );
+      await gc.drain();
       await Promise.all(
         [...indexes.values()].map(async (state) => {
           await state.retiring;
