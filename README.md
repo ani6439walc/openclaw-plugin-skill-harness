@@ -136,7 +136,7 @@ The bundled QMD runtime uses remote models only. BM25, document reads, Chinese s
 
 Old local QMD configurations and indexes remain readable for lexical search and diagnostics. They are never automatically rewritten, cleared, or adopted into a remote embedding identity. To convert vectors, configure a remote provider and follow the explicit whole-database rebuild procedure below; preserve the existing collection definitions and back up the index first. Existing remote index formats and provider ordering are unchanged. Local inference SDK entry points are breaking changes; see QMD's remote-only compatibility notes.
 
-This review branch pins QMD to an exact Git commit until its remote-only package is published manually. After publication, replace that pin with the published version and regenerate the lockfile; do not assume an unpublished prerelease exists on npm.
+The plugin pins the published `@wei840222/qmd` version `2026.10.19`; the lockfile records the registry artifact. Install with `pnpm install --frozen-lockfile` to reproduce that dependency. No Git checkout or unpublished QMD prerelease is required.
 
 Set optional `qmd.embeddingCacheDir` to share document embeddings across skill and experience stores, agents, and processes that use the same directory. Without it, QMD uses its in-memory cache. The plugin forwards the directory unchanged after trimming whitespace; it does not append agent or generation names. QMD expands `~`; relative paths use the process working directory, **not** `dataRoot`. Prefer an absolute path on persistent disk, or tmpfs such as `/dev/shm` when RAM usage and loss on reboot are acceptable.
 
@@ -374,3 +374,7 @@ node .github/scripts/measure-plugin-loader.mjs /path/to/openclaw/openclaw.mjs /t
 ```
 
 The script alternates five timed fresh processes per build and runs a separate capacity process per build, calls the real `plugins inspect --runtime` loader in isolated profiles with fixed empty workspaces and mock endpoint configuration, and records loader time, total CLI time, and captured package/file/logical-byte counts. It does not clear OS caches or connect to a live Gateway. Keep machine-specific results private. A lower measured loader median supports a plugin loading improvement; it does not establish an improvement in every Gateway startup phase, and timing is not a CI threshold.
+
+Repeat this comparison against a tarball installed with the final published QMD dependency when replacing a review revision. Record end-to-end Gateway readiness separately, with the same start and end boundaries; loader inspection, TCP binding, HTTP startup logging, and full readiness measure different work. Do not report overall startup optimization as complete from a loader result alone.
+
+For lifecycle acceptance, check the final build's timer/disposal regressions and use the public `openclaw plugins reload skill-harness --wait --json` operation during an idle maintenance window. Verify retirement completed, old index leases were released after store closure, and the replacement instance serves actual Gateway tools. Report which resource counts the host exposes: a successful reload or absence of warnings alone does not prove zero remaining plugin timers. Keep active-work cancellation and disposal checks separate from ordinary chat completion and Review.
