@@ -170,8 +170,8 @@ importers:
         specifier: 0.7.0
         version: 0.7.0
       '@wei840222/qmd':
-        specifier: git+https://github.com/wei840222/qmd.git#6e1c065ccb5ff04c8fdcca1a6dcdf5099e4dacf3
-        version: https://codeload.github.com/wei840222/qmd/tar.gz/6e1c065ccb5ff04c8fdcca1a6dcdf5099e4dacf3(typescript@7.0.2)
+        specifier: 2026.10.19
+        version: 2026.10.19(typescript@7.0.2)
       gray-matter:
         specifier: 4.0.3
         version: 4.0.3
@@ -1210,9 +1210,8 @@ packages:
   '@vitest/spy@5.0.4':
     resolution: {integrity: sha512-MZKk/gSkm2q+ICobMxCpH1mA+cCAWm8WV7UhxlqGjq/sJ3AGc1BqFOs5CRVXxH78wQtme9q/NAAgBquj4AcyMw==}
 
-  '@wei840222/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/6e1c065ccb5ff04c8fdcca1a6dcdf5099e4dacf3':
-    resolution: {gitHosted: true, integrity: sha512-DB5dvAqKq4ofFnz93eNeAgAt8wsNdTnnRXVCfgoFMxwdU5vJ63R1vVuNxZQpd9F33R+VrgqrS34Rk65caOFyOA==, tarball: https://codeload.github.com/wei840222/qmd/tar.gz/6e1c065ccb5ff04c8fdcca1a6dcdf5099e4dacf3}
-    version: 2026.10.18-remote.0
+  '@wei840222/qmd@2026.10.19':
+    resolution: {integrity: sha512-JczHlLhdNuQoVQkKUSB+QXS9eHk5yum4TEVU9IZoZQUNSXA1pkKjqGRdfPVodb5/p4RVls4f6V5g6HKCv1bHVA==}
     engines: {node: '>=24.21.0'}
     hasBin: true
     peerDependencies:
@@ -3513,7 +3512,7 @@ snapshots:
 
   '@vitest/spy@5.0.4': {}
 
-  '@wei840222/qmd@https://codeload.github.com/wei840222/qmd/tar.gz/6e1c065ccb5ff04c8fdcca1a6dcdf5099e4dacf3(typescript@7.0.2)':
+  '@wei840222/qmd@2026.10.19(typescript@7.0.2)':
     dependencies:
       '@modelcontextprotocol/server': 2.1.0
       '@node-rs/jieba': 2.0.3
