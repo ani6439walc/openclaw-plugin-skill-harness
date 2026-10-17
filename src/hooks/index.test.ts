@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "../../api.js";
-import { logger } from "../../api.js";
+import { logger, setApiLogger, resetApiLogger } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import type { QMDStore } from "@wei840222/qmd";
 import { createSkillExperienceQmdIndex } from "../qmd/experience-index.js";
@@ -835,6 +835,119 @@ description: Navigate Tokyo.
     );
     expect(getTurnState).toHaveBeenCalledWith("session-1", "run-1");
     expect(recordStats).toHaveBeenCalledWith("session-1", state);
+  });
+
+  it.each(["finalize", "inventory"] as const)(
+    "observes a slow agent_end %s without cancelling finalization",
+    async (phase) => {
+      vi.useFakeTimers();
+      const warn = vi.fn();
+      const info = vi.fn();
+      setApiLogger({
+        warn: (message) => warn(message),
+        info: (message) => info(message),
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const state = { timestamps: { start: new Date().toISOString() } };
+      vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
+      vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
+      vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("main");
+      const { handlers, finalizeTurn } = createFinalizedTurnHarness(state, {
+        deps: {
+          skillInventoryResolver: () =>
+            phase === "inventory" ? gate.then(() => []) : Promise.resolve([]),
+        },
+      });
+      if (phase === "finalize")
+        finalizeTurn.mockImplementation(() =>
+          gate.then(() => "applied" as const),
+        );
+      try {
+        const running = handlers.onAgentEnd({ messages: [] } as never, {
+          sessionId: "session-1",
+        });
+        await vi.advanceTimersByTimeAsync(24_999);
+        expect(warn).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(warn).toHaveBeenCalledTimes(1);
+        const message = warn.mock.calls[0]![0] as string;
+        expect(JSON.parse(message.slice(message.indexOf("{")))).toMatchObject({
+          hook: "agent_end",
+          phase,
+          elapsedMs: 25_000,
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(warn).toHaveBeenCalledTimes(1);
+        release();
+        await running;
+        expect(finalizeTurn).toHaveBeenCalledTimes(1);
+        expect(info).toHaveBeenCalledWith(
+          expect.stringContaining('"outcome":"completed"'),
+        );
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        release();
+        resetApiLogger();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("clears the slow warning after normal and already-finalized agent_end", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(logger, "warn");
+    const { handlers, finalizeTurn } = createFinalizedTurnHarness({});
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(false);
+    try {
+      await handlers.onAgentEnd({ messages: [] } as never, {
+        sessionId: "session-1",
+      });
+      finalizeTurn.mockResolvedValue("already-finalized");
+      await handlers.onAgentEnd({ messages: [] } as never, {
+        sessionId: "session-1",
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(warn).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records only classified agent_end errors and preserves rejection", async () => {
+    vi.useFakeTimers();
+    const warn = vi.fn();
+    setApiLogger({ warn: (message) => warn(message) });
+    const { handlers, finalizeTurn } = createFinalizedTurnHarness({});
+    const error = Object.assign(
+      new Error("private-query token=private-secret"),
+      { code: "private-code" },
+    );
+    finalizeTurn.mockRejectedValue(error);
+    try {
+      await expect(
+        handlers.onAgentEnd({ messages: [] } as never, {
+          sessionId: "session-1",
+        }),
+      ).rejects.toBe(error);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = warn.mock.calls[0]![0] as string;
+      expect(JSON.parse(message.slice(message.indexOf("{")))).toMatchObject({
+        hook: "agent_end",
+        phase: "finalize",
+        reason: "operation-failed",
+      });
+      expect(message).not.toMatch(
+        /private-query|private-secret|private-code|session-1/,
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      resetApiLogger();
+      vi.useRealTimers();
+    }
   });
 
   it("passes every staged fallback for the exact turn through one agent_end finalization", async () => {

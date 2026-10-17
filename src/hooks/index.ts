@@ -12,6 +12,7 @@ import type {
 } from "../session/index.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
+import { safeErrorClassification } from "../error-diagnostics.js";
 import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
@@ -102,6 +103,9 @@ import {
 export type { HookDeps } from "./types.js";
 
 import { promptRoutingBudgetMs, withPromptDeadline } from "./prompt-budget.js";
+
+type AgentEndPhase = "finalize" | "inventory" | "stats" | "review-preparation";
+type AgentEndPhaseObserver = (phase: AgentEndPhase) => void;
 
 function eventError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unknown error";
@@ -1643,7 +1647,10 @@ export function createHookHandlers(deps: HookDeps) {
     };
   }
 
-  async function recordAgentEndStats(association: TurnAssociation) {
+  async function recordAgentEndStats(
+    association: TurnAssociation,
+    observePhase?: AgentEndPhaseObserver,
+  ) {
     const { sessionId, turnKey } = association;
     const state = tracker.getTurnState(sessionId, turnKey);
     if (!state) return;
@@ -1659,6 +1666,7 @@ export function createHookHandlers(deps: HookDeps) {
         }
       | undefined;
     if (agentId) {
+      observePhase?.("inventory");
       try {
         const skills = await skillInventoryResolver({
           api,
@@ -1669,9 +1677,12 @@ export function createHookHandlers(deps: HookDeps) {
         });
         if (skills) skillInventory = { agentId, skills };
       } catch (error) {
-        logger.warn("failed to resolve skill inventory for stats", { error });
+        logger.warn(
+          `failed to resolve skill inventory for stats ${JSON.stringify(safeErrorClassification(error))}`,
+        );
       }
     }
+    observePhase?.("stats");
     const recorded = skillInventory
       ? statsAggregator.record(sessionId, state, undefined, {
           skillInventory,
@@ -1764,11 +1775,13 @@ export function createHookHandlers(deps: HookDeps) {
   async function finalizeTrackedTurn(
     association: TurnAssociation | undefined,
     ctx: PluginHookAgentContext,
+    observePhase?: AgentEndPhaseObserver,
   ): Promise<void> {
     if (!association) return;
-    const agentEndStats = await recordAgentEndStats(association);
+    const agentEndStats = await recordAgentEndStats(association, observePhase);
     if (!agentEndStats) return;
 
+    observePhase?.("review-preparation");
     const resolvedConfig = config();
     const reviewConfig = resolvedConfig.review;
     if (!reviewConfig.enabled) return;
@@ -1807,7 +1820,9 @@ export function createHookHandlers(deps: HookDeps) {
         triggers,
       });
     } catch (error) {
-      logger.warn("failed to prepare Intent Review", { error });
+      logger.warn(
+        `failed to prepare Intent Review ${JSON.stringify(safeErrorClassification(error))}`,
+      );
     }
   }
 
@@ -1823,52 +1838,91 @@ export function createHookHandlers(deps: HookDeps) {
       sessionKey: ctx.sessionKey,
     });
     if (!association) return;
-    const stagedEntries = toolFallbacks.listForAssociation(association);
-    const stagedToolFallbacks = stagedEntries.map(
-      ([, staged]) => staged.fallback,
-    );
-    const payload = extractAgentEndPayload({
-      messages: event.messages,
-      error: event.error,
+    const startedAt = Date.now();
+    let phase: AgentEndPhase = "finalize";
+    let phaseStartedAt = startedAt;
+    let slow = false;
+    let outcome: "completed" | "skipped" | "failed" = "completed";
+    const observePhase: AgentEndPhaseObserver = (next) => {
+      phase = next;
+      phaseStartedAt = Date.now();
+    };
+    const diagnostic = () => ({
+      hook: "agent_end",
+      phase,
+      elapsedMs: Date.now() - startedAt,
+      phaseElapsedMs: Date.now() - phaseStartedAt,
     });
-    const finalized = await tracker.finalizeTurnFromAgentEnd({
-      sessionId: association.sessionId,
-      expectedTurnKey: association.turnKey,
-      stagedToolFallbacks,
-      result: payload.result,
-      error: payload.error,
-      endedAt: new Date().toISOString(),
-    });
-    if (finalized !== "applied" && finalized !== "already-finalized") return;
-    turnAssociations.markAssociationTerminal(association);
-    toolFallbacks.markAssociationTerminal(association);
-    if (finalized === "already-finalized") {
-      if (stagedEntries.length > 0) {
-        const durableTurn = tracker.getTurnState(
-          association.sessionId,
-          association.turnKey,
-        );
-        const fallbacksAreDurable = stagedEntries.every(([, staged]) =>
-          durableTurn?.toolCalls?.some(
-            (call) => call.toolCallId === staged.fallback.toolCallId,
-          ),
-        );
-        if (fallbacksAreDurable) {
-          for (const [toolCallId] of stagedEntries) {
-            toolFallbacks.delete(toolCallId);
-            pendingToolCalls.delete(toolCallId);
-            recordedToolCalls.add(toolCallId);
+    // Observe the host's 30-second hook budget without cancelling or racing work.
+    const slowTimer = setTimeout(() => {
+      slow = true;
+      logger.warn(`agent_end slow ${JSON.stringify(diagnostic())}`);
+    }, 25_000);
+    slowTimer.unref?.();
+    try {
+      const stagedEntries = toolFallbacks.listForAssociation(association);
+      const stagedToolFallbacks = stagedEntries.map(
+        ([, staged]) => staged.fallback,
+      );
+      const payload = extractAgentEndPayload({
+        messages: event.messages,
+        error: event.error,
+      });
+      const finalized = await tracker.finalizeTurnFromAgentEnd({
+        sessionId: association.sessionId,
+        expectedTurnKey: association.turnKey,
+        stagedToolFallbacks,
+        result: payload.result,
+        error: payload.error,
+        endedAt: new Date().toISOString(),
+      });
+      if (finalized !== "applied" && finalized !== "already-finalized") {
+        outcome = "skipped";
+        return;
+      }
+      turnAssociations.markAssociationTerminal(association);
+      toolFallbacks.markAssociationTerminal(association);
+      if (finalized === "already-finalized") {
+        if (stagedEntries.length > 0) {
+          const durableTurn = tracker.getTurnState(
+            association.sessionId,
+            association.turnKey,
+          );
+          const fallbacksAreDurable = stagedEntries.every(([, staged]) =>
+            durableTurn?.toolCalls?.some(
+              (call) => call.toolCallId === staged.fallback.toolCallId,
+            ),
+          );
+          if (fallbacksAreDurable) {
+            for (const [toolCallId] of stagedEntries) {
+              toolFallbacks.delete(toolCallId);
+              pendingToolCalls.delete(toolCallId);
+              recordedToolCalls.add(toolCallId);
+            }
           }
         }
+        return;
       }
-      return;
+      for (const [toolCallId] of stagedEntries) {
+        toolFallbacks.delete(toolCallId);
+        pendingToolCalls.delete(toolCallId);
+        recordedToolCalls.add(toolCallId);
+      }
+      await finalizeTrackedTurn(association, ctx, observePhase);
+    } catch (error) {
+      outcome = "failed";
+      logger.warn(
+        `agent_end failed ${JSON.stringify({ ...diagnostic(), ...safeErrorClassification(error) })}`,
+      );
+      throw error;
+    } finally {
+      clearTimeout(slowTimer);
+      if (slow) {
+        logger.info(
+          `agent_end settled after slow warning ${JSON.stringify({ ...diagnostic(), outcome })}`,
+        );
+      }
     }
-    for (const [toolCallId] of stagedEntries) {
-      toolFallbacks.delete(toolCallId);
-      pendingToolCalls.delete(toolCallId);
-      recordedToolCalls.add(toolCallId);
-    }
-    await finalizeTrackedTurn(association, ctx);
   }
 
   async function onBeforeAgentFinalize(

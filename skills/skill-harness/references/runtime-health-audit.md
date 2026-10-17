@@ -87,3 +87,11 @@ dependency. Background endpoint names are not injected or adopted skills. Select
 experience summaries may be nested in a skill or standalone; placement is not a
 separate selection, injection or usage event. Compare periods across routing
 changes separately and do not rewrite historical aggregates.
+
+## Bounded manual follow-up
+
+When aggregates cannot establish task benefit, inspect at most 12 disjoint existing turns: up to four relation-only skill selections, four post-creation experience reuses, and four turns involving explicitly identified revised experiences. Use chronological ordering and prefer retained tool evidence for the first two groups; report insufficient samples rather than adding model calls. Use temporary private analysis, not a new runtime service or public report format.
+
+Record private turn pointers, the observed outcome, and one assessment: concrete help, no clear effect, interference, or insufficient evidence. An off-topic result can be observed without proving that injected guidance caused it. Do not infer historical card text from current files, equate selection with adoption, or count missing usage fields as non-use. Missing versions/context remain unknown; no qualifying relation or merge/delete case is a conditional verification gap, not a reason to change thresholds or keep expanding the task.
+
+Inventory and experience-build warnings include fixed safe phase/reason fields in the single logger string. Match experience recovery by fingerprint; compare retry counts without interpreting unavailable as a proven lock failure. Agent-end slow warnings identify the phase after 25 seconds and log an outcome if work later settles. They do not cancel the hook or prove that a host timeout occurred.

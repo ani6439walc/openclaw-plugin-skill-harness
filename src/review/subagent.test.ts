@@ -122,6 +122,55 @@ describe("buildReviewPrompt", () => {
     },
   );
 
+  it("distinguishes Unicode file budgets from finding JSON limits", () => {
+    const prompt = buildReviewPrompt(snapshot, ["experience-health-check"]);
+    const fileContract = prompt.split("Eligible observed skills")[0];
+    const outputContract = prompt.split("Decision completeness:")[1];
+
+    expect(fileContract).toContain("max 240 Unicode code points");
+    expect(fileContract).toContain("Up to 12 concise keywords");
+    expect(fileContract).toContain("max 64 Unicode code points each");
+    expect(fileContract).toContain("max 12,000 Unicode code points");
+    expect(outputContract).toContain(
+      "summary: nonempty string, at most 500 characters",
+    );
+    expect(outputContract).toContain(
+      "These JSON field limits are separate from the experience file limits above",
+    );
+    expect(prompt).toContain(
+      "Count code points, not bytes or UTF-16 code units",
+    );
+  });
+
+  it("requires consolidation and a bounded self-check before a refine finding", () => {
+    const prompt = buildReviewPrompt(snapshot, ["capability-fit"]);
+    const read = prompt.indexOf("Before refining, read the complete existing");
+    const count = prompt.indexOf("After editing, use the existing exec tool");
+    const output = prompt.indexOf("Output format:");
+
+    expect(read).toBeGreaterThan(-1);
+    expect(count).toBeGreaterThan(read);
+    expect(output).toBeGreaterThan(count);
+    expect(prompt).toContain(
+      "Replace superseded guidance and consolidate repeated steps",
+    );
+    expect(prompt).toContain(
+      "Preserve applicability conditions, prerequisites, necessary steps, verified outcomes, and unresolved limits",
+    );
+    expect(prompt).toContain("never rewrite failure as success");
+    expect(prompt).toContain("Deduplicate keywords");
+    expect(prompt).toContain(
+      "explicit, inspected workspace-relative experience paths",
+    );
+    expect(prompt).toContain("Then read the complete changed files again");
+    expect(prompt).toContain("Never automatically truncate guidance");
+    expect(prompt).toContain("restore any draft edits");
+    expect(prompt).toContain("return hasFinding=false");
+    expect(prompt).toContain(
+      "Do not create a duplicate or synonymous experience to bypass the limits",
+    );
+  });
+
   it("requires unassociated entries when no eligible observed skills exist", () => {
     const prompt = buildReviewPrompt(snapshot, ["capability-fit"]);
     expect(prompt).toContain(
@@ -761,7 +810,7 @@ describe("review writeback boundaries", () => {
 
   it("instructs one skill and keyword per line to match the parser", () => {
     expect(buildReviewPrompt(snapshot, ["capability-fit"])).toContain(
-      "Up to 12 concise keywords (exactly one per line)",
+      "Up to 12 concise keywords (exactly one per line; max 64 Unicode code points each)",
     );
     expect(buildReviewPrompt(snapshot, ["capability-fit"])).toContain(
       "Associated skill names (exactly one per line; no comma-separated lists)",

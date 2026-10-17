@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { setApiLogger, resetApiLogger } from "../../api.js";
 import type { QMDStore } from "@wei840222/qmd";
 import type { SkillExperienceEntry } from "../experiences/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
@@ -54,6 +55,7 @@ describe("SkillExperienceQmdIndex", () => {
   });
 
   afterEach(async () => {
+    resetApiLogger();
     if (index) {
       await index.close();
       index = undefined;
@@ -260,6 +262,104 @@ describe("SkillExperienceQmdIndex", () => {
     expect(await index.search({ query: "screenshot" })).toBeUndefined();
     expect(createStore).not.toHaveBeenCalled();
     expect(await fs.readdir(tmpDir)).toEqual([]);
+  });
+
+  it.each(["store-open", "update", "embed", "status", "publication"] as const)(
+    "persists safe %s failure diagnostics through a single-string host and reports recovery",
+    async (phase) => {
+      vi.useFakeTimers();
+      const warn = vi.fn();
+      const info = vi.fn();
+      setApiLogger({
+        warn: (message) => warn(message),
+        info: (message) => info(message),
+      });
+      const mockStore = makeStore();
+      const failure = Object.assign(
+        new Error("private-query provider-body api-key"),
+        {
+          code: "private-custom-code",
+        },
+      );
+      const createStore = vi.fn().mockResolvedValue(mockStore);
+      if (phase === "store-open") createStore.mockRejectedValueOnce(failure);
+      if (phase === "update") mockStore.update.mockRejectedValueOnce(failure);
+      if (phase === "embed") mockStore.embed.mockRejectedValueOnce(failure);
+      if (phase === "status")
+        mockStore.getStatus.mockRejectedValueOnce(failure);
+      const metadataPath = path.join(
+        tmpDir,
+        "qmd",
+        "experiences",
+        "metadata.json",
+      );
+      if (phase === "publication")
+        await fs.mkdir(metadataPath, { recursive: true });
+      index = createSkillExperienceQmdIndex({
+        dataRoot: tmpDir,
+        config: () => DEFAULT_CONFIG,
+        createStore,
+      });
+      index.schedule(MOCK_ENTRIES);
+      await vi.waitFor(() => expect(index!.getStatus()).toBe("failed"));
+      const message = warn.mock.calls.find(([message]) =>
+        message.includes("failed to build QMD experience index "),
+      )?.[0];
+      expect(message).toBeDefined();
+      const diagnostic = JSON.parse(message.slice(message.indexOf("{")!));
+      expect(diagnostic).toEqual({
+        fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+        phase,
+        reason:
+          phase === "publication" ? "invalid-file-type" : "operation-failed",
+        ...(phase === "publication" ? { code: "EISDIR" } : {}),
+        consecutiveFailures: 1,
+        retryDelayMs: 5000,
+      });
+      expect(message).not.toMatch(
+        /private-query|provider-body|api-key|private-custom-code/,
+      );
+      expect(
+        info.mock.calls.filter(([message]) =>
+          message.includes("QMD experience index build recovered"),
+        ),
+      ).toHaveLength(0);
+      if (phase === "publication")
+        await fs.rm(metadataPath, { recursive: true });
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
+      const recovered = info.mock.calls.filter(([message]) =>
+        message.includes("QMD experience index build recovered"),
+      );
+      expect(recovered).toHaveLength(1);
+      expect(
+        JSON.parse(recovered[0][0].slice(recovered[0][0].indexOf("{"))),
+      ).toEqual({ fingerprint: diagnostic.fingerprint, previousFailures: 1 });
+      expect(
+        JSON.parse(await fs.readFile(metadataPath, "utf8")).fingerprint,
+      ).toBe(diagnostic.fingerprint);
+    },
+  );
+
+  it("classifies incomplete embeddings without exposing provider result fields", async () => {
+    const warn = vi.fn();
+    setApiLogger({ warn: (message) => warn(message) });
+    const mockStore = makeStore();
+    mockStore.embed.mockResolvedValue({ errors: 1 });
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore: vi.fn().mockResolvedValue(mockStore),
+    });
+    index.schedule(MOCK_ENTRIES);
+    await vi.waitFor(() => expect(index!.getStatus()).toBe("failed"));
+    expect(
+      warn.mock.calls.some(([message]) =>
+        message.includes(
+          '"phase":"embed","reason":"embedding-incomplete","code":"EMBEDDING_INCOMPLETE"',
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("retries failed builds with backoff without another catalog refresh", async () => {

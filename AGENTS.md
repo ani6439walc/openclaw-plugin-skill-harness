@@ -361,3 +361,7 @@ verification succeeds. Redact credential assignments and `sk-` tokens before
 logging. Do not serialize stacks, causes, raw provider bodies, queries, or
 credentials. Unknown error codes still map to `operation-failed`. Preserve retry,
 lock, discovery and lease behavior.
+
+New inventory, experience-build and agent_end diagnostics use safeErrorClassification() from src/error-diagnostics.ts: fixed reasons and allowlisted codes only. Encode explicit fields into one logger string; do not include arbitrary error messages/names, paths, queries, evidence, stack/cause or credentials. Keep this stricter contract distinct from existing skill-index redacted diagnostics. Inventory failures retain unavailable semantics and report the failing root category/operation, never a partial complete inventory. Experience recovery follows successful metadata publication. Agent-end slow warnings fire once at 25 seconds, report the active phase, clear/unref their timer and never cancel work, extend host timeouts or change finalization deduplication.
+
+Review refinement must read full entries, consolidate repeated guidance and replace superseded sections while preserving useful prerequisites and verified boundaries. Enforce file limits separately from finding JSON limits: summary 240/body 12,000 Unicode code points; up to 12 keywords of 64 each. Count with existing workspace exec, reread final files, restore drafts and return no finding when no safe improvement fits. Do not truncate, bypass limits with duplicate entries or add automatic model retries.

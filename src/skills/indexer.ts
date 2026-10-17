@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
+import { safeErrorClassification } from "../error-diagnostics.js";
 import { resolveStateDirFromApi } from "../file-utils.js";
 import {
   DEFAULT_SKILL_INDEX_CACHE_TTL_MS,
@@ -43,6 +44,21 @@ interface SkillIndexOptions {
   source?: AvailableSkill["source"];
 }
 
+class InventoryReadError extends Error {
+  constructor(
+    readonly phase: string,
+    readonly diagnostic: ReturnType<typeof safeErrorClassification>,
+  ) {
+    super("Inventory read failed");
+  }
+}
+
+function inventoryReadError(error: unknown, phase: string): InventoryReadError {
+  return error instanceof InventoryReadError
+    ? error
+    : new InventoryReadError(phase, safeErrorClassification(error));
+}
+
 const skillIndexCache = new Map<string, CachedSkillIndex>();
 
 export function clearSkillIndexCache(): void {
@@ -79,13 +95,16 @@ async function readSkillFile(
   source?: AvailableSkill["source"],
   requireComplete = false,
 ): Promise<IndexedSkill | undefined> {
+  let phase = "resolve-file";
   try {
     const resolvedFilePath = await resolveConfinedFile(
       path.dirname(filePath),
       filePath,
     );
     if (!resolvedFilePath) return;
+    phase = "read-file";
     const raw = await fs.readFile(resolvedFilePath);
+    phase = "parse-frontmatter";
     const parsed = matter(raw.toString("utf-8"));
     const name =
       typeof parsed.data.name === "string"
@@ -107,7 +126,7 @@ async function readSkillFile(
       source,
     };
   } catch (err) {
-    if (requireComplete) throw err;
+    if (requireComplete) throw inventoryReadError(err, phase);
     if (!isMissingPathError(err)) {
       logger.warn("failed to read referenced skill metadata", {
         error: err,
@@ -125,7 +144,7 @@ async function readEntryStat(
   try {
     return await fs.stat(entryPath);
   } catch (error) {
-    if (requireComplete) throw error;
+    if (requireComplete) throw inventoryReadError(error, "stat");
     return;
   }
 }
@@ -165,10 +184,11 @@ async function resolveDisabledBundledSkillPolicy(
   stateDir: string,
 ): Promise<DisabledBundledSkillPolicy> {
   const configPath = path.join(stateDir, "openclaw.json");
+  let phase = "read-policy";
   try {
-    const parsed = JSON.parse(
-      await fs.readFile(configPath, "utf-8"),
-    ) as unknown;
+    const content = await fs.readFile(configPath, "utf-8");
+    phase = "parse-policy";
+    const parsed = JSON.parse(content) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return { resolved: false };
     }
@@ -201,10 +221,13 @@ async function resolveDisabledBundledSkillPolicy(
     if (isMissingPathError(err)) {
       return { resolved: true, names: new Set() };
     }
-    logger.warn("failed to read OpenClaw skill entry configuration", {
-      error: err,
-      path: configPath,
-    });
+    logger.warn(
+      `failed to read OpenClaw skill entry configuration ${JSON.stringify({
+        rootCategory: "configuration",
+        phase,
+        ...safeErrorClassification(err),
+      })}`,
+    );
     return { resolved: false };
   }
 }
@@ -235,7 +258,7 @@ async function buildSkillIndex(
         options.requireComplete &&
         !(depth === 0 && isMissingPathError(error))
       ) {
-        throw error;
+        throw inventoryReadError(error, "realpath");
       }
       return;
     }
@@ -246,7 +269,7 @@ async function buildSkillIndex(
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch (error) {
-      if (options.requireComplete) throw error;
+      if (options.requireComplete) throw inventoryReadError(error, "readdir");
       return;
     }
 
@@ -353,18 +376,32 @@ async function listSkillIndexes(
 
   const indexes: Array<Map<string, IndexedSkill>> = [];
   for (const root of resolveSkillRoots(params)) {
-    indexes.push(
-      await getCachedSkillIndex(root.path, {
-        cacheTtlMs,
-        disabledSkillNames:
-          root.source === "bundled"
-            ? await getDisabledBundledSkillNames()
-            : undefined,
-        nowMs: params.nowMs,
-        requireComplete,
-        source: root.source,
-      }),
-    );
+    try {
+      indexes.push(
+        await getCachedSkillIndex(root.path, {
+          cacheTtlMs,
+          disabledSkillNames:
+            root.source === "bundled"
+              ? await getDisabledBundledSkillNames()
+              : undefined,
+          nowMs: params.nowMs,
+          requireComplete,
+          source: root.source,
+        }),
+      );
+    } catch (error) {
+      if (requireComplete) {
+        const failure = inventoryReadError(error, "index");
+        logger.warn(
+          `failed to resolve complete skill inventory ${JSON.stringify({
+            rootCategory: root.source,
+            phase: failure.phase,
+            ...failure.diagnostic,
+          })}`,
+        );
+      }
+      throw error;
+    }
   }
   return indexes;
 }
@@ -375,14 +412,22 @@ export async function resolveSkillInventory(
   const policy = await resolveDisabledBundledSkillPolicy(
     resolveStateDirFromApi(params.api, process.env),
   );
-  if (!policy.resolved) return;
+  if (!policy.resolved) {
+    logger.warn(
+      `failed to resolve complete skill inventory ${JSON.stringify({
+        rootCategory: "configuration",
+        phase: "resolve-policy",
+        reason: "policy-unavailable",
+      })}`,
+    );
+    return;
+  }
   const inventory: SkillInventoryItem[] = [];
   const seen = new Set<string>();
   let indexes: Array<Map<string, IndexedSkill>>;
   try {
     indexes = await listSkillIndexes(params, policy.names, true);
-  } catch (error) {
-    logger.warn("failed to resolve complete skill inventory", { error });
+  } catch {
     return;
   }
   for (const index of indexes) {
