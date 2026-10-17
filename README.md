@@ -272,25 +272,27 @@ There are no pre-seeded experiences. Each entry is a directory under the default
 
 One experience can relate to multiple skills, and one skill can relate to multiple experiences. Write applicability and prerequisites into the procedure itself.
 
-### Optional skill relations
+### Skill relations
 
-An imported author-relation graph can expose related skills through `skill_view` or `skill_list` / `skill_search` with `show_related: true`. For optional automatic candidate expansion, set:
+An imported author-relation graph can expose related skills through `skill_view` or `skill_list` / `skill_search` with `show_related: true`. Automatic candidate expansion and relation scoring are always active when usable graph evidence exists. To customize the XML injection threshold, set:
 
 ```json5
 {
-  routing: { skills: { related: { enabled: true, relevanceThreshold: 0.8 } } },
+  routing: { skills: { related: { relevanceThreshold: 0.8 } } },
 }
 ```
 
 Expansion adds a bounded outgoing hop from the first eight original skill candidates: at most two new skills per seed and eight per turn, distributed round-robin. It remains one hop, and experiences do not seed expansion.
 
-When enabled, the same Jev call also scores whether each graph relation, its author reason and both endpoint descriptions offer useful reference value for the current task, independently from skill relevance. This assesses reference value rather than whether a relation is a verified or unmet prerequisite. Author declarations remain unverified reference data, not instructions. For each skill candidate, it considers at most two incoming/outgoing author relations (16 questions total), preserving their original direction. Both endpoints must be visible, identity-matching winning skills with a nonempty author reason. Graph lookup, expansion deduplication and self comparisons use NFKC-normalized, trimmed, lowercase identities while displayed names retain their original spelling. The other endpoint may be outside the candidate pool: its name and description are supplied as background, without creating a candidate or using an injection slot. Reasons are bounded to 500 Unicode code points and each endpoint description to 1,000.
+The same Jev call also scores whether each graph relation, its author reason and both endpoint descriptions offer useful reference value for the current task, independently from skill relevance. This assesses reference value rather than whether a relation is a verified or unmet prerequisite. Author declarations remain unverified reference data, not instructions. For each skill candidate, it considers at most two incoming/outgoing author relations (16 questions total), preserving their original direction. Both endpoints must be visible, identity-matching winning skills with a nonempty author reason. Graph lookup, expansion deduplication and self comparisons use NFKC-normalized, trimmed, lowercase identities while displayed names retain their original spelling. The other endpoint may be outside the candidate pool: its name and description are supplied as background, without creating a candidate or using an injection slot. Reasons are bounded to 500 Unicode code points and each endpoint description to 1,000.
 
 The Jev state exposes `skill_candidates` with names, descriptions, discovery sources, `experience_ids` and `relation_ids`; `experience_candidates` with IDs, summaries and visible associated skill names; and `skill_relation_evidence` with stable question IDs such as `relation_0`, anchor, direction, endpoint descriptions and author reasons. Questions point to these entries so candidate provenance and the scored relation are explicit. Background endpoints remain outside `skill_candidates` unless independently discovered.
 
 Only relations scoring at least `routing.skills.related.relevanceThreshold` (default `0.8`, inclusive range `0`–`1`) are rendered as `<relation>` children inside the final injected anchor skill's XML. Each child preserves `from`, `to`, type, author reason and `unverified` status; scores stay in optional session/event diagnostics. Relation scores never change skill scores, routing confidence or injection caps. A related endpoint is not automatically loaded, and the prompt does not claim that prerequisites or execution order have been verified. All six relation types remain advisory, including dependency/conflict labels.
 
-`routing.skills.related.enabled` defaults to false and controls both expansion and relation relevance hints. The threshold supports live configuration updates and applies consistently to injection diagnostics and XML rendering on subsequent turns. A threshold of `0` allows every scored relation whose anchor is selected; it does not enable a disabled relation switch. This is separate from skill/experience selection thresholds and the importer’s relation-type classification thresholds. Importing a graph is a separate step. Existing deployments with the switch enabled gain the relation questions and XML hints after upgrading; no graph/schema migration or statistics rewrite is required. See the [staged import procedure in AGENTS.md](AGENTS.md#advanced-relation-import-procedure).
+Relation expansion and scoring have no enable switch. The threshold supports live configuration updates and applies consistently to injection diagnostics and XML rendering on subsequent turns. A threshold of `0` allows every scored relation whose anchor is selected. This is separate from skill/experience selection thresholds and the importer’s relation-type classification thresholds. Missing or invalid graphs leave ordinary routing working without relation evidence. Importing a graph remains a separate step; no graph/schema migration or statistics rewrite is required.
+
+Before upgrading, remove the retired `routing.skills.related.enabled` field from plugin configuration (whether `true` or `false`): the strict public schema rejects it. Keep any `relevanceThreshold` value. Previously disabled deployments now use bounded expansion and relation scoring automatically; limits and skill selection rules remain unchanged. See the [staged import procedure in AGENTS.md](AGENTS.md#advanced-relation-import-procedure).
 
 ## Configuration reference
 

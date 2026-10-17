@@ -71,9 +71,9 @@ the original direction even for an incoming edge; the invoking agent must see
 both matching winning skills. Missing/invalid graph state should leave ordinary
 routing available without relation candidates.
 
-When comparing observation periods, record the graph import time and the
-separate `routing.skills.related.enabled` change time. Graph import alone does
-not enable automatic candidate expansion. Count relation-derived candidates
+When comparing observation periods, record graph import and plugin deployment
+times, plus relation threshold changes. Expansion and scoring are always active
+with usable graph evidence; importing a graph does not deploy the plugin. Count relation-derived candidates
 separately from QMD hits and collection contributions; an author relation or Jev
 selection does not prove adoption or task benefit. Compare actual loading,
 execution outcomes, retries and user corrections. Keep graph/checkpoint contents,

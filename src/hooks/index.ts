@@ -1166,7 +1166,6 @@ export function createHookHandlers(deps: HookDeps) {
           });
 
           const relationGraph =
-            refreshedConfig.routing.skills.related.enabled &&
             refreshedConfig.routing.skills.maxInjectedSkills > 0 &&
             (unionPool.candidateSkills.length > 0 ||
               skillDiscoveryResult.candidateExperiences.some(
@@ -1178,17 +1177,11 @@ export function createHookHandlers(deps: HookDeps) {
                   skillDiscoveryResult.visibleSkills,
                 )
               : new Map();
-          const related = refreshedConfig.routing.skills.related.enabled
-            ? expandRelatedCandidates(
-                unionPool.candidateSkills,
-                skillDiscoveryResult.visibleSkills,
-                relationGraph,
-              )
-            : {
-                candidateSkills: [...unionPool.candidateSkills],
-                added: [],
-                evidence: [],
-              };
+          const related = expandRelatedCandidates(
+            unionPool.candidateSkills,
+            skillDiscoveryResult.visibleSkills,
+            relationGraph,
+          );
           const superset = buildSkillCandidateSuperset({
             originals: unionPool.candidateSkills,
             nameCandidates: skillDiscoveryResult.nameCandidates,

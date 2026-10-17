@@ -1195,7 +1195,7 @@ describe("resolveConfig", () => {
   describe("skillCandidates", () => {
     it("resolves the complete default policy for legacy routing config", () => {
       expect(resolveConfig({}).routing.skills).toEqual({
-        related: { enabled: false, relevanceThreshold: 0.8 },
+        related: { relevanceThreshold: 0.8 },
         search: { minCandidateScore: 0.6, timeoutMs: 15_000 },
         nameMatch: {
           maxEditDistance: 2,
@@ -1207,29 +1207,24 @@ describe("resolveConfig", () => {
       });
     });
 
-    it("accepts opt-in related discovery and rejects unknown relation settings", () => {
-      expect(
-        resolveConfig({ routing: { skills: { related: { enabled: true } } } })
-          .routing.skills.related.enabled,
-      ).toBe(true);
-      expect(() =>
-        resolveConfig({ routing: { skills: { related: { force: true } } } }),
-      ).toThrow();
+    it("rejects the removed relation switch and unknown relation settings", () => {
+      for (const related of [
+        { enabled: true },
+        { enabled: false },
+        { force: true },
+      ]) {
+        expect(() =>
+          resolveConfig({ routing: { skills: { related } } }),
+        ).toThrow();
+      }
     });
 
-    it("preserves enabled-only relation settings with the shared default threshold", () => {
-      expect(
-        resolveConfig({ routing: { skills: { related: { enabled: true } } } })
-          .routing.skills.related,
-      ).toEqual({
-        enabled: true,
-        relevanceThreshold: DEFAULT_RELATION_RELEVANCE_THRESHOLD,
-      });
+    it("defaults relation settings without an enable switch", () => {
       expect(DEFAULT_RELATION_RELEVANCE_THRESHOLD).toBe(0.8);
       expect(
         resolveConfig({ routing: { skills: { related: {} } } }).routing.skills
           .related,
-      ).toEqual({ enabled: false, relevanceThreshold: 0.8 });
+      ).toEqual({ relevanceThreshold: DEFAULT_RELATION_RELEVANCE_THRESHOLD });
     });
 
     it.each([0, 0.4, 1])(
@@ -1239,7 +1234,7 @@ describe("resolveConfig", () => {
           resolveConfig({
             routing: { skills: { related: { relevanceThreshold: threshold } } },
           }).routing.skills.related,
-        ).toEqual({ enabled: false, relevanceThreshold: threshold });
+        ).toEqual({ relevanceThreshold: threshold });
       },
     );
 
@@ -1265,6 +1260,7 @@ describe("resolveConfig", () => {
         manifest.configSchema.properties.routing.properties.skills.properties
           .related;
       expect(related.additionalProperties).toBe(false);
+      expect(related.properties).not.toHaveProperty("enabled");
       expect(related.required ?? []).not.toContain("relevanceThreshold");
       expect(related.properties.relevanceThreshold).toMatchObject({
         type: "number",
@@ -1302,7 +1298,7 @@ describe("resolveConfig", () => {
       }).routing.skills;
 
       expect(policy).toEqual({
-        related: { enabled: false, relevanceThreshold: 0.8 },
+        related: { relevanceThreshold: 0.8 },
         search: { minCandidateScore: 0.7, timeoutMs: 250 },
         nameMatch: {
           maxEditDistance: 1,

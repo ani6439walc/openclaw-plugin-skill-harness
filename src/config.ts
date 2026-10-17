@@ -74,7 +74,6 @@ const DEFAULT_JEV: QmdEndpointConfig = {
 
 const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
   related: {
-    enabled: false,
     relevanceThreshold: DEFAULT_RELATION_RELEVANCE_THRESHOLD,
   },
   search: { minCandidateScore: 0.6, timeoutMs: undefined as never },
@@ -299,7 +298,6 @@ const RoutingSkillsSchema = z
   .object({
     related: z
       .object({
-        enabled: z.boolean().optional().default(false),
         relevanceThreshold: z
           .number()
           .finite()

@@ -400,17 +400,12 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Expand one hop of unverified author-declared skill relations before Jev selection."
-                  },
                   "relevanceThreshold": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
                     "default": 0.8,
-                    "description": "Inclusive task-relevance threshold for advisory skill relation injection; does not affect skill selection or candidate expansion."
+                    "description": "Inclusive reference-value threshold for advisory skill relation injection; does not affect skill selection or candidate expansion."
                   }
                 }
               }

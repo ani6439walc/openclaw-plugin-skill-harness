@@ -3058,13 +3058,9 @@ describe("createHookHandlers topic switch flow", () => {
     expect(write).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { enabled: false, selected: true },
-    { enabled: true, selected: true },
-    { enabled: true, selected: false },
-  ])(
-    "uses graph candidates with enabled=$enabled, selected=$selected",
-    async ({ enabled, selected }) => {
+  it.each([{ selected: true }, { selected: false }])(
+    "uses graph candidates by default with selected=$selected",
+    async ({ selected }) => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-relations-"));
       const workspace = path.join(tmp, "workspace");
       const dataRoot = path.join(tmp, "data");
@@ -3090,7 +3086,6 @@ describe("createHookHandlers topic switch flow", () => {
       const { handlers, classifier, record } = createTopicFlowHarness({
         historicalIntents: [],
         dataRoot,
-        configRaw: { routing: { skills: { related: { enabled } } } },
         ...(!selected
           ? {
               classifier: vi.fn().mockResolvedValue({
@@ -3119,14 +3114,14 @@ describe("createHookHandlers topic switch flow", () => {
         const names = classifier.mock.calls[0][0].candidateSkills.map(
           (s: { name: string }) => s.name,
         );
-        expect(names.includes("supplementary-guidance")).toBe(enabled);
+        expect(names.includes("supplementary-guidance")).toBe(true);
         const discovery =
           record.mock.calls.at(-1)![1].current.inputSkillDiscovery;
         expect(
           discovery.injectedSkills.filter(
             (s: { source: string }) => s.source === "related-declared",
           ),
-        ).toHaveLength(enabled && selected ? 1 : 0);
+        ).toHaveLength(selected ? 1 : 0);
         expect(discovery.retrievalSemanticScores).toEqual([]);
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
@@ -3135,56 +3130,42 @@ describe("createHookHandlers topic switch flow", () => {
   );
 
   it.each<{
-    enabled: boolean;
     selected: boolean;
     score: number;
     injected: boolean;
     threshold?: number;
     liveUpdate?: boolean;
   }>([
-    { enabled: true, selected: true, score: 0.8, injected: true },
-    { enabled: true, selected: true, score: 0.79, injected: false },
-    { enabled: true, selected: false, score: 0.99, injected: false },
-    { enabled: false, selected: true, score: 0.99, injected: false },
+    { selected: true, score: 0.8, injected: true },
+    { selected: true, score: 0.79, injected: false },
+    { selected: false, score: 0.99, injected: false },
     {
-      enabled: true,
       selected: true,
       score: 0.5,
       threshold: 0.5,
       injected: true,
     },
     {
-      enabled: true,
       selected: true,
       score: 0.49,
       threshold: 0.5,
       injected: false,
     },
     {
-      enabled: true,
       selected: true,
       score: 0.99,
       threshold: 1,
       injected: false,
     },
-    { enabled: true, selected: true, score: 1, threshold: 1, injected: true },
-    { enabled: true, selected: true, score: 0, threshold: 0, injected: true },
+    { selected: true, score: 1, threshold: 1, injected: true },
+    { selected: true, score: 0, threshold: 0, injected: true },
     {
-      enabled: true,
       selected: false,
       score: 0.5,
       threshold: 0.4,
       injected: false,
     },
     {
-      enabled: false,
-      selected: true,
-      score: 0.5,
-      threshold: 0.4,
-      injected: false,
-    },
-    {
-      enabled: true,
       selected: true,
       score: 0.7,
       injected: false,
@@ -3192,7 +3173,7 @@ describe("createHookHandlers topic switch flow", () => {
     },
   ])(
     "scores non-candidate relations and renders only selected relevant evidence: %j",
-    async ({ enabled, selected, score, injected, threshold, liveUpdate }) => {
+    async ({ selected, score, injected, threshold, liveUpdate }) => {
       const tmp = fs.mkdtempSync(
         path.join(os.tmpdir(), "hook-relation-scoring-"),
       );
@@ -3228,7 +3209,7 @@ describe("createHookHandlers topic switch flow", () => {
           injected: false,
         })),
       }));
-      const relatedSettings = { enabled, relevanceThreshold: threshold };
+      const relatedSettings = { relevanceThreshold: threshold };
       const { handlers, record } = createTopicFlowHarness({
         historicalIntents: [],
         dataRoot,
@@ -3258,22 +3239,20 @@ describe("createHookHandlers topic switch flow", () => {
         expect(
           params.candidateSkills.map((skill: { name: string }) => skill.name),
         ).toEqual(["candidate-target"]);
-        expect(params.relationEvidence).toHaveLength(enabled ? 1 : 0);
-        if (enabled) {
-          expect(params.relationEvidence[0]).toMatchObject({
-            skill: "candidate-target",
-            from: "noncandidate-source",
-            to: "candidate-target",
-            from_description: "Source skill description",
-          });
-          const saved = record.mock.calls.at(-1)![1].current;
-          expect(saved.inputSkillDiscovery.relationDecisions[0]).toMatchObject({
-            score,
-            injected,
-          });
-          expect(saved.inputSkillDiscovery.retrievalSemanticScores).toEqual([]);
-          expect(saved.confidence).toBe(0.7);
-        }
+        expect(params.relationEvidence).toHaveLength(1);
+        expect(params.relationEvidence[0]).toMatchObject({
+          skill: "candidate-target",
+          from: "noncandidate-source",
+          to: "candidate-target",
+          from_description: "Source skill description",
+        });
+        const saved = record.mock.calls.at(-1)![1].current;
+        expect(saved.inputSkillDiscovery.relationDecisions[0]).toMatchObject({
+          score,
+          injected,
+        });
+        expect(saved.inputSkillDiscovery.retrievalSemanticScores).toEqual([]);
+        expect(saved.confidence).toBe(0.7);
         const serialized = JSON.stringify(result);
         expect(serialized.includes("<relation ")).toBe(injected);
         if (injected) expect(serialized).toContain("Original author guidance");
@@ -3561,7 +3540,6 @@ describe("createHookHandlers topic switch flow", () => {
         historicalIntents: [],
         dataRoot,
         classifier,
-        configRaw: { routing: { skills: { related: { enabled: true } } } },
         experienceCatalog: { resolve: () => entry },
         qmdExperienceIndex: {
           search: vi.fn().mockResolvedValue([

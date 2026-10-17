@@ -124,8 +124,11 @@ artifacts must never enter the package or repository. Removing only
 changes disable affected edges. Upstream CLI file compatibility does not imply
 its writer participates in plugin locking or enforces plugin validation.
 
-Relation expansion is opt-in via `routing.skills.related.enabled` (default false,
-live configuration). Expand only outgoing author declarations from the first
+Relation expansion and relation scoring are always active when usable graph
+evidence exists; there is no enable switch. Remove retired
+`routing.skills.related.enabled` settings before upgrading, as both the strict
+manifest and runtime parser reject them. Preserve configured relevanceThreshold.
+Expand only outgoing author declarations from the first
 8 ranked original name/QMD candidates, one hop, round-robin, at most 2 new
 skills per seed and 8 per turn; alphabetize targets and do not charge duplicates.
 Require current visible winning identities and a nonempty original reason.
@@ -138,7 +141,7 @@ new skill selection thresholds or fallback injection. `relatedCandidates` is opt
 session/event diagnostics; `related-declared` injection contributes to pool
 counts only, never QMD or collection attribution. Do not recalculate old stats.
 
-With the same switch enabled, collect relation relevance evidence independently
+Collect relation relevance evidence independently
 from candidate expansion: at most two incoming/outgoing relations per candidate,
 16 questions total, preserving original `from`/`to`. Anchor each relation to the
 candidate being described. Both endpoints require current visible winning
@@ -165,15 +168,15 @@ Render only relations scoring at least routing.skills.related.relevanceThreshold
 final skill selection, as escaped `<relation>` children within that skill's XML.
 Use the same per-turn resolved threshold for hook injected flags and renderer
 filtering; subsequent turns honor live updates without changing expansion or skill
-selection. Zero does not bypass related.enabled or selected-anchor requirements.
+selection. Zero does not bypass selected-anchor requirements.
 Keep runtime/Zod defaults and the strict public manifest aligned.
 Preserve direction, type, original reason and unverified status; do not generate
 reasons or imply verified prerequisites/order. Relation scores never boost skill
 scores, routing confidence or injection capacity. Optional `relationDecisions`
 session/event diagnostics retain evidence, score and final `injected` status;
 background names are not injected/adopted skills and must not contribute to QMD
-scores or collection counts. No graph/schema/stats migration is needed. Existing
-live-enabled deployments gain this behavior on upgrade; local tests are not
+scores or collection counts. No graph/schema/stats migration is needed. Previously disabled deployments also gain bounded expansion and scoring on
+upgrade; local tests are not
 Gateway verification.
 
 Keep graph implementation in `src/skills/relation-graph.ts`, import and fixed Jev
@@ -186,14 +189,14 @@ validator error lists, not merely successful process exit, and use the existing
 YAML parser without adding a Python runtime dependency.
 
 Graph publication and plugin deployment are separate operations. Subsequent reads
-refresh a changed graph; graph-backed tools work with automatic expansion off.
+refresh a changed graph; graph-backed tools and routing share the same graph.
 Verify deployed behavior through the intended agent's actual Gateway tools:
 `skill_view`, paginated `skill_list(show_related: true)`, and
 `skill_search(show_related: true)`. Preserve original predicate direction for
 incoming edges. Do not infer graph failure from an empty search result or infer
 automatic expansion from tool success. Validate routing separately with an
 eligible turn, optional related candidate diagnostics and final selections;
-Jev may reject any candidate. Do not enable the live switch for a read-only audit.
+Jev may reject any candidate. Do not modify live configuration for a read-only audit.
 
 Graph node counts cover participating skills, not necessarily every visible
 skill. Graphs, schemas, checkpoints and backups are private managed state outside
@@ -304,10 +307,9 @@ A missing or invalid graph leaves ordinary routing working without relations;
 runtime tools do not fall back to legacy metadata relationships. Do not edit the
 formal graph with the upstream ontology CLI while the plugin/importer may be
 writing: its writer does not participate in plugin locks. Keep graph backups and
-checkpoints outside the package. Importing a graph does not enable automatic
-relation expansion or deploy the plugin; `routing.skills.related.enabled`
-defaults to `false` so relation experiments can be observed separately from
-experience-quality changes.
+checkpoints outside the package. Importing a graph does not deploy the plugin. With a usable graph, bounded
+automatic expansion and relation scoring are always active; record graph and
+plugin publication times separately from experience-quality changes.
 
 Relation labels are `related`, `depends_on`, `composes_with`,
 `similar_to`, `conflicts_with`, and `specializes`; an empty reason is visible in
