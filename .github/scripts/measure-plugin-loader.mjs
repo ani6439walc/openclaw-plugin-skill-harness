@@ -15,7 +15,6 @@ function captureStats(stateRoot) {
       else if (entry.isFile()) {
         result.files++;
         result.logicalBytes += fs.statSync(target).size;
-        if (entry.name === "package.json") result.packages++;
       }
     }
   }
@@ -23,7 +22,20 @@ function captureStats(stateRoot) {
   if (fs.existsSync(root)) {
     for (const generation of fs.readdirSync(root)) {
       const captures = path.join(root, generation, "captures");
-      if (fs.existsSync(captures)) walk(captures);
+      if (fs.existsSync(captures)) {
+        for (const build of fs.readdirSync(captures, { withFileTypes: true })) {
+          if (!build.isDirectory()) continue;
+          const buildRoot = path.join(captures, build.name);
+          // Count the loader's package boundaries, not nested fixture manifests.
+          result.packages += fs
+            .readdirSync(buildRoot, { withFileTypes: true })
+            .filter(
+              (entry) =>
+                entry.isDirectory() && /^package-\d+$/u.test(entry.name),
+            ).length;
+        }
+        walk(captures);
+      }
     }
   }
   return result;
