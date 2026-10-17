@@ -64,6 +64,7 @@ vi.mock("./qmd/experience-index.js", async (importOriginal) => {
 
 describe("createPlugin", () => {
   let stateDir: string;
+  const disposers = new Set<() => void | Promise<void>>();
 
   beforeEach(() => {
     stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-state-"));
@@ -72,10 +73,23 @@ describe("createPlugin", () => {
     createExperienceIndexSpy.mockReset();
   });
 
-  afterEach(() => {
-    fs.rmSync(stateDir, { recursive: true, force: true });
-    vi.restoreAllMocks();
-    vi.useRealTimers();
+  afterEach(async () => {
+    try {
+      const results = await Promise.allSettled(
+        [...disposers].map(async (dispose) => dispose()),
+      );
+      disposers.clear();
+      const errors = results
+        .filter((result) => result.status === "rejected")
+        .map((result) => result.reason);
+      if (errors.length > 0)
+        throw new AggregateError(errors, "Fixture disposal failed");
+      if (vi.isFakeTimers()) expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
   });
 
   function createApi(overrides: Partial<OpenClawPluginApi> = {}) {
@@ -100,6 +114,17 @@ describe("createPlugin", () => {
       registerTool,
       registerCommand,
       ...overrides,
+      lifecycle: {
+        ...overrides.lifecycle,
+        onDispose(dispose: () => void | Promise<void>) {
+          disposers.add(dispose);
+          const unregister = overrides.lifecycle?.onDispose?.(dispose);
+          return () => {
+            disposers.delete(dispose);
+            unregister?.();
+          };
+        },
+      },
     } as unknown as OpenClawPluginApi & {
       on: ReturnType<typeof vi.fn>;
       registerTool: ReturnType<typeof vi.fn>;
@@ -200,6 +225,124 @@ describe("createPlugin", () => {
     await onDispose.mock.calls[0][0]();
     expect(closeSkills).toHaveBeenCalledOnce();
     expect(closeExperiences).toHaveBeenCalledOnce();
+  });
+
+  it("disposes failed QMD workers and their retries through fixture teardown", async ({
+    onTestFinished,
+  }) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(skillRoots, "resolveOpenClawBundledSkillsDir").mockResolvedValue(
+      undefined,
+    );
+    vi.spyOn(skills, "listAvailableSkills").mockResolvedValue([]);
+    const rejectStore = vi.fn(async () => {
+      throw new Error("fixture index failure");
+    });
+    createSkillIndexSpy.mockImplementation((params) => {
+      params.createStore = rejectStore;
+    });
+    createExperienceIndexSpy.mockImplementation((params) => {
+      params.createStore = rejectStore;
+    });
+    const api = createApi({
+      pluginConfig: {
+        qmd: {
+          embedding: {
+            baseUrl: "https://fixture.invalid",
+            apiKey: "fixture",
+            model: "fixture-embedding",
+          },
+          expansion: {
+            baseUrl: "https://fixture.invalid",
+            apiKey: "fixture",
+            model: "fixture-expansion",
+          },
+        },
+      },
+    });
+    createPlugin(api).register(api);
+    const { qmdSkillIndex, qmdExperienceIndex } =
+      createHookHandlersSpy.mock.calls[0][0];
+    await vi.waitFor(() => {
+      expect(qmdSkillIndex.getStatus("main")).toBe("failed");
+      expect(qmdExperienceIndex.getStatus()).toBe("failed");
+    });
+    expect(rejectStore).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    // Deliberately leave both failed workers to the fixture's afterEach cleanup.
+    onTestFinished(() => {
+      expect(qmdSkillIndex.getStatus("main")).toBe("idle");
+      expect(qmdExperienceIndex.getStatus()).toBe("idle");
+    });
+  });
+
+  it("leaves no retry timers when QMD workers fail after shutdown starts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(skillRoots, "resolveOpenClawBundledSkillsDir").mockResolvedValue(
+      undefined,
+    );
+    vi.spyOn(skills, "listAvailableSkills").mockResolvedValue([]);
+    let rejectBuild!: (error: Error) => void;
+    const build = new Promise<never>((_resolve, reject) => {
+      rejectBuild = reject;
+    });
+    const embed = vi.fn(() => build);
+    const createStore = vi.fn(async () => ({
+      update: vi.fn(async () => {}),
+      embed,
+      getStatus: vi.fn(async () => ({ needsEmbedding: 0 })),
+      close: vi.fn(async () => {}),
+    }));
+    for (const spy of [createSkillIndexSpy, createExperienceIndexSpy]) {
+      spy.mockImplementation((params) => {
+        params.createStore = createStore;
+      });
+    }
+    const api = createApi({
+      pluginConfig: {
+        qmd: {
+          embedding: {
+            baseUrl: "https://fixture.invalid",
+            apiKey: "fixture",
+            model: "fixture-embedding",
+          },
+          expansion: {
+            baseUrl: "https://fixture.invalid",
+            apiKey: "fixture",
+            model: "fixture-expansion",
+          },
+        },
+      },
+    });
+    createPlugin(api).register(api);
+    const { qmdSkillIndex, qmdExperienceIndex } =
+      createHookHandlersSpy.mock.calls[0][0];
+    const closeSkills = vi.spyOn(qmdSkillIndex, "close");
+    const closeExperiences = vi.spyOn(qmdExperienceIndex, "close");
+    try {
+      await vi.waitFor(() => expect(embed).toHaveBeenCalledTimes(2));
+      const stop = api.on.mock.calls.find(
+        ([name]) => name === "gateway_stop",
+      )![1] as () => Promise<void>;
+      let stopped = false;
+      const stopping = stop().then(() => {
+        stopped = true;
+      });
+      await vi.waitFor(() => {
+        expect(closeSkills).toHaveBeenCalledOnce();
+        expect(closeExperiences).toHaveBeenCalledOnce();
+      });
+      expect(stopped).toBe(false);
+      rejectBuild(new Error("fixture build failed during shutdown"));
+      await stopping;
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(createStore).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      rejectBuild(new Error("fixture cleanup"));
+    }
   });
 
   it("refreshes QMD in the current instance context and drains pending discovery before shutdown closes stores", async () => {

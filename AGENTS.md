@@ -48,6 +48,12 @@ Use strict TypeScript, ESM imports, two-space indentation, and `.js` extensions 
 
 Use Vitest globals in colocated `<module>.test.ts` files. Cover contracts, failures, and boundary validation; no numeric coverage target exists. Behavioral changes require focused regressions. Before handoff, run typecheck, tests, and build; package-facing changes also require loader and dry-pack checks.
 
+Plugin fixtures must collect every instance's lifecycle disposal callback,
+including callbacks observed through test-specific lifecycle spies. Await all
+disposals before removing temporary roots or restoring mocks and clocks. Assert
+zero fake timers before restoring real timers; do not use `clearAllTimers()` to
+hide workers from earlier fixtures that can still schedule retries.
+
 ## Runtime & Agent-Specific Rules
 
 Keep package assets separate from runtime state. There are zero pre-seeded experiences; live sessions, experiences, and statistics belong under `~/.openclaw/plugins/skill-harness/`. Never include that private data in commits.
@@ -249,7 +255,7 @@ The reviewer may merge substantially overlapping experiences after reading their
 
 The Review prompt includes refine, merge, and delete JSON examples with aligned field types/limits. Operation and merge metadata persist in schema-v8 `review.json`; existing v8 changes without operation metadata remain readable and are not reclassified. The runtime-health report counts new operations through its existing `byOperation` aggregate. Invalid findings emit warning-level schema issue paths and codes without rejected values or evidence text. `missing-trigger-decision` means no valid decision remained for a requested trigger; it can follow rejection of a finding that did contain `trigger`. Detached Review transcripts are not retained, so historical reason counts alone cannot identify the original invalid field. These diagnostics do not relax validation or guarantee successful experience learning.
 
-Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn finishes (default 30-second idle delay). A new candidate for the same agent/session replaces the previous pending candidate and resets its timer, with pending entries capped by LRU eviction (default 32 sessions). Before executing, the scheduler checks if the system is actively processing embedded runs (`isSystemActive`); if busy or another Review is in flight, review is postponed by a 30-second retry delay. Each scheduler runs at most one Review at a time. If OpenClaw Gateway is shutting down (`isDraining`), pending reviews abort immediately without executing. Review runs execute in the background detached from the hook scope (`runDetachedFromWorkScope`) with `sessionPersistence: "detached"`, and the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
+Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn finishes (default 30-second idle delay). A new candidate for the same agent/session replaces the previous pending candidate and resets its timer, with pending entries capped by LRU eviction (default 32 sessions). Before executing, the scheduler checks if the system is actively processing embedded runs (`isSystemActive`); if busy or another Review is in flight, review is postponed by a 30-second retry delay. Each scheduler runs at most one Review at a time. Public lifecycle signals and `gateway_stop` cancel pending reviews and abort and await active Review work; Gateway admission remains authoritative during restart draining. Review runs execute through the owning instance's `runInBackgroundContext` with `sessionPersistence: "detached"`, and the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
 
 ## Telemetry interpretation and retention
 
