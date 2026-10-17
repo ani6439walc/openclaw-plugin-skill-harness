@@ -134,6 +134,8 @@ Set optional `qmd.embeddingCacheDir` to share document embeddings across skill a
 
 The QMD cache retains successful document embeddings for up to two hours, bounded to 2,000 entries / 64 MiB of payload (SQLite adds overhead). Identity, credentials, and exact formatted input must match. It does not persist query embeddings or expansion results. Cache misses sharing a directory serialize while the remote request runs; waiting respects the request timeout. Cache failure falls back to ordinary embedding, so this is not a permanent exactly-once guarantee. Changing the directory reopens stores after active operations drain without changing index fingerprints or rebuilding vectors. Read-only discovery does not create the disk cache.
 
+Skill-index mapping publication, lifetime leases, and discovery reads share a FIFO catalog queue within each plugin instance. The existing one-second cross-process file-lock deadline starts only after local queue admission. Maintenance with a zero-wait budget skips a busy queue or lock immediately. Failed work releases the queue, and shutdown stops new work and drains accepted operations before stores close and leases release. Debug diagnostics report only operation category, acquisition outcome, and queue/lock/hold durations; they omit skill names, conversations, and credentials. Independent plugin instances still coordinate through the existing file lock and lease format.
+
 For native Voyage, merge this complete model configuration into the plugin config, retaining your configured expansion and Jev providers:
 
 ```json5

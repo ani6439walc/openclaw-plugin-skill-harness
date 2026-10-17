@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
+import { once } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { FileLock, writeJsonAtomic } from "../file-utils.js";
 import {
   createSkillIndexGc,
@@ -18,7 +19,10 @@ describe("skill index garbage collection", () => {
     now = 100;
     fs.mkdirSync(path.join(root, "agents"));
   });
-  afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+  afterEach(() => {
+    vi.useRealTimers();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
   const gc = () => createSkillIndexGc({ skillsRoot: root, nowMs: () => now });
   function index(id = a) {
     const target = path.join(root, "indexes", id);
@@ -33,6 +37,139 @@ describe("skill index garbage collection", () => {
       allowedSkillNames: ["test"],
     });
   }
+  it("queues seven catalog operations without spending the file-lock budget in the local queue", async () => {
+    vi.useFakeTimers();
+    const coordinator = gc();
+    const order: number[] = [];
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = coordinator.withCatalog(async () => {
+      order.push(0);
+      await blocked;
+      return 0;
+    });
+    await vi.waitFor(() => expect(order).toEqual([0]));
+    const followers = Array.from({ length: 6 }, (_, index) =>
+      coordinator.withCatalog(async () => {
+        order.push(index + 1);
+        return index + 1;
+      }),
+    );
+    try {
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(order).toEqual([0]);
+    } finally {
+      release();
+    }
+    expect(await Promise.all([first, ...followers])).toEqual([
+      0, 1, 2, 3, 4, 5, 6,
+    ]);
+    expect(order).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("skips nonwaiting maintenance while its coordinator is occupied and continues after a rejected operation", async () => {
+    const coordinator = gc();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = false;
+    const first = coordinator.withCatalog(async () => {
+      entered = true;
+      await blocked;
+      return true;
+    });
+    await vi.waitFor(() => expect(entered).toBe(true));
+    const maintenance = vi.fn(async () => true);
+    try {
+      expect(await coordinator.withCatalog(maintenance, 0)).toBeUndefined();
+      expect(maintenance).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await first;
+    }
+    await expect(
+      coordinator.withCatalog(async () => {
+        throw new Error("fixture failure");
+      }),
+    ).rejects.toThrow("fixture failure");
+    expect(await coordinator.withCatalog(async () => "next")).toBe("next");
+  });
+  it("retains the cross-instance deadline and drains all accepted local work", async () => {
+    vi.useFakeTimers();
+    const owner = gc();
+    const contender = gc();
+    let release!: () => void;
+    let entered = false;
+    const first = owner.withCatalog(async () => {
+      entered = true;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await vi.waitFor(() => expect(entered).toBe(true));
+    const external = vi.fn(async () => true);
+    const waiting = contender.withCatalog(external);
+    const tail = vi.fn(async () => "tail");
+    const follower = owner.withCatalog(tail);
+    let drained = false;
+    const draining = owner.drain().then(() => {
+      drained = true;
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await waiting).toBeUndefined();
+      expect(external).not.toHaveBeenCalled();
+      expect(tail).not.toHaveBeenCalled();
+      expect(drained).toBe(false);
+    } finally {
+      release();
+      await first;
+    }
+    expect(await follower).toBe("tail");
+    await draining;
+    expect(drained).toBe(true);
+    expect(await contender.withCatalog(external)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("respects a catalog lock owned by another live process", async () => {
+    const lockPath = path.join(root, "catalog.lock");
+    const child = spawn(
+      process.execPath,
+      [
+        "--eval",
+        `
+      const fs = require('node:fs');
+      const lock = process.argv[1];
+      fs.mkdirSync(lock);
+      fs.writeFileSync(lock + '/owner.json', JSON.stringify({ pid: process.pid, createdAtMs: Date.now() }));
+      process.on('message', () => { fs.rmSync(lock, { recursive: true }); process.exit(0); });
+      process.send('ready');
+    `,
+        lockPath,
+      ],
+      { stdio: ["ignore", "ignore", "inherit", "ipc"] },
+    );
+    const exited = once(child, "exit");
+    try {
+      await once(child, "message");
+      const operation = vi.fn(async () => true);
+      const coordinator = gc();
+      expect(await coordinator.withCatalog(operation, 0)).toBeUndefined();
+      expect(operation).not.toHaveBeenCalled();
+      child.send("release");
+      expect((await exited)[0]).toBe(0);
+      expect(await coordinator.withCatalog(operation)).toBe(true);
+    } finally {
+      if (child.exitCode === null) child.kill();
+      await exited;
+    }
+  });
+
   it("persists the full grace period across coordinator restarts", async () => {
     const target = index();
     expect((await gc().collect()).removedIndexes).toEqual([]);

@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
+import { logger } from "../../api.js";
 import {
   FileLock,
   readJsonFile,
@@ -10,6 +12,12 @@ import {
 
 export const SKILL_INDEX_GC_GRACE_MS = 24 * 60 * 60 * 1000;
 const fingerprintPattern = /^[a-f0-9]{64}$/u;
+type CatalogOperation =
+  | "catalog"
+  | "mapping-publish"
+  | "lease-acquire"
+  | "discovery-read"
+  | "maintenance";
 interface GcState {
   schemaVersion: 1;
   orphanSince: Record<string, number>;
@@ -86,17 +94,56 @@ export function createSkillIndexGc(params: {
   const leasesRoot = path.join(skillsRoot, "leases");
   const statePath = path.join(skillsRoot, "gc.json");
   const nowMs = params.nowMs ?? Date.now;
+  let catalogTail: Promise<void> = Promise.resolve();
+  let pendingCatalogOperations = 0;
 
   async function withCatalog<T>(
     operation: () => Promise<T>,
     maxWaitMs = 1_000,
+    operationName: CatalogOperation = "catalog",
   ): Promise<T | undefined> {
-    if (!directory(skillsRoot, true)) return;
-    const lockPath = path.join(skillsRoot, "catalog.lock");
-    if (!validExistingLock(lockPath)) return;
-    return withFileLock(path.join(skillsRoot, "catalog"), operation, {
-      maxWaitMs,
+    // Maintenance must remain nonblocking even when another local operation is queued.
+    if (maxWaitMs === 0 && pendingCatalogOperations > 0) return;
+    const queuedAt = performance.now();
+    pendingCatalogOperations += 1;
+    const work = catalogTail.then(async () => {
+      const lockStartedAt = performance.now();
+      let acquiredAt: number | undefined;
+      try {
+        if (!directory(skillsRoot, true)) return;
+        const lockPath = path.join(skillsRoot, "catalog.lock");
+        if (!validExistingLock(lockPath)) return;
+        return await withFileLock(
+          path.join(skillsRoot, "catalog"),
+          async () => {
+            acquiredAt = performance.now();
+            return operation();
+          },
+          { maxWaitMs },
+        );
+      } finally {
+        pendingCatalogOperations -= 1;
+        const finishedAt = performance.now();
+        logger.debug(
+          `QMD catalog operation ${JSON.stringify({
+            operation: operationName,
+            acquired: acquiredAt !== undefined,
+            queueWaitMs: Math.round(lockStartedAt - queuedAt),
+            lockWaitMs: Math.round((acquiredAt ?? finishedAt) - lockStartedAt),
+            holdMs:
+              acquiredAt === undefined
+                ? 0
+                : Math.round(finishedAt - acquiredAt),
+          })}`,
+        );
+      }
     });
+    // Rejections belong to their caller and must not poison the next operation.
+    catalogTail = work.then(
+      () => undefined,
+      () => undefined,
+    );
+    return work;
   }
 
   /** Call only while holding the catalog lock, after publishing a reference. */
@@ -124,35 +171,39 @@ export function createSkillIndexGc(params: {
   ): Promise<(() => void) | undefined> {
     if (!fingerprintPattern.test(fingerprint)) return;
     try {
-      return await withCatalog(async () => {
-        if (!directory(indexesRoot, allowCreate)) return;
-        const root = path.join(indexesRoot, fingerprint);
-        if (!directory(root, allowCreate)) return;
-        if (
-          !allowCreate &&
-          (!directory(path.join(root, "docs")) ||
-            !regularFile(path.join(root, "skill-search.sqlite")))
-        )
-          return;
-        if (!directory(leasesRoot, true)) return;
-        const leaseRoot = path.join(leasesRoot, fingerprint);
-        if (!directory(leaseRoot, true)) return;
-        const lease = new FileLock(path.join(leaseRoot, randomUUID()));
-        if (!(await lease.acquire({ maxWaitMs: 0 }))) return;
-        try {
-          markReferenced(fingerprint);
-        } catch (error) {
-          lease.release();
-          throw error;
-        }
-        let released = false;
-        return () => {
-          if (!released) {
-            released = true;
+      return await withCatalog(
+        async () => {
+          if (!directory(indexesRoot, allowCreate)) return;
+          const root = path.join(indexesRoot, fingerprint);
+          if (!directory(root, allowCreate)) return;
+          if (
+            !allowCreate &&
+            (!directory(path.join(root, "docs")) ||
+              !regularFile(path.join(root, "skill-search.sqlite")))
+          )
+            return;
+          if (!directory(leasesRoot, true)) return;
+          const leaseRoot = path.join(leasesRoot, fingerprint);
+          if (!directory(leaseRoot, true)) return;
+          const lease = new FileLock(path.join(leaseRoot, randomUUID()));
+          if (!(await lease.acquire({ maxWaitMs: 0 }))) return;
+          try {
+            markReferenced(fingerprint);
+          } catch (error) {
             lease.release();
+            throw error;
           }
-        };
-      });
+          let released = false;
+          return () => {
+            if (!released) {
+              released = true;
+              lease.release();
+            }
+          };
+        },
+        1_000,
+        "lease-acquire",
+      );
     } catch {
       return;
     }
@@ -230,127 +281,142 @@ export function createSkillIndexGc(params: {
       removedAgents: [] as string[],
     };
     try {
-      await withCatalog(async () => {
-        if (!directory(indexesRoot, true)) return;
-        let refs = mappings(); // Validate the entire catalog before any destructive work.
-        if (fs.existsSync(statePath) && !regularFile(statePath)) return;
-        const state: GcState = fs.existsSync(statePath)
-          ? readJsonFile<GcState>(statePath)
-          : { schemaVersion: 1, orphanSince: {}, retiredAgentSince: {} };
-        if (
-          (fs.existsSync(statePath) && !regularFile(statePath)) ||
-          state?.schemaVersion !== 1 ||
-          !marks(state.orphanSince) ||
-          !marks(state.retiredAgentSince)
-        )
-          return;
-        state.orphanSince = Object.assign(
-          Object.create(null) as Record<string, number>,
-          state.orphanSince,
-        );
-        state.retiredAgentSince = Object.assign(
-          Object.create(null) as Record<string, number>,
-          state.retiredAgentSince,
-        );
-        const persistedAgentKeys = new Set(refs.map((mapping) => mapping.name));
-        for (const key of Object.keys(state.retiredAgentSince)) {
-          if (!persistedAgentKeys.has(key)) delete state.retiredAgentSince[key];
-        }
-        const now = nowMs();
-        const active = options.activeAgentKeys?.();
-        const activeSet = active === undefined ? undefined : new Set(active);
-        for (const mapping of refs) {
-          if (!activeSet || activeSet.has(mapping.name)) {
-            delete state.retiredAgentSince[mapping.name];
-            continue;
+      await withCatalog(
+        async () => {
+          if (!directory(indexesRoot, true)) return;
+          let refs = mappings(); // Validate the entire catalog before any destructive work.
+          if (fs.existsSync(statePath) && !regularFile(statePath)) return;
+          const state: GcState = fs.existsSync(statePath)
+            ? readJsonFile<GcState>(statePath)
+            : { schemaVersion: 1, orphanSince: {}, retiredAgentSince: {} };
+          if (
+            (fs.existsSync(statePath) && !regularFile(statePath)) ||
+            state?.schemaVersion !== 1 ||
+            !marks(state.orphanSince) ||
+            !marks(state.retiredAgentSince)
+          )
+            return;
+          state.orphanSince = Object.assign(
+            Object.create(null) as Record<string, number>,
+            state.orphanSince,
+          );
+          state.retiredAgentSince = Object.assign(
+            Object.create(null) as Record<string, number>,
+            state.retiredAgentSince,
+          );
+          const persistedAgentKeys = new Set(
+            refs.map((mapping) => mapping.name),
+          );
+          for (const key of Object.keys(state.retiredAgentSince)) {
+            if (!persistedAgentKeys.has(key))
+              delete state.retiredAgentSince[key];
           }
-          const since = Object.hasOwn(state.retiredAgentSince, mapping.name)
-            ? state.retiredAgentSince[mapping.name]!
-            : now;
-          state.retiredAgentSince[mapping.name] = since;
-          if (now - since < SKILL_INDEX_GC_GRACE_MS) continue;
-          const buildRoot = path.join(indexesRoot, mapping.fingerprint);
-          if (!validExistingLock(`${buildRoot}.lock`)) continue;
-          const build = new FileLock(buildRoot);
-          if (!(await build.acquire({ maxWaitMs: 0 }))) continue;
-          try {
-            const indexUnused = await unused(mapping.fingerprint);
-            const latestActive = options.activeAgentKeys?.();
-            if (
-              latestActive === undefined ||
-              latestActive.includes(mapping.name)
-            ) {
+          const now = nowMs();
+          const active = options.activeAgentKeys?.();
+          const activeSet = active === undefined ? undefined : new Set(active);
+          for (const mapping of refs) {
+            if (!activeSet || activeSet.has(mapping.name)) {
               delete state.retiredAgentSince[mapping.name];
               continue;
             }
-            const sharedWithActiveAgent = mappings().some(
-              (other) =>
-                other.name !== mapping.name &&
-                other.fingerprint === mapping.fingerprint &&
-                latestActive.includes(other.name),
-            );
-            if (!indexUnused && !sharedWithActiveAgent) continue;
-            fs.unlinkSync(path.join(agentsRoot, `${mapping.name}.json`));
-            delete state.retiredAgentSince[mapping.name];
-            result.removedAgents.push(mapping.name);
-          } finally {
-            build.release();
+            const since = Object.hasOwn(state.retiredAgentSince, mapping.name)
+              ? state.retiredAgentSince[mapping.name]!
+              : now;
+            state.retiredAgentSince[mapping.name] = since;
+            if (now - since < SKILL_INDEX_GC_GRACE_MS) continue;
+            const buildRoot = path.join(indexesRoot, mapping.fingerprint);
+            if (!validExistingLock(`${buildRoot}.lock`)) continue;
+            const build = new FileLock(buildRoot);
+            if (!(await build.acquire({ maxWaitMs: 0 }))) continue;
+            try {
+              const indexUnused = await unused(mapping.fingerprint);
+              const latestActive = options.activeAgentKeys?.();
+              if (
+                latestActive === undefined ||
+                latestActive.includes(mapping.name)
+              ) {
+                delete state.retiredAgentSince[mapping.name];
+                continue;
+              }
+              const sharedWithActiveAgent = mappings().some(
+                (other) =>
+                  other.name !== mapping.name &&
+                  other.fingerprint === mapping.fingerprint &&
+                  latestActive.includes(other.name),
+              );
+              if (!indexUnused && !sharedWithActiveAgent) continue;
+              fs.unlinkSync(path.join(agentsRoot, `${mapping.name}.json`));
+              delete state.retiredAgentSince[mapping.name];
+              result.removedAgents.push(mapping.name);
+            } finally {
+              build.release();
+            }
           }
-        }
-        refs = mappings();
-        const referenced = new Set(refs.map((mapping) => mapping.fingerprint));
-        const candidates = fs
-          .readdirSync(indexesRoot)
-          .filter(
-            (name) =>
-              fingerprintPattern.test(name) &&
-              directory(path.join(indexesRoot, name)),
+          refs = mappings();
+          const referenced = new Set(
+            refs.map((mapping) => mapping.fingerprint),
           );
-        for (const name of Object.keys(state.orphanSince)) {
-          if (referenced.has(name) || !candidates.includes(name))
-            delete state.orphanSince[name];
-        }
-        for (const fingerprint of candidates) {
-          if (referenced.has(fingerprint)) continue;
-          const since = Object.hasOwn(state.orphanSince, fingerprint)
-            ? state.orphanSince[fingerprint]!
-            : now;
-          state.orphanSince[fingerprint] = since;
-          if (
-            now - since < SKILL_INDEX_GC_GRACE_MS ||
-            !(await unused(fingerprint))
-          )
-            continue;
-          const root = path.join(indexesRoot, fingerprint);
-          if (!validExistingLock(`${root}.lock`)) continue;
-          const build = new FileLock(root);
-          if (!(await build.acquire({ maxWaitMs: 0 }))) continue;
-          try {
+          const candidates = fs
+            .readdirSync(indexesRoot)
+            .filter(
+              (name) =>
+                fingerprintPattern.test(name) &&
+                directory(path.join(indexesRoot, name)),
+            );
+          for (const name of Object.keys(state.orphanSince)) {
+            if (referenced.has(name) || !candidates.includes(name))
+              delete state.orphanSince[name];
+          }
+          for (const fingerprint of candidates) {
+            if (referenced.has(fingerprint)) continue;
+            const since = Object.hasOwn(state.orphanSince, fingerprint)
+              ? state.orphanSince[fingerprint]!
+              : now;
+            state.orphanSince[fingerprint] = since;
             if (
-              mappings().some(
-                (mapping) => mapping.fingerprint === fingerprint,
-              ) ||
-              !directory(root)
+              now - since < SKILL_INDEX_GC_GRACE_MS ||
+              !(await unused(fingerprint))
             )
               continue;
-            fs.rmSync(root, { recursive: true });
+            const root = path.join(indexesRoot, fingerprint);
+            if (!validExistingLock(`${root}.lock`)) continue;
+            const build = new FileLock(root);
+            if (!(await build.acquire({ maxWaitMs: 0 }))) continue;
             try {
-              fs.rmdirSync(path.join(leasesRoot, fingerprint));
-            } catch {
-              // Remove only an empty lease directory; unexpected entries survive.
+              if (
+                mappings().some(
+                  (mapping) => mapping.fingerprint === fingerprint,
+                ) ||
+                !directory(root)
+              )
+                continue;
+              fs.rmSync(root, { recursive: true });
+              try {
+                fs.rmdirSync(path.join(leasesRoot, fingerprint));
+              } catch {
+                // Remove only an empty lease directory; unexpected entries survive.
+              }
+              delete state.orphanSince[fingerprint];
+              result.removedIndexes.push(fingerprint);
+            } finally {
+              build.release();
             }
-            delete state.orphanSince[fingerprint];
-            result.removedIndexes.push(fingerprint);
-          } finally {
-            build.release();
           }
-        }
-        writeJsonAtomic(statePath, state);
-      }, 0);
+          writeJsonAtomic(statePath, state);
+        },
+        0,
+        "maintenance",
+      );
     } catch {
       /* Ambiguous state is retained for a later maintenance pass. */
     }
     return result;
   }
-  return { withCatalog, acquire, collect, markReferenced };
+  return {
+    withCatalog,
+    acquire,
+    collect,
+    markReferenced,
+    drain: () => catalogTail,
+  };
 }
