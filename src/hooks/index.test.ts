@@ -3134,14 +3134,65 @@ describe("createHookHandlers topic switch flow", () => {
     },
   );
 
-  it.each([
+  it.each<{
+    enabled: boolean;
+    selected: boolean;
+    score: number;
+    injected: boolean;
+    threshold?: number;
+    liveUpdate?: boolean;
+  }>([
     { enabled: true, selected: true, score: 0.8, injected: true },
     { enabled: true, selected: true, score: 0.79, injected: false },
     { enabled: true, selected: false, score: 0.99, injected: false },
     { enabled: false, selected: true, score: 0.99, injected: false },
+    {
+      enabled: true,
+      selected: true,
+      score: 0.5,
+      threshold: 0.5,
+      injected: true,
+    },
+    {
+      enabled: true,
+      selected: true,
+      score: 0.49,
+      threshold: 0.5,
+      injected: false,
+    },
+    {
+      enabled: true,
+      selected: true,
+      score: 0.99,
+      threshold: 1,
+      injected: false,
+    },
+    { enabled: true, selected: true, score: 1, threshold: 1, injected: true },
+    { enabled: true, selected: true, score: 0, threshold: 0, injected: true },
+    {
+      enabled: true,
+      selected: false,
+      score: 0.5,
+      threshold: 0.4,
+      injected: false,
+    },
+    {
+      enabled: false,
+      selected: true,
+      score: 0.5,
+      threshold: 0.4,
+      injected: false,
+    },
+    {
+      enabled: true,
+      selected: true,
+      score: 0.7,
+      injected: false,
+      liveUpdate: true,
+    },
   ])(
     "scores non-candidate relations and renders only selected relevant evidence: %j",
-    async ({ enabled, selected, score, injected }) => {
+    async ({ enabled, selected, score, injected, threshold, liveUpdate }) => {
       const tmp = fs.mkdtempSync(
         path.join(os.tmpdir(), "hook-relation-scoring-"),
       );
@@ -3177,12 +3228,15 @@ describe("createHookHandlers topic switch flow", () => {
           injected: false,
         })),
       }));
+      const relatedSettings = { enabled, relevanceThreshold: threshold };
       const { handlers, record } = createTopicFlowHarness({
         historicalIntents: [],
         dataRoot,
         classifier,
         configRaw: {
-          routing: { skills: { related: { enabled }, maxInjectedSkills: 1 } },
+          routing: {
+            skills: { related: relatedSettings, maxInjectedSkills: 1 },
+          },
         },
         api: {
           runtime: {
@@ -3223,6 +3277,27 @@ describe("createHookHandlers topic switch flow", () => {
         const serialized = JSON.stringify(result);
         expect(serialized.includes("<relation ")).toBe(injected);
         if (injected) expect(serialized).toContain("Original author guidance");
+        if (liveUpdate) {
+          for (const nextThreshold of [0.6, 0.9]) {
+            relatedSettings.relevanceThreshold = nextThreshold;
+            const updated = await handlers.onBeforePromptBuild(
+              {
+                prompt: "candidate-target",
+                messages: [{ role: "user", content: "candidate-target" }],
+              } as never,
+              { ...ctx, runId: `threshold-update-${nextThreshold}` },
+            );
+            const expected = score >= nextThreshold;
+            const saved = record.mock.calls.at(-1)![1].current;
+            expect(
+              saved.inputSkillDiscovery.relationDecisions[0].injected,
+            ).toBe(expected);
+            expect(JSON.stringify(updated).includes("<relation ")).toBe(
+              expected,
+            );
+          }
+          expect(classifier).toHaveBeenCalledTimes(3);
+        }
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }

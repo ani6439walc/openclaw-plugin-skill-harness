@@ -114,6 +114,38 @@ describe("buildRoutingContext", () => {
     expect(formatWorkingSetSkills(matchedSkills)).not.toContain("<relation");
   });
 
+  it.each([
+    { threshold: 0.5, score: 0.5, injected: true, rendered: true },
+    { threshold: 0.5, score: 0.49, injected: true, rendered: false },
+    { threshold: 0.9, score: 0.85, injected: true, rendered: false },
+    { threshold: 0, score: 0, injected: true, rendered: true },
+    { threshold: 1, score: 1, injected: true, rendered: true },
+    { threshold: 0, score: 0.99, injected: false, rendered: false },
+  ])(
+    "renders relations against the supplied threshold: %j",
+    ({ threshold, score, injected, rendered }) => {
+      const result = buildRoutingContext({
+        matchedSkills: [{ name: "B", location: "/B", description: "B" }],
+        relationRelevanceThreshold: threshold,
+        relationDecisions: [
+          {
+            skill: "B",
+            from: "A",
+            to: "B",
+            from_description: "A",
+            to_description: "B",
+            relation_type: "related",
+            verification_status: "unverified",
+            reason: "Author reason",
+            score,
+            injected,
+          },
+        ],
+      });
+      expect(result.includes("<relation ")).toBe(rendered);
+    },
+  );
+
   it("omits low scores, unselected anchors and decisions not marked injected", () => {
     const relation = {
       skill: "B",

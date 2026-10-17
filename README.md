@@ -278,7 +278,7 @@ An imported author-relation graph can expose related skills through `skill_view`
 
 ```json5
 {
-  routing: { skills: { related: { enabled: true } } },
+  routing: { skills: { related: { enabled: true, relevanceThreshold: 0.8 } } },
 }
 ```
 
@@ -288,28 +288,29 @@ When enabled, the same Jev call also scores whether each graph relation, its aut
 
 The Jev state exposes `skill_candidates` with names, descriptions, discovery sources, `experience_ids` and `relation_ids`; `experience_candidates` with IDs, summaries and visible associated skill names; and `skill_relation_evidence` with stable question IDs such as `relation_0`, anchor, direction, endpoint descriptions and author reasons. Questions point to these entries so candidate provenance and the scored relation are explicit. Background endpoints remain outside `skill_candidates` unless independently discovered.
 
-Only relations scoring at least 0.8 are rendered as `<relation>` children inside the final injected anchor skill's XML. Each child preserves `from`, `to`, type, author reason and `unverified` status; scores stay in optional session/event diagnostics. Relation scores never change skill scores, routing confidence or injection caps. A related endpoint is not automatically loaded, and the prompt does not claim that prerequisites or execution order have been verified. All six relation types remain advisory, including dependency/conflict labels.
+Only relations scoring at least `routing.skills.related.relevanceThreshold` (default `0.8`, inclusive range `0`–`1`) are rendered as `<relation>` children inside the final injected anchor skill's XML. Each child preserves `from`, `to`, type, author reason and `unverified` status; scores stay in optional session/event diagnostics. Relation scores never change skill scores, routing confidence or injection caps. A related endpoint is not automatically loaded, and the prompt does not claim that prerequisites or execution order have been verified. All six relation types remain advisory, including dependency/conflict labels.
 
-This setting defaults to false and controls both expansion and relation relevance hints. Importing a graph is a separate step. Existing deployments with the switch enabled gain the relation questions and XML hints after upgrading; no graph/schema migration or statistics rewrite is required. See the [staged import procedure in AGENTS.md](AGENTS.md#advanced-relation-import-procedure).
+`routing.skills.related.enabled` defaults to false and controls both expansion and relation relevance hints. The threshold supports live configuration updates and applies consistently to injection diagnostics and XML rendering on subsequent turns. A threshold of `0` allows every scored relation whose anchor is selected; it does not enable a disabled relation switch. This is separate from skill/experience selection thresholds and the importer’s relation-type classification thresholds. Importing a graph is a separate step. Existing deployments with the switch enabled gain the relation questions and XML hints after upgrading; no graph/schema migration or statistics rewrite is required. See the [staged import procedure in AGENTS.md](AGENTS.md#advanced-relation-import-procedure).
 
 ## Configuration reference
 
 The full accepted schema is in [`openclaw.plugin.json`](openclaw.plugin.json). Common settings below live inside the plugin's `config` object:
 
-| Setting                                                                           | Default                       | Effect                                                                                               |
-| --------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `routing.scope.agents` / `chatTypes`                                              | `["main"]` / `["direct"]`     | Select eligible agents and chat types. Optional allowed/denied chat-ID lists further restrict scope. |
-| `routing.queryMode`                                                               | `"recent"`                    | Choose `message`, `recent`, or `full` query context; `routing.contextWindow` bounds recent history.  |
-| `routing.skills.search.minCandidateScore`                                         | `0.6`                         | Minimum semantic score for a skill candidate.                                                        |
-| `routing.experiences.search.minCandidateScore`                                    | `0.4`                         | Minimum semantic score for an experience candidate.                                                  |
-| `routing.skills.relevanceThreshold` / `routing.experiences.relevanceThreshold`    | `0.6` / `0.6`                 | Jev selection thresholds, distinct from retrieval thresholds.                                        |
-| `routing.skills.maxInjectedSkills` / `routing.experiences.maxInjectedExperiences` | `8` / `4`                     | Final context limits. Zero disables the corresponding automatic discovery/injection.                 |
-| `routing.timeoutMs`                                                               | `5000`                        | Jev selection budget.                                                                                |
-| `qmd.timeoutMs`                                                                   | `15000`                       | QMD request budget; individual skill/experience `search.timeoutMs` can override retrieval budgets.   |
-| `qmd.indexRefreshIntervalSeconds`                                                 | `300`                         | Background source-check interval; zero disables recurring checks.                                    |
-| `skills.search.collectionWeights`                                                 | meta/body/references: `3/2/1` | Relative collection weights for skill search.                                                        |
-| `review.enabled`                                                                  | `false`                       | Enable automatic experience curation.                                                                |
-| `review.thinking` / `timeoutSeconds`                                              | `"medium"` / `300`            | Reviewer reasoning level and run budget.                                                             |
+| Setting                                                                           | Default                       | Effect                                                                                                     |
+| --------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `routing.scope.agents` / `chatTypes`                                              | `["main"]` / `["direct"]`     | Select eligible agents and chat types. Optional allowed/denied chat-ID lists further restrict scope.       |
+| `routing.queryMode`                                                               | `"recent"`                    | Choose `message`, `recent`, or `full` query context; `routing.contextWindow` bounds recent history.        |
+| `routing.skills.search.minCandidateScore`                                         | `0.6`                         | Minimum semantic score for a skill candidate.                                                              |
+| `routing.experiences.search.minCandidateScore`                                    | `0.4`                         | Minimum semantic score for an experience candidate.                                                        |
+| `routing.skills.relevanceThreshold` / `routing.experiences.relevanceThreshold`    | `0.6` / `0.6`                 | Jev selection thresholds, distinct from retrieval thresholds.                                              |
+| `routing.skills.related.relevanceThreshold`                                       | `0.8`                         | Minimum relation reference-value score for XML hints; 0–1, live-updatable, selected anchor still required. |
+| `routing.skills.maxInjectedSkills` / `routing.experiences.maxInjectedExperiences` | `8` / `4`                     | Final context limits. Zero disables the corresponding automatic discovery/injection.                       |
+| `routing.timeoutMs`                                                               | `5000`                        | Jev selection budget.                                                                                      |
+| `qmd.timeoutMs`                                                                   | `15000`                       | QMD request budget; individual skill/experience `search.timeoutMs` can override retrieval budgets.         |
+| `qmd.indexRefreshIntervalSeconds`                                                 | `300`                         | Background source-check interval; zero disables recurring checks.                                          |
+| `skills.search.collectionWeights`                                                 | meta/body/references: `3/2/1` | Relative collection weights for skill search.                                                              |
+| `review.enabled`                                                                  | `false`                       | Enable automatic experience curation.                                                                      |
+| `review.thinking` / `timeoutSeconds`                                              | `"medium"` / `300`            | Reviewer reasoning level and run budget.                                                                   |
 
 ## Runtime health and troubleshooting
 
