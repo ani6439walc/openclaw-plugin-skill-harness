@@ -6,6 +6,7 @@ import path from "node:path";
 import type { createStore, QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
+import type { BackgroundRunner } from "../subagent-runtime.js";
 import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { AvailableSkill } from "../skills/types.js";
 import type {
@@ -643,11 +644,29 @@ export function createSkillQmdIndex(params: {
   config: SkillQmdIndexConfigProvider;
   createStore?: QmdCreateStore;
   readOnly?: boolean;
+  runInBackgroundContext?: BackgroundRunner;
   activeAgentIds?: () => readonly string[] | undefined;
   nowMs?: () => number;
   setTimer?: (callback: () => void, delayMs: number) => unknown;
   clearTimer?: (timer: unknown) => void;
 }): SkillQmdIndex {
+  const runInBackgroundContext =
+    params.runInBackgroundContext ?? ((run) => run());
+  const runBackgroundTask = (
+    run: () => void | Promise<void>,
+  ): Promise<void> => {
+    const failed = (error: unknown) => {
+      logger.warn("QMD skill background work failed", {
+        errorType: error instanceof Error ? "Error" : typeof error,
+      });
+    };
+    try {
+      return Promise.resolve(runInBackgroundContext(run)).catch(failed);
+    } catch (error) {
+      failed(error);
+      return Promise.resolve();
+    }
+  };
   const agents = new Map<string, AgentIndexState>();
   let closed = false;
   const indexes = new Map<string, SharedIndexState>();
@@ -829,7 +848,7 @@ export function createSkillQmdIndex(params: {
 
   const initialization = params.readOnly
     ? Promise.resolve()
-    : loadExistingIndexCatalog();
+    : runBackgroundTask(loadExistingIndexCatalog);
 
   type DiscoveryMapping = { fingerprint: string; names: Set<string> };
 
@@ -1135,10 +1154,19 @@ export function createSkillQmdIndex(params: {
   function armRetry(state: SharedIndexState): void {
     if (closed || state.retryTimer !== undefined) return;
     const delayMs = Math.max(0, state.nextRetryAtMs - now());
-    state.retryTimer = setTimer(() => {
-      state.retryTimer = undefined;
-      startRefresh(state);
-    }, delayMs);
+    try {
+      state.retryTimer = runInBackgroundContext(() =>
+        setTimer(() => {
+          state.retryTimer = undefined;
+          if (closed) return Promise.resolve();
+          return runBackgroundTask(() => startRefresh(state));
+        }, delayMs),
+      );
+    } catch (error) {
+      logger.warn("QMD skill retry admission failed", {
+        errorType: error instanceof Error ? "Error" : typeof error,
+      });
+    }
   }
 
   function recordRefreshProblem(
@@ -1285,27 +1313,35 @@ export function createSkillQmdIndex(params: {
     }
   }
 
-  function startRefresh(state: SharedIndexState): void {
-    if (closed || state.refreshing) return;
-    const signature = skillSetSignature(mergedSkills(state));
-    state.refreshSignature = signature;
-    const refreshing = refreshIndex(state);
-    state.refreshing = refreshing;
-    void refreshing.finally(() => {
-      if (state.refreshing === refreshing) state.refreshing = undefined;
-      if (
-        state.queuedSignature &&
-        state.queuedSignature !== state.refreshSignature
-      ) {
-        state.queuedSignature = undefined;
-        startRefresh(state);
+  function startRefresh(state: SharedIndexState): Promise<void> {
+    if (closed) return Promise.resolve();
+    if (state.refreshing) return state.refreshing;
+    const refreshing = runBackgroundTask(async () => {
+      state.refreshSignature = skillSetSignature(mergedSkills(state));
+      try {
+        await refreshIndex(state);
+      } finally {
+        if (state.refreshing === refreshing) state.refreshing = undefined;
+        if (
+          !closed &&
+          state.queuedSignature &&
+          state.queuedSignature !== state.refreshSignature
+        ) {
+          state.queuedSignature = undefined;
+          await startRefresh(state);
+        }
       }
     });
+    state.refreshing = refreshing;
+    void refreshing.then(() => {
+      if (state.refreshing === refreshing) state.refreshing = undefined;
+    });
+    return refreshing;
   }
 
   function scheduleLocked(agentId: string, input: SkillQmdScheduleInput): void {
     const agent = agentState(agentId);
-    const scheduling = (async () => {
+    const scheduling = runBackgroundTask(async () => {
       await initialization;
       if (closed) return;
       agent.allowedSkillNames = new Set(
@@ -1325,11 +1361,12 @@ export function createSkillQmdIndex(params: {
       if (state.refreshing) {
         if (signature !== state.refreshSignature)
           state.queuedSignature = signature;
+        await state.refreshing;
         return;
       }
       if (state.lastRefreshError && now() < state.nextRetryAtMs) return;
-      startRefresh(state);
-    })();
+      await startRefresh(state);
+    });
     agent.scheduling = scheduling;
     void scheduling
       .catch((error: unknown) => {
@@ -1518,7 +1555,7 @@ export function createSkillQmdIndex(params: {
     maintenance() {
       if (closed || params.readOnly) return Promise.resolve();
       if (maintenanceWork) return maintenanceWork;
-      const work = (async () => {
+      const work = runBackgroundTask(async () => {
         await initialization;
         if (closed) return;
         const active = params.activeAgentIds?.();
@@ -1609,7 +1646,7 @@ export function createSkillQmdIndex(params: {
             }
           }
         });
-      })().catch((error) => {
+      }).catch((error) => {
         logger.warn("QMD skill index maintenance skipped", { error });
       });
       maintenanceWork = work;

@@ -19,6 +19,7 @@ import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
 import { getReviewModelRef, runReviewSubagent } from "../review/subagent.js";
 import type { CapabilityFitEvidence, ReviewSnapshot } from "../review/types.js";
 import { createIntentReviewScheduler } from "../review/scheduler.js";
+import { createBackgroundRunner } from "../subagent-runtime.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -28,7 +29,6 @@ import {
   extractRecentTurns,
   extractToolText,
   isInternalUserTurn,
-  sanitizePromptInput,
 } from "../classification/index.js";
 import {
   isAllowedChatId,
@@ -241,6 +241,8 @@ export function createHookHandlers(deps: HookDeps) {
   const reviewScheduler =
     deps.reviewScheduler ??
     createIntentReviewScheduler({
+      signal: api.lifecycle?.signal,
+      runInBackgroundContext: createBackgroundRunner(api.lifecycle),
       isSystemActive: (candidate) => {
         const sessionKey = candidate.sessionKey ?? candidate.ctx.sessionKey;
         return turnAssociations.resolveSession(sessionKey) !== undefined;
@@ -418,12 +420,12 @@ export function createHookHandlers(deps: HookDeps) {
     const contextRunId = params.contextRunId?.trim();
     if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
     const runId = eventRunId || contextRunId;
-    const association =
-      (runId ? turnAssociations.resolve(runId) : undefined) ??
-      turnAssociations.resolveSession(params.sessionId ?? params.sessionKey) ??
-      turnAssociations.resolveAnonymousSession(
-        params.sessionId ?? params.sessionKey,
-      );
+    const sessionIdentity = params.sessionId ?? params.sessionKey;
+    const association = runId
+      ? turnAssociations.hasRun(runId)
+        ? turnAssociations.resolve(runId)
+        : turnAssociations.resolveAnonymousSession(sessionIdentity)
+      : turnAssociations.resolveSession(sessionIdentity);
     if (!association) return;
     if (
       (params.sessionId &&
@@ -472,10 +474,10 @@ export function createHookHandlers(deps: HookDeps) {
     latestUserMessage: string;
     conversation: ReturnType<typeof limitConversationTurns>;
   } {
-    const latestUserMessage = extractLatestUserMessage(
-      event.messages,
-      event.prompt,
-    );
+    const latestUserMessage =
+      typeof event.currentUserMessage === "string"
+        ? event.currentUserMessage.trim()
+        : extractLatestUserMessage(event.messages, event.prompt);
     const conversation = limitConversationTurns(
       extractRecentTurns(event.messages),
       refreshedConfig.routing.queryMode,
@@ -1072,7 +1074,7 @@ export function createHookHandlers(deps: HookDeps) {
       if (
         ctx.inputProvenance?.kind === "inter_session" ||
         ctx.inputProvenance?.kind === "internal_system" ||
-        isInternalUserTurn(event)
+        (event.currentUserMessage === undefined && isInternalUserTurn(event))
       )
         return;
 
@@ -1107,6 +1109,9 @@ export function createHookHandlers(deps: HookDeps) {
         refreshedConfig,
       );
       ctx.hookInvocation?.assertActive();
+      if (event.currentUserMessage !== undefined && !latestUserMessage) {
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
+      }
       routing.association = await prepareTrackingTurn({
         ctx,
         routing,

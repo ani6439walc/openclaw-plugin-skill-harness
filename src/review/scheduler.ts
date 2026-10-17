@@ -3,10 +3,7 @@ import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import type { ReviewSnapshot } from "./types.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { PluginHookAgentContext } from "../hooks/types.js";
-import {
-  isGatewayDraining,
-  runDetachedFromWorkScope,
-} from "../subagent-runtime.js";
+import type { BackgroundRunner } from "../subagent-runtime.js";
 
 export const INTENT_REVIEW_DEFAULT_IDLE_MS = 30_000;
 export const INTENT_REVIEW_DEFAULT_RETRY_IDLE_MS = 30_000;
@@ -38,7 +35,8 @@ export interface IntentReviewSchedulerDeps {
   retryIdleMs?: number;
   maxPending?: number;
   isSystemActive?: (candidate: ReviewCandidate) => boolean | Promise<boolean>;
-  isDraining?: () => boolean;
+  signal?: AbortSignal;
+  runInBackgroundContext?: BackgroundRunner;
   runReview?: ReviewRunner;
   onDiscard?: (candidate: ReviewCandidate) => void;
   setTimer?: (
@@ -72,6 +70,10 @@ export class IntentReviewScheduler {
   private reviewInFlight = false;
   private disposed = false;
   private readonly abortController = new AbortController();
+  private readonly activeWork = new Set<Promise<void>>();
+  private readonly stopOnAbort = () => {
+    void this.dispose();
+  };
   private readonly idleResolvers: Array<() => void> = [];
 
   constructor(private readonly deps: IntentReviewSchedulerDeps = {}) {
@@ -82,6 +84,11 @@ export class IntentReviewScheduler {
     this.clearTimer = deps.clearTimer ?? clearTimeout;
     this.runner = deps.runReview;
     this.onDiscardCallback = deps.onDiscard;
+    if (deps.signal?.aborted) {
+      void this.dispose();
+    } else {
+      deps.signal?.addEventListener("abort", this.stopOnAbort, { once: true });
+    }
   }
 
   setRunner(runner: ReviewRunner): void {
@@ -93,11 +100,7 @@ export class IntentReviewScheduler {
   }
 
   schedule(candidate: ReviewCandidate): boolean {
-    if (this.disposed) {
-      return false;
-    }
-
-    if (this.deps.isDraining?.() ?? isGatewayDraining()) {
+    if (this.disposed || this.deps.signal?.aborted) {
       return false;
     }
 
@@ -120,8 +123,7 @@ export class IntentReviewScheduler {
       existing.candidate = candidate;
       this.pendingBySession.delete(key);
       this.pendingBySession.set(key, existing);
-      this.arm(key, existing, this.idleDelayMs);
-      return true;
+      return this.arm(key, existing, this.idleDelayMs);
     }
 
     if (this.pendingBySession.size >= this.maxPending) {
@@ -130,6 +132,7 @@ export class IntentReviewScheduler {
         const [oldestKey, oldestPending] = oldestEntry;
         if (oldestPending.timer) {
           this.clearTimer(oldestPending.timer);
+          oldestPending.timer = undefined;
         }
         this.pendingBySession.delete(oldestKey);
         this.notifyDiscard(oldestPending.candidate);
@@ -138,111 +141,95 @@ export class IntentReviewScheduler {
 
     const pending: PendingReview = { candidate, generation: 0 };
     this.pendingBySession.set(key, pending);
-    this.arm(key, pending, this.idleDelayMs);
-    return true;
+    return this.arm(key, pending, this.idleDelayMs);
   }
 
-  private arm(key: string, pending: PendingReview, delayMs: number): void {
+  private arm(key: string, pending: PendingReview, delayMs: number): boolean {
     if (pending.timer) {
       this.clearTimer(pending.timer);
       pending.timer = undefined;
     }
 
     const generation = ++pending.generation;
-    const timerCallback = () => {
-      try {
-        if (this.disposed) {
-          return;
-        }
-        if (
-          this.pendingBySession.get(key) !== pending ||
-          pending.generation !== generation
-        ) {
-          return;
-        }
+    const runInBackgroundContext =
+      this.deps.runInBackgroundContext ?? ((run) => run());
+    const discard = (error: unknown) => {
+      logger.warn("background review callback failed", { error });
+      if (
+        this.pendingBySession.get(key) === pending &&
+        pending.generation === generation
+      ) {
         pending.timer = undefined;
-
-        if (this.deps.isDraining?.() ?? isGatewayDraining()) {
-          this.pendingBySession.delete(key);
-          this.notifyDiscard(pending.candidate);
+        this.pendingBySession.delete(key);
+        this.notifyDiscard(pending.candidate);
+      }
+      this.checkIdle();
+    };
+    const timerCallback = () => {
+      if (this.disposed) return;
+      try {
+        // Return the whole asynchronous callback to its instance admission owner.
+        const work = runInBackgroundContext(() =>
+          this.runPending(key, pending, generation),
+        );
+        const settled = work.catch(discard).finally(() => {
+          this.activeWork.delete(settled);
           this.checkIdle();
-          return;
-        }
-
-        void Promise.resolve()
-          .then(() =>
-            this.deps.isSystemActive
-              ? this.deps.isSystemActive(pending.candidate)
-              : false,
-          )
-          .then(async (active) => {
-            if (this.disposed) {
-              return;
-            }
-            if (
-              this.pendingBySession.get(key) !== pending ||
-              pending.generation !== generation
-            ) {
-              return;
-            }
-
-            if (active || this.reviewInFlight) {
-              this.arm(key, pending, this.retryIdleMs);
-              return;
-            }
-
-            this.reviewInFlight = true;
-            this.pendingBySession.delete(key);
-
-            try {
-              if (this.runner) {
-                await runDetachedFromWorkScope(() =>
-                  this.runner!(pending.candidate, this.abortController.signal),
-                );
-              }
-            } catch (error) {
-              logger.warn("background intent review execution failed", {
-                error,
-              });
-            } finally {
-              this.reviewInFlight = false;
-              this.checkIdle();
-            }
-          })
-          .catch((error: unknown) => {
-            logger.warn("background intent review liveness check failed", {
-              error,
-            });
-            if (
-              this.pendingBySession.get(key) === pending &&
-              pending.generation === generation
-            ) {
-              this.pendingBySession.delete(key);
-              this.notifyDiscard(pending.candidate);
-            }
-            this.checkIdle();
-          });
-      } catch (error) {
-        logger.warn("unexpected error in background review timer callback", {
-          error,
         });
-        if (
-          this.pendingBySession.get(key) === pending &&
-          pending.generation === generation
-        ) {
-          this.pendingBySession.delete(key);
-          this.notifyDiscard(pending.candidate);
-        }
-        this.checkIdle();
+        this.activeWork.add(settled);
+        return settled;
+      } catch (error) {
+        discard(error);
       }
     };
 
-    const timer = runDetachedFromWorkScope(() =>
-      this.setTimer(timerCallback, delayMs),
-    );
-    pending.timer = timer;
-    if ("unref" in timer && typeof timer.unref === "function") {
-      timer.unref();
+    try {
+      const timer = runInBackgroundContext(() =>
+        this.setTimer(timerCallback, delayMs),
+      );
+      pending.timer = timer;
+      if ("unref" in timer && typeof timer.unref === "function") {
+        timer.unref();
+      }
+      return true;
+    } catch (error) {
+      discard(error);
+      return false;
+    }
+  }
+
+  private async runPending(
+    key: string,
+    pending: PendingReview,
+    generation: number,
+  ): Promise<void> {
+    if (
+      this.disposed ||
+      this.pendingBySession.get(key) !== pending ||
+      pending.generation !== generation
+    )
+      return;
+    pending.timer = undefined;
+
+    const active = await this.deps.isSystemActive?.(pending.candidate);
+    if (
+      this.disposed ||
+      this.pendingBySession.get(key) !== pending ||
+      pending.generation !== generation
+    )
+      return;
+    if (active || this.reviewInFlight) {
+      this.arm(key, pending, this.retryIdleMs);
+      return;
+    }
+
+    this.reviewInFlight = true;
+    this.pendingBySession.delete(key);
+    try {
+      await this.runner?.(pending.candidate, this.abortController.signal);
+    } finally {
+      this.reviewInFlight = false;
+      this.checkIdle();
     }
   }
 
@@ -256,7 +243,11 @@ export class IntentReviewScheduler {
   }
 
   private checkIdle(): void {
-    if (!this.reviewInFlight && this.pendingBySession.size === 0) {
+    if (
+      !this.reviewInFlight &&
+      this.pendingBySession.size === 0 &&
+      this.activeWork.size === 0
+    ) {
       const resolvers = [...this.idleResolvers];
       this.idleResolvers.length = 0;
       for (const resolve of resolvers) {
@@ -282,7 +273,11 @@ export class IntentReviewScheduler {
   }
 
   waitForIdle(): Promise<void> {
-    if (!this.reviewInFlight && this.pendingBySession.size === 0) {
+    if (
+      !this.reviewInFlight &&
+      this.pendingBySession.size === 0 &&
+      this.activeWork.size === 0
+    ) {
       return Promise.resolve();
     }
     return new Promise<void>((resolve) => {
@@ -294,6 +289,7 @@ export class IntentReviewScheduler {
     for (const pending of this.pendingBySession.values()) {
       if (pending.timer) {
         this.clearTimer(pending.timer);
+        pending.timer = undefined;
       }
       this.notifyDiscard(pending.candidate);
     }
@@ -301,13 +297,14 @@ export class IntentReviewScheduler {
     this.checkIdle();
   }
 
-  dispose(): void {
-    if (this.disposed) {
-      return;
+  async dispose(): Promise<void> {
+    if (!this.disposed) {
+      this.disposed = true;
+      this.deps.signal?.removeEventListener("abort", this.stopOnAbort);
+      this.abortController.abort();
+      this.clear();
     }
-    this.disposed = true;
-    this.abortController.abort();
-    this.clear();
+    await Promise.all(this.activeWork);
   }
 }
 

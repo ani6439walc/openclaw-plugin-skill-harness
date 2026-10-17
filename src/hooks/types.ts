@@ -26,35 +26,18 @@ import type {
   TurnAssociationRegistry,
 } from "./turn-associations.js";
 
-export interface PluginHookAgentContext {
-  readonly hookInvocation?: { readonly assertActive: () => void };
-  readonly runId?: string;
-  readonly agentId?: string;
-  readonly sessionKey?: string;
-  readonly sessionId?: string;
-  readonly messageProvider?: string;
-  readonly channelId?: string;
-  readonly trigger?: string;
-  readonly inputProvenance?: {
-    readonly kind: "external_user" | "inter_session" | "internal_system";
-  };
-  readonly modelProviderId?: string;
-  readonly modelId?: string;
-}
-
-export interface PluginHookBeforePromptBuildEvent {
-  readonly prompt: string;
-  readonly messages: unknown[];
-}
-
-export interface PluginHookBeforePromptBuildResult {
-  readonly systemPrompt?: string;
-  readonly prependContext?: string;
-  readonly appendContext?: string;
-  readonly toolsAllow?: string[];
-  readonly prependSystemContext?: string;
-  readonly appendSystemContext?: string;
-}
+// Derive prompt contracts from the public registration API so SDK additions stay visible.
+declare const registerHook: OpenClawPluginApi["on"];
+type BeforePromptBuildHandler = Parameters<
+  typeof registerHook<"before_prompt_build">
+>[1];
+export type PluginHookAgentContext = Parameters<BeforePromptBuildHandler>[1];
+export type PluginHookBeforePromptBuildEvent =
+  Parameters<BeforePromptBuildHandler>[0];
+export type PluginHookBeforePromptBuildResult = Exclude<
+  Awaited<ReturnType<BeforePromptBuildHandler>>,
+  void
+>;
 
 export interface PluginHookBeforeToolCallEvent {
   readonly toolName: string;

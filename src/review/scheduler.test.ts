@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, expect, it, vi } from "vitest";
 import { IntentReviewScheduler, type ReviewCandidate } from "./scheduler.js";
 import type { ReviewSnapshot } from "./types.js";
@@ -225,14 +226,14 @@ describe("IntentReviewScheduler", () => {
     expect(executed).toEqual(["sess-2", "sess-3"]);
   });
 
-  it("rejects scheduling and drops pending reviews when gateway is draining", async () => {
-    let draining = false;
+  it("rejects scheduling and drops pending reviews when its public lifecycle signal aborts", async () => {
+    const lifecycle = new AbortController();
     const discarded: string[] = [];
     const executed: string[] = [];
 
     const scheduler = new IntentReviewScheduler({
       idleDelayMs: 15,
-      isDraining: () => draining,
+      signal: lifecycle.signal,
       onDiscard: (c) => discarded.push(c.snapshot.sessionId),
       runReview: async (c) => {
         executed.push(c.snapshot.sessionId);
@@ -247,7 +248,7 @@ describe("IntentReviewScheduler", () => {
     scheduler.schedule(c1);
 
     // Now gateway starts draining before timer fires
-    draining = true;
+    lifecycle.abort();
 
     await scheduler.waitForIdle();
 
@@ -455,6 +456,115 @@ describe("IntentReviewScheduler", () => {
     await scheduler.waitForIdle();
     expect(discarded).toEqual(["sess-1"]);
     expect(scheduler.getPendingCount()).toBe(0);
+  });
+
+  it("owns timer creation and the full callback in the current instance background context", async () => {
+    const context = new AsyncLocalStorage<{
+      request?: string;
+      registry: string;
+    }>();
+    let registry = "initial";
+    let timerCallback: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const admitted: unknown[] = [];
+    const seen: unknown[] = [];
+    const scheduler = new IntentReviewScheduler({
+      runInBackgroundContext: (run) => {
+        const result = context.run({ registry }, run);
+        admitted.push(result);
+        return result;
+      },
+      setTimer: (callback) => {
+        seen.push(context.getStore());
+        timerCallback = callback;
+        return { unref() {} } as NodeJS.Timeout;
+      },
+      clearTimer: () => {},
+      isSystemActive: async () => {
+        seen.push(context.getStore());
+        return false;
+      },
+      runReview: async (_candidate, signal) => {
+        seen.push(context.getStore());
+        signal.addEventListener("abort", () => release!(), { once: true });
+        await blocked;
+        seen.push(context.getStore());
+      },
+    });
+    context.run({ request: "caller", registry: "turn" }, () =>
+      scheduler.schedule(createMockCandidate()),
+    );
+    expect(seen).toEqual([{ registry: "initial" }]);
+    registry = "replacement";
+    const work = context.run({ request: "expired", registry: "turn" }, () =>
+      timerCallback!(),
+    );
+    expect(work).toBeInstanceOf(Promise);
+    await Promise.resolve();
+    expect(seen).toEqual([
+      { registry: "initial" },
+      { registry: "replacement" },
+      { registry: "replacement" },
+    ]);
+    let finished = false;
+    const completion = Promise.resolve(admitted.at(-1)).then(() => {
+      finished = true;
+    });
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    await scheduler.dispose();
+    await completion;
+    expect(finished).toBe(true);
+    expect(seen.at(-1)).toEqual({ registry: "replacement" });
+    await timerCallback!();
+    expect(seen).toHaveLength(4);
+  });
+
+  it("rejects a review when its captured host runner refuses admission", async () => {
+    const discarded = vi.fn();
+    const scheduler = new IntentReviewScheduler({
+      runInBackgroundContext: () => {
+        throw new Error("instance is retiring");
+      },
+      onDiscard: discarded,
+    });
+    const candidate = createMockCandidate();
+    expect(scheduler.schedule(candidate)).toBe(false);
+    expect(scheduler.getPendingCount()).toBe(0);
+    expect(discarded).toHaveBeenCalledWith(candidate);
+    await scheduler.dispose();
+  });
+
+  it("waits for an active liveness check during disposal without starting its review", async () => {
+    let fire: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    const blocked = new Promise<boolean>((resolve) => {
+      release = () => resolve(false);
+    });
+    const review = vi.fn();
+    const scheduler = new IntentReviewScheduler({
+      setTimer: (callback) => {
+        fire = callback;
+        return { unref() {} } as NodeJS.Timeout;
+      },
+      clearTimer: () => {},
+      isSystemActive: () => blocked,
+      runReview: review,
+    });
+    scheduler.schedule(createMockCandidate());
+    fire!();
+    let stopped = false;
+    const stopping = scheduler.dispose().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    release!();
+    await stopping;
+    expect(review).not.toHaveBeenCalled();
   });
 
   it("waitForIdle resolves immediately when nothing is pending or in flight", async () => {

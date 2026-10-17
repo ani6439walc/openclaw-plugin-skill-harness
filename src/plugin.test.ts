@@ -4,6 +4,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { OpenClawPluginApi } from "../api.js";
 import { logger } from "../api.js";
+import pluginEntry from "../index.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as skills from "./skills/index.js";
 import * as skillRoots from "./skills/roots.js";
 import {
@@ -13,10 +15,12 @@ import {
   initializePluginDataRoot,
 } from "./plugin.js";
 
-const { createHookHandlersSpy, createSkillIndexSpy } = vi.hoisted(() => ({
-  createHookHandlersSpy: vi.fn(),
-  createSkillIndexSpy: vi.fn(),
-}));
+const { createHookHandlersSpy, createSkillIndexSpy, createExperienceIndexSpy } =
+  vi.hoisted(() => ({
+    createHookHandlersSpy: vi.fn(),
+    createSkillIndexSpy: vi.fn(),
+    createExperienceIndexSpy: vi.fn(),
+  }));
 
 vi.mock("./hooks/index.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./hooks/index.js")>();
@@ -44,19 +48,48 @@ vi.mock("./qmd/skill-index.js", async (importOriginal) => {
   };
 });
 
+vi.mock("./qmd/experience-index.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./qmd/experience-index.js")>();
+  return {
+    ...actual,
+    createSkillExperienceQmdIndex: (
+      ...args: Parameters<typeof actual.createSkillExperienceQmdIndex>
+    ) => {
+      createExperienceIndexSpy(args[0]);
+      return actual.createSkillExperienceQmdIndex(...args);
+    },
+  };
+});
+
 describe("createPlugin", () => {
   let stateDir: string;
+  const disposers = new Set<() => void | Promise<void>>();
 
   beforeEach(() => {
     stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-state-"));
     createHookHandlersSpy.mockReset();
     createSkillIndexSpy.mockReset();
+    createExperienceIndexSpy.mockReset();
   });
 
-  afterEach(() => {
-    fs.rmSync(stateDir, { recursive: true, force: true });
-    vi.restoreAllMocks();
-    vi.useRealTimers();
+  afterEach(async () => {
+    try {
+      const results = await Promise.allSettled(
+        [...disposers].map(async (dispose) => dispose()),
+      );
+      disposers.clear();
+      const errors = results
+        .filter((result) => result.status === "rejected")
+        .map((result) => result.reason);
+      if (errors.length > 0)
+        throw new AggregateError(errors, "Fixture disposal failed");
+      if (vi.isFakeTimers()) expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
   });
 
   function createApi(overrides: Partial<OpenClawPluginApi> = {}) {
@@ -81,6 +114,17 @@ describe("createPlugin", () => {
       registerTool,
       registerCommand,
       ...overrides,
+      lifecycle: {
+        ...overrides.lifecycle,
+        onDispose(dispose: () => void | Promise<void>) {
+          disposers.add(dispose);
+          const unregister = overrides.lifecycle?.onDispose?.(dispose);
+          return () => {
+            disposers.delete(dispose);
+            unregister?.();
+          };
+        },
+      },
     } as unknown as OpenClawPluginApi & {
       on: ReturnType<typeof vi.fn>;
       registerTool: ReturnType<typeof vi.fn>;
@@ -101,7 +145,7 @@ describe("createPlugin", () => {
     } as Partial<OpenClawPluginApi>);
 
     expect(() => createPlugin(api).register(api)).not.toThrow();
-    expect(api.on).toHaveBeenCalledTimes(8);
+    expect(api.on).toHaveBeenCalledTimes(9);
     expect(api.on).toHaveBeenCalledWith(
       "before_prompt_build",
       expect.any(Function),
@@ -112,6 +156,23 @@ describe("createPlugin", () => {
         typeof tool === "function" ? options?.name : tool.name,
       ),
     ).toEqual(["skill_list", "skill_search", "skill_view", "skill_experience"]);
+  });
+
+  it("registers the built-entry contract and releases its discovery resources", async () => {
+    const onDispose = vi.fn();
+    const api = createApi({
+      registrationMode: "discovery",
+      lifecycle: { onDispose, registerRuntimeLifecycle: vi.fn() },
+    });
+    pluginEntry.register!(api);
+    expect(api.on).toHaveBeenCalledTimes(9);
+    expect(
+      api.registerTool.mock.calls.map(([, options]) => options.name),
+    ).toEqual(["skill_list", "skill_search", "skill_view", "skill_experience"]);
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+    const close = vi.spyOn(deps.qmdSkillIndex, "close");
+    await onDispose.mock.calls[0][0]();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("resolves the bundled OpenClaw root once during plugin initialization", async () => {
@@ -164,6 +225,266 @@ describe("createPlugin", () => {
     await onDispose.mock.calls[0][0]();
     expect(closeSkills).toHaveBeenCalledOnce();
     expect(closeExperiences).toHaveBeenCalledOnce();
+  });
+
+  it("disposes failed QMD workers and their retries through fixture teardown", async ({
+    onTestFinished,
+  }) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(skillRoots, "resolveOpenClawBundledSkillsDir").mockResolvedValue(
+      undefined,
+    );
+    vi.spyOn(skills, "listAvailableSkills").mockResolvedValue([]);
+    const rejectStore = vi.fn(async () => {
+      throw new Error("fixture index failure");
+    });
+    createSkillIndexSpy.mockImplementation((params) => {
+      params.createStore = rejectStore;
+    });
+    createExperienceIndexSpy.mockImplementation((params) => {
+      params.createStore = rejectStore;
+    });
+    const api = createApi({
+      pluginConfig: {
+        qmd: {
+          embedding: {
+            baseUrl: "https://fixture.invalid",
+            apiKey: "fixture",
+            model: "fixture-embedding",
+          },
+          expansion: {
+            baseUrl: "https://fixture.invalid",
+            apiKey: "fixture",
+            model: "fixture-expansion",
+          },
+        },
+      },
+    });
+    createPlugin(api).register(api);
+    const { qmdSkillIndex, qmdExperienceIndex } =
+      createHookHandlersSpy.mock.calls[0][0];
+    await vi.waitFor(() => {
+      expect(qmdSkillIndex.getStatus("main")).toBe("failed");
+      expect(qmdExperienceIndex.getStatus()).toBe("failed");
+    });
+    expect(rejectStore).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    // Deliberately leave both failed workers to the fixture's afterEach cleanup.
+    onTestFinished(() => {
+      expect(qmdSkillIndex.getStatus("main")).toBe("idle");
+      expect(qmdExperienceIndex.getStatus()).toBe("idle");
+    });
+  });
+
+  it("leaves no retry timers when QMD workers fail after shutdown starts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(skillRoots, "resolveOpenClawBundledSkillsDir").mockResolvedValue(
+      undefined,
+    );
+    vi.spyOn(skills, "listAvailableSkills").mockResolvedValue([]);
+    let rejectBuild!: (error: Error) => void;
+    const build = new Promise<never>((_resolve, reject) => {
+      rejectBuild = reject;
+    });
+    const embed = vi.fn(() => build);
+    const createStore = vi.fn(async () => ({
+      update: vi.fn(async () => {}),
+      embed,
+      getStatus: vi.fn(async () => ({ needsEmbedding: 0 })),
+      close: vi.fn(async () => {}),
+    }));
+    for (const spy of [createSkillIndexSpy, createExperienceIndexSpy]) {
+      spy.mockImplementation((params) => {
+        params.createStore = createStore;
+      });
+    }
+    const api = createApi({
+      pluginConfig: {
+        qmd: {
+          embedding: {
+            baseUrl: "https://fixture.invalid",
+            apiKey: "fixture",
+            model: "fixture-embedding",
+          },
+          expansion: {
+            baseUrl: "https://fixture.invalid",
+            apiKey: "fixture",
+            model: "fixture-expansion",
+          },
+        },
+      },
+    });
+    createPlugin(api).register(api);
+    const { qmdSkillIndex, qmdExperienceIndex } =
+      createHookHandlersSpy.mock.calls[0][0];
+    const closeSkills = vi.spyOn(qmdSkillIndex, "close");
+    const closeExperiences = vi.spyOn(qmdExperienceIndex, "close");
+    try {
+      await vi.waitFor(() => expect(embed).toHaveBeenCalledTimes(2));
+      const stop = api.on.mock.calls.find(
+        ([name]) => name === "gateway_stop",
+      )![1] as () => Promise<void>;
+      let stopped = false;
+      const stopping = stop().then(() => {
+        stopped = true;
+      });
+      await vi.waitFor(() => {
+        expect(closeSkills).toHaveBeenCalledOnce();
+        expect(closeExperiences).toHaveBeenCalledOnce();
+      });
+      expect(stopped).toBe(false);
+      rejectBuild(new Error("fixture build failed during shutdown"));
+      await stopping;
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(createStore).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      rejectBuild(new Error("fixture cleanup"));
+    }
+  });
+
+  it("refreshes QMD in the current instance context and drains pending discovery before shutdown closes stores", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const context = new AsyncLocalStorage<{
+      request?: string;
+      registry: string;
+    }>();
+    let registry = "initial";
+    let blockDiscovery = false;
+    let release: (() => void) | undefined;
+    const blocked = new Promise<never[]>((resolve) => {
+      release = () => resolve([]);
+    });
+    const observations: unknown[] = [];
+    const list = vi
+      .spyOn(skills, "listAvailableSkills")
+      .mockImplementation(async () => {
+        observations.push(context.getStore());
+        return blockDiscovery ? blocked : [];
+      });
+    vi.spyOn(skillRoots, "resolveOpenClawBundledSkillsDir").mockResolvedValue(
+      undefined,
+    );
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const onDispose = vi.fn();
+    const admitted: unknown[] = [];
+    const api = createApi({
+      pluginConfig: { qmd: { indexRefreshIntervalSeconds: 300 } },
+      lifecycle: {
+        registerRuntimeLifecycle: vi.fn(),
+        onDispose,
+        runInBackgroundContext: (run) => {
+          const result = context.run({ registry }, run);
+          admitted.push(result);
+          return result;
+        },
+      },
+    });
+    context.run({ request: "registration", registry: "request" }, () =>
+      createPlugin(api).register(api),
+    );
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+    const close = vi.spyOn(deps.qmdSkillIndex, "close");
+    const schedule = vi
+      .spyOn(deps.qmdSkillIndex, "schedule")
+      .mockImplementation(() => {});
+    await vi.waitFor(() => expect(list).toHaveBeenCalledOnce());
+    expect(observations).toEqual([{ registry: "initial" }]);
+    expect(
+      admitted.some(
+        (result) =>
+          typeof result === "object" && result !== null && "unref" in result,
+      ),
+    ).toBe(true);
+    schedule.mockClear();
+    registry = "replacement";
+    for (const parameters of [
+      createSkillIndexSpy.mock.calls[0]![0],
+      createExperienceIndexSpy.mock.calls[0]![0],
+    ]) {
+      expect(
+        context.run({ request: "expired", registry: "request" }, () =>
+          parameters.runInBackgroundContext(() => context.getStore()),
+        ),
+      ).toEqual({ registry: "replacement" });
+    }
+    blockDiscovery = true;
+    const timerCallIndex = timers.mock.calls.findIndex(
+      ([, delay]) => delay === 300_000,
+    );
+    const callback = timers.mock.calls[
+      timerCallIndex
+    ]![0] as () => Promise<void>;
+    clearTimeout(timers.mock.results[timerCallIndex]!.value);
+    const refresh = context.run(
+      { request: "expired", registry: "request" },
+      callback,
+    );
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(observations.at(-1)).toEqual({ registry: "replacement" });
+    const stop = api.on.mock.calls.find(
+      ([name]) => name === "gateway_stop",
+    )![1] as () => Promise<void>;
+    let stopped = false;
+    const stopping = stop().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    release!();
+    await Promise.all([refresh, stopping]);
+    expect(schedule).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    await onDispose.mock.calls[0][0]();
+    expect(close).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("continues recurring maintenance after a refresh fails", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(skillRoots, "resolveOpenClawBundledSkillsDir").mockResolvedValue(
+      undefined,
+    );
+    vi.spyOn(skills, "listAvailableSkills").mockResolvedValue([]);
+    const maintenance = vi.fn().mockRejectedValue(new Error("refresh failed"));
+    createHookHandlersSpy.mockImplementation((deps) => {
+      deps.qmdSkillIndex.maintenance = maintenance;
+      vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(() => {});
+    });
+    const onDispose = vi.fn();
+    const api = createApi({
+      pluginConfig: { qmd: { indexRefreshIntervalSeconds: 300 } },
+      lifecycle: { onDispose, registerRuntimeLifecycle: vi.fn() },
+    });
+    createPlugin(api).register(api);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(maintenance).toHaveBeenCalledTimes(3);
+    await onDispose.mock.calls[0][0]();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stops pending background resources when its public lifecycle signal aborts", async () => {
+    vi.useFakeTimers();
+    const lifecycle = new AbortController();
+    const onDispose = vi.fn();
+    const api = createApi({
+      lifecycle: {
+        signal: lifecycle.signal,
+        onDispose,
+        registerRuntimeLifecycle: vi.fn(),
+      },
+    });
+    createPlugin(api).register(api);
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+    const close = vi.spyOn(deps.qmdSkillIndex, "close");
+    lifecycle.abort();
+    expect(deps.reviewScheduler.isDisposed()).toBe(true);
+    await onDispose.mock.calls[0][0]();
+    expect(close).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.each(["cli-metadata", "discovery", "tool-discovery"] as const)(

@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { createBackgroundRunner } from "../subagent-runtime.js";
 import {
   mkdtemp,
   mkdir,
@@ -470,6 +472,131 @@ describe("skillIdentityFromDocsPath", () => {
 });
 
 describe("createSkillQmdIndex", () => {
+  it("retains the full refresh and re-admits retries into the current instance context", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "qmd-skill-background-"));
+    roots.push(root);
+    const context = new AsyncLocalStorage<{
+      registry: string;
+      request?: string;
+    }>();
+    let registry = "initial";
+    const admissions: unknown[] = [];
+    const runInBackgroundContext = createBackgroundRunner({
+      runInBackgroundContext(run) {
+        const result = context.run({ registry }, run);
+        admissions.push(result);
+        return result;
+      },
+    });
+    const configurations: unknown[] = [];
+    const timerContexts: unknown[] = [];
+    const timers: Array<() => void> = [];
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const embed = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockImplementationOnce(async () => {
+        await blocked;
+        return { errors: 0 };
+      });
+    const store = createStoreDouble({ embed });
+    const index = context.run(
+      { registry: "request-registry", request: "registration" },
+      () =>
+        createSkillQmdIndex({
+          dataRoot: root,
+          runInBackgroundContext,
+          config: () => {
+            configurations.push(context.getStore());
+            return qmdConfig;
+          },
+          createStore: (async () => store) as never,
+          setTimer: (callback) => {
+            timerContexts.push(context.getStore());
+            timers.push(callback);
+            return callback;
+          },
+          clearTimer: () => {},
+        }),
+    );
+    try {
+      context.run({ registry: "request-registry", request: "schedule" }, () =>
+        index.schedule("main", { skills: [], sourceRoots: ["/fixture"] }),
+      );
+      await waitFor(() => timers.length === 1, "failure did not arm retry");
+      await Promise.all(
+        admissions.filter(
+          (value): value is Promise<unknown> => value instanceof Promise,
+        ),
+      );
+      expect(configurations.length).toBeGreaterThan(0);
+      for (const configuration of configurations) {
+        expect(configuration).toEqual({ registry: "initial" });
+      }
+      expect(timerContexts).toEqual([{ registry: "initial" }]);
+      configurations.length = 0;
+      registry = "replacement";
+      const retry = context.run(
+        { registry: "request-registry", request: "expired" },
+        () => timers.shift()!(),
+      );
+      expect(retry).toBeInstanceOf(Promise);
+      await waitFor(
+        () => embed.mock.calls.length === 2,
+        "owned retry did not start",
+      );
+      expect(configurations.length).toBeGreaterThan(0);
+      for (const configuration of configurations) {
+        expect(configuration).toEqual({ registry: "replacement" });
+      }
+      let ownerFinished = false;
+      const ownedWork = Promise.all(
+        admissions.filter(
+          (value): value is Promise<unknown> => value instanceof Promise,
+        ),
+      ).then(() => {
+        ownerFinished = true;
+      });
+      let closed = false;
+      const closing = index.close().then(() => {
+        closed = true;
+      });
+      await Promise.resolve();
+      expect(ownerFinished).toBe(false);
+      expect(closed).toBe(false);
+      expect(store.close).not.toHaveBeenCalled();
+      release();
+      await Promise.all([retry, ownedWork, closing]);
+      expect(store.close).toHaveBeenCalledOnce();
+      expect(timers).toHaveLength(0);
+    } finally {
+      release();
+      await index.close();
+    }
+  });
+
+  it("fails open when the captured background owner rejects admission", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "qmd-skill-retired-"));
+    roots.push(root);
+    const createStore = vi.fn();
+    const index = createSkillQmdIndex({
+      dataRoot: root,
+      config: () => qmdConfig,
+      createStore,
+      runInBackgroundContext: () => {
+        throw new Error("instance retiring");
+      },
+    });
+    expect(() =>
+      index.schedule("main", { skills: [], sourceRoots: ["/fixture"] }),
+    ).not.toThrow();
+    await index.close();
+    expect(createStore).not.toHaveBeenCalled();
+  });
+
   it("keeps a stable fingerprint across skill content changes", () => {
     const first = skillIndexFingerprint({
       sourceRoots: ["/skills/b", "/skills/a", "/skills/a"],

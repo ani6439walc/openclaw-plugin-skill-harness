@@ -1,10 +1,9 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, expect, it } from "vitest";
 import {
   extractEmbeddedRunError,
   formatEmbeddedError,
-  isGatewayDraining,
-  runDetachedFromWorkScope,
+  createBackgroundRunner,
+  isGatewayDrainingError,
 } from "./subagent-runtime.js";
 
 describe("formatEmbeddedError", () => {
@@ -46,91 +45,37 @@ describe("extractEmbeddedRunError", () => {
   });
 });
 
-describe("runDetachedFromWorkScope", () => {
-  const scopeKey = Symbol.for("openclaw.asyncWorkScope");
-
-  it("executes the callback and returns its value when no scope exists", async () => {
-    const original = (globalThis as Record<symbol, unknown>)[scopeKey];
-    delete (globalThis as Record<symbol, unknown>)[scopeKey];
-    try {
-      const result = await runDetachedFromWorkScope(async () => 42);
-      expect(result).toBe(42);
-    } finally {
-      if (original !== undefined) {
-        (globalThis as Record<symbol, unknown>)[scopeKey] = original;
-      }
-    }
-  });
-
-  it("exits the openclaw.asyncWorkScope so callback executes with undefined store", async () => {
-    const original = (globalThis as Record<symbol, unknown>)[scopeKey];
-    const storage = new AsyncLocalStorage<{ phase: string }>();
-    (globalThis as Record<symbol, unknown>)[scopeKey] = storage;
-
-    try {
-      await storage.run({ phase: "closed" }, async () => {
-        expect(storage.getStore()).toEqual({ phase: "closed" });
-
-        const insideStore = await runDetachedFromWorkScope(async () => {
-          return storage.getStore();
-        });
-
-        expect(insideStore).toBeUndefined();
-        expect(storage.getStore()).toEqual({ phase: "closed" });
-      });
-    } finally {
-      if (original !== undefined) {
-        (globalThis as Record<symbol, unknown>)[scopeKey] = original;
-      } else {
-        delete (globalThis as Record<symbol, unknown>)[scopeKey];
-      }
-    }
-  });
-
-  it("propagates errors thrown inside the detached callback", async () => {
+describe("createBackgroundRunner", () => {
+  it("returns values and propagates failures without a managed lifecycle", async () => {
+    const run = createBackgroundRunner(undefined);
+    expect(run(() => 42)).toBe(42);
     await expect(
-      runDetachedFromWorkScope(async () => {
-        throw new Error("inner error");
+      run(async () => {
+        throw new Error("failure");
       }),
-    ).rejects.toThrow("inner error");
+    ).rejects.toThrow("failure");
+  });
+
+  it("delegates the entire promise to the captured lifecycle with its receiver", async () => {
+    const lifecycle = {
+      value: 42,
+      runInBackgroundContext<T>(run: () => T): T {
+        expect(this.value).toBe(42);
+        return run();
+      },
+    };
+    const run = createBackgroundRunner(lifecycle);
+    const work = Promise.resolve(42);
+    expect(run(() => work)).toBe(work);
+    await expect(work).resolves.toBe(42);
   });
 });
 
-describe("isGatewayDraining", () => {
-  const admissionKey = Symbol.for("openclaw.gatewayWorkAdmissionState");
-
-  it("returns false when state symbol is absent or not draining", () => {
-    const original = (globalThis as Record<symbol, unknown>)[admissionKey];
-    delete (globalThis as Record<symbol, unknown>)[admissionKey];
-    try {
-      expect(isGatewayDraining()).toBe(false);
-
-      (globalThis as Record<symbol, unknown>)[admissionKey] = {
-        restartDraining: false,
-      };
-      expect(isGatewayDraining()).toBe(false);
-    } finally {
-      if (original !== undefined) {
-        (globalThis as Record<symbol, unknown>)[admissionKey] = original;
-      } else {
-        delete (globalThis as Record<symbol, unknown>)[admissionKey];
-      }
-    }
-  });
-
-  it("returns true when restartDraining is true", () => {
-    const original = (globalThis as Record<symbol, unknown>)[admissionKey];
-    try {
-      (globalThis as Record<symbol, unknown>)[admissionKey] = {
-        restartDraining: true,
-      };
-      expect(isGatewayDraining()).toBe(true);
-    } finally {
-      if (original !== undefined) {
-        (globalThis as Record<symbol, unknown>)[admissionKey] = original;
-      } else {
-        delete (globalThis as Record<symbol, unknown>)[admissionKey];
-      }
-    }
+describe("isGatewayDrainingError", () => {
+  it("recognizes the public host admission error without reading process state", () => {
+    const error = new Error("Gateway is restarting. Please try again shortly.");
+    error.name = "GatewayDrainingError";
+    expect(isGatewayDrainingError(error)).toBe(true);
+    expect(isGatewayDrainingError(new Error("other error"))).toBe(false);
   });
 });

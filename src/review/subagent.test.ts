@@ -440,6 +440,7 @@ describe("review writeback boundaries", () => {
       sourceExperienceIds?: string[];
       retainedExperienceId?: string;
     } = {},
+    lifecycle?: OpenClawPluginApi["lifecycle"],
   ) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-boundary-"));
     tempRoots.push(root);
@@ -496,6 +497,7 @@ describe("review writeback boundaries", () => {
     const result = await runReviewSubagent({
       api: {
         config,
+        lifecycle,
         runtime: { agent: { runEmbeddedAgent } },
       } as unknown as OpenClawPluginApi,
       config: resolveConfig({}),
@@ -508,6 +510,35 @@ describe("review writeback boundaries", () => {
     });
     return { result, root, config, runEmbeddedAgent };
   }
+
+  it("rejects a late successful embedded result after lifecycle abort without writing back", async () => {
+    const controller = new AbortController();
+    const { result, root, runEmbeddedAgent } = await review(
+      (workspace) => {
+        fs.writeFileSync(
+          path.join(workspace, "exp-one", "keywords.md"),
+          "updated",
+        );
+        controller.abort();
+      },
+      ["exp-one"],
+      "refine",
+      {},
+      {
+        signal: controller.signal,
+        registerRuntimeLifecycle: vi.fn(),
+      },
+    );
+    expect(result.outcome).toBe("subagent-error");
+    expect(
+      fs.readFileSync(path.join(root, "exp-one", "keywords.md"), "utf8"),
+    ).toBe("workflow");
+    expect(runEmbeddedAgent.mock.calls[0]![0]).toEqual(
+      expect.objectContaining({
+        abortSignal: expect.objectContaining({ aborted: true }),
+      }),
+    );
+  });
 
   it("sets both effective filesystem policies without mutating host config", async () => {
     const { runEmbeddedAgent, config } = await review(() => {}, []);

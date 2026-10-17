@@ -48,6 +48,12 @@ Use strict TypeScript, ESM imports, two-space indentation, and `.js` extensions 
 
 Use Vitest globals in colocated `<module>.test.ts` files. Cover contracts, failures, and boundary validation; no numeric coverage target exists. Behavioral changes require focused regressions. Before handoff, run typecheck, tests, and build; package-facing changes also require loader and dry-pack checks.
 
+Plugin fixtures must collect every instance's lifecycle disposal callback,
+including callbacks observed through test-specific lifecycle spies. Await all
+disposals before removing temporary roots or restoring mocks and clocks. Assert
+zero fake timers before restoring real timers; do not use `clearAllTimers()` to
+hide workers from earlier fixtures that can still schedule retries.
+
 ## Runtime & Agent-Specific Rules
 
 Keep package assets separate from runtime state. There are zero pre-seeded experiences; live sessions, experiences, and statistics belong under `~/.openclaw/plugins/skill-harness/`. Never include that private data in commits.
@@ -75,6 +81,15 @@ Skill root precedence is workshop → workspace → project `.agents/skills` →
 Keep tool documentation aligned with `src/skills/tools.ts` and `src/skills/files.ts`: `skill_list` is paginated (150 default, 500 maximum); `skill_search` returns `skills`, not `results`, omits paths, and caps results at 100 (20 default); `skill_view` takes `file_path`, not `path`. `skill_experience` requires `query`, accepts `limit` (5 default, clamped to 1–20) and `show_skills` (true default), and uses catalog fallback without Jev. Displayed associations are visibility-filtered without excluding experiences; false omits the skills field. Bodies are bounded to 2,000 code points each and 5,000 total; exhausted body budgets preserve entry metadata.
 
 Full registration owns background QMD refreshes and native-config normalization; discovery instances must not rebuild experience indexes. Preserve stable index identity across captured plugin generations. Lifecycle disposal stops refresh timers, disposes Review scheduling, and closes both indexes after active work finishes.
+
+Capture the owning instance's public `api.lifecycle.runInBackgroundContext`
+when installing background resources, and use it again for each timer callback.
+Return the callback's asynchronous work to the host so it remains instance-owned;
+never inspect private OpenClaw globals or manually exit host AsyncLocalStorage.
+Stop background admission and cancel pending work on `gateway_stop` and lifecycle
+disposal, propagate abort signals, and await active work before closing indexes.
+Gateway admission remains authoritative during restart draining; handle its
+rejection without probing private drain-state fields.
 
 Conversation sanitization is a compatibility boundary for input, not a prompt-output format. It removes the current OpenClaw timestamp plus `Conversation info: ⟦openclaw:ctx⟧` fenced JSON envelope, legacy `Sender (untrusted metadata)` metadata, Skill Harness routing blocks, active-memory blocks, assembled-context wrappers, and OpenClaw internal runtime delimiters before recent-turn extraction. A user entry containing only runtime metadata sanitizes to empty; inter-session or internal task-completion user entries also suppress their following assistant payload. External user and assistant messages remain role-tagged. Sessions containing retired intent fields such as `recommendedSkills` are rejected entirely on load, without migration; other unknown intent fields that pass validation are not automatically removed; new turns persist top-level `matchedSkills`, `matchedExperiences`, `confidence`, and `inputSkillDiscovery`; `intentMatchedSkills` is retained only for reading historical intent state. Empty selections still represent routed turns for statistics and Review.
 
@@ -240,7 +255,7 @@ The reviewer may merge substantially overlapping experiences after reading their
 
 The Review prompt includes refine, merge, and delete JSON examples with aligned field types/limits. Operation and merge metadata persist in schema-v8 `review.json`; existing v8 changes without operation metadata remain readable and are not reclassified. The runtime-health report counts new operations through its existing `byOperation` aggregate. Invalid findings emit warning-level schema issue paths and codes without rejected values or evidence text. `missing-trigger-decision` means no valid decision remained for a requested trigger; it can follow rejection of a finding that did contain `trigger`. Detached Review transcripts are not retained, so historical reason counts alone cannot identify the original invalid field. These diagnostics do not relax validation or guarantee successful experience learning.
 
-Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn finishes (default 30-second idle delay). A new candidate for the same agent/session replaces the previous pending candidate and resets its timer, with pending entries capped by LRU eviction (default 32 sessions). Before executing, the scheduler checks if the system is actively processing embedded runs (`isSystemActive`); if busy or another Review is in flight, review is postponed by a 30-second retry delay. Each scheduler runs at most one Review at a time. If OpenClaw Gateway is shutting down (`isDraining`), pending reviews abort immediately without executing. Review runs execute in the background detached from the hook scope (`runDetachedFromWorkScope`) with `sessionPersistence: "detached"`, and the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
+Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn finishes (default 30-second idle delay). A new candidate for the same agent/session replaces the previous pending candidate and resets its timer, with pending entries capped by LRU eviction (default 32 sessions). Before executing, the scheduler checks if the system is actively processing embedded runs (`isSystemActive`); if busy or another Review is in flight, review is postponed by a 30-second retry delay. Each scheduler runs at most one Review at a time. Public lifecycle signals and `gateway_stop` cancel pending reviews and abort and await active Review work; Gateway admission remains authoritative during restart draining. Review runs execute through the owning instance's `runInBackgroundContext` with `sessionPersistence: "detached"`, and the host removes only the isolated temporary workspace in `finally` and does not explicitly call `deleteSession`.
 
 ## Telemetry interpretation and retention
 
@@ -343,12 +358,32 @@ preconditions, Gateway restart impact and rollback together; apply only within
 the user's authorized scope. Do not reset telemetry or delete indexes as a
 routine upgrade step.
 
-Use `openclaw gateway status --deep --require-rpc`,
-`openclaw plugins inspect skill-harness --runtime --json`, and
-`openclaw plugins doctor` for runtime acceptance. Cold plugin inventory and local
-build/test results do not establish that the Gateway loaded the changed build.
-Verify actual tools through the intended agent. Keep deployment observations
-and reports in private notes rather than README or AGENTS.
+Use `openclaw plugins inspect skill-harness --runtime --json` and
+`openclaw plugins doctor` for local registration/configuration diagnostics.
+Runtime inspection loads the plugin in the inspecting CLI process, not the
+running Gateway. Use `openclaw gateway status --deep --require-rpc` for Gateway
+availability, then verify actual tools and an eligible routed turn through the
+intended agent and inspect Gateway observations. Cold plugin inventory, local
+runtime inspection, and build/test results do not establish that the Gateway
+loaded the changed build. Keep deployment observations and reports in private
+notes rather than README or AGENTS.
+
+External plugin installations must explicitly grant
+`plugins.entries.skill-harness.hooks.allowConversationAccess: true`; this is
+host hook policy beside the plugin's `config`, not part of its manifest schema.
+An explicit `allowPromptInjection: false` still blocks prompt hooks. Never
+normalize these permission grants automatically.
+
+Prefer the SDK's explicit `before_prompt_build.currentUserMessage` for routing
+input when present, including an empty string. Only an absent field permits
+legacy prompt/history extraction. Do not parse projected envelope markers in
+the explicit request; retain them as user text. Empty explicit text keeps static
+guidance without routing historical input. Admission IDs identify requests across
+rebuilds; run IDs are correlation data and must not authorize a fallback to a
+different run's current turn. With an explicit unknown run ID, ignore the event
+rather than attaching it to another known run in the same session. A previously
+unseen run ID may resolve a unique anonymous turn for sparse host contexts;
+reserved, terminal, or ambiguous known run IDs never use that fallback.
 
 ## Documentation boundaries
 

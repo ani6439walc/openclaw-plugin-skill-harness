@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { createBackgroundRunner } from "../subagent-runtime.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -226,6 +228,9 @@ describe("SkillExperienceQmdIndex", () => {
       config: () => DEFAULT_CONFIG,
       createStore,
       readOnly: true,
+      runInBackgroundContext: () => {
+        throw new Error("discovery must retain its foreground caller");
+      },
     });
     index.schedule(MOCK_ENTRIES);
     const search = index.search({ query: "screenshot" });
@@ -360,6 +365,148 @@ describe("SkillExperienceQmdIndex", () => {
         ),
       ),
     ).toBe(true);
+  });
+
+  it("retains its worker and re-admits failed-build retries without the old request context", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const context = new AsyncLocalStorage<{
+      registry: string;
+      request?: string;
+    }>();
+    let registry = "initial";
+    const admissions: unknown[] = [];
+    const timerContexts: unknown[] = [];
+    const runInBackgroundContext = createBackgroundRunner({
+      runInBackgroundContext(run) {
+        const result = context.run({ registry }, () => {
+          const value = run();
+          if (value && typeof value === "object" && "unref" in value)
+            timerContexts.push(context.getStore());
+          return value;
+        });
+        admissions.push(result);
+        return result;
+      },
+    });
+    const configurations: unknown[] = [];
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const store = makeStore();
+    store.embed
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockImplementationOnce(async () => {
+        await blocked;
+        return { errors: 0 };
+      });
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    index = context.run(
+      { registry: "request-registry", request: "registration" },
+      () =>
+        createSkillExperienceQmdIndex({
+          dataRoot: tmpDir,
+          runInBackgroundContext,
+          config: () => {
+            configurations.push(context.getStore());
+            return DEFAULT_CONFIG;
+          },
+          createStore: vi.fn().mockResolvedValue(store),
+        }),
+    );
+    try {
+      context.run({ registry: "request-registry", request: "schedule" }, () =>
+        index!.schedule(MOCK_ENTRIES),
+      );
+      await vi.waitFor(() => expect(index!.getStatus()).toBe("failed"));
+      await Promise.all(
+        admissions.filter(
+          (value): value is Promise<unknown> => value instanceof Promise,
+        ),
+      );
+      expect(configurations.length).toBeGreaterThan(0);
+      for (const configuration of configurations) {
+        expect(configuration).toEqual({ registry: "initial" });
+      }
+      expect(timerContexts).toEqual([{ registry: "initial" }]);
+      configurations.length = 0;
+      store.close.mockClear();
+      registry = "replacement";
+      const timerIndex = timers.mock.calls.findIndex(
+        ([, delay]) => delay === 5_000,
+      );
+      const callback = timers.mock.calls[timerIndex]![0] as () => Promise<void>;
+      clearTimeout(timers.mock.results[timerIndex]!.value);
+      const retry = context.run(
+        { registry: "request-registry", request: "expired" },
+        callback,
+      );
+      expect(retry).toBeInstanceOf(Promise);
+      await vi.waitFor(() => expect(store.embed).toHaveBeenCalledTimes(2));
+      expect(configurations.length).toBeGreaterThan(0);
+      for (const configuration of configurations) {
+        expect(configuration).toEqual({ registry: "replacement" });
+      }
+      let ownerFinished = false;
+      const ownedWork = Promise.all(
+        admissions.filter(
+          (value): value is Promise<unknown> => value instanceof Promise,
+        ),
+      ).then(() => {
+        ownerFinished = true;
+      });
+      let closed = false;
+      const closing = index.close().then(() => {
+        closed = true;
+      });
+      await Promise.resolve();
+      expect(ownerFinished).toBe(false);
+      expect(closed).toBe(false);
+      expect(store.close).not.toHaveBeenCalled();
+      release();
+      await Promise.all([retry, ownedWork, closing]);
+      expect(store.close).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      release();
+      timers.mockRestore();
+    }
+  });
+
+  it("does not arm a retry when an in-flight build fails during close", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let reject!: (error: Error) => void;
+    const blocked = new Promise<never>((_resolve, rejectPromise) => {
+      reject = rejectPromise;
+    });
+    const store = makeStore();
+    store.embed.mockImplementation(() => blocked);
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore: vi.fn().mockResolvedValue(store),
+    });
+    index.schedule(MOCK_ENTRIES);
+    await vi.waitFor(() => expect(store.embed).toHaveBeenCalledOnce());
+    const closing = index.close();
+    reject(new Error("failed after close started"));
+    await closing;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("fails open when its captured background owner refuses admission", async () => {
+    const createStore = vi.fn();
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore,
+      runInBackgroundContext: () => {
+        throw new Error("instance retiring");
+      },
+    });
+    expect(() => index!.schedule(MOCK_ENTRIES)).not.toThrow();
+    await index.close();
+    expect(createStore).not.toHaveBeenCalled();
   });
 
   it("retries failed builds with backoff without another catalog refresh", async () => {

@@ -177,6 +177,11 @@ export class TurnAssociationRegistry {
     }
   }
 
+  hasRun(runId: string | undefined): boolean {
+    const key = normalizeTurnAssociationKey(runId);
+    return key !== undefined && this.entries.has(key);
+  }
+
   resolve(runId: string | undefined): TurnAssociation | undefined {
     const key = normalizeTurnAssociationKey(runId);
     if (!key) return;
