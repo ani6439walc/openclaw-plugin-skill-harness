@@ -656,7 +656,7 @@ export function createSkillQmdIndex(params: {
     run: () => void | Promise<void>,
   ): Promise<void> => {
     const failed = (error: unknown) => {
-      logger.warn("QMD skill background work failed", {
+      logger.warn("qmd skill background work failed", {
         errorType: error instanceof Error ? "Error" : typeof error,
       });
     };
@@ -761,7 +761,7 @@ export function createSkillQmdIndex(params: {
       "mapping-publish",
     );
     if (!written)
-      throw Object.assign(new Error("QMD skill catalog is busy"), {
+      throw Object.assign(new Error("qmd skill catalog is busy"), {
         code: CATALOG_BUSY,
       });
   }
@@ -777,7 +777,7 @@ export function createSkillQmdIndex(params: {
         "code" in error &&
         error.code === "ENOENT"
       )) {
-        logger.warn("failed to load QMD skill index catalog", { error });
+        logger.warn("failed to load qmd skill index catalog", { error });
       }
     }
     for (const entry of entries) {
@@ -805,7 +805,7 @@ export function createSkillQmdIndex(params: {
         "code" in error &&
         error.code === "ENOENT"
       )) {
-        logger.warn("failed to load QMD skill agent mappings", { error });
+        logger.warn("failed to load qmd skill agent mappings", { error });
       }
     }
     for (const entry of mappings) {
@@ -931,7 +931,7 @@ export function createSkillQmdIndex(params: {
           state.releasePin?.();
           state.releasePin = undefined;
         } catch (error) {
-          logger.warn("failed to close retired QMD skill index", {
+          logger.warn("failed to close retired qmd skill index", {
             error,
             fingerprint: state.fingerprint,
           });
@@ -1090,7 +1090,7 @@ export function createSkillQmdIndex(params: {
       } catch (error) {
         state.lastRefreshError = error;
         state.status = "failed";
-        logger.warn("failed to open QMD skill index", {
+        logger.warn("failed to open qmd skill index", {
           error,
           fingerprint: state.fingerprint,
         });
@@ -1146,7 +1146,7 @@ export function createSkillQmdIndex(params: {
     clearRetryTimer(state);
     if (state.consecutiveFailures > 0) {
       logger.info(
-        `QMD skill index refresh recovered ${JSON.stringify({ fingerprint: state.fingerprint, previousFailures: state.consecutiveFailures, searchable: state.usable })}`,
+        `qmd skill index refresh recovered ${JSON.stringify({ fingerprint: state.fingerprint, previousFailures: state.consecutiveFailures, searchable: state.usable })}`,
       );
     }
     state.consecutiveFailures = 0;
@@ -1177,7 +1177,7 @@ export function createSkillQmdIndex(params: {
         }, delayMs),
       );
     } catch (error) {
-      logger.warn("QMD skill retry admission failed", {
+      logger.warn("qmd skill retry admission failed", {
         errorType: error instanceof Error ? "Error" : typeof error,
       });
     }
@@ -1202,7 +1202,7 @@ export function createSkillQmdIndex(params: {
     state.status = state.usable ? "ready" : "failed";
     // The host PluginLogger accepts a single string; only fixed safe fields survive.
     logger.warn(
-      `failed to refresh QMD skill index ${JSON.stringify({
+      `failed to refresh qmd skill index ${JSON.stringify({
         fingerprint: state.fingerprint,
         phase,
         reason: refreshFailureReason(error),
@@ -1247,7 +1247,7 @@ export function createSkillQmdIndex(params: {
       if (!closed)
         recordRefreshProblem(
           state,
-          Object.assign(new Error("QMD skill catalog is busy"), {
+          Object.assign(new Error("qmd skill catalog is busy"), {
             code: "PIN_UNAVAILABLE",
           }),
           "lifetime-pin",
@@ -1297,7 +1297,7 @@ export function createSkillQmdIndex(params: {
             if (embedResult.errors > 0 || status.needsEmbedding > 0) {
               recordRefreshProblem(
                 state,
-                Object.assign(new Error("QMD skill embedding incomplete"), {
+                Object.assign(new Error("qmd skill embedding incomplete"), {
                   code: "EMBEDDING_INCOMPLETE",
                 }),
                 "embed",
@@ -1384,7 +1384,7 @@ export function createSkillQmdIndex(params: {
     agent.scheduling = scheduling;
     void scheduling
       .catch((error: unknown) => {
-        logger.warn("failed to schedule QMD skill index", { error, agentId });
+        logger.warn("failed to schedule qmd skill index", { error, agentId });
       })
       .finally(() => {
         if (agent.scheduling === scheduling) agent.scheduling = undefined;
@@ -1554,7 +1554,7 @@ export function createSkillQmdIndex(params: {
           })
           .slice(0, Math.max(1, limit));
       } catch (error) {
-        logger.warn("QMD skill search failed", { error, agentId });
+        logger.warn("qmd skill search failed", { error, agentId });
         return;
       } finally {
         lease?.release();
@@ -1607,7 +1607,7 @@ export function createSkillQmdIndex(params: {
             await retiring;
           } catch (error) {
             // Keep the store and its lease, but let unrelated indexes retire.
-            logger.warn("failed to close retired QMD skill index", {
+            logger.warn("failed to close retired qmd skill index", {
               error,
               fingerprint: state.fingerprint,
             });
@@ -1665,7 +1665,7 @@ export function createSkillQmdIndex(params: {
           "maintenance",
         );
       }).catch((error) => {
-        logger.warn("QMD skill index maintenance skipped", { error });
+        logger.warn("qmd skill index maintenance skipped", { error });
       });
       maintenanceWork = work;
       void work.finally(() => {

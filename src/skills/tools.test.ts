@@ -538,7 +538,7 @@ describe("registerSkillTools", () => {
     ).resolves.toEqual({ success: true, entries: [] });
   });
 
-  it("searches visible skills through the QMD skill index", async () => {
+  it("searches visible skills through the qmd skill index", async () => {
     const workspaceDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "skill-tools-qmd-"),
     );
@@ -803,6 +803,7 @@ describe("registerSkillTools", () => {
     });
     registerSkillTools(api, {
       bundledSkillsDir: "",
+      homeDir: path.join(tmp, "home"),
     });
     const tools = toolsForAgent(api);
 
@@ -972,7 +973,10 @@ describe("registerSkillTools", () => {
       });
       writeSkill(workspaceDir, "b");
       const api = createApi(stateDir, workspaceDir);
-      registerSkillTools(api, { bundledSkillsDir: "" });
+      registerSkillTools(api, {
+        bundledSkillsDir: "",
+        homeDir: path.join(tmp, "home"),
+      });
       const view = toolsForAgent(api).get("skill_view");
       expect(await runTool(view, { name: "a" })).toMatchObject({
         related_skills: [],
@@ -1124,7 +1128,10 @@ describe("registerSkillTools", () => {
     for (let index = 0; index < 155; index += 1) {
       writeSkill(workspaceDir, `skill-${String(index).padStart(3, "0")}`);
     }
-    registerSkillTools(api, { bundledSkillsDir: "" });
+    registerSkillTools(api, {
+      bundledSkillsDir: "",
+      homeDir: path.join(tmp, "home"),
+    });
     const tools = toolsForAgent(api);
 
     await expect(runTool(tools.get("skill_list"), {})).resolves.toMatchObject({

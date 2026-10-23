@@ -827,7 +827,7 @@ describe("createPlugin", () => {
       (deps: {
         qmdSkillIndex?: { schedule: (...args: unknown[]) => void };
       }) => {
-        if (!deps.qmdSkillIndex) throw new Error("missing QMD skill index");
+        if (!deps.qmdSkillIndex) throw new Error("missing qmd skill index");
         vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(() => {
           throw failure;
         });
@@ -841,10 +841,10 @@ describe("createPlugin", () => {
 
     await vi.waitFor(() => {
       const receipt = warn.mock.calls.find(
-        ([message]) => message === "failed to schedule QMD skill search index",
+        ([message]) => message === "failed to schedule qmd skill search index",
       );
       expect(receipt).toEqual([
-        "failed to schedule QMD skill search index",
+        "failed to schedule qmd skill search index",
         { errorType: "Error", scheduled: false },
       ]);
       expect(JSON.stringify(receipt)).not.toContain(privateAgentId);

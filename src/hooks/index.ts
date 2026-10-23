@@ -677,7 +677,7 @@ export function createHookHandlers(deps: HookDeps) {
         if (policy.maxInjectedSkills === 0) return;
         if (!qmdSkillIndex) {
           fallbackReason = "retrieval-unavailable";
-          searchError = "QMD skill index unavailable";
+          searchError = "qmd skill index unavailable";
           return;
         }
         const timeout = new Promise<"timeout">((resolve) => {
@@ -699,12 +699,12 @@ export function createHookHandlers(deps: HookDeps) {
         if (outcome === "timeout") {
           status = "timeout";
           fallbackReason = "retrieval-timeout";
-          searchError = "QMD skill search timed out";
+          searchError = "qmd skill search timed out";
         } else if ("error" in outcome) {
           throw outcome.error;
         } else if (outcome.hits === undefined) {
           fallbackReason = "retrieval-unavailable";
-          searchError = "QMD skill index unavailable";
+          searchError = "qmd skill index unavailable";
         } else {
           status = "completed";
           hits = outcome.hits.map((hit) => ({

@@ -766,7 +766,7 @@ describe("createSkillQmdIndex", () => {
         index.schedule("main", { skills: [], sourceRoots: ["/fixture"] });
         await waitFor(() => timers.length === 1, "failure did not arm retry");
         const call = warn.mock.calls.find(([message]) =>
-          message.includes("failed to refresh QMD skill index"),
+          message.includes("failed to refresh qmd skill index"),
         )!;
         expect(call).toHaveLength(1);
         const fields = JSON.parse(call[0].slice(call[0].indexOf("{")));
@@ -791,12 +791,12 @@ describe("createSkillQmdIndex", () => {
         await waitFor(
           () =>
             info.mock.calls.some(([message]) =>
-              message.includes("QMD skill index refresh recovered"),
+              message.includes("qmd skill index refresh recovered"),
             ),
           "recovery diagnostic missing",
         );
         const recovered = info.mock.calls.find(([message]) =>
-          message.includes("QMD skill index refresh recovered"),
+          message.includes("qmd skill index refresh recovered"),
         )!;
         expect(recovered).toHaveLength(1);
         expect(
@@ -863,7 +863,7 @@ describe("createSkillQmdIndex", () => {
       index.schedule("main", { skills: [], sourceRoots: ["/fixture"] });
       await vi.waitFor(() => expect(timers).toHaveLength(1), { timeout: 3000 });
       const message = warn.mock.calls.find(([message]) =>
-        message.includes("failed to refresh QMD skill index"),
+        message.includes("failed to refresh qmd skill index"),
       )![0];
       expect(JSON.parse(message.slice(message.indexOf("{")))).toMatchObject({
         phase: "mapping",
@@ -947,7 +947,7 @@ describe("createSkillQmdIndex", () => {
     ).toBe("partial");
     expect(pendingTimers).toHaveLength(1);
     const warning = warn.mock.calls.find(([message]) =>
-      message.includes("failed to refresh QMD skill index"),
+      message.includes("failed to refresh qmd skill index"),
     )![0];
     expect(JSON.parse(warning.slice(warning.indexOf("{")))).toMatchObject({
       phase: "embed",
@@ -1775,7 +1775,7 @@ describe("createSkillQmdIndex", () => {
   });
 });
 
-describe("QMD skill connection lifecycle", () => {
+describe("qmd skill connection lifecycle", () => {
   function deferred<T>() {
     let resolve!: (value: T) => void;
     let reject!: (reason: unknown) => void;

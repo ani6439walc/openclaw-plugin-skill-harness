@@ -162,7 +162,7 @@ function lockOwnerPath(lockPath: string): string {
   return path.join(lockPath, "owner.json");
 }
 
-function readProcessStartTime(pid: number): string | undefined {
+export function readProcessStartTime(pid: number): string | undefined {
   if (process.platform !== "linux") return;
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -180,7 +180,7 @@ function readProcessStartTime(pid: number): string | undefined {
 function processStartedAfter(pid: number, timestampMs: number): boolean {
   if (process.platform !== "linux" || timestampMs <= 0) return false;
   try {
-    return fs.statSync(`/proc/${pid}`).mtimeMs > timestampMs;
+    return Math.floor(fs.statSync(`/proc/${pid}`).mtimeMs) > timestampMs + 1000;
   } catch {
     return false;
   }

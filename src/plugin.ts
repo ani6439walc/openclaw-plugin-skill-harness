@@ -279,7 +279,7 @@ export function createPlugin(
               }).map((root) => root.path),
             });
           } catch (error: unknown) {
-            logger.warn("failed to schedule QMD skill search index", {
+            logger.warn("failed to schedule qmd skill search index", {
               errorType: error instanceof Error ? "Error" : typeof error,
               scheduled: false,
             });

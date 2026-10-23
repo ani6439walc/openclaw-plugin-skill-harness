@@ -30,6 +30,7 @@ export interface RegisterSkillToolsOptions {
   bundledSkillsDir?: string;
   nativeBundledSkillsDir?: Promise<string | undefined>;
   getSharedRoots?: () => readonly string[];
+  homeDir?: string;
 }
 
 function jsonToolResult(data: unknown) {
@@ -152,6 +153,7 @@ export function registerSkillTools(
             bundledSkillsDir: options.bundledSkillsDir,
             nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
             sharedRoots: options.getSharedRoots?.(),
+            homeDir: options.homeDir,
           });
           const relatedSkills = showRelated
             ? await relatedSkillsBySkillName(skills, api)
@@ -271,6 +273,7 @@ export function registerSkillTools(
             bundledSkillsDir: options.bundledSkillsDir,
             nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
             sharedRoots: options.getSharedRoots?.(),
+            homeDir: options.homeDir,
           });
           const relatedSkills = showRelated
             ? await relatedSkillsBySkillName(inventory, api)
@@ -384,6 +387,7 @@ export function registerSkillTools(
               bundledSkillsDir: options.bundledSkillsDir,
               nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
               sharedRoots: options.getSharedRoots?.(),
+              homeDir: options.homeDir,
             }),
           );
         },
@@ -495,6 +499,7 @@ export function registerSkillTools(
               bundledSkillsDir: options.bundledSkillsDir,
               nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
               sharedRoots: options.getSharedRoots?.(),
+              homeDir: options.homeDir,
             });
             visibleNames = new Set(
               canonicalSkillNames(inventory.map((skill) => skill.name)),

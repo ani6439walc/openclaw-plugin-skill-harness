@@ -15,6 +15,7 @@ import {
   agentSessionsPath,
   packageRoot,
   readJsonFile,
+  readProcessStartTime,
   writeJsonAtomic,
 } from "./file-utils.js";
 
@@ -38,6 +39,9 @@ describe("FileLock", () => {
       writeJsonAtomic(path.join(lock, "owner.json"), {
         pid: process.pid,
         createdAtMs: Date.now(),
+        ...(readProcessStartTime(process.pid)
+          ? { processStartTime: readProcessStartTime(process.pid) }
+          : {}),
       });
       fs.rmdirSync(`${lock}.reclaim`);
       expect(await contender.acquire({ maxWaitMs: 0 })).toBe(false);

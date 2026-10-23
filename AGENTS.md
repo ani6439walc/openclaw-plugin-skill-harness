@@ -109,7 +109,7 @@ Track QMD connection configuration separately from index fingerprints. Drain act
 
 Count adoption only from successful complete `skill_view` responses or successful `read`/`exec` outputs with parseable frontmatter and a nonempty skill name. Exclude explicit errors, `success: false`, empty/unrecognizable output, and path-only inference; preserve same-turn deduplication at both hooks and session merge boundaries. Do not recalculate existing statistics; historical adoption can include old false positives.
 
-QMD skill and experience snapshots must not generate identity sidecars. Full-registration refresh removes legacy `.identity.yml` and `.identity.json` files; both suffixes stay excluded from reference indexing. Preserve unchanged document mtimes, databases, index metadata, and agent mappings. Persist original skill names in the existing agent mapping; use their `safePathSegment()` values to resolve hashed names with fail-open rejection of unknown/ambiguous segments and agent visibility checks. Experience IDs come from paths and skills from the catalog. Experience fingerprints include the sidecar-free format so full registration refreshes once; discovery never migrates or rebuilds snapshots.
+qmd skill and experience snapshots must not generate identity sidecars. Full-registration refresh removes legacy `.identity.yml` and `.identity.json` files; both suffixes stay excluded from reference indexing. Preserve unchanged document mtimes, databases, index metadata, and agent mappings. Persist original skill names in the existing agent mapping; use their `safePathSegment()` values to resolve hashed names with fail-open rejection of unknown/ambiguous segments and agent visibility checks. Experience IDs come from paths and skills from the catalog. Experience fingerprints include the sidecar-free format so full registration refreshes once; discovery never migrates or rebuilds snapshots.
 
 Skill-index GC is full-registration-only and shares the existing QMD refresh cadence. Catalog locking must cover mapping writes, lease registration, and reclamation; per-instance lifetime pins protect stores through close, including discovery, build, search, embedding, and rotation. Preserve all referenced indexes. Track unreferenced/retired-agent grace in `qmd/skills/gc.json` (24 hours each), reset orphan age on mapping publication or lease acquisition, and reread mappings before deletion. Invalid mappings, unknown lease ownership, symlinks, or busy builds must prevent deletion. Retire agent mappings only from a complete current runtime registry, not stale registration data or query inactivity. Shared active references preserve indexes; do not delete runtime experiences, sessions, stats, or Review state. Fully restart all old Gateway generations when deploying the lease protocol; pre-upgrade stores cannot be proven idle by the new protocol.
 
@@ -399,7 +399,7 @@ belong in `skills/skill-harness/`. Research references explain design context;
 do not claim paper benchmark results as this plugin's measurements or imply that
 related-work algorithms are implemented without source evidence.
 
-QMD skill refresh diagnostics must survive the host PluginLogger's single-string
+qmd skill refresh diagnostics must survive the host PluginLogger's single-string
 contract. Encode fingerprint, phase, fixed reason, searchable, failure count,
 retry delay, and a redacted error diagnostic (`errorName`, string `errorCode`,
 truncated `errorMessage`). Log recovery only after update/publication/embedding

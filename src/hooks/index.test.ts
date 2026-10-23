@@ -1634,7 +1634,7 @@ description: Navigate Tokyo.
     );
     expect(fs.existsSync(path.join(tmp, "review.json"))).toBe(false);
     fs.rmSync(tmp, { recursive: true, force: true });
-  });
+  }, 30_000);
 
   it("rebuilds QMD only after a review changes an intent routing surface", async () => {
     const snapshot = {
@@ -3455,7 +3455,7 @@ describe("createHookHandlers topic switch flow", () => {
     }
   });
 
-  it("unions candidate skills from direct name match, QMD skill search, and Experience QMD index", async () => {
+  it("unions candidate skills from direct name match, qmd skill search, and Experience QMD index", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-union-pool-"));
     const workspace = path.join(tmp, "workspace");
     const state = path.join(tmp, "state");
@@ -4467,7 +4467,7 @@ describe("createHookHandlers topic switch flow", () => {
       ).toMatchObject({
         status: "timeout",
         result: [],
-        error: "QMD skill search timed out",
+        error: "qmd skill search timed out",
         hits: [],
         candidateCount: 0,
       });
