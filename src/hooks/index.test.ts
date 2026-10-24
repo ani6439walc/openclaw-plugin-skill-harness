@@ -4814,7 +4814,7 @@ Current user request: fresh clean request with clean-skill
       ).toMatchObject({
         status: "error",
         result: [],
-        error: "Subagent crashed",
+        error: "Routing selection failed",
         injectedSkills: [],
       });
       expect(record).toHaveBeenCalledWith(
@@ -4973,7 +4973,7 @@ Current user request: fresh clean request with clean-skill
             { role: "user", content: "run skill-turn2" },
           ],
         } as never,
-        ctx,
+        { ...ctx, runId: "run-2" },
       );
       expect(result2?.prependContext).toContain('<skill name="skill-turn2">');
       expect(result2?.prependContext).not.toContain(

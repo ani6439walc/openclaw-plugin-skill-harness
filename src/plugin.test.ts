@@ -619,6 +619,96 @@ describe("createPlugin", () => {
     expect(fs.existsSync(path.join(dataRoot, "review.json"))).toBe(false);
   });
 
+  it.each(["gateway_stop", "dispose"])(
+    "%s cancels selector admission and drains it before closing indexes",
+    async (stopKind) => {
+      fs.mkdirSync(path.join(stateDir, "skills", "fixture"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(stateDir, "skills", "fixture", "SKILL.md"),
+        "---\nname: fixture\ndescription: Fixture.\n---\nInstructions.",
+      );
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const selector = vi.fn(async (_params: { signal?: AbortSignal }) => {
+        await gate;
+        return {
+          skills: ["fixture"],
+          experiences: [],
+          confidence: 0.9,
+          reason: "fixture",
+        };
+      });
+      const closeSkills = vi.fn(async () => {});
+      const closeExperiences = vi.fn(async () => {});
+      createHookHandlersSpy.mockImplementation((deps) => {
+        deps.routingSelector = selector;
+        vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(() => {});
+        vi.spyOn(deps.qmdSkillIndex, "search").mockResolvedValue([]);
+        vi.spyOn(deps.qmdSkillIndex, "close").mockImplementation(closeSkills);
+        deps.qmdSkillIndex.maintenance = vi.fn().mockResolvedValue(undefined);
+        vi.spyOn(deps.qmdExperienceIndex, "schedule").mockImplementation(
+          () => {},
+        );
+        vi.spyOn(deps.qmdExperienceIndex, "close").mockImplementation(
+          closeExperiences,
+        );
+      });
+      const onDispose = vi.fn();
+      const api = createApi({
+        pluginConfig: {
+          routing: { experiences: { maxInjectedExperiences: 0 } },
+          qmd: { indexRefreshIntervalSeconds: 0 },
+        },
+        lifecycle: { onDispose, registerRuntimeLifecycle: vi.fn() },
+      });
+      createPlugin(api).register(api);
+      const prompt = api.on.mock.calls.find(
+        ([name]) => name === "before_prompt_build",
+      )?.[1];
+      const stop =
+        stopKind === "dispose"
+          ? onDispose.mock.calls[0][0]
+          : api.on.mock.calls.find(([name]) => name === "gateway_stop")?.[1];
+      const ctx = {
+        agentId: "main",
+        sessionId: "prompt-stop",
+        sessionKey: "agent:main:main",
+        runId: "turn",
+        trigger: "user",
+        messageProvider: "webchat",
+      };
+      const event = {
+        prompt: "fixture",
+        messages: [{ role: "user", content: "fixture" }],
+      };
+      try {
+        const pending = prompt(event, ctx);
+        await vi.waitFor(() => expect(selector).toHaveBeenCalledTimes(1));
+        const params = selector.mock.calls[0][0] as { signal?: AbortSignal };
+        const stopping = stop();
+        expect(params.signal?.aborted).toBe(true);
+        await Promise.resolve();
+        expect(closeSkills).not.toHaveBeenCalled();
+        expect(closeExperiences).not.toHaveBeenCalled();
+        expect((await pending)?.prependContext).toBeUndefined();
+        expect(
+          (await prompt(event, { ...ctx, runId: "next" }))?.prependContext,
+        ).toBeUndefined();
+        expect(selector).toHaveBeenCalledTimes(1);
+        release();
+        await stopping;
+        expect(closeSkills).toHaveBeenCalledTimes(1);
+        expect(closeExperiences).toHaveBeenCalledTimes(1);
+      } finally {
+        release();
+      }
+    },
+  );
+
   it("refreshes QMD sources only on the configured polling interval", async () => {
     vi.useFakeTimers();
     let schedule: any;

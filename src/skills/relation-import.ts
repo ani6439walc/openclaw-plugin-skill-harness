@@ -7,10 +7,7 @@ import type { EntryType } from "@typesafe-ai/sdk";
 import type { OpenClawConfig } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import { readJsonFile, writeJsonAtomic } from "../file-utils.js";
-import {
-  normalizeTypeSafeBaseUrl,
-  resolveQmdEndpoint,
-} from "../qmd/provider-resolver.js";
+import { normalizeTypeSafeBaseUrl } from "../qmd/provider-resolver.js";
 import { resolveConfinedFile } from "./paths.js";
 import {
   appendImportedRelations,
@@ -262,10 +259,10 @@ export function createImportClassifier(config: OpenClawConfig): {
 } {
   const plugin = resolveConfig(
     config.plugins?.entries?.["skill-harness"]?.config,
+    { openClawConfig: config },
   );
-  const jev = plugin.jev ?? plugin.qmd.jev;
-  if (!jev?.model) throw new Error("missing-jev-model");
-  const endpoint = resolveQmdEndpoint(jev, { openClawConfig: config });
+  const endpoint = plugin.decisionModel;
+  if (!endpoint?.model) throw new Error("missing-decision-model");
   return {
     model: endpoint.model,
     client: new TypeSafeClient({

@@ -316,7 +316,7 @@ export function normalizeTypeSafeBaseUrl(baseUrl?: string): string | undefined {
 
 /**
  * Builds the C++ QMD store models configuration, resolving Jev endpoints
- * from config.jev (even if model is omitted) or fallback to expansion.
+ * from the QMD-only config.jev or the native expansion fallback.
  */
 export function buildStoreModels(config: ResolvedQmdConfig) {
   const jevEndpoint =

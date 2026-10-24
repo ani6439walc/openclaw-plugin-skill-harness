@@ -101,6 +101,7 @@ import {
 } from "./system-context.js";
 export type { HookDeps } from "./types.js";
 
+import { PromptExecutions } from "./prompt-executions.js";
 import { promptRoutingBudgetMs, withPromptDeadline } from "./prompt-budget.js";
 
 type AgentEndPhase = "finalize" | "inventory" | "stats" | "review-preparation";
@@ -215,6 +216,8 @@ export function createHookHandlers(deps: HookDeps) {
             relationEvidence: callParams.relationEvidence,
             candidateExperiences: callParams.candidateExperiences,
             dataRoot: callParams.dataRoot,
+            signal: callParams.signal,
+            assertActive: callParams.assertActive,
           });
           if (!classified) return undefined;
           return {
@@ -244,6 +247,10 @@ export function createHookHandlers(deps: HookDeps) {
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
   const recordedToolCalls = new Set<string>();
+  const promptExecutions = new PromptExecutions<string | undefined>(
+    api.lifecycle?.signal,
+  );
+  const anonymousPreparations = new Map<string, Promise<unknown>>();
   const turnAssociations =
     deps.turnAssociations ?? new TurnAssociationRegistry();
 
@@ -362,7 +369,40 @@ export function createHookHandlers(deps: HookDeps) {
         sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
       });
     if (!sessionId) return;
+    promptExecutions.assertActive();
     const runId = params.ctx.runId?.trim();
+    if (!runId) {
+      const previous =
+        anonymousPreparations.get(sessionId) ?? Promise.resolve();
+      const work = promptExecutions.track(
+        previous
+          .catch(() => {})
+          .then(() => prepareTrackingTurnReserved(params, sessionId, runId)),
+      );
+      anonymousPreparations.set(sessionId, work);
+      try {
+        return await work;
+      } finally {
+        if (anonymousPreparations.get(sessionId) === work)
+          anonymousPreparations.delete(sessionId);
+      }
+    }
+    return promptExecutions.track(
+      prepareTrackingTurnReserved(params, sessionId, runId),
+    );
+  }
+
+  async function prepareTrackingTurnReserved(
+    params: {
+      ctx: PluginHookAgentContext;
+      routing: PromptBuildIdentity;
+      latestUserMessage: string;
+      recentTurns?: readonly RecentTurn[];
+    },
+    sessionId: string,
+    runId: string | undefined,
+  ): Promise<TurnAssociation | undefined> {
+    promptExecutions.assertActive();
     const reservation = runId
       ? turnAssociations.reserve(runId)
       : turnAssociations.reserveAnonymous();
@@ -390,8 +430,12 @@ export function createHookHandlers(deps: HookDeps) {
         input: params.latestUserMessage,
         startedAt: new Date().toISOString(),
         recentTurns: params.recentTurns,
-        assertActive: () => params.ctx.hookInvocation?.assertActive(),
+        assertActive: () => {
+          promptExecutions.assertActive();
+          params.ctx.hookInvocation?.assertActive();
+        },
       });
+      promptExecutions.assertActive();
       params.ctx.hookInvocation?.assertActive();
       if (prepared.status === "retryable-failure") {
         if (reservation.status === "reserved") {
@@ -601,6 +645,7 @@ export function createHookHandlers(deps: HookDeps) {
     } catch (error) {
       logger.warn("listAvailableSkills failed", { error });
     }
+    params.ctx.hookInvocation?.assertActive();
 
     let nameCandidates: SkillDiscoveryCandidate[] = [];
     let matchedTokens: string[] = [];
@@ -1039,7 +1084,9 @@ export function createHookHandlers(deps: HookDeps) {
     operation: (
       ctx: PluginHookAgentContext,
       assertActive: () => void,
+      signal: AbortSignal,
     ) => Promise<T>,
+    parentSignal: AbortSignal,
   ): Promise<T> {
     const startedAtMs = Date.now();
     emitPipelineEvent(ctx, sessionKey, "pipeline", "started");
@@ -1047,9 +1094,19 @@ export function createHookHandlers(deps: HookDeps) {
       const result = await withPromptDeadline(
         timeoutMs,
         () => ctx.hookInvocation?.assertActive(),
-        (assertActive) =>
-          operation({ ...ctx, hookInvocation: { assertActive } }, assertActive),
+        (assertActive, signal) =>
+          promptExecutions.track(
+            operation(
+              { ...ctx, hookInvocation: { assertActive } },
+              assertActive,
+              signal,
+            ),
+          ),
+        parentSignal,
       );
+      ctx.hookInvocation?.assertActive();
+      if (parentSignal.aborted)
+        throw new Error("Skill Harness prompt operation cancelled");
       emitPipelineEvent(ctx, sessionKey, "pipeline", "completed", {
         durationMs: Math.max(0, Date.now() - startedAtMs),
       });
@@ -1131,6 +1188,15 @@ export function createHookHandlers(deps: HookDeps) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
+      ctx.hookInvocation?.assertActive();
+      if (
+        tracker.getCurrentState(routing.association.sessionId)?.turnKey !==
+        routing.association.turnKey
+      ) {
+        throw new Error("Skill Harness prompt turn superseded");
+      }
+      promptExecutions.observe(routing.association);
+
       if (
         refreshedConfig.routing.skills.maxInjectedSkills === 0 &&
         refreshedConfig.routing.experiences.maxInjectedExperiences === 0
@@ -1146,338 +1212,367 @@ export function createHookHandlers(deps: HookDeps) {
         hasModelId: Boolean(ctx.modelId),
       });
 
-      return await runPromptBuildPipeline(
-        ctx,
-        routing.resolvedSessionKey,
-        promptRoutingBudgetMs(refreshedConfig.routing),
-        async (ctx, assertDeadlineActive) => {
-          const association = routing.association!;
-          const assertActive = () => {
-            assertDeadlineActive();
-            if (
-              tracker.getCurrentState(association.sessionId)?.turnKey !==
-              association.turnKey
-            ) {
-              throw new Error("Skill Harness prompt turn superseded");
-            }
-          };
-          ctx = { ...ctx, hookInvocation: { assertActive } };
-          assertActive();
-          const skillDiscoveryResult = await discoverSkillCandidates({
+      const dynamicContext = await promptExecutions.run(
+        routing.association,
+        (turnSignal) =>
+          runPromptBuildPipeline(
             ctx,
-            routing,
-            refreshedConfig,
-            latestUserMessage,
-            conversation,
-          });
+            routing.resolvedSessionKey,
+            promptRoutingBudgetMs(refreshedConfig.routing),
+            async (ctx, assertDeadlineActive, pipelineSignal) => {
+              const association = routing.association!;
+              const assertActive = () => {
+                assertDeadlineActive();
+                if (
+                  tracker.getCurrentState(association.sessionId)?.turnKey !==
+                  association.turnKey
+                ) {
+                  throw new Error("Skill Harness prompt turn superseded");
+                }
+              };
+              ctx = { ...ctx, hookInvocation: { assertActive } };
+              assertActive();
+              const skillDiscoveryResult = await discoverSkillCandidates({
+                ctx,
+                routing,
+                refreshedConfig,
+                latestUserMessage,
+                conversation,
+              });
 
-          assertActive();
-          const unionPool = buildCandidateSkillsUnionPool({
-            visibleSkills: skillDiscoveryResult.visibleSkills,
-            nameCandidates: skillDiscoveryResult.nameCandidates,
-            retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
-            maxInjectedSkills: refreshedConfig.routing.skills.maxInjectedSkills,
-          });
+              assertActive();
+              const unionPool = buildCandidateSkillsUnionPool({
+                visibleSkills: skillDiscoveryResult.visibleSkills,
+                nameCandidates: skillDiscoveryResult.nameCandidates,
+                retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
+                maxInjectedSkills:
+                  refreshedConfig.routing.skills.maxInjectedSkills,
+              });
 
-          const relationGraph =
-            refreshedConfig.routing.skills.maxInjectedSkills > 0 &&
-            (unionPool.candidateSkills.length > 0 ||
-              skillDiscoveryResult.candidateExperiences.some(
-                (experience) => experience.skills.length > 0,
-              )) &&
-            deps.dataRoot
-              ? await resolveRelationGraph(
-                  deps.dataRoot,
-                  skillDiscoveryResult.visibleSkills,
-                )
-              : new Map();
-          const related = expandRelatedCandidates(
-            unionPool.candidateSkills,
-            skillDiscoveryResult.visibleSkills,
-            relationGraph,
-          );
-          const superset = buildSkillCandidateSuperset({
-            originals: unionPool.candidateSkills,
-            nameCandidates: skillDiscoveryResult.nameCandidates,
-            retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
-            experiences: skillDiscoveryResult.candidateExperiences,
-            expanded: related.candidateSkills,
-            expandedNames: related.added,
-            visibleSkills: skillDiscoveryResult.visibleSkills,
-            enabled: refreshedConfig.routing.skills.maxInjectedSkills > 0,
-          });
-          const relationEvidence = collectRelationEvidence(
-            superset.candidateSkills,
-            skillDiscoveryResult.visibleSkills,
-            relationGraph,
-          );
-          assertActive();
-
-          let relationDecisions: RelationDecision[] = [];
-          let confidence = 0;
-          let matchedSkills: readonly AvailableSkill[] = [];
-          let matchedExperiences: SkillExperienceEntry[] = [];
-          let selectedSkills: string[] = [];
-          let selectedExperiences: string[] = [];
-          let rerankStatus: "completed" | "skipped" | "unavailable" | "error" =
-            "skipped";
-          let rerankError: string | undefined;
-          const rerankStartedAtMs = Date.now();
-          const visibleMap = new Map(
-            skillDiscoveryResult.visibleSkills.map((s) => [
-              canonicalIdentity(s.name),
-              s,
-            ]),
-          );
-
-          if (
-            superset.candidateSkills.length === 0 &&
-            skillDiscoveryResult.candidateExperiences.length === 0
-          ) {
-            matchedSkills = [];
-            matchedExperiences = [];
-          } else {
-            try {
-              const llmResult = await withPromptDeadline(
-                refreshedConfig.routing.timeoutMs,
-                assertActive,
-                async () =>
-                  effectiveRoutingSelector({
-                    api,
-                    config: refreshedConfig,
-                    agentId: routing.effectiveAgentId,
-                    sessionKey: routing.resolvedSessionKey,
-                    sessionId: ctx.sessionId,
-                    conversation,
-                    latest: latestUserMessage,
-                    messageProvider: ctx.messageProvider,
-                    channelId: ctx.channelId,
-                    candidateSkills: superset.candidateSkills,
-                    candidateSources: superset.candidateSources,
-                    visibleSkillNames: skillDiscoveryResult.visibleSkills.map(
-                      (skill) => skill.name,
-                    ),
-                    relatedEvidence: related.evidence,
-                    relationEvidence,
-                    candidateExperiences:
-                      skillDiscoveryResult.candidateExperiences,
-                    dataRoot: deps.dataRoot,
-                  }),
+              const relationGraph =
+                refreshedConfig.routing.skills.maxInjectedSkills > 0 &&
+                (unionPool.candidateSkills.length > 0 ||
+                  skillDiscoveryResult.candidateExperiences.some(
+                    (experience) => experience.skills.length > 0,
+                  )) &&
+                deps.dataRoot
+                  ? await resolveRelationGraph(
+                      deps.dataRoot,
+                      skillDiscoveryResult.visibleSkills,
+                    )
+                  : new Map();
+              const related = expandRelatedCandidates(
+                unionPool.candidateSkills,
+                skillDiscoveryResult.visibleSkills,
+                relationGraph,
+              );
+              const superset = buildSkillCandidateSuperset({
+                originals: unionPool.candidateSkills,
+                nameCandidates: skillDiscoveryResult.nameCandidates,
+                retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
+                experiences: skillDiscoveryResult.candidateExperiences,
+                expanded: related.candidateSkills,
+                expandedNames: related.added,
+                visibleSkills: skillDiscoveryResult.visibleSkills,
+                enabled: refreshedConfig.routing.skills.maxInjectedSkills > 0,
+              });
+              const relationEvidence = collectRelationEvidence(
+                superset.candidateSkills,
+                skillDiscoveryResult.visibleSkills,
+                relationGraph,
               );
               assertActive();
 
-              if (llmResult) {
-                rerankStatus = "completed";
-                relationDecisions = llmResult.relationDecisions ?? [];
-                confidence = llmResult.confidence;
-                selectedSkills = [...llmResult.skills];
-                selectedExperiences = [...(llmResult.experiences ?? [])];
-                const candidateExpMap = new Map(
-                  skillDiscoveryResult.candidateExperiences.map((e) => [
-                    e.id,
-                    e,
-                  ]),
-                );
-                matchedExperiences = (llmResult.experiences ?? [])
-                  .flatMap((id: string) => {
-                    const e =
-                      candidateExpMap.get(id) ?? experienceCatalog?.resolve(id);
-                    return e ? [e] : [];
-                  })
-                  .slice(
-                    0,
-                    refreshedConfig.routing.experiences.maxInjectedExperiences,
-                  );
+              let relationDecisions: RelationDecision[] = [];
+              let confidence = 0;
+              let matchedSkills: readonly AvailableSkill[] = [];
+              let matchedExperiences: SkillExperienceEntry[] = [];
+              let selectedSkills: string[] = [];
+              let selectedExperiences: string[] = [];
+              let rerankStatus:
+                "completed" | "skipped" | "unavailable" | "error" = "skipped";
+              let rerankError: string | undefined;
+              const rerankStartedAtMs = Date.now();
+              const visibleMap = new Map(
+                skillDiscoveryResult.visibleSkills.map((s) => [
+                  canonicalIdentity(s.name),
+                  s,
+                ]),
+              );
 
-                const candidates = new Set(
-                  superset.candidateSkills.map((skill) =>
-                    canonicalIdentity(skill.name),
-                  ),
-                );
-                matchedSkills = [
-                  ...new Set(llmResult.skills.map(canonicalIdentity)),
-                ]
-                  .filter((name) => candidates.has(name))
-                  .flatMap((name) => {
-                    const skill = visibleMap.get(name);
-                    return skill ? [skill] : [];
-                  })
-                  .slice(0, refreshedConfig.routing.skills.maxInjectedSkills);
-              } else {
-                rerankStatus = "unavailable";
-                rerankError = "Jev routing unavailable";
+              if (
+                superset.candidateSkills.length === 0 &&
+                skillDiscoveryResult.candidateExperiences.length === 0
+              ) {
                 matchedSkills = [];
                 matchedExperiences = [];
-              }
-            } catch (error) {
-              rerankStatus = "error";
-              rerankError = eventError(error);
-              logger.warn("routing selector execution failed", { error });
-              matchedSkills = [];
-              matchedExperiences = [];
-            }
-          }
+              } else {
+                try {
+                  const llmResult = await withPromptDeadline(
+                    refreshedConfig.routing.timeoutMs,
+                    assertActive,
+                    async (assertSelectorActive, signal) =>
+                      promptExecutions.track(
+                        effectiveRoutingSelector({
+                          api,
+                          config: refreshedConfig,
+                          agentId: routing.effectiveAgentId,
+                          sessionKey: routing.resolvedSessionKey,
+                          sessionId: ctx.sessionId,
+                          conversation,
+                          latest: latestUserMessage,
+                          messageProvider: ctx.messageProvider,
+                          channelId: ctx.channelId,
+                          candidateSkills: superset.candidateSkills,
+                          candidateSources: superset.candidateSources,
+                          visibleSkillNames:
+                            skillDiscoveryResult.visibleSkills.map(
+                              (skill) => skill.name,
+                            ),
+                          relatedEvidence: related.evidence,
+                          relationEvidence,
+                          candidateExperiences:
+                            skillDiscoveryResult.candidateExperiences,
+                          dataRoot: deps.dataRoot,
+                          signal,
+                          assertActive: assertSelectorActive,
+                        }),
+                      ),
+                    pipelineSignal,
+                  );
+                  assertActive();
 
-          assertActive();
-          const injectedCollections: Record<SkillCollectionKind, number> = {
-            meta: 0,
-            body: 0,
-            references: 0,
-          };
-          const injectedCandidates: InputSkillDiscovery["injectedSkills"] =
-            unionPool.pool
-              .filter((candidate) =>
-                matchedSkills.some(
-                  (skill) => skill.name === candidate.skillName,
-                ),
-              )
-              .map((candidate) => {
-                for (const col of candidate.collections ?? []) {
-                  injectedCollections[col] += 1;
+                  if (llmResult) {
+                    rerankStatus = "completed";
+                    relationDecisions = llmResult.relationDecisions ?? [];
+                    confidence = llmResult.confidence;
+                    selectedSkills = [...llmResult.skills];
+                    selectedExperiences = [...(llmResult.experiences ?? [])];
+                    const candidateExpMap = new Map(
+                      skillDiscoveryResult.candidateExperiences.map((e) => [
+                        e.id,
+                        e,
+                      ]),
+                    );
+                    matchedExperiences = (llmResult.experiences ?? [])
+                      .flatMap((id: string) => {
+                        const e =
+                          candidateExpMap.get(id) ??
+                          experienceCatalog?.resolve(id);
+                        return e ? [e] : [];
+                      })
+                      .slice(
+                        0,
+                        refreshedConfig.routing.experiences
+                          .maxInjectedExperiences,
+                      );
+
+                    const candidates = new Set(
+                      superset.candidateSkills.map((skill) =>
+                        canonicalIdentity(skill.name),
+                      ),
+                    );
+                    matchedSkills = [
+                      ...new Set(llmResult.skills.map(canonicalIdentity)),
+                    ]
+                      .filter((name) => candidates.has(name))
+                      .flatMap((name) => {
+                        const skill = visibleMap.get(name);
+                        return skill ? [skill] : [];
+                      })
+                      .slice(
+                        0,
+                        refreshedConfig.routing.skills.maxInjectedSkills,
+                      );
+                  } else {
+                    rerankStatus = "unavailable";
+                    rerankError = "Routing selection unavailable";
+                    matchedSkills = [];
+                    matchedExperiences = [];
+                  }
+                } catch (error) {
+                  rerankStatus = "error";
+                  rerankError = "Routing selection failed";
+                  logger.warn("routing selector execution failed", {
+                    reason: "selection-failed",
+                  });
+                  matchedSkills = [];
+                  matchedExperiences = [];
                 }
-                return {
-                  name: candidate.skillName,
-                  source: candidate.source,
-                  collections: candidate.collections,
-                  topCollection: candidate.topCollection,
-                };
+              }
+
+              assertActive();
+              const injectedCollections: Record<SkillCollectionKind, number> = {
+                meta: 0,
+                body: 0,
+                references: 0,
+              };
+              const injectedCandidates: InputSkillDiscovery["injectedSkills"] =
+                unionPool.pool
+                  .filter((candidate) =>
+                    matchedSkills.some(
+                      (skill) => skill.name === candidate.skillName,
+                    ),
+                  )
+                  .map((candidate) => {
+                    for (const col of candidate.collections ?? []) {
+                      injectedCollections[col] += 1;
+                    }
+                    return {
+                      name: candidate.skillName,
+                      source: candidate.source,
+                      collections: candidate.collections,
+                      topCollection: candidate.topCollection,
+                    };
+                  });
+
+              const finalSkillNames = new Set(
+                matchedSkills.map((skill) => canonicalIdentity(skill.name)),
+              );
+              relationDecisions = relationDecisions.map((decision) => ({
+                ...decision,
+                injected:
+                  decision.score >=
+                    refreshedConfig.routing.skills.related.relevanceThreshold &&
+                  finalSkillNames.has(canonicalIdentity(decision.skill)),
+              }));
+              for (const skill of matchedSkills) {
+                const sources = superset.candidateSources[skill.name] ?? [];
+                const recorded = injectedCandidates.find(
+                  (candidate) => candidate.name === skill.name,
+                );
+                if (recorded) {
+                  recorded.sources = sources;
+                } else {
+                  injectedCandidates.push({
+                    name: skill.name,
+                    source: sources.includes("experience-associated")
+                      ? "experience-associated"
+                      : "related-declared",
+                    sources,
+                  });
+                }
+              }
+              const contributedBy: string[] = [];
+              if (
+                injectedCandidates.some(
+                  (candidate) =>
+                    candidate.sources?.includes("related-declared") ??
+                    candidate.source === "related-declared",
+                )
+              )
+                contributedBy.push("related-declared");
+              if (
+                skillDiscoveryResult.nameCandidates.some((candidate) =>
+                  finalSkillNames.has(canonicalIdentity(candidate.skillName)),
+                )
+              ) {
+                contributedBy.push("name-match");
+              }
+              if (
+                skillDiscoveryResult.retrievalCandidates.some((candidate) =>
+                  finalSkillNames.has(canonicalIdentity(candidate.skillName)),
+                )
+              ) {
+                contributedBy.push("search");
+              }
+              if (
+                injectedCandidates.some((candidate) =>
+                  candidate.sources?.includes("experience-associated"),
+                )
+              ) {
+                contributedBy.push("experience-associated");
+              }
+
+              const inputSkillDiscovery: InputSkillDiscovery = {
+                nameCandidates: skillDiscoveryResult.nameCandidates.length,
+                retrievalAttempted:
+                  Boolean(qmdSkillIndex) &&
+                  refreshedConfig.routing.skills.maxInjectedSkills > 0,
+                retrievalCandidates:
+                  skillDiscoveryResult.retrievalCandidates.length,
+                retrievalSemanticScores:
+                  skillDiscoveryResult.retrievalSemanticScores,
+                experienceRetrieval: skillDiscoveryResult.experienceRetrieval,
+                candidateCount: superset.candidateSkills.length,
+                ...(related.added.length
+                  ? { relatedCandidates: related.added }
+                  : {}),
+                ...(relationDecisions.length ? { relationDecisions } : {}),
+                injectedSkills: injectedCandidates,
+                retrievalCollections: skillDiscoveryResult.retrievalCollections,
+                injectedCollections,
+                ...(skillDiscoveryResult.fallbackReason
+                  ? { fallbackReason: skillDiscoveryResult.fallbackReason }
+                  : {}),
+                durationMs: Math.max(
+                  0,
+                  Date.now() - skillDiscoveryResult.startedAtMs,
+                ),
+              };
+
+              await recordPromptBuildSession({
+                assertActive,
+                association: routing.association,
+                latestUserMessage,
+                matchedSkills,
+                matchedExperiences,
+                inputSkillDiscovery,
+                confidence,
               });
+              assertActive();
 
-          const finalSkillNames = new Set(
-            matchedSkills.map((skill) => canonicalIdentity(skill.name)),
-          );
-          relationDecisions = relationDecisions.map((decision) => ({
-            ...decision,
-            injected:
-              decision.score >=
-                refreshedConfig.routing.skills.related.relevanceThreshold &&
-              finalSkillNames.has(canonicalIdentity(decision.skill)),
-          }));
-          for (const skill of matchedSkills) {
-            const sources = superset.candidateSources[skill.name] ?? [];
-            const recorded = injectedCandidates.find(
-              (candidate) => candidate.name === skill.name,
-            );
-            if (recorded) {
-              recorded.sources = sources;
-            } else {
-              injectedCandidates.push({
-                name: skill.name,
-                source: sources.includes("experience-associated")
-                  ? "experience-associated"
-                  : "related-declared",
-                sources,
+              emitPipelineEvent(
+                ctx,
+                routing.resolvedSessionKey,
+                "rerank",
+                "completed",
+                {
+                  status: rerankStatus,
+                  result: matchedSkills.map((skill) => skill.name),
+                  reason: contributedBy,
+                  ...(rerankStatus === "completed" ? { confidence } : {}),
+                  ...(rerankError ? { error: rerankError } : {}),
+                  selectedSkills,
+                  selectedExperiences,
+                  experienceCandidates:
+                    skillDiscoveryResult.candidateExperiences.length,
+                  candidateCount: superset.candidateSkills.length,
+                  relatedCandidates: related.added,
+                  ...(relationDecisions.length ? { relationDecisions } : {}),
+                  injectedCount: matchedSkills.length,
+                  injectedSkills: matchedSkills.map((s) => s.name),
+                  injectedExperiences: matchedExperiences.map((e) => e.id),
+                  durationMs: Math.max(0, Date.now() - rerankStartedAtMs),
+                },
+              );
+
+              if (
+                matchedSkills.length === 0 &&
+                matchedExperiences.length === 0
+              ) {
+                return undefined;
+              }
+              return buildRoutingContext({
+                matchedSkills,
+                experiences: matchedExperiences,
+                relationDecisions,
+                relationRelevanceThreshold:
+                  refreshedConfig.routing.skills.related.relevanceThreshold,
               });
-            }
-          }
-          const contributedBy: string[] = [];
-          if (
-            injectedCandidates.some(
-              (candidate) =>
-                candidate.sources?.includes("related-declared") ??
-                candidate.source === "related-declared",
-            )
-          )
-            contributedBy.push("related-declared");
-          if (
-            skillDiscoveryResult.nameCandidates.some((candidate) =>
-              finalSkillNames.has(canonicalIdentity(candidate.skillName)),
-            )
-          ) {
-            contributedBy.push("name-match");
-          }
-          if (
-            skillDiscoveryResult.retrievalCandidates.some((candidate) =>
-              finalSkillNames.has(canonicalIdentity(candidate.skillName)),
-            )
-          ) {
-            contributedBy.push("search");
-          }
-          if (
-            injectedCandidates.some((candidate) =>
-              candidate.sources?.includes("experience-associated"),
-            )
-          ) {
-            contributedBy.push("experience-associated");
-          }
-
-          const inputSkillDiscovery: InputSkillDiscovery = {
-            nameCandidates: skillDiscoveryResult.nameCandidates.length,
-            retrievalAttempted:
-              Boolean(qmdSkillIndex) &&
-              refreshedConfig.routing.skills.maxInjectedSkills > 0,
-            retrievalCandidates:
-              skillDiscoveryResult.retrievalCandidates.length,
-            retrievalSemanticScores:
-              skillDiscoveryResult.retrievalSemanticScores,
-            experienceRetrieval: skillDiscoveryResult.experienceRetrieval,
-            candidateCount: superset.candidateSkills.length,
-            ...(related.added.length
-              ? { relatedCandidates: related.added }
-              : {}),
-            ...(relationDecisions.length ? { relationDecisions } : {}),
-            injectedSkills: injectedCandidates,
-            retrievalCollections: skillDiscoveryResult.retrievalCollections,
-            injectedCollections,
-            ...(skillDiscoveryResult.fallbackReason
-              ? { fallbackReason: skillDiscoveryResult.fallbackReason }
-              : {}),
-            durationMs: Math.max(
-              0,
-              Date.now() - skillDiscoveryResult.startedAtMs,
-            ),
-          };
-
-          await recordPromptBuildSession({
-            assertActive,
-            association: routing.association,
-            latestUserMessage,
-            matchedSkills,
-            matchedExperiences,
-            inputSkillDiscovery,
-            confidence,
-          });
-
-          emitPipelineEvent(
-            ctx,
-            routing.resolvedSessionKey,
-            "rerank",
-            "completed",
-            {
-              status: rerankStatus,
-              result: matchedSkills.map((skill) => skill.name),
-              reason: contributedBy,
-              ...(rerankStatus === "completed" ? { confidence } : {}),
-              ...(rerankError ? { error: rerankError } : {}),
-              selectedSkills,
-              selectedExperiences,
-              experienceCandidates:
-                skillDiscoveryResult.candidateExperiences.length,
-              candidateCount: superset.candidateSkills.length,
-              relatedCandidates: related.added,
-              ...(relationDecisions.length ? { relationDecisions } : {}),
-              injectedCount: matchedSkills.length,
-              injectedSkills: matchedSkills.map((s) => s.name),
-              injectedExperiences: matchedExperiences.map((e) => e.id),
-              durationMs: Math.max(0, Date.now() - rerankStartedAtMs),
             },
-          );
-
-          if (matchedSkills.length === 0 && matchedExperiences.length === 0) {
-            return toPromptBuildResult(undefined, workingSetSkillsXml);
-          }
-          return toPromptBuildResult(
-            buildRoutingContext({
-              matchedSkills,
-              experiences: matchedExperiences,
-              relationDecisions,
-              relationRelevanceThreshold:
-                refreshedConfig.routing.skills.related.relevanceThreshold,
-            }),
-            workingSetSkillsXml,
-          );
-        },
+            turnSignal,
+          ),
       );
+      ctx.hookInvocation?.assertActive();
+      promptExecutions.assertActive();
+      if (
+        tracker.getCurrentState(routing.association.sessionId)?.turnKey !==
+        routing.association.turnKey
+      ) {
+        throw new Error("Skill Harness prompt turn superseded");
+      }
+      return toPromptBuildResult(dynamicContext, workingSetSkillsXml);
     } catch (err) {
       logger.warn("before_prompt_build hook error", {
         errorType: err instanceof Error ? "Error" : typeof err,
@@ -1909,6 +2004,7 @@ export function createHookHandlers(deps: HookDeps) {
         outcome = "skipped";
         return;
       }
+      promptExecutions.removeTurn(association);
       turnAssociations.markAssociationTerminal(association);
       toolFallbacks.markAssociationTerminal(association);
       if (finalized === "already-finalized") {
@@ -2026,6 +2122,7 @@ export function createHookHandlers(deps: HookDeps) {
       finalizationStatus: finalized,
     });
     if (finalized === "applied" || finalized === "already-finalized") {
+      promptExecutions.removeTurn(association);
       turnAssociations.markAssociationTerminal(association);
       toolFallbacks.markAssociationTerminal(association);
       for (const [toolCallId] of stagedEntries) {
@@ -2041,6 +2138,7 @@ export function createHookHandlers(deps: HookDeps) {
     _event: PluginHookSessionEndEvent,
     ctx: PluginHookSessionContext,
   ): Promise<void> {
+    promptExecutions.removeSession(ctx.sessionId);
     turnAssociations.removeSession(ctx.sessionId);
     toolFallbacks.removeSession(ctx.sessionId);
     for (const [toolCallId, pending] of pendingToolCalls) {
@@ -2056,6 +2154,7 @@ export function createHookHandlers(deps: HookDeps) {
   }
 
   return {
+    disposePromptWork: () => promptExecutions.dispose(),
     onBeforePromptBuild,
     onBeforeToolCall,
     onAfterToolCall,

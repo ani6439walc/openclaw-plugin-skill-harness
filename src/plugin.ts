@@ -322,6 +322,7 @@ export function createPlugin(
         signal: api.lifecycle?.signal,
         runInBackgroundContext,
       });
+      let stopPromptWork: (() => Promise<void>) | undefined;
       let stopping: Promise<void> | undefined;
       const stopBackgroundWork = (): Promise<void> => {
         if (stopping) return stopping;
@@ -331,8 +332,14 @@ export function createPlugin(
           clearTimeout(refreshTimer);
           refreshTimer = undefined;
         }
+        // Close admission and abort synchronously before waiting on background work.
+        const promptDrain = stopPromptWork?.();
         stopping = (async () => {
-          await Promise.all([reviewScheduler.dispose(), ...backgroundWork]);
+          await Promise.all([
+            promptDrain,
+            reviewScheduler.dispose(),
+            ...backgroundWork,
+          ]);
           await Promise.all([
             qmdSkillIndex.close(),
             qmdExperienceIndex.close(),
@@ -373,6 +380,9 @@ export function createPlugin(
       };
 
       const handlers = createHookHandlers(deps);
+      stopPromptWork = handlers.disposePromptWork;
+      // The lifecycle may already have aborted before hooks were installed.
+      if (disposed) void stopPromptWork();
 
       refreshLiveConfigFromRuntime();
       void runBackgroundTask(refreshQmdIndexes);
