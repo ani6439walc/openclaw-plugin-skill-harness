@@ -13,7 +13,7 @@ Start with these implementation boundaries, then trace callers and colocated `*.
 | `src/plugin.ts`, `index.ts`, `api.ts`                              | Registration, live configuration, lifecycle ownership, and SDK boundary.                              |
 | `src/config.ts`, `src/types.ts`, `openclaw.plugin.json`            | Runtime defaults/types and the strict public configuration contract.                                  |
 | `src/hooks/`                                                       | Turn eligibility, candidate discovery, prompt assembly, lifecycle events, and tool tracking.          |
-| `src/classification/`                                              | Conversation sanitization, prompt rendering, and constrained Jev selection.                           |
+| `src/classification/`                                              | Conversation sanitization, prompt rendering, and constrained Decision selection.                      |
 | `src/skills/`, `src/experiences/`, `src/qmd/`                      | Visible skill roots/tools, experience validation/catalog, and managed search indexes.                 |
 | `src/skills/relation-graph.ts`, `relation-import.ts`, `related.ts` | Graph replay/identity and publication, staged import/classification, and bounded candidate expansion. |
 | `src/session/`, `src/stats/`                                       | Persisted turn state, retention, usage, and aggregate telemetry.                                      |
@@ -58,9 +58,15 @@ hide workers from earlier fixtures that can still schedule retries.
 
 Keep package assets separate from runtime state. There are zero pre-seeded experiences; live sessions, experiences, and statistics belong under `~/.openclaw/plugins/skill-harness/`. Never include that private data in commits.
 
-The public manifest requires `qmd.embedding.model`, `qmd.expansion.model`, and top-level `jev.model`. Keep examples valid against the manifest, not just the more permissive compatibility parser in `resolveConfig()`. Jev uses `routing.timeoutMs`; candidate searches use their separate search budgets, defaulting to `qmd.timeoutMs`. Invalid manifest configuration can prevent loading; runtime fail-open behavior does not bypass host validation.
+The public manifest requires `qmd.embedding.model` and `qmd.expansion.model`. The `qmd.jev` and plugin `decisionModel` endpoint objects are optional; each requires a nonempty `model` when present, with optional `baseUrl` and `apiKey`. Keep examples valid against the manifest, not just the more permissive compatibility parser in `resolveConfig()`. Selection uses `routing.timeoutMs` (default 5,000 ms; host capped at 30,000 ms); candidate searches use their separate search budgets, defaulting to `qmd.timeoutMs`. Invalid manifest configuration can prevent loading; runtime fail-open behavior does not bypass host validation.
 
-The dynamic pipeline runs input skill discovery and experience retrieval in parallel. Direct skill evidence combines bounded typo-aware name matching (strip URLs before tokenization) and managed `SkillQmdIndex` retrieval over meta/body/references (`minCandidateScore` default 0.6). Experience evidence uses managed `SkillExperienceQmdIndex` multi-collection retrieval over keywords, summary, and body (`minCandidateScore` default 0.4). Unified selection runs one constrained call (TypeSafe Jev) only when the pool of visible skill candidates and/or shared experience candidates is non-empty; an empty candidate pool short-circuits without a model call; `maxInjectedSkills: 0` short-circuits skill discovery; model, parsing, or validation failure injects no heuristic fallback skills. The unified skill pool contains name/QMD hits, visible skills associated with every retrieved experience candidate, and bounded relation expansion seeded only by original name/QMD hits. Score every skill independently and retain only selector-selected visible names, ranked by Jev score with a locale-independent name tie-break (UTF-16 string order; experience ties use IDs) and capped by `maxInjectedSkills`; do not append associations after selection in either Jev or hooks. Zero permits experiences-only injection. The renderer emits optional `<matched_skills>` and standalone `<matched_experiences>` blocks, with each selected experience attached once to the highest-ranked final associated skill when available (no `<intent>` block). Topic checkers (`previousTopic`), runtime task complexity scoring (`complexity`), classifier `suggestion` fields, session curation (`curation` / `curationAppliedCount`), instruction writers, legacy `routing.intents` configuration, legacy `routing.model`, `routing.modelFallback`, `routing.thinking`, routing subagent fallback, legacy `fastpath` / `candidate` frontmatter fields, and legacy pseudo-headers (`[Skill Harness Context...]`, `[User Message]:`) are obsolete and strictly forbidden. Do not use OpenClaw core's reserved `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>` delimiters in plugin prompt output as core runtime logic strips them from visible turns; these delimiters are sanitizer-only input boundaries.
+Automatic selection resolves the agent's host `decisionModel` string, then `agents.defaults.decisionModel`, then plugin `decisionModel`. An explicit empty/whitespace agent string suppresses the global default; absent, null, or non-string values allow inheritance. All host requests carry owning `agentId`, including globally inherited selections. Once selected, host unavailable/timeout/error/invalid output never retries through the plugin endpoint. Do not substitute the conversational model. Host calls use public Decision V1 options without `model` or `thinking`. Plugin fallback uses the existing TypeSafe transport with Boolean/noul conversion and no automatic retries.
+
+Skills, experiences, and bounded relations share one full evaluation per eligible turn; hook rebuilds share that turn's in-flight/terminal result, including failures and cancellation. Empty candidate pools skip client creation and credential resolution. Validate the full batch (256 questions, 1 MiB JSON, 20,000 nodes, depth 32); reject unsupported input without truncating candidates or splitting requests. Deadlines and lifecycle shutdown abort selection and drain accepted work. Preserve hook/turn/generation checks before mutation; diagnostic strings expose only fixed routes/reasons/codes and aggregate counts/timing.
+
+`qmd.jev` is QMD-only. Plugin `decisionModel` independently serves the selector and explicit manual relation importer; no copying, cross-fallback, or root `jev` alias exists. Both preserve provider/model, provider-catalog, environment, and supported SecretRef resolution. Invalid present endpoint objects must fail open at the runtime caller; the strict manifest rejects the retired root `jev`. `buildStoreModels()` consumes only resolved QMD configuration. Changing plugin `decisionModel` must not rotate stores or alter index identity. Changing `qmd.jev` preserves drain/reopen and embedding fingerprint behavior. Managed searches retain `rerank: false`; expansion uses `qmd.expansion`. Native QMD Jev expansion compatibility and `TYPESAFE_*` environment sources remain available when `qmd.jev` is omitted; omission is not a total disable.
+
+The dynamic pipeline runs input skill discovery and experience retrieval in parallel. Direct skill evidence combines bounded typo-aware name matching (strip URLs before tokenization) and managed `SkillQmdIndex` retrieval over meta/body/references (`minCandidateScore` default 0.6). Experience evidence uses managed `SkillExperienceQmdIndex` multi-collection retrieval over keywords, summary, and body (`minCandidateScore` default 0.4). Unified selection runs at most one constrained call (host Decision V1 or plugin TypeSafe) only when the pool of visible skill candidates and/or shared experience candidates is non-empty; an empty candidate pool short-circuits without a model call; `maxInjectedSkills: 0` short-circuits skill discovery; model, parsing, or validation failure injects no heuristic fallback skills. The unified skill pool contains name/QMD hits, visible skills associated with every retrieved experience candidate, and bounded relation expansion seeded only by original name/QMD hits. Score every skill independently and retain only selector-selected visible names, ranked by selector score with a locale-independent name tie-break (UTF-16 string order; experience ties use IDs) and capped by `maxInjectedSkills`; do not append associations after selection in either adapter or hooks. Zero permits experiences-only injection. The renderer emits optional `<matched_skills>` and standalone `<matched_experiences>` blocks, with each selected experience attached once to the highest-ranked final associated skill when available (no `<intent>` block). Topic checkers (`previousTopic`), runtime task complexity scoring (`complexity`), classifier `suggestion` fields, session curation (`curation` / `curationAppliedCount`), instruction writers, legacy `routing.intents` configuration, legacy `routing.model`, `routing.modelFallback`, `routing.thinking`, routing subagent fallback, legacy `fastpath` / `candidate` frontmatter fields, and legacy pseudo-headers (`[Skill Harness Context...]`, `[User Message]:`) are obsolete and strictly forbidden. Do not use OpenClaw core's reserved `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>` delimiters in plugin prompt output as core runtime logic strips them from visible turns; these delimiters are sanitizer-only input boundaries.
 
 Runtime experiences live in decoupled multi-to-multi folders under `dataRoot/experiences/<id>/` containing required `summary.md`, `keywords.md`, and `body.md`, plus optional `skills.md`. Experiences and their QMD index are shared across agents: dynamic retrieval and `skill_experience` searches are not filtered by agent skill visibility. The tool accepts no `skills` filter; `show_skills` only filters displayed associations to visible names, and final injected skills are visibility-filtered; do not describe experiences as agent-private. Managed QMD indexes for skills and experiences reside respectively under `dataRoot/qmd/skills/` and `dataRoot/qmd/experiences/`. Review is disabled by default, uses only `experience-health-check` (with `intent-health-check` as configuration alias), `routing-uncertainty`, and `capability-fit`, writes schema-v8 state with compatible v7 migration, and runs embedded sessions with detached persistence while the host cleans only the temporary workspace.
 
@@ -103,7 +109,7 @@ Use imperative Conventional Commit subjects such as `feat:`, `fix:`, `refactor:`
 
 Entire skill directories may be symlinks outside the workspace. Use `src/skills/paths.ts` to confine main/support file reads, listings, and QMD snapshots to `realpath(skillDir)`. Allow internal links; reject external, broken, cyclic, and non-regular file targets. Keep existing relative-path and supported-directory rules; do not introduce external support allowlists.
 
-Register the prompt hook with the schema maximum of 121,500 ms. Each turn uses the maximum enabled search budget plus Jev's `routing.timeoutMs` plus 1,500 ms (default 21,500 ms). Local timeout preserves completed static context. Check host `hookInvocation.assertActive()` and turn identity after asynchronous work and before mutations; stale work must not persist successful injection or duplicate terminal events.
+Register the prompt hook with the schema maximum of 121,500 ms. Each turn uses the maximum enabled search budget plus the selector's `routing.timeoutMs` plus 1,500 ms (default 21,500 ms). Local timeout preserves completed static context. Check host `hookInvocation.assertActive()` and turn identity after asynchronous work and before mutations; stale work must not persist successful injection or duplicate terminal events.
 
 Track QMD connection configuration separately from index fingerprints. Drain active search/update/embed operations before reopening the same database with current endpoints, credentials, expansion/Jev settings, or timeout. Block new operations during rotation and coalesce updates. Fail open if reopening fails, without reverting to old credentials; comparison information stays in memory. Preserve embedding model/dimension invalidation and discovery's no-rebuild boundary.
 
@@ -150,7 +156,7 @@ Require current visible winning identities and a nonempty original reason.
 Use canonicalIdentity() for graph/visibility lookups, expansion deduplication
 and self comparisons; preserve original names in output.
 Keep all originals; never seed from experiences. Pass at most 2 reasons of 500
-code points per target to the existing single Jev call, labeled unverified.
+code points per target to the existing single Decision call, labeled unverified.
 Do not introduce hard dependency/conflict rules, fabricated retrieval scores,
 new skill selection thresholds or fallback injection. `relatedCandidates` is optional
 session/event diagnostics; `related-declared` injection contributes to pool
@@ -166,14 +172,14 @@ candidate. That background endpoint does not become a candidate, receive its own
 skill question, or consume an injection slot. Reasons are bounded to 500 code
 points. All six predicates remain unverified advisory evidence.
 
-Expose explicit crosslinked Jev state: `skill_candidates` entries carry
+Expose explicit crosslinked Decision state: `skill_candidates` entries carry
 name/description/sources/experience_ids/relation_ids; `experience_candidates`
 carry id/summary/visible_associated_skills; `skill_relation_evidence` carries
 question id (`relation_0`, etc.), anchor/direction and bounded endpoint evidence.
 Questions reference their state entries. Noncandidate endpoints remain background;
 experience association or relation relevance must never force a skill selection.
 
-Score relation reference value for the current task in the existing single Jev
+Score relation reference value for the current task in the existing single Decision
 call, separately from skill relevance. Use the author reason and both endpoint
 descriptions; author declarations remain unverified reference data, not instructions.
 Do not score a relation as a prerequisite-verification or unmet-necessity test.
@@ -211,7 +217,7 @@ Verify deployed behavior through the intended agent's actual Gateway tools:
 incoming edges. Do not infer graph failure from an empty search result or infer
 automatic expansion from tool success. Validate routing separately with an
 eligible turn, optional related candidate diagnostics and final selections;
-Jev may reject any candidate. Do not modify live configuration for a read-only audit.
+The selected Decision provider may reject any candidate. Do not modify live configuration for a read-only audit.
 
 Graph node counts cover participating skills, not necessarily every visible
 skill. Graphs, schemas, checkpoints and backups are private managed state outside
@@ -259,7 +265,7 @@ Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn fin
 
 ## Telemetry interpretation and retention
 
-Schema v7 starts a fresh telemetry cohort. Current turns record top-level selections, confidence, skill/tool usage, routing adoption, projection, inventory, and daily aggregates without creating an intent. Historical `state.intent.result` can still populate per-intent route reasons (`qmd-keyword`, `qmd-hybrid`, and `llm-classifier`) with count, average score, minimum score, and maximum score; those compatibility fields do not imply current intent classification. QMD evidence uses retrieval hit scores; selector confidence comes from Jev. `skillDiscovery` separately records input skill matching: name-match and QMD search candidates, QMD semantic-score distribution, collection hit distribution (`meta`, `body`, `references`) for retrieved candidates and final injected skills, pre-injection candidate and injection counts, fallback reasons, and duration summaries. It does not retain user requests, snippets, QMD explanations, or per-hit score lists. Per-day maps include the same aggregate input skill-match telemetry alongside intent outcomes, intent routing, intent-matched skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
+Schema v7 starts a fresh telemetry cohort. Current turns record top-level selections, confidence, skill/tool usage, routing adoption, projection, inventory, and daily aggregates without creating an intent. Historical `state.intent.result` can still populate per-intent route reasons (`qmd-keyword`, `qmd-hybrid`, and `llm-classifier`) with count, average score, minimum score, and maximum score; those compatibility fields do not imply current intent classification. QMD evidence uses retrieval hit scores; selector confidence comes from the selected Decision adapter. `skillDiscovery` separately records input skill matching: name-match and QMD search candidates, QMD semantic-score distribution, collection hit distribution (`meta`, `body`, `references`) for retrieved candidates and final injected skills, pre-injection candidate and injection counts, fallback reasons, and duration summaries. It does not retain user requests, snippets, QMD explanations, or per-hit score lists. Per-day maps include the same aggregate input skill-match telemetry alongside intent outcomes, intent routing, intent-matched skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
 
 The runtime-health projection keeps one canonical `routing` block, one canonical `projection` block, and names retained processed events as `retainedProcessedEventCount`. It omits the duplicate `routingEffectiveness` / `projectionEfficiency` aliases and the internal `dailyDynamicKeyCardinality` diagnostic.
 
@@ -296,7 +302,9 @@ node skills/skill-harness/scripts/import-skill-relations.mjs apply --source /pat
 Preflight makes no model requests and reports unresolved targets and estimated
 request count. Sample classifies the first at most 20 relations in the importer's stable order; it is not a random or representative sample. Classify explicitly runs
 the full catalog, reusing successful matching checkpoint entries and retrying
-failed batches. Sample/classify use the configured plugin Jev model and can
+failed batches. Sample/classify use only plugin `decisionModel` (not `qmd.jev` or a
+host model) and fail before model I/O when it is missing or invalid. They retain
+the existing TypeSafe batching and checkpoint metadata and can
 incur provider charges. The CLI must receive the same provider environment
 variables as the Gateway; reading its config file does not hydrate service-only
 secrets. No credentials are written to checkpoints. Each request
@@ -348,9 +356,16 @@ skills and do not measure pure skill-search conversion.
 Remove the entire legacy `instruction: { ... }` block from plugin configuration;
 there is no automatic migration or compatibility parser for this retired setting.
 
-Older deployments must add mandatory `qmd.embedding`, `qmd.expansion`, and
-`jev.model` before loading this version. Remove retired `instruction`, `rerank`,
-and legacy routing fields; the compatibility parser does not override strict
+Older deployments must retain mandatory `qmd.embedding` and `qmd.expansion`.
+Back up the previous build/configuration privately, then remove root plugin `jev`:
+there is no runtime alias, and the strict manifest rejects it. Explicitly move
+its QMD use to `qmd.jev` and independently configure `decisionModel` for plugin
+selection/manual import when needed. A configured host Decision model now takes
+precedence over the plugin endpoint. Validate host-only, plugin-only and combined
+configuration in an isolated profile; do not change live settings during tests.
+Rollback restores both the old build and its configuration shape without deleting
+runtime data, graph, databases, mappings, leases or telemetry. Remove retired
+`instruction`, `rerank`, and legacy routing fields; the compatibility parser does not override strict
 manifest rejection. Migrate native static selections into `skills.workingSet`
 and intentionally shared `skills.load.extraDirs` into `skills.sharedRoots`
 before enabling default startup normalization. Prepare configuration changes,

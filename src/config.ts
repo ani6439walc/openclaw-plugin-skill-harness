@@ -67,11 +67,6 @@ const DEFAULT_ROUTING_EXPERIENCES: ResolvedRoutingExperiencesConfig = {
   maxInjectedExperiences: 4,
 };
 
-const DEFAULT_JEV: QmdEndpointConfig = {
-  baseUrl: "",
-  model: "",
-};
-
 const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
   related: {
     relevanceThreshold: DEFAULT_RELATION_RELEVANCE_THRESHOLD,
@@ -139,7 +134,6 @@ const DEFAULT_REVIEW = {
 
 const DEFAULT_CONFIG: ResolvedSkillHarnessPluginConfig = {
   qmd: DEFAULT_QMD,
-  jev: DEFAULT_JEV,
   skills: DEFAULT_SKILLS,
   routing: DEFAULT_ROUTING,
   review: DEFAULT_REVIEW,
@@ -623,14 +617,14 @@ const QmdEmbeddingSchema = QmdEndpointObjectSchema.extend({
   dimension: z.number().int().positive().default(1536).catch(1536),
 }).catch({ baseUrl: "", model: "", dimension: 1536 });
 
-const QmdJevSchema = z
+const OptionalModelEndpointSchema = z
   .object({
-    baseUrl: z.string().trim().optional().catch(undefined),
-    model: z.string().trim().optional().catch(undefined),
-    apiKey: EndpointApiKeySchema,
+    baseUrl: z.string().trim().optional(),
+    model: z.string().trim().min(1),
+    apiKey: z.union([z.string().trim(), SecretRefSchema]).optional(),
   })
-  .optional()
-  .catch(undefined);
+  .strict()
+  .optional();
 
 const QmdSchema = z
   .object({
@@ -639,21 +633,18 @@ const QmdSchema = z
     indexRefreshIntervalSeconds: boundedInt(300, 0, 86_400),
     embedding: QmdEmbeddingSchema,
     expansion: QmdEndpointSchema,
-    jev: QmdJevSchema,
   })
   .catch(DEFAULT_QMD);
 
 const SkillHarnessConfigSchema = z
   .object({
     qmd: QmdSchema,
-    jev: QmdJevSchema,
     skills: z.unknown().optional(),
     routing: z.unknown().optional(),
     review: ReviewSchema.optional().default(DEFAULT_REVIEW),
   })
   .catch({
     qmd: DEFAULT_QMD,
-    jev: undefined,
     skills: DEFAULT_SKILLS,
     routing: DEFAULT_ROUTING,
     review: DEFAULT_REVIEW,
@@ -672,21 +663,34 @@ export function resolveConfig(
   });
   const resolvedExpansion = resolveQmdEndpoint(resolved.qmd.expansion, options);
 
-  const hasJevInput = Boolean(
-    (resolved.jev &&
-      (resolved.jev.model || resolved.jev.baseUrl || resolved.jev.apiKey)) ||
-    (resolved.qmd.jev &&
-      (resolved.qmd.jev.model ||
-        resolved.qmd.jev.baseUrl ||
-        resolved.qmd.jev.apiKey)),
-  );
-  const rawJev = resolved.jev ?? resolved.qmd.jev ?? DEFAULT_JEV;
-  const ep = resolveQmdEndpoint(rawJev, options);
-  const resolvedJev: QmdEndpointConfig = {
-    ...rawJev,
-    ...ep,
-    baseUrl: normalizeTypeSafeBaseUrl(ep.baseUrl) || ep.baseUrl,
+  // Validate present endpoint objects outside the permissive compatibility schema.
+  // Invalid live settings must fail open at the caller, never create empty clients.
+  const rawConfig =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : undefined;
+  const rawQmd =
+    rawConfig?.qmd &&
+    typeof rawConfig.qmd === "object" &&
+    !Array.isArray(rawConfig.qmd)
+      ? (rawConfig.qmd as Record<string, unknown>)
+      : undefined;
+  const resolveModelEndpoint = (
+    input: unknown,
+  ): QmdEndpointConfig | undefined => {
+    const endpoint = OptionalModelEndpointSchema.parse(input);
+    if (!endpoint) return undefined;
+    const resolvedEndpoint = resolveQmdEndpoint(endpoint, options);
+    if (!resolvedEndpoint.model) throw new Error("invalid-model-endpoint");
+    return {
+      ...resolvedEndpoint,
+      baseUrl:
+        normalizeTypeSafeBaseUrl(resolvedEndpoint.baseUrl) ||
+        resolvedEndpoint.baseUrl,
+    };
   };
+  const qmdJev = resolveModelEndpoint(rawQmd?.jev);
+  const decisionModel = resolveModelEndpoint(rawConfig?.decisionModel);
 
   const timeoutMs = clampInt(
     resolved.qmd.timeoutMs,
@@ -720,9 +724,9 @@ export function resolveConfig(
         ...resolved.qmd.expansion,
         ...resolvedExpansion,
       },
-      ...(hasJevInput ? { jev: resolvedJev } : {}),
+      ...(qmdJev ? { jev: qmdJev } : {}),
     },
-    jev: resolvedJev,
+    ...(decisionModel ? { decisionModel } : {}),
     skills: resolvedSkills,
     routing: resolvedRouting,
     review: resolved.review,

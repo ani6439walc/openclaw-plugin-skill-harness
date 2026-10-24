@@ -6,12 +6,14 @@ import {
   applyImportCheckpoint,
   CLASSIFICATION_VERSION,
   classifyRelations,
+  createImportClassifier,
   parseAuthorRelations,
   preflightRelations,
   selectRelationType,
 } from "./relation-import.js";
 import { scoredRelationTypes } from "./relation-graph.js";
 import type { ImportCandidate, ImportPlan } from "./relation-import.js";
+import type { OpenClawConfig } from "../../api.js";
 import type { TypeSafeClient } from "@typesafe-ai/sdk";
 const roots: string[] = [];
 afterEach(async () => {
@@ -82,6 +84,40 @@ function response(input: unknown) {
   };
 }
 describe("relation import", () => {
+  it("requires the plugin decision endpoint before creating a manual classifier", () => {
+    for (const plugin of [
+      {},
+      { jev: { model: "old/jev" } },
+      { qmd: { jev: { model: "qmd/jev" } } },
+    ]) {
+      expect(() =>
+        createImportClassifier({
+          plugins: { entries: { "skill-harness": { config: plugin } } },
+        } as unknown as OpenClawConfig),
+      ).toThrow("missing-decision-model");
+    }
+  });
+  it("uses only the plugin decisionModel with the host provider catalog", () => {
+    const classifier = createImportClassifier({
+      models: {
+        providers: {
+          custom: { baseUrl: "https://decision.test/v1", apiKey: "test-key" },
+        },
+      },
+      plugins: {
+        entries: {
+          "skill-harness": {
+            config: {
+              decisionModel: { model: "custom/decision-jev" },
+              qmd: { jev: { model: "qmd/other-jev" } },
+            },
+          },
+        },
+      },
+    } as unknown as OpenClawConfig);
+    expect(classifier.model).toBe("decision-jev");
+    expect(classifier.client).toBeDefined();
+  });
   it("parses four author formats without inventing reasons", () => {
     for (const input of [{ b: "because" }, '{"b":"because"}'])
       expect(parseAuthorRelations(input)).toEqual([

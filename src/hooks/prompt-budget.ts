@@ -19,39 +19,57 @@ export function promptRoutingBudgetMs(routing: ResolvedRoutingConfig): number {
   );
 }
 
-/** A timed-out operation may still settle, but must not publish its result. */
+/** Bound publication and propagate cancellation to accepted asynchronous work. */
 export async function withPromptDeadline<T>(
   timeoutMs: number,
   assertParentActive: () => void,
-  operation: (assertActive: () => void) => Promise<T>,
+  operation: (assertActive: () => void, signal: AbortSignal) => Promise<T>,
+  parentSignal?: AbortSignal,
 ): Promise<T> {
   let active = true;
+  const controller = new AbortController();
   const deadline = Date.now() + timeoutMs;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   const assertActive = () => {
-    assertParentActive();
-    if (!active || Date.now() >= deadline) {
-      throw new Error("Skill Harness prompt operation expired");
+    try {
+      assertParentActive();
+      if (!active || controller.signal.aborted || Date.now() >= deadline) {
+        throw new Error("Skill Harness prompt operation expired");
+      }
+    } catch (error) {
+      controller.abort();
+      throw error;
     }
   };
   try {
+    if (parentSignal?.aborted) controller.abort();
     assertActive();
+    const cancellation = new Promise<never>((_resolve, reject) => {
+      onAbort = () => {
+        active = false;
+        controller.abort();
+        reject(new Error("Skill Harness prompt operation cancelled"));
+      };
+      parentSignal?.addEventListener("abort", onAbort, { once: true });
+      timer = setTimeout(() => {
+        active = false;
+        controller.abort();
+        reject(
+          new Error(`Skill Harness prompt timed out after ${timeoutMs}ms`),
+        );
+      }, timeoutMs);
+    });
     return await Promise.race([
-      operation(assertActive).then((result) => {
+      operation(assertActive, controller.signal).then((result) => {
         assertActive();
         return result;
       }),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          active = false;
-          reject(
-            new Error(`Skill Harness prompt timed out after ${timeoutMs}ms`),
-          );
-        }, timeoutMs);
-      }),
+      cancellation,
     ]);
   } finally {
     active = false;
     if (timer !== undefined) clearTimeout(timer);
+    if (onAbort) parentSignal?.removeEventListener("abort", onAbort);
   }
 }

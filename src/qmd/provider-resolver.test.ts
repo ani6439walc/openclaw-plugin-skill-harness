@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { resolveConfig } from "../config.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildStoreModels,
   isJevModel,
@@ -532,18 +533,35 @@ describe("buildStoreModels", () => {
     expect(models).not.toHaveProperty("embed_provider");
   });
 
-  it("resolves Jev endpoint when config.jev has only baseUrl and no model", () => {
-    const config: ResolvedQmdConfig = {
-      ...baseConfig,
-      jev: {
-        baseUrl: "http://proxy.local/v1",
-      } as any,
-    };
-
-    const models = buildStoreModels(config);
-    expect(models.jev_base_url).toBe("http://proxy.local/v1");
-    expect(models.jev_api_model).toBeUndefined();
-    expect(models.embed_api_url).toBe("https://embed.example.com");
+  it("forwards only the explicit QMD endpoint to store models", () => {
+    const resolved = resolveConfig({
+      qmd: {
+        ...baseConfig,
+        jev: {
+          model: "qmd-jev",
+          baseUrl: "https://qmd.test",
+          apiKey: "qmd-key",
+        },
+      },
+      decisionModel: {
+        model: "decision-jev",
+        baseUrl: "https://decision.test",
+        apiKey: "decision-key",
+      },
+    });
+    expect(buildStoreModels(resolved.qmd)).toMatchObject({
+      jev_base_url: "https://qmd.test",
+      jev_api_model: "qmd-jev",
+      jev_api_key: "qmd-key",
+    });
+    expect(
+      buildStoreModels(
+        resolveConfig({
+          qmd: baseConfig,
+          decisionModel: { model: "decision-jev", apiKey: "decision-key" },
+        }).qmd,
+      ),
+    ).not.toHaveProperty("jev_api_key");
   });
 
   it("resolves Jev endpoint from expansion when expansion.model is a Jev model", () => {
@@ -589,5 +607,35 @@ describe("buildStoreModels", () => {
     expect(models).not.toHaveProperty("jev_base_url");
     expect(models).not.toHaveProperty("jev_api_model");
     expect(models).not.toHaveProperty("jev_api_key");
+  });
+});
+
+describe("native QMD Jev environment fallback", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("retains native environment configuration when qmd.jev is omitted", async () => {
+    vi.stubEnv("TYPESAFE_API_KEY", "native-qmd-key");
+    vi.stubEnv("TYPESAFE_BASE_URL", "https://native-qmd.test");
+    vi.stubEnv("TYPESAFE_DEFAULT_MODEL", "native-qmd-jev");
+    // Exercise the pinned package's setup only; no search or model request runs.
+    const { createConfiguredLLM } = await import(
+      new URL("./hybrid.js", import.meta.resolve("@wei840222/qmd")).href
+    );
+    const config = resolveConfig({
+      decisionModel: {
+        model: "plugin-jev",
+        baseUrl: "https://plugin.test",
+        apiKey: "plugin-key",
+      },
+    });
+    const models = buildStoreModels(config.qmd);
+    expect(models).not.toHaveProperty("jev_api_key");
+    const llm = createConfiguredLLM(models);
+    try {
+      expect(llm.jev?.model).toBe("native-qmd-jev");
+      expect(llm.supportsRerank).toBe(true);
+    } finally {
+      await llm.dispose();
+    }
   });
 });

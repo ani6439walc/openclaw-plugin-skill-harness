@@ -8,6 +8,8 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
+import * as skillInventory from "../skills/index.js";
+import { defaultStatsAggregator } from "../stats/index.js";
 import { SessionTracker } from "../session/tracker.js";
 import { createHookHandlers } from "./index.js";
 import {
@@ -16,6 +18,7 @@ import {
   withPromptDeadline,
 } from "./prompt-budget.js";
 import type {
+  HookDeps,
   PluginHookAgentContext,
   PluginHookBeforePromptBuildEvent,
   PluginHookBeforePromptBuildResult,
@@ -28,6 +31,7 @@ vi.mock("openclaw/plugin-sdk/agent-harness-runtime", () => ({
 const roots: string[] = [];
 const cleanup: Array<() => void> = [];
 const operations = new Set<Promise<unknown>>();
+const disposals: Array<() => Promise<void>> = [];
 function track<T>(operation: Promise<T>): Promise<T> {
   operations.add(operation);
   void operation.then(
@@ -43,6 +47,8 @@ async function settleFixture() {
 afterEach(async () => {
   // Release gates and drain handlers before resetting mocks or removing files.
   await settleFixture();
+  await Promise.all(disposals.splice(0).map((dispose) => dispose()));
+  if (vi.isFakeTimers()) expect(vi.getTimerCount()).toBe(0);
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.clearAllMocks();
@@ -99,10 +105,15 @@ function fixture() {
     routing: { experiences: { maxInjectedExperiences: 0 } },
   });
   const search = vi.fn(async () => []);
-  const selector = vi.fn(async () => selected);
+  const selector = vi.fn<NonNullable<HookDeps["routingSelector"]>>(
+    async () => selected,
+  );
+  const lifecycle = new AbortController();
+  const getWorkingSetSkills = vi.fn(async () => ["fixture"]);
   const handlers = createHookHandlers({
     api: {
       config: {},
+      lifecycle: { signal: lifecycle.signal },
       runtime: {
         state: { resolveStateDir: () => root },
         agent: { resolveAgentWorkspaceDir: () => workspace },
@@ -112,7 +123,7 @@ function fixture() {
     tracker,
     config: () => config,
     refreshLiveConfigFromRuntime: () => {},
-    getWorkingSetSkills: async () => ["fixture"],
+    getWorkingSetSkills,
     qmdSkillIndex: {
       search,
       schedule: () => {},
@@ -121,6 +132,8 @@ function fixture() {
     },
     routingSelector: selector,
   });
+  disposals.push(() => handlers.disposePromptWork());
+  disposals.push(() => handlers.reviewScheduler.dispose());
   let active = true;
   cleanup.push(() => {
     active = false;
@@ -142,6 +155,8 @@ function fixture() {
     tracker,
     search,
     selector,
+    lifecycle,
+    getWorkingSetSkills,
     handlers,
     setConfig: (next: typeof config) => {
       config = next;
@@ -195,6 +210,304 @@ describe("prompt routing deadlines", () => {
     expect(operations.size).toBe(0);
     expect((await pending)?.prependContext).toBeUndefined();
     expect(f.selector).not.toHaveBeenCalled();
+  });
+
+  it.each(["named", "anonymous"])(
+    "shares %s turn work across concurrent reentry and serial prompt rebuild",
+    async (kind) => {
+      const f = fixture();
+      const callCtx = kind === "anonymous" ? { ...ctx, runId: undefined } : ctx;
+      const selection = deferred<typeof selected>(selected);
+      f.selector.mockReturnValue(selection.promise);
+      const merge = vi.spyOn(f.tracker, "mergeTurnAndPersist");
+      const first = f.handlers.onBeforePromptBuild(event, callCtx);
+      await until(() => f.selector.mock.calls.length > 0);
+      const second = f.handlers.onBeforePromptBuild(event, callCtx);
+      await until(() => f.getWorkingSetSkills.mock.calls.length === 2);
+      selection.resolve(selected);
+      const [one, two] = await Promise.all([first, second]);
+      expect(one?.prependContext).toContain('<skill name="fixture">');
+      expect(two?.prependContext).toEqual(one?.prependContext);
+      const third = await f.handlers.onBeforePromptBuild(event, callCtx);
+      expect(third?.prependContext).toEqual(one?.prependContext);
+      expect(f.selector).toHaveBeenCalledTimes(1);
+      expect(f.search).toHaveBeenCalledTimes(1);
+      expect(merge).toHaveBeenCalledTimes(1);
+      expect(
+        vi
+          .mocked(emitAgentEvent)
+          .mock.calls.filter(([event]) => event.data.phase === "rerank"),
+      ).toHaveLength(1);
+    },
+  );
+
+  it.each(["named", "anonymous"])(
+    "does not duplicate %s selection while tracker preparation is pending",
+    async (kind) => {
+      const f = fixture();
+      const callCtx = kind === "anonymous" ? { ...ctx, runId: undefined } : ctx;
+      const release = deferred<void>(undefined);
+      const original = f.tracker.preparePromptTurn.bind(f.tracker);
+      const prepare = vi
+        .spyOn(f.tracker, "preparePromptTurn")
+        .mockImplementationOnce(async (params) => {
+          await release.promise;
+          return original(params);
+        });
+      const first = f.handlers.onBeforePromptBuild(event, callCtx);
+      await until(() => prepare.mock.calls.length === 1);
+      const second = f.handlers.onBeforePromptBuild(event, callCtx);
+      await until(() => f.getWorkingSetSkills.mock.calls.length === 2);
+      release.resolve();
+      const [result] = await Promise.all([first, second]);
+      expect(result?.prependContext).toContain('<skill name="fixture">');
+      await f.handlers.onBeforePromptBuild(event, callCtx);
+      expect(f.selector).toHaveBeenCalledTimes(1);
+      expect(f.search).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("checks each joining invocation before returning shared dynamic context", async () => {
+    const f = fixture();
+    const selection = deferred<typeof selected>(selected);
+    f.selector.mockReturnValue(selection.promise);
+    const first = f.handlers.onBeforePromptBuild(event, ctx);
+    await until(() => f.selector.mock.calls.length > 0);
+    let active = true;
+    const second = f.handlers.onBeforePromptBuild(event, {
+      ...ctx,
+      hookInvocation: {
+        assertActive: () => {
+          if (!active) throw new Error("inactive joined caller");
+        },
+      },
+    });
+    await until(() => f.getWorkingSetSkills.mock.calls.length === 2);
+    active = false;
+    selection.resolve(selected);
+    expect((await first)?.prependContext).toContain('<skill name="fixture">');
+    expect((await second)?.prependContext).toBeUndefined();
+    expect(f.selector).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["agent_end", "pending"],
+    ["agent_end", "completed"],
+    ["message_sending", "pending"],
+    ["message_sending", "completed"],
+  ] as const)(
+    "late %s for turn A preserves turn B's %s selector and cached result",
+    async (completion, phase) => {
+      const f = fixture();
+      vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(false);
+      await f.handlers.onBeforePromptBuild(event, ctx);
+      const selection = deferred<typeof selected>(selected);
+      f.selector.mockReturnValueOnce(selection.promise);
+      const nextCtx = { ...ctx, runId: "turn-b" };
+      const next = f.handlers.onBeforePromptBuild(event, nextCtx);
+      await until(() => f.selector.mock.calls.length === 2);
+      const signal = f.selector.mock.calls[1][0].signal;
+      if (phase === "completed") {
+        selection.resolve(selected);
+        expect((await next)?.prependContext).toContain(
+          '<skill name="fixture">',
+        );
+      }
+      if (completion === "agent_end") {
+        await f.handlers.onAgentEnd(
+          {
+            runId: "turn",
+            messages: [{ role: "assistant", content: "Turn A complete" }],
+            success: true,
+          },
+          ctx,
+        );
+      } else {
+        await f.handlers.onMessageSending({ content: "Turn A complete" }, ctx);
+      }
+      expect(
+        f.tracker.getTurnState("session", "turn")?.timestamps?.end,
+      ).toBeTruthy();
+      expect(signal?.aborted).toBe(false);
+      selection.resolve(selected);
+      const result = await next;
+      expect(result?.prependContext).toContain('<skill name="fixture">');
+      const replay = await f.handlers.onBeforePromptBuild(event, nextCtx);
+      expect(replay?.prependContext).toEqual(result?.prependContext);
+      expect(f.selector).toHaveBeenCalledTimes(2);
+      expect(f.search).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps selection failure terminal and admits a genuine next turn", async () => {
+    const f = fixture();
+    f.selector.mockRejectedValueOnce(new Error("selection failed"));
+    expect(
+      (await f.handlers.onBeforePromptBuild(event, ctx))?.prependContext,
+    ).toBeUndefined();
+    expect(
+      (await f.handlers.onBeforePromptBuild(event, ctx))?.prependContext,
+    ).toBeUndefined();
+    expect(f.selector).toHaveBeenCalledTimes(1);
+    const next = await f.handlers.onBeforePromptBuild(
+      {
+        prompt: "fixture next",
+        messages: [{ role: "user", content: "fixture next" }],
+      },
+      { ...ctx, runId: "next" },
+    );
+    expect(next?.prependContext).toContain('<skill name="fixture">');
+    expect(f.selector).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes static context when replaying the cached dynamic result", async () => {
+    const f = fixture();
+    const first = await f.handlers.onBeforePromptBuild(event, ctx);
+    f.getWorkingSetSkills.mockResolvedValue([]);
+    f.setConfig(
+      resolveConfig({
+        skills: { includeWorkspaceSkills: false, includeWorkshopSkills: false },
+        routing: { experiences: { maxInjectedExperiences: 0 } },
+      }),
+    );
+    const second = await f.handlers.onBeforePromptBuild(event, ctx);
+    expect(first?.appendSystemContext).toContain("<working_set_skills>");
+    expect(second?.appendSystemContext).not.toContain("<working_set_skills>");
+    expect(second?.prependContext).toEqual(first?.prependContext);
+    expect(f.selector).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts the selector on lifecycle stop and drains accepted work before disposal", async () => {
+    const f = fixture();
+    const selection = deferred<typeof selected>(selected);
+    f.selector.mockReturnValue(selection.promise);
+    const first = f.handlers.onBeforePromptBuild(event, ctx);
+    await until(() => f.selector.mock.calls.length > 0);
+    const signal = f.selector.mock.calls[0][0].signal;
+    expect(signal?.aborted).toBe(false);
+    f.lifecycle.abort();
+    expect(signal?.aborted).toBe(true);
+    let disposed = false;
+    const disposal = f.handlers.disposePromptWork().then(() => {
+      disposed = true;
+    });
+    await Promise.resolve();
+    expect(disposed).toBe(false);
+    expect((await first)?.prependContext).toBeUndefined();
+    const next = await f.handlers.onBeforePromptBuild(event, {
+      ...ctx,
+      runId: "next",
+    });
+    expect(next?.appendSystemContext).toContain("<working_set_skills>");
+    expect(f.selector).toHaveBeenCalledTimes(1);
+    selection.resolve(selected);
+    await disposal;
+    expect(f.tracker.getCurrentState("session")?.matchedSkills).toBeUndefined();
+  });
+
+  it("aborts a replaced turn before starting the next selector", async () => {
+    const f = fixture();
+    const selection = deferred<typeof selected>(selected);
+    f.selector.mockReturnValueOnce(selection.promise);
+    const first = f.handlers.onBeforePromptBuild(event, ctx);
+    await until(() => f.selector.mock.calls.length > 0);
+    const signal = f.selector.mock.calls[0][0].signal;
+    const next = await f.handlers.onBeforePromptBuild(event, {
+      ...ctx,
+      runId: "next",
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(next?.prependContext).toContain('<skill name="fixture">');
+    expect((await first)?.prependContext).toBeUndefined();
+    selection.resolve(selected);
+  });
+
+  it("cancels a superseded selector even when the next turn disables dynamic routing", async () => {
+    const f = fixture();
+    const selection = deferred<typeof selected>(selected);
+    f.selector.mockReturnValue(selection.promise);
+    const first = f.handlers.onBeforePromptBuild(event, ctx);
+    await until(() => f.selector.mock.calls.length > 0);
+    const signal = f.selector.mock.calls[0][0].signal;
+    f.setConfig(
+      resolveConfig({
+        routing: {
+          skills: { maxInjectedSkills: 0 },
+          experiences: { maxInjectedExperiences: 0 },
+        },
+      }),
+    );
+    const next = await f.handlers.onBeforePromptBuild(event, {
+      ...ctx,
+      runId: "next",
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(next?.prependContext).toBeUndefined();
+    expect((await first)?.prependContext).toBeUndefined();
+    selection.resolve(selected);
+    expect(f.selector).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not admit retrieval after cancellation during inventory discovery", async () => {
+    const f = fixture();
+    const release = deferred<void>(undefined);
+    const original = skillInventory.listAvailableSkills;
+    let discovering = false;
+    vi.spyOn(skillInventory, "listAvailableSkills").mockImplementation(
+      async (params) => {
+        const result = await original(params);
+        if (!params.source) {
+          discovering = true;
+          await release.promise;
+        }
+        return result;
+      },
+    );
+    const pending = f.handlers.onBeforePromptBuild(event, ctx);
+    await until(() => discovering);
+    f.lifecycle.abort();
+    expect((await pending)?.prependContext).toBeUndefined();
+    release.resolve();
+    await f.handlers.disposePromptWork();
+    expect(f.search).not.toHaveBeenCalled();
+    expect(f.selector).not.toHaveBeenCalled();
+  });
+
+  it("does not publish successful discovery events after lifecycle cancellation", async () => {
+    const f = fixture();
+    const search = deferred<[]>([]);
+    f.search.mockReturnValue(search.promise);
+    const pending = f.handlers.onBeforePromptBuild(event, ctx);
+    await until(() => f.search.mock.calls.length > 0);
+    f.lifecycle.abort();
+    expect((await pending)?.prependContext).toBeUndefined();
+    search.resolve([]);
+    await f.handlers.disposePromptWork();
+    expect(f.selector).not.toHaveBeenCalled();
+    expect(
+      vi
+        .mocked(emitAgentEvent)
+        .mock.calls.filter(
+          ([event]) =>
+            event.data.phase === "search" && event.data.state === "completed",
+        ),
+    ).toHaveLength(0);
+  });
+
+  it("cancels in-flight turn work on session_end", async () => {
+    const f = fixture();
+    const selection = deferred<typeof selected>(selected);
+    f.selector.mockReturnValue(selection.promise);
+    const pending = f.handlers.onBeforePromptBuild(event, ctx);
+    await until(() => f.selector.mock.calls.length > 0);
+    const signal = f.selector.mock.calls[0][0].signal;
+    await f.handlers.onSessionEnd(
+      { sessionId: "session", messageCount: 1 },
+      { agentId: "main", sessionId: "session" },
+    );
+    expect(signal?.aborted).toBe(true);
+    expect((await pending)?.prependContext).toBeUndefined();
+    selection.resolve(selected);
   });
 
   it("uses enabled search budgets plus selection and overhead", () => {
@@ -324,6 +637,9 @@ describe("prompt routing deadlines", () => {
     await until(() => f.selector.mock.calls.length > 0);
     await vi.advanceTimersByTimeAsync(5_000);
     const result = await pending;
+    expect(f.selector.mock.calls[0][0].signal?.aborted).toBe(true);
+    await f.handlers.onBeforePromptBuild(event, ctx);
+    expect(f.selector).toHaveBeenCalledTimes(1);
     expect(result?.appendSystemContext).toContain("<working_set_skills>");
     expect(result?.prependContext).toBeUndefined();
     selection.resolve(selected);
@@ -429,6 +745,28 @@ describe("prompt routing deadlines", () => {
         .mocked(emitAgentEvent)
         .mock.calls.filter(([event]) => event.data.phase === "rerank"),
     ).toHaveLength(0);
+  });
+
+  it("propagates parent cancellation and removes its deadline timer", async () => {
+    vi.useFakeTimers();
+    const parent = new AbortController();
+    const done = deferred<void>(undefined);
+    let signal: AbortSignal | undefined;
+    const pending = withPromptDeadline(
+      100,
+      () => {},
+      async (_assertActive, childSignal) => {
+        signal = childSignal;
+        await done.promise;
+      },
+      parent.signal,
+    );
+    const check = expect(pending).rejects.toThrow("cancelled");
+    parent.abort();
+    expect(signal?.aborted).toBe(true);
+    await check;
+    expect(vi.getTimerCount()).toBe(0);
+    done.resolve();
   });
 
   it("expires guards even when an operation completes after its deadline", async () => {

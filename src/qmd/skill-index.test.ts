@@ -1,3 +1,4 @@
+import { resolveConfig } from "../config.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createBackgroundRunner } from "../subagent-runtime.js";
 import {
@@ -1823,6 +1824,52 @@ describe("qmd skill connection lifecycle", () => {
       search: () => index.search({ agentId: "main", query: "query", limit: 3 }),
     };
   }
+
+  it("keeps the active QMD store when only the plugin decision model changes", async () => {
+    const fixture = await setup();
+    const qmd = {
+      ...qmdConfig,
+      jev: { model: "qmd-jev", baseUrl: "https://qmd.test", apiKey: "qmd-key" },
+    };
+    fixture.setConfig(
+      resolveConfig({
+        qmd,
+        decisionModel: {
+          model: "old-decision",
+          baseUrl: "https://old.test",
+          apiKey: "old-key",
+        },
+      }).qmd,
+    );
+    await fixture.search();
+    const storeCount = fixture.createStore.mock.calls.length;
+    fixture.setConfig(
+      resolveConfig({
+        qmd,
+        decisionModel: {
+          model: "next-decision",
+          baseUrl: "https://next.test",
+          apiKey: "next-key",
+        },
+      }).qmd,
+    );
+    await fixture.search();
+    expect(fixture.createStore).toHaveBeenCalledTimes(storeCount);
+    expect(fixture.next.close).not.toHaveBeenCalled();
+    expect(fixture.next.search).toHaveBeenCalledWith(
+      expect.objectContaining({ rerank: false }),
+    );
+    const options = fixture.createStore.mock.calls.at(-1)?.[0] as {
+      config: { models: Record<string, unknown> };
+    };
+    expect(options.config.models).toMatchObject({
+      jev_api_model: "qmd-jev",
+      jev_base_url: "https://qmd.test",
+      jev_api_key: "qmd-key",
+    });
+    expect(JSON.stringify(options.config.models)).not.toContain("decision");
+    await fixture.index.close();
+  });
 
   it.each(["endpoint", "key", "expansion", "jev", "timeout", "cache"])(
     "applies changed %s without changing the index database",

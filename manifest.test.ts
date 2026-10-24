@@ -217,11 +217,27 @@ describe("skill-harness manifest", () => {
     });
   });
 
-  it("exposes jev at top level alongside qmd and requires jev.model", () => {
-    expect(manifest.configSchema.required).toEqual(["qmd", "jev"]);
-    expect(manifest.configSchema.properties.jev).toBeDefined();
-    expect(manifest.configSchema.properties.jev.type).toBe("object");
-    expect(manifest.configSchema.properties.jev.required).toEqual(["model"]);
-    expect(manifest.configSchema.properties.qmd.properties.jev).toBeUndefined();
+  it("exposes independent optional model endpoints and rejects retired root jev", () => {
+    expect(manifest.configSchema.required).toEqual(["qmd"]);
+    expect(manifest.configSchema.additionalProperties).toBe(false);
+    expect(manifest.configSchema.properties).not.toHaveProperty("jev");
+    for (const endpoint of [
+      manifest.configSchema.properties.decisionModel,
+      manifest.configSchema.properties.qmd.properties.jev,
+    ]) {
+      expect(endpoint.type).toBe("object");
+      expect(endpoint.required).toEqual(["model"]);
+      expect(endpoint.additionalProperties).toBe(false);
+      expect(endpoint.properties.model).toMatchObject({
+        type: "string",
+        minLength: 1,
+        pattern: "\\S",
+      });
+      expect(Object.keys(endpoint.properties)).toEqual([
+        "baseUrl",
+        "model",
+        "apiKey",
+      ]);
+    }
   });
 });

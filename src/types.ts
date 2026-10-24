@@ -138,7 +138,7 @@ export type ResolvedQmdConfig = {
 
 export type ResolvedSkillHarnessPluginConfig = {
   qmd: ResolvedQmdConfig;
-  jev: QmdEndpointConfig;
+  decisionModel?: QmdEndpointConfig;
   skills: ResolvedSkillsConfig;
   routing: ResolvedRoutingConfig;
   review: ResolvedReviewConfig;

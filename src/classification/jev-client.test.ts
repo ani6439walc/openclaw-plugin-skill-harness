@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TypeSafeClient } from "@typesafe-ai/sdk";
 import type { OpenClawPluginApi } from "../../api.js";
-import { resolveConfig } from "../config.js";
+import { resolveConfig as resolveBaseConfig } from "../config.js";
 import { runJevUnifiedRouting } from "./jev-client.js";
 import type { AvailableSkill } from "../types.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
+
+function resolveConfig(raw: Record<string, unknown>) {
+  return resolveBaseConfig({
+    decisionModel: { model: "typesafe/jev-latest" },
+    ...raw,
+  });
+}
 
 describe("runJevUnifiedRouting", () => {
   const dummyApi = {
@@ -77,7 +84,7 @@ describe("runJevUnifiedRouting", () => {
       skills: ["git-tools"],
       experiences: [],
       confidence: 0.85,
-      reason: "jev → 1 skill: [git-tools]",
+      reason: "decision → 1 skill: [git-tools]",
     });
   });
 
@@ -487,7 +494,7 @@ describe("runJevUnifiedRouting", () => {
 
     expect(result?.skills).toEqual(["skill-2", "skill-3"]);
     expect(result?.confidence).toBe(0.95);
-    expect(result?.reason).toBe("jev → 2 skills: [skill-2, skill-3]");
+    expect(result?.reason).toBe("decision → 2 skills: [skill-2, skill-3]");
   });
 
   it("returns early when no candidate questions exist", async () => {
@@ -512,7 +519,7 @@ describe("runJevUnifiedRouting", () => {
       skills: [],
       experiences: [],
       confidence: 0.0,
-      reason: "jev → no candidate questions to evaluate",
+      reason: "decision → no candidate questions to evaluate",
     });
   });
 
@@ -605,7 +612,7 @@ describe("runJevUnifiedRouting", () => {
     }
   });
 
-  it("respects plugin-level qmd.jev overrides (e.g. baseUrl, apiKey, model)", async () => {
+  it("uses decisionModel independently of QMD and preserves a provider-qualified vendor model ID", async () => {
     const mockSystemOne = vi.fn().mockResolvedValue({
       model: "typesafe/jev-custom",
       answers: {
@@ -615,13 +622,12 @@ describe("runJevUnifiedRouting", () => {
     });
 
     const config = resolveConfig({
-      qmd: {
-        jev: {
-          baseUrl: "https://custom-proxy.internal/v1",
-          apiKey: "custom-proxy-key",
-          model: "typesafe/jev-custom",
-        },
+      decisionModel: {
+        baseUrl: "https://custom-proxy.internal/v1",
+        apiKey: "custom-proxy-key",
+        model: "openrouter/typesafe/jev-custom",
       },
+      qmd: { jev: { model: "typesafe/qmd-only" } },
     });
 
     const result = await runJevUnifiedRouting({
@@ -636,6 +642,48 @@ describe("runJevUnifiedRouting", () => {
 
     expect(result).toBeDefined();
     expect(result?.skills).toEqual(["git-tools"]);
+    expect(mockSystemOne.mock.calls[0][0].model).toBe("typesafe/jev-custom");
+    expect(mockSystemOne.mock.calls[0][1]).toMatchObject({
+      retry: { maxRetries: 0 },
+    });
+  });
+
+  it("does not borrow QMD or conversational configuration when the plugin model is absent", async () => {
+    const systemOne = vi.fn();
+    expect(
+      await runJevUnifiedRouting({
+        api: dummyApi,
+        config: resolveBaseConfig({
+          qmd: { jev: { model: "typesafe/qmd-only" } },
+        }),
+        agentId: "main",
+        latest: "review code",
+        candidateSkills,
+        modelRef: { provider: "typesafe", model: "conversation-only" },
+        client: { systemOne } as unknown as TypeSafeClient,
+      }),
+    ).toBeUndefined();
+    expect(systemOne).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Boolean-shaped answer from the legacy noul transport", async () => {
+    const systemOne = vi.fn().mockResolvedValue({
+      answers: {
+        "skill_git-tools": { type: "boolean", probabilityTrue: 0.95 },
+        "skill_markdown-formatter": { type: "noul", noul: 0.9 },
+      },
+    });
+    expect(
+      await runJevUnifiedRouting({
+        api: dummyApi,
+        config: resolveConfig({}),
+        agentId: "main",
+        latest: "review code",
+        candidateSkills,
+        client: { systemOne } as unknown as TypeSafeClient,
+      }),
+    ).toBeUndefined();
+    expect(systemOne).toHaveBeenCalledOnce();
   });
 
   it("scores associated skills independently instead of automatically selecting them with an experience", async () => {

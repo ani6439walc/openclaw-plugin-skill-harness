@@ -190,7 +190,8 @@ describe("resolveConfig", () => {
       expect(result.routing.scope.deniedChatIds).toEqual([]);
       expect(result.routing).not.toHaveProperty("model");
       expect(result.routing).not.toHaveProperty("modelFallback");
-      expect(result.jev).toBeDefined();
+      expect(result.decisionModel).toBeUndefined();
+      expect(result).not.toHaveProperty("jev");
     });
 
     it("should use default values for non-object config", () => {
@@ -574,91 +575,91 @@ describe("resolveConfig", () => {
       });
     });
 
-    it("resolves optional qmd.jev endpoint when only apiKey is provided", () => {
-      const result = resolveConfig({
-        qmd: {
-          embedding: {
-            baseUrl: "https://example.com/v1",
-            model: "embed-model",
-          },
-          expansion: {
-            baseUrl: "https://example.com/v1",
-            model: "gemini-flash",
-          },
-          jev: {
-            apiKey: "my-custom-jev-key",
-          },
-        },
-      });
+    it.each(["decisionModel", "qmd.jev"])(
+      "requires a nonempty model for present %s endpoints",
+      (field) => {
+        for (const endpoint of [
+          {},
+          { apiKey: "key" },
+          { model: "   " },
+          { model: 42 },
+          { model: "jev", baseUrl: 4 },
+          null,
+        ]) {
+          const raw =
+            field === "decisionModel"
+              ? { decisionModel: endpoint }
+              : { qmd: { jev: endpoint } };
+          expect(() => resolveConfig(raw)).toThrow();
+        }
+      },
+    );
 
-      expect(result.qmd.jev).toBeDefined();
-      expect(result.qmd.jev?.apiKey).toBe("my-custom-jev-key");
-    });
-
-    it("resolves top-level jev endpoint when configured at root", () => {
-      const mockConfig = {
-        models: {
-          providers: {
-            openrouter: {
-              baseUrl: "https://openrouter.ai/api/v1",
-              apiKey: "or-key",
-            },
-          },
-        },
-      } as unknown as OpenClawConfig;
-
+    it("resolves the plugin decision endpoint without configuring QMD Jev", () => {
       const result = resolveConfig(
+        { decisionModel: { model: "openrouter/typesafe/jev-latest" } },
         {
-          qmd: {
-            embedding: {
-              baseUrl: "https://example.com/v1",
-              model: "embed-model",
+          openClawConfig: {
+            models: {
+              providers: {
+                openrouter: {
+                  baseUrl: "https://openrouter.ai/api/v1",
+                  apiKey: "or-key",
+                },
+              },
             },
-            expansion: {
-              baseUrl: "https://example.com/v1",
-              model: "gemini-flash",
-            },
-          },
-          jev: {
-            model: "openrouter/typesafe/jev-latest",
-          },
+          } as unknown as OpenClawConfig,
         },
-        { openClawConfig: mockConfig },
       );
-
-      expect(result.jev).toEqual({
+      expect(result.decisionModel).toEqual({
         baseUrl: "https://openrouter.ai/api",
         model: "typesafe/jev-latest",
         apiKey: "or-key",
       });
-      expect(result.qmd.jev).toEqual(result.jev);
+      expect(result.qmd.jev).toBeUndefined();
+      expect(result).not.toHaveProperty("jev");
     });
 
-    it("prefers top-level jev when both top-level and qmd.jev are specified", () => {
+    it("resolves independent QMD and plugin endpoints without cross-fallback", () => {
       const result = resolveConfig({
         qmd: {
-          embedding: {
-            baseUrl: "https://example.com/v1",
-            model: "embed-model",
-          },
-          expansion: {
-            baseUrl: "https://example.com/v1",
-            model: "gemini-flash",
-          },
           jev: {
-            apiKey: "legacy-key",
+            model: "qmd-provider/jev",
+            apiKey: "qmd-key",
+            baseUrl: "https://qmd.test/v1",
           },
         },
-        jev: {
-          apiKey: "top-level-key",
+        decisionModel: {
+          model: "decision-provider/jev",
+          apiKey: "decision-key",
+          baseUrl: "https://decision.test/v1",
         },
       });
-
-      expect(result.jev?.apiKey).toBe("top-level-key");
-      expect(result.qmd.jev?.apiKey).toBe("top-level-key");
+      expect(result.qmd.jev).toEqual({
+        model: "jev",
+        apiKey: "qmd-key",
+        baseUrl: "https://qmd.test",
+      });
+      expect(result.decisionModel).toEqual({
+        model: "jev",
+        apiKey: "decision-key",
+        baseUrl: "https://decision.test",
+      });
+      expect(
+        resolveConfig({ qmd: { jev: { model: "jev" } } }).decisionModel,
+      ).toBeUndefined();
     });
 
-    it("resolves apiKey specified as a SecretRef object in jev and qmd.embedding", () => {
+    it("ignores retired root jev without consuming or forwarding it", () => {
+      const result = resolveConfig({
+        jev: { model: "retired/jev", apiKey: "retired-key" },
+      });
+      expect(result).not.toHaveProperty("jev");
+      expect(result.decisionModel).toBeUndefined();
+      expect(result.qmd.jev).toBeUndefined();
+    });
+
+    it("resolves SecretRef and provider environment keys independently", () => {
       const result = resolveConfig(
         {
           qmd: {
@@ -670,26 +671,33 @@ describe("resolveConfig", () => {
                 id: "EMBED_SECRET",
               },
             },
-            expansion: {
-              model: "custom/expand",
+            jev: {
+              model: "qmd-provider/jev",
+              apiKey: { source: "env", id: "QMD_SECRET" },
             },
           },
-          jev: {
-            model: "custom/jev",
-            apiKey: { source: "env", id: "JEV_SECRET" },
+          decisionModel: {
+            model: "typesafe/jev",
+            apiKey: { source: "env", id: "DECISION_SECRET" },
           },
         },
         {
           env: {
-            EMBED_SECRET: "resolved-embed-val",
-            JEV_SECRET: "resolved-jev-val",
+            EMBED_SECRET: "embed-val",
+            QMD_SECRET: "qmd-val",
+            DECISION_SECRET: "decision-val",
           },
         },
       );
-
-      expect(result.qmd.embedding.apiKey).toBe("resolved-embed-val");
-      expect(result.jev?.apiKey).toBe("resolved-jev-val");
-      expect(result.qmd.jev?.apiKey).toBe("resolved-jev-val");
+      expect(result.qmd.embedding.apiKey).toBe("embed-val");
+      expect(result.qmd.jev?.apiKey).toBe("qmd-val");
+      expect(result.decisionModel?.apiKey).toBe("decision-val");
+      expect(
+        resolveConfig(
+          { decisionModel: { model: "typesafe/jev" } },
+          { env: { TYPESAFE_API_KEY: "env-key" } },
+        ).decisionModel?.apiKey,
+      ).toBe("env-key");
     });
 
     it("resolves default skills.search weights and index refresh interval", () => {

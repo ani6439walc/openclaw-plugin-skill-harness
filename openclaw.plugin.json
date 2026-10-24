@@ -12,7 +12,7 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["qmd", "jev"],
+    "required": ["qmd"],
     "properties": {
       "qmd": {
         "type": "object",
@@ -105,15 +105,49 @@
             "maximum": 86400,
             "default": 300,
             "description": "Seconds between source checks for QMD experience and skill index refreshes; 0 disables subsequent automatic checks."
+          },
+          "jev": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model"],
+            "description": "Optional QMD-only Jev endpoint for search strategy and native reranking. Independent of plugin decisionModel; native QMD environment and expansion fallbacks remain available when omitted.",
+            "properties": {
+              "baseUrl": {
+                "type": "string",
+                "description": "Optional base URL for TypeSafe Jev. If omitted, resolved from the OpenClaw provider prefix in model or TYPESAFE_BASE_URL."
+              },
+              "model": {
+                "type": "string",
+                "description": "TypeSafe Jev model name or OpenClaw 'provider/model' reference (e.g. 'typesafe/jev-latest' or 'openrouter/typesafe/jev-latest').",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "apiKey": {
+                "description": "Optional API key or SecretRef object for TypeSafe Jev. If omitted, resolved from the OpenClaw provider, TYPESAFE_API_KEY, or environment.",
+                "anyOf": [
+                  { "type": "string" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["id"],
+                    "properties": {
+                      "source": { "type": "string" },
+                      "provider": { "type": "string" },
+                      "id": { "type": "string" }
+                    }
+                  }
+                ]
+              }
+            }
           }
         },
         "required": ["embedding", "expansion"]
       },
-      "jev": {
+      "decisionModel": {
         "type": "object",
         "additionalProperties": false,
         "required": ["model"],
-        "description": "TypeSafe Jev provider for unified skill and experience candidate routing.",
+        "description": "Optional TypeSafe endpoint for candidate selection when no host Decision model is selected, and for explicit manual relation classification. Independent of qmd.jev.",
         "properties": {
           "baseUrl": {
             "type": "string",
@@ -121,7 +155,9 @@
           },
           "model": {
             "type": "string",
-            "description": "TypeSafe Jev model name or OpenClaw 'provider/model' reference (e.g. 'typesafe/jev-latest' or 'openrouter/typesafe/jev-latest')."
+            "description": "TypeSafe Jev model name or OpenClaw 'provider/model' reference (e.g. 'typesafe/jev-latest' or 'openrouter/typesafe/jev-latest').",
+            "minLength": 1,
+            "pattern": "\\S"
           },
           "apiKey": {
             "description": "Optional API key or SecretRef object for TypeSafe Jev. If omitted, resolved from the OpenClaw provider, TYPESAFE_API_KEY, or environment.",
@@ -148,9 +184,7 @@
         "properties": {
           "sharedRoots": {
             "type": "array",
-            "items": {
-              "type": "string"
-            },
+            "items": { "type": "string" },
             "default": [],
             "description": "Absolute local skill directories intentionally shared with every agent. Agent-local roots retain precedence."
           },
@@ -166,9 +200,7 @@
             "properties": {
               "defaults": {
                 "type": "array",
-                "items": {
-                  "type": "string"
-                },
+                "items": { "type": "string" },
                 "default": [],
                 "description": "Default skills made available to every agent's working set."
               },
@@ -176,9 +208,7 @@
                 "type": "object",
                 "additionalProperties": {
                   "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                  "items": { "type": "string" }
                 },
                 "default": {},
                 "description": "Agent-specific skill lists keyed by agent ID."
@@ -249,9 +279,7 @@
             "properties": {
               "agents": {
                 "type": "array",
-                "items": {
-                  "type": "string"
-                },
+                "items": { "type": "string" },
                 "description": "Agent IDs eligible for dynamic routing.",
                 "default": ["main"]
               },
@@ -266,17 +294,13 @@
               },
               "allowedChatIds": {
                 "type": "array",
-                "items": {
-                  "type": "string"
-                },
+                "items": { "type": "string" },
                 "description": "Allow-list of chat IDs for dynamic routing.",
                 "default": []
               },
               "deniedChatIds": {
                 "type": "array",
-                "items": {
-                  "type": "string"
-                },
+                "items": { "type": "string" },
                 "description": "Deny-list of chat IDs for dynamic routing.",
                 "default": []
               }
@@ -373,9 +397,7 @@
                   },
                   "genericTokens": {
                     "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
+                    "items": { "type": "string" },
                     "default": [],
                     "description": "Tokens that suppress only a one-token name-match request after normalization."
                   }
