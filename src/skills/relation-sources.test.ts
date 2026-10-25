@@ -176,6 +176,63 @@ it("validates retained bindings when explicitly rebinding a collection", async (
   expect(await fs.readFile(relationSourcesPath(root), "utf8")).toBe(before);
 });
 
+it("removes only explicitly named deleted skills while preserving the source identity", async () => {
+  const collection = path.join(root, "collection");
+  await skill(path.join(collection, "a"), "a");
+  await skill(path.join(collection, "b"), "b");
+  const source = await registerRelationSource(root, {
+    root: collection,
+    skills: { ...bindings("a"), ...bindings("b") },
+  });
+  await fs.rm(path.join(collection, "b"), { recursive: true });
+  const omitted = await registerRelationSource(root, {
+    id: source.id,
+    root: collection,
+    skills: bindings("a"),
+  });
+  expect(Object.keys(omitted.skills).sort()).toEqual(["a", "b"]);
+  const removed = await registerRelationSource(root, {
+    id: source.id,
+    root: collection,
+    skills: bindings("a"),
+    removeKeys: ["b"],
+  });
+  expect(removed.id).toBe(source.id);
+  expect(removed.skills).toEqual(bindings("a"));
+  expect(readRelationSources(root)!.sources[0]).toEqual(removed);
+});
+
+it("rejects invalid, duplicate, unknown and simultaneously supplied removal keys", async () => {
+  const collection = path.join(root, "collection");
+  await skill(path.join(collection, "a"), "a");
+  const source = await registerRelationSource(root, {
+    root: collection,
+    skills: bindings("a"),
+  });
+  const file = relationSourcesPath(root);
+  const before = await fs.readFile(file, "utf8");
+  for (const removeKeys of [[".."], ["a", "a"], ["unknown"], ["constructor"]]) {
+    await expect(
+      registerRelationSource(root, {
+        id: source.id,
+        root: collection,
+        skills: {},
+        removeKeys,
+      }),
+    ).rejects.toThrow();
+    expect(await fs.readFile(file, "utf8")).toBe(before);
+  }
+  await expect(
+    registerRelationSource(root, {
+      id: source.id,
+      root: collection,
+      skills: bindings("a"),
+      removeKeys: ["a"],
+    }),
+  ).rejects.toThrow();
+  expect(await fs.readFile(file, "utf8")).toBe(before);
+});
+
 it("does not infer origin from names, content, or the containing installation category", async () => {
   const collection = path.join(root, "upstream");
   const original = await skill(path.join(collection, "sample"), "sample");

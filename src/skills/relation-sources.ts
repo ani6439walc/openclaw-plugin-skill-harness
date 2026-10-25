@@ -31,6 +31,7 @@ export interface RegisterRelationSourceInput {
   skills: Record<string, RelationSourceBinding>;
   rebind?: boolean;
   rename?: boolean;
+  removeKeys?: readonly string[];
 }
 
 export interface ResolvedRelationSource {
@@ -273,10 +274,24 @@ export async function registerRelationSource(
     (input.id !== undefined && !text(input.id)) ||
     (input.label !== undefined && !text(input.label)) ||
     (input.rebind !== undefined && typeof input.rebind !== "boolean") ||
-    (input.rename !== undefined && typeof input.rename !== "boolean")
+    (input.rename !== undefined && typeof input.rename !== "boolean") ||
+    (input.removeKeys !== undefined &&
+      (!Array.isArray(input.removeKeys) ||
+        input.removeKeys.some(
+          (key) => typeof key !== "string" || !validSkillKey(key),
+        ) ||
+        new Set(input.removeKeys).size !== input.removeKeys.length))
   )
     fail();
-  fields(input, ["id", "root", "label", "skills", "rebind", "rename"]);
+  fields(input, [
+    "id",
+    "root",
+    "label",
+    "skills",
+    "rebind",
+    "rename",
+    "removeKeys",
+  ]);
   const directory = path.dirname(relationSourcesPath(dataRoot));
   try {
     if (!lstatSync(directory).isDirectory()) fail();
@@ -304,6 +319,15 @@ export async function registerRelationSource(
       if (previous && previous.root !== root && !input.rebind)
         throw new Error("Relation source rebind requires explicit permission");
       const skills = { ...previous?.skills };
+      for (const key of input.removeKeys ?? []) {
+        if (
+          !previous ||
+          !Object.hasOwn(previous.skills, key) ||
+          Object.hasOwn(input.skills, key)
+        )
+          fail();
+        delete skills[key];
+      }
       for (const [key, binding] of Object.entries(input.skills)) {
         const old =
           previous && Object.hasOwn(previous.skills, key)
