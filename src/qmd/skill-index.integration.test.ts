@@ -2,11 +2,11 @@ import { createServer, type Server } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { stat } from "node:fs/promises";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { scheduler } from "node:timers/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStore, type QMDStore, type StoreOptions } from "@wei840222/qmd";
 import type { AvailableSkill } from "../skills/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
@@ -197,6 +197,242 @@ async function waitUntil(
 function flattenedInputs(fixture: EmbeddingFixture, from = 0): string[] {
   return fixture.inputs.slice(from).flat();
 }
+
+describe("QMD vector layout upgrade", () => {
+  it("converts an unchanged experience index without reembedding and keeps discovery read-only", async () => {
+    const fixture = await createEmbeddingFixture();
+    const root = await mkdtemp(path.join(tmpdir(), "qmd-layout-upgrade-"));
+    roots.push(root);
+    const config = configFor(fixture.baseUrl);
+    const entries = [
+      {
+        id: "layout-upgrade",
+        summary: "Vector layout upgrade guidance",
+        keywords: ["layoutupgrademarker"],
+        body: "Preserve layoutupgrademarker vectors during upgrades.",
+        skills: [],
+        path: root,
+      },
+    ];
+    let buildOptions: StoreOptions | undefined;
+    const initial = createSkillExperienceQmdIndex({
+      dataRoot: root,
+      config: () => config,
+      createStore: async (options) => {
+        buildOptions = options;
+        return createStore(options);
+      },
+    });
+    try {
+      initial.schedule(entries);
+      await waitUntil(
+        () => initial.getStatus() === "ready",
+        "initial layout fixture",
+      );
+    } finally {
+      await initial.close();
+    }
+    expect(buildOptions).toBeDefined();
+    type VectorRow = {
+      hash: string;
+      seq: number;
+      collection: string;
+      embedding: Uint8Array;
+    };
+    const vectors = (store: QMDStore) =>
+      (
+        store.internal.db
+          .prepare(
+            `
+      SELECT r.hash, r.seq, c.name AS collection, v.embedding
+      FROM vector_rows r
+      JOIN vector_collection_ids c ON c.id = r.collection_id
+      JOIN vectors_by_collection v ON v.rowid = r.id
+      ORDER BY r.hash, r.seq, c.name
+    `,
+          )
+          .all() as VectorRow[]
+      ).map((row) => ({
+        ...row,
+        embedding: Buffer.from(row.embedding).toString("hex"),
+      }));
+    const { identity, chunks, documents, collections, expectedVectors } =
+      await (async () => {
+        const seed = await createStore(buildOptions!);
+        try {
+          const identity = seed.internal.db
+            .prepare("SELECT * FROM embedding_index_state")
+            .all();
+          const chunks = seed.internal.db
+            .prepare("SELECT * FROM content_vectors ORDER BY hash, seq")
+            .all();
+          const documents = seed.internal.db
+            .prepare("SELECT * FROM documents ORDER BY id")
+            .all();
+          const collections = await seed.listCollections();
+          const expectedVectors = vectors(seed);
+          expect(expectedVectors.length).toBeGreaterThan(0);
+          const db = seed.internal.db;
+          db.exec(
+            "CREATE VIRTUAL TABLE vectors_vec USING vec0(hash_seq TEXT PRIMARY KEY, embedding float[1536] distance_metric=cosine)",
+          );
+          const insert = db.prepare(
+            "INSERT OR IGNORE INTO vectors_vec (hash_seq, embedding) VALUES (?, ?)",
+          );
+          for (const row of expectedVectors) {
+            insert.run(
+              `${row.hash}_${row.seq}`,
+              Buffer.from(row.embedding, "hex"),
+            );
+          }
+          db.exec(
+            "DROP TABLE vectors_by_collection; DROP TABLE vector_rows; DROP TABLE vector_collection_ids; PRAGMA user_version = 1",
+          );
+          return { identity, chunks, documents, collections, expectedVectors };
+        } finally {
+          await seed.close();
+        }
+      })();
+    const metadataPath = path.join(root, "qmd", "experiences", "metadata.json");
+    const metadata = await readFile(metadataPath, "utf8");
+    const documentPaths = ["keywords", "summary", "body"].map((collection) =>
+      path.join(
+        root,
+        "qmd",
+        "experiences",
+        "docs",
+        collection,
+        `${entries[0]!.id}.md`,
+      ),
+    );
+    const mtimes = await Promise.all(
+      documentPaths.map(async (file) => (await stat(file)).mtimeMs),
+    );
+    const requestsBeforeReopen = fixture.requests.length;
+    const opened: Array<{ options: StoreOptions; store: QMDStore }> = [];
+    const trackedStore = async (options: StoreOptions) => {
+      const store = await createStore(options);
+      opened.push({ options, store });
+      vi.spyOn(store, "update");
+      vi.spyOn(store, "embed");
+      const search = store.search.bind(store);
+      store.search = (options) => search({ ...options, expansion: "skip" });
+      return store;
+    };
+    const discovery = createSkillExperienceQmdIndex({
+      dataRoot: root,
+      config: () => config,
+      createStore: trackedStore,
+      readOnly: true,
+      getEntries: () => entries,
+    });
+    let full: ReturnType<typeof createSkillExperienceQmdIndex> | undefined;
+    let fresh: ReturnType<typeof createSkillExperienceQmdIndex> | undefined;
+    try {
+      discovery.schedule(entries);
+      await discovery.search({ query: "layoutupgrademarker" });
+      expect(opened).toHaveLength(1);
+      const readOnly = opened[0]!;
+      expect(readOnly.options.readOnly).toBe(true);
+      expect(
+        readOnly.store.internal.db.prepare("PRAGMA user_version").get(),
+      ).toEqual({ user_version: 1 });
+      expect(
+        await readOnly.store.searchVector("layoutupgrademarker", {
+          collection: "body",
+        }),
+      ).toEqual([]);
+      expect(fixture.requests).toHaveLength(requestsBeforeReopen);
+      expect(await readFile(metadataPath, "utf8")).toBe(metadata);
+
+      full = createSkillExperienceQmdIndex({
+        dataRoot: root,
+        config: () => config,
+        createStore: trackedStore,
+      });
+      full.schedule(entries);
+      await waitUntil(
+        () => full!.getStatus() === "ready",
+        "unchanged experience reopen",
+      );
+      expect(
+        readOnly.store.internal.db.prepare("PRAGMA user_version").get(),
+      ).toEqual({ user_version: 2 });
+      expect(
+        readOnly.store.internal.db
+          .prepare("SELECT name FROM sqlite_master WHERE name = 'vectors_vec'")
+          .all(),
+      ).toEqual([]);
+      expect(vectors(readOnly.store)).toEqual(expectedVectors);
+      expect(
+        readOnly.store.internal.db
+          .prepare("SELECT * FROM embedding_index_state")
+          .all(),
+      ).toEqual(identity);
+      expect(
+        readOnly.store.internal.db
+          .prepare("SELECT * FROM content_vectors ORDER BY hash, seq")
+          .all(),
+      ).toEqual(chunks);
+      expect(
+        readOnly.store.internal.db
+          .prepare("SELECT * FROM documents ORDER BY id")
+          .all(),
+      ).toEqual(documents);
+      expect(await readOnly.store.listCollections()).toEqual(collections);
+      expect(
+        await Promise.all(
+          documentPaths.map(async (file) => (await stat(file)).mtimeMs),
+        ),
+      ).toEqual(mtimes);
+      expect(fixture.requests).toHaveLength(requestsBeforeReopen);
+      expect(await readFile(metadataPath, "utf8")).toBe(metadata);
+      expect(
+        (
+          await readOnly.store.searchVector("layoutupgrademarker", {
+            collection: "body",
+          })
+        ).length,
+      ).toBeGreaterThan(0);
+      expect(
+        (await discovery.search({ query: "layoutupgrademarker" }))?.some(
+          (hit) => hit.id === entries[0]!.id,
+        ),
+      ).toBe(true);
+      fresh = createSkillExperienceQmdIndex({
+        dataRoot: root,
+        config: () => config,
+        createStore: trackedStore,
+        readOnly: true,
+        getEntries: () => entries,
+      });
+      fresh.schedule(entries);
+      expect(
+        (await fresh.search({ query: "layoutupgrademarker" }))?.some(
+          (hit) => hit.id === entries[0]!.id,
+        ),
+      ).toBe(true);
+      expect(opened.map(({ options }) => options.readOnly)).toEqual([
+        true,
+        false,
+        true,
+      ]);
+      expect(
+        await opened[2]!.store.searchVector("layoutupgrademarker", {
+          collection: "body",
+        }),
+      ).not.toHaveLength(0);
+      for (const { store } of opened) {
+        expect(store.update).not.toHaveBeenCalled();
+        expect(store.embed).not.toHaveBeenCalled();
+      }
+    } finally {
+      await fresh?.close();
+      await full?.close();
+      await discovery.close();
+    }
+  });
+});
 
 describe("createSkillQmdIndex real QMD integration", () => {
   it("refreshes a live discovery mapping using read-only real SQLite stores", async () => {

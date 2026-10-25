@@ -88,7 +88,7 @@ Review operates on experience copies in a temporary workspace. Filesystem tools 
 
 ## Installation and setup
 
-Use OpenClaw **2026.10.7 or later**, Node.js suitable for that installation, and the pnpm version declared in [`package.json`](package.json). Development CI uses Node.js 24 and 26.
+Use OpenClaw **2026.10.7 or later**, Node.js **26.12.1 or later**, and the pnpm version declared in [`package.json`](package.json). QMD requires Node.js 26; development CI uses Node.js 26.
 
 ### 1. Build and install
 
@@ -137,7 +137,7 @@ Managed skill and experience searches keep `rerank: false`; query expansion cont
 
 #### Migrating the former root Jev setting
 
-Back up your configuration privately before upgrading. Remove the old top-level plugin `jev` object: the strict manifest rejects it, and the runtime compatibility parser ignores it without an alias. To retain its QMD use, copy the endpoint explicitly to `qmd.jev`; to retain plugin selection or manual import, separately configure `decisionModel`. Neither new field inherits the other. A configured host Decision model now takes precedence over plugin selection. Validate the new shape in an isolated profile before applying it. Rollback requires restoring both the prior plugin build and its prior configuration shape; preserve runtime sessions, experiences, graph, QMD databases/mappings/leases, statistics, and Review state.
+Back up your configuration privately before upgrading. Remove the old top-level plugin `jev` object: the strict manifest rejects it, and the runtime compatibility parser ignores it without an alias. To retain its QMD use, copy the endpoint explicitly to `qmd.jev`; to retain plugin selection or manual import, separately configure `decisionModel`. Neither new field inherits the other. A configured host Decision model now takes precedence over plugin selection. Validate the new shape in an isolated profile before applying it. Configuration rollback requires restoring both the prior plugin build and its prior configuration shape; preserve runtime sessions, experiences, graph, statistics, and Review state. A QMD downgrade additionally requires the matching offline index backup described below.
 
 External plugins need `hooks.allowConversationAccess: true` to register conversation hooks, including automatic prompt routing and end-of-turn Review. Keep `hooks` beside `config`, not inside it. Prompt injection is allowed by default; an explicit `hooks.allowPromptInjection: false` disables the prompt hook even with conversation access. The plugin does not grant itself these permissions. See [OpenClaw hook permissions](https://docs.openclaw.ai/plugins/hooks#permissions-and-scope).
 
@@ -145,9 +145,15 @@ External plugins need `hooks.allowConversationAccess: true` to register conversa
 
 The bundled QMD runtime uses remote models only. BM25, document reads, Chinese segmentation, AST chunking, CLI, and MCP remain available; local inference, model downloads, GPU initialization, local tokenization, and local model fallback are retired. Configure the required embedding and expansion fields above; QMD Jev is independent and optional. Missing remote configuration produces an explicit model-operation error without choosing a provider or uploading documents. Pure lexical QMD operations require no model. `qmd pull` now explains the retirement and exits nonzero.
 
-Old local QMD configurations and indexes remain readable for lexical search and diagnostics. They are never automatically rewritten, cleared, or adopted into a remote embedding identity. To convert vectors, configure a remote provider and follow the explicit whole-database rebuild procedure below; preserve the existing collection definitions and back up the index first. Existing remote index formats and provider ordering are unchanged. Local inference SDK entry points are breaking changes; see QMD's remote-only compatibility notes.
+Old local QMD configurations and indexes remain readable for lexical search and diagnostics. They are not automatically adopted into a remote embedding identity. To change embedding providers or models, configure a remote provider and follow the explicit whole-database rebuild procedure below; preserve the existing collection definitions and back up the index first. The separate vector layout conversion described below does not change embedding identity. Local inference SDK entry points are breaking changes; see QMD's remote-only compatibility notes.
 
-The plugin pins the published `@wei840222/qmd` version `2026.10.19`; the lockfile records the registry artifact. Install with `pnpm install --frozen-lockfile` to reproduce that dependency. No Git checkout or unpublished QMD prerelease is required.
+The plugin pins the published `@wei840222/qmd` version `2026.10.25`; the lockfile records the registry artifact. Install with `pnpm install --frozen-lockfile` to reproduce that dependency. No Git checkout or unpublished QMD prerelease is required.
+
+Before first starting this release against existing indexes, stop all Gateway generations and other processes using those indexes, then take a complete offline backup of `dataRoot/qmd/skills/` and `dataRoot/qmd/experiences/`, including any SQLite WAL/SHM files and the associated mappings, metadata, and leases. Copying a running WAL database file by file is not a consistent backup. Keep the backup outside the repository and package.
+
+QMD 2026.10.25 converts the legacy vector table to collection partitions on the first writable open. Full registration owns that initialization, including reopening an unchanged experience catalog; discovery remains read-only and cannot convert an old index. The layout conversion copies usable vectors without calling a model or reembedding, but unsupported legacy tables and rows without active document/chunk metadata can be discarded; do not assume it is lossless. Allow time for conversion and its final VACUUM during startup. Do not run an older QMD build against an index being converted.
+
+Restore the complete matching offline index backup before downgrading QMD. Restoring only the old plugin build or mixing an older main database with newer WAL/SHM files is insufficient; without the backup, returning to the older vector layout requires a full paid reembedding. This is separate from changing embedding models or dimensions, which retains its explicit rebuild requirement. A read-only process can use lexical retrieval on an unconverted legacy index, but vector retrieval requires full registration to complete the conversion first.
 
 Set optional `qmd.embeddingCacheDir` to share document embeddings across skill and experience stores, agents, and processes that use the same directory. Without it, QMD uses its in-memory cache. The plugin forwards the directory unchanged after trimming whitespace; it does not append agent or generation names. QMD expands `~`; relative paths use the process working directory, **not** `dataRoot`. Prefer an absolute path on persistent disk, or tmpfs such as `/dev/shm` when RAM usage and loss on reboot are acceptable.
 

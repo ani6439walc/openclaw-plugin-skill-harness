@@ -751,7 +751,7 @@ describe("SkillExperienceQmdIndex", () => {
       expect(fixture.createStore).toHaveBeenCalledTimes(2);
       expect(fixture.createStore.mock.calls[1]?.[0]).toMatchObject({
         dbPath: fixture.createStore.mock.calls[0]?.[0].dbPath,
-        readOnly: true,
+        readOnly: false,
         config: {
           models: {
             embed_api_url: config.embedding.baseUrl,
@@ -761,6 +761,12 @@ describe("SkillExperienceQmdIndex", () => {
         },
         remoteRequestTimeoutMs: config.timeoutMs,
       });
+      expect(fixture.createStore.mock.calls[1]?.[0].config.collections).toEqual(
+        fixture.createStore.mock.calls[0]?.[0].config.collections,
+      );
+      expect(
+        Object.keys(fixture.createStore.mock.calls[1]?.[0].config.collections),
+      ).toEqual(["keywords", "summary", "body"]);
       if (field === "jev")
         expect(
           fixture.createStore.mock.calls[1]?.[0].config.models,
@@ -973,6 +979,53 @@ describe("SkillExperienceQmdIndex", () => {
     index = undefined;
     expect(fixture.next.search).not.toHaveBeenCalled();
     expect(fixture.next.close).toHaveBeenCalledOnce();
+  });
+
+  it("does not open an existing store after disposal while waiting for its build lock", async () => {
+    await publish(MOCK_ENTRIES);
+    const lock = new FileLock(
+      path.join(tmpDir, "qmd", "experiences", "experience-routing.sqlite"),
+    );
+    expect(await lock.acquire({ maxWaitMs: 0 })).toBe(true);
+    const acquire = vi.spyOn(FileLock.prototype, "acquire");
+    const createStore = vi.fn().mockResolvedValue(makeStore());
+    try {
+      index = createSkillExperienceQmdIndex({
+        dataRoot: tmpDir,
+        config: () => DEFAULT_CONFIG,
+        createStore,
+      });
+      await vi.waitFor(() => expect(acquire).toHaveBeenCalled());
+      const closing = index.close();
+      lock.release();
+      await closing;
+      index = undefined;
+      expect(createStore).not.toHaveBeenCalled();
+    } finally {
+      lock.release();
+      acquire.mockRestore();
+    }
+  });
+
+  it("does not create an empty database from published metadata when the index is missing", async () => {
+    await publish(MOCK_ENTRIES);
+    const database = path.join(
+      tmpDir,
+      "qmd",
+      "experiences",
+      "experience-routing.sqlite",
+    );
+    await fs.unlink(database);
+    const createStore = vi.fn().mockResolvedValue(makeStore());
+    index = createSkillExperienceQmdIndex({
+      dataRoot: tmpDir,
+      config: () => DEFAULT_CONFIG,
+      createStore,
+    });
+    expect(await index.search({ query: "screenshot" })).toBeUndefined();
+    expect(createStore).not.toHaveBeenCalled();
+    await expect(fs.lstat(database)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(index.getStatus()).toBe("idle");
   });
 
   it.each(["timeoutMs", "embeddingCacheDir"] as const)(

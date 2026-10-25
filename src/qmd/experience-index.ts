@@ -120,6 +120,19 @@ function snapshotFingerprint(
   );
 }
 
+function experienceSnapshotCollections(docsRoot: string) {
+  return Object.fromEntries(
+    EXPERIENCE_COLLECTIONS.map(({ name }) => [
+      name,
+      {
+        path: path.join(docsRoot, name),
+        pattern: "**/*.md",
+        ignore: ["**/*.identity.json", "**/*.identity.yml"],
+      },
+    ]),
+  );
+}
+
 function extractSemanticScore(result: QmdRawSearchResult): number {
   const explain = result.explain as Record<string, unknown> | undefined;
   if (explain && typeof explain === "object") {
@@ -294,23 +307,7 @@ export function createSkillExperienceQmdIndex(params: {
   ): Promise<
     Record<string, { path: string; pattern: string; ignore?: string[] }>
   > {
-    const collections = {
-      [EXPERIENCE_KEYWORDS_COLLECTION]: {
-        path: path.join(docsRoot, EXPERIENCE_KEYWORDS_COLLECTION),
-        pattern: "**/*.md",
-        ignore: ["**/*.identity.json", "**/*.identity.yml"],
-      },
-      [EXPERIENCE_SUMMARY_COLLECTION]: {
-        path: path.join(docsRoot, EXPERIENCE_SUMMARY_COLLECTION),
-        pattern: "**/*.md",
-        ignore: ["**/*.identity.json", "**/*.identity.yml"],
-      },
-      [EXPERIENCE_BODY_COLLECTION]: {
-        path: path.join(docsRoot, EXPERIENCE_BODY_COLLECTION),
-        pattern: "**/*.md",
-        ignore: ["**/*.identity.json", "**/*.identity.yml"],
-      },
-    };
+    const collections = experienceSnapshotCollections(docsRoot);
 
     const currentFiles = new Set<string>();
 
@@ -417,21 +414,38 @@ export function createSkillExperienceQmdIndex(params: {
           storeFingerprint = undefined;
           connectionSignature = undefined;
           if (closed) return;
-          const connection = storeConnection();
-          const createStore =
-            params.createStore ?? (await import("@wei840222/qmd")).createStore;
-          const fingerprint = expectedFingerprint;
-          const opened = await createStore({
-            dbPath: databasePath,
-            config: { collections: {}, models: connection.models },
-            readOnly: true,
-            remoteRequestTimeoutMs: connection.remoteRequestTimeoutMs,
-          });
-          store = opened;
-          storeFingerprint = fingerprint;
-          connectionSignature = connection.signature;
-          if (closed) return;
-          if (connection.signature !== storeConnection().signature) continue;
+          const open = async () => {
+            if (closed) return;
+            if (!params.readOnly && !(await fs.lstat(databasePath)).isFile())
+              return;
+            if (closed) return;
+            const createStore =
+              params.createStore ??
+              (await import("@wei840222/qmd")).createStore;
+            if (closed) return;
+            const connection = storeConnection();
+            const fingerprint = expectedFingerprint;
+            const opened = await createStore({
+              dbPath: databasePath,
+              config: {
+                collections: experienceSnapshotCollections(docsRoot),
+                models: connection.models,
+              },
+              readOnly: params.readOnly ?? false,
+              remoteRequestTimeoutMs: connection.remoteRequestTimeoutMs,
+            });
+            store = opened;
+            storeFingerprint = fingerprint;
+            connectionSignature = connection.signature;
+            return opened;
+          };
+          // Discovery already owns this lock. Only full registration may run
+          // writable QMD initialization, including vector layout conversion.
+          const opened = params.readOnly
+            ? await open()
+            : await withFileLock(databasePath, open);
+          if (!opened || closed) return;
+          if (connectionSignature !== storeConnection().signature) continue;
           return opened;
         }
       } catch (error) {

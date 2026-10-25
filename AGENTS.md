@@ -38,7 +38,7 @@ instead of duplicating a version in workflow YAML.
 - `python3 skills/skill-harness/scripts/test-validate-experiences.py`: test the experience validator after building its production imports in `dist/`.
 - `python3 .github/scripts/test_jules_pr_review.py`: test the CI review helper.
 
-CI uses Node.js 24 and 26 and runs formatting, typecheck, Vitest, all three Python suites, build, loader, and dry-pack checks. `pnpm run build` prunes `dist/` before invoking `tsc`; inspect the actual tarball before handoff of package changes.
+Use Node.js 26.12.1 or later; the pinned QMD release requires Node.js 26. CI uses Node.js 26 and runs formatting, typecheck, Vitest, all three Python suites, build, loader, and dry-pack checks. `pnpm run build` prunes `dist/` before invoking `tsc`; inspect the actual tarball before handoff of package changes.
 
 ## Coding Style & Naming Conventions
 
@@ -106,6 +106,8 @@ Production JSON I/O should use `readJsonFile()`, `writeJsonAtomic()`, or `safeWr
 Use imperative Conventional Commit subjects such as `feat:`, `fix:`, `refactor:`, `test:`, or `docs:`, optionally scoped (`feat(qmd):`). Pull requests should explain behavior, risks, configuration/runtime impact, verification, and linked issues. Public behavior changes must update `README.md` and, when applicable, `openclaw.plugin.json`; maintenance-workflow changes must update `skills/skill-harness/**`.
 
 ## Reliability boundaries
+
+The pinned QMD 2026.10.25 release converts legacy vector tables to collection partitions on writable initialization. Full registration must open unchanged experience indexes writable under the existing database lock, with the complete shared three-collection definitions; an empty writable collection config deletes existing collections. Discovery retains `readOnly: true` and its existing outer lock, without nested acquisition or conversion. Preserve catalog fingerprints, document mtimes, usable vector bytes, and published embedding identity; unsupported legacy data can be discarded by QMD, as documented in README. A layout change must not trigger `update()` or `embed()`. Before deployment, stop old generations and take consistent offline backups of both managed QMD index trees with WAL/SHM, mappings, metadata, and leases. Downgrades require restoring that complete backup; code/config rollback alone cannot restore the old vector format. No runtime experiences, sessions, stats, Review, or relation graph migration is required.
 
 Entire skill directories may be symlinks outside the workspace. Use `src/skills/paths.ts` to confine main/support file reads, listings, and QMD snapshots to `realpath(skillDir)`. Allow internal links; reject external, broken, cyclic, and non-regular file targets. Keep existing relative-path and supported-directory rules; do not introduce external support allowlists.
 
