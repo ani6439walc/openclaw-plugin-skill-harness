@@ -24,7 +24,6 @@ export interface RelatedCandidateEvidence {
   name: string;
   from: string;
   relation_type: RelatedSkillResult["relation_type"];
-  verification_status: "unverified";
   reason: string;
 }
 
@@ -76,7 +75,6 @@ export function expandRelatedCandidates(
             name: target.name,
             from: seed.name,
             relation_type: edge.relation_type,
-            verification_status: "unverified",
             reason: Array.from(edge.reason).slice(0, 500).join(""),
           });
         }
@@ -101,7 +99,6 @@ export interface RelationEvidence {
   from_description: string;
   to_description: string;
   relation_type: RelatedSkillResult["relation_type"];
-  verification_status: "unverified";
   reason: string;
 }
 
@@ -162,7 +159,6 @@ export function collectRelationEvidence(
               .join(""),
             to_description: Array.from(to.description).slice(0, 1000).join(""),
             relation_type: edge.relation_type,
-            verification_status: "unverified" as const,
             reason: Array.from(edge.reason).slice(0, 500).join(""),
           },
         ];

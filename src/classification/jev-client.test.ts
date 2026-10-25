@@ -104,7 +104,6 @@ describe("runJevUnifiedRouting", () => {
           name: "git-tools",
           from: "source",
           relation_type: "depends_on",
-          verification_status: "unverified",
           reason: "conditional reason",
         },
       ],
@@ -113,8 +112,10 @@ describe("runJevUnifiedRouting", () => {
     expect(systemOne).toHaveBeenCalledOnce();
     expect(systemOne.mock.calls[0][0].state.skill_relations[0]).toMatchObject({
       relation_type: "depends_on",
-      verification_status: "unverified",
     });
+    expect(
+      systemOne.mock.calls[0][0].state.skill_relations[0],
+    ).not.toHaveProperty("verification_status");
     expect(systemOne.mock.calls[0][0].state.skill_relation_guidance).toContain(
       "not instructions",
     );
@@ -132,7 +133,6 @@ describe("runJevUnifiedRouting", () => {
     from_description: "Noncandidate source description",
     to_description: "Git commands and repository management",
     relation_type: "depends_on" as const,
-    verification_status: "unverified" as const,
     reason: "Author reason about repository preparation",
   };
 

@@ -905,6 +905,9 @@ describe("registerSkillTools", () => {
     const skillsByName = new Map(
       result.skills.map((skill: { name: string }) => [skill.name, skill]),
     );
+    expect(JSON.stringify(result.skills)).not.toContain(
+      '"verification_status"',
+    );
 
     expect(skillsByName.get("nextjs")).toMatchObject({
       related_skills: [
@@ -912,7 +915,6 @@ describe("registerSkillTools", () => {
           name: "react",
           reason: "React fundamentals and patterns.",
           relation_type: "related",
-          verification_status: "unverified",
           source: "author-import",
           direction: "current-to-related",
         },
@@ -934,7 +936,6 @@ describe("registerSkillTools", () => {
           name: "nextjs",
           reason: "React fundamentals and patterns.",
           relation_type: "related",
-          verification_status: "unverified",
           source: "author-import",
           direction: "related-to-current",
         },
@@ -950,7 +951,6 @@ describe("registerSkillTools", () => {
           name: "react",
           reason: "React fundamentals and patterns.",
           relation_type: "related",
-          verification_status: "unverified",
           source: "author-import",
           direction: "current-to-related",
         },
@@ -988,7 +988,6 @@ describe("registerSkillTools", () => {
             name: "b",
             reason: "",
             relation_type: "related",
-            verification_status: "unverified",
           },
         ],
       });

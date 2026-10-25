@@ -9,6 +9,8 @@ import { resolveConfig } from "../config.js";
 import { readJsonFile, writeJsonAtomic } from "../file-utils.js";
 import { normalizeTypeSafeBaseUrl } from "../qmd/provider-resolver.js";
 import { resolveConfinedFile } from "./paths.js";
+import { readRelationSources } from "./relation-sources.js";
+import type { RelationSourceRegistry } from "./relation-sources.js";
 import {
   appendImportedRelations,
   readSkillIdentity,
@@ -81,7 +83,10 @@ export function parseAuthorRelations(
   return [...result].map(([name, reason]) => ({ name, reason }));
 }
 
-export async function preflightRelations(source: string): Promise<ImportPlan> {
+export async function preflightRelations(
+  source: string,
+  registry?: RelationSourceRegistry,
+): Promise<ImportPlan> {
   const root = await fs.realpath(source);
   const plan: ImportPlan = {
     version: 1,
@@ -115,7 +120,7 @@ export async function preflightRelations(source: string): Promise<ImportPlan> {
         const name =
           typeof parsed.data.name === "string" ? parsed.data.name.trim() : "";
         if (!name) throw new Error("missing-name");
-        const identity = await readSkillIdentity({ name, location });
+        const identity = await readSkillIdentity({ name, location }, registry);
         if (!identity) throw new Error("invalid-identity");
         const list = skills.get(name) ?? [];
         list.push({
@@ -472,10 +477,13 @@ export async function applyImportCheckpoint(
     )
       throw new Error("checkpoint-identity-mismatch");
     for (const identity of [candidate.relation.from, candidate.relation.to]) {
-      const current = await readSkillIdentity({
-        name: identity.name,
-        location: path.join(identity.source, "SKILL.md"),
-      });
+      const current = await readSkillIdentity(
+        {
+          name: identity.name,
+          location: path.join(identity.source, "SKILL.md"),
+        },
+        identity.source_id ? readRelationSources(dataRoot) : undefined,
+      );
       if (
         !current ||
         current.id !== identity.id ||
@@ -503,7 +511,10 @@ export async function runRelationImportCli(argv: string[]): Promise<void> {
     throw new Error(
       "usage: preflight|sample|classify|apply --source DIR [--output FILE --checkpoint FILE --config FILE --data-root DIR]",
     );
-  const plan = await preflightRelations(flags.source);
+  const plan = await preflightRelations(
+    flags.source,
+    flags["data-root"] ? readRelationSources(flags["data-root"]) : undefined,
+  );
   if (command === "preflight") {
     if (flags.output) writeJsonAtomic(flags.output, plan);
     console.log(

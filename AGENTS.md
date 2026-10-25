@@ -133,7 +133,9 @@ Experience skill associations are not required dependencies. Preserve eligibilit
 
 Author skill relations are imported once into private ontology-v1.0.4-compatible
 JSONL; runtime metadata is not a second relationship source. Keep the original
-reason, direction, provenance and unverified status. The importer must not edit
+reason, direction and provenance. New graph records, relation tool/evidence payloads,
+and XML must omit `verification_status` and the `verification` attribute; author
+assertions remain advisory rather than verified prerequisites. The importer must not edit
 fork skills, infer missing reasons, promote model scores to verified dependencies,
 or treat removed metadata as a deletion request. Use explicit preflight,
 limited-sample, full-classification and apply stages; paid model requests and
@@ -158,7 +160,8 @@ Require current visible winning identities and a nonempty original reason.
 Use canonicalIdentity() for graph/visibility lookups, expansion deduplication
 and self comparisons; preserve original names in output.
 Keep all originals; never seed from experiences. Pass at most 2 reasons of 500
-code points per target to the existing single Decision call, labeled unverified.
+code points per target to the existing single Decision call, described as author
+reference assertions without a verification-status field.
 Do not introduce hard dependency/conflict rules, fabricated retrieval scores,
 new skill selection thresholds or fallback injection. `relatedCandidates` is optional
 session/event diagnostics; `related-declared` injection contributes to pool
@@ -193,14 +196,55 @@ Use the same per-turn resolved threshold for hook injected flags and renderer
 filtering; subsequent turns honor live updates without changing expansion or skill
 selection. Zero does not bypass selected-anchor requirements.
 Keep runtime/Zod defaults and the strict public manifest aligned.
-Preserve direction, type, original reason and unverified status; do not generate
+Preserve direction, type and original reason; do not generate
 reasons or imply verified prerequisites/order. Relation scores never boost skill
 scores, routing confidence or injection capacity. Optional `relationDecisions`
 session/event diagnostics retain evidence, score and final `injected` status;
 background names are not injected/adopted skills and must not contribute to QMD
-scores or collection counts. No graph/schema/stats migration is needed. Previously disabled deployments also gain bounded expansion and scoring on
-upgrade; local tests are not
-Gateway verification.
+scores or collection counts. Historical sessions and statistics remain readable
+without migration or rewriting retired verification-status fields. Previously
+disabled deployments also gain bounded expansion and scoring on upgrade; local
+tests are not Gateway verification.
+
+Stable relation identity uses `source_id` plus an immutable `skill_key`; it must
+not include the current filesystem path or content fingerprint. GitHub source
+IDs use `github:owner/repository`; self-hosted Git includes its host. Standalone
+local collections receive one persistent `local:<UUID>` source ID through
+explicit registration, with mutable human labels kept separate. Placement
+categories (`workshop`, `workspace`, `managed`, etc.) are not origin identity.
+Known remote provenance survives local installation; unknown copies must not be
+merged by name, matching contents or a guessed Git origin.
+
+The private `skill-relations/sources.json` registry owns source-root bindings
+and each immutable key's current name and relative `source_path` under that
+registered root. Readers do
+not create UUIDs, bindings or sidecars. Registration, explicit rebind/rename,
+and graph publication share the graph lock; missing, invalid or ambiguous
+bindings fail open without borrowing another source's relations. Only current
+visible winning skills may resolve graph endpoints. Back up the registry with
+graph/schema and preserve it during host moves; losing it does not authorize
+regenerating local identities or guessing that matching names share lineage.
+Removing a skill from a registration input does not delete its binding. Use
+explicit `removeKeys` to retire deleted source entries before a complete catalog
+rebuild, preserving the collection ID and every remaining immutable key.
+
+Runtime graph format v2 stores source identity and relative paths, plus each
+relation's endpoint evidence fingerprints. Compare these against current
+resolved endpoints; updating a node must not rewrite other edges' evidence.
+Keep the existing normalized `SKILL.md` fingerprint recipe distinct from CLI
+folder hashes. A mismatch disables the affected hint; restoring exactly the
+same fingerprint permits the original evidence again. Reimport must recheck
+source graph content and current endpoint identities before publication. Preserve
+source reasons, labels and direction, without carrying old classification scores
+onto changed evidence. Keep the upstream ontology schema separate from these
+private runtime bindings and evidence fields.
+
+Legacy v1 graphs retain their legacy reader/identity checks; new v2 records must
+not receive v1 fallback validation when registry/evidence is unavailable. Stage
+and validate rebuilds before switching the formal graph, retain a complete
+rollback backup, and coordinate publication with a compatible plugin build.
+Do not publish stable-ID records while an old loaded plugin still expects hashed
+v1 identities. This is a graph-format change, with no session/statistics reset.
 
 Keep graph implementation in `src/skills/relation-graph.ts`, import and fixed Jev
 classification in `relation-import.ts`, and bounded routing expansion in
@@ -289,17 +333,63 @@ malformed/older logs fail open.
 
 ## Advanced relation import procedure
 
+For ontology-backed rebuilds, use the source `graph.jsonl` and schema as the
+authoritative relationship input. Preserve its stable skill keys and original
+labels/reasons, explicitly bind source roots, and validate the replayed graph,
+relative paths, endpoint revisions and source graph digest before publication.
+No model classification is required merely to import existing ontology labels.
+Keep staged artifacts private, and inspect source counts, unresolved bindings
+and the complete backup/rollback pair before formal publication. The legacy
+metadata importer below remains available for older source declarations.
+
+Build first. Explicitly register complete source bindings through
+`registerRelationSource()` from `dist/src/skills/relation-sources.js`; its input
+contains `root`, `skills: { [skillKey]: { name, source_path } }`, optional `id`
+and `label`. Omit `id` only when deliberately creating a local collection;
+subsequent registration of that same root reuses its persisted UUID. Existing
+origin root/name/path changes require `rebind: true` / `rename: true`, while
+retirement requires an explicit `removeKeys` list. Registration uses the same
+graph lock and rejects invalid state rather than replacing it. Back up the
+registry before changing existing bindings. No source identity sidecars are
+written into skills or QMD snapshots.
+
+With the source registered in a private staged data root, run:
+
+```bash
+node skills/skill-harness/scripts/rebuild-skill-relations.mjs preflight --data-root /private/staged-data --graph /path/to/repo/ontology/graph.jsonl --schema /path/to/repo/ontology/schema.yaml --source-id github:owner/repository --output /private/rebuild/plan.json
+node skills/skill-harness/scripts/rebuild-skill-relations.mjs apply --data-root /private/staged-data --graph /path/to/repo/ontology/graph.jsonl --schema /path/to/repo/ontology/schema.yaml --source-id github:owner/repository --plan /private/rebuild/plan.json
+```
+
+The plan output directory must be private (mode `0700`); plans cannot overwrite
+source trees or managed graph/schema/registry files. Include other registered
+collections as isolated nodes with the same `--additional-source-ids id1,id2`
+argument in both stages. This does not infer local relations. Existing unrelated
+relations or changed supplemental nodes block replacement rather than being
+silently discarded. Preflight/apply make no model calls. Apply reconstructs the
+plan from the authoritative source and compares source graph/schema, registry,
+destination and endpoint identities inside the publication lock; any mismatch
+rejects the operation. Rebuild plans are tied to their target data root's current
+graph and registry: make a fresh preflight for a different target rather than
+copying a plan from staging. Existing graph/schema/registry files are backed up
+together before graph-last atomic publication. Keep deployment and runtime
+acceptance separate from this offline procedure.
+
 The one-time importer accepts YAML objects/arrays and JSON strings in
 `metadata.related-skills`. It does not edit skill files. Build first, then run
 these stages separately from the package root, substituting your own paths:
 
 ```bash
 pnpm run build
-node skills/skill-harness/scripts/import-skill-relations.mjs preflight --source /path/to/skills --output /private/import-plan.json
-node skills/skill-harness/scripts/import-skill-relations.mjs sample --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
-node skills/skill-harness/scripts/import-skill-relations.mjs classify --source /path/to/skills --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
+node skills/skill-harness/scripts/import-skill-relations.mjs preflight --source /path/to/skills --data-root /path/to/plugin-data --output /private/import-plan.json
+node skills/skill-harness/scripts/import-skill-relations.mjs sample --source /path/to/skills --data-root /path/to/plugin-data --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
+node skills/skill-harness/scripts/import-skill-relations.mjs classify --source /path/to/skills --data-root /path/to/plugin-data --config /path/to/openclaw.json --checkpoint /private/import-checkpoint.json
 node skills/skill-harness/scripts/import-skill-relations.mjs apply --source /path/to/skills --checkpoint /private/import-checkpoint.json --data-root /path/to/plugin-data
 ```
+
+Use the same data root, source registry and identity mode in every stage. A
+checkpoint classified with v1 hashed identities cannot be applied after switching
+the source to stable v2 bindings; do not spend classification requests before
+the target source registration is final.
 
 Preflight makes no model requests and reports unresolved targets and estimated
 request count. Sample classifies the first at most 20 relations in the importer's stable order; it is not a random or representative sample. Classify explicitly runs
@@ -325,8 +415,9 @@ not overwritten; reported conflicts require separate resolution. No model
 requests are made by apply. Keep the source metadata until graph import and
 agent-visible tool output have been verified; removing only `related-skills`
 thereafter does not invalidate imported identities. Changes to other metadata,
-body content or winning source disable affected edges until explicitly reviewed
-and reimported. The graph is not periodically synchronized with source metadata.
+body content or winning source disable affected edges while their recorded
+evidence no longer matches. Restore the original contents or explicitly review
+and reimport current source evidence before using those hints again. The graph is not periodically synchronized with source metadata.
 
 A missing or invalid graph leaves ordinary routing working without relations;
 runtime tools do not fall back to legacy metadata relationships. Do not edit the

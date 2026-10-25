@@ -117,7 +117,6 @@ it("keeps identity after metadata removal and disables changed, hidden or replac
       reason: "helpful",
       direction: "current-to-related",
       relation_type: "composes_with",
-      verification_status: "unverified",
       source: "author-import",
     },
   ]);

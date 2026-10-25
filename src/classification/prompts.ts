@@ -85,7 +85,7 @@ function formatSkillXml(
       xmlBlock(
         "relation",
         escapeXmlText(relation.reason),
-        ` from="${escapeXmlAttribute(relation.from)}" to="${escapeXmlAttribute(relation.to)}" type="${escapeXmlAttribute(relation.relation_type)}" verification="unverified"`,
+        ` from="${escapeXmlAttribute(relation.from)}" to="${escapeXmlAttribute(relation.to)}" type="${escapeXmlAttribute(relation.relation_type)}"`,
       ),
     );
   }

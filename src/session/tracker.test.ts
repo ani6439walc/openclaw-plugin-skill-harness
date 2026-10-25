@@ -118,7 +118,6 @@ describe("SessionTracker", () => {
               from_description: "Background context",
               to_description: "Target context",
               relation_type: "depends_on",
-              verification_status: "unverified",
               reason: "Author reason",
               score: 1,
               injected: true,
@@ -143,6 +142,27 @@ describe("SessionTracker", () => {
     expect(
       saved.current.inputSkillDiscovery.relationDecisions[0],
     ).toMatchObject({ from: "background", score: 1, injected: true });
+    expect(
+      saved.current.inputSkillDiscovery.relationDecisions[0],
+    ).not.toHaveProperty("verification_status");
+
+    const legacyRoot = path.join(tempDir, "legacy");
+    const legacyFile = sessionsPath("related-session.json", legacyRoot);
+    saved.current.inputSkillDiscovery.relationDecisions[0].verification_status =
+      "unverified";
+    const legacyRaw = JSON.stringify(saved);
+    fs.mkdirSync(path.dirname(legacyFile), { recursive: true });
+    fs.writeFileSync(legacyFile, legacyRaw);
+    expect(
+      SessionTracker.create(legacyRoot).getCurrentState("related-session")
+        ?.inputSkillDiscovery?.relationDecisions?.[0],
+    ).toMatchObject({
+      from: "background",
+      score: 1,
+      injected: true,
+      verification_status: "unverified",
+    });
+    expect(fs.readFileSync(legacyFile, "utf8")).toBe(legacyRaw);
     expect(
       StatsAggregator.create(tempDir).record("related-session", saved.current),
     ).toBe(true);
