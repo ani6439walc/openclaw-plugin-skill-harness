@@ -537,9 +537,20 @@ reserved, terminal, or ambiguous known run IDs never use that fallback.
 ## Documentation boundaries
 
 The private project note is `~/productivity/projects/ai/skill-harness.md`
-(`/home/wei/productivity/projects/ai/skill-harness.md`). Keep project status,
-deployment observations, runtime audit results, and research follow-ups there;
-keep private runtime data out of repository documentation.
+(`/home/wei/productivity/projects/ai/skill-harness.md`). Write it for human
+readers: retain the design background, architecture diagrams, key trade-offs,
+research context, user-facing behavior and configuration, current status,
+completed milestones, and explicitly agreed next actions. Organize and explain
+these clearly rather than reducing the page to a status summary. Keep
+contributor-only source inventories, command transcripts, process IDs, detailed
+audit evidence, and long deployment histories out of it.
+
+Keep coding-agent contracts here. Preserve detailed private deployment/audit
+records and historical engineering handoffs in Hindsight with their source,
+date, version, and evidence locations. Confirm preservation before removing
+unique details from the project page. Historical records describe their own
+cutoff, not current runtime state. Keep private runtime data out of repository
+documentation and preserve the project page's agreed follow-up scope.
 
 README introduces the project, research context, architecture, behavior and user
 setup. Keep coding-agent contracts, schema migrations, concurrency, persistence,
