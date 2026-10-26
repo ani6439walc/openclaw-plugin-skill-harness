@@ -200,6 +200,9 @@ async function assertDestinationScope(
   const raw = await fs.readFile(relationGraphPath(dataRoot), "utf8");
   if (relationDigest(raw) !== expected) fail("stale-destination");
   const graph = replayRelationGraph(raw);
+  // Full source replacement must never erase Review edits or deletion tombstones.
+  // A deliberate reset uses the lower-level publishRelationSnapshot API.
+  if (graph.reviewedPairs?.size) fail("reviewed-destination-history");
   const supplementalNodes = new Set<string>();
   for (const node of graph.entities.values()) {
     if (node.type !== "Skill") fail("foreign-destination-node");
@@ -243,7 +246,8 @@ async function assertDestinationScope(
     if (
       !graph.entities.has(edge.from) ||
       !graph.entities.has(edge.to) ||
-      edge.properties.source !== "author-import" ||
+      (edge.properties.source !== undefined &&
+        edge.properties.source !== "author-import") ||
       supplementalNodes.has(edge.from) ||
       supplementalNodes.has(edge.to)
     )

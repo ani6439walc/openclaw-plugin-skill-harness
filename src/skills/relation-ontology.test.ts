@@ -11,6 +11,7 @@ import {
   readRelationGraph,
   relationGraphPath,
   resolveRelationGraph,
+  applyRelationReviewChanges,
 } from "./relation-graph.js";
 import {
   registerRelationSource,
@@ -117,6 +118,56 @@ afterEach(async () => {
 });
 
 describe("ontology relation import", () => {
+  it.each(["update", "delete"] as const)(
+    "refuses ordinary snapshot reimport after Review %s, including deleted-edge history",
+    async (operation) => {
+      const input = await fixture();
+      const plan = await preflightOntologyImport(input);
+      await applyOntologyImport(input.dataRoot, plan);
+      const expected = (await readRelationGraph(input.dataRoot))!.relations[0];
+      const [from, to] = [
+        plan.identities.find((identity) => identity.id === expected.from)!,
+        plan.identities.find((identity) => identity.id === expected.to)!,
+      ];
+      await applyRelationReviewChanges(
+        input.dataRoot,
+        [
+          {
+            operation,
+            from,
+            to,
+            expected,
+            ...(operation === "update"
+              ? { type: "related" as const, reason: "Review revision" }
+              : {}),
+            rationale: "Current endpoint bodies require correction.",
+            evidence: [from, to].map((identity) => ({
+              skillId: identity.id,
+              filePath: "SKILL.md",
+              startLine: 4,
+              endLine: 4,
+              quote: `${identity.name} body`,
+              fileDigest: "a".repeat(64),
+            })),
+          },
+        ],
+        {
+          batchId: "batch",
+          eventId: "event",
+          agentId: "main",
+          assertCurrent: async () => {},
+        },
+      );
+      const before = await fs.readFile(relationGraphPath(input.dataRoot));
+      await expect(preflightOntologyImport(input)).rejects.toThrow(
+        "reviewed-destination-history",
+      );
+      await expect(applyOntologyImport(input.dataRoot, plan)).rejects.toThrow();
+      expect(await fs.readFile(relationGraphPath(input.dataRoot))).toEqual(
+        before,
+      );
+    },
+  );
   it("replays create/update/delete/relate/unrelate before validating the active catalog", async () => {
     const input = await fixture();
     await fs.writeFile(
@@ -652,9 +703,16 @@ describe("ontology relation import", () => {
       input.dataRoot,
       await preflightOntologyImport(input),
     );
-    const foreign = (
-      await fs.readFile(relationGraphPath(input.dataRoot), "utf8")
-    ).replaceAll('"author-import"', '"manual"');
+    const foreign = encode(
+      (await fs.readFile(relationGraphPath(input.dataRoot), "utf8"))
+        .trimEnd()
+        .split("\n")
+        .map((line) => {
+          const record = JSON.parse(line);
+          if (record.op === "relate") record.properties.source = "manual";
+          return record;
+        }),
+    );
     await fs.writeFile(relationGraphPath(input.dataRoot), foreign);
     await expect(preflightOntologyImport(input)).rejects.toThrow();
     expect(await fs.readFile(relationGraphPath(input.dataRoot), "utf8")).toBe(

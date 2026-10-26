@@ -50,7 +50,7 @@ export interface GraphRelatedSkill {
   reason: string;
   direction: "current-to-related" | "related-to-current";
   relation_type: RelationType;
-  source: "author-import";
+  source?: "author-import" | "review";
 }
 export interface GraphEntity {
   id: string;
@@ -68,6 +68,28 @@ export interface GraphRelation {
 export interface RelationGraph {
   entities: Map<string, GraphEntity>;
   relations: GraphRelation[];
+  /** Latest operation revision for each ordered pair, including absent/deleted edges. */
+  readonly relationRevisions?: ReadonlyMap<string, string>;
+  /** Includes deleted pairs so ordinary imports cannot resurrect reviewed edges. */
+  reviewedPairs?: Set<string>;
+}
+export interface RelationReviewEvidence {
+  skillId: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  quote: string;
+  fileDigest: string;
+}
+export interface RelationReviewChange {
+  operation: "create" | "update" | "delete";
+  from: SkillIdentity;
+  to: SkillIdentity;
+  expected: GraphRelation | null;
+  type?: RelationType;
+  reason?: string;
+  rationale: string;
+  evidence: readonly RelationReviewEvidence[];
 }
 function object(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -127,9 +149,16 @@ export async function readSkillIdentity(
 
 /** Replay ontology 1.0.4 operations; malformed streams are rejected as a whole. */
 export function replayRelationGraph(raw: string): RelationGraph {
-  const graph: RelationGraph = { entities: new Map(), relations: [] };
+  const relationRevisions = new Map<string, string>();
+  const graph: RelationGraph = {
+    entities: new Map(),
+    relations: [],
+    relationRevisions,
+  };
+  let ordinal = 0;
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
+    ordinal++;
     const record: unknown = JSON.parse(line);
     if (!object(record)) throw new Error("Invalid graph record");
     if (record.op === "create") {
@@ -175,6 +204,14 @@ export function replayRelationGraph(raw: string): RelationGraph {
         to: record.to as string,
         properties: (record.properties ?? {}) as Record<string, unknown>,
       };
+      relationRevisions.set(
+        stable([relation.from, relation.to]),
+        hash(stable({ ordinal, record })),
+      );
+      if (object(record.review)) {
+        graph.reviewedPairs ??= new Set();
+        graph.reviewedPairs.add(stable([relation.from, relation.to]));
+      }
       if (record.op === "relate") graph.relations.push(relation);
       else
         graph.relations = graph.relations.filter(
@@ -249,7 +286,7 @@ function validIdentity(value: unknown): value is SkillIdentity {
 }
 function validProperties(p: Record<string, unknown>): boolean {
   return (
-    p.source === "author-import" &&
+    (p.source === undefined || p.source === "author-import") &&
     (p.formatVersion === 1 ||
       (p.formatVersion === 2 &&
         typeof p.fromFingerprint === "string" &&
@@ -367,7 +404,9 @@ export async function resolveRelationGraph(
         reason: edge.properties.reason as string,
         direction,
         relation_type: edge.rel as RelationType,
-        source: "author-import",
+        source: graph.reviewedPairs?.has(stable([edge.from, edge.to]))
+          ? "review"
+          : "author-import",
       });
       result.set(key, list);
     }
@@ -394,7 +433,7 @@ ${relationTypes
     (type) => `  ${type}:
     from_types: [Skill]
     to_types: [Skill]
-    required: [reason, source, formatVersion, fromFingerprint, toFingerprint]
+    required: [reason, formatVersion, fromFingerprint, toFingerprint]
 `,
   )
   .join("")}`;
@@ -597,7 +636,6 @@ function importedProperties(edge: ImportedRelation): Record<string, unknown> {
     throw new Error("Invalid imported relation");
   return {
     reason: edge.reason,
-    source: "author-import",
     formatVersion: stableIdentity(edge.from) ? 2 : 1,
     ...(stableIdentity(edge.from)
       ? {
@@ -630,6 +668,8 @@ async function assertCurrentIdentities(
     if (
       !current ||
       current.id !== identity.id ||
+      current.name !== identity.name ||
+      current.source !== identity.source ||
       current.fingerprint !== identity.fingerprint ||
       current.source_id !== identity.source_id ||
       current.skill_key !== identity.skill_key ||
@@ -638,15 +678,297 @@ async function assertCurrentIdentities(
       throw new Error("stale-source");
   }
 }
-async function writeTextAtomic(file: string, content: string): Promise<void> {
+async function writeTextAtomic(
+  file: string,
+  content: string,
+  signal?: AbortSignal,
+): Promise<void> {
   const temporary = `${file}.tmp-${randomUUID()}`;
   try {
     await fs.writeFile(temporary, content, { mode: 0o600 });
+    signal?.throwIfAborted();
     await fs.rename(temporary, file);
   } finally {
     await fs.rm(temporary, { force: true });
   }
 }
+
+function boundedText(value: unknown, maximum: number): value is string {
+  return (
+    typeof value === "string" &&
+    !!value.trim() &&
+    Array.from(value).length <= maximum
+  );
+}
+
+function validReviewEvidence(
+  evidence: unknown,
+  from: SkillIdentity,
+  to: SkillIdentity,
+): evidence is readonly RelationReviewEvidence[] {
+  if (!Array.isArray(evidence) || evidence.length < 2 || evidence.length > 16)
+    return false;
+  const covered = new Set<string>();
+  for (const entry of evidence) {
+    if (
+      !object(entry) ||
+      Object.keys(entry).some(
+        (key) =>
+          ![
+            "skillId",
+            "filePath",
+            "startLine",
+            "endLine",
+            "quote",
+            "fileDigest",
+          ].includes(key),
+      ) ||
+      (entry.skillId !== from.id && entry.skillId !== to.id) ||
+      !boundedText(entry.filePath, 1024) ||
+      entry.filePath.includes("\\") ||
+      path.posix.isAbsolute(entry.filePath) ||
+      /^[A-Za-z]:/.test(entry.filePath) ||
+      /[\u0000-\u001f\u007f]/u.test(entry.filePath) ||
+      !entry.filePath
+        .split("/")
+        .every((part) => part && part !== "." && part !== "..") ||
+      !Number.isSafeInteger(entry.startLine) ||
+      !Number.isSafeInteger(entry.endLine) ||
+      (entry.startLine as number) < 1 ||
+      (entry.endLine as number) > 1_000_000 ||
+      (entry.endLine as number) < (entry.startLine as number) ||
+      (entry.endLine as number) - (entry.startLine as number) >= 200 ||
+      !boundedText(entry.quote, 2000) ||
+      typeof entry.fileDigest !== "string" ||
+      !/^[a-f0-9]{64}$/.test(entry.fileDigest)
+    )
+      return false;
+    covered.add(entry.skillId);
+  }
+  return covered.has(from.id) && covered.has(to.id);
+}
+
+function assertReviewChange(change: RelationReviewChange): void {
+  if (
+    !object(change) ||
+    !["create", "update", "delete"].includes(change.operation) ||
+    !validIdentity(change.from) ||
+    !validIdentity(change.to) ||
+    !stableIdentity(change.from) ||
+    !stableIdentity(change.to) ||
+    change.from.id === change.to.id ||
+    canonicalIdentity(change.from.name) === canonicalIdentity(change.to.name) ||
+    !boundedText(change.rationale, 2000) ||
+    !validReviewEvidence(change.evidence, change.from, change.to) ||
+    (change.operation === "create"
+      ? change.expected !== null
+      : !object(change.expected)) ||
+    (change.operation === "delete"
+      ? change.type !== undefined || change.reason !== undefined
+      : !relationTypes.includes(change.type as RelationType) ||
+        !boundedText(change.reason, 2000))
+  )
+    throw new Error("invalid-review-change");
+}
+
+function assertNodeOwnership(
+  graph: RelationGraph,
+  identity: SkillIdentity,
+): void {
+  const existing = graph.entities.get(identity.id);
+  if (
+    existing &&
+    (existing.type !== "Skill" ||
+      existing.properties.formatVersion !== 2 ||
+      existing.properties.source_id !== identity.source_id ||
+      existing.properties.skill_key !== identity.skill_key)
+  )
+    throw new Error("Graph entity ownership conflict");
+}
+
+/**
+ * Append one logical Review batch under the same lock as imports and registry writes.
+ * The caller checks evidence bytes, current visible winners, and each targeted
+ * pair's captured relationRevisions inside this lock, including absent edges.
+ */
+export async function applyRelationReviewChanges(
+  dataRoot: string,
+  changes: readonly RelationReviewChange[],
+  options: {
+    batchId: string;
+    eventId: string;
+    agentId: string;
+    assertCurrent: () => Promise<void>;
+    signal?: AbortSignal;
+  },
+): Promise<{ changed: number; batchId: string }> {
+  if (
+    !Array.isArray(changes) ||
+    changes.length < 1 ||
+    changes.length > 8 ||
+    !boundedText(options.batchId, 256) ||
+    !boundedText(options.eventId, 256) ||
+    !boundedText(options.agentId, 256) ||
+    typeof options.assertCurrent !== "function"
+  )
+    throw new Error("invalid-review-batch");
+  const pinned = structuredClone(changes);
+  const { batchId, eventId, agentId, assertCurrent, signal } = options;
+  const pairs = new Set<string>();
+  for (const change of pinned) {
+    assertReviewChange(change);
+    const pair = stable([change.from.id, change.to.id]);
+    if (pairs.has(pair)) throw new Error("duplicate-review-pair");
+    pairs.add(pair);
+  }
+  signal?.throwIfAborted();
+  const file = relationGraphPath(dataRoot);
+  await assertGraphDirectory(dataRoot);
+  const result = await withFileLock(file, async () => {
+    signal?.throwIfAborted();
+    const raw = (await managedGraphText(dataRoot)) ?? "";
+    const graph = replayRelationGraph(raw);
+    if (
+      [...graph.entities.values()].some(
+        (node) => node.type !== "Skill" || node.properties.formatVersion !== 2,
+      )
+    )
+      throw new Error("stable-writer-on-legacy-graph");
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      const record: unknown = JSON.parse(line);
+      if (
+        object(record) &&
+        object(record.review) &&
+        (record.review.batchId === batchId || record.review.eventId === eventId)
+      )
+        throw new Error("duplicate-review");
+    }
+    await assertCurrent();
+    signal?.throwIfAborted();
+    const registry = readRelationSources(dataRoot);
+    await assertCurrentIdentities(
+      pinned.flatMap((change) => [change.from, change.to]),
+      registry,
+    );
+    const currentRegistry = readRelationSources(dataRoot);
+    if (
+      !registry ||
+      !currentRegistry ||
+      registryDigest(currentRegistry) !== registryDigest(registry)
+    )
+      throw new Error("stale-registry");
+    const timestamp = new Date().toISOString();
+    const operations: Record<string, unknown>[] = [];
+    for (const change of pinned) {
+      for (const identity of [change.from, change.to])
+        assertNodeOwnership(graph, identity);
+      const previous = graph.relations.filter(
+        (edge) => edge.from === change.from.id && edge.to === change.to.id,
+      );
+      if (
+        change.expected === null
+          ? previous.length !== 0
+          : previous.length !== 1 ||
+            stable(previous[0]) !== stable(change.expected)
+      )
+        throw new Error("stale-relation");
+      if (
+        previous[0] &&
+        (!relationTypes.includes(previous[0].rel as RelationType) ||
+          !validProperties(previous[0].properties) ||
+          previous[0].properties.formatVersion !== 2)
+      )
+        throw new Error("invalid-review-target");
+      // Missing nodes cannot be an update/delete target even in a malformed log.
+      if (
+        change.operation !== "create" &&
+        (!graph.entities.has(change.from.id) ||
+          !graph.entities.has(change.to.id))
+      )
+        throw new Error("stale-relation");
+      const review = {
+        batchId,
+        eventId,
+        agentId,
+        operation: change.operation,
+        timestamp,
+        previousRelation: previous[0] ?? null,
+        rationale: change.rationale,
+        evidence: change.evidence,
+      };
+      if (change.operation !== "delete") {
+        for (const identity of [change.from, change.to]) {
+          const existing = graph.entities.get(identity.id);
+          const properties = identityProperties(identity);
+          if (!existing) {
+            const entity = {
+              id: identity.id,
+              type: "Skill",
+              properties,
+              created: timestamp,
+              updated: timestamp,
+            };
+            operations.push({ op: "create", entity, timestamp });
+            graph.entities.set(identity.id, entity);
+          } else if (stable(existing.properties) !== stable(properties)) {
+            operations.push({
+              op: "update",
+              id: identity.id,
+              properties,
+              timestamp,
+            });
+            graph.entities.set(identity.id, {
+              ...existing,
+              properties,
+              updated: timestamp,
+            });
+          }
+        }
+      }
+      if (previous[0])
+        operations.push({
+          op: "unrelate",
+          from: previous[0].from,
+          rel: previous[0].rel,
+          to: previous[0].to,
+          timestamp,
+          review,
+        });
+      if (change.operation !== "delete") {
+        const sourceGraphDigest = previous[0]?.properties.sourceGraphDigest;
+        operations.push({
+          op: "relate",
+          from: change.from.id,
+          rel: change.type,
+          to: change.to.id,
+          properties: {
+            reason: change.reason,
+            formatVersion: 2,
+            fromFingerprint: change.from.fingerprint,
+            toFingerprint: change.to.fingerprint,
+            ...(sourceGraphDigest === undefined ? {} : { sourceGraphDigest }),
+          },
+          timestamp,
+          review,
+        });
+      }
+    }
+    signal?.throwIfAborted();
+    const appended = `${raw}${raw && !raw.endsWith("\n") ? "\n" : ""}${operations.map((operation) => JSON.stringify(operation)).join("\n")}\n`;
+    await writeTextAtomic(
+      path.join(path.dirname(file), "schema.yaml"),
+      stableRelationSchema,
+      signal,
+    );
+    await writeTextAtomic(file, appended, signal);
+    graphCache.delete(file);
+    return { changed: pinned.length, batchId };
+  });
+  if (!result) throw new Error("Skill relation graph is busy");
+  return result;
+}
+
 export async function appendImportedRelations(
   dataRoot: string,
   relations: readonly ImportedRelation[],
@@ -706,7 +1028,14 @@ export async function appendImportedRelations(
       const previous = graph.relations.filter(
         (r) => r.from === edge.from.id && r.to === edge.to.id,
       );
-      if (previous.some((r) => r.properties.source !== "author-import")) {
+      if (
+        graph.reviewedPairs?.has(stable([edge.from.id, edge.to.id])) ||
+        previous.some(
+          (r) =>
+            r.properties.source !== undefined &&
+            r.properties.source !== "author-import",
+        )
+      ) {
         result.conflicts.push(`${edge.from.name} -> ${edge.to.name}`);
         continue;
       }
