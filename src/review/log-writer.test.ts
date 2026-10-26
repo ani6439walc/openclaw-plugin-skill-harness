@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { IntentReviewLogWriter } from "./log-writer.js";
 import { parseReviewLog } from "./log.js";
-import type { ReviewFinding } from "./types.js";
+import type { ReviewFinding, SkillRelationReviewFinding } from "./types.js";
+import { logger } from "../../api.js";
 
 describe("IntentReviewLogWriter", () => {
   let root: string;
@@ -19,7 +20,150 @@ describe("IntentReviewLogWriter", () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "intent-review-writer-"));
     writer = new IntentReviewLogWriter(root);
   });
-  afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const relationFinding: SkillRelationReviewFinding = {
+    trigger: "capability-fit",
+    targetKind: "skill-relation",
+    operation: "create",
+    fromSkillId: "collection:first",
+    toSkillId: "collection:second",
+    relationType: "composes_with",
+    reason: "These procedures compose at the documented handoff.",
+    relationEvidence: [
+      {
+        skillId: "collection:first",
+        filePath: "SKILL.md",
+        startLine: 1,
+        endLine: 2,
+        quote: "First procedure",
+      },
+      {
+        skillId: "collection:second",
+        filePath: "SKILL.md",
+        startLine: 3,
+        endLine: 4,
+        quote: "Second procedure",
+      },
+    ],
+    dedupeKey: "relation",
+    summary: "Connect the complementary procedures",
+    evidence: ["Both skill documents were read"],
+    correctionGoal: "Preserve a useful handoff",
+    suggestedChange: "Create this relation",
+  };
+
+  it.each(["create", "update", "delete"] as const)(
+    "persists a relation %s and graph receipt",
+    async (operation) => {
+      const finding = { ...relationFinding, operation };
+      expect(
+        await writer.record("relation", source, [finding], {
+          changedRelationCount: 1,
+          relationBatchId: "graph-batch-1",
+          relationOutcome: "applied",
+        }),
+      ).toBe(true);
+      const log = parseReviewLog(
+        JSON.parse(fs.readFileSync(path.join(root, "review.json"), "utf8")),
+      );
+      expect(log.processedEvents.relation).toMatchObject({
+        changeCount: 1,
+        changes: [finding],
+        changedRelationCount: 1,
+        relationBatchId: "graph-batch-1",
+        relationOutcome: "applied",
+      });
+      expect(log.processedEvents.relation?.changes?.[0]).not.toHaveProperty(
+        "targetExperienceIds",
+      );
+    },
+  );
+
+  it("records only completed findings while preserving partial experience state and graph receipt", async () => {
+    const completedExperience: ReviewFinding = {
+      trigger: "capability-fit",
+      targetKind: "skill-experience",
+      operation: "refine",
+      targetExperienceIds: ["complete-entry"],
+      dedupeKey: "completed",
+      summary: "Refine the completed entry",
+      evidence: ["The completed file was reread"],
+      correctionGoal: "Keep the completed refinement",
+      suggestedChange: "Updated the experience",
+    };
+    expect(
+      await writer.record(
+        "partial",
+        source,
+        [relationFinding, completedExperience],
+        {
+          outcome: "partially-applied",
+          changedRelationCount: 1,
+          relationBatchId: "graph-batch-1",
+          relationOutcome: "applied",
+          experienceOutcome: "partial",
+          changedExperienceIds: ["complete-entry", "incomplete-entry"],
+          partialExperienceIds: ["incomplete-entry"],
+          validationErrors: ["experience-write-failed"],
+        },
+      ),
+    ).toBe(true);
+    const log = parseReviewLog(
+      JSON.parse(fs.readFileSync(path.join(root, "review.json"), "utf8")),
+    );
+    expect(log.processedEvents.partial).toMatchObject({
+      outcome: "partially-applied",
+      changeCount: 2,
+      changes: [relationFinding, completedExperience],
+      changedRelationCount: 1,
+      relationBatchId: "graph-batch-1",
+      experienceOutcome: "partial",
+      changedExperienceIds: ["complete-entry", "incomplete-entry"],
+      partialExperienceIds: ["incomplete-entry"],
+    });
+  });
+
+  it("rejects malformed relation receipts without logging rejected evidence or values", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(
+      await writer.record("invalid", source, [relationFinding], {
+        changedRelationCount: 1,
+        relationBatchId: "private-evidence-marker",
+        relationOutcome: "aborted",
+      }),
+    ).toBe(false);
+    expect(fs.existsSync(path.join(root, "review.json"))).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("reason=operation-failed"),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(
+      "private-evidence-marker",
+    );
+  });
+
+  it("redacts write failures while retaining the atomic JSON writer", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const privateRoot = path.join(root, "private-write-error-marker");
+    fs.mkdirSync(path.join(privateRoot, "review.json"), { recursive: true });
+    expect(
+      await new IntentReviewLogWriter(privateRoot).record(
+        "write-failure",
+        source,
+        [],
+      ),
+    ).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("reason=invalid-file-type code=EISDIR"),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(
+      "private-write-error-marker",
+    );
+    expect(fs.readdirSync(privateRoot)).toEqual(["review.json"]);
+  });
 
   it("writes one v8 record for an applied review", async () => {
     const finding = {

@@ -131,6 +131,47 @@ Experience skill associations are not required dependencies. Preserve eligibilit
 
 ## Skill relation graph
 
+Review may automatically create, update and delete both imported author relations
+and its own relations in the private graph. Preserve author reasons/provenance on
+import; subsequent Review revisions must preserve the original operations in
+history rather than treating their current reason/type as immutable. Relation
+inspection seeds are final `matchedSkills` union successfully loaded skills,
+filtered to current visible winning identities; do not broaden experience
+association eligibility or count recommendation as adoption. Use existing Review
+triggers/scheduling, one-hop evidence preparation with at most eight extra visible
+skills, and at most eight ordered-pair changes per run.
+
+The parent stages confined full `SKILL.md` snapshots (256 KiB per file, 2 MiB
+total). Relation proposals must cite exact line ranges/quotes from both endpoints,
+touch an original seed and stay inside that fixed manifest. Skill content can
+justify changes without an execution trial; recommendation/search scores or
+co-loading alone cannot. Require explicit necessity for `depends_on`; deletion
+requires contradiction, duplication or supersession, not lack of usage or search
+hits. Do not introduce confidence levels or restore verification-status fields.
+
+Keep formal Review writes in the graph domain. Under the graph lock, recheck
+current source bindings, visible winners, exact evidence bytes/fingerprints and
+each targeted pair's latest operation revision, including absent/deleted targets.
+Reject the complete graph batch on a conflict, but allow unrelated graph edits.
+Publish by atomic replacement of unchanged old JSONL plus all new operations:
+create uses `relate`, update uses `unrelate` plus `relate`, delete uses `unrelate`.
+Operation-level `review` metadata retains batch/event/agent IDs, time, rationale,
+exact evidence/digests and the previous relation. New relation properties omit
+`source`; read historical `source: author-import` compatibly and retain imported
+`sourceGraphDigest`. Never compact Review history implicitly. Normal incremental
+imports protect all reviewed ordered pairs across types, including tombstones;
+ontology full-import preflight rejects reviewed destination history. Explicit
+snapshot maintenance remains a separate backed-up replacement path.
+
+Graph and experience commits are independent. Preserve committed graph receipts
+on later experience conflict, I/O failure or abort; additive v8 log fields record
+per-domain outcomes, actual experience deltas and partial targets. Only completed
+findings are logged as applied. Hook cancellation must not discard committed
+receipts; relation-only work must not refresh the experience index. The staged
+manifest and parent validation bound accepted proposals. No graph-writing tool
+is exposed; `exec` remains governed by host policy, and `workspaceOnly` filesystem
+configuration is not shell containment.
+
 Author skill relations are imported once into private ontology-v1.0.4-compatible
 JSONL; runtime metadata is not a second relationship source. Keep the original
 reason, direction and provenance. New graph records, relation tool/evidence payloads,

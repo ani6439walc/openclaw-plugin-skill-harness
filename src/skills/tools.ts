@@ -116,7 +116,7 @@ export function registerSkillTools(
         name: "skill_list",
         label: "List Skills",
         description:
-          "List OpenClaw skills visible to the current agent. Use only when the task is broad, terminology is uncertain, or focused search is insufficient. Set show_related to include direct optional relations: current-to-related is declared by the returned skill, while related-to-current is declared by another visible skill. Use skill_view to read full SKILL.md content or linked support files.",
+          "List OpenClaw skills visible to the current agent. Use only when the task is broad, terminology is uncertain, or focused search is insufficient. Set show_related to include direct optional relations: current-to-related points from the returned skill to another visible skill, while related-to-current points from another visible skill to the returned skill. Use skill_view to read full SKILL.md content or linked support files.",
         parameters: Type.Object({
           offset: Type.Optional(
             Type.Number({
@@ -139,7 +139,7 @@ export function registerSkillTools(
           show_related: Type.Optional(
             Type.Boolean({
               description:
-                "When true, include direct unverified graph relations with type, author reason and original direction; these are not required dependencies.",
+                "When true, include direct unverified graph relations with type, relation reason, source (author-import or review) and original direction; these are not required dependencies.",
             }),
           ),
         }),
@@ -229,7 +229,7 @@ export function registerSkillTools(
           show_related: Type.Optional(
             Type.Boolean({
               description:
-                "When true, include direct unverified graph relations with type, author reason and original direction; these are not required dependencies.",
+                "When true, include direct unverified graph relations with type, relation reason, source (author-import or review) and original direction; these are not required dependencies.",
             }),
           ),
         }),
@@ -367,7 +367,7 @@ export function registerSkillTools(
         name: "skill_view",
         label: "View Skill",
         description:
-          "Read a visible OpenClaw skill's SKILL.md content, or read one of its linked support files under references, templates, scripts, assets, or examples. Read the complete skill before following its workflow. Returned relations are unverified author declarations, not required dependencies or hard conflicts; incoming relations retain their original predicate direction.",
+          "Read a visible OpenClaw skill's SKILL.md content, or read one of its linked support files under references, templates, scripts, assets, or examples. Read the complete skill before following its workflow. Returned relations are unverified relation assertions, not required dependencies or hard conflicts; source identifies author-import or review provenance, and incoming relations retain their original predicate direction.",
         parameters: Type.Object({
           name: Type.String({ description: "Skill name to read." }),
           file_path: Type.Optional(

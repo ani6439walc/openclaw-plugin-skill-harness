@@ -52,6 +52,8 @@ import {
   resolveSkillInventory,
 } from "../skills/index.js";
 import { experiencesPath, packageRoot } from "../file-utils.js";
+import { prepareRelationReviewContext } from "../review/relations.js";
+import type { RelationReviewContext } from "../review/relations.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import type { SkillExperienceEntry } from "../experiences/index.js";
 import type { SkillExperienceHit } from "../qmd/experience-index.js";
@@ -289,12 +291,58 @@ export function createHookHandlers(deps: HookDeps) {
           error,
         });
       }
+      let relationContext: RelationReviewContext | undefined;
+      if (deps.dataRoot) {
+        const seedNames = [
+          ...new Set([
+            ...(candidate.snapshot.current.matchedSkills ?? []),
+            ...(candidate.snapshot.current.skillsUsed ?? []).map(
+              (skill) => skill.name,
+            ),
+          ]),
+        ];
+        try {
+          relationContext = await prepareRelationReviewContext({
+            dataRoot: deps.dataRoot,
+            seedNames,
+            getVisibleSkills: async () =>
+              (deps.reviewSkillResolver ?? listAvailableSkills)({
+                api,
+                agentId: candidate.agentId,
+                bundledSkillsDir,
+                nativeBundledSkillsDir: await nativeBundledSkillsDir,
+                sharedRoots: sharedRoots(),
+                usageStats: {},
+                cacheTtlMs: 0,
+              }),
+            ...(qmdSkillIndex
+              ? {
+                  search: ({ query, limit }) =>
+                    qmdSkillIndex.search({
+                      agentId: candidate.agentId,
+                      query,
+                      limit,
+                    }),
+                }
+              : {}),
+            searchTimeoutMs: candidate.resolvedConfig.qmd.timeoutMs,
+            signal: abortSignal,
+          });
+        } catch {
+          if (abortSignal.aborted) return;
+          logger.warn("review relation evidence unavailable", {
+            reason: "preparation-failed",
+          });
+        }
+      }
+      abortSignal.throwIfAborted();
       const reviewResult = await reviewer({
         api,
         config: candidate.resolvedConfig,
         agentId: candidate.agentId,
         experienceDirectory: experiencesPath(deps.dataRoot ?? "."),
         allowedExperienceSkills,
+        ...(relationContext ? { relationContext } : {}),
         sessionKey: candidate.ctx.sessionKey ?? candidate.snapshot.sessionKey,
         messageProvider: candidate.ctx.messageProvider,
         modelRef: candidate.modelRef,
@@ -303,7 +351,13 @@ export function createHookHandlers(deps: HookDeps) {
         dataRoot: deps.dataRoot,
         abortSignal,
       });
-      if (!reviewResult || abortSignal.aborted) return;
+      if (
+        !reviewResult ||
+        (abortSignal.aborted &&
+          !reviewResult.changedRelationCount &&
+          !reviewResult.changedExperienceIds?.length)
+      )
+        return;
       await reviewLogWriter.record(
         candidate.snapshot.eventId,
         {
@@ -317,6 +371,21 @@ export function createHookHandlers(deps: HookDeps) {
           triggers: candidate.triggers,
           outcome: reviewResult.outcome,
           changedExperienceIds: reviewResult.changedExperienceIds,
+          ...(reviewResult.changedRelationCount !== undefined
+            ? { changedRelationCount: reviewResult.changedRelationCount }
+            : {}),
+          ...(reviewResult.relationBatchId
+            ? { relationBatchId: reviewResult.relationBatchId }
+            : {}),
+          ...(reviewResult.relationOutcome
+            ? { relationOutcome: reviewResult.relationOutcome }
+            : {}),
+          ...(reviewResult.experienceOutcome
+            ? { experienceOutcome: reviewResult.experienceOutcome }
+            : {}),
+          ...(reviewResult.partialExperienceIds
+            ? { partialExperienceIds: reviewResult.partialExperienceIds }
+            : {}),
           validationErrors: reviewResult.validationErrors,
           noFindingReasonCounts: reviewResult.noFindingReasonCounts,
           schemaRejectionReasonCounts: reviewResult.schemaRejectionReasonCounts,

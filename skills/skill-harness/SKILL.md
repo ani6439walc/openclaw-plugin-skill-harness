@@ -23,6 +23,8 @@ The reviewer uses `read`, `write`, `edit`, `ls`, and `exec` in its temporary wor
 
 Use this when the user asks to inspect, author, refine, or prune skill experiences manually. Read and follow `references/experience.md`. Maintain valid experience directory structure (`summary.md`, `keywords.md`, `body.md`, and optional `skills.md`) under `<dataRoot>/experiences/<id>/`.
 
+Automatic Review also maintains private skill relations when enabled. It starts from final recommended and successfully loaded skills, reads bounded staged `SKILL.md` evidence, and submits validated relation proposals through the plugin's graph writer. Recommendation alone is not relationship or execution evidence. This manual experience workflow does not authorize direct graph edits or reimport: Review JSONL history, including deletions, must be preserved. See [skill relation behavior](../../README.md#skill-relations).
+
 ## Mode: runtime-health
 
 Use this when the user asks for Skill Harness health, Review outcome distributions, experience and skill discovery metrics, session retention, QMD state, or disk growth. Read and follow `references/runtime-health-audit.md`. Run the report-only `scripts/runtime-health-audit.py` locally. Report data coverage first, then query/selection observations, skill usage, experience retrieval, Review outcomes, and suggested checks or bounded experiments with supporting sample counts. Keep output private and never modify runtime state from audit findings. A healthy report does not prove Gateway loaded the plugin.

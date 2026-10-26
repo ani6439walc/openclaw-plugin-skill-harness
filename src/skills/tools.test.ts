@@ -1,13 +1,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { registerSkillTools } from "./tools.js";
 import {
   appendImportedRelations,
+  applyRelationReviewChanges,
   readSkillIdentity,
   relationGraphPath,
 } from "./relation-graph.js";
+import { registerRelationSource } from "./relation-sources.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import type { IntentCatalogEntry } from "../types.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
@@ -190,6 +193,102 @@ describe("registerSkillTools", () => {
     expect(description("skill_view")).toContain(
       "Read the complete skill before following its workflow",
     );
+  });
+
+  it("describes relation provenance without attributing Review assertions to authors", async () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "skill-tools-review-relations-"),
+    );
+    try {
+      const stateDir = path.join(tmp, "state");
+      const workspace = path.join(tmp, "workspace");
+      const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+      writeSkill(workspace, "writer");
+      writeSkill(workspace, "reader");
+      const source = await registerRelationSource(dataRoot, {
+        id: "github:example/tool-skills",
+        root: path.join(workspace, "skills"),
+        skills: {
+          writer: { name: "writer", source_path: "writer/SKILL.md" },
+          reader: { name: "reader", source_path: "reader/SKILL.md" },
+        },
+      });
+      const registry = { version: 1 as const, sources: [source] };
+      const skills = ["writer", "reader"].map((name) => ({
+        name,
+        location: path.join(workspace, "skills", name, "SKILL.md"),
+      }));
+      const [from, to] = await Promise.all(
+        skills.map((skill) => readSkillIdentity(skill, registry)),
+      );
+      expect(from).toBeDefined();
+      expect(to).toBeDefined();
+      await applyRelationReviewChanges(
+        dataRoot,
+        [
+          {
+            operation: "create",
+            from: from!,
+            to: to!,
+            expected: null,
+            type: "composes_with",
+            reason: "The reviewed workflows compose.",
+            rationale:
+              "The complete endpoint files describe compatible workflows.",
+            evidence: [from!, to!].map((identity, index) => ({
+              skillId: identity.id,
+              filePath: "SKILL.md",
+              startLine: 6,
+              endLine: 6,
+              quote: index === 0 ? "# Writer" : "# reader",
+              fileDigest: createHash("sha256")
+                .update(fs.readFileSync(skills[index]!.location))
+                .digest("hex"),
+            })),
+          },
+        ],
+        {
+          batchId: "tool-review-batch",
+          eventId: "tool-review-event",
+          agentId: "main",
+          assertCurrent: async () => {},
+        },
+      );
+      const api = createApi(stateDir, workspace);
+      registerSkillTools(api);
+      const tools = toolsForAgent(api);
+      expect(
+        (tools.get("skill_list") as { description: string }).description,
+      ).toContain("points from the returned skill");
+      for (const name of ["skill_list", "skill_search"]) {
+        const tool = tools.get(name) as {
+          parameters: { properties: { show_related: { description: string } } };
+        };
+        const description = tool.parameters.properties.show_related.description;
+        expect(description).toContain("relation reason");
+        expect(description).toContain("source");
+        expect(description).not.toContain("author reason");
+        expect(description).toContain("not required dependencies");
+      }
+      const view = tools.get("skill_view") as { description: string };
+      expect(view.description).toContain("unverified relation assertions");
+      expect(view.description).not.toContain("author declarations");
+      expect(view.description).toContain(
+        "not required dependencies or hard conflicts",
+      );
+      const result = await runTool(view, { name: "writer" });
+      expect(result.related_skills).toEqual([
+        {
+          name: "reader",
+          reason: "The reviewed workflows compose.",
+          direction: "current-to-related",
+          relation_type: "composes_with",
+          source: "review",
+        },
+      ]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("returns five shared experiences by default while bounding bodies and visible associations", async () => {

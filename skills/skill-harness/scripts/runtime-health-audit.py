@@ -314,7 +314,7 @@ def review_change_summary(events: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(trigger, str):
                     trigger_events[trigger] += 1
         changes = event.get("changes")
-        if not isinstance(changes, list):
+        if outcome not in ("applied", "partially-applied") or not isinstance(changes, list):
             changes = []
         changes_per_event[str(len(changes))] += 1
         for change in changes:
@@ -349,7 +349,7 @@ def review_change_summary(events: dict[str, Any]) -> dict[str, Any]:
 
     event_count = sum(outcomes.values())
     total_changes = sum(changes_by_trigger.values())
-    applied_events = outcomes["applied"]
+    applied_events = outcomes["applied"] + outcomes["partially-applied"]
     return {
         "eventCount": event_count,
         "invalidRecords": invalid_records,
@@ -795,10 +795,9 @@ def review_analysis(review: dict[str, Any] | None, start: float, end: float) -> 
     events = object_or_empty(review.get("processedEvents"))
     selected = {key: value for key, value in events.items()
                 if isinstance(value, dict) and (at := iso_timestamp(value.get("processedAt"))) is not None and start <= at < end}
-    summarized = {key: {**value, "changes": value.get("changes", []) if value.get("outcome") == "applied" else []} for key, value in selected.items()}
-    result = review_change_summary(summarized)
+    result = review_change_summary(selected)
     result["status"] = "observed-completed-events"
-    result["outcomeRates"] = {outcome: ratio(count, result["eventCount"]) for outcome, count in ((name, result["outcomes"].get(name, 0)) for name in ("applied", "nofinding", "schema-rejected", "parse-failed", "subagent-error", "validation-failed"))}
+    result["outcomeRates"] = {outcome: ratio(count, result["eventCount"]) for outcome, count in ((name, result["outcomes"].get(name, 0)) for name in ("applied", "partially-applied", "nofinding", "schema-rejected", "parse-failed", "subagent-error", "validation-failed"))}
     result["lastCompletedAt"] = max((value["processedAt"] for value in selected.values()), key=lambda value: iso_timestamp(value), default=None)
     result["invalidTimestamps"] = sum(iso_timestamp(object_or_empty(value).get("processedAt")) is None for value in events.values())
     result["queueState"] = "unobserved"
