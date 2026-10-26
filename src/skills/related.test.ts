@@ -14,12 +14,27 @@ const edge = (
   reason: "Author reason",
   direction: "current-to-related",
   relation_type: "depends_on",
-  verification_status: "unverified",
   source: "author-import",
   ...extra,
 });
 
 describe("declared relation candidates", () => {
+  it("keeps author provenance without emitting verification status", () => {
+    const visible = [skill("alpha"), skill("beta")];
+    const graph = new Map([["alpha", [edge("beta")]]]);
+    const expanded = expandRelatedCandidates([visible[0]], visible, graph);
+    const evidence = collectRelationEvidence([visible[0]], visible, graph);
+    expect(expanded.added).toEqual(["beta"]);
+    expect(expanded.evidence[0]).toMatchObject({
+      from: "alpha",
+      name: "beta",
+      relation_type: "depends_on",
+      reason: "Author reason",
+    });
+    expect(expanded.evidence[0]).not.toHaveProperty("verification_status");
+    expect(evidence[0]).not.toHaveProperty("verification_status");
+  });
+
   it("uses canonical identities for graph lookup, targets, self edges and duplicates", () => {
     const anchor = skill("Ａ");
     const existing = skill("Ｂ");

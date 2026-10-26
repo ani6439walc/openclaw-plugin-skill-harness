@@ -1,6 +1,7 @@
 import type { ReviewOperation } from "./log.js";
 import type { ReviewTrigger } from "./triggers.js";
 import type { AvailableSkill } from "../types.js";
+import type { RelationType } from "../skills/relation-graph.js";
 
 export interface ReviewRecommendationCandidate {
   name: string;
@@ -69,7 +70,32 @@ export type SkillExperienceReviewFinding = BaseReviewFinding & {
       }
   );
 
-export type ReviewFinding = SkillExperienceReviewFinding;
+export interface RelationEvidenceReference {
+  skillId: string;
+  filePath: "SKILL.md";
+  startLine: number;
+  endLine: number;
+  quote: string;
+}
+
+export type SkillRelationReviewFinding = BaseReviewFinding & {
+  targetKind: "skill-relation";
+  operation: "create" | "update" | "delete";
+  fromSkillId: string;
+  toSkillId: string;
+  relationType?: RelationType;
+  reason?: string;
+  relationEvidence: RelationEvidenceReference[];
+  targetExperienceIds?: never;
+  sourceExperienceIds?: never;
+  retainedExperienceId?: never;
+};
+
+export type ReviewFinding =
+  SkillExperienceReviewFinding | SkillRelationReviewFinding;
+
+export type ReviewDomainOutcome =
+  "applied" | "partial" | "validation-failed" | "aborted";
 
 export type ReviewSource = {
   sessionId: string;

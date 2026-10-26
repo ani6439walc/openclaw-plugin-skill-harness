@@ -45,6 +45,7 @@ describe("skill-harness user-triggered modes", () => {
         .sort(),
     ).toEqual([
       "import-skill-relations.mjs",
+      "rebuild-skill-relations.mjs",
       "runtime-health-audit.py",
       "test-runtime-health-audit.py",
       "test-validate-experiences.py",

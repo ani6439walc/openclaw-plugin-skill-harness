@@ -3,10 +3,14 @@ import {
   reviewLogPath,
   fileExists,
   readJsonFile,
-  safeWriteJson,
+  writeJsonAtomic,
   withFileLock,
 } from "../file-utils.js";
-import type { ReviewFinding, ReviewSource } from "./types.js";
+import type {
+  ReviewDomainOutcome,
+  ReviewFinding,
+  ReviewSource,
+} from "./types.js";
 import {
   createReviewLog,
   ReviewLogSchema,
@@ -18,10 +22,33 @@ import {
   type SchemaRejectionReasonCounts,
 } from "./log.js";
 import type { ReviewTrigger } from "./triggers.js";
+import { safeErrorClassification } from "../error-diagnostics.js";
 
 function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
-  return {
+  const common = {
     trigger: finding.trigger,
+    dedupeKey: finding.dedupeKey,
+    summary: finding.summary,
+    evidence: [...finding.evidence],
+    correctionGoal: finding.correctionGoal,
+    suggestedChange: finding.suggestedChange,
+  };
+  if (finding.targetKind === "skill-relation") {
+    return {
+      ...common,
+      targetKind: "skill-relation",
+      operation: finding.operation,
+      fromSkillId: finding.fromSkillId,
+      toSkillId: finding.toSkillId,
+      ...(finding.relationType !== undefined
+        ? { relationType: finding.relationType }
+        : {}),
+      ...(finding.reason !== undefined ? { reason: finding.reason } : {}),
+      relationEvidence: finding.relationEvidence.map((entry) => ({ ...entry })),
+    };
+  }
+  return {
+    ...common,
     targetKind: "skill-experience",
     operation: finding.operation,
     targetExperienceIds: [...finding.targetExperienceIds],
@@ -31,11 +58,6 @@ function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
           retainedExperienceId: finding.retainedExperienceId,
         }
       : {}),
-    dedupeKey: finding.dedupeKey,
-    summary: finding.summary,
-    evidence: [...finding.evidence],
-    correctionGoal: finding.correctionGoal,
-    suggestedChange: finding.suggestedChange,
   };
 }
 
@@ -63,10 +85,10 @@ export class IntentReviewLogWriter {
         ),
       );
     } catch (error) {
-      logger.warn("failed to read completed skill epochs", {
-        error,
-        path: logPath,
-      });
+      const diagnostic = safeErrorClassification(error);
+      logger.warn(
+        `failed to read completed skill epochs reason=${diagnostic.reason}${diagnostic.code ? ` code=${diagnostic.code}` : ""}`,
+      );
       return undefined;
     }
   }
@@ -81,6 +103,11 @@ export class IntentReviewLogWriter {
       outcome?: ProcessedEventOutcome;
       changedIntentIds?: readonly string[];
       changedExperienceIds?: readonly string[];
+      changedRelationCount?: number;
+      relationBatchId?: string;
+      relationOutcome?: ReviewDomainOutcome;
+      experienceOutcome?: ReviewDomainOutcome;
+      partialExperienceIds?: readonly string[];
       validationErrors?: readonly string[];
       noFindingReasonCounts?: NoFindingReasonCounts;
       schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
@@ -122,6 +149,21 @@ export class IntentReviewLogWriter {
           ...(options.changedExperienceIds?.length
             ? { changedExperienceIds: [...options.changedExperienceIds] }
             : {}),
+          ...(options.changedRelationCount !== undefined
+            ? { changedRelationCount: options.changedRelationCount }
+            : {}),
+          ...(options.relationBatchId !== undefined
+            ? { relationBatchId: options.relationBatchId }
+            : {}),
+          ...(options.relationOutcome !== undefined
+            ? { relationOutcome: options.relationOutcome }
+            : {}),
+          ...(options.experienceOutcome !== undefined
+            ? { experienceOutcome: options.experienceOutcome }
+            : {}),
+          ...(options.partialExperienceIds?.length
+            ? { partialExperienceIds: [...options.partialExperienceIds] }
+            : {}),
           ...(options.validationErrors?.length
             ? { validationErrors: [...options.validationErrors] }
             : {}),
@@ -136,16 +178,13 @@ export class IntentReviewLogWriter {
             : {}),
         };
         log.updatedAt = nowIso;
-        return safeWriteJson(
-          logPath,
-          ReviewLogSchema.parse(log),
-          "failed to write v8 intent review log",
-        );
+        writeJsonAtomic(logPath, ReviewLogSchema.parse(log));
+        return true;
       } catch (error) {
-        logger.warn("failed to update v8 intent review log", {
-          error,
-          path: logPath,
-        });
+        const diagnostic = safeErrorClassification(error);
+        logger.warn(
+          `failed to update v8 intent review log reason=${diagnostic.reason}${diagnostic.code ? ` code=${diagnostic.code}` : ""}`,
+        );
         return false;
       }
     });

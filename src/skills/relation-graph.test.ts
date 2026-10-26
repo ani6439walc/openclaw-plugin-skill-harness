@@ -83,10 +83,16 @@ it("preserves foreign ownership and validates scores before publishing", async (
   const { edge } = await fixture();
   await appendImportedRelations(root, [edge]);
   const file = relationGraphPath(root);
-  const raw = (await fs.readFile(file, "utf8")).replaceAll(
-    '"author-import"',
-    '"manual"',
-  );
+  const raw =
+    (await fs.readFile(file, "utf8"))
+      .trimEnd()
+      .split("\n")
+      .map((line) => {
+        const record = JSON.parse(line);
+        if (record.op === "relate") record.properties.source = "manual";
+        return JSON.stringify(record);
+      })
+      .join("\n") + "\n";
   await fs.writeFile(file, raw);
   expect((await appendImportedRelations(root, [edge])).conflicts).toHaveLength(
     1,
@@ -117,7 +123,6 @@ it("keeps identity after metadata removal and disables changed, hidden or replac
       reason: "helpful",
       direction: "current-to-related",
       relation_type: "composes_with",
-      verification_status: "unverified",
       source: "author-import",
     },
   ]);

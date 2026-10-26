@@ -10,11 +10,16 @@ import {
   parseAuthorRelations,
   preflightRelations,
   selectRelationType,
+  runRelationImportCli,
 } from "./relation-import.js";
 import { scoredRelationTypes } from "./relation-graph.js";
+import {
+  registerRelationSource,
+  readRelationSources,
+} from "./relation-sources.js";
 import type { ImportCandidate, ImportPlan } from "./relation-import.js";
 import type { OpenClawConfig } from "../../api.js";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
+import { TypeSafeClient } from "@typesafe-ai/sdk";
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(
@@ -84,6 +89,104 @@ function response(input: unknown) {
   };
 }
 describe("relation import", () => {
+  it("keeps CLI identities consistent across preflight, sample, classify and apply", async () => {
+    const dir = await root();
+    const dataRoot = await root();
+    await skill(dir, "a", "{b: helpful}");
+    await skill(dir, "b");
+    await registerRelationSource(dataRoot, {
+      id: "github:example/skills",
+      root: dir,
+      skills: {
+        a: { name: "a", source_path: "a/SKILL.md" },
+        b: { name: "b", source_path: "b/SKILL.md" },
+      },
+    });
+    const config = path.join(dataRoot, "config.json");
+    const checkpoint = path.join(dataRoot, "checkpoint.json");
+    await fs.writeFile(
+      config,
+      JSON.stringify({
+        plugins: {
+          entries: {
+            "skill-harness": {
+              config: {
+                decisionModel: { model: "test-jev", apiKey: "fixture-only" },
+              },
+            },
+          },
+        },
+      }),
+    );
+    const request = vi
+      .spyOn(TypeSafeClient.prototype, "systemOne")
+      .mockImplementation((async (input: unknown) =>
+        response(input)) as TypeSafeClient["systemOne"]);
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const common = ["--source", dir, "--data-root", dataRoot];
+      await runRelationImportCli(["preflight", ...common]);
+      await runRelationImportCli([
+        "sample",
+        ...common,
+        "--config",
+        config,
+        "--checkpoint",
+        checkpoint,
+      ]);
+      await runRelationImportCli([
+        "classify",
+        ...common,
+        "--config",
+        config,
+        "--checkpoint",
+        checkpoint,
+      ]);
+      expect(request).toHaveBeenCalledTimes(1);
+      await runRelationImportCli([
+        "apply",
+        ...common,
+        "--checkpoint",
+        checkpoint,
+      ]);
+      const raw = await fs.readFile(
+        path.join(dataRoot, "skill-relations/graph.jsonl"),
+        "utf8",
+      );
+      expect(raw).toContain('"id":"github:example/skills:a"');
+      expect(raw).toContain('"formatVersion":2');
+    } finally {
+      request.mockRestore();
+      output.mockRestore();
+    }
+  });
+  it("uses explicitly registered stable origins for manual checkpoint imports", async () => {
+    const dir = await root();
+    const dataRoot = await root();
+    await skill(dir, "a", "{b: helpful}");
+    await skill(dir, "b");
+    await registerRelationSource(dataRoot, {
+      id: "github:example/skills",
+      root: dir,
+      skills: {
+        a: { name: "a", source_path: "a/SKILL.md" },
+        b: { name: "b", source_path: "b/SKILL.md" },
+      },
+    });
+    const registry = readRelationSources(dataRoot)!;
+    const planned = await preflightRelations(dir, registry);
+    expect(planned.candidates[0].relation.from.id).toBe(
+      "github:example/skills:a",
+    );
+    const checkpoint = await classifyRelations(planned, client(response));
+    await applyImportCheckpoint(dataRoot, planned, checkpoint);
+    const raw = await fs.readFile(
+      path.join(dataRoot, "skill-relations/graph.jsonl"),
+      "utf8",
+    );
+    expect(raw).toContain('"formatVersion":2');
+    expect(raw).not.toContain("verification_status");
+  });
   it("requires the plugin decision endpoint before creating a manual classifier", () => {
     for (const plugin of [
       {},

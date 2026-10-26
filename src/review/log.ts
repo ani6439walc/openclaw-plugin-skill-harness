@@ -1,8 +1,13 @@
 import { z } from "zod";
-import type { ReviewSource } from "./types.js";
+import type {
+  ReviewDomainOutcome,
+  ReviewSource,
+  SkillRelationReviewFinding,
+} from "./types.js";
 import { REVIEW_TRIGGER_TYPES } from "./triggers.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
+import { relationTypes } from "../skills/relation-graph.js";
 export type SkillPlacementReason = "low-adoption" | "zero-intent-match-usage";
 
 export const REVIEW_OPERATIONS = [
@@ -15,6 +20,7 @@ export type ReviewOperation = (typeof REVIEW_OPERATIONS)[number];
 
 export const PROCESSED_EVENT_OUTCOMES = [
   "applied",
+  "partially-applied",
   "nofinding",
   "schema-rejected",
   "parse-failed",
@@ -58,7 +64,7 @@ const STORED_REVIEW_TRIGGERS = [
 ] as const;
 type StoredReviewTrigger = (typeof STORED_REVIEW_TRIGGERS)[number];
 
-export type AppliedReviewChange = {
+export type AppliedExperienceReviewChange = {
   trigger: StoredReviewTrigger;
   targetKind: "skill-experience";
   operation?: ReviewOperation;
@@ -72,9 +78,17 @@ export type AppliedReviewChange = {
   suggestedChange: string;
 };
 
+export type AppliedRelationReviewChange = Omit<
+  SkillRelationReviewFinding,
+  "trigger"
+> & { trigger: StoredReviewTrigger };
+
+export type AppliedReviewChange =
+  AppliedExperienceReviewChange | AppliedRelationReviewChange;
+
 // Historical intent edits remain audit data; they cannot become new review findings.
 type LegacyReviewChange = Omit<
-  AppliedReviewChange,
+  AppliedExperienceReviewChange,
   "targetKind" | "operation" | "targetExperienceIds"
 > & {
   targetKind: "intent-markdown" | "skill-experience";
@@ -92,6 +106,11 @@ export type ProcessedEventRecord = {
   changes?: (AppliedReviewChange | LegacyReviewChange)[];
   changedIntentIds?: string[];
   changedExperienceIds?: string[];
+  changedRelationCount?: number;
+  relationBatchId?: string;
+  relationOutcome?: ReviewDomainOutcome;
+  experienceOutcome?: ReviewDomainOutcome;
+  partialExperienceIds?: string[];
   validationErrors?: string[];
   noFindingReasonCounts?: NoFindingReasonCounts;
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
@@ -160,6 +179,97 @@ const SchemaRejectionReasonCountsSchema = PositiveCountsSchema.refine((value) =>
 ).transform((value): SchemaRejectionReasonCounts => value);
 
 const StoredExperienceIdSchema = z.string().trim().min(3).max(129);
+
+const StableSkillIdSchema = z.string().trim().min(1).max(1000);
+const BoundedRelationTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => [...value].length <= 2000, {
+    message: "Relation text exceeds the code point limit",
+  });
+const RelationEvidenceSchema = z
+  .object({
+    skillId: StableSkillIdSchema,
+    filePath: z.literal("SKILL.md"),
+    startLine: z.number().int().positive(),
+    endLine: z.number().int().positive(),
+    quote: z
+      .string()
+      .refine((value) => value.trim().length > 0 && [...value].length <= 2000, {
+        message: "Evidence quote must be nonempty and bounded",
+      }),
+  })
+  .strict()
+  .refine(
+    (entry) =>
+      entry.endLine >= entry.startLine && entry.endLine - entry.startLine < 200,
+    { path: ["endLine"], message: "Invalid evidence line span" },
+  );
+
+// Shared by model output validation and the additive v8 audit contract.
+export const RelationChangeFieldsSchema = z
+  .object({
+    targetKind: z.literal("skill-relation"),
+    operation: z.enum(["create", "update", "delete"]),
+    fromSkillId: StableSkillIdSchema,
+    toSkillId: StableSkillIdSchema,
+    relationType: z.enum(relationTypes).optional(),
+    reason: BoundedRelationTextSchema.optional(),
+    relationEvidence: z.array(RelationEvidenceSchema).min(2).max(16),
+  })
+  .strict()
+  .superRefine((change, ctx) => {
+    if (change.fromSkillId === change.toSkillId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["toSkillId"],
+        message: "Self relation",
+      });
+    }
+    if (change.operation !== "delete") {
+      for (const field of ["relationType", "reason"] as const) {
+        if (change[field] === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            path: [field],
+            message: "Required for relation mutation",
+          });
+        }
+      }
+    }
+    const endpoints = new Set([change.fromSkillId, change.toSkillId]);
+    const covered = new Set<string>();
+    for (const [index, entry] of change.relationEvidence.entries()) {
+      if (!endpoints.has(entry.skillId)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["relationEvidence", index, "skillId"],
+          message: "Evidence must describe an endpoint",
+        });
+      }
+      covered.add(entry.skillId);
+    }
+    if ([...endpoints].some((id) => !covered.has(id))) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["relationEvidence"],
+        message: "Both endpoints require evidence",
+      });
+    }
+  });
+
+export const StoredRelationChangeSchema = RelationChangeFieldsSchema.safeExtend(
+  {
+    trigger: z.enum(STORED_REVIEW_TRIGGERS),
+    dedupeKey: z.string().trim().min(1).max(120),
+    summary: z.string().trim().min(1).max(500),
+    evidence: z.array(z.string().trim().min(1).max(1000)).max(10),
+    correctionGoal: z.string().trim().min(1).max(1000),
+    suggestedChange: z.string().trim().min(1).max(12000),
+  },
+);
+
 const ExperienceChangeShape = {
   trigger: z.enum(STORED_REVIEW_TRIGGERS),
   targetKind: z.literal("skill-experience"),
@@ -252,15 +362,121 @@ const ProcessedEventRecordSchema = z
     changeCount: z.number().int().nonnegative(),
     outcome: ProcessedEventOutcomeSchema,
     changes: z
-      .array(z.union([ExperienceChangeSchema, LegacyChangeSchema]))
+      .array(
+        z.union([
+          ExperienceChangeSchema,
+          StoredRelationChangeSchema,
+          LegacyChangeSchema,
+        ]),
+      )
       .optional(),
     changedIntentIds: z.array(z.string()).optional(),
     changedExperienceIds: z.array(z.string()).optional(),
+    changedRelationCount: z.number().int().nonnegative().optional(),
+    relationBatchId: z.string().trim().min(1).max(1000).optional(),
+    relationOutcome: z
+      .enum(["applied", "partial", "validation-failed", "aborted"])
+      .optional(),
+    experienceOutcome: z
+      .enum(["applied", "partial", "validation-failed", "aborted"])
+      .optional(),
+    partialExperienceIds: z.array(StoredExperienceIdSchema).min(1).optional(),
     validationErrors: z.array(z.string()).optional(),
     noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
     schemaRejectionReasonCounts: SchemaRejectionReasonCountsSchema.optional(),
   })
   .strict()
+  .superRefine((record, ctx) => {
+    const issue = (path: string, message: string) =>
+      ctx.addIssue({ code: "custom", path: [path], message });
+    const relationChanges =
+      record.changes?.filter(
+        (change) => change.targetKind === "skill-relation",
+      ) ?? [];
+    const hasReceipt =
+      record.changedRelationCount !== undefined ||
+      record.relationBatchId !== undefined ||
+      record.relationOutcome !== undefined ||
+      record.experienceOutcome !== undefined ||
+      record.partialExperienceIds !== undefined;
+    if (!hasReceipt) return;
+    if (record.changeCount !== (record.changes?.length ?? 0)) {
+      issue("changeCount", "Receipt change count must match applied findings");
+    }
+    if (record.changedRelationCount !== undefined) {
+      if (record.changedRelationCount !== relationChanges.length) {
+        issue(
+          "changedRelationCount",
+          "Relation count must match applied findings",
+        );
+      }
+      if (record.changedRelationCount > 0) {
+        if (!record.relationBatchId)
+          issue(
+            "relationBatchId",
+            "Committed relations require a batch receipt",
+          );
+        if (record.relationOutcome !== "applied")
+          issue(
+            "relationOutcome",
+            "Committed relation batches must be applied",
+          );
+      } else if (record.relationBatchId !== undefined) {
+        issue(
+          "relationBatchId",
+          "Empty relation batch cannot have a commit receipt",
+        );
+      }
+    } else if (
+      record.relationBatchId !== undefined ||
+      relationChanges.length > 0
+    ) {
+      issue("changedRelationCount", "Relation receipt requires a count");
+    }
+    if (record.partialExperienceIds) {
+      if (record.experienceOutcome !== "partial")
+        issue(
+          "experienceOutcome",
+          "Incomplete experiences require a partial outcome",
+        );
+      if (
+        new Set(record.partialExperienceIds).size !==
+          record.partialExperienceIds.length ||
+        record.partialExperienceIds.some(
+          (id) => !record.changedExperienceIds?.includes(id),
+        )
+      ) {
+        issue(
+          "partialExperienceIds",
+          "Incomplete experiences must be distinct changed IDs",
+        );
+      }
+    }
+    const committed =
+      record.changeCount > 0 || (record.changedExperienceIds?.length ?? 0) > 0;
+    if (
+      committed &&
+      record.outcome !== "applied" &&
+      record.outcome !== "partially-applied"
+    ) {
+      issue("outcome", "Committed work requires an applied outcome");
+    }
+    const failed = [record.relationOutcome, record.experienceOutcome].some(
+      (outcome) => outcome !== undefined && outcome !== "applied",
+    );
+    if (committed && failed && record.outcome !== "partially-applied") {
+      issue(
+        "outcome",
+        "Mixed domain results require a partially applied outcome",
+      );
+    }
+    if (record.outcome === "partially-applied" && (!committed || !failed)) {
+      issue(
+        "outcome",
+        "Partially applied outcome requires committed and failed work",
+      );
+    }
+  })
   .transform((record): ProcessedEventRecord => record);
 
 const ReviewedSkillEpochSchema = z

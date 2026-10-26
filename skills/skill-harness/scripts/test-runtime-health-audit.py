@@ -766,6 +766,58 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(result["changes"]["byOperation"], {"merge": 1, "delete": 1})
         self.assertEqual(result["changes"]["total"], 3)
 
+    def test_partial_review_preserves_committed_findings_in_every_summary(self) -> None:
+        review_path = self.root / "review.json"
+        review = json.loads(review_path.read_text())
+        review["processedEvents"]["partial"] = {
+            "processedAt": "2026-08-01T00:02:00Z",
+            "outcome": "partially-applied",
+            "triggers": ["capability-fit", "routing-uncertainty"],
+            "changeCount": 2,
+            "changes": [
+                {"trigger": "capability-fit", "targetKind": "skill-relation", "operation": "update",
+                 "fromSkillId": "PRIVATE_ENDPOINT_FROM", "toSkillId": "PRIVATE_ENDPOINT_TO",
+                 "reason": "PRIVATE_REASON", "relationEvidence": [{"quote": "PRIVATE_QUOTE"}]},
+                {"trigger": "capability-fit", "targetKind": "skill-experience", "operation": "create",
+                 "targetExperienceIds": ["completed-entry"]},
+            ],
+            "changedRelationCount": 1,
+            "relationBatchId": "PRIVATE_BATCH",
+            "relationOutcome": "applied",
+            "experienceOutcome": "partial",
+            "changedExperienceIds": ["completed-entry", "incomplete-entry"],
+            "partialExperienceIds": ["incomplete-entry"],
+        }
+        # Uncommitted proposed changes must also be excluded outside window analysis.
+        review["processedEvents"]["failed"] = {
+            "processedAt": "2026-08-01T00:03:00Z",
+            "outcome": "validation-failed", "triggers": ["capability-fit"],
+            "changes": [{"trigger": "capability-fit", "operation": "delete",
+                         "targetExperienceIds": ["uncommitted-entry"]}],
+        }
+        review_path.write_text(json.dumps(review))
+        report = self.report_at()
+        summaries = (
+            report["runtime"]["review"]["processedEvents"],
+            report["analysis"]["cumulative"]["review"],
+            report["analysis"]["windows"]["recent"]["review"],
+        )
+        for summary in summaries:
+            with self.subTest(summary=summary.get("status", "runtime")):
+                self.assertEqual(summary["eventCount"], 4)
+                self.assertEqual(summary["outcomes"]["partially-applied"], 1)
+                self.assertEqual(summary["changes"]["total"], 3)
+                self.assertEqual(summary["changes"]["appliedEvents"], 2)
+                self.assertEqual(summary["changes"]["averagePerAppliedEvent"], 1.5)
+                self.assertEqual(summary["changes"]["byOperation"], {"refine": 1, "create": 1, "update": 1})
+                targets = summary["changes"]["topTargetExperiences"]
+                self.assertEqual({row["experience"] for row in targets}, {"example", "completed-entry"})
+                self.assertNotIn("incomplete-entry", json.dumps(summary))
+                self.assertNotIn("uncommitted-entry", json.dumps(summary))
+                self.assertNotIn("PRIVATE_", json.dumps(summary))
+        for summary in summaries[1:]:
+            self.assertEqual(summary["outcomeRates"]["partially-applied"], {"numerator": 1, "denominator": 4, "rate": 0.25})
+
     def test_multiple_skill_indexes_and_broken_database(self) -> None:
         root = self.root / "qmd" / "skills" / "indexes"
         for fingerprint in ("secret-one", "secret-two", "missing", "corrupt"):

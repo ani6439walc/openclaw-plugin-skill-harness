@@ -129,6 +129,7 @@ export type HookDeps = {
   tracker?: typeof defaultTracker;
   statsAggregator?: typeof defaultStatsAggregator;
   skillInventoryResolver?: typeof resolveSkillInventory;
+  reviewSkillResolver?: typeof import("../skills/indexer.js").listAvailableSkills;
   clock?: () => Date;
   experienceCatalog?: SkillExperienceCatalog;
   qmdSkillIndex?: SkillQmdIndex;

@@ -148,7 +148,6 @@ describe("StatsAggregator", () => {
                 from_description: "Background context",
                 to_description: "Target context",
                 relation_type: "depends_on",
-                verification_status: "unverified",
                 reason: "Author reason",
                 score: 1,
                 injected: true,
