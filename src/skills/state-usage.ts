@@ -73,7 +73,9 @@ export interface BatchSkillUsageEntry {
  * Records or increments skill usage directly into OpenClaw state database's skill_usage table.
  * Fails open: any database error is logged as a warning and never propagates to the caller.
  */
-export function recordSkillUsageToStateDb(params: RecordSkillUsageParams): void {
+export function recordSkillUsageToStateDb(
+  params: RecordSkillUsageParams,
+): void {
   try {
     const rawSkillFile = params.skillFile?.trim();
     if (!rawSkillFile || !path.isAbsolute(rawSkillFile)) return;
@@ -207,4 +209,3 @@ export function batchUpsertSkillUsage(
 
   return { inserted, errors };
 }
-

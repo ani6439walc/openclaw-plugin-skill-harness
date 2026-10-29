@@ -10,7 +10,11 @@ import {
   resolveCoreSkillTelemetrySource,
 } from "./state-usage.js";
 
-function setupTestStateDb(): { dir: string; dbPath: string; cleanup: () => void } {
+function setupTestStateDb(): {
+  dir: string;
+  dbPath: string;
+  cleanup: () => void;
+} {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "state-usage-test-"));
   const stateDir = path.join(dir, "state");
   fs.mkdirSync(stateDir, { recursive: true });
@@ -46,7 +50,9 @@ function setupTestStateDb(): { dir: string; dbPath: string; cleanup: () => void 
 describe("state-usage", () => {
   describe("normalizeSkillIndexName", () => {
     it("normalizes mixed-case and symbols to hyphenated key", () => {
-      expect(normalizeSkillIndexName("My_Skill Name/v1")).toBe("my-skill-name-v1");
+      expect(normalizeSkillIndexName("My_Skill Name/v1")).toBe(
+        "my-skill-name-v1",
+      );
       expect(normalizeSkillIndexName("  --test-- ")).toBe("test");
       expect(normalizeSkillIndexName("simple-skill")).toBe("simple-skill");
     });
@@ -55,7 +61,9 @@ describe("state-usage", () => {
   describe("resolveCoreSkillTelemetrySource", () => {
     it("maps sources to core categories", () => {
       expect(resolveCoreSkillTelemetrySource("bundled")).toBe("bundled");
-      expect(resolveCoreSkillTelemetrySource("openclaw-bundled")).toBe("bundled");
+      expect(resolveCoreSkillTelemetrySource("openclaw-bundled")).toBe(
+        "bundled",
+      );
       expect(resolveCoreSkillTelemetrySource("workspace")).toBe("workspace");
       expect(resolveCoreSkillTelemetrySource("workshop")).toBe("workspace");
       expect(resolveCoreSkillTelemetrySource("managed")).toBe("workspace");
@@ -77,7 +85,13 @@ describe("state-usage", () => {
           },
         } as any;
 
-        const skillFile = path.join(dir, "workspace", "skills", "test-skill", "SKILL.md");
+        const skillFile = path.join(
+          dir,
+          "workspace",
+          "skills",
+          "test-skill",
+          "SKILL.md",
+        );
 
         recordSkillUsageToStateDb({
           api: mockApi,
@@ -177,7 +191,9 @@ describe("state-usage", () => {
         expect(res1).toEqual({ inserted: 2, errors: 0 });
 
         const db = new DatabaseSync(dbPath);
-        let rows = db.prepare("SELECT * FROM skill_usage ORDER BY skill_key ASC").all() as any[];
+        let rows = db
+          .prepare("SELECT * FROM skill_usage ORDER BY skill_key ASC")
+          .all() as any[];
         expect(rows).toHaveLength(2);
         expect(rows[0].use_count).toBe(10);
         expect(rows[1].use_count).toBe(5);
@@ -196,7 +212,9 @@ describe("state-usage", () => {
         ]);
         expect(res2).toEqual({ inserted: 1, errors: 0 });
 
-        rows = db.prepare("SELECT * FROM skill_usage WHERE skill_key = 'skill-one'").all() as any[];
+        rows = db
+          .prepare("SELECT * FROM skill_usage WHERE skill_key = 'skill-one'")
+          .all() as any[];
         expect(rows[0].use_count).toBe(10); // remains 10 (max)
         expect(rows[0].first_used_at_ms).toBe(500); // expanded min
         expect(rows[0].last_used_at_ms).toBe(7000); // expanded max
@@ -207,4 +225,3 @@ describe("state-usage", () => {
     });
   });
 });
-

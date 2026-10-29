@@ -513,11 +513,7 @@ describe("skill indexer", () => {
       "live-skill",
       "Archived copy.",
     );
-    writeSkillAt(
-      path.join(workshop, "live-skill"),
-      "live-skill",
-      "Live copy.",
-    );
+    writeSkillAt(path.join(workshop, "live-skill"), "live-skill", "Live copy.");
     writeSkillAt(
       path.join(workshop, ".archive", "retired-skill", "old-version"),
       "retired-skill",
@@ -537,7 +533,9 @@ describe("skill indexer", () => {
       description: "Live copy.",
       location: path.join(workshop, "live-skill", "SKILL.md"),
     });
-    expect(skills.find((skill) => skill.name === "retired-skill")).toBeUndefined();
+    expect(
+      skills.find((skill) => skill.name === "retired-skill"),
+    ).toBeUndefined();
   });
 
   it("gives an agent workshop skill precedence over workspace and shared roots", async () => {
