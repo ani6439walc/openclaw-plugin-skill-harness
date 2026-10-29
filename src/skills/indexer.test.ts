@@ -469,6 +469,50 @@ describe("skill indexer", () => {
     warnSpy.mockRestore();
   });
 
+  it("ignores workshop .archive copies so the live skill keeps its name", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const api = createApi(stateDir, workspaceDir);
+    const workshop = path.join(
+      stateDir,
+      "agents",
+      "main",
+      "agent",
+      "workshop-skills",
+    );
+    writeSkillAt(
+      path.join(workshop, ".archive", "live-skill", "old-version"),
+      "live-skill",
+      "Archived copy.",
+    );
+    writeSkillAt(
+      path.join(workshop, "live-skill"),
+      "live-skill",
+      "Live copy.",
+    );
+    writeSkillAt(
+      path.join(workshop, ".archive", "retired-skill", "old-version"),
+      "retired-skill",
+      "Retired copy.",
+    );
+
+    const skills = await listAvailableSkills({
+      api,
+      agentId: "main",
+      bundledSkillsDir: "",
+      cacheTtlMs: 0,
+      homeDir: path.join(tmp, "home"),
+    });
+
+    expect(skills.find((skill) => skill.name === "live-skill")).toMatchObject({
+      source: "workshop",
+      description: "Live copy.",
+      location: path.join(workshop, "live-skill", "SKILL.md"),
+    });
+    expect(skills.find((skill) => skill.name === "retired-skill")).toBeUndefined();
+  });
+
   it("gives an agent workshop skill precedence over workspace and shared roots", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
     const workspaceDir = path.join(tmp, "workspace");

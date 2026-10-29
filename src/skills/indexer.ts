@@ -307,6 +307,9 @@ async function buildSkillIndex(
     const childDirs: string[] = [];
     for (const entry of entries) {
       if (disabledSkillNames.has(entry.name.toLowerCase())) continue;
+      // Workshop keeps prior versions under .archive. Indexing them first
+      // (depth-first, name order) shadows the live skill of the same name.
+      if (entry.name === ".archive") continue;
       const childDir = await resolveChildDirectory(
         dir,
         entry,
