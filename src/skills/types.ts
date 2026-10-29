@@ -102,6 +102,8 @@ export type SkillReadResult =
       file_type: string;
       related_skills: RelatedSkillResult[];
       is_binary?: boolean;
+      path?: string;
+      source?: SkillSource;
     }
   | {
       success: false;

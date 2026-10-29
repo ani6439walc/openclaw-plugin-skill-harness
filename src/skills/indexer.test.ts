@@ -286,6 +286,33 @@ describe("skill indexer", () => {
     ).toMatchObject({ description: "Updated description." });
   });
 
+  it("drops an expired index whose cache key is not the root path", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const api = createApi(stateDir, workspaceDir);
+    const skillDir = path.join(workspaceDir, "skills", "cached");
+
+    writeSkillAt(skillDir, "cached-skill", "Initial description.");
+    await listAvailableSkills({
+      api,
+      agentId: "main",
+      cacheTtlMs: 60_000,
+      nowMs: 0,
+    });
+
+    writeSkillAt(skillDir, "cached-skill", "Updated description.");
+    const refreshedSkills = await listAvailableSkills({
+      api,
+      agentId: "main",
+      cacheTtlMs: 60_000,
+      nowMs: 60_000,
+    });
+    expect(
+      refreshedSkills.find((skill) => skill.name === "cached-skill"),
+    ).toMatchObject({ description: "Updated description." });
+  });
+
   it("lists nested skills across all roots using first-root precedence", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-"));
     const workspaceDir = path.join(tmp, "workspace");

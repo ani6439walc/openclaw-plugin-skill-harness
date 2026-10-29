@@ -150,6 +150,8 @@ export async function readAvailableSkill(
       content: await fs.readFile(resolved, "utf-8"),
       file_type: path.extname(validation.normalizedFilePath),
       related_skills: relatedSkills,
+      path: skill.location,
+      source: skill.source,
     };
   } catch (err) {
     return {

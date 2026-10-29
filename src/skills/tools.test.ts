@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { registerSkillTools } from "./tools.js";
@@ -1323,5 +1324,53 @@ describe("registerSkillTools", () => {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
       fs.rmSync(stateDir, { recursive: true, force: true });
     }
+  });
+
+  it("records skill usage into state openclaw.sqlite when skill_view is called", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-db-"));
+    const stateDir = path.join(tmp, "state");
+    const workspaceDir = path.join(tmp, "workspace");
+    const api = createApi(stateDir, workspaceDir);
+    writeSkill(workspaceDir);
+
+    const innerStateDir = path.join(stateDir, "state");
+    fs.mkdirSync(innerStateDir, { recursive: true });
+    const dbPath = path.join(innerStateDir, "openclaw.sqlite");
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE skill_usage (
+        skill_file TEXT NOT NULL PRIMARY KEY,
+        skill_key TEXT NOT NULL,
+        skill_name TEXT NOT NULL,
+        skill_source TEXT NOT NULL,
+        first_used_at_ms INTEGER NOT NULL,
+        last_used_at_ms INTEGER NOT NULL,
+        use_count INTEGER NOT NULL,
+        last_agent_id TEXT
+      ) STRICT;
+    `);
+    db.close();
+
+    registerSkillTools(api, {
+      bundledSkillsDir: "",
+      homeDir: path.join(tmp, "home"),
+    });
+    const tools = toolsForAgent(api);
+
+    await runTool(tools.get("skill_view"), { name: "writer" });
+
+    const checkDb = new DatabaseSync(dbPath);
+    const rows = checkDb.prepare("SELECT * FROM skill_usage").all() as any[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      skill_key: "writer",
+      skill_name: "writer",
+      skill_source: "workspace",
+      use_count: 1,
+      last_agent_id: "main",
+    });
+    checkDb.close();
+
+    fs.rmSync(tmp, { recursive: true, force: true });
   });
 });

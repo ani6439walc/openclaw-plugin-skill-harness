@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { OpenClawPluginApi } from "../../api.js";
 import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
+import { recordSkillUsageToStateDb } from "./state-usage.js";
 import { relatedSkillsBySkillName } from "./related.js";
 import { skillSourcePriority } from "./types.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
@@ -378,18 +379,28 @@ export function registerSkillTools(
           ),
         }),
         async execute(_toolCallId, params) {
-          return jsonToolResult(
-            await readAvailableSkill({
+          const result = await readAvailableSkill({
+            api,
+            agentId,
+            name: requiredStringParam(params, "name"),
+            filePath: optionalStringParam(params, "file_path"),
+            bundledSkillsDir: options.bundledSkillsDir,
+            nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
+            sharedRoots: options.getSharedRoots?.(),
+            homeDir: options.homeDir,
+          });
+
+          if (result.success && result.path) {
+            recordSkillUsageToStateDb({
               api,
               agentId,
-              name: requiredStringParam(params, "name"),
-              filePath: optionalStringParam(params, "file_path"),
-              bundledSkillsDir: options.bundledSkillsDir,
-              nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
-              sharedRoots: options.getSharedRoots?.(),
-              homeDir: options.homeDir,
-            }),
-          );
+              skillFile: result.path,
+              skillName: result.name,
+              skillSource: result.source,
+            });
+          }
+
+          return jsonToolResult(result);
         },
       };
     },

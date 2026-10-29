@@ -66,9 +66,9 @@ export function clearSkillIndexCache(): void {
 }
 
 function sweepExpiredSkillIndexes(nowMs: number): void {
-  for (const [root, cached] of skillIndexCache) {
+  for (const [cacheKey, cached] of skillIndexCache) {
     if (cached.expiresAtMs <= nowMs) {
-      skillIndexCache.delete(root);
+      skillIndexCache.delete(cacheKey);
     }
   }
 }
