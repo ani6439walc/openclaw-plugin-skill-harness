@@ -88,7 +88,7 @@ Review operates on experience copies in a temporary workspace. Filesystem tools 
 
 ## Installation and setup
 
-Use OpenClaw **2026.10.7 or later**, Node.js **26.12.1 or later**, and the pnpm version declared in [`package.json`](package.json). QMD requires Node.js 26; development CI uses Node.js 26.
+Use OpenClaw **2026.10.9 or later**, Node.js **26.12.1 or later**, and the pnpm version declared in [`package.json`](package.json). QMD requires Node.js 26; development CI uses Node.js 26.
 
 ### 1. Build and install
 

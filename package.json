@@ -2,7 +2,7 @@
   "name": "skill-harness",
   "displayName": "Skill Harness",
   "description": "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
-  "version": "2026.10.7",
+  "version": "2026.10.9",
   "type": "module",
   "engines": {
     "node": ">=26.12.1"
@@ -44,12 +44,12 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.10.7",
-      "minGatewayVersion": "2026.10.7"
+      "pluginApi": ">=2026.10.9",
+      "minGatewayVersion": "2026.10.9"
     },
     "build": {
-      "openclawVersion": "2026.10.7",
-      "pluginSdkVersion": "2026.10.7"
+      "openclawVersion": "2026.10.9",
+      "pluginSdkVersion": "2026.10.9"
     }
   },
   "scripts": {
@@ -67,7 +67,7 @@
     "zod": "4.6.7"
   },
   "peerDependencies": {
-    "openclaw": "2026.10.7"
+    "openclaw": "2026.10.9"
   },
   "devDependencies": {
     "typescript": "7.0.2",
