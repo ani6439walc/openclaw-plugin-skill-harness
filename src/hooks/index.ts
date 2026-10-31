@@ -922,7 +922,7 @@ export function createHookHandlers(deps: HookDeps) {
       try {
         if (expPolicy.maxInjectedExperiences === 0) return;
         if (!qmdExperienceIndex) {
-          searchError = "QMD experience index unavailable";
+          searchError = "qmd experience index unavailable";
           return;
         }
         const timeout = new Promise<"timeout">((resolve) => {
@@ -944,7 +944,7 @@ export function createHookHandlers(deps: HookDeps) {
         ]);
         if (expOutcome === "timeout") {
           experienceRetrieval.status = "timeout";
-          searchError = "QMD experience search timed out";
+          searchError = "qmd experience search timed out";
         } else if ("error" in expOutcome) {
           experienceRetrieval.status = "error";
           throw expOutcome.error;
@@ -987,7 +987,7 @@ export function createHookHandlers(deps: HookDeps) {
           }
           experienceRetrieval.candidateCount = candidateExperiences.length;
         } else if (expOutcome !== "timeout" && !("error" in expOutcome)) {
-          searchError = "QMD experience index unavailable";
+          searchError = "qmd experience index unavailable";
         }
       } catch (error) {
         experienceRetrieval.status = "error";

@@ -245,7 +245,7 @@ export function createSkillExperienceQmdIndex(params: {
     run: () => void | Promise<void>,
   ): Promise<void> => {
     const failed = (error: unknown) => {
-      logger.warn("QMD experience background work failed", {
+      logger.warn("qmd experience background work failed", {
         errorType: error instanceof Error ? "Error" : typeof error,
       });
     };
@@ -449,7 +449,7 @@ export function createSkillExperienceQmdIndex(params: {
           return opened;
         }
       } catch (error) {
-        logger.warn("failed to open QMD experience index", { error });
+        logger.warn("failed to open qmd experience index", { error });
         return;
       }
     })();
@@ -635,7 +635,7 @@ export function createSkillExperienceQmdIndex(params: {
         resetRetryState();
         if (previousFailures > 0) {
           logger.info(
-            `QMD experience index build recovered ${JSON.stringify({
+            `qmd experience index build recovered ${JSON.stringify({
               fingerprint: target.fingerprint,
               previousFailures,
             })}`,
@@ -680,14 +680,14 @@ export function createSkillExperienceQmdIndex(params: {
             }, delay),
           );
         } catch (admissionError) {
-          logger.warn("QMD experience retry admission failed", {
+          logger.warn("qmd experience retry admission failed", {
             errorType:
               admissionError instanceof Error ? "Error" : typeof admissionError,
           });
         }
       }
       logger.warn(
-        `failed to build QMD experience index ${JSON.stringify({
+        `failed to build qmd experience index ${JSON.stringify({
           fingerprint: target.fingerprint,
           phase,
           ...safeErrorClassification(error),
@@ -863,7 +863,7 @@ export function createSkillExperienceQmdIndex(params: {
 
         return hits;
       } catch (error) {
-        logger.warn("QMD experience search failed", { error });
+        logger.warn("qmd experience search failed", { error });
         return;
       } finally {
         lease?.release();

@@ -47,15 +47,23 @@
               "apiKey": {
                 "description": "Optional API key or SecretRef object for embeddings. If omitted, resolved from the OpenClaw provider or environment.",
                 "anyOf": [
-                  { "type": "string" },
+                  {
+                    "type": "string"
+                  },
                   {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["id"],
                     "properties": {
-                      "source": { "type": "string" },
-                      "provider": { "type": "string" },
-                      "id": { "type": "string" }
+                      "source": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      }
                     }
                   }
                 ]
@@ -84,15 +92,23 @@
               "apiKey": {
                 "description": "Optional API key or SecretRef object for expansion. If omitted, resolved from the OpenClaw provider or environment.",
                 "anyOf": [
-                  { "type": "string" },
+                  {
+                    "type": "string"
+                  },
                   {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["id"],
                     "properties": {
-                      "source": { "type": "string" },
-                      "provider": { "type": "string" },
-                      "id": { "type": "string" }
+                      "source": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      }
                     }
                   }
                 ]
@@ -104,7 +120,7 @@
             "minimum": 0,
             "maximum": 86400,
             "default": 300,
-            "description": "Seconds between source checks for QMD experience and skill index refreshes; 0 disables subsequent automatic checks."
+            "description": "Seconds between source checks for qmd experience and skill index refreshes; 0 disables subsequent automatic checks."
           },
           "jev": {
             "type": "object",
@@ -125,15 +141,23 @@
               "apiKey": {
                 "description": "Optional API key or SecretRef object for TypeSafe Jev. If omitted, resolved from the OpenClaw provider, TYPESAFE_API_KEY, or environment.",
                 "anyOf": [
-                  { "type": "string" },
+                  {
+                    "type": "string"
+                  },
                   {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["id"],
                     "properties": {
-                      "source": { "type": "string" },
-                      "provider": { "type": "string" },
-                      "id": { "type": "string" }
+                      "source": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      }
                     }
                   }
                 ]
@@ -162,15 +186,23 @@
           "apiKey": {
             "description": "Optional API key or SecretRef object for TypeSafe Jev. If omitted, resolved from the OpenClaw provider, TYPESAFE_API_KEY, or environment.",
             "anyOf": [
-              { "type": "string" },
+              {
+                "type": "string"
+              },
               {
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["id"],
                 "properties": {
-                  "source": { "type": "string" },
-                  "provider": { "type": "string" },
-                  "id": { "type": "string" }
+                  "source": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
                 }
               }
             ]
@@ -184,7 +216,9 @@
         "properties": {
           "sharedRoots": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "default": [],
             "description": "Absolute local skill directories intentionally shared with every agent. Agent-local roots retain precedence."
           },
@@ -200,7 +234,9 @@
             "properties": {
               "defaults": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "default": [],
                 "description": "Default skills made available to every agent's working set."
               },
@@ -208,7 +244,9 @@
                 "type": "object",
                 "additionalProperties": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "default": {},
                 "description": "Agent-specific skill lists keyed by agent ID."
@@ -279,7 +317,9 @@
             "properties": {
               "agents": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "Agent IDs eligible for dynamic routing.",
                 "default": ["main"]
               },
@@ -294,13 +334,17 @@
               },
               "allowedChatIds": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "Allow-list of chat IDs for dynamic routing.",
                 "default": []
               },
               "deniedChatIds": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "Deny-list of chat IDs for dynamic routing.",
                 "default": []
               }
@@ -397,7 +441,9 @@
                   },
                   "genericTokens": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "default": [],
                     "description": "Tokens that suppress only a one-token name-match request after normalization."
                   }

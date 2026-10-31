@@ -309,7 +309,7 @@ describe("SkillExperienceQmdIndex", () => {
       index.schedule(MOCK_ENTRIES);
       await vi.waitFor(() => expect(index!.getStatus()).toBe("failed"));
       const message = warn.mock.calls.find(([message]) =>
-        message.includes("failed to build QMD experience index "),
+        message.includes("failed to build qmd experience index "),
       )?.[0];
       expect(message).toBeDefined();
       const diagnostic = JSON.parse(message.slice(message.indexOf("{")!));
@@ -327,7 +327,7 @@ describe("SkillExperienceQmdIndex", () => {
       );
       expect(
         info.mock.calls.filter(([message]) =>
-          message.includes("QMD experience index build recovered"),
+          message.includes("qmd experience index build recovered"),
         ),
       ).toHaveLength(0);
       if (phase === "publication")
@@ -335,7 +335,7 @@ describe("SkillExperienceQmdIndex", () => {
       await vi.advanceTimersByTimeAsync(5000);
       await vi.waitFor(() => expect(index!.getStatus()).toBe("ready"));
       const recovered = info.mock.calls.filter(([message]) =>
-        message.includes("QMD experience index build recovered"),
+        message.includes("qmd experience index build recovered"),
       );
       expect(recovered).toHaveLength(1);
       expect(
