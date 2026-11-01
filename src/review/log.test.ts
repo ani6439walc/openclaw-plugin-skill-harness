@@ -55,6 +55,32 @@ function relationLog(
 }
 
 describe("relation review audit", () => {
+  it("rejects impossible inspection counts and unbounded cursors", () => {
+    const preparation = {
+      status: "ready",
+      requestedSeeds: 1,
+      capturedSeeds: 1,
+      capturedExtras: 8,
+      existingNeighborAttempts: 4,
+      discoveryAttempts: 5,
+      skippedCaptureCount: 1,
+    };
+    expect(() =>
+      parseReviewLog(
+        relationLog(relationChange, { relationPreparation: preparation }),
+      ),
+    ).toThrow();
+    const raw = {
+      ...relationLog(),
+      relationInspectionCursors: Object.fromEntries(
+        Array.from({ length: 257 }, (_, i) => [
+          i.toString(16).padStart(64, "0"),
+          { offset: 0, updatedAt: "2026-11-01T00:00:00.000Z" },
+        ]),
+      ),
+    };
+    expect(() => parseReviewLog(raw)).toThrow();
+  });
   it("preserves exact excerpt whitespace for later source validation", () => {
     const change = {
       ...relationChange,

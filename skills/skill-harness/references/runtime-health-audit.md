@@ -62,6 +62,8 @@ A healthy report **does not prove Gateway loaded the plugin**. Review logs also 
 4. Use concrete conditional suggestions: low candidate hit rate with healthy indexes → inspect skill metadata/body and representative requests before testing a lower candidate threshold; many unadopted injections → inspect relevance and descriptions before testing a stricter relevance threshold or smaller injection limit; schema rejection → inspect Review output contracts; timeout/unavailable → investigate service/index health first. Do not invent an optimal numeric threshold from aggregate scores.
 5. Finish with unobserved signals that limit the decision. Reporting does not authorize config edits, telemetry resets, experience deletion, or Gateway restart.
 
+The `relationInspection` summary separates preparation readiness/skip reasons, model-reported existing/discovery assessments, search attempts and committed graph operations. `changes-proposed` is not an applied change. Events without preparation fields are historical or unavailable observations, not proof that the graph was inspected. Capture counts describe prepared material, not demonstrated model attention. No-commit cancellation can leave no event.
+
 ## Skill relation observations
 
 Treat ontology graph relations as unverified hints. Tool output identifies their

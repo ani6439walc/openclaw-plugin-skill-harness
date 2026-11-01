@@ -12,6 +12,8 @@ import {
   prepareRelationReviewContext,
   validateRelationReviewFindings,
   applyPreparedRelationReview,
+  stageRelationReviewEvidence,
+  stageRelationReviewSkill,
 } from "./relations.js";
 import type { SkillRelationReviewFinding } from "./types.js";
 
@@ -22,7 +24,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
-async function fixture(count = 3) {
+async function fixture(count = 3, admit = true) {
   const source = path.join(root, "source");
   const skills = await Promise.all(
     Array.from({ length: count }, async (_, index) => {
@@ -48,19 +50,17 @@ async function fixture(count = 3) {
   });
   let visible = skills;
   const getVisibleSkills = async () => visible;
-  const search = vi
-    .fn()
-    .mockResolvedValue(skills.slice(1).map(({ name }) => ({ name })));
   const context = await prepareRelationReviewContext({
     dataRoot: root,
     seedNames: [skills[0].name],
     getVisibleSkills,
-    search,
   });
+  if (admit) {
+    for (const skill of skills.slice(1)) await context!.admitSkill(skill.name);
+  }
   return {
     skills,
     context: context!,
-    search,
     getVisibleSkills,
     setVisible: (next: typeof skills) => {
       visible = next;
@@ -94,10 +94,10 @@ function finding(
   };
 }
 it("starts from recommended skills without a load and bounds extras to eight", async () => {
-  const { context, search } = await fixture(15);
+  const { context } = await fixture(15);
   expect(context.seedIds).toEqual([context.skills[0].identity.id]);
   expect(context.skills).toHaveLength(9);
-  expect(search).toHaveBeenCalledWith(expect.objectContaining({ limit: 8 }));
+  expect(context.preparation.discoveryAttempts).toBe(8);
 });
 it("validates exact original excerpts and rejects unstaged or nonseed-only changes", async () => {
   const { context } = await fixture();
@@ -158,17 +158,14 @@ it("rejects current file changes and winning-root changes without publishing", a
   await expect(fs.stat(relationGraphPath(root))).rejects.toThrow();
 });
 it("skips discovery with no visible registered seeds and checks cancellation", async () => {
-  const { search, getVisibleSkills } = await fixture();
-  search.mockClear();
+  const { getVisibleSkills } = await fixture();
   expect(
     await prepareRelationReviewContext({
       dataRoot: root,
       seedNames: ["hidden"],
       getVisibleSkills,
-      search,
     }),
   ).toBeUndefined();
-  expect(search).not.toHaveBeenCalled();
   const controller = new AbortController();
   controller.abort();
   await expect(
@@ -181,42 +178,114 @@ it("skips discovery with no visible registered seeds and checks cancellation", a
   ).rejects.toThrow();
 });
 it("caps extra discovery attempts even when early candidates are unreadable", async () => {
-  const { skills, getVisibleSkills, search } = await fixture(15);
+  const { skills, getVisibleSkills } = await fixture(15, false);
   for (const skill of skills.slice(1, 9))
     await fs.writeFile(skill.location, "x".repeat(256 * 1024 + 1));
   const context = await prepareRelationReviewContext({
     dataRoot: root,
     seedNames: ["skill-0"],
     getVisibleSkills,
-    search,
   });
+  for (const skill of skills.slice(1)) await context!.admitSkill(skill.name);
   expect(context?.skills).toHaveLength(1);
+  expect(context?.preparation.discoveryAttempts).toBe(8);
+  expect(context?.preparation.skippedCaptureCount).toBe(8);
 });
 
-it("cancels a pending discovery search without accepting its late results", async () => {
-  const { getVisibleSkills } = await fixture();
+it("cancels a pending admission without accepting its late result", async () => {
+  const { skills } = await fixture(3, false);
   const controller = new AbortController();
   let entered!: () => void;
   const ready = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  let finish!: (hits: { name: string }[]) => void;
-  const pending = prepareRelationReviewContext({
+  let finish!: (value: typeof skills) => void;
+  let block = false;
+  const context = (await prepareRelationReviewContext({
     dataRoot: root,
     seedNames: ["skill-0"],
-    getVisibleSkills,
-    signal: controller.signal,
-    search: async () => {
+    getVisibleSkills: async () => {
+      if (!block) return skills;
       entered();
       return new Promise((resolve) => {
         finish = resolve;
       });
     },
-  });
+    signal: controller.signal,
+  }))!;
+  block = true;
+  const pending = context.admitSkill("skill-1");
   await ready;
   controller.abort();
+  finish(skills);
   await expect(pending).rejects.toThrow();
-  finish([{ name: "skill-1" }]);
+  expect(context.skills).toHaveLength(1);
+});
+
+it("starts with seeds only and admits stable snapshots on demand", async () => {
+  const { context, skills } = await fixture(3, false);
+  expect(context.skills).toHaveLength(1);
+  const admission = await context.admitSkill("skill-1");
+  expect(admission.status).toBe("eligible");
+  await fs.appendFile(skills[1].location, "later change\n");
+  expect(await context.admitSkill("SKILL-1")).toEqual(admission);
+  expect(context.skills).toHaveLength(2);
+  expect(context.preparation.discoveryAttempts).toBe(1);
+});
+
+it("rotates existing neighbors while reserving discovery capacity", async () => {
+  const { skills, getVisibleSkills } = await fixture(13, false);
+  const all = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: skills.map(({ name }) => name),
+    getVisibleSkills,
+  }))!;
+  await appendImportedRelations(
+    root,
+    all.skills.slice(1).map((to) => ({
+      from: all.skills[0].identity,
+      to: to.identity,
+      type: "related" as const,
+      reason: "Documented shared pipeline",
+    })),
+  );
+  const first = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills,
+  }))!;
+  expect(first.skills).toHaveLength(5);
+  expect(first.preparation.existingNeighborAttempts).toBe(4);
+  expect(first.inspectionCursor).toEqual({
+    key: expect.stringMatching(/^[a-f0-9]{64}$/),
+    nextOffset: 4,
+  });
+  const second = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills,
+    getNeighborOffset: (key) =>
+      key === first.inspectionCursor!.key
+        ? first.inspectionCursor!.nextOffset
+        : 0,
+  }))!;
+  expect(
+    second.skills
+      .slice(1)
+      .some((entry) => first.skills.some((old) => old.name === entry.name)),
+  ).toBe(false);
+  for (const skill of skills.slice(1)) await first.admitSkill(skill.name);
+  expect(first.skills).toHaveLength(9);
+  expect(first.preparation.discoveryAttempts).toBe(4);
+});
+
+it("rechecks current visibility before new admission", async () => {
+  const { context, skills, setVisible } = await fixture(3, false);
+  setVisible([skills[0]]);
+  expect(await context.admitSkill("skill-1")).toMatchObject({
+    status: "ineligible",
+  });
+  expect(context.skills).toHaveLength(1);
 });
 
 it("rejects an absent target that was created and removed during review", async () => {
@@ -246,7 +315,7 @@ it("rejects an absent target that was created and removed during review", async 
 });
 
 it("updates then deletes an imported relation using fresh content evidence each time", async () => {
-  const { context, getVisibleSkills, search } = await fixture();
+  const { context, getVisibleSkills } = await fixture();
   const [from, to] = context.skills;
   await appendImportedRelations(root, [
     {
@@ -261,7 +330,6 @@ it("updates then deletes an imported relation using fresh content evidence each 
     dataRoot: root,
     seedNames: [from.name],
     getVisibleSkills,
-    search,
   }))!;
   await applyPreparedRelationReview(
     updatedContext,
@@ -277,7 +345,6 @@ it("updates then deletes an imported relation using fresh content evidence each 
     dataRoot: root,
     seedNames: [from.name],
     getVisibleSkills,
-    search,
   }))!;
   await applyPreparedRelationReview(
     deletedContext,
@@ -288,5 +355,264 @@ it("updates then deletes an imported relation using fresh content evidence each 
   expect((await readRelationGraph(root))!.relations).toHaveLength(0);
   expect(await fs.readFile(relationGraphPath(root), "utf8")).toContain(
     "Original broad relation",
+  );
+});
+
+it("serializes concurrent admissions without exceeding the extra-skill budget", async () => {
+  const { context, skills } = await fixture(15, false);
+  const results = await Promise.all(
+    skills
+      .slice(1)
+      .flatMap(({ name }) => [
+        context.admitSkill(name),
+        context.admitSkill(name),
+      ]),
+  );
+  expect(context.skills).toHaveLength(9);
+  expect(context.preparation.discoveryAttempts).toBe(8);
+  expect(context.preparation.capturedExtras).toBe(8);
+  expect(results.filter((entry) => entry.status === "eligible")).toHaveLength(
+    16,
+  );
+});
+
+it("uses the current graph for new endpoints without refreshing already captured pair revisions", async () => {
+  const { context: identities, getVisibleSkills } = await fixture(4);
+  const context = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills,
+  }))!;
+  await context.admitSkill("skill-1");
+  const [from, first, second] = identities.skills;
+  await appendImportedRelations(root, [
+    {
+      from: from.identity,
+      to: first.identity,
+      type: "related",
+      reason: "Concurrent first pair",
+    },
+    {
+      from: from.identity,
+      to: second.identity,
+      type: "related",
+      reason: "Current second pair",
+    },
+  ]);
+  await context.admitSkill("skill-2");
+  expect(context.relations).toHaveLength(1);
+  expect(context.relations[0].to).toBe(second.identity.id);
+  expect(
+    context.relationRevisions.has(
+      JSON.stringify([from.identity.id, first.identity.id]),
+    ),
+  ).toBe(false);
+  expect(
+    context.relationRevisions.has(
+      JSON.stringify([from.identity.id, second.identity.id]),
+    ),
+  ).toBe(true);
+  await expect(
+    applyPreparedRelationReview(
+      context,
+      [finding(context)],
+      "stale-old-pair",
+      "main",
+    ),
+  ).rejects.toThrow("stale-review-revision");
+  const proposed = finding(context);
+  proposed.operation = "update";
+  proposed.toSkillId = second.identity.id;
+  proposed.relationEvidence[1] = {
+    skillId: second.identity.id,
+    filePath: "SKILL.md",
+    startLine: 5,
+    endLine: 5,
+    quote: `${second.name} provides pipeline data.`,
+  };
+  expect(
+    await applyPreparedRelationReview(
+      context,
+      [proposed],
+      "fresh-new-pair",
+      "main",
+    ),
+  ).toMatchObject({ changed: 1 });
+});
+
+it("rejects unregistered endpoints and reports distinct preparation skips", async () => {
+  const onPreparation = vi.fn();
+  await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: [],
+    getVisibleSkills: async () => [],
+    onPreparation,
+  });
+  expect(onPreparation).toHaveBeenLastCalledWith(
+    expect.objectContaining({ reason: "no-seeds" }),
+  );
+  await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills: async () => [],
+    onPreparation,
+  });
+  expect(onPreparation).toHaveBeenLastCalledWith(
+    expect.objectContaining({ reason: "registry-unavailable" }),
+  );
+  const { context, skills, setVisible, getVisibleSkills } = await fixture(
+    2,
+    false,
+  );
+  await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["missing"],
+    getVisibleSkills,
+    onPreparation,
+  });
+  expect(onPreparation).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      reason: "no-eligible-seeds",
+      skippedCaptureCount: 1,
+    }),
+  );
+  const unregistered = {
+    name: "unregistered",
+    description: "Unregistered skill",
+    location: path.join(root, "unregistered", "SKILL.md"),
+  };
+  await fs.mkdir(path.dirname(unregistered.location));
+  await fs.writeFile(
+    unregistered.location,
+    "---\nname: unregistered\ndescription: Unregistered skill\n---\nFull content\n",
+  );
+  setVisible([...skills, unregistered]);
+  expect(await context.admitSkill(unregistered.name)).toEqual({
+    status: "ineligible",
+    reason: "unregistered",
+  });
+  expect(context.skills).toHaveLength(1);
+});
+
+it("enforces the total snapshot budget without truncating a newly admitted file", async () => {
+  const { skills, getVisibleSkills } = await fixture(10, false);
+  for (const skill of skills) {
+    const content = await fs.readFile(skill.location, "utf8");
+    await fs.writeFile(
+      skill.location,
+      content + "x".repeat(256 * 1024 - Buffer.byteLength(content)),
+    );
+  }
+  const context = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills,
+  }))!;
+  for (const skill of skills.slice(1, 8))
+    expect((await context.admitSkill(skill.name)).status).toBe("eligible");
+  expect(await context.admitSkill("skill-8")).toEqual({
+    status: "ineligible",
+    reason: "evidence-budget",
+  });
+  expect(context.skills).toHaveLength(8);
+  expect(
+    context.skills.reduce(
+      (sum, skill) => sum + Buffer.byteLength(skill.content),
+      0,
+    ),
+  ).toBe(2 * 1024 * 1024);
+});
+
+it("stages newly admitted snapshots idempotently without rewriting existing evidence", async () => {
+  const { context } = await fixture(3, false);
+  const workspace = path.join(root, "workspace");
+  await fs.mkdir(workspace);
+  await stageRelationReviewEvidence(context, workspace);
+  const seedFile = path.join(workspace, context.skills[0].workspacePath);
+  await fs.utimes(seedFile, 1, 1);
+  const admitted = await context.admitSkill("skill-1");
+  if (admitted.status !== "eligible") throw new Error("expected eligible");
+  await stageRelationReviewSkill(admitted.skill, workspace);
+  await stageRelationReviewEvidence(context, workspace);
+  expect((await fs.stat(seedFile)).mtimeMs).toBe(1000);
+  expect(
+    await fs.readFile(
+      path.join(workspace, admitted.skill.workspacePath),
+      "utf8",
+    ),
+  ).toBe(admitted.skill.content);
+  await fs.chmod(seedFile, 0o600);
+  await fs.appendFile(seedFile, "tampered\n");
+  await expect(stageRelationReviewEvidence(context, workspace)).rejects.toThrow(
+    "stale-staged-evidence",
+  );
+});
+
+it("rejects symlinked staging directories and evidence files", async () => {
+  const { context } = await fixture(2, false);
+  const workspace = path.join(root, "workspace");
+  const outside = path.join(root, "outside");
+  await fs.mkdir(workspace);
+  await fs.mkdir(outside);
+  await fs.symlink(outside, path.join(workspace, "relation-evidence"));
+  await expect(
+    stageRelationReviewEvidence(context, workspace),
+  ).rejects.toThrow();
+  expect(await fs.readdir(outside)).toEqual([]);
+  await fs.unlink(path.join(workspace, "relation-evidence"));
+  await stageRelationReviewEvidence(context, workspace);
+  const file = path.join(workspace, context.skills[0].workspacePath);
+  const outsideFile = path.join(outside, "SKILL.md");
+  await fs.writeFile(outsideFile, context.skills[0].content);
+  await fs.unlink(file);
+  await fs.symlink(outsideFile, file);
+  await expect(
+    stageRelationReviewEvidence(context, workspace),
+  ).rejects.toThrow();
+  expect(await fs.readFile(outsideFile, "utf8")).toBe(
+    context.skills[0].content,
+  );
+});
+
+it("advances past failed existing-neighbor captures on the next inspection", async () => {
+  const { skills, getVisibleSkills } = await fixture(11, false);
+  const all = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: skills.map(({ name }) => name),
+    getVisibleSkills,
+  }))!;
+  await appendImportedRelations(
+    root,
+    all.skills.slice(1).map((to) => ({
+      from: all.skills[0].identity,
+      to: to.identity,
+      type: "related" as const,
+      reason: "Shared documented workflow",
+    })),
+  );
+  const firstNames = skills
+    .slice(1)
+    .map(({ name }) => name)
+    .sort()
+    .slice(0, 4);
+  for (const skill of skills.filter(({ name }) => firstNames.includes(name)))
+    await fs.writeFile(skill.location, "x".repeat(256 * 1024 + 1));
+  const first = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills,
+  }))!;
+  expect(first.skills).toHaveLength(1);
+  expect(first.preparation.existingNeighborAttempts).toBe(4);
+  expect(first.preparation.skippedCaptureCount).toBe(4);
+  const second = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills,
+    getNeighborOffset: () => first.inspectionCursor!.nextOffset,
+  }))!;
+  expect(second.skills).toHaveLength(5);
+  expect(second.skills.some(({ name }) => firstNames.includes(name))).toBe(
+    false,
   );
 });

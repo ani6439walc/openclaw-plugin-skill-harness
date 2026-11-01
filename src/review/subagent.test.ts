@@ -251,6 +251,10 @@ describe("runReviewSubagent", () => {
               {
                 text: JSON.stringify({
                   findings: [{ trigger: "capability-fit", hasFinding: false }],
+                  relationReview: {
+                    existing: "no-change",
+                    discovery: "no-change",
+                  },
                 }),
               },
             ],
@@ -285,6 +289,12 @@ describe("runReviewSubagent", () => {
       expect.objectContaining({ sessionPersistence: "detached" }),
     );
     expect(deleteSession).not.toHaveBeenCalled();
+  });
+
+  it("does not report model relation assessments without an eligible context", async () => {
+    const { result } = await runNoFindingReview(vi.fn());
+    expect(result.outcome).toBe("nofinding");
+    expect(result.relationReview).toBeUndefined();
   });
 
   it("applies a reviewer-owned experience update", async () => {
@@ -559,6 +569,7 @@ describe("review writeback boundaries", () => {
           "skill_experience",
           "skill_list",
           "skill_search",
+          "skill_view",
         ],
       }),
     );

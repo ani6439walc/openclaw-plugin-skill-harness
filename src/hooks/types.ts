@@ -152,7 +152,12 @@ export type HookDeps = {
   ) => Promise<RoutingLlmResult | undefined>;
   classifier?: (params: unknown) => Promise<RoutingLlmResult | undefined>;
   reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
-    Partial<Pick<IntentReviewLogWriter, "completedSkillEpochKeys">>;
+    Partial<
+      Pick<
+        IntentReviewLogWriter,
+        "completedSkillEpochKeys" | "relationInspectionOffset"
+      >
+    >;
   getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;
 
   bundledSkillsDir?: string;

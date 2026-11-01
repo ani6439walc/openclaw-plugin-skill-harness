@@ -23,7 +23,7 @@ The reviewer uses `read`, `write`, `edit`, `ls`, and `exec` in its temporary wor
 
 Use this when the user asks to inspect, author, refine, or prune skill experiences manually. Read and follow `references/experience.md`. Maintain valid experience directory structure (`summary.md`, `keywords.md`, `body.md`, and optional `skills.md`) under `<dataRoot>/experiences/<id>/`.
 
-Automatic Review also maintains private skill relations when enabled. It starts from final recommended and successfully loaded skills, reads bounded staged `SKILL.md` evidence, and submits validated relation proposals through the plugin's graph writer. Recommendation alone is not relationship or execution evidence. This manual experience workflow does not authorize direct graph edits or reimport: Review JSONL history, including deletions, must be preserved. See [skill relation behavior](../../README.md#skill-relations).
+Automatic Review also maintains private skill relations when enabled. It starts from final recommended and successfully loaded skills, rotates through existing neighbors, autonomously searches for candidates, admits bounded `SKILL.md` evidence through Review’s `skill_view`, and submits validated relation proposals through the plugin's graph writer. Recommendation alone is not relationship or execution evidence. This manual experience workflow does not authorize direct graph edits or reimport: Review JSONL history, including deletions, must be preserved. See [skill relation behavior](../../README.md#skill-relations).
 
 ## Mode: runtime-health
 

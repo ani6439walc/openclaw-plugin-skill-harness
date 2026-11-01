@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { canonicalIdentity } from "../normalize.js";
@@ -32,6 +32,37 @@ export interface RelationReviewSkill {
   workspacePath: string;
 }
 
+export interface RelationPreparationSummary {
+  status: "ready" | "skipped";
+  reason?:
+    | "no-seeds"
+    | "registry-unavailable"
+    | "no-eligible-seeds"
+    | "preparation-failed"
+    | "no-data-root";
+  requestedSeeds: number;
+  capturedSeeds: number;
+  capturedExtras: number;
+  existingNeighborAttempts: number;
+  discoveryAttempts: number;
+  skippedCaptureCount: number;
+}
+
+export type RelationSkillAdmission =
+  | { status: "eligible"; skill: RelationReviewSkill }
+  | {
+      status: "ineligible";
+      reason:
+        | "not-visible"
+        | "registry-unavailable"
+        | "unregistered"
+        | "unreadable"
+        | "file-too-large"
+        | "evidence-budget"
+        | "extra-skill-budget"
+        | "unstable-content";
+    };
+
 export interface RelationReviewContext {
   dataRoot: string;
   seedIds: readonly string[];
@@ -39,6 +70,9 @@ export interface RelationReviewContext {
   relations: readonly GraphRelation[];
   relationRevisions: ReadonlyMap<string, string>;
   getVisibleSkills: () => Promise<readonly AvailableSkill[]>;
+  preparation: RelationPreparationSummary;
+  inspectionCursor?: { key: string; nextOffset: number };
+  admitSkill: (name: string) => Promise<RelationSkillAdmission>;
 }
 
 function visibleWinners(skills: readonly AvailableSkill[]) {
@@ -52,89 +86,125 @@ function visibleWinners(skills: readonly AvailableSkill[]) {
   return result;
 }
 
-async function boundedSearch<T>(
-  search: (params: { query: string; limit: number }) => Promise<T>,
-  params: { query: string; limit: number },
-  signal: AbortSignal | undefined,
-  timeoutMs: number,
-): Promise<T> {
-  signal?.throwIfAborted();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let onAbort: (() => void) | undefined;
-  try {
-    return await Promise.race([
-      search(params),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("review-search-timeout")),
-          timeoutMs,
-        );
-        onAbort = () => reject(new Error("review-search-aborted"));
-        signal?.addEventListener("abort", onAbort, { once: true });
-        if (signal?.aborted) onAbort();
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    if (onAbort) signal?.removeEventListener("abort", onAbort);
-  }
-}
-
 export async function prepareRelationReviewContext(params: {
   dataRoot: string;
   seedNames: readonly string[];
   getVisibleSkills: () => Promise<readonly AvailableSkill[]>;
-  search?: (params: {
-    query: string;
-    limit: number;
-  }) => Promise<readonly { name: string }[] | undefined>;
+  getNeighborOffset?: (key: string) => number;
+  onPreparation?: (summary: RelationPreparationSummary) => void;
   signal?: AbortSignal;
-  searchTimeoutMs?: number;
 }): Promise<RelationReviewContext | undefined> {
-  params.signal?.throwIfAborted();
-  if (!params.seedNames.length) return;
-  const registry = readRelationSources(params.dataRoot);
-  if (!registry) return;
-  const winners = visibleWinners(await params.getVisibleSkills());
-  params.signal?.throwIfAborted();
+  const checkActive = () => params.signal?.throwIfAborted();
+  checkActive();
+  const requestedSeeds = [...new Set(params.seedNames.map(canonicalIdentity))];
+  const preparation: RelationPreparationSummary = {
+    status: "skipped",
+    requestedSeeds: requestedSeeds.length,
+    capturedSeeds: 0,
+    capturedExtras: 0,
+    existingNeighborAttempts: 0,
+    discoveryAttempts: 0,
+    skippedCaptureCount: 0,
+  };
+  const skip = (reason: RelationPreparationSummary["reason"]) => {
+    preparation.reason = reason;
+    params.onPreparation?.(preparation);
+    return undefined;
+  };
+  if (!requestedSeeds.length) return skip("no-seeds");
+  if (!readRelationSources(params.dataRoot))
+    return skip("registry-unavailable");
+  const initialWinners = visibleWinners(await params.getVisibleSkills());
+  checkActive();
   const captured = new Map<string, RelationReviewSkill>();
+  const skills: RelationReviewSkill[] = [];
+  const relations: GraphRelation[] = [];
+  const relationRevisions = new Map<string, string>();
   let bytes = 0;
-  async function capture(name: string) {
-    const key = canonicalIdentity(name);
-    if (captured.has(key)) return captured.get(key);
-    const skill = winners.get(key);
-    if (!skill) return;
-    const file = await resolveConfinedFile(
-      path.dirname(skill.location),
-      skill.location,
-    );
-    if (!file || (await fs.stat(file)).size > MAX_SKILL_BYTES) return;
-    const content = await fs.readFile(file, "utf8");
-    const identity = await readSkillIdentity(skill, registry);
-    if (!identity?.source_id || (await fs.readFile(file, "utf8")) !== content)
-      return;
-    const size = Buffer.byteLength(content);
-    if (bytes + size > MAX_SNAPSHOT_BYTES)
-      throw new Error("review-evidence-budget");
-    params.signal?.throwIfAborted();
-    const snapshot: RelationReviewSkill = {
-      name: skill.name,
-      identity,
-      content,
-      fileDigest: digest(content),
-      workspacePath: `relation-evidence/${digest(identity.id)}/SKILL.md`,
-    };
-    bytes += size;
-    captured.set(key, snapshot);
-    return snapshot;
+
+  async function captureSnapshot(
+    name: string,
+    winners: ReadonlyMap<string, AvailableSkill>,
+  ): Promise<RelationSkillAdmission> {
+    checkActive();
+    const skill = winners.get(canonicalIdentity(name));
+    if (!skill) return { status: "ineligible", reason: "not-visible" };
+    const registry = readRelationSources(params.dataRoot);
+    if (!registry)
+      return { status: "ineligible", reason: "registry-unavailable" };
+    try {
+      const file = await resolveConfinedFile(
+        path.dirname(skill.location),
+        skill.location,
+      );
+      checkActive();
+      if (!file) return { status: "ineligible", reason: "unreadable" };
+      const stat = await fs.stat(file);
+      checkActive();
+      if (stat.size > MAX_SKILL_BYTES)
+        return { status: "ineligible", reason: "file-too-large" };
+      const content = await fs.readFile(file, "utf8");
+      checkActive();
+      const size = Buffer.byteLength(content);
+      if (size > MAX_SKILL_BYTES)
+        return { status: "ineligible", reason: "file-too-large" };
+      if (bytes + size > MAX_SNAPSHOT_BYTES)
+        return { status: "ineligible", reason: "evidence-budget" };
+      const identity = await readSkillIdentity(skill, registry);
+      checkActive();
+      if (!identity?.source_id)
+        return { status: "ineligible", reason: "unregistered" };
+      const after = await fs.readFile(file, "utf8");
+      checkActive();
+      if (after !== content)
+        return { status: "ineligible", reason: "unstable-content" };
+      return {
+        status: "eligible",
+        skill: {
+          name: skill.name,
+          identity,
+          content,
+          fileDigest: digest(content),
+          workspacePath: `relation-evidence/${digest(identity.id)}/SKILL.md`,
+        },
+      };
+    } catch {
+      checkActive();
+      return { status: "ineligible", reason: "unreadable" };
+    }
+  }
+  function retain(skill: RelationReviewSkill) {
+    bytes += Buffer.byteLength(skill.content);
+    captured.set(canonicalIdentity(skill.name), skill);
+    skills.push(skill);
   }
   const seedIds = new Set<string>();
-  for (const name of new Set(params.seedNames.map(canonicalIdentity))) {
-    const skill = await capture(name);
-    if (skill) seedIds.add(skill.identity.id);
+  for (const name of requestedSeeds) {
+    const result = await captureSnapshot(name, initialWinners);
+    checkActive();
+    if (result.status === "eligible") {
+      retain(result.skill);
+      seedIds.add(result.skill.identity.id);
+    } else preparation.skippedCaptureCount++;
   }
-  if (!seedIds.size) return;
+  preparation.capturedSeeds = seedIds.size;
+  if (!seedIds.size) return skip("no-eligible-seeds");
   const graph = await readRelationGraph(params.dataRoot);
+  checkActive();
+  // Initial seed pairs are fixed at preparation time, including tombstones.
+  for (const from of seedIds)
+    for (const to of seedIds) {
+      const pair = JSON.stringify([from, to]);
+      const revision = graph?.relationRevisions?.get(pair);
+      if (revision !== undefined) relationRevisions.set(pair, revision);
+    }
+  relations.push(
+    ...structuredClone(
+      (graph?.relations ?? []).filter(
+        (edge) => seedIds.has(edge.from) && seedIds.has(edge.to),
+      ),
+    ),
+  );
   const extraNames = new Set<string>();
   for (const edge of graph?.relations ?? []) {
     const other = seedIds.has(edge.from)
@@ -143,77 +213,189 @@ export async function prepareRelationReviewContext(params: {
         ? edge.from
         : undefined;
     const node = other ? graph?.entities.get(other) : undefined;
-    if (typeof node?.properties.name === "string")
-      extraNames.add(node.properties.name);
-  }
-  const attemptedExtras = new Set<string>();
-  async function captureExtra(name: string) {
-    const key = canonicalIdentity(name);
-    if (
-      attemptedExtras.size >= MAX_RELATION_EXTRA_SKILLS ||
-      captured.has(key) ||
-      attemptedExtras.has(key) ||
-      !winners.has(key)
-    )
-      return;
-    attemptedExtras.add(key);
-    await capture(name);
-  }
-  for (const name of [...extraNames].sort()) await captureExtra(name);
-  if (attemptedExtras.size < MAX_RELATION_EXTRA_SKILLS && params.search) {
-    const query = Array.from(
-      [...captured.values()]
-        .filter((skill) => seedIds.has(skill.identity.id))
-        .map(
-          (skill) =>
-            `${skill.name}: ${winners.get(canonicalIdentity(skill.name))?.description ?? ""}`,
-        )
-        .join("\n"),
-    )
-      .slice(0, 1000)
-      .join("");
-    let hits: readonly { name: string }[] | undefined;
-    try {
-      hits = await boundedSearch(
-        params.search,
-        { query, limit: MAX_RELATION_EXTRA_SKILLS - attemptedExtras.size },
-        params.signal,
-        params.searchTimeoutMs ?? 15000,
-      );
-    } catch {
-      params.signal?.throwIfAborted();
+    if (typeof node?.properties.name === "string") {
+      const key = canonicalIdentity(node.properties.name);
+      if (!captured.has(key) && initialWinners.has(key)) extraNames.add(key);
     }
-    params.signal?.throwIfAborted();
-    for (const hit of hits ?? []) await captureExtra(hit.name);
   }
-  const skills = [...captured.values()];
-  const ids = new Set(skills.map((skill) => skill.identity.id));
+  const attemptedExtras = new Map<string, RelationSkillAdmission>();
+  async function captureExtra(
+    name: string,
+    source: "existing" | "discovery",
+  ): Promise<RelationSkillAdmission> {
+    checkActive();
+    const key = canonicalIdentity(name);
+    const existing = captured.get(key);
+    if (existing) return { status: "eligible", skill: existing };
+    const previous = attemptedExtras.get(key);
+    if (previous) return previous;
+    if (attemptedExtras.size >= MAX_RELATION_EXTRA_SKILLS)
+      return { status: "ineligible", reason: "extra-skill-budget" };
+    // Reserve the attempt before I/O; failed captures also consume the budget.
+    attemptedExtras.set(key, { status: "ineligible", reason: "unreadable" });
+    if (source === "existing") preparation.existingNeighborAttempts++;
+    else preparation.discoveryAttempts++;
+    const winners = visibleWinners(await params.getVisibleSkills());
+    checkActive();
+    const result = await captureSnapshot(name, winners);
+    checkActive();
+    if (result.status === "eligible") {
+      const currentGraph = await readRelationGraph(params.dataRoot);
+      checkActive();
+      const id = result.skill.identity.id;
+      // Admission may happen much later than preparation. Only new pairs take
+      // a fresh baseline; refreshing old pairs could hide concurrent edits.
+      for (const seed of seedIds)
+        for (const [from, to] of [
+          [seed, id],
+          [id, seed],
+        ]) {
+          const pair = JSON.stringify([from, to]);
+          const revision = currentGraph?.relationRevisions?.get(pair);
+          if (revision !== undefined) relationRevisions.set(pair, revision);
+        }
+      relations.push(
+        ...structuredClone(
+          (currentGraph?.relations ?? []).filter(
+            (edge) =>
+              (edge.from === id && seedIds.has(edge.to)) ||
+              (edge.to === id && seedIds.has(edge.from)),
+          ),
+        ),
+      );
+      retain(result.skill);
+      preparation.capturedExtras++;
+    } else preparation.skippedCaptureCount++;
+    attemptedExtras.set(key, result);
+    return result;
+  }
+  const neighbors = [...extraNames].sort();
+  const cursorKey = digest(JSON.stringify([...seedIds].sort()));
+  const rawOffset = params.getNeighborOffset?.(cursorKey) ?? 0;
+  const offset =
+    Number.isSafeInteger(rawOffset) && rawOffset >= 0 && neighbors.length
+      ? rawOffset % neighbors.length
+      : 0;
+  const initialAttempts = Math.min(4, neighbors.length);
+  for (let index = 0; index < initialAttempts; index++)
+    await captureExtra(
+      neighbors[(offset + index) % neighbors.length],
+      "existing",
+    );
+  checkActive();
+  preparation.status = "ready";
+  params.onPreparation?.(preparation);
+  // A single run can issue parallel tool calls. Serialize admission so the
+  // byte/skill budgets and pair baselines are checked and changed atomically.
+  let admissionQueue: Promise<unknown> = Promise.resolve();
   return {
     dataRoot: params.dataRoot,
     seedIds: [...seedIds],
     skills,
-    relations: structuredClone(
-      (graph?.relations ?? []).filter(
-        (edge) =>
-          ids.has(edge.from) &&
-          ids.has(edge.to) &&
-          (seedIds.has(edge.from) || seedIds.has(edge.to)),
-      ),
-    ),
-    relationRevisions: new Map(graph?.relationRevisions),
+    relations,
+    relationRevisions,
     getVisibleSkills: params.getVisibleSkills,
+    preparation,
+    ...(neighbors.length
+      ? {
+          inspectionCursor: {
+            key: cursorKey,
+            nextOffset: (offset + initialAttempts) % neighbors.length,
+          },
+        }
+      : {}),
+    admitSkill(name) {
+      const admission = admissionQueue.then(() =>
+        captureExtra(name, "discovery"),
+      );
+      admissionQueue = admission.catch(() => undefined);
+      return admission;
+    },
   };
+}
+
+export async function stageRelationReviewSkill(
+  skill: RelationReviewSkill,
+  workspace: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  const segment = digest(skill.identity.id);
+  if (skill.workspacePath !== `relation-evidence/${segment}/SKILL.md`)
+    throw new Error("invalid-staged-evidence-path");
+  const root = await fs.realpath(workspace);
+  signal?.throwIfAborted();
+  let directory = root;
+  for (const part of ["relation-evidence", segment]) {
+    directory = path.join(directory, part);
+    try {
+      await fs.mkdir(directory, { mode: 0o700 });
+    } catch (error) {
+      if (!(
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "EEXIST"
+      ))
+        throw error;
+    }
+    signal?.throwIfAborted();
+    const stat = await fs.lstat(directory);
+    signal?.throwIfAborted();
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      (await fs.realpath(directory)) !== directory
+    )
+      throw new Error("invalid-staged-evidence-directory");
+    signal?.throwIfAborted();
+  }
+  const file = path.join(directory, "SKILL.md");
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  let created = false;
+  try {
+    try {
+      handle = await fs.open(
+        file,
+        fsConstants.O_WRONLY |
+          fsConstants.O_CREAT |
+          fsConstants.O_EXCL |
+          fsConstants.O_NOFOLLOW,
+        0o400,
+      );
+      created = true;
+    } catch (error) {
+      if (!(
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "EEXIST"
+      ))
+        throw error;
+      handle = await fs.open(
+        file,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+      );
+    }
+    signal?.throwIfAborted();
+    const stat = await handle.stat();
+    signal?.throwIfAborted();
+    if (!stat.isFile() || stat.size > MAX_SKILL_BYTES)
+      throw new Error("invalid-staged-evidence-file");
+    if (created) await handle.writeFile(skill.content, "utf8");
+    else if ((await handle.readFile("utf8")) !== skill.content)
+      throw new Error("stale-staged-evidence");
+    signal?.throwIfAborted();
+  } finally {
+    await handle?.close();
+  }
 }
 
 export async function stageRelationReviewEvidence(
   context: RelationReviewContext,
   workspace: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  for (const skill of context.skills) {
-    const file = path.join(workspace, skill.workspacePath);
-    await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-    await fs.writeFile(file, skill.content, { mode: 0o400 });
-  }
+  for (const skill of context.skills)
+    await stageRelationReviewSkill(skill, workspace, signal);
 }
 
 export function formatRelationReviewContext(

@@ -51,6 +51,7 @@ async function setup(
   const record = vi.fn(async () => true);
   const schedule = vi.fn();
   const reviewSkillResolver = vi.fn(async () => skills);
+  const search = vi.fn(async () => [{ name: "extra", score: 1 }]);
   createHookHandlers({
     api: { config: {} } as OpenClawPluginApi,
     config: () => resolveConfig({}),
@@ -77,7 +78,7 @@ async function setup(
     experienceCatalog: { listAll: () => [] } as never,
     qmdExperienceIndex: { schedule } as never,
     qmdSkillIndex: {
-      search: vi.fn(async () => [{ name: "extra", score: 1 }]),
+      search,
     } as never,
   });
   const candidate = {
@@ -99,8 +100,32 @@ async function setup(
     },
   };
   await runner!(candidate as never, controller.signal);
-  return { reviewer, record, schedule, reviewSkillResolver };
+  return { reviewer, record, schedule, reviewSkillResolver, search };
 }
+it("records preparation and independent assessment without pre-searching candidates", async () => {
+  const relationReview = { existing: "not-applicable", discovery: "no-change" };
+  const { record, search } = await setup({
+    findings: [],
+    outcome: "nofinding",
+    relationReview,
+    relationSearchCount: 1,
+  });
+  expect(search).not.toHaveBeenCalled();
+  expect(record).toHaveBeenCalledWith(
+    "e",
+    expect.anything(),
+    [],
+    expect.objectContaining({
+      relationReview,
+      relationSearchCount: 1,
+      relationPreparation: expect.objectContaining({
+        status: "ready",
+        requestedSeeds: 2,
+        capturedSeeds: 2,
+      }),
+    }),
+  );
+});
 it("includes recommended and loaded seeds while retaining loaded-only experience eligibility", async () => {
   const { reviewer, schedule, record } = await setup({
     findings: [],
