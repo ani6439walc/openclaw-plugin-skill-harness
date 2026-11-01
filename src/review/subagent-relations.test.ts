@@ -66,8 +66,8 @@ async function fixture() {
     dataRoot: root,
     seedNames: ["a"],
     getVisibleSkills: async () => skills,
-    search: async () => [{ name: "b" }],
   }))!;
+  await context.admitSkill("b");
   const [a, b] = context.skills;
   const finding: SkillRelationReviewFinding = {
     targetKind: "skill-relation",
@@ -95,6 +95,10 @@ async function fixture() {
       {
         text: JSON.stringify({
           findings: [{ ...finding, hasFinding: true }, ...extra],
+          relationReview: {
+            existing: "not-applicable",
+            discovery: "changes-proposed",
+          },
         }),
       },
     ],
@@ -142,6 +146,39 @@ it("parses relation findings and rejects invalid structured evidence", async () 
   expect(
     parse({ relationEvidence: [finding.relationEvidence[0]] })?.findings,
   ).toEqual([]);
+});
+it("requires an independent relation assessment and checks it against proposed operations", async () => {
+  const { context, finding } = await fixture();
+  const parse = (
+    relationReview?: unknown,
+    findings: unknown[] = [{ trigger: "capability-fit", hasFinding: false }],
+  ) =>
+    parseReviewFindingsDetailed(
+      JSON.stringify({
+        findings,
+        ...(relationReview ? { relationReview } : {}),
+      }),
+      ["capability-fit"],
+      context,
+    );
+  expect(parse()?.invalidRelationReview).toBe(true);
+  expect(
+    parse({ existing: "not-applicable", discovery: "no-change" })
+      ?.invalidRelationReview,
+  ).toBeUndefined();
+  expect(
+    parse({ existing: "not-applicable", discovery: "changes-proposed" })
+      ?.invalidRelationReview,
+  ).toBe(true);
+  expect(
+    parse({ existing: "not-applicable", discovery: "changes-proposed" }, [
+      { ...finding, hasFinding: true },
+    ])?.relationReview,
+  ).toEqual({ existing: "not-applicable", discovery: "changes-proposed" });
+  expect(
+    parse({ existing: "no-change", discovery: "no-change" })
+      ?.invalidRelationReview,
+  ).toBe(true);
 });
 it("gives relation updates a valid format without experience-only requirements", async () => {
   const { context } = await fixture();

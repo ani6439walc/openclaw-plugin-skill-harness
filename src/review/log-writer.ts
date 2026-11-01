@@ -7,6 +7,7 @@ import {
   withFileLock,
 } from "../file-utils.js";
 import type {
+  RelationReviewAssessment,
   ReviewDomainOutcome,
   ReviewFinding,
   ReviewSource,
@@ -20,7 +21,9 @@ import {
   type NoFindingReasonCounts,
   type ProcessedEventOutcome,
   type SchemaRejectionReasonCounts,
+  MAX_RELATION_INSPECTION_CURSORS,
 } from "./log.js";
+import type { RelationPreparationSummary } from "./relations.js";
 import type { ReviewTrigger } from "./triggers.js";
 import { safeErrorClassification } from "../error-diagnostics.js";
 
@@ -61,14 +64,6 @@ function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
   };
 }
 
-function readReviewLog(raw: unknown, nowIso: string) {
-  try {
-    return parseReviewLog(raw);
-  } catch {
-    return createReviewLog(nowIso);
-  }
-}
-
 export class IntentReviewLogWriter {
   constructor(private readonly dataRoot: string) {}
 
@@ -78,10 +73,7 @@ export class IntentReviewLogWriter {
     try {
       return new Set(
         Object.keys(
-          readReviewLog(
-            readJsonFile<unknown>(logPath),
-            new Date().toISOString(),
-          ).reviewedSkillEpochs,
+          parseReviewLog(readJsonFile<unknown>(logPath)).reviewedSkillEpochs,
         ),
       );
     } catch (error) {
@@ -90,6 +82,20 @@ export class IntentReviewLogWriter {
         `failed to read completed skill epochs reason=${diagnostic.reason}${diagnostic.code ? ` code=${diagnostic.code}` : ""}`,
       );
       return undefined;
+    }
+  }
+
+  relationInspectionOffset(key: string): number {
+    const logPath = reviewLogPath(this.dataRoot);
+    if (!fileExists(logPath)) return 0;
+    try {
+      return (
+        parseReviewLog(readJsonFile<unknown>(logPath))
+          .relationInspectionCursors?.[key]?.offset ?? 0
+      );
+    } catch {
+      // Reading a cursor cannot authorize replacement of an unreadable history.
+      return 0;
     }
   }
 
@@ -111,6 +117,10 @@ export class IntentReviewLogWriter {
       validationErrors?: readonly string[];
       noFindingReasonCounts?: NoFindingReasonCounts;
       schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
+      relationPreparation?: RelationPreparationSummary;
+      relationReview?: RelationReviewAssessment;
+      relationSearchCount?: number;
+      relationInspectionCursor?: { key: string; nextOffset: number };
     } = {},
   ): Promise<boolean> {
     if (!eventId) return false;
@@ -120,11 +130,8 @@ export class IntentReviewLogWriter {
         const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
         let log = createReviewLog(nowIso);
         if (fileExists(logPath)) {
-          try {
-            log = readReviewLog(readJsonFile<unknown>(logPath), nowIso);
-          } catch {
-            // Invalid runtime state starts a fresh review window.
-          }
+          // Unknown/newer or corrupt history must never be replaced by an empty log.
+          log = parseReviewLog(readJsonFile<unknown>(logPath));
         }
         pruneReviewLogEvents(log, options.nowMs ?? Date.now());
         if (Object.hasOwn(log.processedEvents, eventId)) return false;
@@ -176,7 +183,45 @@ export class IntentReviewLogWriter {
                   options.schemaRejectionReasonCounts,
               }
             : {}),
+          ...(options.relationPreparation
+            ? { relationPreparation: options.relationPreparation }
+            : {}),
+          ...(options.relationReview
+            ? { relationReview: options.relationReview }
+            : {}),
+          ...(options.relationSearchCount !== undefined
+            ? { relationSearchCount: options.relationSearchCount }
+            : {}),
         };
+        if (options.relationInspectionCursor) {
+          const { key, nextOffset } = options.relationInspectionCursor;
+          if (
+            !/^[a-f0-9]{64}$/.test(key) ||
+            !Number.isSafeInteger(nextOffset) ||
+            nextOffset < 0
+          )
+            throw new Error("invalid-relation-inspection-cursor");
+          const cursors = (log.relationInspectionCursors ??= {});
+          cursors[key] = { offset: nextOffset, updatedAt: nowIso };
+          const oldest = Object.keys(cursors).sort((a, b) => {
+            const left = cursors[a]!.updatedAt,
+              right = cursors[b]!.updatedAt;
+            return left < right
+              ? -1
+              : left > right
+                ? 1
+                : a < b
+                  ? -1
+                  : a > b
+                    ? 1
+                    : 0;
+          });
+          for (const stale of oldest.slice(
+            0,
+            Math.max(0, oldest.length - MAX_RELATION_INSPECTION_CURSORS),
+          ))
+            delete cursors[stale];
+        }
         log.updatedAt = nowIso;
         writeJsonAtomic(logPath, ReviewLogSchema.parse(log));
         return true;

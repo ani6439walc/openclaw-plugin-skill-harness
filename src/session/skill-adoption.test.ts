@@ -120,6 +120,7 @@ describe("skill adoption evidence", () => {
       { success: false },
       { content: "" },
       { name: " " },
+      { review_inspection: true },
     ]) {
       expect(
         extractSkillInfo(

@@ -15,12 +15,30 @@ import {
   initializePluginDataRoot,
 } from "./plugin.js";
 
-const { createHookHandlersSpy, createSkillIndexSpy, createExperienceIndexSpy } =
-  vi.hoisted(() => ({
-    createHookHandlersSpy: vi.fn(),
-    createSkillIndexSpy: vi.fn(),
-    createExperienceIndexSpy: vi.fn(),
-  }));
+const {
+  createHookHandlersSpy,
+  createSkillIndexSpy,
+  createExperienceIndexSpy,
+  registerSkillToolsSpy,
+} = vi.hoisted(() => ({
+  createHookHandlersSpy: vi.fn(),
+  createSkillIndexSpy: vi.fn(),
+  createExperienceIndexSpy: vi.fn(),
+  registerSkillToolsSpy: vi.fn(),
+}));
+
+vi.mock("./skills/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./skills/index.js")>();
+  return {
+    ...actual,
+    registerSkillTools: (
+      ...args: Parameters<typeof actual.registerSkillTools>
+    ) => {
+      registerSkillToolsSpy(args[1]);
+      return actual.registerSkillTools(...args);
+    },
+  };
+});
 
 vi.mock("./hooks/index.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./hooks/index.js")>();
@@ -69,6 +87,7 @@ describe("createPlugin", () => {
   beforeEach(() => {
     stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-state-"));
     createHookHandlersSpy.mockReset();
+    registerSkillToolsSpy.mockReset();
     createSkillIndexSpy.mockReset();
     createExperienceIndexSpy.mockReset();
   });
@@ -173,6 +192,26 @@ describe("createPlugin", () => {
     const close = vi.spyOn(deps.qmdSkillIndex, "close");
     await onDispose.mock.calls[0][0]();
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("shares Review capabilities only inside the owning plugin registration", async () => {
+    const firstApi = createApi({ registrationMode: "discovery" });
+    createPlugin(firstApi).register(firstApi);
+    const first =
+      createHookHandlersSpy.mock.calls.at(-1)![0].reviewToolRegistry;
+    expect(first).toBeDefined();
+    expect(registerSkillToolsSpy.mock.calls.at(-1)![0].reviewToolRegistry).toBe(
+      first,
+    );
+    const secondApi = createApi({ registrationMode: "discovery" });
+    createPlugin(secondApi).register(secondApi);
+    const second =
+      createHookHandlersSpy.mock.calls.at(-1)![0].reviewToolRegistry;
+    expect(second).toBeDefined();
+    expect(second).not.toBe(first);
+    expect(registerSkillToolsSpy.mock.calls.at(-1)![0].reviewToolRegistry).toBe(
+      second,
+    );
   });
 
   it("resolves the bundled OpenClaw root once during plugin initialization", async () => {

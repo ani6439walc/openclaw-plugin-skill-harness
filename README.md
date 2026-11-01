@@ -3,7 +3,7 @@
 [![OpenClaw](https://img.shields.io/badge/Platform-OpenClaw-blue.svg)](https://github.com/openclaw/openclaw)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Skill Harness is an OpenClaw plugin that helps agents find relevant skills and reuse experience from previous work. Before an agent replies, it searches skills and experiences, selects the relevant candidates, and adds compact guidance to the conversation. An optional reviewer turns evidence from completed turns into reusable experience for future tasks.
+Skill Harness is an OpenClaw plugin that helps agents find relevant skills and reuse experience from previous work. Before an agent replies, it searches skills and experiences, selects the relevant candidates, and adds compact guidance to the conversation. An optional reviewer turns evidence from completed turns into reusable experience and maintains skill relations using bounded skill-content evidence.
 
 The project combines **skill discovery**, **experience retrieval**, and **experience curation** around existing OpenClaw agents. Skills remain ordinary skill files; experience lives separately in runtime storage.
 
@@ -18,7 +18,7 @@ Skill Harness addresses these problems with:
 - **On-demand discovery:** search skill metadata, bodies, and reference files before selecting a bounded set for the current task.
 - **Reusable experience:** retrieve past procedures independently of skill discovery, including standalone guidance without skill associations.
 - **Progressive loading:** inject descriptions and experience summaries; let the agent load detailed instructions when relevant.
-- **Evidence-based curation:** optionally review completed turns, check existing coverage, and create, refine, merge, or delete experience when the evidence supports a change.
+- **Evidence-based curation:** optionally review completed turns, check existing coverage, and create, refine, merge, or delete experience when the evidence supports a change. The same Review can create, update, or delete skill relations using exact evidence from both endpoint skills.
 
 For example, a request to diagnose a deployment can surface a relevant operations skill alongside an experience describing a previously verified diagnostic sequence. The agent loads the skill through `skill_view`, queries further experience through `skill_experience`, and applies the guidance to the current environment.
 
@@ -26,12 +26,12 @@ For example, a request to diagnose a deployment can surface a relevant operation
 
 These papers provide context for the design choices and related directions. The table distinguishes the research ideas from the behavior implemented here; the papers' benchmark results are not measurements of this plugin.
 
-| Paper                                                                                                                          | Research idea                                                                                                     | Relationship to Skill Harness                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [SkillRouter: Skill Routing for LLM Agents at Scale](https://arxiv.org/abs/2603.22455)                                         | Skill bodies contain routing evidence that names and descriptions can miss; retrieve candidates before reranking. | Searches metadata, bodies, and references, then uses one constrained Decision selection call. Uses QMD and Jev rather than SkillRouter's trained retrieval/reranking models.                 |
-| [SkillDAG: Self-Evolving Typed Skill Graphs for LLM Skill Selection at Scale](https://arxiv.org/abs/2606.03056)                | Typed directed relations add structure to skill selection, and execution can inform graph evolution.              | Offers an imported author-relation graph and optional bounded candidate expansion. Relations remain unverified hints; runtime review curates experiences rather than evolving graph edges.   |
-| [Compositional Skill Routing for LLM Agents: Decompose, Retrieve, and Compose (SkillWeaver)](https://arxiv.org/abs/2606.18051) | Complex tasks can require decomposition, retrieval, and dependency-aware composition of multiple skills.          | Selects multiple relevant skills; task decomposition and executable DAG planning remain related work, outside the current routing pipeline.                                                  |
-| [SkillOpt: Executive Strategy for Self-Evolving Agent Skills](https://arxiv.org/abs/2605.23904)                                | Bounded document edits can improve an agent's external state when accepted through validation.                    | Reviewer changes pass schema, content, operation, and concurrency checks. This is experience curation; it does not optimize skill files using scored rollouts or held-out performance tests. |
+| Paper                                                                                                                          | Research idea                                                                                                     | Relationship to Skill Harness                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [SkillRouter: Skill Routing for LLM Agents at Scale](https://arxiv.org/abs/2603.22455)                                         | Skill bodies contain routing evidence that names and descriptions can miss; retrieve candidates before reranking. | Searches metadata, bodies, and references, then uses one constrained Decision selection call. Uses QMD and Jev rather than SkillRouter's trained retrieval/reranking models.                                                                                    |
+| [SkillDAG: Self-Evolving Typed Skill Graphs for LLM Skill Selection at Scale](https://arxiv.org/abs/2606.03056)                | Typed directed relations add structure to skill selection, and execution can inform graph evolution.              | Uses a private relation graph with bounded candidate expansion when usable evidence exists. Optional Review maintains imported and Review-created relations using exact skill-content evidence; relations remain advisory, without hard dependency enforcement. |
+| [Compositional Skill Routing for LLM Agents: Decompose, Retrieve, and Compose (SkillWeaver)](https://arxiv.org/abs/2606.18051) | Complex tasks can require decomposition, retrieval, and dependency-aware composition of multiple skills.          | Selects multiple relevant skills; task decomposition and executable DAG planning remain related work, outside the current routing pipeline.                                                                                                                     |
+| [SkillOpt: Executive Strategy for Self-Evolving Agent Skills](https://arxiv.org/abs/2605.23904)                                | Bounded document edits can improve an agent's external state when accepted through validation.                    | Reviewer changes pass schema, content, operation, and concurrency checks. This is experience curation; it does not optimize skill files using scored rollouts or held-out performance tests.                                                                    |
 
 ## Architecture
 
@@ -41,7 +41,7 @@ flowchart TD
   H --> W[Static working-set descriptions]
   H --> S[Skill candidates: name matching and QMD search]
   H --> E[Experience candidates: QMD search]
-  G[Optional author-relation graph] -.-> S
+  G[Private skill-relation graph] -.-> S
   S --> J[One constrained Decision selection call]
   E --> J
   G -. Bounded relation relevance questions .-> J
@@ -49,9 +49,10 @@ flowchart TD
   J --> C
   C --> A[Agent loads guidance and executes tools]
   A --> T[Session evidence and aggregate statistics]
-  T -. Review enabled .-> R[Background experience reviewer]
+  T -. Review enabled .-> R[Background reviewer]
   R --> V[Validate findings and file changes]
   V --> X[Shared runtime experiences]
+  V --> G
   X --> E
 ```
 
@@ -61,14 +62,14 @@ flowchart TD
 | QMD indexes         | Hybrid retrieval over skill metadata, bodies and references, and experience keywords, summaries and bodies.          |
 | Decision selector   | Evaluates the combined candidate pool against the conversation and configured relevance thresholds.                  |
 | Prompt integration  | Adds a static working set and compact, advisory dynamic context through OpenClaw hooks.                              |
-| Experience reviewer | Optionally examines completed turns and proposes validated experience changes.                                       |
+| Background reviewer | Optionally examines completed turns and proposes validated experience and skill-relation changes.                    |
 | Runtime state       | Stores experiences, session evidence, review outcomes, managed indexes, and aggregate telemetry outside the package. |
 
 ### Before a reply
 
 1. Add skill-discovery guidance and the configured static working-set descriptions. Automatic workspace/workshop additions can be controlled separately.
 2. For eligible agents and chats, search skill and experience candidates in parallel using the conversation context. Skill discovery combines typo-aware name matching with QMD retrieval.
-3. Build one deduplicated skill pool from name/QMD hits and visible skills associated with all retrieved experience candidates. Optional relation expansion starts only from the original name/QMD hits. If candidates exist, make at most one unified Decision evaluation that independently scores every skill, experience and bounded relation; an empty pool skips selection.
+3. Build one deduplicated skill pool from name/QMD hits and visible skills associated with all retrieved experience candidates. When usable graph evidence exists, bounded relation expansion starts only from the original name/QMD hits. If candidates exist, make at most one unified Decision evaluation that independently scores every skill, experience and bounded relation; an empty pool skips selection.
 4. Inject only individually selected skills and experiences, subject to their separate configured limits. Selecting an experience does not automatically select its associated skills.
 5. The agent uses `skill_view` to load skill instructions and `skill_experience` to search detailed experience before applying relevant guidance.
 
@@ -84,7 +85,9 @@ The Review execution module loads only after Review is enabled and a trigger sur
 
 The reviewer checks existing coverage before creating an entry, prefers refining an existing procedure, and can merge overlapping experiences or remove guidance proven obsolete, useless, or superseded. A no-finding outcome is valid. Changes are checked against the declared operation, actual file changes, eligible observed skills, and concurrent updates before writeback.
 
-Review operates on experience copies in a temporary workspace. Filesystem tools are workspace-restricted; `exec` follows the host execution policy and has no additional shell sandbox supplied by this plugin. Its prompt limits commands to experience maintenance. Review does not train model weights or authorize edits to skill sources.
+The same Review can create, update, or delete imported and Review-created skill relations using bounded snapshots and exact evidence from both endpoint skills. The parent validates current identities, evidence and targeted revisions before publishing changes with their operation history. Graph and experience changes commit independently; a committed graph change remains recorded if later experience work fails. See [Skill relations](#skill-relations) for evidence and concurrency limits.
+
+Review operates on experience copies and staged skill snapshots in a temporary workspace. Filesystem tools are workspace-restricted; `exec` follows the host execution policy and has no additional shell sandbox supplied by this plugin. Its prompt limits commands to experience maintenance. The parent publishes validated relation proposals through the graph writer; the reviewer has no graph-writing tool. Review does not train model weights or authorize edits to skill sources.
 
 ## Installation and setup
 
@@ -285,7 +288,7 @@ Merge this into the plugin configuration to enable the optional learning loop:
 
 Remove the example `model` line to use the session/agent model. Default triggers include a health check every 10 turns, routing confidence below 0.5, and capability-fit thresholds of 5 tool calls or 2 failures, plus inventory evidence. Runs are debounced and serialized in the background; they do not change the route already used for a completed turn.
 
-The reviewer has `ls`, `read`, `write`, `edit`, `exec`, `skill_experience`, `skill_list`, and `skill_search`. Review may incur additional model costs and may create, refine, merge, or delete runtime experiences. The same run can propose skill-relation changes; enabling Review does not add a second relation-review run.
+The reviewer has `ls`, `read`, `write`, `edit`, `exec`, `skill_experience`, `skill_list`, `skill_search`, and `skill_view`. Review may incur additional model costs and may create, refine, merge, or delete runtime experiences. The same run can propose skill-relation changes; enabling Review does not add a second relation-review run.
 
 Refinement consolidates existing guidance rather than appending an incident log: read the full entry, replace superseded sections, preserve verified prerequisites and outcomes, and check Unicode limits before finishing. Summaries allow 240 code points, bodies 12,000, and keywords up to 12 entries of 64 code points each. If no useful improvement fits safely, leave the entry unchanged and return no finding. Validation remains strict; these instructions do not guarantee model compliance.
 
@@ -313,13 +316,19 @@ New graphs use stable skill identities, such as `github:owner/repository:skill-k
 
 Each imported relation records the content fingerprints of both endpoints. Relation hints are available only while both endpoints match that evidence; changing a node cannot refresh older relations' evidence. Back up the source registry with the graph. The stable-identity runtime format requires a coordinated plugin/graph upgrade: stage and validate the rebuilt graph first, then publish it with the compatible build. Existing v1 graphs retain their legacy identity checks; a newer graph must not be published to an older loaded plugin.
 
-When Review runs, relation inspection starts from the union of that turn's final recommended skills and successfully loaded skills, filtered to the current agent's visible winning sources. Recommendation is not counted as loading, adoption or execution. Existing incident graph neighbors and one bounded managed skill search can supply at most eight extra skills. Each proposal must touch an original seed; extra skills never seed another hop. Missing source registrations skip those skills without allocating identities. Experience associations retain their existing loaded-skill eligibility.
+When Review runs, relation inspection starts from the union of that turn's final recommended skills and successfully loaded skills, filtered to the current agent's visible winning sources. Recommendation is not counted as loading, adoption or execution. Up to four existing incident graph neighbors are prepared first, using a persisted rotation position. The reviewer then searches autonomously from the conversation, experiences and skill content, with at most four `skill_search` calls. Calling `skill_view` admits eligible full skill snapshots into this run’s evidence scope. Existing and discovered endpoints share a budget of eight distinct extra-skill attempts; failed captures also consume a slot, while repeated reads reuse the same snapshot. The parent no longer pre-searches discovery candidates. Each proposal must touch an original seed; extra skills never seed another hop. Missing source registrations skip those skills without allocating identities. Experience associations retain their existing loaded-skill eligibility.
 
-The parent stages full `SKILL.md` copies in the temporary Review workspace. Files larger than 256 KiB are unavailable as evidence, and the complete snapshot is capped at 2 MiB. Search snippets, scores, co-recommendation and co-loading do not establish a relation. Review must cite exact line ranges and excerpts from both endpoint snapshots and explain the type, direction and reason. Clear content evidence is sufficient without an execution trial. `depends_on` requires an explicit necessary condition. Updates must identify the old error; deletion needs contradiction, duplication or supersession rather than low usage or missing search results. All six types remain advisory and have no confidence levels.
+The parent stages full `SKILL.md` copies in the temporary Review workspace, including eligible skills requested through Review’s `skill_view`. The tool returns the same captured content, line numbers and stable identity used for validation. Support files can inform understanding but do not become formal relation evidence. Review reads do not count as skill adoption or usage. Files larger than 256 KiB are unavailable as evidence, and the complete snapshot is capped at 2 MiB. Search snippets, scores, co-recommendation and co-loading do not establish a relation. Review must cite exact line ranges and excerpts from both endpoint snapshots and explain the type, direction and reason. Clear content evidence is sufficient without an execution trial. `depends_on` requires an explicit necessary condition. Updates must identify the old error; deletion needs contradiction, duplication or supersession rather than low usage or missing search results. All six types remain advisory and have no confidence levels.
 
-Each Review may propose up to eight create/update/delete changes, including changes to imported author relations. The parent verifies the fixed evidence scope, exact excerpts, current visible winners, source bindings, content fingerprints and the latest operation revision of each target pair. A target conflict rejects the entire relation batch; unrelated graph changes do not block it. Accepted changes preserve all existing JSONL bytes and append logical operations: `relate` for create, `unrelate` plus `relate` for update, and `unrelate` for delete. The graph lock covers validation and atomic replacement of the complete file, so the new operations publish together. Operation-level `review` metadata stores batch/event/agent IDs, time, rationale, evidence digests and the previous relation. New edge properties omit `source`; historical `source: author-import` records remain readable, and imported `sourceGraphDigest` is preserved on updates.
+Each Review may propose up to eight create/update/delete changes, including changes to imported author relations. After closing tool admission and draining accepted work, the parent verifies the accumulated evidence scope, exact excerpts, current visible winners, source bindings, content fingerprints and the latest operation revision of each target pair. A target conflict rejects the entire relation batch; unrelated graph changes do not block it. Accepted changes preserve all existing JSONL bytes and append logical operations: `relate` for create, `unrelate` plus `relate` for update, and `unrelate` for delete. The graph lock covers validation and atomic replacement of the complete file, so the new operations publish together. Operation-level `review` metadata stores batch/event/agent IDs, time, rationale, evidence digests and the previous relation. New edge properties omit `source`; historical `source: author-import` records remain readable, and imported `sourceGraphDigest` is preserved on updates.
 
 Ordinary incremental imports cannot overwrite reviewed pairs or resurrect Review deletions. The full ontology import CLI rejects a destination with Review history; complete replacement requires the explicit graph snapshot maintenance path and a backup. Review does not compact history or reset sessions/statistics. Graph and experience writes are separate domains: a committed graph batch remains recorded if later experience work conflicts, partially fails or is canceled. Additive schema-v8 Review receipts distinguish domain outcomes and actual experience deltas; relation-only changes do not rebuild the experience index. Review provides no graph-writing tool; `exec` remains governed by host policy, and filesystem `workspaceOnly` is not shell containment.
+
+Every triggered run with eligible relation seeds must return separate `relationReview.existing` and `relationReview.discovery` assessments: `changes-proposed`, `no-change`, or `not-applicable` where permitted. Experience-only output is incomplete in that case. These assessments describe model-reported inspection and proposals, not committed changes or proof of improved outcomes. `relationPreparation` records readiness, fixed skip reasons and aggregate capture counts; `relationSearchCount` records search attempts. A discovery `no-change` assessment requires at least one nonempty search attempt; an unavailable search still counts as an attempt, not a successful lookup. Existing `not-applicable` is valid only when the admitted evidence scope contains no existing relations. Historical events without these fields remain unknown. The runtime-health report separates these observations from committed relation operations.
+
+Rotation positions live in `review.json` and are capped at 256 seed groups. A stable seed group and neighbor list advance through successive batches; changing groups, catalog changes or cursor eviction can repeat earlier samples. Search is bounded exploration, not exhaustive coverage. Canceled runs with no committed work retain the existing no-record behavior.
+
+**Upgrade and rollback:** stop every old Review writer before installing this version and back up the complete `review.json`. New readers accept historical v8 records, but older strict v8 readers reject the new optional inspection fields and can reset the log. Do not run old and new writers together. Before downgrading, preserve the newer log separately and restore the compatible backup. The new writer refuses to overwrite an unreadable or unsupported existing log; investigate and recover that file rather than expecting an automatic reset.
 
 To customize the XML injection threshold, set:
 
@@ -360,7 +369,7 @@ The full accepted schema is in [`openclaw.plugin.json`](openclaw.plugin.json). C
 | `qmd.timeoutMs`                                                                   | `15000`                       | QMD request budget; individual skill/experience `search.timeoutMs` can override retrieval budgets.         |
 | `qmd.indexRefreshIntervalSeconds`                                                 | `300`                         | Background source-check interval; zero disables recurring checks.                                          |
 | `skills.search.collectionWeights`                                                 | meta/body/references: `3/2/1` | Relative collection weights for skill search.                                                              |
-| `review.enabled`                                                                  | `false`                       | Enable automatic experience curation.                                                                      |
+| `review.enabled`                                                                  | `false`                       | Enable automatic experience curation and skill-relation review.                                            |
 | `review.thinking` / `timeoutSeconds`                                              | `"medium"` / `300`            | Reviewer reasoning level and run budget.                                                                   |
 
 ## Runtime health and troubleshooting
@@ -375,19 +384,37 @@ The report separates cumulative statistics from daily and retained-session obser
 
 Runtime state lives separately from package files under `~/.openclaw/plugins/skill-harness/`: experiences, sessions, `stats.json`, `review.json`, managed `qmd/` indexes, and optional `skill-relations/`. Keep runtime files and reports private.
 
-| Symptom                             | Check                                                                                                                                                                                         |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plugin fails to load                | Run `plugins doctor`; verify the build and required QMD settings and optional Decision endpoints. On older configurations, remove retired `instruction`, `rerank`, and legacy routing fields. |
-| No dynamic context                  | Check enabled state, agent/chat scope, index readiness, endpoints, thresholds and limits. No eligible candidates or failed selection intentionally inject no dynamic context.                 |
-| Search is unavailable after install | Allow background indexing to complete and check model services; `skill_experience` also has catalog fallback.                                                                                 |
-| No new experience appears           | Review is disabled by default. When enabled, a valid investigation can still conclude there is nothing durable to add.                                                                        |
-| Duplicate skill inventories         | Check native prompt suppression and migrate static selections to `skills.workingSet`.                                                                                                         |
+| Symptom                             | Check                                                                                                                                                                                                             |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plugin fails to load                | Run `plugins doctor`; verify the build and required QMD settings and optional Decision endpoints. On older configurations, remove retired `instruction`, `rerank`, and legacy routing fields.                     |
+| No dynamic context                  | Check enabled state, agent/chat scope, index readiness, endpoints, thresholds and limits. No eligible candidates or failed selection intentionally inject no dynamic context.                                     |
+| Search is unavailable after install | Allow background indexing to complete and check model services; `skill_experience` also has catalog fallback.                                                                                                     |
+| No new experience appears           | Review is disabled by default. When enabled, a valid investigation can still conclude there is nothing durable to add.                                                                                            |
+| Relation graph stays unchanged      | Check preparation, both relation assessments and committed operations separately. A completed `nofinding` run can be healthy; see the verification steps below.                                                   |
+| Review fails with `DataCloneError`  | Builds that put callbacks in `toolBindings` fail when the host clones them. Use a build with cloneable Review descriptors and restart the owning plugin instance through the coordinated upgrade procedure above. |
+| Duplicate skill inventories         | Check native prompt suppression and migrate static selections to `skills.workingSet`.                                                                                                                             |
 
 Skill-index refresh warnings include a JSON diagnostic suffix with the index fingerprint, failure phase, a fixed reason code, whether an existing store remains searchable, consecutive failures, retry delay, and a redacted error diagnostic (`errorName`, string `errorCode`, truncated `errorMessage`). A recovery message records the previous failure count when a later refresh and embedding check succeed. These fields survive the host's single-string logger contract. Credential assignments and `sk-` tokens are redacted; stacks, causes, raw provider bodies, queries, and credentials are excluded. Unknown failures use `operation-failed`. A refresh warning alone does not mean searches are unavailable.
 
 Inventory failures now identify the root category, operation phase and fixed error classification without exposing filesystem paths or source content. Experience-index build warnings identify the phase, fingerprint, consecutive failures and retry delay; recovery is recorded after successful publication. These diagnostics use fixed classifications rather than raw error messages.
 
 An `agent_end` taking 25 seconds emits one slow warning with its current finalization, inventory, statistics or Review-preparation phase. If it later settles, a completion message records elapsed time and outcome. This observes slow work without cancelling it or extending the host timeout; an unsettled warning alone does not prove the cause of a timeout.
+
+### Verify relation Review after an upgrade
+
+A healthy Gateway and successful ordinary skill tools do not prove that the isolated reviewer can use its tools or publish a result. After confirming the running plugin is active, inspect a completed, in-scope turn that triggered Review and recommended or successfully loaded a visible skill with a registered source. A skill can be searchable and readable without being registered for relation evidence.
+
+Read the following observations together in the private Review log or runtime-health report:
+
+| Observation                              | Meaning                                                                                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `relationPreparation.status: ready`      | The parent captured eligible seed evidence. Counts describe prepared material, not proven model attention.                                     |
+| `relationPreparation.status: skipped`    | Check the recorded reason, such as no eligible seeds or an unavailable source registry. This does not establish that relation inspection ran.  |
+| `relationSearchCount > 0`                | The reviewer attempted a bounded search. It does not prove the search succeeded or supplied a new endpoint.                                    |
+| Both assessments report `no-change`      | The reviewer reported no justified relation change; a valid completed `nofinding` run leaves the graph unchanged.                              |
+| An assessment reports `changes-proposed` | Check publication receipts and committed findings before claiming a graph change. Validation or concurrency checks may still reject proposals. |
+
+An experience change alone does not prove that relations changed. Report committed relation create/update/delete operations separately, including graph commits preserved by a `partially-applied` event. Do not force an edge or weaken evidence requirements to make a deployment check produce a write. An observed no-change run verifies that path only; positive graph publication and improved task outcomes require their own evidence. See the [runtime-health procedure](skills/skill-harness/references/runtime-health-audit.md#verify-a-completed-relation-review) for bounded diagnosis.
 
 ## Contributing
 

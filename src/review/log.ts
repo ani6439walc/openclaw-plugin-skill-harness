@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { RelationPreparationSummary } from "./relations.js";
+import type { RelationReviewAssessment } from "./types.js";
 import type {
   ReviewDomainOutcome,
   ReviewSource,
@@ -114,6 +116,9 @@ export type ProcessedEventRecord = {
   validationErrors?: string[];
   noFindingReasonCounts?: NoFindingReasonCounts;
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
+  relationPreparation?: RelationPreparationSummary;
+  relationReview?: RelationReviewAssessment;
+  relationSearchCount?: number;
 };
 
 export type ReviewedSkillEpoch = {
@@ -132,7 +137,64 @@ export type ReviewLog = {
   updatedAt: string;
   processedEvents: Record<string, ProcessedEventRecord>;
   reviewedSkillEpochs: Record<string, ReviewedSkillEpoch>;
+  relationInspectionCursors?: Record<
+    string,
+    { offset: number; updatedAt: string }
+  >;
 };
+
+export const MAX_RELATION_INSPECTION_CURSORS = 256;
+const InspectionCountSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
+export const RelationPreparationSchema = z
+  .object({
+    status: z.enum(["ready", "skipped"]),
+    reason: z
+      .enum([
+        "no-seeds",
+        "registry-unavailable",
+        "no-eligible-seeds",
+        "preparation-failed",
+        "no-data-root",
+      ])
+      .optional(),
+    requestedSeeds: InspectionCountSchema,
+    capturedSeeds: InspectionCountSchema,
+    capturedExtras: InspectionCountSchema.max(8),
+    existingNeighborAttempts: InspectionCountSchema.max(4),
+    discoveryAttempts: InspectionCountSchema.max(8),
+    skippedCaptureCount: InspectionCountSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.status === "skipped") !== (value.reason !== undefined))
+      ctx.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "Skipped preparations require a reason",
+      });
+    if (value.existingNeighborAttempts + value.discoveryAttempts > 8)
+      ctx.addIssue({
+        code: "custom",
+        path: ["discoveryAttempts"],
+        message: "Extra attempt budget exceeded",
+      });
+    if (value.capturedSeeds > value.requestedSeeds)
+      ctx.addIssue({
+        code: "custom",
+        path: ["capturedSeeds"],
+        message: "Captured seeds exceed requested seeds",
+      });
+  });
+export const RelationReviewAssessmentSchema = z
+  .object({
+    existing: z.enum(["changes-proposed", "no-change", "not-applicable"]),
+    discovery: z.enum(["changes-proposed", "no-change", "not-applicable"]),
+  })
+  .strict();
 
 const ReviewSourceSchema = z
   .object({
@@ -384,6 +446,9 @@ const ProcessedEventRecordSchema = z
     validationErrors: z.array(z.string()).optional(),
     noFindingReasonCounts: NoFindingReasonCountsSchema.optional(),
     schemaRejectionReasonCounts: SchemaRejectionReasonCountsSchema.optional(),
+    relationPreparation: RelationPreparationSchema.optional(),
+    relationReview: RelationReviewAssessmentSchema.optional(),
+    relationSearchCount: InspectionCountSchema.max(4).optional(),
   })
   .strict()
   .superRefine((record, ctx) => {
@@ -501,6 +566,21 @@ export const ReviewLogSchema = z
       z.string().regex(/^[a-f0-9]{64}$/),
       ReviewedSkillEpochSchema,
     ),
+    relationInspectionCursors: z
+      .record(
+        z.string().regex(/^[a-f0-9]{64}$/),
+        z
+          .object({
+            offset: InspectionCountSchema,
+            updatedAt: z.iso.datetime(),
+          })
+          .strict(),
+      )
+      .refine(
+        (entries) =>
+          Object.keys(entries).length <= MAX_RELATION_INSPECTION_CURSORS,
+      )
+      .optional(),
   })
   .strict()
   .transform((log): ReviewLog => log);

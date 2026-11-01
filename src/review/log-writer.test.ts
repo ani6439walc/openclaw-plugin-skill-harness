@@ -56,6 +56,91 @@ describe("IntentReviewLogWriter", () => {
     suggestedChange: "Create this relation",
   };
 
+  it("persists inspection results without claiming publication and advances cursors once", async () => {
+    const key = "a".repeat(64);
+    const relationPreparation = {
+      status: "ready" as const,
+      requestedSeeds: 1,
+      capturedSeeds: 1,
+      capturedExtras: 4,
+      existingNeighborAttempts: 4,
+      discoveryAttempts: 0,
+      skippedCaptureCount: 0,
+    };
+    const options = {
+      outcome: "validation-failed" as const,
+      relationPreparation,
+      relationReview: {
+        existing: "no-change" as const,
+        discovery: "changes-proposed" as const,
+      },
+      relationSearchCount: 1,
+      relationInspectionCursor: { key, nextOffset: 4 },
+    };
+    expect(await writer.record("inspection", source, [], options)).toBe(true);
+    expect(new IntentReviewLogWriter(root).relationInspectionOffset(key)).toBe(
+      4,
+    );
+    expect(
+      await writer.record("inspection", source, [], {
+        ...options,
+        relationInspectionCursor: { key, nextOffset: 8 },
+      }),
+    ).toBe(false);
+    expect(writer.relationInspectionOffset(key)).toBe(4);
+    const log = parseReviewLog(
+      JSON.parse(fs.readFileSync(path.join(root, "review.json"), "utf8")),
+    );
+    expect(log.processedEvents.inspection).toMatchObject({
+      changeCount: 0,
+      relationPreparation,
+      relationReview: options.relationReview,
+      relationSearchCount: 1,
+    });
+    expect(log.processedEvents.inspection).not.toHaveProperty(
+      "relationOutcome",
+    );
+  });
+
+  it("never replaces an unreadable existing review history", async () => {
+    vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const file = path.join(root, "review.json");
+    const content = JSON.stringify({
+      schemaVersion: 99,
+      importantHistory: ["preserve"],
+    });
+    fs.writeFileSync(file, content);
+    expect(await writer.record("new-event", source, [])).toBe(false);
+    expect(fs.readFileSync(file, "utf8")).toBe(content);
+  });
+
+  it("bounds cursor history and evicts the oldest entry while preserving events", async () => {
+    await writer.record("prior", source, [], {
+      nowMs: Date.parse("2026-10-31T00:00:00Z"),
+    });
+    const file = path.join(root, "review.json");
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    raw.relationInspectionCursors = Object.fromEntries(
+      Array.from({ length: 256 }, (_, i) => [
+        i.toString(16).padStart(64, "0"),
+        { offset: i, updatedAt: "2026-10-31T00:00:00.000Z" },
+      ]),
+    );
+    fs.writeFileSync(file, JSON.stringify(raw));
+    const key = "f".repeat(64);
+    expect(
+      await writer.record("next", source, [], {
+        nowMs: Date.parse("2026-11-01T00:00:00Z"),
+        relationInspectionCursor: { key, nextOffset: 4 },
+      }),
+    ).toBe(true);
+    const log = parseReviewLog(JSON.parse(fs.readFileSync(file, "utf8")));
+    expect(Object.keys(log.relationInspectionCursors!)).toHaveLength(256);
+    expect(log.relationInspectionCursors).not.toHaveProperty("0".repeat(64));
+    expect(log.processedEvents).toHaveProperty("prior");
+    expect(writer.relationInspectionOffset(key)).toBe(4);
+  });
+
   it.each(["create", "update", "delete"] as const)(
     "persists a relation %s and graph receipt",
     async (operation) => {
@@ -352,13 +437,13 @@ describe("IntentReviewLogWriter", () => {
   it.each([
     ["malformed", "{ broken"],
     ["unsupported schema", JSON.stringify({ schemaVersion: 5 })],
-  ])("replaces %s review.json with a fresh v8 log", async (_name, original) => {
-    const logPath = path.join(root, "review.json");
-    fs.writeFileSync(logPath, original);
-    await expect(writer.record("event-1", source, [])).resolves.toBe(true);
-    expect(JSON.parse(fs.readFileSync(logPath, "utf8"))).toMatchObject({
-      schemaVersion: 8,
-      processedEvents: { "event-1": expect.any(Object) },
-    });
-  });
+  ])(
+    "preserves %s review.json instead of replacing history",
+    async (_name, original) => {
+      const logPath = path.join(root, "review.json");
+      fs.writeFileSync(logPath, original);
+      await expect(writer.record("event-1", source, [])).resolves.toBe(false);
+      expect(fs.readFileSync(logPath, "utf8")).toBe(original);
+    },
+  );
 });

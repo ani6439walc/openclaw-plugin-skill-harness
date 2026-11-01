@@ -97,6 +97,11 @@ export type ReviewFinding =
 export type ReviewDomainOutcome =
   "applied" | "partial" | "validation-failed" | "aborted";
 
+export interface RelationReviewAssessment {
+  existing: "changes-proposed" | "no-change" | "not-applicable";
+  discovery: "changes-proposed" | "no-change" | "not-applicable";
+}
+
 export type ReviewSource = {
   sessionId: string;
   sessionKey?: string;

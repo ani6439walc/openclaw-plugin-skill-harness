@@ -1630,6 +1630,16 @@ description: Navigate Tokyo.
         ],
         outcome: "nofinding",
         noFindingReasonCounts: { "wrong-trigger": 1 },
+        relationPreparation: {
+          status: "skipped",
+          reason: "no-seeds",
+          requestedSeeds: 0,
+          capturedSeeds: 0,
+          capturedExtras: 0,
+          existingNeighborAttempts: 0,
+          discoveryAttempts: 0,
+          skippedCaptureCount: 0,
+        },
       },
     );
     expect(fs.existsSync(path.join(tmp, "review.json"))).toBe(false);

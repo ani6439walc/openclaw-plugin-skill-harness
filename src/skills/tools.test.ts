@@ -6,6 +6,10 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { registerSkillTools } from "./tools.js";
 import {
+  createReviewToolRegistry,
+  REVIEW_TOOL_BINDING_KEY,
+} from "../review/tool-bindings.js";
+import {
   appendImportedRelations,
   applyRelationReviewChanges,
   readSkillIdentity,
@@ -129,6 +133,11 @@ async function runTool(tool: unknown, params: Record<string, unknown>) {
 function toolsForAgent(
   api: ReturnType<typeof createApi>,
   agentId = "main",
+  context: {
+    sessionId?: string;
+    sessionKey?: string;
+    toolBindings?: Readonly<Record<string, unknown>>;
+  } = {},
 ): Map<string, unknown> {
   return new Map(
     api.registerTool.mock.calls.flatMap(([registeredTool]) => {
@@ -136,6 +145,7 @@ function toolsForAgent(
         typeof registeredTool === "function"
           ? (registeredTool as (context: { agentId?: string }) => unknown)({
               agentId,
+              ...context,
             })
           : registeredTool;
       const tools = Array.isArray(resolved) ? resolved : [resolved];
@@ -1351,12 +1361,56 @@ describe("registerSkillTools", () => {
     `);
     db.close();
 
+    const registry = createReviewToolRegistry();
     registerSkillTools(api, {
+      reviewToolRegistry: registry,
       bundledSkillsDir: "",
       homeDir: path.join(tmp, "home"),
     });
     const tools = toolsForAgent(api);
-
+    const run = registry.register({
+      agentId: "main",
+      sessionId: "review-1",
+      sessionKey: "review-key",
+    });
+    const reviewTools = toolsForAgent(api, "main", {
+      sessionId: "review-1",
+      sessionKey: "review-key",
+      toolBindings: structuredClone({ [REVIEW_TOOL_BINDING_KEY]: run.binding }),
+    });
+    await expect(
+      runTool(reviewTools.get("skill_search"), { query: " " }),
+    ).resolves.toMatchObject({ success: false });
+    expect(run.searchCount).toBe(0);
+    const inspection = await runTool(reviewTools.get("skill_view"), {
+      name: "writer",
+    });
+    expect(inspection).toMatchObject({
+      success: true,
+      review_inspection: true,
+      relation_review: {
+        eligible: false,
+        reason: "relation-review-unavailable",
+      },
+    });
+    const before = new DatabaseSync(dbPath);
+    expect(before.prepare("SELECT * FROM skill_usage").all()).toHaveLength(0);
+    before.close();
+    await run.close();
+    await expect(
+      runTool(reviewTools.get("skill_view"), { name: "writer" }),
+    ).rejects.toThrow("review-tool-closed");
+    await expect(
+      runTool(reviewTools.get("skill_search"), { query: "writer" }),
+    ).rejects.toThrow("review-tool-closed");
+    const invalidTools = toolsForAgent(api, "main", {
+      sessionId: "review-1",
+      sessionKey: "review-key",
+      toolBindings: { [REVIEW_TOOL_BINDING_KEY]: null },
+    });
+    await expect(
+      runTool(invalidTools.get("skill_view"), { name: "writer" }),
+    ).rejects.toThrow("invalid-review-tool-binding");
     await runTool(tools.get("skill_view"), { name: "writer" });
 
     const checkDb = new DatabaseSync(dbPath);

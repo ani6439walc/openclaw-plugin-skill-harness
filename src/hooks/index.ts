@@ -53,7 +53,10 @@ import {
 } from "../skills/index.js";
 import { experiencesPath, packageRoot } from "../file-utils.js";
 import { prepareRelationReviewContext } from "../review/relations.js";
-import type { RelationReviewContext } from "../review/relations.js";
+import type {
+  RelationReviewContext,
+  RelationPreparationSummary,
+} from "../review/relations.js";
 import { SkillExperienceCatalog } from "../experiences/index.js";
 import type { SkillExperienceEntry } from "../experiences/index.js";
 import type { SkillExperienceHit } from "../qmd/experience-index.js";
@@ -292,6 +295,16 @@ export function createHookHandlers(deps: HookDeps) {
         });
       }
       let relationContext: RelationReviewContext | undefined;
+      let relationPreparation: RelationPreparationSummary = {
+        status: "skipped",
+        reason: "no-data-root",
+        requestedSeeds: 0,
+        capturedSeeds: 0,
+        capturedExtras: 0,
+        existingNeighborAttempts: 0,
+        discoveryAttempts: 0,
+        skippedCaptureCount: 0,
+      };
       if (deps.dataRoot) {
         const seedNames = [
           ...new Set([
@@ -315,21 +328,21 @@ export function createHookHandlers(deps: HookDeps) {
                 usageStats: {},
                 cacheTtlMs: 0,
               }),
-            ...(qmdSkillIndex
-              ? {
-                  search: ({ query, limit }) =>
-                    qmdSkillIndex.search({
-                      agentId: candidate.agentId,
-                      query,
-                      limit,
-                    }),
-                }
-              : {}),
-            searchTimeoutMs: candidate.resolvedConfig.qmd.timeoutMs,
+            getNeighborOffset: (key) =>
+              reviewLogWriter.relationInspectionOffset?.(key) ?? 0,
+            onPreparation: (summary) => {
+              relationPreparation = summary;
+            },
             signal: abortSignal,
           });
         } catch {
           if (abortSignal.aborted) return;
+          relationPreparation = {
+            ...relationPreparation,
+            status: "skipped",
+            reason: "preparation-failed",
+            requestedSeeds: seedNames.length,
+          };
           logger.warn("review relation evidence unavailable", {
             reason: "preparation-failed",
           });
@@ -337,6 +350,7 @@ export function createHookHandlers(deps: HookDeps) {
       }
       abortSignal.throwIfAborted();
       const reviewResult = await reviewer({
+        reviewToolRegistry: deps.reviewToolRegistry,
         api,
         config: candidate.resolvedConfig,
         agentId: candidate.agentId,
@@ -389,6 +403,11 @@ export function createHookHandlers(deps: HookDeps) {
           validationErrors: reviewResult.validationErrors,
           noFindingReasonCounts: reviewResult.noFindingReasonCounts,
           schemaRejectionReasonCounts: reviewResult.schemaRejectionReasonCounts,
+          relationPreparation:
+            relationContext?.preparation ?? relationPreparation,
+          relationReview: reviewResult.relationReview,
+          relationSearchCount: reviewResult.relationSearchCount,
+          relationInspectionCursor: relationContext?.inspectionCursor,
         },
       );
       if (

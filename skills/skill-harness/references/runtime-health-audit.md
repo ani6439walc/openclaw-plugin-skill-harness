@@ -64,6 +64,22 @@ A healthy report **does not prove Gateway loaded the plugin**. Review logs also 
 
 ## Skill relation observations
 
+### Verify a completed relation Review
+
+The `relationInspection` summary separates preparation readiness/skip reasons, model-reported existing/discovery assessments, search attempts and committed graph operations. `changes-proposed` is not an applied change. Events without preparation fields are historical or unavailable observations, not proof that the graph was inspected. Capture counts describe prepared material, not demonstrated model attention. No-commit cancellation can leave no event.
+
+When diagnosing an unchanged graph, inspect one existing completed event privately before expanding the investigation:
+
+1. Confirm the turn was in scope and triggered Review. Absence of a completed event cannot distinguish a queued, running, canceled or never-scheduled run. Use live runtime evidence for those claims; do not infer them from this report.
+2. Check `relationPreparation`. For `skipped`, report its fixed reason and counts. A successful ordinary `skill_view` does not prove a registered source or eligible relation seed. Do not automatically register sources to make an audit pass.
+3. For `ready`, check both `relationReview.existing` and `.discovery`. Existing inspection may be `not-applicable` when the admitted manifest has no existing relations; discovery remains applicable. A discovery `no-change` result requires at least one nonempty search attempt. `relationSearchCount` includes failed attempts and does not prove successful retrieval.
+4. Distinguish a valid `nofinding` result from `subagent-error`, `parse-failed`, `schema-rejected` or `validation-failed`. If the reviewer fails at startup with `DataCloneError`, check that its build uses cloneable tool-binding descriptors. Ordinary tool success does not exercise this isolated Review boundary. Engineering details belong in [the relation graph contract](../../../AGENTS.md#skill-relation-graph).
+5. Count actual relation changes from committed findings and domain receipts. Experience-only writes, prepared snapshots and proposed changes do not establish graph publication. A valid no-change run can leave graph bytes unchanged. It verifies that execution path, not positive create/update/delete publication or better task outcomes.
+
+Today's post-upgrade event is excluded from the report's complete-day comparison windows. Use retained cumulative observations or the specific private event for immediate verification, keeping the population and timestamps explicit. Do not manufacture relationships, run new model calls, edit state or restart Gateway as part of this report-only workflow.
+
+### Interpret relation hints and selection
+
 Treat ontology graph relations as unverified hints. Tool output identifies their
 source as `author-import` or `review`; Review assertions are not author declarations. A
 `depends_on` or `conflicts_with` label is not evidence of a necessary dependency,

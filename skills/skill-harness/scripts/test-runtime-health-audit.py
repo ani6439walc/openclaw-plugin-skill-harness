@@ -766,6 +766,28 @@ class RuntimeHealthAuditTest(unittest.TestCase):
         self.assertEqual(result["changes"]["byOperation"], {"merge": 1, "delete": 1})
         self.assertEqual(result["changes"]["total"], 3)
 
+    def test_relation_inspection_separates_proposals_from_commits(self) -> None:
+        review_path = self.root / "review.json"
+        review = json.loads(review_path.read_text())
+        review["processedEvents"] = {
+            "proposed": {"processedAt": "2026-08-01T00:00:00Z", "outcome": "validation-failed",
+                "relationPreparation": {"status": "ready", "capturedSeeds": 2, "capturedExtras": 3},
+                "relationReview": {"existing": "no-change", "discovery": "changes-proposed"},
+                "relationSearchCount": 2},
+            "skipped": {"processedAt": "2026-08-01T00:01:00Z", "outcome": "nofinding",
+                "relationPreparation": {"status": "skipped", "reason": "no-eligible-seeds"}},
+            "historical": {"processedAt": "2026-08-01T00:02:00Z", "outcome": "nofinding"},
+        }
+        review_path.write_text(json.dumps(review))
+        result = self.report_at()["runtime"]["review"]["processedEvents"]["relationInspection"]
+        self.assertEqual(result["preparation"], {"ready": 1, "skipped": 1})
+        self.assertEqual(result["skipReasons"], {"no-eligible-seeds": 1})
+        self.assertEqual(result["existingAssessments"], {"no-change": 1})
+        self.assertEqual(result["discoveryAssessments"], {"changes-proposed": 1})
+        self.assertEqual(result["searchCalls"], 2)
+        self.assertEqual(result["committedOperations"], {})
+        self.assertEqual(result["eventsWithoutPreparation"], 1)
+
     def test_partial_review_preserves_committed_findings_in_every_summary(self) -> None:
         review_path = self.root / "review.json"
         review = json.loads(review_path.read_text())

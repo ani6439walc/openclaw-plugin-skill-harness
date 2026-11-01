@@ -1,4 +1,8 @@
 import { Type } from "typebox";
+import {
+  getReviewToolBinding,
+  type ReviewToolRegistry,
+} from "../review/tool-bindings.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
@@ -24,6 +28,7 @@ const MAX_EXPERIENCE_BODY_CODE_POINTS = 2_000;
 const MAX_EXPERIENCE_TOTAL_CODE_POINTS = 5_000;
 
 export interface RegisterSkillToolsOptions {
+  reviewToolRegistry?: ReviewToolRegistry;
   experienceCatalog?: SkillExperienceCatalog;
   qmdExperienceIndex?: SkillExperienceQmdIndex;
   qmdSkillIndex?: SkillQmdIndex;
@@ -235,6 +240,10 @@ export function registerSkillTools(
           ),
         }),
         async execute(_toolCallId, params) {
+          const binding = getReviewToolBinding(
+            toolContext,
+            options.reviewToolRegistry,
+          );
           const query = truncateCodePoints(
             optionalStringParam(params, "query")?.trim() ?? "",
             MAX_SKILL_SEARCH_QUERY_CODE_POINTS,
@@ -245,115 +254,123 @@ export function registerSkillTools(
               error: "query is required",
             });
           }
+          const search = async () => {
+            if (binding) toolContext.assertInvocationCurrent?.();
 
-          const requestedLimit =
-            optionalIntegerParam(params, "limit") ?? DEFAULT_SKILL_SEARCH_LIMIT;
-          const limit = Math.min(
-            MAX_SKILL_SEARCH_LIMIT,
-            Math.max(1, requestedLimit),
-          );
-          const showStats = booleanParam(params, "show_stats");
-          const showEvidence = booleanParam(params, "show_evidence", true);
-          const showRelated = booleanParam(params, "show_related");
+            const requestedLimit =
+              optionalIntegerParam(params, "limit") ??
+              DEFAULT_SKILL_SEARCH_LIMIT;
+            const limit = Math.min(
+              MAX_SKILL_SEARCH_LIMIT,
+              Math.max(1, requestedLimit),
+            );
+            const showStats = booleanParam(params, "show_stats");
+            const showEvidence = booleanParam(params, "show_evidence", true);
+            const showRelated = booleanParam(params, "show_related");
 
-          const index = options.qmdSkillIndex;
-          if (!index) {
+            const index = options.qmdSkillIndex;
+            if (!index) {
+              return jsonToolResult({
+                success: false,
+                error: "skill search index is not ready",
+              });
+            }
+
+            if (index.getStatus(agentId) === "idle") {
+              options.scheduleSkillSearchIndex?.(agentId);
+            }
+
+            const inventory = await listAvailableSkills({
+              api,
+              agentId,
+              bundledSkillsDir: options.bundledSkillsDir,
+              nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
+              sharedRoots: options.getSharedRoots?.(),
+              homeDir: options.homeDir,
+            });
+            const relatedSkills = showRelated
+              ? await relatedSkillsBySkillName(inventory, api)
+              : undefined;
+            const hits = await index.search({
+              agentId,
+              query,
+              limit,
+              includeEvidence: showEvidence,
+            });
+            if (!hits) {
+              return jsonToolResult({
+                success: false,
+                error: "skill search index is not ready",
+              });
+            }
+
+            const inventoryByName = new Map(
+              inventory.map((skill) => [skill.name.toLowerCase(), skill]),
+            );
+            const usageStats = showStats
+              ? await readSkillUsageStats({ api, agentId })
+              : undefined;
+
+            const skills = hits
+              .map((hit) => {
+                const skill = inventoryByName.get(hit.name.toLowerCase());
+                if (!skill) return;
+                return {
+                  name: skill.name,
+                  description: skill.description,
+                  source: skill.source,
+                  score: hit.score,
+                  ...(usageStats
+                    ? {
+                        usage_stats: skillUsageStatsForName(
+                          usageStats,
+                          skill.name,
+                        ),
+                      }
+                    : {}),
+                  ...(showEvidence && hit.evidence
+                    ? { evidence: hit.evidence }
+                    : {}),
+                  ...(showRelated && relatedSkills
+                    ? {
+                        related_skills:
+                          relatedSkills.get(skill.name.toLowerCase()) ?? [],
+                      }
+                    : {}),
+                };
+              })
+              .filter(
+                (skill): skill is NonNullable<typeof skill> =>
+                  skill !== undefined,
+              )
+              .sort((left, right) => {
+                if (right.score !== left.score) return right.score - left.score;
+                const sourceComparison =
+                  skillSourcePriority(left.source) -
+                  skillSourcePriority(right.source);
+                if (sourceComparison !== 0) return sourceComparison;
+                if (usageStats) {
+                  const usageComparison =
+                    skillUsageStatsForName(usageStats, right.name).usage_turns -
+                    skillUsageStatsForName(usageStats, left.name).usage_turns;
+                  if (usageComparison !== 0) return usageComparison;
+                }
+                return left.name.localeCompare(right.name);
+              });
+
             return jsonToolResult({
-              success: false,
-              error: "skill search index is not ready",
+              success: true,
+              query,
+              total: skills.length,
+              count: skills.length,
+              limit,
+              skills,
             });
-          }
-
-          if (index.getStatus(agentId) === "idle") {
-            options.scheduleSkillSearchIndex?.(agentId);
-          }
-
-          const inventory = await listAvailableSkills({
-            api,
-            agentId,
-            bundledSkillsDir: options.bundledSkillsDir,
-            nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
-            sharedRoots: options.getSharedRoots?.(),
-            homeDir: options.homeDir,
-          });
-          const relatedSkills = showRelated
-            ? await relatedSkillsBySkillName(inventory, api)
-            : undefined;
-          const hits = await index.search({
-            agentId,
-            query,
-            limit,
-            includeEvidence: showEvidence,
-          });
-          if (!hits) {
-            return jsonToolResult({
-              success: false,
-              error: "skill search index is not ready",
-            });
-          }
-
-          const inventoryByName = new Map(
-            inventory.map((skill) => [skill.name.toLowerCase(), skill]),
-          );
-          const usageStats = showStats
-            ? await readSkillUsageStats({ api, agentId })
-            : undefined;
-
-          const skills = hits
-            .map((hit) => {
-              const skill = inventoryByName.get(hit.name.toLowerCase());
-              if (!skill) return;
-              return {
-                name: skill.name,
-                description: skill.description,
-                source: skill.source,
-                score: hit.score,
-                ...(usageStats
-                  ? {
-                      usage_stats: skillUsageStatsForName(
-                        usageStats,
-                        skill.name,
-                      ),
-                    }
-                  : {}),
-                ...(showEvidence && hit.evidence
-                  ? { evidence: hit.evidence }
-                  : {}),
-                ...(showRelated && relatedSkills
-                  ? {
-                      related_skills:
-                        relatedSkills.get(skill.name.toLowerCase()) ?? [],
-                    }
-                  : {}),
-              };
-            })
-            .filter(
-              (skill): skill is NonNullable<typeof skill> =>
-                skill !== undefined,
-            )
-            .sort((left, right) => {
-              if (right.score !== left.score) return right.score - left.score;
-              const sourceComparison =
-                skillSourcePriority(left.source) -
-                skillSourcePriority(right.source);
-              if (sourceComparison !== 0) return sourceComparison;
-              if (usageStats) {
-                const usageComparison =
-                  skillUsageStatsForName(usageStats, right.name).usage_turns -
-                  skillUsageStatsForName(usageStats, left.name).usage_turns;
-                if (usageComparison !== 0) return usageComparison;
-              }
-              return left.name.localeCompare(right.name);
-            });
-
-          return jsonToolResult({
-            success: true,
-            query,
-            total: skills.length,
-            count: skills.length,
-            limit,
-            skills,
-          });
+          };
+          if (!binding) return search();
+          const result = await binding.search(search);
+          toolContext.assertInvocationCurrent?.();
+          return result;
         },
       };
     },
@@ -379,16 +396,33 @@ export function registerSkillTools(
           ),
         }),
         async execute(_toolCallId, params) {
-          const result = await readAvailableSkill({
-            api,
-            agentId,
-            name: requiredStringParam(params, "name"),
-            filePath: optionalStringParam(params, "file_path"),
-            bundledSkillsDir: options.bundledSkillsDir,
-            nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
-            sharedRoots: options.getSharedRoots?.(),
-            homeDir: options.homeDir,
-          });
+          const binding = getReviewToolBinding(
+            toolContext,
+            options.reviewToolRegistry,
+          );
+          const read = async () =>
+            readAvailableSkill({
+              api,
+              agentId,
+              name: requiredStringParam(params, "name"),
+              filePath: optionalStringParam(params, "file_path"),
+              bundledSkillsDir: options.bundledSkillsDir,
+              nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
+              sharedRoots: options.getSharedRoots?.(),
+              homeDir: options.homeDir,
+            });
+
+          if (binding) {
+            toolContext.assertInvocationCurrent?.();
+            const inspected = await binding.readSkill(
+              requiredStringParam(params, "name"),
+              optionalStringParam(params, "file_path"),
+              read,
+            );
+            toolContext.assertInvocationCurrent?.();
+            return jsonToolResult(inspected);
+          }
+          const result = await read();
 
           if (result.success && result.path) {
             recordSkillUsageToStateDb({

@@ -353,6 +353,7 @@ function extractSkillViewInfo(toolResult: unknown): SkillRecord | undefined {
     const parsed = JSON.parse(text) as unknown;
     if (!parsed || typeof parsed !== "object") return;
     const result = parsed as {
+      review_inspection?: unknown;
       success?: unknown;
       name?: unknown;
       path?: unknown;
@@ -361,6 +362,7 @@ function extractSkillViewInfo(toolResult: unknown): SkillRecord | undefined {
       description?: unknown;
     };
     if (
+      result.review_inspection === true ||
       result.success !== true ||
       typeof result.name !== "string" ||
       !result.name.trim()

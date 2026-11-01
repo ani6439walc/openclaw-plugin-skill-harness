@@ -300,6 +300,13 @@ def review_change_summary(events: dict[str, Any]) -> dict[str, Any]:
     trigger_events: Counter[str] = Counter()
     nofinding_reasons: Counter[str] = Counter()
     schema_rejection_reasons: Counter[str] = Counter()
+    relation_preparation: Counter[str] = Counter()
+    relation_skip_reasons: Counter[str] = Counter()
+    relation_existing: Counter[str] = Counter()
+    relation_discovery: Counter[str] = Counter()
+    relation_operations: Counter[str] = Counter()
+    relation_search_calls = 0
+    events_without_preparation = 0
     invalid_records = 0
 
     for event in events.values():
@@ -308,6 +315,23 @@ def review_change_summary(events: dict[str, Any]) -> dict[str, Any]:
             continue
         outcome = event.get("outcome")
         outcomes[outcome if isinstance(outcome, str) else "<non-string>"] += 1
+        preparation = event.get("relationPreparation")
+        if isinstance(preparation, dict) and preparation.get("status") in ("ready", "skipped"):
+            relation_preparation[preparation["status"]] += 1
+            reason = preparation.get("reason")
+            if reason in ("no-seeds", "registry-unavailable", "no-eligible-seeds", "preparation-failed", "no-data-root"):
+                relation_skip_reasons[reason] += 1
+        else:
+            events_without_preparation += 1
+        assessment = event.get("relationReview")
+        if isinstance(assessment, dict):
+            for field, counts in (("existing", relation_existing), ("discovery", relation_discovery)):
+                status = assessment.get(field)
+                if status in ("changes-proposed", "no-change", "not-applicable"):
+                    counts[status] += 1
+        searches = event.get("relationSearchCount")
+        if type(searches) is int and 0 <= searches <= 4:
+            relation_search_calls += searches
         triggers = event.get("triggers")
         if isinstance(triggers, list):
             for trigger in triggers:
@@ -327,6 +351,8 @@ def review_change_summary(events: dict[str, Any]) -> dict[str, Any]:
             operation = change.get("operation")
             if isinstance(operation, str):
                 operations[operation] += 1
+                if change.get("targetKind") == "skill-relation" and operation in ("create", "update", "delete"):
+                    relation_operations[operation] += 1
             target_ids = change.get("targetIntentIds")
             if isinstance(target_ids, list):
                 for target_id in target_ids:
@@ -375,6 +401,15 @@ def review_change_summary(events: dict[str, Any]) -> dict[str, Any]:
         "triggerEvents": counter_dict(trigger_events),
         "noFindingReasons": counter_dict(nofinding_reasons),
         "schemaRejectionReasons": counter_dict(schema_rejection_reasons),
+        "relationInspection": {
+            "preparation": counter_dict(relation_preparation),
+            "skipReasons": counter_dict(relation_skip_reasons),
+            "existingAssessments": counter_dict(relation_existing),
+            "discoveryAssessments": counter_dict(relation_discovery),
+            "searchCalls": relation_search_calls,
+            "committedOperations": counter_dict(relation_operations),
+            "eventsWithoutPreparation": events_without_preparation,
+        },
     }
 
 
