@@ -9,6 +9,7 @@ import { registerRelationSource } from "../skills/relation-sources.js";
 import { readRelationGraph } from "../skills/relation-graph.js";
 import { prepareRelationReviewContext } from "./relations.js";
 import { runReviewSubagent } from "./subagent.js";
+import { createReviewToolRegistry } from "./tool-bindings.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
 
 const roots: string[] = [];
@@ -29,7 +30,13 @@ interface EmbeddedParams {
 }
 
 async function fixture(
-  mode: "create" | "no-search" | "search-unavailable" | "staging-failed",
+  mode:
+    | "create"
+    | "no-search"
+    | "search-unavailable"
+    | "staging-failed"
+    | "embedded-error"
+    | "abort",
 ) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-autonomous-"));
   roots.push(root);
@@ -59,6 +66,8 @@ async function fixture(
     getVisibleSkills: async () => skills,
   }))!;
   expect(context.skills).toHaveLength(1);
+  const registry = createReviewToolRegistry();
+  const abort = new AbortController();
   const factories: ((context: EmbeddedParams) => Tool)[] = [];
   let retainedView!: Tool;
   const index = {
@@ -70,11 +79,19 @@ async function fixture(
   const runEmbeddedAgent = vi.fn(async (params: EmbeddedParams) => {
     const tools = new Map(
       factories.map((factory) => {
-        const tool = factory(params);
+        const tool = factory({
+          ...params,
+          toolBindings: structuredClone(params.toolBindings),
+        });
         return [tool.name, tool] as const;
       }),
     );
     retainedView = tools.get("skill_view")!;
+    if (mode === "embedded-error") throw new Error("embedded-test-error");
+    if (mode === "abort") {
+      abort.abort();
+      return { payloads: [] };
+    }
     if (mode !== "no-search")
       await tools
         .get("skill_search")!
@@ -175,12 +192,14 @@ async function fixture(
     },
   } as unknown as OpenClawPluginApi;
   registerSkillTools(api, {
+    reviewToolRegistry: registry,
     qmdSkillIndex: index,
     getSharedRoots: () => [source],
     bundledSkillsDir: "",
     homeDir: path.join(root, "home"),
   });
   const result = await runReviewSubagent({
+    reviewToolRegistry: registry,
     api,
     config: resolveConfig({}),
     agentId: "main",
@@ -195,6 +214,7 @@ async function fixture(
     },
     triggers: ["capability-fit"],
     relationContext: context,
+    abortSignal: abort.signal,
   });
   await expect(retainedView.execute("late", { name: "b" })).rejects.toThrow(
     "review-tool-closed",
@@ -244,3 +264,15 @@ it("rejects graph proposals after an admitted endpoint could not be staged safel
   });
   expect(graph?.relations ?? []).toHaveLength(0);
 });
+
+it.each(["embedded-error", "abort"] as const)(
+  "revokes the cloned run descriptor after %s",
+  async (mode) => {
+    const { result, graph } = await fixture(mode);
+    expect(result).toMatchObject({
+      outcome: "subagent-error",
+      relationSearchCount: 0,
+    });
+    expect(graph?.relations ?? []).toHaveLength(0);
+  },
+);

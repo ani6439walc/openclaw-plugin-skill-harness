@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { registerSkillTools } from "./tools.js";
 import {
-  createReviewToolBinding,
+  createReviewToolRegistry,
   REVIEW_TOOL_BINDING_KEY,
 } from "../review/tool-bindings.js";
 import {
@@ -1361,12 +1361,14 @@ describe("registerSkillTools", () => {
     `);
     db.close();
 
+    const registry = createReviewToolRegistry();
     registerSkillTools(api, {
+      reviewToolRegistry: registry,
       bundledSkillsDir: "",
       homeDir: path.join(tmp, "home"),
     });
     const tools = toolsForAgent(api);
-    const run = createReviewToolBinding({
+    const run = registry.register({
       agentId: "main",
       sessionId: "review-1",
       sessionKey: "review-key",
@@ -1374,7 +1376,7 @@ describe("registerSkillTools", () => {
     const reviewTools = toolsForAgent(api, "main", {
       sessionId: "review-1",
       sessionKey: "review-key",
-      toolBindings: { [REVIEW_TOOL_BINDING_KEY]: run.binding },
+      toolBindings: structuredClone({ [REVIEW_TOOL_BINDING_KEY]: run.binding }),
     });
     await expect(
       runTool(reviewTools.get("skill_search"), { query: " " }),

@@ -1,4 +1,5 @@
 import type { OpenClawPluginApi } from "../../api.js";
+import type { ReviewToolRegistry } from "../review/tool-bindings.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import type { defaultTracker } from "../session/index.js";
 import type { defaultStatsAggregator } from "../stats/index.js";
@@ -135,6 +136,7 @@ export type HookDeps = {
   qmdSkillIndex?: SkillQmdIndex;
   qmdExperienceIndex?: SkillExperienceQmdIndex;
   reviewScheduler?: IntentReviewScheduler | ReviewSchedulerLike;
+  reviewToolRegistry?: ReviewToolRegistry;
   loadReviewSubagent?: () => Promise<
     Pick<
       typeof import("../review/subagent.js"),

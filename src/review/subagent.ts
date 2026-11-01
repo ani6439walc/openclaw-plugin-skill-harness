@@ -37,7 +37,8 @@ import {
 } from "./relations.js";
 import type { RelationReviewContext } from "./relations.js";
 import {
-  createReviewToolBinding,
+  createReviewToolRegistry,
+  type ReviewToolRegistry,
   REVIEW_TOOL_BINDING_KEY,
 } from "./tool-bindings.js";
 
@@ -926,6 +927,7 @@ function findChangedExperienceIds(
 }
 
 type RunReviewParams = {
+  reviewToolRegistry?: ReviewToolRegistry;
   api: OpenClawPluginApi;
   config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
@@ -1013,7 +1015,9 @@ async function runReviewSubagentInternal(
       validationErrors: errors,
     };
   }
-  const reviewTools = createReviewToolBinding({
+  const reviewTools = (
+    params.reviewToolRegistry ?? createReviewToolRegistry()
+  ).register({
     agentId: params.agentId,
     sessionId: runId,
     sessionKey,
@@ -1021,15 +1025,14 @@ async function runReviewSubagentInternal(
     relationContext: params.relationContext,
     signal: abortSignal,
   });
-  const prompt = buildReviewPrompt(
-    params.snapshot,
-    params.triggers,
-    workspaceDir,
-    allowedExperienceSkills,
-    params.relationContext,
-  );
-
   try {
+    const prompt = buildReviewPrompt(
+      params.snapshot,
+      params.triggers,
+      workspaceDir,
+      allowedExperienceSkills,
+      params.relationContext,
+    );
     if (params.relationContext)
       await stageRelationReviewEvidence(params.relationContext, workspaceDir);
     abortSignal?.throwIfAborted();

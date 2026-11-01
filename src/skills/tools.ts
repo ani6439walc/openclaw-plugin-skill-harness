@@ -1,5 +1,8 @@
 import { Type } from "typebox";
-import { getReviewToolBinding } from "../review/tool-bindings.js";
+import {
+  getReviewToolBinding,
+  type ReviewToolRegistry,
+} from "../review/tool-bindings.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
@@ -25,6 +28,7 @@ const MAX_EXPERIENCE_BODY_CODE_POINTS = 2_000;
 const MAX_EXPERIENCE_TOTAL_CODE_POINTS = 5_000;
 
 export interface RegisterSkillToolsOptions {
+  reviewToolRegistry?: ReviewToolRegistry;
   experienceCatalog?: SkillExperienceCatalog;
   qmdExperienceIndex?: SkillExperienceQmdIndex;
   qmdSkillIndex?: SkillQmdIndex;
@@ -236,7 +240,10 @@ export function registerSkillTools(
           ),
         }),
         async execute(_toolCallId, params) {
-          const binding = getReviewToolBinding(toolContext);
+          const binding = getReviewToolBinding(
+            toolContext,
+            options.reviewToolRegistry,
+          );
           const query = truncateCodePoints(
             optionalStringParam(params, "query")?.trim() ?? "",
             MAX_SKILL_SEARCH_QUERY_CODE_POINTS,
@@ -389,7 +396,10 @@ export function registerSkillTools(
           ),
         }),
         async execute(_toolCallId, params) {
-          const binding = getReviewToolBinding(toolContext);
+          const binding = getReviewToolBinding(
+            toolContext,
+            options.reviewToolRegistry,
+          );
           const read = async () =>
             readAvailableSkill({
               api,

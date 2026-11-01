@@ -16,6 +16,7 @@ import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
 import { createIntentReviewScheduler } from "./review/scheduler.js";
+import { createReviewToolRegistry } from "./review/tool-bindings.js";
 import { createBackgroundRunner } from "./subagent-runtime.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
@@ -226,6 +227,7 @@ export function createPlugin(
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const reviewLogWriter = new IntentReviewLogWriter(dataRoot);
+      const reviewToolRegistry = createReviewToolRegistry();
 
       const knownAgentIds = new Set<string>(["main"]);
       const collectKnownAgentIds = () => {
@@ -334,9 +336,11 @@ export function createPlugin(
         }
         // Close admission and abort synchronously before waiting on background work.
         const promptDrain = stopPromptWork?.();
+        const reviewToolsDrain = reviewToolRegistry.close();
         stopping = (async () => {
           await Promise.all([
             promptDrain,
+            reviewToolsDrain,
             reviewScheduler.dispose(),
             ...backgroundWork,
           ]);
@@ -368,6 +372,7 @@ export function createPlugin(
         tracker,
         statsAggregator,
         reviewLogWriter,
+        reviewToolRegistry,
         reviewScheduler,
         getWorkingSetSkills,
         qmdSkillIndex,
@@ -401,6 +406,7 @@ export function createPlugin(
       api.on("session_end", handlers.onSessionEnd);
       api.on("gateway_stop", stopBackgroundWork);
       registerSkillTools(api, {
+        reviewToolRegistry,
         experienceCatalog,
         qmdExperienceIndex,
         qmdSkillIndex,

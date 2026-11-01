@@ -350,6 +350,7 @@ export function createHookHandlers(deps: HookDeps) {
       }
       abortSignal.throwIfAborted();
       const reviewResult = await reviewer({
+        reviewToolRegistry: deps.reviewToolRegistry,
         api,
         config: candidate.resolvedConfig,
         agentId: candidate.agentId,
