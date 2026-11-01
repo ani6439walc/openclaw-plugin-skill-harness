@@ -324,7 +324,7 @@ Each Review may propose up to eight create/update/delete changes, including chan
 
 Ordinary incremental imports cannot overwrite reviewed pairs or resurrect Review deletions. The full ontology import CLI rejects a destination with Review history; complete replacement requires the explicit graph snapshot maintenance path and a backup. Review does not compact history or reset sessions/statistics. Graph and experience writes are separate domains: a committed graph batch remains recorded if later experience work conflicts, partially fails or is canceled. Additive schema-v8 Review receipts distinguish domain outcomes and actual experience deltas; relation-only changes do not rebuild the experience index. Review provides no graph-writing tool; `exec` remains governed by host policy, and filesystem `workspaceOnly` is not shell containment.
 
-Every triggered run with eligible relation seeds must return separate `relationReview.existing` and `relationReview.discovery` assessments: `changes-proposed`, `no-change`, or `not-applicable` where permitted. Experience-only output is incomplete in that case. These assessments describe model-reported inspection and proposals, not committed changes or proof of improved outcomes. `relationPreparation` records readiness, fixed skip reasons and aggregate capture counts; `relationSearchCount` records search attempts. Historical events without these fields remain unknown. The runtime-health report separates these observations from committed relation operations.
+Every triggered run with eligible relation seeds must return separate `relationReview.existing` and `relationReview.discovery` assessments: `changes-proposed`, `no-change`, or `not-applicable` where permitted. Experience-only output is incomplete in that case. These assessments describe model-reported inspection and proposals, not committed changes or proof of improved outcomes. `relationPreparation` records readiness, fixed skip reasons and aggregate capture counts; `relationSearchCount` records search attempts. A discovery `no-change` assessment requires at least one nonempty search attempt; an unavailable search still counts as an attempt, not a successful lookup. Existing `not-applicable` is valid only when the admitted evidence scope contains no existing relations. Historical events without these fields remain unknown. The runtime-health report separates these observations from committed relation operations.
 
 Rotation positions live in `review.json` and are capped at 256 seed groups. A stable seed group and neighbor list advance through successive batches; changing groups, catalog changes or cursor eviction can repeat earlier samples. Search is bounded exploration, not exhaustive coverage. Canceled runs with no committed work retain the existing no-record behavior.
 
@@ -369,7 +369,7 @@ The full accepted schema is in [`openclaw.plugin.json`](openclaw.plugin.json). C
 | `qmd.timeoutMs`                                                                   | `15000`                       | QMD request budget; individual skill/experience `search.timeoutMs` can override retrieval budgets.         |
 | `qmd.indexRefreshIntervalSeconds`                                                 | `300`                         | Background source-check interval; zero disables recurring checks.                                          |
 | `skills.search.collectionWeights`                                                 | meta/body/references: `3/2/1` | Relative collection weights for skill search.                                                              |
-| `review.enabled`                                                                  | `false`                       | Enable automatic experience curation.                                                                      |
+| `review.enabled`                                                                  | `false`                       | Enable automatic experience curation and skill-relation review.                                            |
 | `review.thinking` / `timeoutSeconds`                                              | `"medium"` / `300`            | Reviewer reasoning level and run budget.                                                                   |
 
 ## Runtime health and troubleshooting
@@ -384,19 +384,37 @@ The report separates cumulative statistics from daily and retained-session obser
 
 Runtime state lives separately from package files under `~/.openclaw/plugins/skill-harness/`: experiences, sessions, `stats.json`, `review.json`, managed `qmd/` indexes, and optional `skill-relations/`. Keep runtime files and reports private.
 
-| Symptom                             | Check                                                                                                                                                                                         |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plugin fails to load                | Run `plugins doctor`; verify the build and required QMD settings and optional Decision endpoints. On older configurations, remove retired `instruction`, `rerank`, and legacy routing fields. |
-| No dynamic context                  | Check enabled state, agent/chat scope, index readiness, endpoints, thresholds and limits. No eligible candidates or failed selection intentionally inject no dynamic context.                 |
-| Search is unavailable after install | Allow background indexing to complete and check model services; `skill_experience` also has catalog fallback.                                                                                 |
-| No new experience appears           | Review is disabled by default. When enabled, a valid investigation can still conclude there is nothing durable to add.                                                                        |
-| Duplicate skill inventories         | Check native prompt suppression and migrate static selections to `skills.workingSet`.                                                                                                         |
+| Symptom                             | Check                                                                                                                                                                                                             |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plugin fails to load                | Run `plugins doctor`; verify the build and required QMD settings and optional Decision endpoints. On older configurations, remove retired `instruction`, `rerank`, and legacy routing fields.                     |
+| No dynamic context                  | Check enabled state, agent/chat scope, index readiness, endpoints, thresholds and limits. No eligible candidates or failed selection intentionally inject no dynamic context.                                     |
+| Search is unavailable after install | Allow background indexing to complete and check model services; `skill_experience` also has catalog fallback.                                                                                                     |
+| No new experience appears           | Review is disabled by default. When enabled, a valid investigation can still conclude there is nothing durable to add.                                                                                            |
+| Relation graph stays unchanged      | Check preparation, both relation assessments and committed operations separately. A completed `nofinding` run can be healthy; see the verification steps below.                                                   |
+| Review fails with `DataCloneError`  | Builds that put callbacks in `toolBindings` fail when the host clones them. Use a build with cloneable Review descriptors and restart the owning plugin instance through the coordinated upgrade procedure above. |
+| Duplicate skill inventories         | Check native prompt suppression and migrate static selections to `skills.workingSet`.                                                                                                                             |
 
 Skill-index refresh warnings include a JSON diagnostic suffix with the index fingerprint, failure phase, a fixed reason code, whether an existing store remains searchable, consecutive failures, retry delay, and a redacted error diagnostic (`errorName`, string `errorCode`, truncated `errorMessage`). A recovery message records the previous failure count when a later refresh and embedding check succeed. These fields survive the host's single-string logger contract. Credential assignments and `sk-` tokens are redacted; stacks, causes, raw provider bodies, queries, and credentials are excluded. Unknown failures use `operation-failed`. A refresh warning alone does not mean searches are unavailable.
 
 Inventory failures now identify the root category, operation phase and fixed error classification without exposing filesystem paths or source content. Experience-index build warnings identify the phase, fingerprint, consecutive failures and retry delay; recovery is recorded after successful publication. These diagnostics use fixed classifications rather than raw error messages.
 
 An `agent_end` taking 25 seconds emits one slow warning with its current finalization, inventory, statistics or Review-preparation phase. If it later settles, a completion message records elapsed time and outcome. This observes slow work without cancelling it or extending the host timeout; an unsettled warning alone does not prove the cause of a timeout.
+
+### Verify relation Review after an upgrade
+
+A healthy Gateway and successful ordinary skill tools do not prove that the isolated reviewer can use its tools or publish a result. After confirming the running plugin is active, inspect a completed, in-scope turn that triggered Review and recommended or successfully loaded a visible skill with a registered source. A skill can be searchable and readable without being registered for relation evidence.
+
+Read the following observations together in the private Review log or runtime-health report:
+
+| Observation                              | Meaning                                                                                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `relationPreparation.status: ready`      | The parent captured eligible seed evidence. Counts describe prepared material, not proven model attention.                                     |
+| `relationPreparation.status: skipped`    | Check the recorded reason, such as no eligible seeds or an unavailable source registry. This does not establish that relation inspection ran.  |
+| `relationSearchCount > 0`                | The reviewer attempted a bounded search. It does not prove the search succeeded or supplied a new endpoint.                                    |
+| Both assessments report `no-change`      | The reviewer reported no justified relation change; a valid completed `nofinding` run leaves the graph unchanged.                              |
+| An assessment reports `changes-proposed` | Check publication receipts and committed findings before claiming a graph change. Validation or concurrency checks may still reject proposals. |
+
+An experience change alone does not prove that relations changed. Report committed relation create/update/delete operations separately, including graph commits preserved by a `partially-applied` event. Do not force an edge or weaken evidence requirements to make a deployment check produce a write. An observed no-change run verifies that path only; positive graph publication and improved task outcomes require their own evidence. See the [runtime-health procedure](skills/skill-harness/references/runtime-health-audit.md#verify-a-completed-relation-review) for bounded diagnosis.
 
 ## Contributing
 
