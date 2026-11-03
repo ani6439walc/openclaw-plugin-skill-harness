@@ -51,7 +51,7 @@ export function sanitizeConversationText(text: string): string {
     )
     .replace(routingBlock(), " ")
     .replace(
-      /(?:Context:\s*)?<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>/gi,
+      /(?:Context:\s*)?<(active_memory_plugin|hindsight_memory_plugin)\b[^>]*>[\s\S]*?<\/\1>/gi,
       " ",
     )
     .replace(

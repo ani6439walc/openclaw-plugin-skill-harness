@@ -73,6 +73,8 @@ flowchart TD
 4. Inject only individually selected skills and experiences, subject to their separate configured limits. Selecting an experience does not automatically select its associated skills.
 5. The agent uses `skill_view` to load skill instructions and `skill_experience` to search detailed experience before applying relevant guidance.
 
+Recent conversation input is stripped of Skill Harness, Hindsight Memory and native Active Memory injection blocks before skill and experience selection. This prevents previous recommendations or recalled memories from being treated as user requests. The cleanup applies to routing input copies; it does not rewrite the session transcript or the main model's history.
+
 Dynamic context contains optional `<matched_skills>` and standalone `<matched_experiences>` blocks. Each selected experience summary appears once: inside its highest-scored final associated skill, or standalone if no associated skill survives selection. Skills are ordered by selector score with a locale-independent name tie-break (UTF-16 string order); experience score ties use the same ordering on IDs. Experiences with no associations, invisible associations or rejected associated skills remain eligible. Placement never boosts skill scores or requires loading a skill. The context is advisory, non-user input; full documents and the entire catalog are not inserted.
 
 Runtime search or selection failures let the main agent continue with available static context. Failed selection does not inject an unchecked fallback list. Invalid configuration can still prevent the plugin from loading.

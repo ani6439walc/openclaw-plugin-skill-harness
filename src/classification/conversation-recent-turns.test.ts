@@ -20,6 +20,45 @@ Conversation info: ⟦openclaw:ctx⟧
 <<<END_OPENCLAW_INTERNAL_CONTEXT>>>`;
 
 describe("extractRecentTurns", () => {
+  it("removes both plugins' injected context from historical routing input without changing messages", () => {
+    const messages = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "<hindsight_memory_plugin>Old memory about unrelated travel</hindsight_memory_plugin>",
+          },
+          {
+            type: "text",
+            text: "<skill_harness_plugin><matched_skills>Old travel skill</matched_skills></skill_harness_plugin>\nFix the database query",
+          },
+          { type: "image", data: "fixture-image" },
+        ],
+      },
+      { role: "assistant", content: "I will inspect the database query." },
+    ];
+    const original = structuredClone(messages);
+
+    expect(extractRecentTurns(messages)).toEqual([
+      { role: "user", text: "Fix the database query" },
+      { role: "assistant", text: "I will inspect the database query." },
+    ]);
+    expect(messages).toEqual(original);
+  });
+
+  it("ignores user entries containing only injected memory context", () => {
+    expect(
+      extractRecentTurns([
+        {
+          role: "user",
+          content:
+            "<hindsight_memory_plugin>Old memory</hindsight_memory_plugin>",
+        },
+      ]),
+    ).toEqual([]);
+  });
+
   it("keeps the direct user turn when the next user entry is runtime metadata", () => {
     const result = extractRecentTurns([
       { role: "user", content: CURRENT_OPENCLAW_USER_MESSAGE },
