@@ -30,11 +30,9 @@ import { createSkillQmdIndex } from "./qmd/skill-index.js";
 import { activeAgentIdsFromConfig } from "./qmd/active-agents.js";
 import { createSkillExperienceQmdIndex } from "./qmd/experience-index.js";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import {
   experiencesPath,
-  packageRoot as defaultPackageRoot,
   resolvePluginDataRoot,
   resolveStateDirFromApi,
   sessionsDirPath,
@@ -157,12 +155,6 @@ export function createPlugin(
       const dataRoot = resolvePluginDataRoot(stateDir, PLUGIN_ID);
       initializePluginDataRoot({ dataRoot });
 
-      const bundledSkillsDir = path.join(defaultPackageRoot, "skills");
-      // Captured generations have different asset paths but share one index identity.
-      const bundledSkillsIdentityDir = path.join(
-        api.rootDir ?? defaultPackageRoot,
-        "skills",
-      );
       const ownsBackgroundWork =
         api.registrationMode === undefined || api.registrationMode === "full";
       let disposed = false;
@@ -275,7 +267,6 @@ export function createPlugin(
               sourceRoots: resolveSkillRoots({
                 api: runtimeConfigApi,
                 agentId: normalizedAgentId,
-                bundledSkillsDir: bundledSkillsIdentityDir,
                 nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
                 sharedRoots: config.skills.sharedRoots,
               }).map((root) => root.path),
@@ -378,7 +369,6 @@ export function createPlugin(
         qmdSkillIndex,
         qmdExperienceIndex,
 
-        bundledSkillsDir,
         nativeBundledSkillsDir,
         getSharedRoots: () => config.skills.sharedRoots,
         dataRoot,
@@ -411,7 +401,6 @@ export function createPlugin(
         qmdExperienceIndex,
         qmdSkillIndex,
         scheduleSkillSearchIndex,
-        bundledSkillsDir: deps.bundledSkillsDir,
         nativeBundledSkillsDir: deps.nativeBundledSkillsDir,
         getSharedRoots: () => config.skills.sharedRoots,
       });

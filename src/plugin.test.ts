@@ -226,7 +226,7 @@ describe("createPlugin", () => {
     await expect(deps.nativeBundledSkillsDir).resolves.toBeDefined();
   });
 
-  it("uses the installation root for index identity across captured generations", async () => {
+  it("keeps native skill roots stable without a package skill root across captured generations", async () => {
     const sourceRoots: string[][] = [];
     createHookHandlersSpy.mockImplementation((deps) => {
       vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(
@@ -245,7 +245,8 @@ describe("createPlugin", () => {
       createPlugin(api).register(api);
     }
     await vi.waitFor(() => expect(sourceRoots).toHaveLength(2));
-    expect(sourceRoots[0]).toContain(path.join(rootDir, "skills"));
+    expect(sourceRoots[0]).not.toContain(path.join(rootDir, "skills"));
+    expect(sourceRoots[0]).toContain(process.env.OPENCLAW_BUNDLED_SKILLS_DIR);
     expect(sourceRoots[1]).toEqual(sourceRoots[0]);
     createHookHandlersSpy.mockReset();
   });

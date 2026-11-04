@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { runOntologyImportCli } from "../../../dist/src/skills/relation-ontology.js";
+import { runOntologyImportCli } from "../dist/src/skills/relation-ontology.js";
 try {
   await runOntologyImportCli(process.argv.slice(2));
 } catch {

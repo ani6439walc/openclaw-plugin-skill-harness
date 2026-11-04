@@ -296,7 +296,15 @@ Refinement consolidates existing guidance rather than appending an incident log:
 
 ### Maintain experience manually
 
-Load the bundled `skill-harness` skill and request its `experience` workflow to inspect, draft, refine, or prune experience. It checks existing coverage and validates entries before applying changes. See the [experience procedure](skills/skill-harness/references/experience.md).
+The package no longer bundles a `skill-harness` maintenance skill. For explicit manual maintenance, inspect existing coverage, read entries in full, and validate a staged tree before applying changes. The [maintenance procedure](AGENTS.md#manual-experience-maintenance) documents the steps and visibility requirements. After building from a source checkout, run:
+
+```bash
+node scripts/validate-experiences.mjs --experiences-dir /path/to/staged/experiences --visible-skills-file /path/to/private/visible-skills.json
+```
+
+The visibility file maps every configured agent ID to its complete visible skill-name list. Validation is read-only; resolve all errors before relying on the edited entries.
+
+When upgrading, remove `skill-harness` from explicit working-set lists if it referred to the retired bundled skill; another visible same-name skill can still resolve normally. If removing the package skill root changes the effective source-root set, the managed skill-index fingerprint changes and full registration builds or selects an index through the normal lifecycle. The experience index and persisted sessions/statistics/Review history need no migration for this retirement.
 
 There are no pre-seeded experiences. Each entry is a directory under the default runtime data root:
 
@@ -376,13 +384,13 @@ The full accepted schema is in [`openclaw.plugin.json`](openclaw.plugin.json). C
 
 ## Runtime health and troubleshooting
 
-Use the bundled `skill-harness` skill's `runtime-health` workflow for a private, report-only check of retrieval, injection, recorded skill use, Review outcomes, index health, retention, and disk growth. From a source checkout:
+Use the maintenance CLI for a private, report-only check of retrieval, injection, recorded skill use, Review outcomes, index health, retention, and disk growth. From a source checkout:
 
 ```bash
-python3 skills/skill-harness/scripts/runtime-health-audit.py --days 7 --output /tmp/skill-harness-runtime-health.json
+node scripts/runtime-health-audit.mjs --days 7 --output /tmp/skill-harness-runtime-health.json
 ```
 
-The report separates cumulative statistics from daily and retained-session observations. Missing data is reported as unavailable. Recorded skill use is not a measure of task success, and the report does not prove that the Gateway loaded the plugin. See the [audit procedure](skills/skill-harness/references/runtime-health-audit.md).
+The report separates cumulative statistics from daily and retained-session observations. Missing data is reported as unavailable. Recorded skill use is not a measure of task success, and the report does not prove that the Gateway loaded the plugin. See the [audit procedure](AGENTS.md#runtime-health-audit-procedure).
 
 Runtime state lives separately from package files under `~/.openclaw/plugins/skill-harness/`: experiences, sessions, `stats.json`, `review.json`, managed `qmd/` indexes, and optional `skill-relations/`. Keep runtime files and reports private.
 
@@ -416,11 +424,11 @@ Read the following observations together in the private Review log or runtime-he
 | Both assessments report `no-change`      | The reviewer reported no justified relation change; a valid completed `nofinding` run leaves the graph unchanged.                              |
 | An assessment reports `changes-proposed` | Check publication receipts and committed findings before claiming a graph change. Validation or concurrency checks may still reject proposals. |
 
-An experience change alone does not prove that relations changed. Report committed relation create/update/delete operations separately, including graph commits preserved by a `partially-applied` event. Do not force an edge or weaken evidence requirements to make a deployment check produce a write. An observed no-change run verifies that path only; positive graph publication and improved task outcomes require their own evidence. See the [runtime-health procedure](skills/skill-harness/references/runtime-health-audit.md#verify-a-completed-relation-review) for bounded diagnosis.
+An experience change alone does not prove that relations changed. Report committed relation create/update/delete operations separately, including graph commits preserved by a `partially-applied` event. Do not force an edge or weaken evidence requirements to make a deployment check produce a write. An observed no-change run verifies that path only; positive graph publication and improved task outcomes require their own evidence. See the [runtime-health procedure](AGENTS.md#verify-a-completed-relation-review) for bounded diagnosis.
 
 ## Contributing
 
-Implementation contracts, source navigation, migrations, and development checks are maintained in [AGENTS.md](AGENTS.md). User-triggered maintenance workflows are in the [bundled skill](skills/skill-harness/SKILL.md).
+Implementation contracts, source navigation, migrations, and development checks are maintained in [AGENTS.md](AGENTS.md). Manual maintenance and audit procedures also live there; their Node.js CLIs are under `scripts/`. Automatic routing and Review do not load these procedures.
 
 ## License
 
@@ -428,7 +436,7 @@ MIT.
 
 ### Package and isolated loader validation
 
-`pnpm run build` removes stale `dist/` files before compilation. The published tarball includes runtime output and bundled maintenance resources, excluding source maps and test helpers. Inspect the actual `pnpm pack` tarball and its installed dependency closure; a source-tree build alone does not prove package contents.
+`pnpm run build` removes stale `dist/` files before compilation. The published tarball includes runtime output, this README, the maintenance guide and four maintenance CLIs, excluding source maps and test helpers. It declares no bundled skill root. Inspect the actual `pnpm pack` tarball and its installed dependency closure; a source-tree build alone does not prove package contents.
 
 For a reproducible loader comparison, extract and independently install baseline and candidate tarballs in temporary directories. Use the same OpenClaw and Node versions, then run:
 

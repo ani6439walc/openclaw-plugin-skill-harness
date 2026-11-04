@@ -28,16 +28,16 @@
   ],
   "files": [
     "README.md",
+    "AGENTS.md",
     "package.json",
     "openclaw.plugin.json",
     "dist",
-    "skills/**",
-    "!skills/**/__pycache__/**",
-    "!skills/**/*.py[cod]",
+    "scripts/runtime-health-audit.mjs",
+    "scripts/validate-experiences.mjs",
+    "scripts/import-skill-relations.mjs",
+    "scripts/rebuild-skill-relations.mjs",
     "!dist/**/*.map",
-    "!dist/**/*.test.*",
-    "!skills/**/test-*",
-    "!skills/**/test_*"
+    "!dist/**/*.test.*"
   ],
   "openclaw": {
     "extensions": [
@@ -54,8 +54,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts'",
+    "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts' 'scripts/*{audit,experiences,relations}.mjs'",
     "test": "vitest run",
+    "test:maintenance": "node scripts/test-runtime-health-audit.mjs && node scripts/test-validate-experiences.mjs",
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && tsc",
     "test:plugin-loader": "node --input-type=module --eval \"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); require('./dist/index.js');\""
   },

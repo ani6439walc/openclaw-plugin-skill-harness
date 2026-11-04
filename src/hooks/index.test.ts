@@ -2326,8 +2326,24 @@ describe("createHookHandlers internal turn guards", () => {
 });
 
 describe("createHookHandlers topic switch flow", () => {
+  const bundledFixtureRoots: string[] = [];
+
+  function createBundledSkillFixture(): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "hook-bundled-skill-"));
+    bundledFixtureRoots.push(root);
+    writeSkill(
+      root,
+      "skill-harness",
+      "Fixture for routing and working-set tests.",
+    );
+    return root;
+  }
+
   afterEach(() => {
     vi.restoreAllMocks();
+    for (const root of bundledFixtureRoots.splice(0)) {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   const intent = {
@@ -2738,7 +2754,7 @@ describe("createHookHandlers topic switch flow", () => {
       configRaw: { instruction: { enabled: false } },
       qmdSkillIndex: { search },
       classifier,
-      bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
+      bundledSkillsDir: createBundledSkillFixture(),
     });
 
     await handlers.onBeforePromptBuild(
@@ -4998,7 +5014,7 @@ Current user request: fresh clean request with clean-skill
     const getWorkingSetSkills = vi.fn().mockResolvedValue(["skill-harness"]);
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
-      bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
+      bundledSkillsDir: createBundledSkillFixture(),
       getWorkingSetSkills,
     });
 
@@ -5030,7 +5046,7 @@ Current user request: fresh clean request with clean-skill
     const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
     const { handlers } = createTopicFlowHarness({
       historicalIntents: [],
-      bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
+      bundledSkillsDir: createBundledSkillFixture(),
       getWorkingSetSkills,
     });
 
@@ -5774,7 +5790,7 @@ Current user request: fresh clean request with clean-skill
       historicalIntents: [],
       configRaw: { routing: { scope: { agents: ["main"] } } },
       classifier,
-      bundledSkillsDir: path.join(resolvePackageRoot(), "skills"),
+      bundledSkillsDir: createBundledSkillFixture(),
       getWorkingSetSkills,
     });
 

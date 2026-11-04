@@ -19,8 +19,8 @@ async function main() {
   }
   const [{ validateExperienceDirectory }, { readJsonFile }] = await Promise.all(
     [
-      import("../../../dist/src/experiences/catalog.js"),
-      import("../../../dist/src/file-utils.js"),
+      import("../dist/src/experiences/catalog.js"),
+      import("../dist/src/file-utils.js"),
     ],
   ).catch(() => {
     throw new Error(

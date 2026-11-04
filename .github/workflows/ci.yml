@@ -41,7 +41,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting (Prettier)
-        run: pnpm exec prettier --check '**/*.md' '**/*.json' '**/*.ts'
+        run: pnpm exec prettier --check '**/*.md' '**/*.json' '**/*.ts' 'scripts/*{audit,experiences,relations}.mjs'
 
       - name: Type check
         run: pnpm run typecheck
@@ -56,6 +56,5 @@ jobs:
         run: |
           pnpm run build
           pnpm run test:plugin-loader
-          python3 skills/skill-harness/scripts/test-runtime-health-audit.py
-          python3 skills/skill-harness/scripts/test-validate-experiences.py
+          pnpm run test:maintenance
           pnpm pack --dry-run
