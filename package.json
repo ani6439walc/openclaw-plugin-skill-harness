@@ -31,11 +31,8 @@
     "AGENTS.md",
     "package.json",
     "openclaw.plugin.json",
+    "scripts/*.mjs",
     "dist",
-    "scripts/runtime-health-audit.mjs",
-    "scripts/validate-experiences.mjs",
-    "scripts/import-skill-relations.mjs",
-    "scripts/rebuild-skill-relations.mjs",
     "!dist/**/*.map",
     "!dist/**/*.test.*"
   ],

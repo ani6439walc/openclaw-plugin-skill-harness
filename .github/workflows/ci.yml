@@ -41,7 +41,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting (Prettier)
-        run: pnpm exec prettier --check '**/*.md' '**/*.json' '**/*.ts' 'scripts/*{audit,experiences,relations}.mjs'
+        run: pnpm exec prettier --check '**/*.md' '**/*.json' '**/*.ts' 'scripts/*.mjs'
 
       - name: Type check
         run: pnpm run typecheck
