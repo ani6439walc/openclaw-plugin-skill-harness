@@ -51,7 +51,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts' 'scripts/*{audit,experiences,relations}.mjs'",
+    "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts' 'scripts/*.mjs'",
     "test": "vitest run",
     "test:maintenance": "node scripts/test-runtime-health-audit.mjs && node scripts/test-validate-experiences.mjs",
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && tsc",
