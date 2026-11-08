@@ -37,8 +37,14 @@ function findSkillFiles(stateDir) {
     { root: path.join(stateDir, "external-skills"), source: "shared" },
     { root: path.join(stateDir, "plugin-skills"), source: "plugin" },
     { root: path.join(stateDir, "npm", "projects"), source: "plugin" },
-    { root: "/home/wei/.npm-global/lib/node_modules/openclaw/skills", source: "bundled" },
-    { root: "/home/wei/.npm-global/lib/node_modules/openclaw/dist/extensions", source: "bundled" },
+    {
+      root: "/home/wei/.npm-global/lib/node_modules/openclaw/skills",
+      source: "bundled",
+    },
+    {
+      root: "/home/wei/.npm-global/lib/node_modules/openclaw/dist/extensions",
+      source: "bundled",
+    },
   ];
 
   // Also include workshop roots per agent
@@ -72,7 +78,10 @@ function findSkillFiles(stateDir) {
         const content = fs.readFileSync(skillPath, "utf-8");
         for (const line of content.split("\n").slice(0, 20)) {
           if (line.startsWith("name:")) {
-            const cand = line.split(":", 2)[1].trim().replace(/^["']|["']$/g, "");
+            const cand = line
+              .split(":", 2)[1]
+              .trim()
+              .replace(/^["']|["']$/g, "");
             if (cand) {
               sname = cand;
               break;
@@ -116,8 +125,18 @@ function findSkillFiles(stateDir) {
 export function runBackfill(options = {}) {
   const stateDir = options.stateDir ?? "/home/wei/.openclaw";
   const dbPath = path.join(stateDir, "state", "openclaw.sqlite");
-  const sessionsDir = path.join(stateDir, "plugins", "skill-harness", "sessions");
-  const statsFile = path.join(stateDir, "plugins", "skill-harness", "stats.json");
+  const sessionsDir = path.join(
+    stateDir,
+    "plugins",
+    "skill-harness",
+    "sessions",
+  );
+  const statsFile = path.join(
+    stateDir,
+    "plugins",
+    "skill-harness",
+    "stats.json",
+  );
 
   console.log(`[Backfill] State dir: ${stateDir}`);
   console.log(`[Backfill] Database: ${dbPath}`);
@@ -128,13 +147,17 @@ export function runBackfill(options = {}) {
 
   // 1. Resolve skill file locations
   const skillMap = findSkillFiles(stateDir);
-  console.log(`[Backfill] Discovered ${skillMap.size} available skills across roots.`);
+  console.log(
+    `[Backfill] Discovered ${skillMap.size} available skills across roots.`,
+  );
 
   // 2. Extract historical views from sessions
   const usageByName = new Map(); // name.toLowerCase() -> { firstMs, lastMs, count, agentId, origName }
 
   if (fs.existsSync(sessionsDir)) {
-    const sessionFiles = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
+    const sessionFiles = fs
+      .readdirSync(sessionsDir)
+      .filter((f) => f.endsWith(".json"));
     console.log(`[Backfill] Scanning ${sessionFiles.length} session files...`);
 
     for (const sf of sessionFiles) {
@@ -145,7 +168,9 @@ export function runBackfill(options = {}) {
         continue;
       }
       const agentId = data.agentId || "main";
-      const turns = (data.current ? [data.current] : []).concat(data.history || []);
+      const turns = (data.current ? [data.current] : []).concat(
+        data.history || [],
+      );
 
       for (const turn of turns) {
         if (!turn) continue;
@@ -222,7 +247,9 @@ export function runBackfill(options = {}) {
     }
   }
 
-  console.log(`[Backfill] Found historical usage for ${usageByName.size} skills.`);
+  console.log(
+    `[Backfill] Found historical usage for ${usageByName.size} skills.`,
+  );
 
   // 4. Upsert into openclaw.sqlite
   const db = new DatabaseSync(dbPath);
@@ -285,10 +312,15 @@ export function runBackfill(options = {}) {
     db.close();
   }
 
-  console.log(`[Backfill] Successfully upserted: ${upsertedCount} skills (skipped ${skippedNoFile} without live file).`);
+  console.log(
+    `[Backfill] Successfully upserted: ${upsertedCount} skills (skipped ${skippedNoFile} without live file).`,
+  );
   return { upsertedCount, skippedNoFile };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename ?? "")) {
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(import.meta.filename ?? "")
+) {
   runBackfill();
 }
