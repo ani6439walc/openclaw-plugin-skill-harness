@@ -171,10 +171,13 @@ describe("buildReviewPrompt", () => {
     );
   });
 
-  it("requires unassociated entries when no eligible observed skills exist", () => {
+  it("requires unassociated created entries while allowing preserved skills on modified entries when no eligible observed skills exist", () => {
     const prompt = buildReviewPrompt(snapshot, ["capability-fit"]);
     expect(prompt).toContain(
-      "none; omit skills.md on entries you create or modify",
+      "none; omit skills.md on created entries, and do not add new skills to skills.md on modified entries",
+    );
+    expect(prompt).toContain(
+      "refined or merged entries may preserve their existing skills.md associations",
     );
     expect(prompt).not.toContain("all visible skills");
   });
@@ -588,6 +591,59 @@ describe("review writeback boundaries", () => {
     expect(
       fs.readFileSync(path.join(root, "exp-other", "skills.md"), "utf8"),
     ).toBe("reader");
+  });
+
+  it("allows refining an existing experience to preserve its pre-existing skills.md even when not loaded in the current turn", async () => {
+    const { result, root } = await review(
+      (workspace) => {
+        fs.writeFileSync(
+          path.join(workspace, "exp-other", "body.md"),
+          "Updated body keeping reader in skills.md.",
+        );
+      },
+      ["exp-other"],
+      "refine",
+    );
+    expect(result.outcome).toBe("applied");
+    expect(
+      fs.readFileSync(path.join(root, "exp-other", "skills.md"), "utf8"),
+    ).toBe("reader");
+    expect(
+      fs.readFileSync(path.join(root, "exp-other", "body.md"), "utf8"),
+    ).toBe("Updated body keeping reader in skills.md.");
+  });
+
+  it("rejects adding an unauthorized skill to skills.md during refine or create even if another experience had it", async () => {
+    const { result: refineResult } = await review(
+      (workspace) => {
+        fs.writeFileSync(
+          path.join(workspace, "exp-one", "skills.md"),
+          "writer\nreader",
+        );
+      },
+      ["exp-one"],
+      "refine",
+    );
+    expect(refineResult.outcome).toBe("validation-failed");
+    expect(refineResult.validationErrors).toContain(
+      "exp-one: skill reader is not visible to any configured agent",
+    );
+
+    const { result: createResult } = await review(
+      (workspace) => {
+        fs.cpSync(
+          path.join(workspace, "exp-other"),
+          path.join(workspace, "exp-created"),
+          { recursive: true },
+        );
+      },
+      ["exp-created"],
+      "create",
+    );
+    expect(createResult.outcome).toBe("validation-failed");
+    expect(createResult.validationErrors).toContain(
+      "exp-created: skill reader is not visible to any configured agent",
+    );
   });
 
   it("preserves concurrent runtime changes and applies none of the review", async () => {
