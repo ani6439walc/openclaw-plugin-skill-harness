@@ -170,8 +170,8 @@ importers:
         specifier: 0.7.0
         version: 0.7.0
       '@wei840222/qmd':
-        specifier: 2026.11.4
-        version: 2026.11.4
+        specifier: 2026.11.10
+        version: 2026.11.10
       gray-matter:
         specifier: 4.0.3
         version: 4.0.3
@@ -1282,8 +1282,8 @@ packages:
   '@vitest/spy@5.0.5':
     resolution: {integrity: sha512-lwJRExuH417257Q5wv9QYugN9IMJkoxcrKrYxGPQkBzl7wlNpTUxD/5yNX4ESKVUIShKPgkGchYPFMWOOk0wzw==}
 
-  '@wei840222/qmd@2026.11.4':
-    resolution: {integrity: sha512-UX6PhuUGyTLjBtrfVh4uvJKT00vwdzabsUUhUgI4DXdrw5qZmCp5sXagPzkV7REsZU84CVLmMmY4/6KiPfPnWA==}
+  '@wei840222/qmd@2026.11.10':
+    resolution: {integrity: sha512-rYScCcfszc/nXmhsVTnis+CdLjMjllGBtWCzndCDs0i7y+OwB+y1z8eCzZB9DN+IBH5JCnAPnu0wIRxazN4ssw==}
     engines: {node: '>=26.0.0'}
     hasBin: true
 
@@ -3739,7 +3739,7 @@ snapshots:
 
   '@vitest/spy@5.0.5': {}
 
-  '@wei840222/qmd@2026.11.4':
+  '@wei840222/qmd@2026.11.10':
     dependencies:
       '@modelcontextprotocol/server': 2.3.0
       '@node-rs/jieba': 2.0.4
