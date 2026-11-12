@@ -6,10 +6,7 @@ import {
   type OpenClawPluginApi,
   type OpenClawPluginDefinition,
 } from "../api.js";
-import {
-  resolveLivePluginConfigObject,
-  resolvePluginConfigObject,
-} from "openclaw/plugin-sdk/plugin-config-runtime";
+import { readPluginConfig } from "./plugin-config.js";
 import { resolveConfig } from "./config.js";
 import { canonicalIdentity } from "./normalize.js";
 import { SessionTracker } from "./session/index.js";
@@ -114,7 +111,7 @@ export function createPlugin(
     },
   });
   const registrationPluginConfig = {
-    ...resolvePluginConfigObject(api.config, PLUGIN_ID),
+    ...readPluginConfig(api.config, PLUGIN_ID),
     ...api.pluginConfig,
   };
 
@@ -123,11 +120,9 @@ export function createPlugin(
   });
 
   const refreshLiveConfigFromRuntime = (): ResolvedSkillHarnessPluginConfig => {
-    const livePluginConfig = resolveLivePluginConfigObject(
-      canAccessRuntime ? getRuntimeConfig : undefined,
-      PLUGIN_ID,
-      api.pluginConfig as Record<string, unknown>,
-    );
+    const livePluginConfig = canAccessRuntime
+      ? readPluginConfig(getRuntimeConfig(), PLUGIN_ID)
+      : api.pluginConfig;
     const sdkPluginConfig = {
       ...registrationPluginConfig,
       ...livePluginConfig,

@@ -15,6 +15,11 @@ import {
   initializePluginDataRoot,
 } from "./plugin.js";
 
+// Simulate a host that has removed this retired facade.
+vi.mock("openclaw/plugin-sdk/plugin-config-runtime", () => {
+  throw new Error("plugin-config-runtime is no longer available");
+});
+
 const {
   createHookHandlersSpy,
   createSkillIndexSpy,
@@ -1088,6 +1093,76 @@ describe("createPlugin", () => {
     expect(apiConfig).toEqual(apiConfigBefore);
     expect(runtimeConfig).toEqual(runtimeConfigBefore);
     expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it("normalizes plugin entry keys and preserves registration override precedence", async () => {
+    const api = createApi({
+      config: {
+        plugins: {
+          entries: {
+            " Skill-Harness ": {
+              config: {
+                skills: { workingSet: { defaults: ["host-snapshot"] } },
+              },
+            },
+            "skill-harness": { enabled: true },
+          },
+        },
+      },
+      pluginConfig: {
+        skills: { workingSet: { defaults: ["registration-override"] } },
+      },
+    });
+
+    createPlugin(api).register(api);
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+    expect(await deps.getWorkingSetSkills("main")).toEqual([
+      "registration-override",
+    ]);
+  });
+
+  it("observes normalized live updates and explicit clearing in the same instance", async () => {
+    let runtimeConfig: Record<string, unknown> = {};
+    const api = createApi({
+      config: {
+        plugins: {
+          entries: {
+            " Skill-Harness ": {
+              config: {
+                skills: { workingSet: { defaults: ["registration-default"] } },
+              },
+            },
+          },
+        },
+      },
+      runtime: {
+        config: { current: () => runtimeConfig },
+        state: { resolveStateDir: () => stateDir },
+      } as never,
+    });
+    createPlugin(api).register(api);
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+    expect(await deps.getWorkingSetSkills("main")).toEqual([
+      "registration-default",
+    ]);
+
+    for (const [skills, expected] of [
+      [{ workingSet: { defaults: ["live-default"] } }, ["live-default"]],
+      [{ workingSet: { defaults: [] } }, []],
+      [{}, []],
+    ] as const) {
+      runtimeConfig = {
+        plugins: {
+          entries: {
+            " Skill-Harness ": { config: { skills } },
+            "skill-harness": { enabled: true },
+          },
+        },
+      };
+      const before = structuredClone(runtimeConfig);
+      expect(await deps.getWorkingSetSkills("main")).toEqual(expected);
+      expect(runtimeConfig).toEqual(before);
+    }
   });
 
   it("resolves an agent-specific working set for an NFKC-equivalent runtime agent ID", async () => {
