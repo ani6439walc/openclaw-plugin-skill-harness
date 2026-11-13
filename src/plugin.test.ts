@@ -15,6 +15,18 @@ import {
   initializePluginDataRoot,
 } from "./plugin.js";
 
+function parseLogReceipt(receipt: readonly unknown[] | undefined): unknown[] {
+  expect(receipt).toHaveLength(1);
+  const message = receipt![0] as string;
+  expect(typeof message).toBe("string");
+  const jsonStart = message.indexOf(" {");
+  expect(jsonStart).toBeGreaterThan(0);
+  return [
+    message.slice(0, jsonStart),
+    JSON.parse(message.slice(jsonStart + 1)),
+  ];
+}
+
 // Simulate a host that has removed this retired facade.
 vi.mock("openclaw/plugin-sdk/plugin-config-runtime", () => {
   throw new Error("plugin-config-runtime is no longer available");
@@ -975,10 +987,10 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
 
     await vi.waitFor(() => {
-      const receipt = warn.mock.calls.find(
-        ([message]) => message === "failed to schedule qmd skill search index",
+      const receipt = warn.mock.calls.find(([message]) =>
+        message.startsWith("failed to schedule qmd skill search index "),
       );
-      expect(receipt).toEqual([
+      expect(parseLogReceipt(receipt)).toEqual([
         "failed to schedule qmd skill search index",
         { errorType: "Error", scheduled: false },
       ]);
@@ -1272,10 +1284,10 @@ describe("createPlugin", () => {
 
     await resolve(privateAgentId);
 
-    const receipt = warn.mock.calls.find(
-      ([message]) => message === "failed to resolve live working-set skills",
+    const receipt = warn.mock.calls.find(([message]) =>
+      message.startsWith("failed to resolve live working-set skills "),
     );
-    expect(receipt).toEqual([
+    expect(parseLogReceipt(receipt)).toEqual([
       "failed to resolve live working-set skills",
       {
         errorType: "Error",

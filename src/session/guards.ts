@@ -1,3 +1,4 @@
+import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
@@ -155,7 +156,9 @@ export function resolveCanonicalSessionKeyFromSessionId(params: {
     );
     return match?.sessionKey;
   } catch (err) {
-    logger.warn("failed to resolve canonical session key", { error: err });
+    logger.warn(
+      formatErrorDiagnostic("failed to resolve canonical session key", err),
+    );
     return;
   }
 }

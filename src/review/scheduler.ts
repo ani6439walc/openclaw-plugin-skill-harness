@@ -1,4 +1,5 @@
 import { logger } from "../../api.js";
+import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import type { ReviewSnapshot } from "./types.js";
 import type { ReviewTrigger } from "./triggers.js";
@@ -155,7 +156,9 @@ export class IntentReviewScheduler {
     const runInBackgroundContext =
       this.deps.runInBackgroundContext ?? ((run) => run());
     const discard = (error: unknown) => {
-      logger.warn("background review callback failed", { error });
+      logger.warn(
+        formatErrorDiagnostic("background review callback failed", error),
+      );
       if (
         this.pendingBySession.get(key) === pending &&
         pending.generation === generation
@@ -239,7 +242,12 @@ export class IntentReviewScheduler {
       const callback = this.onDiscardCallback ?? this.deps.onDiscard;
       callback?.(candidate);
     } catch (error) {
-      logger.warn("failed to execute review discard callback", { error });
+      logger.warn(
+        formatErrorDiagnostic(
+          "failed to execute review discard callback",
+          error,
+        ),
+      );
     }
   }
 

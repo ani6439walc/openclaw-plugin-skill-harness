@@ -49,6 +49,18 @@ vi.mock("openclaw/plugin-sdk/agent-harness-runtime", () => ({
 const emitHostAgentEvent = vi.mocked(emitAgentEvent);
 const SKILL_HARNESS_SYSTEM_CONTEXT = `${BASE_SKILL_HARNESS_SYSTEM_CONTEXT}\n\n${SKILL_HARNESS_INTENT_CONTEXT}`;
 
+function parseLogReceipt(receipt: readonly unknown[] | undefined): unknown[] {
+  expect(receipt).toHaveLength(1);
+  const message = receipt![0] as string;
+  expect(typeof message).toBe("string");
+  const jsonStart = message.indexOf(" {");
+  expect(jsonStart).toBeGreaterThan(0);
+  return [
+    message.slice(0, jsonStart),
+    JSON.parse(message.slice(jsonStart + 1)),
+  ];
+}
+
 function createHandlers(
   api: unknown = {},
   overrides: Record<string, unknown> = {},
@@ -231,18 +243,42 @@ describe("createHookHandlers tracking guards", () => {
       { sessionId, sessionKey, runId } as never,
     );
 
-    expect(info).toHaveBeenCalledWith("onMessageSending hook triggered", {
-      hasSessionId: true,
-      hasSessionKey: true,
-      hasRunId: true,
-    });
-    expect(info).toHaveBeenCalledWith("onMessageSending association resolved", {
-      associationResolved: true,
-    });
-    expect(info).toHaveBeenCalledWith(
+    expect(
+      parseLogReceipt(
+        info.mock.calls.find(([message]) =>
+          message.startsWith("onMessageSending hook triggered "),
+        ),
+      ),
+    ).toEqual([
+      "onMessageSending hook triggered",
+      {
+        hasSessionId: true,
+        hasSessionKey: true,
+        hasRunId: true,
+      },
+    ]);
+    expect(
+      parseLogReceipt(
+        info.mock.calls.find(([message]) =>
+          message.startsWith("onMessageSending association resolved "),
+        ),
+      ),
+    ).toEqual([
+      "onMessageSending association resolved",
+      {
+        associationResolved: true,
+      },
+    ]);
+    expect(
+      parseLogReceipt(
+        info.mock.calls.find(([message]) =>
+          message.startsWith("onMessageSending turn finalization result "),
+        ),
+      ),
+    ).toEqual([
       "onMessageSending turn finalization result",
       { finalizationStatus: "retryable-failure" },
-    );
+    ]);
     const receipts = JSON.stringify(info.mock.calls);
     for (const privateValue of [sessionId, sessionKey, runId, turnKey]) {
       expect(receipts).not.toContain(privateValue);
@@ -690,6 +726,14 @@ description: Navigate Tokyo.
     );
 
     expect(warn).toHaveBeenCalledTimes(1);
+    expect(parseLogReceipt(warn.mock.calls[0])).toEqual([
+      "discarded persisted tool fallback",
+      { reason: "ambiguous" },
+    ]);
+    const receipt = JSON.stringify(warn.mock.calls);
+    for (const privateValue of [sessionKey, "shared-call", "/safe/b"]) {
+      expect(receipt).not.toContain(privateValue);
+    }
     expect(toolFallbacks.get("shared-call")).toBeUndefined();
   });
 
@@ -2634,13 +2678,22 @@ describe("createHookHandlers topic switch flow", () => {
       { ...ctx, sessionId: privateSession } as never,
     );
 
-    expect(debug).toHaveBeenCalledWith("before_prompt_build hook triggered", {
-      hasSessionId: true,
-      hasSessionKey: true,
-      hasRunId: true,
-      hasModelProviderId: false,
-      hasModelId: false,
-    });
+    expect(
+      parseLogReceipt(
+        debug.mock.calls.find(([message]) =>
+          message.startsWith("before_prompt_build hook triggered "),
+        ),
+      ),
+    ).toEqual([
+      "before_prompt_build hook triggered",
+      {
+        hasSessionId: true,
+        hasSessionKey: true,
+        hasRunId: true,
+        hasModelProviderId: false,
+        hasModelId: false,
+      },
+    ]);
     const receipts = JSON.stringify(debug.mock.calls);
     expect(receipts).not.toContain(privateResult);
     expect(receipts).not.toContain(privateSession);
@@ -5058,10 +5111,10 @@ Current user request: fresh clean request with clean-skill
       ctx,
     );
 
-    const receipts = info.mock.calls.filter(
-      ([message]) => message === "working-set skills static context emitted",
+    const receipts = info.mock.calls.filter(([message]) =>
+      message.startsWith("working-set skills static context emitted "),
     );
-    expect(receipts).toEqual([
+    expect(receipts.map(parseLogReceipt)).toEqual([
       [
         "working-set skills static context emitted",
         {
@@ -5091,8 +5144,8 @@ Current user request: fresh clean request with clean-skill
     );
 
     expect(
-      info.mock.calls.filter(
-        ([message]) => message === "working-set skills static context emitted",
+      info.mock.calls.filter(([message]) =>
+        message.startsWith("working-set skills static context emitted "),
       ),
     ).toEqual([]);
   });
@@ -5431,10 +5484,10 @@ Current user request: fresh clean request with clean-skill
 
     await handlers.onBeforePromptBuild(event, ctx);
 
-    const receipt = warn.mock.calls.find(
-      ([message]) => message === "before_prompt_build hook error",
+    const receipt = warn.mock.calls.find(([message]) =>
+      message.startsWith("before_prompt_build hook error "),
     );
-    expect(receipt).toEqual([
+    expect(parseLogReceipt(receipt)).toEqual([
       "before_prompt_build hook error",
       { errorType: "Error", staticContextAvailable: false },
     ]);
@@ -5540,11 +5593,10 @@ Current user request: fresh clean request with clean-skill
       expect(result?.appendSystemContext).toContain(
         "Workspace fallback skill.",
       );
-      const receipt = warn.mock.calls.find(
-        ([message]) =>
-          message === "failed to retrieve working-set agent skill names",
+      const receipt = warn.mock.calls.find(([message]) =>
+        message.startsWith("failed to retrieve working-set agent skill names "),
       );
-      expect(receipt).toEqual([
+      expect(parseLogReceipt(receipt)).toEqual([
         "failed to retrieve working-set agent skill names",
         { errorType: "Error", workingSetSkillCount: 0 },
       ]);
@@ -5594,10 +5646,10 @@ Current user request: fresh clean request with clean-skill
       expect(result?.appendSystemContext).toContain(
         "Workspace resolver fallback skill.",
       );
-      const receipt = warn.mock.calls.find(
-        ([message]) => message === "failed to resolve working-set agent skills",
+      const receipt = warn.mock.calls.find(([message]) =>
+        message.startsWith("failed to resolve working-set agent skills "),
       );
-      expect(receipt).toEqual([
+      expect(parseLogReceipt(receipt)).toEqual([
         "failed to resolve working-set agent skills",
         { errorType: "Error", workingSetSkillCount: 1 },
       ]);
@@ -5645,10 +5697,10 @@ Current user request: fresh clean request with clean-skill
         '<skill name="explicit-only">',
       );
       expect(result?.appendSystemContext).toContain("Explicit fallback skill.");
-      const receipt = warn.mock.calls.find(
-        ([message]) => message === "failed to resolve workspace agent skills",
+      const receipt = warn.mock.calls.find(([message]) =>
+        message.startsWith("failed to resolve workspace agent skills "),
       );
-      expect(receipt).toEqual([
+      expect(parseLogReceipt(receipt)).toEqual([
         "failed to resolve workspace agent skills",
         { errorType: "Error", workspaceSkillCount: 0 },
       ]);
@@ -5686,12 +5738,12 @@ Current user request: fresh clean request with clean-skill
       await handlers.onBeforePromptBuild(event, ctx);
 
       expect(info).toHaveBeenCalled();
-      const receipt = warn.mock.calls.find(
-        ([message]) =>
-          message ===
-          "failed to resolve working-set agent skills for prompt build",
+      const receipt = warn.mock.calls.find(([message]) =>
+        message.startsWith(
+          "failed to resolve working-set agent skills for prompt build ",
+        ),
       );
-      expect(receipt).toEqual([
+      expect(parseLogReceipt(receipt)).toEqual([
         "failed to resolve working-set agent skills for prompt build",
         { errorType: "Error", workingSetSkillCount: 0 },
       ]);

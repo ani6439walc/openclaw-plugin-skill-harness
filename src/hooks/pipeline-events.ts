@@ -1,3 +1,4 @@
+import { safeErrorClassification } from "../error-diagnostics.js";
 import { emitAgentEvent as emitHostAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { logger } from "../../api.js";
 import { roundToDecimals } from "../normalize.js";
@@ -109,10 +110,8 @@ export function emitPipelineEvent(
       data: cleanPipelineEventData(rawData),
     });
   } catch (err) {
-    logger.warn("failed to emit skill-harness pipeline event", {
-      phase,
-      state,
-      error: err,
-    });
+    logger.warn(
+      `failed to emit skill-harness pipeline event ${JSON.stringify({ phase, state, ...safeErrorClassification(err) })}`,
+    );
   }
 }

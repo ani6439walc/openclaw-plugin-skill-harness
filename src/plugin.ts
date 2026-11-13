@@ -1,3 +1,4 @@
+import { formatErrorDiagnostic } from "./error-diagnostics.js";
 import {
   definePluginEntry,
   logger,
@@ -50,10 +51,9 @@ export function initializePluginDataRoot({
     fs.mkdirSync(sessionsDirPath(dataRoot), { recursive: true });
     fs.mkdirSync(experiencesPath(dataRoot), { recursive: true });
   } catch (err) {
-    logger.warn("failed to create skill-harness data root", {
-      error: err,
-      path: dataRoot,
-    });
+    logger.warn(
+      formatErrorDiagnostic("failed to create skill-harness data root", err),
+    );
   }
 }
 
@@ -80,10 +80,12 @@ export function createWorkingSetSkillsResolver(
         liveConfig.skills.workingSet.defaults
       );
     } catch (error) {
-      logger.warn("failed to resolve live working-set skills", {
-        errorType: error instanceof Error ? "Error" : typeof error,
-        workingSetSkillCount: 0,
-      });
+      logger.warn(
+        `failed to resolve live working-set skills ${JSON.stringify({
+          errorType: error instanceof Error ? "Error" : typeof error,
+          workingSetSkillCount: 0,
+        })}`,
+      );
       return [];
     }
   };
@@ -167,9 +169,11 @@ export function createPlugin(
         const settled = work
           .catch((error: unknown) => {
             if (!disposed) {
-              logger.warn("plugin background task failed", {
-                errorType: error instanceof Error ? "Error" : typeof error,
-              });
+              logger.warn(
+                `plugin background task failed ${JSON.stringify({
+                  errorType: error instanceof Error ? "Error" : typeof error,
+                })}`,
+              );
             }
           })
           .finally(() => backgroundWork.delete(settled));
@@ -267,10 +271,12 @@ export function createPlugin(
               }).map((root) => root.path),
             });
           } catch (error: unknown) {
-            logger.warn("failed to schedule qmd skill search index", {
-              errorType: error instanceof Error ? "Error" : typeof error,
-              scheduled: false,
-            });
+            logger.warn(
+              `failed to schedule qmd skill search index ${JSON.stringify({
+                errorType: error instanceof Error ? "Error" : typeof error,
+                scheduled: false,
+              })}`,
+            );
           }
         });
       };

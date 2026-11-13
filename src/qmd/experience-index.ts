@@ -5,7 +5,10 @@ import type { QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
 import type { BackgroundRunner } from "../subagent-runtime.js";
-import { safeErrorClassification } from "../error-diagnostics.js";
+import {
+  formatErrorDiagnostic,
+  safeErrorClassification,
+} from "../error-diagnostics.js";
 import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { SkillExperienceEntry } from "../experiences/types.js";
 import type { ResolvedQmdConfig } from "../types.js";
@@ -245,9 +248,9 @@ export function createSkillExperienceQmdIndex(params: {
     run: () => void | Promise<void>,
   ): Promise<void> => {
     const failed = (error: unknown) => {
-      logger.warn("qmd experience background work failed", {
-        errorType: error instanceof Error ? "Error" : typeof error,
-      });
+      logger.warn(
+        formatErrorDiagnostic("qmd experience background work failed", error),
+      );
     };
     try {
       return Promise.resolve(runInBackgroundContext(run)).catch(failed);
@@ -449,7 +452,9 @@ export function createSkillExperienceQmdIndex(params: {
           return opened;
         }
       } catch (error) {
-        logger.warn("failed to open qmd experience index", { error });
+        logger.warn(
+          formatErrorDiagnostic("failed to open qmd experience index", error),
+        );
         return;
       }
     })();
@@ -680,10 +685,12 @@ export function createSkillExperienceQmdIndex(params: {
             }, delay),
           );
         } catch (admissionError) {
-          logger.warn("qmd experience retry admission failed", {
-            errorType:
-              admissionError instanceof Error ? "Error" : typeof admissionError,
-          });
+          logger.warn(
+            formatErrorDiagnostic(
+              "qmd experience retry admission failed",
+              admissionError,
+            ),
+          );
         }
       }
       logger.warn(
@@ -863,7 +870,9 @@ export function createSkillExperienceQmdIndex(params: {
 
         return hits;
       } catch (error) {
-        logger.warn("qmd experience search failed", { error });
+        logger.warn(
+          formatErrorDiagnostic("qmd experience search failed", error),
+        );
         return;
       } finally {
         lease?.release();

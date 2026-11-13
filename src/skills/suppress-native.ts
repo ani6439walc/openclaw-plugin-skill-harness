@@ -1,3 +1,4 @@
+import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import {
   logger,
   type OpenClawConfig,
@@ -130,9 +131,12 @@ export async function suppressNativeSkillsOnStartup(
     logger.info("successfully normalized native OpenClaw skills configuration");
     return true;
   } catch (error) {
-    logger.warn("failed to normalize native OpenClaw skills configuration", {
-      error: error instanceof Error ? error.message : String(error),
-    });
+    logger.warn(
+      formatErrorDiagnostic(
+        "failed to normalize native OpenClaw skills configuration",
+        error,
+      ),
+    );
     return false;
   }
 }

@@ -1,3 +1,4 @@
+import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import { logger } from "../../api.js";
 import {
   fileExists,
@@ -80,10 +81,7 @@ export async function readSkillUsageStats(
     if (!fileExists(filePath)) return {};
     parsed = readJsonFile<RawStatsFile>(filePath);
   } catch (err) {
-    logger.warn("failed to read skill usage stats", {
-      error: err,
-      path: filePath,
-    });
+    logger.warn(formatErrorDiagnostic("failed to read skill usage stats", err));
     return {};
   }
 

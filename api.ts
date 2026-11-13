@@ -5,12 +5,13 @@ export {
 } from "openclaw/plugin-sdk/plugin-entry";
 
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 
 export interface PluginSubsystemLogger {
-  trace(message: string, meta?: Record<string, unknown>): void;
-  debug(message: string, meta?: Record<string, unknown>): void;
-  info(message: string, meta?: Record<string, unknown>): void;
-  warn(message: string, meta?: Record<string, unknown>): void;
+  trace(message: string): void;
+  debug(message: string): void;
+  info(message: string): void;
+  warn(message: string): void;
 }
 
 // Muted cyan/teal blue (38;5;74 from 256-color palette)
@@ -23,47 +24,37 @@ function formatPrefixed(message: string): string {
 }
 
 export const logger: PluginSubsystemLogger = {
-  trace(message: string, meta?: Record<string, unknown>): void {
-    backendLogger.trace(formatPrefixed(message), meta);
+  trace(message: string): void {
+    backendLogger.trace(formatPrefixed(message));
   },
-  debug(message: string, meta?: Record<string, unknown>): void {
-    backendLogger.debug(formatPrefixed(message), meta);
+  debug(message: string): void {
+    backendLogger.debug(formatPrefixed(message));
   },
-  info(message: string, meta?: Record<string, unknown>): void {
-    backendLogger.info(formatPrefixed(message), meta);
+  info(message: string): void {
+    backendLogger.info(formatPrefixed(message));
   },
-  warn(message: string, meta?: Record<string, unknown>): void {
-    backendLogger.warn(formatPrefixed(message), meta);
+  warn(message: string): void {
+    backendLogger.warn(formatPrefixed(message));
   },
 };
 
-export interface ExternalApiLogger {
-  trace?: (message: string, ...args: unknown[]) => void;
-  debug?: (message: string, ...args: unknown[]) => void;
-  info?: (message: string, ...args: unknown[]) => void;
-  warn?: (message: string, ...args: unknown[]) => void;
-  error?: (message: string, ...args: unknown[]) => void;
+export interface ExternalApiLogger extends Partial<
+  OpenClawPluginApi["logger"]
+> {
+  trace?: (message: string) => void;
 }
 
 export function setApiLogger(apiLogger: ExternalApiLogger): void {
   const defaultLogger = createSubsystemLogger("plugins");
   backendLogger = {
-    trace: (msg, meta) =>
-      apiLogger.trace
-        ? apiLogger.trace(msg, meta)
-        : defaultLogger.trace(msg, meta),
-    debug: (msg, meta) =>
-      apiLogger.debug
-        ? apiLogger.debug(msg, meta)
-        : defaultLogger.debug(msg, meta),
-    info: (msg, meta) =>
-      apiLogger.info
-        ? apiLogger.info(msg, meta)
-        : defaultLogger.info(msg, meta),
-    warn: (msg, meta) =>
-      apiLogger.warn
-        ? apiLogger.warn(msg, meta)
-        : defaultLogger.warn(msg, meta),
+    trace: (msg) =>
+      apiLogger.trace ? apiLogger.trace(msg) : defaultLogger.trace(msg),
+    debug: (msg) =>
+      apiLogger.debug ? apiLogger.debug(msg) : defaultLogger.debug(msg),
+    info: (msg) =>
+      apiLogger.info ? apiLogger.info(msg) : defaultLogger.info(msg),
+    warn: (msg) =>
+      apiLogger.warn ? apiLogger.warn(msg) : defaultLogger.warn(msg),
   };
 }
 
