@@ -1,3 +1,4 @@
+import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import { createHash } from "node:crypto";
 import { logger } from "../../api.js";
 import { resolveTurnEventId } from "../session/index.js";
@@ -1634,10 +1635,9 @@ export class StatsAggregator {
       assertStats(stats);
       return new Set(Object.keys(stats.processedEvents));
     } catch (error) {
-      logger.warn("failed to read processed stats events", {
-        error,
-        path: statsFilePath,
-      });
+      logger.warn(
+        formatErrorDiagnostic("failed to read processed stats events", error),
+      );
       return new Set();
     }
   }
@@ -1669,10 +1669,9 @@ export class StatsAggregator {
       const eventId = resolveTurnEventId(sessionId, state);
       return eventId ? !stats.processedEvents[eventId] : false;
     } catch (error) {
-      logger.warn("failed to preflight stats event", {
-        error,
-        path: statsFilePath,
-      });
+      logger.warn(
+        formatErrorDiagnostic("failed to preflight stats event", error),
+      );
       return false;
     }
   }
@@ -1843,10 +1842,7 @@ export class StatsAggregator {
       if (written) this.acceptedTurnCount = stats.summary.turns;
       return written;
     } catch (err) {
-      logger.warn("failed to update stats file", {
-        error: err,
-        path: statsFilePath,
-      });
+      logger.warn(formatErrorDiagnostic("failed to update stats file", err));
       return false;
     }
   }
@@ -1861,7 +1857,9 @@ export class StatsAggregator {
       this.acceptedTurnCount = stats.summary.turns;
       return this.acceptedTurnCount;
     } catch (err) {
-      logger.warn("failed to read accepted turn count", { error: err });
+      logger.warn(
+        formatErrorDiagnostic("failed to read accepted turn count", err),
+      );
       return undefined;
     }
   }

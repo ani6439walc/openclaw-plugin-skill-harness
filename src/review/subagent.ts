@@ -46,11 +46,12 @@ import { validateExperienceDirectory } from "../experiences/index.js";
 import {
   buildEmbeddedSubagentRunDefaults,
   extractEmbeddedRunError,
-  formatEmbeddedError,
   isGatewayDrainingError,
   createBackgroundRunner,
 } from "../subagent-runtime.js";
 import { withFileLock } from "../file-utils.js";
+import { formatErrorDiagnostic } from "../error-diagnostics.js";
+import { isRecord } from "../guards.js";
 import {
   DEFAULT_PROVIDER,
   parseModelRef,
@@ -79,7 +80,7 @@ function resolveFirstModelRef(
       });
       if (parsed) return { provider: parsed.provider, model: parsed.model };
     } catch (err) {
-      logger.debug("skipping invalid model ref", { error: err, modelRef: ref });
+      logger.debug(formatErrorDiagnostic("skipping invalid model ref", err));
     }
   }
   return;
@@ -263,15 +264,66 @@ function extractFirstParseableJsonObject(text: string): unknown | undefined {
 }
 
 function summarizeRawReply(rawReply: string): {
-  rawReplyHead: string;
+  reason: "empty-reply" | "invalid-json" | "invalid-shape";
   rawReplyLength: number;
   hasParseableJsonObject: boolean;
 } {
+  const hasParseableJsonObject = Boolean(
+    extractFirstParseableJsonObject(rawReply),
+  );
+  let hasParseableJson = hasParseableJsonObject;
+  if (!hasParseableJson) {
+    try {
+      JSON.parse(stripCodeFence(rawReply));
+      hasParseableJson = true;
+    } catch {
+      // The reply is invalid JSON; do not retain any part of it in diagnostics.
+    }
+  }
   return {
-    rawReplyHead: rawReply.slice(0, 200).replace(/\s+/g, " ").trim(),
+    reason: !rawReply.trim()
+      ? "empty-reply"
+      : hasParseableJson
+        ? "invalid-shape"
+        : "invalid-json",
     rawReplyLength: rawReply.length,
-    hasParseableJsonObject: Boolean(extractFirstParseableJsonObject(rawReply)),
+    hasParseableJsonObject,
   };
+}
+
+/** SDK error kinds are classifications; messages and unknown kinds are evidence. */
+function classifyEmbeddedReviewError(result: {
+  payloads?: unknown[];
+  meta?: unknown;
+}): string {
+  if (
+    result.payloads?.some(
+      (payload) => isRecord(payload) && payload.isError === true,
+    )
+  )
+    return "error-payload";
+  const error = isRecord(result.meta) ? result.meta.error : undefined;
+  const kind = isRecord(error) ? error.kind : undefined;
+  switch (kind) {
+    case "context_overflow":
+      return "context-overflow";
+    case "compaction_failure":
+      return "compaction-failure";
+    case "compaction_replay_refresh_required":
+      return "compaction-replay-refresh-required";
+    case "role_ordering":
+      return "role-ordering";
+    case "image_size":
+      return "image-size";
+    case "retry_limit":
+      return "retry-limit";
+    case "incomplete_turn":
+      return "incomplete-turn";
+    case "hook_block":
+      return "hook-block";
+    default:
+      return "embedded-error";
+  }
 }
 
 function extractMalformedFindingsResponse(
@@ -653,10 +705,12 @@ export function parseReviewFindingsDetailed(
           schemaRejectionReasonCounts[reasonCode] =
             (schemaRejectionReasonCounts[reasonCode] ?? 0) + 1;
         }
-        logger.warn("dropping invalid review finding", {
-          schemaRejectionReasonCode: reasonCode,
-          ...summarizeSchemaError(result.error),
-        });
+        logger.warn(
+          `dropping invalid review finding ${JSON.stringify({
+            schemaRejectionReasonCode: reasonCode,
+            ...summarizeSchemaError(result.error),
+          })}`,
+        );
         continue;
       }
       const finding = result.data;
@@ -1109,10 +1163,11 @@ async function runReviewSubagentInternal(
     metadata.relationSearchCount = reviewTools.searchCount;
     const embeddedError = extractEmbeddedRunError(result);
     if (embeddedError) {
-      logger.warn("review subagent returned an error", {
-        error: embeddedError,
-        modelRef: params.modelRef,
-      });
+      logger.warn(
+        `review subagent returned an error ${JSON.stringify({
+          reason: classifyEmbeddedReviewError(result),
+        })}`,
+      );
       return { findings: [], outcome: "subagent-error" };
     }
 
@@ -1125,9 +1180,9 @@ async function runReviewSubagentInternal(
     if (params.relationContext && parsed?.relationReview)
       metadata.relationReview = parsed.relationReview;
     if (!parsed) {
-      logger.warn("review result parse failed", {
-        ...summarizeRawReply(rawReply),
-      });
+      logger.warn(
+        `review result parse failed ${JSON.stringify(summarizeRawReply(rawReply))}`,
+      );
       return { findings: [], outcome: "parse-failed" };
     }
 
@@ -1482,10 +1537,7 @@ async function runReviewSubagentInternal(
       abortSignal?.aborted ||
       (err instanceof Error && err.name === "AbortError");
     if (!isGatewayDrainingError(err) && !isAbort) {
-      logger.warn("review subagent error", {
-        error: formatEmbeddedError(err) ?? String(err),
-        modelRef: params.modelRef,
-      });
+      logger.warn(formatErrorDiagnostic("review subagent error", err));
     }
     if (
       committed.changedRelationCount ||

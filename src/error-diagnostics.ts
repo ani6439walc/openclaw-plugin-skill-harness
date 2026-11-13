@@ -36,3 +36,8 @@ export function safeErrorClassification(error: unknown): {
       return { reason: "operation-failed" };
   }
 }
+
+/** Only the classifier's fixed fields cross the single-string logging boundary. */
+export function formatErrorDiagnostic(message: string, error: unknown): string {
+  return `${message} ${JSON.stringify(safeErrorClassification(error))}`;
+}

@@ -1,3 +1,4 @@
+import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import { getOrCache } from "../singleton.js";
 import path from "node:path";
 import * as fs from "node:fs";
@@ -413,10 +414,9 @@ function extractSkillInfoFromMarkdown(
       };
     }
   } catch (err) {
-    logger.warn("not valid skill markdown with frontmatter", {
-      error: err,
-      path: filePath,
-    });
+    logger.warn(
+      formatErrorDiagnostic("not valid skill markdown with frontmatter", err),
+    );
   }
   return;
 }
@@ -565,10 +565,7 @@ export class SessionTracker {
         if (!isCurrentSessionData(sessionData)) continue;
         this.sessionData.set(sessionData.sessionId, sessionData);
       } catch (err) {
-        logger.warn("failed to load session file", {
-          error: err,
-          path: filePath,
-        });
+        logger.warn(formatErrorDiagnostic("failed to load session file", err));
       }
     }
   }
@@ -731,10 +728,9 @@ export class SessionTracker {
         ? outcome.result
         : { status: "retryable-failure" };
     } catch (error) {
-      logger.warn("failed to prepare prompt turn", {
-        error,
-        sessionId: params.sessionId,
-      });
+      logger.warn(
+        formatErrorDiagnostic("failed to prepare prompt turn", error),
+      );
       return { status: "retryable-failure" };
     }
   }
@@ -771,10 +767,7 @@ export class SessionTracker {
       });
       return outcome.acquired ? outcome.result : "retryable-failure";
     } catch (error) {
-      logger.warn("failed to merge turn", {
-        error,
-        sessionId: params.sessionId,
-      });
+      logger.warn(formatErrorDiagnostic("failed to merge turn", error));
       return "retryable-failure";
     }
   }
@@ -877,10 +870,9 @@ export class SessionTracker {
       });
       return outcome.acquired ? outcome.result : "retryable-failure";
     } catch (error) {
-      logger.warn("failed to finalize exact turn", {
-        error,
-        sessionId: params.sessionId,
-      });
+      logger.warn(
+        formatErrorDiagnostic("failed to finalize exact turn", error),
+      );
       return "retryable-failure";
     }
   }
@@ -1025,9 +1017,9 @@ export class SessionTracker {
 
     const filename = `${sessionId}.json`;
     if (path.basename(filename) !== filename) {
-      logger.warn("refusing to delete invalid session file path", {
-        sessionId,
-      });
+      logger.warn(
+        `refusing to delete invalid session file path ${JSON.stringify({ reason: "invalid-session-path" })}`,
+      );
       return;
     }
 
@@ -1035,10 +1027,7 @@ export class SessionTracker {
     try {
       fs.rmSync(filePath, { force: true });
     } catch (err) {
-      logger.warn("failed to delete session file", {
-        error: err,
-        path: filePath,
-      });
+      logger.warn(formatErrorDiagnostic("failed to delete session file", err));
     }
   }
 
@@ -1065,17 +1054,18 @@ export class SessionTracker {
             fs.rmSync(filePath, { force: true });
             deletedCount += 1;
           } catch (err) {
-            logger.warn("failed to delete expired session file", {
-              error: err,
-              path: filePath,
-            });
+            logger.warn(
+              formatErrorDiagnostic(
+                "failed to delete expired session file",
+                err,
+              ),
+            );
           }
         }
       } catch (err) {
-        logger.warn("failed to scan expired session files", {
-          error: err,
-          path: sessionsDir,
-        });
+        logger.warn(
+          formatErrorDiagnostic("failed to scan expired session files", err),
+        );
       }
     }
 
@@ -1115,26 +1105,26 @@ export class SessionTracker {
               deletedCount += 1;
             } catch (err) {
               logger.warn(
-                "failed to delete expired embedded agent session file",
-                {
-                  error: err,
-                  path: filePath,
-                },
+                formatErrorDiagnostic(
+                  "failed to delete expired embedded agent session file",
+                  err,
+                ),
               );
             }
           }
         } catch (err) {
-          logger.warn("failed to scan embedded agent session files", {
-            error: err,
-            path: sessionsDir,
-          });
+          logger.warn(
+            formatErrorDiagnostic(
+              "failed to scan embedded agent session files",
+              err,
+            ),
+          );
         }
       }
     } catch (err) {
-      logger.warn("failed to scan embedded agent directories", {
-        error: err,
-        path: agentsDir,
-      });
+      logger.warn(
+        formatErrorDiagnostic("failed to scan embedded agent directories", err),
+      );
     }
 
     return deletedCount;

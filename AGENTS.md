@@ -741,6 +741,15 @@ source maps and contributor checks here. Developer maintenance procedures belong
 do not claim paper benchmark results as this plugin's measurements or imply that
 related-work algorithms are implemented without source evidence.
 
+The shared logger and host adapter accept one message string. Build diagnostics
+at each call site from fixed labels and explicitly selected safe fields; use
+`formatErrorDiagnostic()` for ordinary failure reasons and allowlisted codes.
+Review returned errors use only supported SDK error kinds or a fixed fallback;
+keep raw error extraction separate for control flow. Parse-failure logs retain
+only a fixed reason, reply length, and parseable-object flag. Schema rejections
+retain schema field/index paths, codes, and counts, without rejected values or
+messages. Never generically serialize metadata to satisfy the logger signature.
+
 qmd skill refresh diagnostics must survive the host PluginLogger's single-string
 contract. Encode fingerprint, phase, fixed reason, searchable, failure count,
 retry delay, and a redacted error diagnostic (`errorName`, string `errorCode`,

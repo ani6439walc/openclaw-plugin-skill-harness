@@ -1,3 +1,4 @@
+import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import { logger } from "../../api.js";
 
 export function extractToolText(raw: unknown): string {
@@ -26,10 +27,12 @@ export function extractToolText(raw: unknown): string {
       }
     }
   } catch (error) {
-    logger.warn("failed to parse tool response as JSON, returning raw string", {
-      error,
-      raw: text,
-    });
+    logger.warn(
+      formatErrorDiagnostic(
+        "failed to parse tool response as JSON, returning raw string",
+        error,
+      ),
+    );
   }
   return text;
 }

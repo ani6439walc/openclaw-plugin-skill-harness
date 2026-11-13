@@ -1,3 +1,4 @@
+import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
@@ -126,10 +127,9 @@ export function recordSkillUsageToStateDb(
       db.close();
     }
   } catch (error) {
-    logger.warn("failed to record skill usage to state db", {
-      error: error instanceof Error ? error.message : String(error),
-      skillName: params.skillName,
-    });
+    logger.warn(
+      formatErrorDiagnostic("failed to record skill usage to state db", error),
+    );
   }
 }
 
@@ -187,10 +187,12 @@ export function batchUpsertSkillUsage(
         inserted += 1;
       } catch (err) {
         errors += 1;
-        logger.warn("failed to batch upsert skill usage entry", {
-          skillName: entry.skillName,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        logger.warn(
+          formatErrorDiagnostic(
+            "failed to batch upsert skill usage entry",
+            err,
+          ),
+        );
       }
     }
     db.exec("COMMIT;");
@@ -200,9 +202,9 @@ export function batchUpsertSkillUsage(
     } catch {
       // ignore rollback failure
     }
-    logger.warn("batch upsert transaction failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
+    logger.warn(
+      formatErrorDiagnostic("batch upsert transaction failed", error),
+    );
   } finally {
     db.close();
   }

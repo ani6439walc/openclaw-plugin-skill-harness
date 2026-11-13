@@ -6,6 +6,10 @@ import path from "node:path";
 import type { createStore, QMDStore } from "@wei840222/qmd";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
+import {
+  formatErrorDiagnostic,
+  safeErrorClassification,
+} from "../error-diagnostics.js";
 import type { BackgroundRunner } from "../subagent-runtime.js";
 import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import type { AvailableSkill } from "../skills/types.js";
@@ -413,11 +417,12 @@ export async function writeSkillSnapshot(params: {
         );
       bodyContent = await fs.readFile(bodySource, "utf8");
     } catch (error) {
-      logger.warn("failed to read skill body for QMD snapshot", {
-        error,
-        skill: skill.name,
-        location: skill.location,
-      });
+      logger.warn(
+        formatErrorDiagnostic(
+          "failed to read skill body for QMD snapshot",
+          error,
+        ),
+      );
       bodyContent = skill.description;
     }
     await writeIndexedDocument({
@@ -435,11 +440,12 @@ export async function writeSkillSnapshot(params: {
       try {
         content = await fs.readFile(confinedSource, "utf8");
       } catch (error) {
-        logger.warn("failed to read skill reference for QMD snapshot", {
-          error,
-          skill: skill.name,
-          path: relative,
-        });
+        logger.warn(
+          formatErrorDiagnostic(
+            "failed to read skill reference for QMD snapshot",
+            error,
+          ),
+        );
         continue;
       }
       await writeIndexedDocument({
@@ -656,9 +662,9 @@ export function createSkillQmdIndex(params: {
     run: () => void | Promise<void>,
   ): Promise<void> => {
     const failed = (error: unknown) => {
-      logger.warn("qmd skill background work failed", {
-        errorType: error instanceof Error ? "Error" : typeof error,
-      });
+      logger.warn(
+        formatErrorDiagnostic("qmd skill background work failed", error),
+      );
     };
     try {
       return Promise.resolve(runInBackgroundContext(run)).catch(failed);
@@ -777,7 +783,12 @@ export function createSkillQmdIndex(params: {
         "code" in error &&
         error.code === "ENOENT"
       )) {
-        logger.warn("failed to load qmd skill index catalog", { error });
+        logger.warn(
+          formatErrorDiagnostic(
+            "failed to load qmd skill index catalog",
+            error,
+          ),
+        );
       }
     }
     for (const entry of entries) {
@@ -805,7 +816,12 @@ export function createSkillQmdIndex(params: {
         "code" in error &&
         error.code === "ENOENT"
       )) {
-        logger.warn("failed to load qmd skill agent mappings", { error });
+        logger.warn(
+          formatErrorDiagnostic(
+            "failed to load qmd skill agent mappings",
+            error,
+          ),
+        );
       }
     }
     for (const entry of mappings) {
@@ -931,10 +947,12 @@ export function createSkillQmdIndex(params: {
           state.releasePin?.();
           state.releasePin = undefined;
         } catch (error) {
-          logger.warn("failed to close retired qmd skill index", {
-            error,
-            fingerprint: state.fingerprint,
-          });
+          logger.warn(
+            `failed to close retired qmd skill index ${JSON.stringify({
+              fingerprint: state.fingerprint,
+              ...safeErrorClassification(error),
+            })}`,
+          );
         }
       })();
       state.retiring = retiring;
@@ -1090,10 +1108,12 @@ export function createSkillQmdIndex(params: {
       } catch (error) {
         state.lastRefreshError = error;
         state.status = "failed";
-        logger.warn("failed to open qmd skill index", {
-          error,
-          fingerprint: state.fingerprint,
-        });
+        logger.warn(
+          `failed to open qmd skill index ${JSON.stringify({
+            fingerprint: state.fingerprint,
+            ...safeErrorClassification(error),
+          })}`,
+        );
         return;
       }
     })();
@@ -1177,9 +1197,9 @@ export function createSkillQmdIndex(params: {
         }, delayMs),
       );
     } catch (error) {
-      logger.warn("qmd skill retry admission failed", {
-        errorType: error instanceof Error ? "Error" : typeof error,
-      });
+      logger.warn(
+        formatErrorDiagnostic("qmd skill retry admission failed", error),
+      );
     }
   }
 
@@ -1384,7 +1404,9 @@ export function createSkillQmdIndex(params: {
     agent.scheduling = scheduling;
     void scheduling
       .catch((error: unknown) => {
-        logger.warn("failed to schedule qmd skill index", { error, agentId });
+        logger.warn(
+          formatErrorDiagnostic("failed to schedule qmd skill index", error),
+        );
       })
       .finally(() => {
         if (agent.scheduling === scheduling) agent.scheduling = undefined;
@@ -1554,7 +1576,7 @@ export function createSkillQmdIndex(params: {
           })
           .slice(0, Math.max(1, limit));
       } catch (error) {
-        logger.warn("qmd skill search failed", { error, agentId });
+        logger.warn(formatErrorDiagnostic("qmd skill search failed", error));
         return;
       } finally {
         lease?.release();
@@ -1607,10 +1629,12 @@ export function createSkillQmdIndex(params: {
             await retiring;
           } catch (error) {
             // Keep the store and its lease, but let unrelated indexes retire.
-            logger.warn("failed to close retired qmd skill index", {
-              error,
-              fingerprint: state.fingerprint,
-            });
+            logger.warn(
+              `failed to close retired qmd skill index ${JSON.stringify({
+                fingerprint: state.fingerprint,
+                ...safeErrorClassification(error),
+              })}`,
+            );
           } finally {
             state.retiring = undefined;
           }
@@ -1665,7 +1689,9 @@ export function createSkillQmdIndex(params: {
           "maintenance",
         );
       }).catch((error) => {
-        logger.warn("qmd skill index maintenance skipped", { error });
+        logger.warn(
+          formatErrorDiagnostic("qmd skill index maintenance skipped", error),
+        );
       });
       maintenanceWork = work;
       void work.finally(() => {

@@ -4,7 +4,10 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import matter from "gray-matter";
 import { logger } from "../../api.js";
-import { safeErrorClassification } from "../error-diagnostics.js";
+import {
+  formatErrorDiagnostic,
+  safeErrorClassification,
+} from "../error-diagnostics.js";
 import { resolveStateDirFromApi } from "../file-utils.js";
 import {
   DEFAULT_SKILL_INDEX_CACHE_TTL_MS,
@@ -128,10 +131,9 @@ async function readSkillFile(
   } catch (err) {
     if (requireComplete) throw inventoryReadError(err, phase);
     if (!isMissingPathError(err)) {
-      logger.warn("failed to read referenced skill metadata", {
-        error: err,
-        path: filePath,
-      });
+      logger.warn(
+        formatErrorDiagnostic("failed to read referenced skill metadata", err),
+      );
     }
     return;
   }
@@ -290,13 +292,9 @@ async function buildSkillIndex(
           const dedupeKey = `${root}:${skill.location}:${key}`;
           if (!loggedDuplicateSkills.has(dedupeKey)) {
             loggedDuplicateSkills.add(dedupeKey);
-            const message = `duplicate skill name ignored while indexing skills: name="${skill.name}" ignored="${skill.location}" kept="${keptSkill.location}"`;
-            logger.warn(message, {
-              ignoredPath: skill.location,
-              keptPath: keptSkill.location,
-              name: skill.name,
-              root,
-            });
+            logger.warn(
+              `duplicate skill name ignored while indexing skills ${JSON.stringify({ reason: "duplicate-name" })}`,
+            );
           }
         } else {
           index.set(key, skill);

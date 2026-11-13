@@ -11,7 +11,10 @@ import type {
 } from "../session/index.js";
 import type { RecentTurn, ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { logger } from "../../api.js";
-import { safeErrorClassification } from "../error-diagnostics.js";
+import {
+  formatErrorDiagnostic,
+  safeErrorClassification,
+} from "../error-diagnostics.js";
 import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
@@ -290,9 +293,12 @@ export function createHookHandlers(deps: HookDeps) {
           .map((skill) => skill.name.trim().toLowerCase())
           .filter((skill) => observedSkillNames.has(skill));
       } catch (error) {
-        logger.warn("failed to resolve review experience skill inventory", {
-          error,
-        });
+        logger.warn(
+          formatErrorDiagnostic(
+            "failed to resolve review experience skill inventory",
+            error,
+          ),
+        );
       }
       let relationContext: RelationReviewContext | undefined;
       let relationPreparation: RelationPreparationSummary = {
@@ -343,9 +349,11 @@ export function createHookHandlers(deps: HookDeps) {
             reason: "preparation-failed",
             requestedSeeds: seedNames.length,
           };
-          logger.warn("review relation evidence unavailable", {
-            reason: "preparation-failed",
-          });
+          logger.warn(
+            `review relation evidence unavailable ${JSON.stringify({
+              reason: "preparation-failed",
+            })}`,
+          );
         }
       }
       abortSignal.throwIfAborted();
@@ -731,7 +739,7 @@ export function createHookHandlers(deps: HookDeps) {
         usageStats: {},
       });
     } catch (error) {
-      logger.warn("listAvailableSkills failed", { error });
+      logger.warn(formatErrorDiagnostic("listAvailableSkills failed", error));
     }
     params.ctx.hookInvocation?.assertActive();
 
@@ -762,7 +770,9 @@ export function createHookHandlers(deps: HookDeps) {
       nameMatchStatus = "error";
       nameMatchError = eventError(error);
       fallbackReason = "name-channel-unavailable";
-      logger.warn("skill name candidate matching failed", { error });
+      logger.warn(
+        formatErrorDiagnostic("skill name candidate matching failed", error),
+      );
     } finally {
       emitPipelineEvent(
         params.ctx,
@@ -896,7 +906,9 @@ export function createHookHandlers(deps: HookDeps) {
         status = "error";
         searchError = eventError(error);
         fallbackReason = "retrieval-unavailable";
-        logger.warn("skill candidate retrieval failed", { error });
+        logger.warn(
+          formatErrorDiagnostic("skill candidate retrieval failed", error),
+        );
       } finally {
         if (timer !== undefined) clearTimeout(timer);
         emitPipelineEvent(
@@ -1011,7 +1023,9 @@ export function createHookHandlers(deps: HookDeps) {
       } catch (error) {
         experienceRetrieval.status = "error";
         searchError = eventError(error);
-        logger.warn("experience candidate retrieval failed", { error });
+        logger.warn(
+          formatErrorDiagnostic("experience candidate retrieval failed", error),
+        );
       } finally {
         if (expTimer !== undefined) clearTimeout(expTimer);
         emitPipelineEvent(
@@ -1062,10 +1076,12 @@ export function createHookHandlers(deps: HookDeps) {
         try {
           workingSetSkillNames = await deps.getWorkingSetSkills(agentId);
         } catch (error) {
-          logger.warn("failed to retrieve working-set agent skill names", {
-            errorType: error instanceof Error ? "Error" : typeof error,
-            workingSetSkillCount: 0,
-          });
+          logger.warn(
+            `failed to retrieve working-set agent skill names ${JSON.stringify({
+              errorType: error instanceof Error ? "Error" : typeof error,
+              workingSetSkillCount: 0,
+            })}`,
+          );
         }
       }
 
@@ -1081,10 +1097,12 @@ export function createHookHandlers(deps: HookDeps) {
           skillNames: workingSetSkillNames,
         });
       } catch (error) {
-        logger.warn("failed to resolve working-set agent skills", {
-          errorType: error instanceof Error ? "Error" : typeof error,
-          workingSetSkillCount: workingSetSkillNames.length,
-        });
+        logger.warn(
+          `failed to resolve working-set agent skills ${JSON.stringify({
+            errorType: error instanceof Error ? "Error" : typeof error,
+            workingSetSkillCount: workingSetSkillNames.length,
+          })}`,
+        );
       }
 
       async function loadDiscoveredSkills(
@@ -1102,15 +1120,16 @@ export function createHookHandlers(deps: HookDeps) {
           });
         } catch (error) {
           logger.warn(
-            source === "workspace"
-              ? "failed to resolve workspace agent skills"
-              : "failed to resolve agent workshop skills",
-            {
+            `${
+              source === "workspace"
+                ? "failed to resolve workspace agent skills"
+                : "failed to resolve agent workshop skills"
+            } ${JSON.stringify({
               errorType: error instanceof Error ? "Error" : typeof error,
               [source === "workspace"
                 ? "workspaceSkillCount"
                 : "workshopSkillCount"]: 0,
-            },
+            })}`,
           );
           return [];
         }
@@ -1140,26 +1159,30 @@ export function createHookHandlers(deps: HookDeps) {
       }
       if (!skills.length) {
         logger.info(
-          "no working-set, workspace, or workshop agent skills could be resolved",
-          { workingSetSkillCount: 0 },
+          `no working-set, workspace, or workshop agent skills could be resolved ${JSON.stringify({ workingSetSkillCount: 0 })}`,
         );
         return undefined;
       }
       const workingSetSkillsXml = formatWorkingSetSkills(skills);
-      logger.info("working-set skills static context emitted", {
-        workingSetSkillCount: skills.length,
-        staticHeader: workingSetSkillsXml.includes("### Working set skills"),
-        workingSetWrapper: workingSetSkillsXml.includes("<working_set_skills>"),
-        workingSetSkillTag: workingSetSkillsXml.includes("<skill "),
-      });
+      logger.info(
+        `working-set skills static context emitted ${JSON.stringify({
+          workingSetSkillCount: skills.length,
+          staticHeader: workingSetSkillsXml.includes("### Working set skills"),
+          workingSetWrapper: workingSetSkillsXml.includes(
+            "<working_set_skills>",
+          ),
+          workingSetSkillTag: workingSetSkillsXml.includes("<skill "),
+        })}`,
+      );
       return workingSetSkillsXml;
     } catch (error) {
       logger.warn(
-        "failed to resolve working-set agent skills for prompt build",
-        {
-          errorType: error instanceof Error ? "Error" : typeof error,
-          workingSetSkillCount: 0,
-        },
+        `failed to resolve working-set agent skills for prompt build ${JSON.stringify(
+          {
+            errorType: error instanceof Error ? "Error" : typeof error,
+            workingSetSkillCount: 0,
+          },
+        )}`,
       );
       return undefined;
     }
@@ -1292,13 +1315,15 @@ export function createHookHandlers(deps: HookDeps) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
-      logger.debug("before_prompt_build hook triggered", {
-        hasSessionId: Boolean(ctx.sessionId),
-        hasSessionKey: Boolean(ctx.sessionKey),
-        hasRunId: Boolean(ctx.runId),
-        hasModelProviderId: Boolean(ctx.modelProviderId),
-        hasModelId: Boolean(ctx.modelId),
-      });
+      logger.debug(
+        `before_prompt_build hook triggered ${JSON.stringify({
+          hasSessionId: Boolean(ctx.sessionId),
+          hasSessionKey: Boolean(ctx.sessionKey),
+          hasRunId: Boolean(ctx.runId),
+          hasModelProviderId: Boolean(ctx.modelProviderId),
+          hasModelId: Boolean(ctx.modelId),
+        })}`,
+      );
 
       const dynamicContext = await promptExecutions.run(
         routing.association,
@@ -1481,9 +1506,11 @@ export function createHookHandlers(deps: HookDeps) {
                 } catch (error) {
                   rerankStatus = "error";
                   rerankError = "Routing selection failed";
-                  logger.warn("routing selector execution failed", {
-                    reason: "selection-failed",
-                  });
+                  logger.warn(
+                    `routing selector execution failed ${JSON.stringify({
+                      reason: "selection-failed",
+                    })}`,
+                  );
                   matchedSkills = [];
                   matchedExperiences = [];
                 }
@@ -1662,10 +1689,12 @@ export function createHookHandlers(deps: HookDeps) {
       }
       return toPromptBuildResult(dynamicContext, workingSetSkillsXml);
     } catch (err) {
-      logger.warn("before_prompt_build hook error", {
-        errorType: err instanceof Error ? "Error" : typeof err,
-        staticContextAvailable: Boolean(workingSetSkillsXml),
-      });
+      logger.warn(
+        `before_prompt_build hook error ${JSON.stringify({
+          errorType: err instanceof Error ? "Error" : typeof err,
+          staticContextAvailable: Boolean(workingSetSkillsXml),
+        })}`,
+      );
       return staticContextEligible
         ? toPromptBuildResult(
             undefined,
@@ -1800,10 +1829,11 @@ export function createHookHandlers(deps: HookDeps) {
       },
     });
     if (staged === "full" || staged === "ambiguous") {
-      logger.warn("discarded persisted tool fallback", {
-        reason: staged,
-        toolName,
-      });
+      logger.warn(
+        `discarded persisted tool fallback ${JSON.stringify({
+          reason: staged,
+        })}`,
+      );
     }
   }
 
@@ -1919,7 +1949,9 @@ export function createHookHandlers(deps: HookDeps) {
         triggers: params.triggers,
       });
     } catch (error) {
-      logger.warn("failed to enqueue Intent Review", { error });
+      logger.warn(
+        formatErrorDiagnostic("failed to enqueue Intent Review", error),
+      );
       return false;
     }
   }
@@ -2174,19 +2206,23 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookMessageSendingEvent,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    logger.info("onMessageSending hook triggered", {
-      hasSessionId: Boolean(ctx.sessionId),
-      hasSessionKey: Boolean(ctx.sessionKey),
-      hasRunId: Boolean(ctx.runId),
-    });
+    logger.info(
+      `onMessageSending hook triggered ${JSON.stringify({
+        hasSessionId: Boolean(ctx.sessionId),
+        hasSessionKey: Boolean(ctx.sessionKey),
+        hasRunId: Boolean(ctx.runId),
+      })}`,
+    );
     const association = resolveAssociatedTurn({
       contextRunId: ctx.runId,
       sessionId: ctx.sessionId,
       sessionKey: ctx.sessionKey,
     });
-    logger.info("onMessageSending association resolved", {
-      associationResolved: Boolean(association),
-    });
+    logger.info(
+      `onMessageSending association resolved ${JSON.stringify({
+        associationResolved: Boolean(association),
+      })}`,
+    );
     if (!association) return;
     const stagedEntries = toolFallbacks.listForAssociation(association);
     const stagedToolFallbacks = stagedEntries.map(
@@ -2206,9 +2242,11 @@ export function createHookHandlers(deps: HookDeps) {
       result: resultText || undefined,
       endedAt: new Date().toISOString(),
     });
-    logger.info("onMessageSending turn finalization result", {
-      finalizationStatus: finalized,
-    });
+    logger.info(
+      `onMessageSending turn finalization result ${JSON.stringify({
+        finalizationStatus: finalized,
+      })}`,
+    );
     if (finalized === "applied" || finalized === "already-finalized") {
       promptExecutions.removeTurn(association);
       turnAssociations.markAssociationTerminal(association);

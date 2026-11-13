@@ -1,3 +1,4 @@
+import { formatErrorDiagnostic } from "./error-diagnostics.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -122,7 +123,7 @@ export function safeWriteJson(
     writeJsonAtomic(filePath, data);
     return true;
   } catch (err) {
-    logger.warn(logMessage, { error: err, path: filePath });
+    logger.warn(formatErrorDiagnostic(logMessage, err));
     return false;
   }
 }
@@ -268,11 +269,9 @@ function tryReclaimOrphanedLock(lockPath: string): boolean {
       fs.rmSync(lockPath, { recursive: true, force: true });
       return true;
     } catch (err: unknown) {
-      logger.warn("failed to reclaim orphaned file lock", {
-        error: err,
-        path: lockPath,
-        owner,
-      });
+      logger.warn(
+        formatErrorDiagnostic("failed to reclaim orphaned file lock", err),
+      );
       return false;
     }
   } finally {
@@ -328,10 +327,9 @@ export class FileLock {
           } catch {
             // ignore
           }
-          logger.warn("failed to write file lock owner", {
-            error: err,
-            path: this.lockPath,
-          });
+          logger.warn(
+            formatErrorDiagnostic("failed to write file lock owner", err),
+          );
           return false;
         }
         return true;
@@ -339,10 +337,9 @@ export class FileLock {
         const e = err as NodeJS.ErrnoException;
         if (e.code !== "EEXIST") {
           // Non-EEXIST errors (EACCES, ENOENT, etc.) should fail fast
-          logger.warn("failed to acquire file lock", {
-            error: err,
-            path: this.lockPath,
-          });
+          logger.warn(
+            formatErrorDiagnostic("failed to acquire file lock", err),
+          );
           return false;
         }
         // Crash leftovers or legacy empty lock dirs can block rebuilds forever.

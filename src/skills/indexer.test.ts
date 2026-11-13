@@ -471,28 +471,24 @@ describe("skill indexer", () => {
     await resolveSkillInventory({ api, agentId: "main", cacheTtlMs: 0 });
     await resolveSkillInventory({ api, agentId: "main", cacheTtlMs: 0 });
 
-    const keptPath = path.join(workspaceDir, "skills", "first-dup", "SKILL.md");
-    const ignoredPath = path.join(
-      workspaceDir,
-      "skills",
+    const prefix = "duplicate skill name ignored while indexing skills ";
+    const duplicateWarnings = warnSpy.mock.calls.filter(([message]) =>
+      message.startsWith(prefix),
+    );
+    expect(duplicateWarnings).toHaveLength(1);
+    expect(duplicateWarnings[0]).toHaveLength(1);
+    expect(JSON.parse(duplicateWarnings[0]![0].slice(prefix.length))).toEqual({
+      reason: "duplicate-name",
+    });
+    const receipt = JSON.stringify(duplicateWarnings);
+    for (const privateValue of [
+      "dup-skill",
+      "first-dup",
       "second-dup",
-      "SKILL.md",
-    );
-    const message = `duplicate skill name ignored while indexing skills: name="dup-skill" ignored="${ignoredPath}" kept="${keptPath}"`;
-    const duplicateWarnings = warnSpy.mock.calls.filter(
-      ([msg]) => msg === message,
-    );
-    expect(duplicateWarnings).toEqual([
-      [
-        message,
-        {
-          ignoredPath,
-          keptPath,
-          name: "dup-skill",
-          root: path.join(workspaceDir, "skills"),
-        },
-      ],
-    ]);
+      workspaceDir,
+    ]) {
+      expect(receipt).not.toContain(privateValue);
+    }
     warnSpy.mockRestore();
   });
 
