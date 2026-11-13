@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import {
@@ -217,33 +217,171 @@ describe("resolveStatusUpdateAgentId", () => {
 });
 
 describe("resolveCanonicalSessionKeyFromSessionId", () => {
-  it("returns the session key for the matching row-scoped session entry", () => {
+  interface SessionLookupResult {
+    sessionKey: string;
+    entry: { sessionId: string };
+  }
+
+  function createApi(
+    lookup: (params: {
+      agentId: string;
+      sessionId: string;
+    }) => Promise<SessionLookupResult | undefined>,
+  ) {
+    const getSessionEntryByIdAsync = vi.fn(lookup);
+    const forbiddenLookup = vi.fn(() => {
+      throw new Error("unexpected session enumeration or alternate namespace");
+    });
     const api = {
       runtime: {
         agent: {
           session: {
-            listSessionEntries: () => [
-              {
-                sessionKey: "agent:main:direct:first",
-                entry: { sessionId: "other-session" },
-              },
-              {
-                sessionKey: "agent:main:direct:resolved",
-                entry: { sessionId: "target-session" },
-              },
-            ],
+            getSessionEntryByIdAsync,
+            getSessionEntryById: forbiddenLookup,
+            listSessionEntries: forbiddenLookup,
+            listSessionEntriesAsync: forbiddenLookup,
           },
         },
+        session: { getSessionEntryByIdAsync: forbiddenLookup },
       },
     } as unknown as OpenClawPluginApi;
+    return { api, getSessionEntryByIdAsync, forbiddenLookup };
+  }
 
-    expect(
+  it("awaits the targeted asynchronous row read before resolving its key", async () => {
+    let finishLookup!: (result: SessionLookupResult) => void;
+    const lookup = new Promise<SessionLookupResult>((resolve) => {
+      finishLookup = resolve;
+    });
+    const { api, getSessionEntryByIdAsync, forbiddenLookup } = createApi(
+      () => lookup,
+    );
+
+    const result = resolveCanonicalSessionKeyFromSessionId({
+      api,
+      agentId: "main",
+      sessionId: "target-session",
+    });
+    expect(result).toBeInstanceOf(Promise);
+    expect(getSessionEntryByIdAsync).toHaveBeenCalledExactlyOnceWith({
+      agentId: "main",
+      sessionId: "target-session",
+    });
+    let settled = false;
+    void Promise.resolve(result).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    finishLookup({
+      sessionKey: "agent:main:direct:resolved",
+      entry: { sessionId: "target-session" },
+    });
+    await expect(result).resolves.toBe("agent:main:direct:resolved");
+    expect(forbiddenLookup).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, ""])(
+    "does not read the SDK when the session ID is %s",
+    async (sessionId) => {
+      const { api, getSessionEntryByIdAsync, forbiddenLookup } = createApi(
+        async () => undefined,
+      );
+      await expect(
+        resolveCanonicalSessionKeyFromSessionId({
+          api,
+          agentId: "main",
+          sessionId,
+        }),
+      ).resolves.toBeUndefined();
+      expect(getSessionEntryByIdAsync).not.toHaveBeenCalled();
+      expect(forbiddenLookup).not.toHaveBeenCalled();
+    },
+  );
+
+  it("passes the raw requested ID and owning agent without store or ordering overrides", async () => {
+    const sessionId = " target-session ";
+    const { api, getSessionEntryByIdAsync, forbiddenLookup } = createApi(
+      async () => ({
+        sessionKey: "agent:other:direct:resolved",
+        entry: { sessionId },
+      }),
+    );
+    await expect(
+      resolveCanonicalSessionKeyFromSessionId({
+        api,
+        agentId: "other",
+        sessionId,
+      }),
+    ).resolves.toBe("agent:other:direct:resolved");
+    expect(getSessionEntryByIdAsync).toHaveBeenCalledExactlyOnceWith({
+      agentId: "other",
+      sessionId: " target-session ",
+    });
+    expect(forbiddenLookup).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "a different session ID", returnedId: "other-session" },
+    { label: "only a trimmed legacy alias", returnedId: " target-session " },
+  ])("rejects $label", async ({ returnedId }) => {
+    const { api, getSessionEntryByIdAsync, forbiddenLookup } = createApi(
+      async () => ({
+        sessionKey: "agent:main:direct:unrelated",
+        entry: { sessionId: returnedId },
+      }),
+    );
+    await expect(
       resolveCanonicalSessionKeyFromSessionId({
         api,
         agentId: "main",
         sessionId: "target-session",
       }),
-    ).toBe("agent:main:direct:resolved");
+    ).resolves.toBeUndefined();
+    expect(getSessionEntryByIdAsync).toHaveBeenCalledExactlyOnceWith({
+      agentId: "main",
+      sessionId: "target-session",
+    });
+    expect(forbiddenLookup).not.toHaveBeenCalled();
+  });
+
+  it("returns undefined for a missing row without trying another namespace or store", async () => {
+    const { api, getSessionEntryByIdAsync, forbiddenLookup } = createApi(
+      async () => undefined,
+    );
+    await expect(
+      resolveCanonicalSessionKeyFromSessionId({
+        api,
+        agentId: "main",
+        sessionId: "missing-session",
+      }),
+    ).resolves.toBeUndefined();
+    expect(getSessionEntryByIdAsync).toHaveBeenCalledExactlyOnceWith({
+      agentId: "main",
+      sessionId: "missing-session",
+    });
+    expect(forbiddenLookup).not.toHaveBeenCalled();
+  });
+
+  it("fails open when the targeted asynchronous lookup rejects", async () => {
+    const { api, getSessionEntryByIdAsync, forbiddenLookup } = createApi(
+      async () => {
+        throw new Error("lookup failed");
+      },
+    );
+    await expect(
+      resolveCanonicalSessionKeyFromSessionId({
+        api,
+        agentId: "main",
+        sessionId: "target-session",
+      }),
+    ).resolves.toBeUndefined();
+    expect(getSessionEntryByIdAsync).toHaveBeenCalledExactlyOnceWith({
+      agentId: "main",
+      sessionId: "target-session",
+    });
+    expect(forbiddenLookup).not.toHaveBeenCalled();
   });
 });
 

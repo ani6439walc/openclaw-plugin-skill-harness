@@ -79,6 +79,8 @@ Dynamic context contains optional `<matched_skills>` and standalone `<matched_ex
 
 Runtime search or selection failures let the main agent continue with available static context. Failed selection does not inject an unchecked fallback list. Invalid configuration can still prevent the plugin from loading.
 
+When OpenClaw supplies a native request admission ID, prompt rebuilds for that request share one selection attempt, including a failed or cancelled attempt, even if the run ID changes. A different admitted request gets its own turn even when its text or run ID matches an earlier request. Superseded requests cannot restart selection; a rebuild after finalization keeps available static guidance without selecting again. Hosts that omit admission IDs retain the older, weaker run/text-based matching. Missing canonical session keys are resolved through the SDK's asynchronous lookup for the supplied session ID; a supplied key requires no lookup. No configuration or saved-state migration is required.
+
 ### After a completed turn
 
 Review is disabled by default. When enabled, experience-health cadence, uncertain routing, or capability-fit evidence can schedule a background investigation. A trigger does not itself prove that an experience should be written.

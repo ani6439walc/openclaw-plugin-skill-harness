@@ -141,20 +141,20 @@ export function resolveStatusUpdateAgentId(ctx: {
   return "main";
 }
 
-export function resolveCanonicalSessionKeyFromSessionId(params: {
+export async function resolveCanonicalSessionKeyFromSessionId(params: {
   api: OpenClawPluginApi;
   agentId: string;
   sessionId: string | undefined;
-}): string | undefined {
+}): Promise<string | undefined> {
   if (!params.sessionId) return;
   try {
-    const entries = params.api.runtime.agent.session.listSessionEntries({
-      agentId: params.agentId,
-    });
-    const match = entries.find(
-      ({ entry }) => entry.sessionId === params.sessionId,
-    );
-    return match?.sessionKey;
+    const match =
+      await params.api.runtime.agent.session.getSessionEntryByIdAsync({
+        agentId: params.agentId,
+        sessionId: params.sessionId,
+      });
+    if (match?.entry.sessionId !== params.sessionId) return;
+    return match.sessionKey;
   } catch (err) {
     logger.warn(
       formatErrorDiagnostic("failed to resolve canonical session key", err),
