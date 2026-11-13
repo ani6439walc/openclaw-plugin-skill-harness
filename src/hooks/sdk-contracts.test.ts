@@ -81,7 +81,13 @@ describe("SDK current request contract", () => {
       ctx,
     );
     expect(h.tracker.preparePromptTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ input: "What is two plus two?", runId: "run" }),
+      expect.objectContaining({
+        input: "What is two plus two?",
+        forceNew: true,
+      }),
+    );
+    expect(h.tracker.preparePromptTurn.mock.calls[0][0]).not.toHaveProperty(
+      "runId",
     );
     for (const search of [h.skillSearch, h.experienceSearch]) {
       expect(search).toHaveBeenCalledWith(

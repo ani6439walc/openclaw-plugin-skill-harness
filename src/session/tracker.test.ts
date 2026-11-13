@@ -504,6 +504,147 @@ describe("SessionTracker", () => {
       ]);
     });
 
+    it("creates distinct UUID turns for forced preparations with the same run id and input", async () => {
+      const params = {
+        sessionId: "session-a",
+        sessionKey: "agent:main:direct:a",
+        agentId: "main",
+        runId: "run-a",
+        input: "same request",
+        startedAt: "2026-08-12T00:00:00.000Z",
+        forceNew: true,
+      };
+      const first = await tracker.preparePromptTurn(params);
+      const second = await tracker.preparePromptTurn(params);
+      expect(first.status).toBe("applied");
+      expect(second.status).toBe("applied");
+      if (
+        first.status === "retryable-failure" ||
+        second.status === "retryable-failure"
+      ) {
+        throw new Error("failed to prepare forced turns");
+      }
+      const uuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+      expect(first.identity).toEqual({
+        turnKey: expect.stringMatching(uuid),
+        reused: false,
+      });
+      expect(second.identity).toEqual({
+        turnKey: expect.stringMatching(uuid),
+        reused: false,
+      });
+      expect(second.identity.turnKey).not.toBe(first.identity.turnKey);
+
+      const saved = JSON.parse(
+        fs.readFileSync(sessionsPath("session-a.json", tempDir), "utf8"),
+      );
+      const state = {
+        input: params.input,
+        intent: {},
+        timestamps: { start: params.startedAt },
+      };
+      expect(saved).toEqual({
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey,
+        agentId: params.agentId,
+        current: { ...state, turnKey: second.identity.turnKey },
+        history: [{ ...state, turnKey: first.identity.turnKey }],
+      });
+    });
+
+    it("forces a fresh anonymous turn instead of reusing equal input", async () => {
+      const params = {
+        sessionId: "session-a",
+        agentId: "main",
+        input: "same request",
+        startedAt: "2026-08-12T00:00:00.000Z",
+      };
+      const first = await tracker.preparePromptTurn(params);
+      const second = await tracker.preparePromptTurn({
+        ...params,
+        forceNew: true,
+      });
+      expect(first.status).toBe("applied");
+      expect(second.status).toBe("applied");
+      if (
+        first.status === "retryable-failure" ||
+        second.status === "retryable-failure"
+      ) {
+        throw new Error("failed to prepare anonymous turns");
+      }
+      expect(second.identity.reused).toBe(false);
+      expect(second.identity.turnKey).not.toBe(first.identity.turnKey);
+      const saved = JSON.parse(
+        fs.readFileSync(sessionsPath("session-a.json", tempDir), "utf8"),
+      );
+      expect(saved.history).toEqual([
+        {
+          turnKey: first.identity.turnKey,
+          input: params.input,
+          intent: {},
+          timestamps: { start: params.startedAt },
+        },
+      ]);
+    });
+
+    it("keeps anonymous equal-input reuse when forceNew is omitted", async () => {
+      const params = {
+        sessionId: "session-a",
+        agentId: "main",
+        input: "same request",
+        startedAt: "2026-08-12T00:00:00.000Z",
+      };
+      const first = await tracker.preparePromptTurn(params);
+      expect(first.status).toBe("applied");
+      if (first.status === "retryable-failure") {
+        throw new Error("failed to prepare anonymous turn");
+      }
+      const file = sessionsPath("session-a.json", tempDir);
+      const original = fs.readFileSync(file, "utf8");
+      await expect(
+        tracker.preparePromptTurn({
+          ...params,
+          input: " same request ",
+          startedAt: "2026-08-12T00:00:01.000Z",
+        }),
+      ).resolves.toEqual({
+        status: "reused",
+        identity: { turnKey: first.identity.turnKey, reused: true },
+      });
+      expect(fs.readFileSync(file, "utf8")).toBe(original);
+    });
+
+    it("checks forced preparation ownership before changing persisted or in-memory state", async () => {
+      const params = {
+        sessionId: "session-a",
+        agentId: "main",
+        input: "same request",
+        startedAt: "2026-08-12T00:00:00.000Z",
+      };
+      await tracker.preparePromptTurn(params);
+      const file = sessionsPath("session-a.json", tempDir);
+      const original = fs.readFileSync(file, "utf8");
+      const originalCurrent = structuredClone(
+        tracker.getCurrentState("session-a"),
+      );
+      await expect(
+        tracker.preparePromptTurn({
+          ...params,
+          forceNew: true,
+          recentTurns: [
+            { role: "user", text: params.input },
+            { role: "assistant", text: "must not be saved" },
+          ],
+          assertActive: () => {
+            throw new Error("preparation no longer active");
+          },
+        }),
+      ).resolves.toEqual({ status: "retryable-failure" });
+      expect(fs.readFileSync(file, "utf8")).toBe(original);
+      expect(tracker.getCurrentState("session-a")).toEqual(originalCurrent);
+    });
+
     it("updates a unique retained turn without mutating the newer current turn", async () => {
       for (const [runId, input] of [
         ["run-a", "first request"],

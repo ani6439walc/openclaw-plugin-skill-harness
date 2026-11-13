@@ -3132,12 +3132,10 @@ describe("createHookHandlers topic switch flow", () => {
           runtime: {
             agent: {
               session: {
-                listSessionEntries: vi.fn().mockReturnValue([
-                  {
-                    sessionKey: resolvedSessionKey,
-                    entry: { sessionId: ctx.sessionId },
-                  },
-                ]),
+                getSessionEntryByIdAsync: vi.fn().mockResolvedValue({
+                  sessionKey: resolvedSessionKey,
+                  entry: { sessionId: ctx.sessionId },
+                }),
               },
             },
           } as never,
@@ -4920,12 +4918,10 @@ Current user request: fresh clean request with clean-skill
         runtime: {
           agent: {
             session: {
-              listSessionEntries: vi.fn().mockReturnValue([
-                {
-                  sessionKey: resolvedSessionKey,
-                  entry: { sessionId: ctx.sessionId },
-                },
-              ]),
+              getSessionEntryByIdAsync: vi.fn().mockResolvedValue({
+                sessionKey: resolvedSessionKey,
+                entry: { sessionId: ctx.sessionId },
+              }),
             },
           },
         },

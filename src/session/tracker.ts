@@ -628,12 +628,13 @@ export class SessionTracker {
     sessionKey?: string;
     agentId: string;
     runId?: string;
+    forceNew?: boolean;
     input: string;
     startedAt: string;
     recentTurns?: readonly RecentTurn[];
     assertActive?: () => void;
   }): Promise<PromptTurnPrepareResult> {
-    const requestedRunId = params.runId?.trim();
+    const requestedRunId = params.forceNew ? undefined : params.runId?.trim();
     try {
       const outcome =
         await this.mutateSession<PersistedPromptTurnPrepareResult>({
@@ -677,6 +678,7 @@ export class SessionTracker {
             }
 
             const reusableWithoutRunId =
+              !params.forceNew &&
               !requestedRunId &&
               !current.timestamps?.end &&
               current.turnKey &&

@@ -24,6 +24,7 @@ import type {
   PluginHookBeforePromptBuildResult,
 } from "./types.js";
 import { emitAgentEvent } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { TurnAssociationRegistry } from "./turn-associations.js";
 
 vi.mock("openclaw/plugin-sdk/agent-harness-runtime", () => ({
   emitAgentEvent: vi.fn(),
@@ -110,17 +111,40 @@ function fixture() {
   );
   const lifecycle = new AbortController();
   const getWorkingSetSkills = vi.fn(async () => ["fixture"]);
+  const sessionLookup = vi.fn<
+    (params: { agentId?: string; sessionId: string }) => Promise<
+      | {
+          sessionKey: string;
+          entry: { sessionId: string };
+        }
+      | undefined
+    >
+  >(async ({ sessionId }) => ({
+    sessionKey: ctx.sessionKey,
+    entry: { sessionId },
+  }));
+  const listSessionEntries = vi.fn(() => {
+    throw new Error("synchronous listing is forbidden");
+  });
+  const turnAssociations = new TurnAssociationRegistry();
   const handlers = createHookHandlers({
     api: {
       config: {},
       lifecycle: { signal: lifecycle.signal },
       runtime: {
         state: { resolveStateDir: () => root },
-        agent: { resolveAgentWorkspaceDir: () => workspace },
+        agent: {
+          resolveAgentWorkspaceDir: () => workspace,
+          session: {
+            getSessionEntryByIdAsync: sessionLookup,
+            listSessionEntries,
+          },
+        },
       },
     } as unknown as OpenClawPluginApi,
     dataRoot: root,
     tracker,
+    turnAssociations,
     config: () => config,
     refreshLiveConfigFromRuntime: () => {},
     getWorkingSetSkills,
@@ -158,6 +182,9 @@ function fixture() {
     lifecycle,
     getWorkingSetSkills,
     handlers,
+    sessionLookup,
+    listSessionEntries,
+    turnAssociations,
     setConfig: (next: typeof config) => {
       config = next;
     },
@@ -196,6 +223,328 @@ beforeAll(async () => {
     /* @vite-ignore */ pathToFileURL(path.join(dist, entry)).href
   );
   hostRunner = module[exportedName];
+});
+
+describe("native admission identity", () => {
+  it("joins pending selection and tracker preparation across correlation run IDs", async () => {
+    const f = fixture();
+    const selection = deferred<typeof selected>(selected);
+    f.selector.mockReturnValue(selection.promise);
+    const prepare = vi.spyOn(f.tracker, "preparePromptTurn");
+    const admitted = { ...event, currentUserMessageId: "admission-a" };
+    const first = f.handlers.onBeforePromptBuild(admitted, ctx);
+    await until(() => f.selector.mock.calls.length === 1);
+    const second = f.handlers.onBeforePromptBuild(admitted, {
+      ...ctx,
+      runId: "rebuild",
+    });
+    await until(() => f.getWorkingSetSkills.mock.calls.length === 2);
+    selection.resolve(selected);
+    const [one, two] = await Promise.all([first, second]);
+    expect(two?.prependContext).toEqual(one?.prependContext);
+    expect(one?.prependContext).toContain('<skill name="fixture">');
+    expect(f.selector).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(f.turnAssociations.resolve("rebuild")).toEqual(
+      f.turnAssociations.resolve(ctx.runId),
+    );
+  });
+
+  it.each(["", " ", "admission-a", " admission-a "])(
+    "keeps the opaque native ID %j separate from its neighbors",
+    async (id) => {
+      const f = fixture();
+      const callCtx = { ...ctx, runId: undefined };
+      await f.handlers.onBeforePromptBuild(
+        { ...event, currentUserMessageId: id },
+        callCtx,
+      );
+      await f.handlers.onBeforePromptBuild(
+        { ...event, currentUserMessageId: `${id}!` },
+        callCtx,
+      );
+      expect(f.selector).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("never revives a finalized or superseded admission for a rebuild", async () => {
+    const f = fixture();
+    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(false);
+    const admitted = { ...event, currentUserMessageId: "admission-a" };
+    await f.handlers.onBeforePromptBuild(admitted, ctx);
+    await f.handlers.onMessageSending({ content: "done" }, ctx);
+    const prepare = vi.spyOn(f.tracker, "preparePromptTurn");
+    const replay = await f.handlers.onBeforePromptBuild(admitted, {
+      ...ctx,
+      runId: "rebuilt-final",
+    });
+    expect(replay?.prependContext).toBeUndefined();
+    expect(replay?.appendSystemContext).toContain("<working_set_skills>");
+    expect(prepare).not.toHaveBeenCalled();
+    expect(f.selector).toHaveBeenCalledTimes(1);
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "admission-b" },
+      { ...ctx, runId: "next" },
+    );
+    const turnB = f.tracker.getCurrentState("session")?.turnKey;
+    await f.handlers.onBeforePromptBuild(admitted, {
+      ...ctx,
+      runId: "late-rebuild",
+    });
+    expect(f.selector).toHaveBeenCalledTimes(2);
+    expect(f.tracker.getCurrentState("session")?.turnKey).toBe(turnB);
+  });
+
+  it("keeps a deadline cancellation terminal across same-admission rebuilds", async () => {
+    const f = fixture();
+    const selection = deferred<typeof selected>(selected);
+    f.selector.mockReturnValue(selection.promise);
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const admitted = { ...event, currentUserMessageId: "admission-a" };
+    const first = f.handlers.onBeforePromptBuild(admitted, ctx);
+    await until(() => f.selector.mock.calls.length === 1);
+    await vi.advanceTimersByTimeAsync(MAX_PROMPT_HOOK_TIMEOUT_MS + 1);
+    expect((await first)?.prependContext).toBeUndefined();
+    expect(
+      (
+        await f.handlers.onBeforePromptBuild(admitted, {
+          ...ctx,
+          runId: "rebuild",
+        })
+      )?.prependContext,
+    ).toBeUndefined();
+    expect(f.selector).toHaveBeenCalledTimes(1);
+    selection.resolve(selected);
+  });
+
+  it("keeps equal text independent for distinct admissions without run IDs", async () => {
+    const f = fixture();
+    const callCtx = { ...ctx, runId: undefined };
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "admission-a" },
+      callCtx,
+    );
+    const firstTurn = f.tracker.getCurrentState("session")?.turnKey;
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "admission-b" },
+      callCtx,
+    );
+    expect(f.selector).toHaveBeenCalledTimes(2);
+    expect(f.tracker.getCurrentState("session")?.turnKey).not.toBe(firstTurn);
+  });
+
+  it("shares completed selection across run IDs of one admission", async () => {
+    const f = fixture();
+    const admitted = { ...event, currentUserMessageId: "admission-a" };
+    const first = await f.handlers.onBeforePromptBuild(admitted, ctx);
+    const firstTurn = f.tracker.getCurrentState("session")?.turnKey;
+    const second = await f.handlers.onBeforePromptBuild(admitted, {
+      ...ctx,
+      runId: "rebuilt-run",
+    });
+    expect(second?.prependContext).toEqual(first?.prependContext);
+    expect(f.selector).toHaveBeenCalledTimes(1);
+    expect(f.search).toHaveBeenCalledTimes(1);
+    expect(f.tracker.getCurrentState("session")?.turnKey).toBe(firstTurn);
+  });
+
+  it("does not retry terminal selection failure when the same admission gets a new run ID", async () => {
+    const f = fixture();
+    f.selector.mockRejectedValue(new Error("selection failed"));
+    const admitted = { ...event, currentUserMessageId: "admission-a" };
+    await f.handlers.onBeforePromptBuild(admitted, ctx);
+    await f.handlers.onBeforePromptBuild(admitted, {
+      ...ctx,
+      runId: "rebuilt-run",
+    });
+    expect(f.selector).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps distinct admissions independent even when they share a run ID", async () => {
+    const f = fixture();
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "admission-a" },
+      ctx,
+    );
+    const firstTurn = f.tracker.getCurrentState("session")?.turnKey;
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "admission-b" },
+      ctx,
+    );
+    expect(f.selector).toHaveBeenCalledTimes(2);
+    expect(f.tracker.getCurrentState("session")?.turnKey).not.toBe(firstTurn);
+  });
+});
+
+describe("asynchronous prompt identity", () => {
+  const admitted = { ...event, currentUserMessageId: "admission-a" };
+  const noKey = { ...ctx, sessionKey: undefined };
+  const match = {
+    sessionKey: ctx.sessionKey,
+    entry: { sessionId: ctx.sessionId },
+  };
+
+  it("skips SDK lookup when the canonical key is supplied", async () => {
+    const f = fixture();
+    await f.handlers.onBeforePromptBuild(admitted, ctx);
+    expect(f.sessionLookup).not.toHaveBeenCalled();
+    expect(f.listSessionEntries).not.toHaveBeenCalled();
+  });
+
+  it("shares one pending lookup across rebuilds of the same admission", async () => {
+    const f = fixture();
+    const lookup = deferred<typeof match | undefined>(match);
+    f.sessionLookup.mockReturnValue(lookup.promise);
+    const first = f.handlers.onBeforePromptBuild(admitted, noKey);
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    const second = f.handlers.onBeforePromptBuild(admitted, {
+      ...noKey,
+      runId: "rebuild",
+    });
+    await Promise.resolve();
+    lookup.resolve(match);
+    const [one, two] = await Promise.all([first, second]);
+    expect(one?.prependContext).toContain('<skill name="fixture">');
+    expect(two?.prependContext).toEqual(one?.prependContext);
+    expect(f.sessionLookup).toHaveBeenCalledExactlyOnceWith({
+      agentId: "main",
+      sessionId: "session",
+    });
+    expect(f.selector).toHaveBeenCalledTimes(1);
+    expect(f.listSessionEntries).not.toHaveBeenCalled();
+  });
+
+  it.each(["native", "legacy-named", "legacy-anonymous"])(
+    "rejects an older %s lookup returning after the newer request",
+    async (kind) => {
+      const f = fixture();
+      const lookup = deferred<typeof match | undefined>(match);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      const firstEvent = kind === "native" ? admitted : event;
+      const secondEvent = {
+        ...event,
+        prompt: "fixture next",
+        messages: [{ role: "user", content: "fixture next" }],
+        ...(kind === "native" ? { currentUserMessageId: "admission-b" } : {}),
+      };
+      const firstCtx =
+        kind === "legacy-anonymous" ? { ...noKey, runId: undefined } : noKey;
+      const first = f.handlers.onBeforePromptBuild(firstEvent, firstCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      const secondCtx = {
+        ...ctx,
+        runId: kind === "legacy-anonymous" ? undefined : "run-b",
+      };
+      const second = await f.handlers.onBeforePromptBuild(
+        secondEvent,
+        secondCtx,
+      );
+      const turnB = f.tracker.getCurrentState("session")?.turnKey;
+      lookup.resolve(match);
+      expect((await first)?.prependContext).toBeUndefined();
+      expect(second?.prependContext).toContain('<skill name="fixture">');
+      expect(f.tracker.getCurrentState("session")?.turnKey).toBe(turnB);
+      expect(f.selector).toHaveBeenCalledTimes(1);
+      await f.handlers.onBeforePromptBuild(secondEvent, secondCtx);
+      expect(f.selector).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("fences a pending old run from falling back to a newer anonymous turn", async () => {
+    const f = fixture();
+    const lookup = deferred<typeof match | undefined>(match);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    const first = f.handlers.onBeforePromptBuild(admitted, noKey);
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "admission-b" },
+      { ...ctx, runId: undefined },
+    );
+    const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+    await f.handlers.onAgentEnd(
+      {
+        runId: ctx.runId,
+        success: true,
+        messages: [{ role: "assistant", content: "late" }],
+      },
+      ctx,
+    );
+    expect(finalize).not.toHaveBeenCalled();
+    expect(
+      f.tracker.getCurrentState("session")?.timestamps?.end,
+    ).toBeUndefined();
+    lookup.resolve(match);
+    await first;
+  });
+
+  it("makes a colliding run ambiguous while the second admission lookup is still pending", async () => {
+    const f = fixture();
+    await f.handlers.onBeforePromptBuild(admitted, ctx);
+    const lookup = deferred<typeof match | undefined>(match);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    const second = f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "admission-b" },
+      noKey,
+    );
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+    await f.handlers.onAgentEnd(
+      {
+        runId: ctx.runId,
+        success: true,
+        messages: [{ role: "assistant", content: "ambiguous" }],
+      },
+      ctx,
+    );
+    expect(finalize).not.toHaveBeenCalled();
+    lookup.resolve(match);
+    expect((await second)?.prependContext).toContain('<skill name="fixture">');
+    expect(f.selector).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an expired invocation immediately after its lookup settles", async () => {
+    const f = fixture();
+    const lookup = deferred<typeof match | undefined>(match);
+    f.sessionLookup.mockReturnValue(lookup.promise);
+    let active = true;
+    const prepare = vi.spyOn(f.tracker, "preparePromptTurn");
+    const pending = f.handlers.onBeforePromptBuild(admitted, {
+      ...noKey,
+      hookInvocation: {
+        assertActive: () => {
+          if (!active) throw new Error("expired");
+        },
+      },
+    });
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    active = false;
+    lookup.resolve(match);
+    await pending;
+    expect(f.getWorkingSetSkills).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(f.selector).not.toHaveBeenCalled();
+  });
+
+  it("drains an accepted lookup on disposal without reserving a turn afterward", async () => {
+    const f = fixture();
+    const lookup = deferred<typeof match | undefined>(match);
+    f.sessionLookup.mockReturnValue(lookup.promise);
+    const prepare = vi.spyOn(f.tracker, "preparePromptTurn");
+    const pending = f.handlers.onBeforePromptBuild(admitted, noKey);
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    f.lifecycle.abort();
+    let disposed = false;
+    const disposal = f.handlers.disposePromptWork().then(() => {
+      disposed = true;
+    });
+    await Promise.resolve();
+    expect(disposed).toBe(false);
+    lookup.resolve(match);
+    await Promise.all([pending, disposal]);
+    expect(f.getWorkingSetSkills).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(f.selector).not.toHaveBeenCalled();
+  });
 });
 
 describe("prompt routing deadlines", () => {

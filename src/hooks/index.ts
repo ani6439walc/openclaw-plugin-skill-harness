@@ -109,7 +109,10 @@ import {
 } from "./system-context.js";
 export type { HookDeps } from "./types.js";
 
-import { PromptExecutions } from "./prompt-executions.js";
+import {
+  PromptExecutions,
+  type PromptRequestOwner,
+} from "./prompt-executions.js";
 import { promptRoutingBudgetMs, withPromptDeadline } from "./prompt-budget.js";
 
 type AgentEndPhase = "finalize" | "inventory" | "stats" | "review-preparation";
@@ -434,23 +437,32 @@ export function createHookHandlers(deps: HookDeps) {
     effectiveAgentId: string;
     resolvedSessionKey?: string;
     association?: TurnAssociation;
+    request?: PromptRequestOwner<string | undefined>;
   }
 
-  function resolvePromptBuildIdentity(
+  async function resolvePromptBuildIdentity(
     ctx: PluginHookAgentContext,
-  ): PromptBuildIdentity {
+    request: PromptRequestOwner<string | undefined> | undefined,
+    nativeAdmission: boolean,
+  ): Promise<PromptBuildIdentity> {
     const resolvedAgentId = resolveStatusUpdateAgentId(ctx);
-    const resolvedSessionKey =
-      ctx.sessionKey?.trim() ||
-      (resolvedAgentId
-        ? resolveCanonicalSessionKeyFromSessionId({
+    let resolvedSessionKey = ctx.sessionKey?.trim() || undefined;
+    if (!resolvedSessionKey && resolvedAgentId) {
+      if (request?.state === "finalized") {
+        resolvedSessionKey = request.resolvedSessionKey;
+      } else if (!nativeAdmission || request) {
+        const lookup = () =>
+          resolveCanonicalSessionKeyFromSessionId({
             api,
             agentId: resolvedAgentId,
             sessionId: ctx.sessionId,
-          })
-        : undefined);
-
-    return { effectiveAgentId: resolvedAgentId, resolvedSessionKey };
+          });
+        resolvedSessionKey = request
+          ? await promptExecutions.lookupRequest(request, lookup)
+          : await promptExecutions.track(lookup());
+      }
+    }
+    return { effectiveAgentId: resolvedAgentId, resolvedSessionKey, request };
   }
 
   async function prepareTrackingTurn(params: {
@@ -460,6 +472,7 @@ export function createHookHandlers(deps: HookDeps) {
     recentTurns?: readonly RecentTurn[];
   }): Promise<TurnAssociation | undefined> {
     const sessionId =
+      params.routing.request?.sessionId ??
       params.ctx.sessionId ??
       tracker.resolveCurrentSessionId({
         sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
@@ -467,6 +480,49 @@ export function createHookHandlers(deps: HookDeps) {
     if (!sessionId) return;
     promptExecutions.assertActive();
     const runId = params.ctx.runId?.trim();
+    const request = params.routing.request;
+    if (request?.admissionId !== undefined) {
+      const assertActive = () => {
+        promptExecutions.assertRequestCurrent(request);
+        params.ctx.hookInvocation?.assertActive();
+      };
+      const association = await promptExecutions.prepareRequest(
+        request,
+        async () => {
+          assertActive();
+          const prepared = await tracker.preparePromptTurn({
+            sessionId,
+            sessionKey:
+              params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+            agentId: params.routing.effectiveAgentId,
+            forceNew: true,
+            input: params.latestUserMessage,
+            startedAt: new Date().toISOString(),
+            recentTurns: params.recentTurns,
+            assertActive,
+          });
+          assertActive();
+          if (prepared.status === "retryable-failure") return;
+          return {
+            sessionId,
+            sessionKey:
+              params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+            turnKey: prepared.identity.turnKey,
+          };
+        },
+      );
+      assertActive();
+      if (!association) return;
+      if (runId) {
+        // An ambiguous run alias must not conflate independent admissions.
+        turnAssociations.bindNativeRun(runId, request, association);
+      } else {
+        const reservation = turnAssociations.reserveAnonymous();
+        if (reservation.status === "reserved")
+          turnAssociations.bindAnonymous(reservation.token, association);
+      }
+      return association;
+    }
     if (!runId) {
       const previous =
         anonymousPreparations.get(sessionId) ?? Promise.resolve();
@@ -499,6 +555,9 @@ export function createHookHandlers(deps: HookDeps) {
     runId: string | undefined,
   ): Promise<TurnAssociation | undefined> {
     promptExecutions.assertActive();
+    if (params.routing.request)
+      promptExecutions.assertRequestCurrent(params.routing.request);
+    params.ctx.hookInvocation?.assertActive();
     const reservation = runId
       ? turnAssociations.reserve(runId)
       : turnAssociations.reserveAnonymous();
@@ -528,10 +587,14 @@ export function createHookHandlers(deps: HookDeps) {
         recentTurns: params.recentTurns,
         assertActive: () => {
           promptExecutions.assertActive();
+          if (params.routing.request)
+            promptExecutions.assertRequestCurrent(params.routing.request);
           params.ctx.hookInvocation?.assertActive();
         },
       });
       promptExecutions.assertActive();
+      if (params.routing.request)
+        promptExecutions.assertRequestCurrent(params.routing.request);
       params.ctx.hookInvocation?.assertActive();
       if (prepared.status === "retryable-failure") {
         if (reservation.status === "reserved") {
@@ -573,7 +636,9 @@ export function createHookHandlers(deps: HookDeps) {
     const association = runId
       ? turnAssociations.hasRun(runId)
         ? turnAssociations.resolve(runId)
-        : turnAssociations.resolveAnonymousSession(sessionIdentity)
+        : turnAssociations.unknownRunFallbackEnabled
+          ? turnAssociations.resolveAnonymousSession(sessionIdentity)
+          : undefined
       : turnAssociations.resolveSession(sessionIdentity);
     if (!association) return;
     if (
@@ -1239,8 +1304,74 @@ export function createHookHandlers(deps: HookDeps) {
     let staticContextEligible = false;
     let workingSetSkillsXml: string | undefined;
     let intentContextEnabled = false;
+    let request: PromptRequestOwner<string | undefined> | undefined;
     try {
-      const routing = resolvePromptBuildIdentity(ctx);
+      ctx.hookInvocation?.assertActive();
+      // Preserve static-only fallback after dynamic shutdown for a supplied key.
+      // A lookup already pending at shutdown still fails its original fences.
+      if (promptExecutions.isStopped) {
+        if (
+          !ctx.sessionKey?.trim() ||
+          shouldSkipSkillSystemContext(ctx) ||
+          ctx.inputProvenance?.kind === "inter_session" ||
+          ctx.inputProvenance?.kind === "internal_system" ||
+          (event.currentUserMessage === undefined && isInternalUserTurn(event))
+        )
+          return;
+        const staticContext = await resolveWorkingSetSkillsXml(
+          resolveStatusUpdateAgentId(ctx),
+        );
+        ctx.hookInvocation?.assertActive();
+        return toPromptBuildResult(undefined, staticContext);
+      }
+      promptExecutions.assertActive();
+      const admissionId =
+        typeof event.currentUserMessageId === "string"
+          ? event.currentUserMessageId
+          : undefined;
+      const ownerSessionId =
+        ctx.sessionId ??
+        tracker.resolveCurrentSessionId?.({ sessionKey: ctx.sessionKey });
+      const runId = ctx.runId?.trim() || undefined;
+      const legacyInput =
+        admissionId === undefined && !runId
+          ? buildConversationContext(
+              event,
+              ctx,
+              config(),
+            ).latestUserMessage.trim()
+          : undefined;
+      request = ownerSessionId
+        ? promptExecutions.claimRequest({
+            agentId: resolveStatusUpdateAgentId(ctx),
+            sessionId: ownerSessionId,
+            admissionId,
+            runId,
+            legacyInput,
+          })
+        : undefined;
+      if (admissionId !== undefined && ctx.runId) {
+        // This is an event-rejection fence, not a turn reservation or admission.
+        turnAssociations.claimNativeRun(
+          ctx.runId,
+          request ?? {},
+          ownerSessionId,
+        );
+      }
+      const assertRequestActive = (allowFinalized = false) => {
+        ctx.hookInvocation?.assertActive();
+        promptExecutions.assertActive();
+        if (request)
+          promptExecutions.assertRequestCurrent(request, allowFinalized);
+      };
+      assertRequestActive(true);
+      const routing = await resolvePromptBuildIdentity(
+        ctx,
+        request,
+        admissionId !== undefined,
+      );
+      assertRequestActive(true);
+      if (request) request.resolvedSessionKey = routing.resolvedSessionKey;
       resolvedSessionKey = routing.resolvedSessionKey ?? resolvedSessionKey;
 
       const resolvedContext = {
@@ -1259,9 +1390,15 @@ export function createHookHandlers(deps: HookDeps) {
       staticContextEligible = true;
       refreshLiveConfigFromRuntime();
       const refreshedConfig = config();
-      workingSetSkillsXml = await resolveWorkingSetSkillsXml(
-        routing.effectiveAgentId,
+      workingSetSkillsXml = await promptExecutions.track(
+        resolveWorkingSetSkillsXml(routing.effectiveAgentId),
       );
+      assertRequestActive(true);
+      if (
+        admissionId !== undefined &&
+        (!request || request.state === "finalized")
+      )
+        return toPromptBuildResult(undefined, workingSetSkillsXml);
       intentContextEnabled = isEnabledForAgent(
         refreshedConfig,
         routing.effectiveAgentId,
@@ -1295,6 +1432,7 @@ export function createHookHandlers(deps: HookDeps) {
         latestUserMessage,
         recentTurns: extractRecentTurns(event.messages),
       });
+      assertRequestActive();
       if (!routing.association) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
@@ -1306,6 +1444,7 @@ export function createHookHandlers(deps: HookDeps) {
       ) {
         throw new Error("Skill Harness prompt turn superseded");
       }
+      if (request) request.association = routing.association;
       promptExecutions.observe(routing.association);
 
       if (
@@ -1325,7 +1464,11 @@ export function createHookHandlers(deps: HookDeps) {
         })}`,
       );
 
-      const dynamicContext = await promptExecutions.run(
+      const runDynamic =
+        request?.admissionId !== undefined
+          ? promptExecutions.runRequest.bind(promptExecutions, request)
+          : promptExecutions.run.bind(promptExecutions);
+      const dynamicContext = await runDynamic(
         routing.association,
         (turnSignal) =>
           runPromptBuildPipeline(
@@ -1336,6 +1479,7 @@ export function createHookHandlers(deps: HookDeps) {
               const association = routing.association!;
               const assertActive = () => {
                 assertDeadlineActive();
+                assertRequestActive();
                 if (
                   tracker.getCurrentState(association.sessionId)?.turnKey !==
                   association.turnKey
@@ -1679,6 +1823,7 @@ export function createHookHandlers(deps: HookDeps) {
             turnSignal,
           ),
       );
+      assertRequestActive();
       ctx.hookInvocation?.assertActive();
       promptExecutions.assertActive();
       if (
@@ -1702,6 +1847,8 @@ export function createHookHandlers(deps: HookDeps) {
             intentContextEnabled,
           )
         : undefined;
+    } finally {
+      if (request) promptExecutions.releaseRequest(request);
     }
   }
 
@@ -2124,7 +2271,7 @@ export function createHookHandlers(deps: HookDeps) {
         outcome = "skipped";
         return;
       }
-      promptExecutions.removeTurn(association);
+      promptExecutions.finalizeAssociation(association);
       turnAssociations.markAssociationTerminal(association);
       toolFallbacks.markAssociationTerminal(association);
       if (finalized === "already-finalized") {
@@ -2248,7 +2395,7 @@ export function createHookHandlers(deps: HookDeps) {
       })}`,
     );
     if (finalized === "applied" || finalized === "already-finalized") {
-      promptExecutions.removeTurn(association);
+      promptExecutions.finalizeAssociation(association);
       turnAssociations.markAssociationTerminal(association);
       toolFallbacks.markAssociationTerminal(association);
       for (const [toolCallId] of stagedEntries) {

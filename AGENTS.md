@@ -710,12 +710,49 @@ Prefer the SDK's explicit `before_prompt_build.currentUserMessage` for routing
 input when present, including an empty string. Only an absent field permits
 legacy prompt/history extraction. Do not parse projected envelope markers in
 the explicit request; retain them as user text. Empty explicit text keeps static
-guidance without routing historical input. Admission IDs identify requests across
-rebuilds; run IDs are correlation data and must not authorize a fallback to a
-different run's current turn. With an explicit unknown run ID, ignore the event
-rather than attaching it to another known run in the same session. A previously
-unseen run ID may resolve a unique anonymous turn for sparse host contexts;
-reserved, terminal, or ambiguous known run IDs never use that fallback.
+guidance without routing historical input.
+
+Treat native `currentUserMessageId` strings as opaque admission identities,
+including empty or whitespace-only strings. Scope them by the raw agent/session
+ID pair, never by run ID or input text. Claim ownership before the first await.
+One admission shares turn preparation and its pending or terminal selection
+Promise across rebuilds, including failure and cancellation. A new admission
+forces a fresh tracker turn without changing the persisted schema. Superseded
+or finalized admissions must never reserve another turn or repeat selection.
+A still-current finalized admission keeps available static guidance; a stale
+invocation may return no context. Omitted admission IDs preserve the
+legacy run/text matching and its weaker identity guarantees.
+
+For missing canonical keys, use only
+`runtime.agent.session.getSessionEntryByIdAsync({ agentId, sessionId })` with the
+raw requested ID and ambient SDK store scope. Omit ordering/store overrides and
+require the returned entry's session ID to equal the raw requested ID exactly;
+the SDK's trimmed legacy alias fallback must not broaden this lookup. A supplied
+nonblank key skips the SDK read. Do not replace a failed lookup with a store
+scan. After every asynchronous boundary, recheck the original hook invocation,
+plugin generation and current request before reserving a turn or publishing
+effects. SDK owner-retirement rejection alone is insufficient. Disposal drains
+pending lookups along with prompt work.
+
+Run IDs remain correlation data. Register native aliases as known pending fences
+before lookup; a collision between admission owners becomes ambiguous and cannot
+block either request's independent selection. Superseding a request cancels its
+prompt work but preserves an already active old alias for that old turn's late
+events. With an explicit unknown run ID, ignore the event rather than attaching
+it to another known run in the same session. A previously unseen run ID may
+resolve a unique anonymous turn for sparse host contexts; pending, reserved,
+terminal, or ambiguous known run IDs never use that fallback.
+
+Native admission tombstones and native run aliases have separate generation-local
+budgets of 16,384 entries; the existing legacy alias budget remains 1,024.
+Native fences are not forgotten by TTL or LRU. Admission overflow keeps static
+guidance without admitting new dynamic work. Native alias overflow permanently
+disables unknown-run fallback for that generation. Converting a legacy alias to
+a native fence retains its original budget allocation. Session cleanup reclaims
+owned entries; cross-session ambiguous aliases remain fenced until disposal.
+Disposal clears the request/admission ledgers; alias fences remain owned by the
+retired handler generation. Do not persist admission IDs or reset existing
+session history to implement these contracts.
 
 ## Documentation boundaries
 

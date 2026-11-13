@@ -8,9 +8,13 @@ export interface TurnAssociation {
 
 interface AssociationEntry {
   association?: TurnAssociation;
-  state: "reserved" | "active" | "terminal" | "ambiguous";
+  state: "reserved" | "pending" | "active" | "terminal" | "ambiguous";
   touchedAt: number;
   token?: string;
+  ownerToken?: object;
+  sessionId?: string;
+  nativeFence?: boolean;
+  nativeBudget?: boolean;
 }
 
 type ReservationResult =
@@ -37,19 +41,105 @@ export function sameTurnAssociation(
 export class TurnAssociationRegistry {
   private readonly entries = new Map<string, AssociationEntry>();
   private readonly maxEntries: number;
+  private readonly maxNativeEntries: number;
+  private nativeEntries = 0;
+  private allowUnknownRunFallback = true;
   private readonly idleTtlMs: number;
   private readonly now: () => number;
 
   constructor(
     options: {
       maxEntries?: number;
+      maxNativeEntries?: number;
       idleTtlMs?: number;
       now?: () => number;
     } = {},
   ) {
     this.maxEntries = options.maxEntries ?? 1024;
+    this.maxNativeEntries = options.maxNativeEntries ?? 16_384;
     this.idleTtlMs = options.idleTtlMs ?? 30 * 60 * 1000;
     this.now = options.now ?? Date.now;
+  }
+
+  get unknownRunFallbackEnabled(): boolean {
+    return this.allowUnknownRunFallback;
+  }
+
+  claimNativeRun(
+    runId: string | undefined,
+    ownerToken: object,
+    sessionId?: string,
+  ): "claimed" | "same-owner" | "blocked" {
+    const key = normalizeTurnAssociationKey(runId);
+    if (!key) return "blocked";
+    const existing = this.entries.get(key);
+    if (existing) {
+      if (existing.nativeFence && existing.ownerToken === ownerToken) {
+        return existing.state === "ambiguous" ? "blocked" : "same-owner";
+      }
+      const previousSessionId = existing.nativeFence
+        ? existing.sessionId
+        : existing.association?.sessionId;
+      existing.sessionId =
+        previousSessionId && previousSessionId === sessionId
+          ? previousSessionId
+          : undefined;
+      existing.nativeFence = true;
+      existing.state = "ambiguous";
+      existing.touchedAt = this.now();
+      delete existing.association;
+      delete existing.token;
+      delete existing.ownerToken;
+      if (this.nativeEntries >= this.maxNativeEntries) {
+        this.allowUnknownRunFallback = false;
+      }
+      return "blocked";
+    }
+    if (this.nativeEntries >= this.maxNativeEntries) {
+      this.allowUnknownRunFallback = false;
+      return "blocked";
+    }
+    this.entries.set(key, {
+      state: "pending",
+      ownerToken,
+      sessionId,
+      nativeFence: true,
+      nativeBudget: true,
+      touchedAt: this.now(),
+    });
+    this.nativeEntries += 1;
+    return "claimed";
+  }
+
+  bindNativeRun(
+    runId: string | undefined,
+    ownerToken: object,
+    association: TurnAssociation,
+  ): "bound" | "ambiguous" | "stale" {
+    const key = normalizeTurnAssociationKey(runId);
+    if (!key) return "stale";
+    const entry = this.entries.get(key);
+    if (!entry?.nativeFence) return "stale";
+    if (entry.state === "ambiguous") return "ambiguous";
+    if (entry.ownerToken !== ownerToken || entry.state === "terminal") {
+      return "stale";
+    }
+    if (
+      entry.state === "active" &&
+      !sameTurnAssociation(entry.association, association)
+    ) {
+      entry.sessionId =
+        entry.sessionId === association.sessionId ? entry.sessionId : undefined;
+      entry.state = "ambiguous";
+      delete entry.association;
+      return "ambiguous";
+    }
+    if (entry.state !== "pending" && entry.state !== "active") return "stale";
+    entry.state = "active";
+    entry.sessionId = association.sessionId;
+    entry.association = { ...association };
+    entry.touchedAt = this.now();
+    return "bound";
   }
 
   reserve(runId: string | undefined): ReservationResult {
@@ -58,6 +148,7 @@ export class TurnAssociationRegistry {
     const now = this.now();
     this.prune(now);
     const existing = this.entries.get(key);
+    if (existing?.nativeFence) return { status: "ambiguous" };
     if (existing?.state === "active") {
       existing.touchedAt = now;
       return existing.association
@@ -73,7 +164,10 @@ export class TurnAssociationRegistry {
     }
     if (existing?.state === "reserved") return { status: "ambiguous" };
     if (existing?.state === "ambiguous") return { status: "ambiguous" };
-    if (this.entries.size >= this.maxEntries && !this.evictOldestEligible()) {
+    if (
+      this.entries.size - this.nativeEntries >= this.maxEntries &&
+      !this.evictOldestEligible()
+    ) {
       return { status: "full" };
     }
 
@@ -92,7 +186,10 @@ export class TurnAssociationRegistry {
   > {
     const now = this.now();
     this.prune(now);
-    if (this.entries.size >= this.maxEntries && !this.evictOldestEligible()) {
+    if (
+      this.entries.size - this.nativeEntries >= this.maxEntries &&
+      !this.evictOldestEligible()
+    ) {
       return { status: "full" };
     }
     const token = randomUUID();
@@ -112,6 +209,7 @@ export class TurnAssociationRegistry {
     const key = normalizeTurnAssociationKey(runId);
     if (!key) return "stale";
     const entry = this.entries.get(key);
+    if (entry?.nativeFence) return "ambiguous";
     if (!entry || entry.state !== "reserved" || entry.token !== token) {
       return this.bindExisting(key, association);
     }
@@ -134,6 +232,7 @@ export class TurnAssociationRegistry {
     const duplicate = [...this.entries.entries()].find(
       ([candidateKey, candidate]) =>
         candidateKey !== key &&
+        !candidate.nativeFence &&
         (candidate.state === "active" || candidate.state === "terminal") &&
         sameTurnAssociation(candidate.association, association),
     );
@@ -157,6 +256,7 @@ export class TurnAssociationRegistry {
     if (!key) return "stale";
     const entry = this.entries.get(key);
     if (!entry) return "stale";
+    if (entry.nativeFence) return "ambiguous";
     if (sameTurnAssociation(entry.association, association)) {
       entry.touchedAt = this.now();
       return "bound";
@@ -198,7 +298,7 @@ export class TurnAssociationRegistry {
     if (!normalizedSessionIdentity) return;
     const distinct = new Map<string, TurnAssociation>();
     for (const [key, entry] of this.entries) {
-      if (!key.startsWith("anonymous:")) continue;
+      if (!key.startsWith("anonymous:") || entry.nativeFence) continue;
       const association = entry.association;
       if (
         entry.state !== "active" ||
@@ -274,13 +374,20 @@ export class TurnAssociationRegistry {
 
   removeSession(sessionId: string): void {
     for (const [key, entry] of this.entries) {
-      if (entry.association?.sessionId === sessionId) this.entries.delete(key);
+      if (
+        (entry.nativeFence ? entry.sessionId : entry.association?.sessionId) ===
+        sessionId
+      ) {
+        if (entry.nativeBudget) this.nativeEntries -= 1;
+        this.entries.delete(key);
+      }
     }
   }
 
   private prune(now: number): void {
     for (const [key, entry] of this.entries) {
       if (
+        !entry.nativeFence &&
         (entry.state === "terminal" || entry.state === "ambiguous") &&
         now - entry.touchedAt > this.idleTtlMs
       ) {
@@ -292,6 +399,7 @@ export class TurnAssociationRegistry {
   private evictOldestEligible(): boolean {
     let oldest: { key: string; touchedAt: number } | undefined;
     for (const [key, entry] of this.entries) {
+      if (entry.nativeFence) continue;
       if (entry.state !== "terminal" && entry.state !== "ambiguous") continue;
       if (!oldest || entry.touchedAt < oldest.touchedAt) {
         oldest = { key, touchedAt: entry.touchedAt };
