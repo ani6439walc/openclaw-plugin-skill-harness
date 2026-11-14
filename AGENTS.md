@@ -432,6 +432,34 @@ or root-level state during cleanup. Compatible Review v7 migration retains ordin
 processed events and placement epochs, discarding retired keyword-learning fields;
 malformed/older logs fail open.
 
+### Selection-to-use funnel analysis
+
+Session history (`dataRoot/sessions/*.json`, subject to retention — analyses cover
+only the retained window, not the full `stats.json` cohort) records everything
+needed to join retrieval, selection, injection, and use per turn:
+
+- Experience retrieval hits: `inputSkillDiscovery.experienceRetrieval.hits[]`
+  (IDs plus semantic scores). Compare with `matchedExperiences` to separate
+  retrieval recall from selector precision.
+- Skill selection and injection: `matchedSkills` and
+  `inputSkillDiscovery.injectedSkills`. Persisted records show the post-filter
+  selection, so matched-to-injected typically reads 100% — the real filtering
+  happens upstream in the candidate pool. Do not report it as a funnel stage.
+- Same-turn use: `toolCalls[]`, from which `skillsUsed` derives. A skill used
+  without being matched (explicit mention, working-set static use) is normal;
+  `used` may exceed `matched` for such skills.
+
+Build two funnels. Skill funnel: matched → used, per skill. Experience funnel:
+retrieved → matched → turns where any skill was used in the same turn.
+Experience-to-skill attribution uses co-occurrence (`matchedExperiences` ×
+`skillsUsed`) plus lift against the global baseline; it is correlation, not
+causation, unless the experience declares the association in its `skills.md`
+(only a minority do — a missing `skills.md` is normal for skill-independent
+experiences, not a defect). High-lift pairs (e.g. travel-planning →
+trip-itinerary-fill, gitea-pr-head-revision-review → gitea) identify experiences
+worth keeping fresh; high-retrieval, never-matched experiences are the cheapest
+Review input (QMD oversensitivity or stale content, not selector failure).
+
 ## Runtime health audit procedure
 
 Use this workflow on explicit user request to inspect runtime health, skill discovery and usage, experience retrieval, and completed Review outcomes. It produces observations for maintenance decisions; it does not change routing or runtime state.
