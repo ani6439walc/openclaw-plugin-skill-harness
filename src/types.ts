@@ -92,6 +92,7 @@ export type ContextWindow = {
 };
 
 export type ResolvedRoutingConfig = {
+  minTriggerChars: number;
   scope: ResolvedRoutingScopeConfig;
   experiences: ResolvedRoutingExperiencesConfig;
   skills: ResolvedRoutingSkillsConfig;

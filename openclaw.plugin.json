@@ -309,6 +309,12 @@
         "description": "Pre-turn dynamic routing thresholds and candidate selection.",
         "additionalProperties": false,
         "properties": {
+          "minTriggerChars": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 5,
+            "description": "Minimum trimmed current request length in UTF-16 code units for automatic skill and experience routing, before adding conversation context. Static working-set guidance and manual tools remain available."
+          },
           "scope": {
             "type": "object",
             "description": "Session, chat, and agent qualification for dynamic routing.",
