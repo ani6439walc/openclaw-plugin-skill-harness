@@ -13,6 +13,40 @@ import {
 } from "./constants.js";
 
 describe("resolveConfig", () => {
+  it("defaults minTriggerChars to 5 and accepts positive integers", () => {
+    expect(resolveConfig({}).routing.minTriggerChars).toBe(5);
+    expect(
+      resolveConfig({ routing: { minTriggerChars: 1 } }).routing
+        .minTriggerChars,
+    ).toBe(1);
+    expect(
+      resolveConfig({ routing: { minTriggerChars: 20 } }).routing
+        .minTriggerChars,
+    ).toBe(20);
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity, "2", null])(
+    "defaults invalid minTriggerChars=%s to 5",
+    (minTriggerChars) => {
+      expect(
+        resolveConfig({ routing: { minTriggerChars } }).routing.minTriggerChars,
+      ).toBe(5);
+    },
+  );
+
+  it("declares the minimum trigger length in the public manifest", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"),
+    );
+    expect(
+      manifest.configSchema.properties.routing.properties.minTriggerChars,
+    ).toMatchObject({
+      type: "integer",
+      minimum: 1,
+      default: 5,
+    });
+  });
+
   it.each([undefined, "", "   ", 42])(
     "omits invalid or absent embedding cache directories: %s",
     (embeddingCacheDir) => {

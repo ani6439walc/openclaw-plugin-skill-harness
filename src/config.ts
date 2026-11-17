@@ -84,6 +84,7 @@ const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
 const DEFAULT_SKILL_CANDIDATES = DEFAULT_ROUTING_SKILLS;
 
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
+  minTriggerChars: 5,
   scope: DEFAULT_ROUTING_SCOPE,
   experiences: DEFAULT_ROUTING_EXPERIENCES,
   skills: DEFAULT_ROUTING_SKILLS,
@@ -320,6 +321,7 @@ const RoutingSkillsSchema = z
 
 const RoutingSchema = z
   .object({
+    minTriggerChars: z.number().int().min(1).catch(5),
     scope: ScopeSchema.optional().default(DEFAULT_ROUTING_SCOPE),
     experiences: RoutingExperiencesSchema,
     skills: RoutingSkillsSchema,

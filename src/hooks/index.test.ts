@@ -2850,7 +2850,10 @@ describe("createHookHandlers topic switch flow", () => {
       ],
     } as never;
     const { handlers, classifier, record, emitAgentEvent } =
-      createTopicFlowHarness({ historicalIntents: [] });
+      createTopicFlowHarness({
+        historicalIntents: [],
+        configRaw: { routing: { minTriggerChars: 1 } },
+      });
 
     const result = await handlers.onBeforePromptBuild(fastEvent, ctx);
 
@@ -3128,6 +3131,7 @@ describe("createHookHandlers topic switch flow", () => {
     const { handlers, tracker, rotate, record, write } = createTopicFlowHarness(
       {
         historicalIntents: [],
+        configRaw: { routing: { minTriggerChars: 1 } },
         api: {
           runtime: {
             agent: {
@@ -3224,6 +3228,7 @@ describe("createHookHandlers topic switch flow", () => {
   it("does not persist prompt-build intent data without a session id or current keyed session", async () => {
     const { handlers, rotate, record, write } = createTopicFlowHarness({
       historicalIntents: [],
+      configRaw: { routing: { minTriggerChars: 1 } },
     });
 
     await handlers.onBeforePromptBuild(

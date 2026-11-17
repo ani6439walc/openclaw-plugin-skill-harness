@@ -1423,7 +1423,10 @@ export function createHookHandlers(deps: HookDeps) {
         refreshedConfig,
       );
       ctx.hookInvocation?.assertActive();
-      if (event.currentUserMessage !== undefined && !latestUserMessage) {
+      if (
+        latestUserMessage.trim().length <
+        refreshedConfig.routing.minTriggerChars
+      ) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       routing.association = await prepareTrackingTurn({

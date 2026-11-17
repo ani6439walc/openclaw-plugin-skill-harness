@@ -240,11 +240,14 @@ After rebuilding an existing linked installation, use `openclaw plugins reload s
 
 Continue using your agent normally. By default, dynamic routing applies to agent `main` in direct chats, uses recent conversation context, and injects up to **8 skills** and **4 experiences**.
 
+Automatic skill and experience routing requires at least `routing.minTriggerChars` characters in the trimmed current request (default `5`, positive integer). Length uses JavaScript UTF-16 code units; most Chinese characters count as one. The check runs before adding conversation history, so earlier messages cannot make a short current request pass. Short requests keep static working-set guidance and access to manual skill tools. Set `routing.minTriggerChars` to `1` to allow single-character requests; blank input remains excluded.
+
 To change scope or limits, merge a routing fragment into the plugin configuration:
 
 ```json5
 {
   routing: {
+    minTriggerChars: 5,
     scope: { agents: ["main"], chatTypes: ["direct"] },
     queryMode: "recent",
     skills: { maxInjectedSkills: 8 },

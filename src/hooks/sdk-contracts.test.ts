@@ -41,7 +41,7 @@ const ctx = {
   trigger: "user",
 };
 
-function promptHarness() {
+function promptHarness(configInput: Record<string, unknown> = {}) {
   const tracker = {
     preparePromptTurn: vi.fn(async () => ({
       status: "applied",
@@ -59,6 +59,7 @@ function promptHarness() {
     experienceSearch,
     selector,
     handlers: createHandlers({
+      config: () => resolveConfig(configInput),
       tracker: tracker as never,
       qmdSkillIndex: { search: skillSearch } as never,
       qmdExperienceIndex: { search: experienceSearch } as never,
@@ -68,6 +69,39 @@ function promptHarness() {
 }
 
 describe("SDK current request contract", () => {
+  it.each([
+    [undefined, " 繼續 ", false],
+    [5, "幫我看一下", true],
+    [6, "幫我看一下", false],
+    [1, " 好 ", true],
+    [2, " 好 ", false],
+    [2, " 繼續 ", true],
+    [1, "   ", false],
+  ] as const)(
+    "applies minTriggerChars=%s to %j before dynamic routing",
+    async (minimum, input, expected) => {
+      const h = promptHarness({ routing: { minTriggerChars: minimum } });
+      const result = await h.handlers.onBeforePromptBuild(
+        {
+          currentUserMessage: input,
+          currentUserMessageId: "short-input-admission",
+          prompt: "A long historical prompt cannot bypass the minimum.",
+          messages: [{ role: "user", content: "A long historical request." }],
+        },
+        ctx,
+      );
+      expect(result?.appendSystemContext).toContain(
+        SKILL_HARNESS_SYSTEM_CONTEXT,
+      );
+      expect(h.tracker.preparePromptTurn).toHaveBeenCalledTimes(
+        expected ? 1 : 0,
+      );
+      expect(h.skillSearch).toHaveBeenCalledTimes(expected ? 1 : 0);
+      expect(h.experienceSearch).toHaveBeenCalledTimes(expected ? 1 : 0);
+      if (!expected) expect(h.selector).not.toHaveBeenCalled();
+    },
+  );
+
   it("uses the explicit request for tracking and both searches when the prompt reconstructs history", async () => {
     const h = promptHarness();
     await h.handlers.onBeforePromptBuild(
