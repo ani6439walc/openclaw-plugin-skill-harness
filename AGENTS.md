@@ -37,9 +37,8 @@ instead of duplicating a version in workflow YAML.
 - `pnpm exec prettier --check README.md AGENTS.md`: check formatting for these documents without formatting unrelated files.
 - `node scripts/test-runtime-health-audit.mjs`: run the report-only runtime-health audit helper tests.
 - `node scripts/test-validate-experiences.mjs`: test the experience validator after building its production imports in `dist/`.
-- `python3 .github/scripts/test_jules_pr_review.py`: test the CI review helper.
 
-Use Node.js 26.12.1 or later; the pinned QMD release requires Node.js 26. CI uses Node.js 26 and runs formatting, typecheck, Vitest, both Node.js maintenance suites and the Python CI-helper suite, build, loader, and dry-pack checks. `pnpm run build` prunes `dist/` before invoking `tsc`; inspect the actual tarball before handoff of package changes.
+Use Node.js 26.12.1 or later; the pinned QMD release requires Node.js 26. CI uses Node.js 26 and runs formatting, typecheck, Vitest, both Node.js maintenance suites, build, loader, and dry-pack checks. `pnpm run build` prunes `dist/` before invoking `tsc`; inspect the actual tarball before handoff of package changes.
 
 ## Coding Style & Naming Conventions
 
