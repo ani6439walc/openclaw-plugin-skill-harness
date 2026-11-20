@@ -124,10 +124,12 @@ async function runTool(tool: unknown, params: Record<string, unknown>) {
       execute: (
         id: string,
         params: unknown,
-      ) => Promise<{ content: Array<{ text: string }> }>;
+      ) => Promise<{ content: Array<{ text: string }>; details: unknown }>;
     }
   ).execute("tool-call", params);
-  return JSON.parse(result.content[0]?.text ?? "{}");
+  const rendered = JSON.parse(result.content[0]?.text ?? "{}");
+  expect(result.details).toStrictEqual(rendered);
+  return rendered;
 }
 
 function toolsForAgent(

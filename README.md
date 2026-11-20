@@ -262,6 +262,8 @@ Set `maxInjectedSkills: 0` for experience-only routing; set `maxInjectedExperien
 
 Agents can use these tools even when automatically selected guidance is insufficient:
 
+All four tools return the same JSON payload as rendered text for direct calls and as structured results for Code Mode, including tool-reported errors.
+
 | Tool               | Inputs and purpose                                                                                                                                                                                                           |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `skill_list`       | Lists visible skills. `offset` defaults to 0; `limit` defaults to 150, maximum 500. Optional `show_stats` and `show_related` default to false. Follow pagination for larger catalogs.                                        |

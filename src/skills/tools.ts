@@ -40,14 +40,11 @@ export interface RegisterSkillToolsOptions {
 }
 
 function jsonToolResult(data: unknown) {
+  const text = JSON.stringify(data, null, 2);
   return {
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify(data, null, 2),
-      },
-    ],
-    details: undefined,
+    content: [{ type: "text" as const, text }],
+    // Code Mode projects details instead of the rendered text.
+    details: JSON.parse(text) as unknown,
   };
 }
 
