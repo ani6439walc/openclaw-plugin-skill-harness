@@ -316,7 +316,7 @@ describe("registerSkillTools", () => {
         dataRoot,
         id === "alpha" ? "react" : "vue",
         id,
-        "😀".repeat(2_500),
+        "😀".repeat(4_500),
       );
     }
     const experienceFile = path.join(
@@ -348,12 +348,79 @@ describe("registerSkillTools", () => {
       result.entries.map(
         (entry: { body: string }) => Array.from(entry.body).length,
       ),
-    ).toEqual([2_000, 2_000, 1_000, 0, 0]);
+    ).toEqual([4_000, 4_000, 2_000, 0, 0]);
+    expect(
+      result.entries.map(
+        (entry: { body_truncated: boolean }) => entry.body_truncated,
+      ),
+    ).toEqual([true, true, true, true, true]);
     expect(result.entries.every((entry: object) => !("path" in entry))).toBe(
       true,
     );
     expect(fs.readFileSync(experienceFile, "utf8")).toBe(before);
     expect(api.runtime.agent).not.toHaveProperty("runEmbeddedAgent");
+  });
+
+  it("reads the complete untruncated body by exact id without calling QMD", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-id-"));
+    try {
+      const stateDir = path.join(tmp, "state");
+      const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+      const workspace = path.join(tmp, "workspace");
+      const api = createApi(stateDir, workspace);
+      writeSkill(workspace, "react");
+      const fullBody = "😀".repeat(11_500);
+      writeExperience(dataRoot, "react", "long-playbook", fullBody);
+      fs.writeFileSync(
+        path.join(dataRoot, "experiences", "long-playbook", "skills.md"),
+        "react\nvue\n",
+      );
+      const qmdSearch = vi.fn();
+      registerSkillTools(api, {
+        experienceCatalog: new SkillExperienceCatalog(dataRoot),
+        qmdExperienceIndex: {
+          schedule: vi.fn(),
+          search: qmdSearch,
+          getStatus: () => "ready" as const,
+          close: vi.fn().mockResolvedValue(undefined),
+        },
+      });
+      const tool = toolsForAgent(api).get("skill_experience");
+
+      const full = await runTool(tool, { id: "long-playbook" });
+      expect(full).toEqual({
+        success: true,
+        entries: [
+          {
+            id: "long-playbook",
+            skills: ["react"],
+            summary: "long-playbook summary",
+            keywords: ["long-playbook"],
+            body: fullBody,
+            body_truncated: false,
+          },
+        ],
+      });
+      expect(qmdSearch).not.toHaveBeenCalled();
+
+      const withoutSkills = await runTool(tool, {
+        id: "  LONG-PLAYBOOK  ",
+        show_skills: false,
+      });
+      expect(withoutSkills.success).toBe(true);
+      expect(withoutSkills.entries).toHaveLength(1);
+      expect(withoutSkills.entries[0]).not.toHaveProperty("skills");
+      expect(Array.from(withoutSkills.entries[0].body).length).toBe(11_500);
+      expect(withoutSkills.entries[0].body_truncated).toBe(false);
+
+      const missing = await runTool(tool, { id: "does-not-exist" });
+      expect(missing).toEqual({
+        success: false,
+        error: "experience not found",
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it.each([false, true])(
@@ -602,17 +669,36 @@ describe("registerSkillTools", () => {
     },
   );
 
-  it("requires a query and validates its type and Unicode length at execution", async () => {
+  it("requires id or query (mutually exclusive) and validates types and Unicode lengths at execution", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-"));
     const api = createApi(path.join(tmp, "state"), path.join(tmp, "workspace"));
     registerSkillTools(api);
     const tool = toolsForAgent(api).get("skill_experience");
-    for (const params of [{}, { query: "  " }, { skills: ["react"] }]) {
+    for (const params of [
+      {},
+      { query: "  " },
+      { id: "  " },
+      { skills: ["react"] },
+    ]) {
       await expect(runTool(tool, params)).resolves.toEqual({
         success: false,
-        error: "query is required",
+        error: "id or query is required",
       });
     }
+    await expect(
+      runTool(tool, { id: "alpha", query: "summary" }),
+    ).resolves.toEqual({
+      success: false,
+      error: "provide either id or query, not both",
+    });
+    await expect(runTool(tool, { id: "😀".repeat(65) })).resolves.toEqual({
+      success: false,
+      error: "id must contain at most 64 Unicode code points",
+    });
+    await expect(runTool(tool, { id: 42 })).resolves.toEqual({
+      success: false,
+      error: "id must be a string",
+    });
     await expect(runTool(tool, { query: "😀".repeat(501) })).resolves.toEqual({
       success: false,
       error: "query must contain at most 500 Unicode code points",
@@ -626,14 +712,15 @@ describe("registerSkillTools", () => {
       entries: [],
     });
     const schema = (
-      tool as { parameters: { properties: object; required: string[] } }
+      tool as { parameters: { properties: object; required?: string[] } }
     ).parameters;
     expect(Object.keys(schema.properties)).toEqual([
+      "id",
       "query",
       "limit",
       "show_skills",
     ]);
-    expect(schema.required).toEqual(["query"]);
+    expect(schema.required).toBeUndefined();
   });
 
   it("returns an explicit empty result when no experience matches the query", async () => {

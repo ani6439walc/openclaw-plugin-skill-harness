@@ -264,12 +264,12 @@ Agents can use these tools even when automatically selected guidance is insuffic
 
 All four tools return the same JSON payload as rendered text for direct calls and as structured results for Code Mode, including tool-reported errors.
 
-| Tool               | Inputs and purpose                                                                                                                                                                                                           |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skill_list`       | Lists visible skills. `offset` defaults to 0; `limit` defaults to 150, maximum 500. Optional `show_stats` and `show_related` default to false. Follow pagination for larger catalogs.                                        |
-| `skill_search`     | Requires `query`; hybrid-searches metadata, bodies and references. `limit` defaults to 20, maximum 100. `show_evidence` defaults to true; `show_stats` and `show_related` default to false. Returns `skills`, without paths. |
-| `skill_view`       | Requires `name`; loads the skill document. Optional `file_path` loads a relative support file under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`.                                                      |
-| `skill_experience` | Requires `query`; searches shared experiences. `limit` defaults to 5, clamped to 1–20. `show_skills` defaults to true. Tries QMD then catalog fallback without calling Jev.                                                  |
+| Tool               | Inputs and purpose                                                                                                                                                                                                                      |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skill_list`       | Lists visible skills. `offset` defaults to 0; `limit` defaults to 150, maximum 500. Optional `show_stats` and `show_related` default to false. Follow pagination for larger catalogs.                                                   |
+| `skill_search`     | Requires `query`; hybrid-searches metadata, bodies and references. `limit` defaults to 20, maximum 100. `show_evidence` defaults to true; `show_stats` and `show_related` default to false. Returns `skills`, without paths.            |
+| `skill_view`       | Requires `name`; loads the skill document. Optional `file_path` loads a relative support file under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`.                                                                 |
+| `skill_experience` | Accepts mutually exclusive `id` (exact full-body read, max 64 CP) or `query` (search, max 500 CP). `limit` defaults to 5 (1–20) for search. `show_skills` defaults to true. Search tries QMD then catalog fallback without calling Jev. |
 
 Example tool arguments:
 
@@ -277,9 +277,9 @@ Example tool arguments:
 { "query": "diagnose a deployment readiness failure", "limit": 5 }
 ```
 
-Use those arguments with `skill_search` to find skills or `skill_experience` to find experience. Load a selected skill with `skill_view`, for example `{ "name": "your-operations-skill" }`.
+Use those arguments with `skill_search` to find skills or `skill_experience` to find experience, or call `skill_experience` with `{ "id": "your-experience-id" }` to read a known or injected experience's full untruncated body. Load a selected skill with `skill_view`, for example `{ "name": "your-operations-skill" }`.
 
-Experiences are shared across agents. Skill visibility filters displayed associations and final injected skill names, rather than excluding experience entries. An experience can therefore be found with `skills: []` when all associated skills are invisible; `show_skills: false` omits that field. Associations are hints, not prerequisite or access-control declarations. Retrieved bodies are bounded to 2,000 code points each and 5,000 total.
+Experiences are shared across agents. Skill visibility filters displayed associations and final injected skill names, rather than excluding experience entries. An experience can therefore be found with `skills: []` when all associated skills are invisible; `show_skills: false` omits that field. Associations are hints, not prerequisite or access-control declarations. Search responses bound bodies to 4,000 code points each and 10,000 total and report `body_truncated` per entry; exact `id` reads return the complete untruncated body (`body_truncated: false`).
 
 ### Enable review
 

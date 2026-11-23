@@ -571,13 +571,13 @@ An experience captures a reusable problem/solution workflow, verified command se
 Each experience lives in a subfolder: experiences/<id>/ containing:
 - summary.md: Exactly one concise plain-text summary sentence (max 240 Unicode code points).
 - keywords.md: Up to 12 concise keywords (exactly one per line; max 64 Unicode code points each).
-- body.md: Structured Markdown detailing the reusable procedure, exact commands, pitfalls, and verification steps (max 12,000 Unicode code points).
+- body.md: Structured Markdown detailing the reusable procedure, exact commands, pitfalls, and verification steps (max 12,000 Unicode code points; keep entries focused and concise—prefer <= 4,000 Unicode code points when sufficient so search results return complete guidance without truncation).
 - skills.md: (Optional) Associated skill names (exactly one per line; no comma-separated lists).
 
 Eligible observed skills for experiences: ${experienceSkillNames.length > 0 ? experienceSkillNames.join(", ") : "none; omit skills.md on created entries, and do not add new skills to skills.md on modified entries"}.
 
 Curation workflow for every requested trigger:
-- Before creating an experience, use skill_experience with query and limit: 5 to check existing coverage. Use ls to inspect experiences/ and read the full workspace files for likely matches; bounded search results or no hits do not prove coverage is absent.
+- Before creating an experience, use skill_experience with query and limit: 5 to check existing coverage (or pass id to read an entry in full). Use ls to inspect experiences/ and read the full workspace files for likely matches; bounded search results or no hits do not prove coverage is absent.
 - If an existing experience already covers the procedure, return no finding unless the observed evidence supports a concrete improvement. Refine the existing ID when adding corrections or useful steps to the same workflow. Create a new ID only for a distinct reusable workflow missing from existing entries.
 - Before refining, read the complete existing summary, keywords, body, and optional skills files. Replace superseded guidance and consolidate repeated steps instead of appending an incident log. Preserve applicability conditions, prerequisites, necessary steps, verified outcomes, and unresolved limits; never rewrite failure as success or remove a still-valid prerequisite merely to save space. Deduplicate keywords and keep only those useful for discovery.
 - After editing, use the existing exec tool with explicit, inspected workspace-relative experience paths to count summary/body Unicode code points, keyword entries, and each keyword's code points. Count code points, not bytes or UTF-16 code units (for example, Array.from(text).length in Node). Then read the complete changed files again and correct any excess before reporting a finding. Never automatically truncate guidance to meet a limit.

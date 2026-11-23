@@ -22,10 +22,11 @@ const DEFAULT_SKILL_SEARCH_LIMIT = 20;
 const MAX_SKILL_SEARCH_LIMIT = 100;
 const MAX_SKILL_SEARCH_QUERY_CODE_POINTS = 1_000;
 const DEFAULT_EXPERIENCE_LIMIT = 5;
+const MAX_EXPERIENCE_ID_CODE_POINTS = 64;
 const MAX_EXPERIENCE_QUERY_CODE_POINTS = 500;
 const MAX_EXPERIENCE_LIMIT = 20;
-const MAX_EXPERIENCE_BODY_CODE_POINTS = 2_000;
-const MAX_EXPERIENCE_TOTAL_CODE_POINTS = 5_000;
+const MAX_EXPERIENCE_BODY_CODE_POINTS = 4_000;
+const MAX_EXPERIENCE_TOTAL_CODE_POINTS = 10_000;
 
 export interface RegisterSkillToolsOptions {
   reviewToolRegistry?: ReviewToolRegistry;
@@ -446,13 +447,26 @@ export function registerSkillTools(
         name: "skill_experience",
         label: "Read Skill Experience",
         description:
-          "Search shared runtime experiences by query. Skill visibility only filters displayed associations, never experience eligibility. Results are bounded, read-only, and do not invoke a model.",
+          "Read a shared runtime experience in full by exact id, or search shared runtime experiences by query. Skill visibility only filters displayed associations, never experience eligibility. Search bodies are bounded (4,000 code points each, 10,000 total; truncated entries set body_truncated: true); pass id to read the complete untruncated body. Read-only and does not invoke a model.",
         parameters: Type.Object({
-          query: Type.String({ maxLength: MAX_EXPERIENCE_QUERY_CODE_POINTS }),
+          id: Type.Optional(
+            Type.String({
+              maxLength: MAX_EXPERIENCE_ID_CODE_POINTS,
+              description:
+                'Exact experience ID to read in full without search truncation (for example from an injected <experience id="..."> summary or prior search). Mutually exclusive with query.',
+            }),
+          ),
+          query: Type.Optional(
+            Type.String({
+              maxLength: MAX_EXPERIENCE_QUERY_CODE_POINTS,
+              description:
+                "Concise search query over shared runtime experiences. Mutually exclusive with id.",
+            }),
+          ),
           limit: Type.Optional(
             Type.Number({
               description:
-                "Maximum number of results. Defaults to 5 and is capped at 20.",
+                "Maximum number of search results. Defaults to 5 and is capped at 20. Ignored when id is provided.",
             }),
           ),
           show_skills: Type.Optional(
@@ -463,22 +477,44 @@ export function registerSkillTools(
           ),
         }),
         async execute(_toolCallId, params) {
-          const rawQuery =
+          const record =
             params && typeof params === "object"
-              ? (params as Record<string, unknown>).query
+              ? (params as Record<string, unknown>)
               : undefined;
           if (
-            params &&
-            typeof params === "object" &&
-            Object.prototype.hasOwnProperty.call(params, "query") &&
-            typeof rawQuery !== "string"
+            record &&
+            Object.prototype.hasOwnProperty.call(record, "id") &&
+            record.id !== undefined &&
+            typeof record.id !== "string"
+          ) {
+            return jsonToolResult({
+              success: false,
+              error: "id must be a string",
+            });
+          }
+          if (
+            record &&
+            Object.prototype.hasOwnProperty.call(record, "query") &&
+            record.query !== undefined &&
+            typeof record.query !== "string"
           ) {
             return jsonToolResult({
               success: false,
               error: "query must be a string",
             });
           }
+
+          const id = optionalStringParam(params, "id");
           const query = optionalStringParam(params, "query");
+          if (
+            id !== undefined &&
+            Array.from(id).length > MAX_EXPERIENCE_ID_CODE_POINTS
+          ) {
+            return jsonToolResult({
+              success: false,
+              error: "id must contain at most 64 Unicode code points",
+            });
+          }
           if (
             query !== undefined &&
             Array.from(query).length > MAX_EXPERIENCE_QUERY_CODE_POINTS
@@ -489,10 +525,65 @@ export function registerSkillTools(
             });
           }
 
-          if (!query || query.trim() === "") {
+          const trimmedId = id?.trim() ?? "";
+          const trimmedQuery = query?.trim() ?? "";
+          if (trimmedId && trimmedQuery) {
             return jsonToolResult({
               success: false,
-              error: "query is required",
+              error: "provide either id or query, not both",
+            });
+          }
+          if (!trimmedId && !trimmedQuery) {
+            return jsonToolResult({
+              success: false,
+              error: "id or query is required",
+            });
+          }
+
+          const showSkills = booleanParam(params, "show_skills", true);
+
+          const loadVisibleNames = async (): Promise<ReadonlySet<string>> => {
+            if (!showSkills) return new Set();
+            const inventory = await listAvailableSkills({
+              api,
+              agentId,
+              bundledSkillsDir: options.bundledSkillsDir,
+              nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
+              sharedRoots: options.getSharedRoots?.(),
+              homeDir: options.homeDir,
+            });
+            return new Set(
+              canonicalSkillNames(inventory.map((skill) => skill.name)),
+            );
+          };
+
+          if (trimmedId) {
+            const entry = options.experienceCatalog?.resolve(trimmedId);
+            if (!entry) {
+              return jsonToolResult({
+                success: false,
+                error: "experience not found",
+              });
+            }
+            const visibleNames = await loadVisibleNames();
+            return jsonToolResult({
+              success: true,
+              entries: [
+                {
+                  id: entry.id,
+                  ...(showSkills
+                    ? {
+                        skills: entry.skills.filter((skill) =>
+                          visibleNames.has(canonicalIdentity(skill)),
+                        ),
+                      }
+                    : {}),
+                  summary: entry.summary,
+                  keywords: entry.keywords,
+                  body: entry.body,
+                  body_truncated: false,
+                },
+              ],
             });
           }
 
@@ -503,7 +594,6 @@ export function registerSkillTools(
               optionalIntegerParam(params, "limit") ?? DEFAULT_EXPERIENCE_LIMIT,
             ),
           );
-          const showSkills = booleanParam(params, "show_skills", true);
 
           let matches: SkillExperienceEntry[] = [];
           if (query && options.qmdExperienceIndex) {
@@ -533,28 +623,18 @@ export function registerSkillTools(
             });
           }
 
-          let visibleNames: ReadonlySet<string> = new Set();
-          if (showSkills && matches.length > 0) {
-            const inventory = await listAvailableSkills({
-              api,
-              agentId,
-              bundledSkillsDir: options.bundledSkillsDir,
-              nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
-              sharedRoots: options.getSharedRoots?.(),
-              homeDir: options.homeDir,
-            });
-            visibleNames = new Set(
-              canonicalSkillNames(inventory.map((skill) => skill.name)),
-            );
-          }
+          const visibleNames =
+            matches.length > 0 ? await loadVisibleNames() : new Set<string>();
 
           let remainingCodePoints = MAX_EXPERIENCE_TOTAL_CODE_POINTS;
           const entries = matches.map((entry) => {
+            const fullLength = Array.from(entry.body).length;
             const body = truncateCodePoints(
               entry.body,
               Math.min(MAX_EXPERIENCE_BODY_CODE_POINTS, remainingCodePoints),
             );
-            remainingCodePoints -= Array.from(body).length;
+            const renderedLength = Array.from(body).length;
+            remainingCodePoints -= renderedLength;
             return {
               id: entry.id,
               ...(showSkills
@@ -567,6 +647,7 @@ export function registerSkillTools(
               summary: entry.summary,
               keywords: entry.keywords,
               body,
+              body_truncated: renderedLength < fullLength,
             };
           });
 
