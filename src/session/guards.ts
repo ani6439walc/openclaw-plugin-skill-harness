@@ -40,9 +40,11 @@ export function shouldSkipSkillSystemContext(ctx: {
   return (
     sessionKey.includes(":active-memory:") ||
     isDreamingSessionKey(sessionKey) ||
+    sessionKey.includes(":internal-session-effects:") ||
     sessionKey.includes(":skill-harness:") ||
     sessionKey.includes(":subagent:") ||
     sessionId.startsWith("active-memory-") ||
+    sessionId.startsWith("internal-session-effects-") ||
     sessionId.startsWith("skill-harness-")
   );
 }

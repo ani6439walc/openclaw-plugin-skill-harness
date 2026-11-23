@@ -140,6 +140,22 @@ describe("shouldSkipIntentAnalysis", () => {
     ).toBe(true);
   });
 
+  it("skips internal-session-effects sessions", () => {
+    expect(
+      shouldSkipIntentAnalysis({
+        trigger: "user",
+        sessionKey:
+          "agent:main:internal-session-effects:skill-workshop-review_abc",
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipIntentAnalysis({
+        trigger: "user",
+        sessionId: "internal-session-effects-skill-workshop-review_abc",
+      }),
+    ).toBe(true);
+  });
+
   it("does not skip normal user sessions", () => {
     expect(
       shouldSkipIntentAnalysis({
@@ -162,6 +178,19 @@ describe("shouldSkipSkillSystemContext", () => {
     {
       label: "active-memory session id",
       context: { sessionId: "active-memory-xyz" },
+    },
+    {
+      label: "internal-session-effects session key",
+      context: {
+        sessionKey:
+          "agent:main:internal-session-effects:skill-workshop-review_abc",
+      },
+    },
+    {
+      label: "internal-session-effects session id",
+      context: {
+        sessionId: "internal-session-effects-skill-workshop-review_abc",
+      },
     },
     {
       label: "skill-harness session key",

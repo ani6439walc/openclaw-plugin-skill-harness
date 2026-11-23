@@ -2192,6 +2192,7 @@ describe("createHookHandlers internal turn guards", () => {
     "agent:main:direct:123:subagent:worker",
     "agent:main:dreaming-narrative-light-123",
     "agent:main:direct:123:active-memory:worker",
+    "agent:main:internal-session-effects:skill-workshop-review_abc",
   ])("does not inject into excluded session %s", async (sessionKey) => {
     const handlers = createHookHandlers({
       api: { config: {} } as OpenClawPluginApi,
@@ -2205,6 +2206,26 @@ describe("createHookHandlers internal turn guards", () => {
         trigger: "manual",
         agentId: "main",
         sessionKey,
+      },
+    );
+
+    expect(result).toBeUndefined();
+  });
+
+  it("does not inject working-set context into internal-session-effects even when trigger is omitted", async () => {
+    const handlers = createHookHandlers({
+      api: { config: {} } as OpenClawPluginApi,
+      config: () => resolveConfig({}),
+      refreshLiveConfigFromRuntime: vi.fn(),
+    });
+
+    const result = await handlers.onBeforePromptBuild(
+      { prompt: "Background skill review.", messages: [] },
+      {
+        agentId: "main",
+        sessionKey:
+          "agent:main:internal-session-effects:skill-workshop-review_abc",
+        sessionId: "internal-session-effects-skill-workshop-review_abc",
       },
     );
 
