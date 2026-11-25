@@ -3943,7 +3943,7 @@ describe("createHookHandlers topic switch flow", () => {
     const registration = registerTool.mock.calls.find(
       ([, options]) => options?.name === "skill_experience",
     );
-    const tool = registration![0]({ agentId: "main" });
+    const tool = registration![0].create({ agentId: "main" });
     const toolQuery = async () => {
       const result = await tool.execute("test", {
         query: "unlisted paraphrase",

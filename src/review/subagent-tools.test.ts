@@ -68,7 +68,10 @@ async function fixture(
   expect(context.skills).toHaveLength(1);
   const registry = createReviewToolRegistry();
   const abort = new AbortController();
-  const factories: ((context: EmbeddedParams) => Tool)[] = [];
+  const factories: {
+    contextVersion: 2;
+    create: (context: EmbeddedParams) => Tool;
+  }[] = [];
   let retainedView!: Tool;
   const index = {
     getStatus: () => "ready",
@@ -79,7 +82,7 @@ async function fixture(
   const runEmbeddedAgent = vi.fn(async (params: EmbeddedParams) => {
     const tools = new Map(
       factories.map((factory) => {
-        const tool = factory({
+        const tool = factory.create({
           ...params,
           toolBindings: structuredClone(params.toolBindings),
         });
@@ -184,8 +187,10 @@ async function fixture(
   });
   const api = {
     config: {},
-    registerTool: (factory: (context: EmbeddedParams) => Tool) =>
-      factories.push(factory),
+    registerTool: (factory: {
+      contextVersion: 2;
+      create: (context: EmbeddedParams) => Tool;
+    }) => factories.push(factory),
     runtime: {
       state: { resolveStateDir: () => root },
       agent: { resolveAgentWorkspaceDir: () => root, runEmbeddedAgent },

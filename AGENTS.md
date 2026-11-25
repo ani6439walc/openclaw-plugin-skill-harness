@@ -758,7 +758,7 @@ notes rather than README or AGENTS.
 External plugin installations must explicitly grant
 `plugins.entries.skill-harness.hooks.allowConversationAccess: true`; this is
 host hook policy beside the plugin's `config`, not part of its manifest schema.
-An explicit `allowPromptInjection: false` still blocks prompt hooks. Never
+An explicit `allowPromptModification: false` still blocks prompt hooks. Never
 normalize these permission grants automatically.
 
 Prefer the SDK's explicit `before_prompt_build.currentUserMessage` for routing

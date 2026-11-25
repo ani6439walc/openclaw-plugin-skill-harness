@@ -143,13 +143,26 @@ function toolsForAgent(
 ): Map<string, unknown> {
   return new Map(
     api.registerTool.mock.calls.flatMap(([registeredTool]) => {
+      const factoryContext = {
+        agentId,
+        ...context,
+      };
       const resolved =
         typeof registeredTool === "function"
-          ? (registeredTool as (context: { agentId?: string }) => unknown)({
-              agentId,
-              ...context,
-            })
-          : registeredTool;
+          ? (registeredTool as (context: { agentId?: string }) => unknown)(
+              factoryContext,
+            )
+          : registeredTool &&
+              typeof registeredTool === "object" &&
+              "create" in registeredTool &&
+              typeof (registeredTool as { create?: unknown }).create ===
+                "function"
+            ? (
+                registeredTool as {
+                  create: (context: { agentId?: string }) => unknown;
+                }
+              ).create(factoryContext)
+            : registeredTool;
       const tools = Array.isArray(resolved) ? resolved : [resolved];
       return tools.flatMap((tool) =>
         tool && typeof tool === "object" && "name" in tool
@@ -173,6 +186,9 @@ describe("registerSkillTools", () => {
     });
 
     expect(api.registerTool).toHaveBeenCalledTimes(4);
+    expect(
+      api.registerTool.mock.calls.map(([factory]) => factory.contextVersion),
+    ).toEqual([2, 2, 2, 2]);
     expect([...toolsForAgent(api).keys()]).toEqual([
       "skill_list",
       "skill_search",
