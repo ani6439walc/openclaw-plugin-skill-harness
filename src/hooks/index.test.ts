@@ -1650,9 +1650,14 @@ description: Navigate Tokyo.
     },
   );
 
-  it.each([false, true])(
-    "deduplicates completed native admissions and resumes pending ones after hook reload (newer owner: %s)",
-    async (newerOwner) => {
+  it.each([
+    { newerOwner: false, sparse: false },
+    { newerOwner: false, sparse: true },
+    { newerOwner: true, sparse: false },
+    { newerOwner: true, sparse: true },
+  ])(
+    "deduplicates completed native admissions and resumes pending ones after hook reload (newer owner: $newerOwner, sparse: $sparse)",
+    async ({ newerOwner, sparse }) => {
       const root = fs.mkdtempSync(
         path.join(os.tmpdir(), "native-review-reload-"),
       );
@@ -1667,6 +1672,7 @@ description: Navigate Tokyo.
         trigger: "user" as const,
         messageProvider: "webchat",
       };
+      const lookup = vi.fn().mockResolvedValue(undefined);
       function generation() {
         const tracker = SessionTracker.create(root);
         const handlers = createHandlers(
@@ -1674,7 +1680,10 @@ description: Navigate Tokyo.
             config: {},
             runtime: {
               state: { resolveStateDir: () => root },
-              agent: { resolveAgentWorkspaceDir: () => root },
+              agent: {
+                resolveAgentWorkspaceDir: () => root,
+                session: { getSessionEntryByIdAsync: lookup },
+              },
             },
           },
           {
@@ -1755,11 +1764,7 @@ description: Navigate Tokyo.
         await reload();
         if (newerOwner) await f.prompt("message-11", "run-11");
         const currentKey = f.tracker.getCurrentState(ctx.sessionId)!.turnKey;
-        await f.prompt(
-          "message-10",
-          "run-10",
-          newerOwner ? "" : ctx.sessionKey,
-        );
+        await f.prompt("message-10", "run-10", sparse ? "" : ctx.sessionKey);
         expect(f.tracker.getCurrentState(ctx.sessionId)?.turnKey).toBe(
           currentKey,
         );

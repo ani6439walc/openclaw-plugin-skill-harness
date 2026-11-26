@@ -434,6 +434,10 @@ export function createHookHandlers(deps: HookDeps) {
     const runId = params.ctx.runId?.trim();
     const request = params.routing.request;
     if (request?.admissionId !== undefined) {
+      const hostSessionKey =
+        params.routing.resolvedSessionKey ||
+        params.ctx.sessionKey?.trim() ||
+        undefined;
       const assertActive = () => {
         promptExecutions.assertRequestCurrent(request);
         params.ctx.hookInvocation?.assertActive();
@@ -444,8 +448,7 @@ export function createHookHandlers(deps: HookDeps) {
           assertActive();
           const prepared = await tracker.preparePromptTurn({
             sessionId,
-            sessionKey:
-              params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+            sessionKey: hostSessionKey,
             agentId: params.routing.effectiveAgentId,
             forceNew: true,
             nativeAdmissionId: request.admissionId,
@@ -458,8 +461,7 @@ export function createHookHandlers(deps: HookDeps) {
           if (!("identity" in prepared)) return;
           return {
             sessionId,
-            sessionKey:
-              params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+            sessionKey: prepared.identity.sessionKey ?? hostSessionKey,
             turnKey: prepared.identity.turnKey,
             ...(prepared.identity.finalized
               ? { finalized: true as const }
