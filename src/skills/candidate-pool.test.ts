@@ -102,52 +102,12 @@ describe("buildCandidateSkillsUnionPool", () => {
     expect(union.candidateSkills.map((s) => s.name)).toEqual(["alpha", "beta"]);
     expect((union as Record<string, unknown>).fallbackSkills).toBeUndefined();
   });
-
-  it("builds candidate skills from experience-qmd sources and maps experienceHitsBySkill", () => {
-    const mockHit = {
-      identity: "alpha/test-exp",
-      skill: "alpha",
-      entryId: "test-exp",
-      score: 0.95,
-      semanticScore: 0.95,
-      collection: "skill-experiences",
-    };
-    const union = buildCandidateSkillsUnionPool({
-      visibleSkills: skills,
-      nameCandidates: [],
-      retrievalCandidates: [
-        { skillName: "beta", score: 0.7, source: "direct-retrieval" },
-      ],
-      experienceCandidates: [
-        {
-          skillName: "alpha",
-          score: 0.95,
-          source: "experience-qmd",
-          experienceHits: [mockHit],
-        },
-      ],
-    });
-
-    expect(union.pool).toHaveLength(2);
-    expect(union.candidateSkills.map((s) => s.name)).toEqual(["alpha", "beta"]);
-    expect(union.experienceHitsBySkill.get("alpha")).toEqual([mockHit]);
-    expect(union.experienceHitsBySkill.has("beta")).toBe(false);
-  });
 });
 
 describe("buildSkillCandidateSuperset", () => {
   const gamma = { name: "gamma", description: "Gamma", location: "/gamma" };
   const delta = { name: "delta", description: "Delta", location: "/delta" };
-  const experience = {
-    id: "exp",
-    summary: "Shared guidance",
-    keywords: ["task"],
-    body: "Body",
-    path: "/exp",
-    skills: ["ALPHA", "gamma", "hidden", "gamma"],
-  };
-
-  it("preserves ranked originals then visible associations then expanded extras without fabricating scores", () => {
+  it("preserves ranked originals then visible related skills without fabricating scores", () => {
     const result = buildSkillCandidateSuperset({
       originals: [skills[1], skills[0]],
       nameCandidates: [
@@ -157,7 +117,6 @@ describe("buildSkillCandidateSuperset", () => {
         { skillName: "beta", score: 0.9, source: "direct-retrieval" },
         { skillName: "alpha", score: 0.7, source: "direct-retrieval" },
       ],
-      experiences: [experience],
       expanded: [skills[0], gamma, delta],
       expandedNames: ["gamma", "delta"],
       visibleSkills: [...skills, gamma, delta],
@@ -171,8 +130,8 @@ describe("buildSkillCandidateSuperset", () => {
     ]);
     expect(result.candidateSources).toEqual({
       beta: ["direct-retrieval"],
-      alpha: ["name-match", "direct-retrieval", "experience-associated"],
-      gamma: ["experience-associated", "related-declared"],
+      alpha: ["name-match", "direct-retrieval"],
+      gamma: ["related-declared"],
       delta: ["related-declared"],
     });
     expect(result.candidateSkills).toEqual([
@@ -186,21 +145,22 @@ describe("buildSkillCandidateSuperset", () => {
     );
   });
 
-  it("uses visible winning identities for canonical association names and drops invisible endpoints", () => {
+  it("uses the winning visible skill for canonical expansion names and drops hidden endpoints", () => {
     const result = buildSkillCandidateSuperset({
       originals: [],
       nameCandidates: [],
       retrievalCandidates: [],
-      experiences: [experience],
-      expanded: [{ ...delta, name: "hidden" }],
-      expandedNames: ["hidden"],
+      expanded: [
+        { ...gamma, name: "GAMMA", location: "/losing" },
+        { ...delta, name: "hidden" },
+      ],
+      expandedNames: ["GAMMA", "hidden"],
       visibleSkills: [skills[0], gamma],
       enabled: true,
     });
-    expect(result.candidateSkills).toEqual([skills[0], gamma]);
+    expect(result.candidateSkills).toEqual([gamma]);
     expect(result.candidateSources).toEqual({
-      alpha: ["experience-associated"],
-      gamma: ["experience-associated"],
+      gamma: ["related-declared"],
     });
   });
 
@@ -209,7 +169,6 @@ describe("buildSkillCandidateSuperset", () => {
       originals: skills,
       nameCandidates: [{ skillName: "alpha", score: 1, source: "name-match" }],
       retrievalCandidates: [],
-      experiences: [experience],
       expanded: [gamma],
       expandedNames: ["gamma"],
       visibleSkills: [...skills, gamma],

@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { IntentReviewLogWriter } from "./log-writer.js";
 import { parseReviewLog } from "./log.js";
-import type { ReviewFinding, SkillRelationReviewFinding } from "./types.js";
+import type { SkillRelationReviewFinding } from "./types.js";
 import { logger } from "../../api.js";
 
 describe("IntentReviewLogWriter", () => {
@@ -168,50 +168,6 @@ describe("IntentReviewLogWriter", () => {
     },
   );
 
-  it("records only completed findings while preserving partial experience state and graph receipt", async () => {
-    const completedExperience: ReviewFinding = {
-      trigger: "capability-fit",
-      targetKind: "skill-experience",
-      operation: "refine",
-      targetExperienceIds: ["complete-entry"],
-      dedupeKey: "completed",
-      summary: "Refine the completed entry",
-      evidence: ["The completed file was reread"],
-      correctionGoal: "Keep the completed refinement",
-      suggestedChange: "Updated the experience",
-    };
-    expect(
-      await writer.record(
-        "partial",
-        source,
-        [relationFinding, completedExperience],
-        {
-          outcome: "partially-applied",
-          changedRelationCount: 1,
-          relationBatchId: "graph-batch-1",
-          relationOutcome: "applied",
-          experienceOutcome: "partial",
-          changedExperienceIds: ["complete-entry", "incomplete-entry"],
-          partialExperienceIds: ["incomplete-entry"],
-          validationErrors: ["experience-write-failed"],
-        },
-      ),
-    ).toBe(true);
-    const log = parseReviewLog(
-      JSON.parse(fs.readFileSync(path.join(root, "review.json"), "utf8")),
-    );
-    expect(log.processedEvents.partial).toMatchObject({
-      outcome: "partially-applied",
-      changeCount: 2,
-      changes: [relationFinding, completedExperience],
-      changedRelationCount: 1,
-      relationBatchId: "graph-batch-1",
-      experienceOutcome: "partial",
-      changedExperienceIds: ["complete-entry", "incomplete-entry"],
-      partialExperienceIds: ["incomplete-entry"],
-    });
-  });
-
   it("rejects malformed relation receipts without logging rejected evidence or values", async () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     expect(
@@ -250,200 +206,59 @@ describe("IntentReviewLogWriter", () => {
     expect(fs.readdirSync(privateRoot)).toEqual(["review.json"]);
   });
 
-  it("writes one v8 record for an applied review", async () => {
-    const finding = {
-      trigger: "capability-fit" as const,
-      targetKind: "skill-experience" as const,
-      operation: "refine" as const,
-      targetExperienceIds: ["productivity"] as [string],
-      dedupeKey: "deploy-flow",
-      summary: "Reusable deployment flow",
-      evidence: ["Five related tool calls"],
-      correctionGoal: "Preserve deployment workflow",
-      suggestedChange: "Updated productivity",
-    };
-
-    expect(
-      await writer.record("session-1:turn-1", source, [finding], {
-        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
-      }),
-    ).toBe(true);
-    expect(await writer.record("session-1:turn-1", source, [finding])).toBe(
-      false,
-    );
-
-    expect(
-      JSON.parse(fs.readFileSync(path.join(root, "review.json"), "utf8")),
-    ).toMatchObject({
+  it("preserves an unsupported prior log without rewriting it", async () => {
+    const file = path.join(root, "review.json");
+    const prior = JSON.stringify({
       schemaVersion: 8,
-      processedEvents: {
-        "session-1:turn-1": {
-          triggers: ["capability-fit"],
-          changeCount: 1,
-          outcome: "applied",
-          changes: [{ targetKind: "skill-experience", operation: "refine" }],
-        },
-      },
+      processedEvents: {},
+      reviewedSkillEpochs: {},
     });
+    fs.writeFileSync(file, prior);
+    expect(await writer.record("new", source, [])).toBe(false);
+    expect(fs.readFileSync(file, "utf8")).toBe(prior);
   });
-
-  it.each(["create", "refine", "merge", "delete"] as const)(
-    "persists %s metadata and preserves unclassified v8 history",
-    async (operation) => {
-      const finding: ReviewFinding = {
-        trigger: "capability-fit",
-        targetKind: "skill-experience",
-        targetExperienceIds:
-          operation === "merge" ? ["kept-entry", "old-entry"] : ["old-entry"],
-        dedupeKey: "change",
-        summary: "Reviewed experience",
-        evidence: ["Verified file changes"],
-        correctionGoal: "Keep useful guidance",
-        suggestedChange: "Applied the declared operation",
-        ...(operation === "merge"
-          ? {
-              operation,
-              sourceExperienceIds: ["old-entry"],
-              retainedExperienceId: "kept-entry",
-            }
-          : { operation }),
-      };
-      const oldChange = {
-        trigger: finding.trigger,
-        targetKind: finding.targetKind,
-        targetExperienceIds: ["historical-entry"],
-        dedupeKey: "historical",
-        summary: finding.summary,
-        evidence: finding.evidence,
-        correctionGoal: finding.correctionGoal,
-        suggestedChange: finding.suggestedChange,
-      };
-      const oldEvent = {
-        processedAt: "2026-06-11T00:00:00.000Z",
-        triggers: ["capability-fit"],
-        changeCount: 1,
-        outcome: "applied",
-        changes: [oldChange],
-      };
-      const logPath = path.join(root, "review.json");
-      fs.writeFileSync(
-        logPath,
-        JSON.stringify({
-          schemaVersion: 8,
-          createdAt: oldEvent.processedAt,
-          updatedAt: oldEvent.processedAt,
-          processedEvents: { old: oldEvent },
-          reviewedSkillEpochs: {},
-        }),
-      );
-      expect(
-        await writer.record("new", source, [finding], {
-          nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
-          changedExperienceIds: finding.targetExperienceIds,
-        }),
-      ).toBe(true);
-      const log = parseReviewLog(JSON.parse(fs.readFileSync(logPath, "utf8")));
-      expect(log.processedEvents.old).toEqual(oldEvent);
-      expect(log.processedEvents.new?.changes?.[0]).toEqual(finding);
-      expect(log.processedEvents.new?.changedExperienceIds).toEqual(
-        finding.targetExperienceIds,
-      );
-    },
-  );
-
-  it("preserves legacy v8 audit history and epoch deduplication when recording a new event", async () => {
-    const prior = {
-      processedAt: "2026-06-11T00:00:00.000Z",
-      triggers: ["intent-health-check"],
-      changeCount: 1,
-      outcome: "applied",
-      changedIntentIds: ["build"],
-      changes: [
-        {
-          trigger: "intent-health-check",
-          targetKind: "intent-markdown",
-          operation: "refine",
-          targetIntentIds: ["build"],
-          dedupeKey: "refine-build",
-          summary: "Refine build workflow",
-          evidence: ["Verified command"],
-          correctionGoal: "Use current command",
-          suggestedChange: "Update body",
-        },
-      ],
+  it("preserves current skill epochs and does not advance a cursor when preparation skipped", async () => {
+    const file = path.join(root, "review.json");
+    const key = "c".repeat(64);
+    const epoch = {
+      agentId: "main",
+      skillName: "test",
+      source: "workspace",
+      reason: "low-adoption",
+      completedAt: source.turnStart,
+      outcome: "nofinding",
+      eventId: "prior",
     };
-    const epochKey = "a".repeat(64);
-    const reviewedSkillEpochs = {
-      [epochKey]: {
-        agentId: "main",
-        skillName: "writer",
-        source: "workspace",
-        reason: "low-adoption",
-        completedAt: "2026-06-11T00:00:00.000Z",
+    const log = {
+      schemaVersion: 9,
+      createdAt: source.turnStart,
+      updatedAt: source.turnStart,
+      processedEvents: {},
+      reviewedSkillEpochs: { [key]: epoch },
+    };
+    fs.writeFileSync(file, JSON.stringify(log));
+    expect(writer.completedSkillEpochKeys()).toEqual(new Set([key]));
+    expect(
+      await writer.record("skipped", source, [], {
+        triggers: ["relation-health-check"],
         outcome: "nofinding",
-        eventId: "prior",
-      },
-    };
-    const logPath = path.join(root, "review.json");
-    fs.writeFileSync(
-      logPath,
-      JSON.stringify({
-        schemaVersion: 8,
-        createdAt: "2026-06-11T00:00:00.000Z",
-        updatedAt: "2026-06-11T00:00:00.000Z",
-        processedEvents: { prior },
-        reviewedSkillEpochs,
-      }),
-    );
-    expect(writer.completedSkillEpochKeys()).toEqual(new Set([epochKey]));
-    expect(
-      await writer.record("next", source, [], {
-        triggers: ["experience-health-check"],
-        nowMs: Date.parse("2026-06-11T00:01:00.000Z"),
+        relationPreparation: {
+          status: "skipped",
+          reason: "no-seeds",
+          requestedSeeds: 0,
+          capturedSeeds: 0,
+          capturedExtras: 0,
+          existingNeighborAttempts: 0,
+          discoveryAttempts: 0,
+          skippedCaptureCount: 0,
+        },
       }),
     ).toBe(true);
-    const persisted = JSON.parse(fs.readFileSync(logPath, "utf8"));
-    expect(persisted.processedEvents.prior).toEqual(prior);
-    expect(persisted.reviewedSkillEpochs).toEqual(reviewedSkillEpochs);
-    expect(persisted.processedEvents.next).toBeDefined();
-  });
-
-  it("replaces a legacy review log before recording a new event", async () => {
-    const logPath = path.join(root, "review.json");
-    fs.writeFileSync(
-      logPath,
-      JSON.stringify({
-        schemaVersion: 7,
-        createdAt: "2026-06-01T00:00:00.000Z",
-        updatedAt: "2026-06-01T00:00:00.000Z",
-        processedEvents: { prior: {} },
-        reviewedSkillEpochs: {},
-      }),
-    );
-
-    expect(
-      await writer.record("next", source, [], {
-        triggers: ["experience-health-check"],
-      }),
-    ).toBe(true);
-    const persisted = JSON.parse(fs.readFileSync(logPath, "utf8"));
-    expect(persisted).toMatchObject({ schemaVersion: 8 });
-    expect(persisted.processedEvents).not.toHaveProperty("prior");
-    expect(persisted.processedEvents.next.triggers).toEqual([
-      "experience-health-check",
+    const saved = parseReviewLog(JSON.parse(fs.readFileSync(file, "utf8")));
+    expect(saved.reviewedSkillEpochs).toEqual(log.reviewedSkillEpochs);
+    expect(saved.relationInspectionCursors).toBeUndefined();
+    expect(saved.processedEvents.skipped?.triggers).toEqual([
+      "relation-health-check",
     ]);
   });
-
-  it.each([
-    ["malformed", "{ broken"],
-    ["unsupported schema", JSON.stringify({ schemaVersion: 5 })],
-  ])(
-    "preserves %s review.json instead of replacing history",
-    async (_name, original) => {
-      const logPath = path.join(root, "review.json");
-      fs.writeFileSync(logPath, original);
-      await expect(writer.record("event-1", source, [])).resolves.toBe(false);
-      expect(fs.readFileSync(logPath, "utf8")).toBe(original);
-    },
-  );
 });

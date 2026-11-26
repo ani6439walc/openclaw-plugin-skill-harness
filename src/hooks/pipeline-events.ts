@@ -7,8 +7,7 @@ import type { PluginHookAgentContext } from "./types.js";
 const SKILL_HARNESS_EVENT_STREAM = "plugin:skill-harness";
 const SKILL_HARNESS_EVENT_KIND = "skill-harness.pipeline";
 
-export type PipelinePhase =
-  "pipeline" | "name-match" | "search" | "experience-search" | "rerank";
+export type PipelinePhase = "pipeline" | "name-match" | "search" | "rerank";
 
 export type PipelineState = "started" | "completed" | "failed";
 
@@ -31,13 +30,10 @@ export type PipelineMetadata = {
   durationMs?: number;
   nameCandidates?: number;
   retrievalCandidates?: number;
-  experienceCandidates?: number;
   candidateCount?: number;
   injectedCount?: number;
   selectedSkills?: string[];
-  selectedExperiences?: string[];
   injectedSkills?: string[];
-  injectedExperiences?: string[];
   fallbackReason?: SkillCandidatePoolFallbackReason;
   collectionHits?: Partial<Record<"meta" | "body" | "references", number>>;
   injectedCollections?: Partial<Record<"meta" | "body" | "references", number>>;

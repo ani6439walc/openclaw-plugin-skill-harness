@@ -18,7 +18,6 @@ describe("skill-harness manifest", () => {
       "skill_list",
       "skill_search",
       "skill_view",
-      "skill_experience",
     ]);
     expect(manifest).not.toHaveProperty("commandAliases");
   });
@@ -112,7 +111,7 @@ describe("skill-harness manifest", () => {
       "inherits the top-level model",
     );
     expect(review.properties.modelFallback.description).toContain(
-      "Last-resort Intent Review model",
+      "Last-resort Review model",
     );
     expect(review.properties.modelFallback.description).toContain(
       "not a runtime retry model",
@@ -123,13 +122,15 @@ describe("skill-harness manifest", () => {
       default: 300,
     });
     expect(review.properties).not.toHaveProperty("keywordCoverage");
-    expect(triggers.intentHealthCheck.properties.everyTurns.default).toBe(10);
+    expect(triggers.relationHealthCheck.properties.everyTurns.default).toBe(10);
     expect(triggers.routingUncertainty.properties.confidenceBelow.default).toBe(
       0.5,
     );
     expect(triggers.capabilityFit.properties.toolCalls.default).toBe(5);
     expect(triggers.capabilityFit.properties.toolFailures.default).toBe(2);
     for (const removed of [
+      "experienceHealthCheck",
+      "intentHealthCheck",
       "skillCandidate",
       "skillPlacement",
       "processGap",
@@ -163,34 +164,11 @@ describe("skill-harness manifest", () => {
     );
   });
 
-  it("matches the runtime thresholds schema for experiences routing and removes intents", () => {
-    expect(
-      manifest.configSchema.properties.routing.properties.intents,
-    ).toBeUndefined();
-    const experiences =
-      manifest.configSchema.properties.routing.properties.experiences
-        .properties;
-    expect(experiences.search.properties.minCandidateScore).toEqual({
-      type: "number",
-      minimum: 0,
-      maximum: 1,
-      default: 0.4,
-      description: expect.any(String),
-    });
-    expect(experiences.relevanceThreshold).toEqual({
-      type: "number",
-      minimum: 0,
-      maximum: 1,
-      default: 0.6,
-      description: expect.any(String),
-    });
-    expect(experiences.maxInjectedExperiences).toEqual({
-      type: "integer",
-      minimum: 0,
-      maximum: 20,
-      default: 4,
-      description: expect.any(String),
-    });
+  it("rejects retired routing sections in the public contract", () => {
+    const routing = manifest.configSchema.properties.routing;
+    expect(routing.additionalProperties).toBe(false);
+    expect(routing.properties).not.toHaveProperty("experiences");
+    expect(routing.properties).not.toHaveProperty("intents");
   });
 
   it("declares collectionWeights supporting positive floating-point numbers", () => {

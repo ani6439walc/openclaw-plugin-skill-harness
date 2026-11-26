@@ -11,7 +11,7 @@ describe("SKILL_HARNESS_SYSTEM_CONTEXT", () => {
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_search`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_view`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).not.toContain("`skill_manage`");
-    expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain("`skill_experience`");
+    expect(SKILL_HARNESS_SYSTEM_CONTEXT).not.toContain("`skill_experience`");
     expect(SKILL_HARNESS_SYSTEM_CONTEXT).toContain(
       "Use only the Skill Harness tools exposed in the current turn",
     );
@@ -52,7 +52,7 @@ describe("SKILL_HARNESS_SYSTEM_CONTEXT", () => {
       "intent_matched_skills",
     );
     expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain("skill_candidates");
-    expect(SKILL_HARNESS_ROUTING_CONTEXT).toContain("matched_experiences");
+    expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain("matched_experiences");
     expect(SKILL_HARNESS_ROUTING_CONTEXT).not.toContain(
       "domain_skill_candidates",
     );

@@ -24,7 +24,6 @@ const LATENCY_BUCKETS = [
 const ROUTE_REASONS = ["qmd-keyword", "qmd-hybrid", "llm-classifier"];
 const OUTCOMES = [
   "applied",
-  "partially-applied",
   "nofinding",
   "schema-rejected",
   "parse-failed",
@@ -150,8 +149,8 @@ function requireObject(value, field, target) {
 }
 function loadReviewLog(target) {
   const value = loadJson(target);
-  if (value.schemaVersion !== 8)
-    throw new Error(`${target} must be a current schema-v8 review log`);
+  if (value.schemaVersion !== 9)
+    throw new Error(`${target} must be a current schema-v9 review log`);
   for (const field of ["processedEvents", "reviewedSkillEpochs"])
     requireObject(value, field, target);
   return value;
@@ -302,22 +301,6 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
         : null,
   };
 }
-function qmdHealth(root) {
-  const experiences = path.join(root, "experiences"),
-    intents = path.join(root, "intents");
-  const useExperiences =
-    isFile(path.join(experiences, "experience-routing.sqlite")) ||
-    (isDirectory(experiences) &&
-      !isFile(path.join(intents, "intent-routing.sqlite")));
-  const snapshot = useExperiences ? experiences : intents;
-  return qmdDatabaseHealth(
-    snapshot,
-    path.join(
-      snapshot,
-      useExperiences ? "experience-routing.sqlite" : "intent-routing.sqlite",
-    ),
-  );
-}
 function skillQmdHealth(root) {
   const roots = children(root)
     .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
@@ -392,27 +375,12 @@ function sessionHealth(sessionsDir, agentsDir) {
     ).length,
   };
 }
-function countExperiences(root) {
-  const dirs = children(root).filter((entry) =>
-    isDirectory(path.join(root, entry.name)),
-  );
-  const files = walk(root).filter(
-    (target) => target.endsWith(".md") && isFile(target),
-  );
-  return {
-    count: dirs.length,
-    markdownFiles: files.length,
-    bytes: sum(files.map((target) => fs.statSync(target).size)),
-  };
-}
 
 function reviewChangeSummary(events) {
   const outcomes = counter(),
     changesPerEvent = counter(),
     changesByTrigger = counter(),
     operations = counter(),
-    targetIntents = counter(),
-    targetExperiences = counter(),
     triggerEvents = counter(),
     noFindingReasons = counter(),
     schemaRejectionReasons = counter(),
@@ -430,7 +398,6 @@ function reviewChangeSummary(events) {
       continue;
     }
     const outcome = event.outcome;
-    increment(outcomes, typeof outcome === "string" ? outcome : "<non-string>");
     const prep = event.relationPreparation;
     if (isObject(prep) && ["ready", "skipped"].includes(prep.status)) {
       increment(preparation, prep.status);
@@ -445,6 +412,8 @@ function reviewChangeSummary(events) {
       )
         increment(skipReasons, prep.reason);
     } else eventsWithoutPreparation++;
+    if (outcome === "skipped") continue;
+    increment(outcomes, typeof outcome === "string" ? outcome : "<non-string>");
     const assessment = objectOrEmpty(event.relationReview);
     for (const [field, counts] of [
       ["existing", existingAssessments],
@@ -465,8 +434,7 @@ function reviewChangeSummary(events) {
     for (const trigger of Array.isArray(event.triggers) ? event.triggers : [])
       if (typeof trigger === "string") increment(triggerEvents, trigger);
     const changes =
-      ["applied", "partially-applied"].includes(outcome) &&
-      Array.isArray(event.changes)
+      outcome === "applied" && Array.isArray(event.changes)
         ? event.changes
         : [];
     increment(changesPerEvent, String(changes.length));
@@ -485,12 +453,6 @@ function reviewChangeSummary(events) {
         )
           increment(committedOperations, change.operation);
       }
-      for (const [field, counts] of [
-        ["targetIntentIds", targetIntents],
-        ["targetExperienceIds", targetExperiences],
-      ])
-        for (const id of Array.isArray(change[field]) ? change[field] : [])
-          if (typeof id === "string") increment(counts, id);
     }
     for (const [field, counts] of [
       ["noFindingReasonCounts", noFindingReasons],
@@ -501,10 +463,10 @@ function reviewChangeSummary(events) {
   }
   const eventCount = sum([...outcomes.values()]),
     total = sum([...changesByTrigger.values()]),
-    appliedEvents =
-      (outcomes.get("applied") ?? 0) + (outcomes.get("partially-applied") ?? 0);
+    appliedEvents = outcomes.get("applied") ?? 0;
   return {
     eventCount,
+    skippedPreparations: preparation.get("skipped") ?? 0,
     invalidRecords,
     outcomes: counterDict(outcomes),
     changes: {
@@ -516,8 +478,6 @@ function reviewChangeSummary(events) {
       eventsByChangeCount: counterDict(changesPerEvent),
       byTrigger: counterDict(changesByTrigger),
       byOperation: counterDict(operations),
-      topTargetExperiences: topCounts(targetExperiences, "experience"),
-      topTargetIntents: topCounts(targetIntents, "intent"),
     },
     triggerEvents: counterDict(triggerEvents),
     noFindingReasons: counterDict(noFindingReasons),
@@ -823,7 +783,7 @@ function discoveryAnalysis(rows) {
       ).length,
       injectedSkillCount: observedSum(rows, "qmdSearch", "injectedSkills"),
       injectedCountMeaning:
-        "includes experience-source skills; not pure skill-search conversion",
+        "schema-v7 QMD bucket, including historical routing sources; attribution is not a search conversion rate",
     },
     pool: {
       nonEmptyTurns: ratio(observedSum(rows, "pool", "nonEmptyTurns"), turns),
@@ -877,6 +837,7 @@ function reviewAnalysis(review, start, end) {
     });
   const result = reviewChangeSummary(Object.fromEntries(selected));
   const completed = selected
+    .filter(([, event]) => event.outcome !== "skipped")
     .map(([, value]) => value.processedAt)
     .sort((a, b) => isoTimestamp(b) - isoTimestamp(a));
   return {
@@ -946,7 +907,6 @@ function routingObservations(root) {
         at,
         completed: end !== null,
         skills: nameList(raw.matchedSkills),
-        experiences: nameList(raw.matchedExperiences),
         used: nameList(raw.skillsUsed, true),
         confidence: observedNumber(raw.confidence),
         discovery: pick(discovery, [
@@ -956,7 +916,6 @@ function routingObservations(root) {
           "retrievalCandidates",
           "durationMs",
         ]),
-        experienceRetrieval: discovery.experienceRetrieval,
       };
       const key = JSON.stringify([session.sessionId, identity]),
         priority = Number(end !== null) * 2 + Number(current),
@@ -970,9 +929,7 @@ function routingObservations(root) {
 }
 function sessionAnalysis(records, start, end) {
   const rows = records.filter((row) => start <= row.at && row.at < end),
-    routed = rows.filter(
-      (row) => row.skills !== null && row.experiences !== null,
-    ),
+    routed = rows.filter((row) => row.skills !== null),
     completeUsage = routed.filter((row) => row.completed && row.used !== null),
     usage = new Map();
   for (const row of completeUsage)
@@ -1003,59 +960,10 @@ function sessionAnalysis(records, start, end) {
     adoption: ratio(count.adoptedTurns, count.injectedTurns),
     lowSample: count.injectedTurns < 20,
   }));
-  const statuses = counter(),
-    thresholds = counter(),
-    scores = [];
-  let candidates = 0,
-    hits = 0,
-    selected = 0,
-    selectedCount = 0,
-    candidateRows = 0,
-    candidateWithHits = 0,
-    scoreRows = 0;
-  for (const row of routed) {
-    const retrieval = objectOrEmpty(row.experienceRetrieval),
-      status = retrieval.status;
-    increment(
-      statuses,
-      ["completed", "disabled", "unavailable", "timeout", "error"].includes(
-        status,
-      )
-        ? status
-        : "unobserved",
-    );
-    if (status !== "completed") continue;
-    const n = observedNumber(retrieval.candidateCount);
-    if (n !== null) {
-      candidateRows++;
-      candidates += n;
-      candidateWithHits += Number(n > 0);
-      if (n > 0) {
-        selected += Number(row.experiences.size > 0);
-        selectedCount += row.experiences.size;
-      }
-    }
-    if (Array.isArray(retrieval.hits)) {
-      hits += retrieval.hits.length;
-      scoreRows++;
-      for (const hit of retrieval.hits) {
-        const score = observedNumber(objectOrEmpty(hit).semanticScore);
-        if (score !== null) scores.push(score);
-      }
-    }
-    const threshold = observedNumber(retrieval.minCandidateScore);
-    if (threshold !== null) increment(thresholds, String(threshold));
-  }
   const poolRows = routed.filter(
-    (row) =>
-      observedNumber(row.discovery.candidateCount) !== null &&
-      observedNumber(objectOrEmpty(row.experienceRetrieval).candidateCount) !==
-        null,
+    (row) => observedNumber(row.discovery.candidateCount) !== null,
   );
-  const nonempty = poolRows.filter(
-    (row) =>
-      row.discovery.candidateCount + row.experienceRetrieval.candidateCount > 0,
-  );
+  const nonempty = poolRows.filter((row) => row.discovery.candidateCount > 0);
   return {
     status: rows.length ? "observed" : "unavailable",
     source: "retained-session-routing-fields",
@@ -1072,15 +980,11 @@ function sessionAnalysis(records, start, end) {
       poolObservedTurns: poolRows.length,
       emptyPoolTurns: poolRows.length - nonempty.length,
       nonEmptyWithoutInjection: ratio(
-        nonempty.filter((row) => !row.skills.size && !row.experiences.size)
-          .length,
+        nonempty.filter((row) => !row.skills.size).length,
         nonempty.length,
       ),
       skillInjectedTurns: routed.filter((row) => row.skills.size > 0).length,
-      experienceInjectedTurns: routed.filter((row) => row.experiences.size > 0)
-        .length,
       injectedSkills: sum(routed.map((row) => row.skills.size)),
-      injectedExperiences: sum(routed.map((row) => row.experiences.size)),
       confidence: numericSummary(
         routed
           .map((row) => row.confidence)
@@ -1091,18 +995,6 @@ function sessionAnalysis(records, start, end) {
           .map((row) => observedNumber(row.discovery.durationMs))
           .filter((value) => value !== null),
       ),
-    },
-    experienceRetrieval: {
-      statuses: counterDict(statuses),
-      statusDenominator: routed.length,
-      candidateObservedTurns: candidateRows,
-      hitTurns: ratio(candidateWithHits, candidateRows),
-      candidateCount: candidateRows ? candidates : null,
-      hitCount: scoreRows ? hits : null,
-      selectedFromNonEmpty: ratio(selected, candidateWithHits),
-      selectedExperiencesFromNonEmpty: candidateRows ? selectedCount : null,
-      semanticScore: numericSummary(scores),
-      observedThresholds: counterDict(thresholds),
     },
     skills: {
       topUsed: ranked(skillUsage, "usageTurns"),
@@ -1328,8 +1220,7 @@ export function buildReport(
       `runtime state changed while being read: ${changed.join(", ")}`,
     );
   const intentPaths = directFiles(path.join(dataRoot, "intents"), ".md"),
-    qmd = qmdHealth(path.join(dataRoot, "qmd"));
-  qmd.skills = skillQmdHealth(path.join(dataRoot, "qmd/skills/indexes"));
+    qmd = { skills: skillQmdHealth(path.join(dataRoot, "qmd/skills/indexes")) };
   return {
     schemaVersion: 1,
     reportOnly: true,
@@ -1353,7 +1244,6 @@ export function buildReport(
         path.join(dataRoot, "sessions"),
         path.join(dataRoot, "agents"),
       ),
-      experiences: countExperiences(path.join(dataRoot, "experiences")),
       intents: {
         markdownFiles: intentPaths.length,
         bytes: sum(intentPaths.map((target) => fs.statSync(target).size)),

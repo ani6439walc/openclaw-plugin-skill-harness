@@ -3,24 +3,23 @@
 [![OpenClaw](https://img.shields.io/badge/Platform-OpenClaw-blue.svg)](https://github.com/openclaw/openclaw)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Skill Harness is an OpenClaw plugin that helps agents find relevant skills and reuse experience from previous work. Before an agent replies, it searches skills and experiences, selects the relevant candidates, and adds compact guidance to the conversation. An optional reviewer turns evidence from completed turns into reusable experience and maintains skill relations using bounded skill-content evidence.
+Skill Harness helps OpenClaw agents find and load the workflows relevant to a request. It searches each agent's visible skill library, considers documented relationships between skills, and adds short descriptions to the prompt. The agent can then open the full instructions through `skill_view`.
 
-The project combines **skill discovery**, **experience retrieval**, and **experience curation** around existing OpenClaw agents. Skills remain ordinary skill files; experience lives separately in runtime storage.
+Skills remain ordinary files. An optional background reviewer reads skill documents in light of completed turns and proposes changes to a private relation graph.
 
 ## Why this project exists
 
 As a skill library grows, listing every skill in every prompt consumes context and makes it harder to find the right workflow. Short descriptions also leave out details that matter for selection: applicability, prerequisites, operating steps, and failure conditions often appear only in the full skill document.
 
-Repeated work introduces another problem. An agent may solve the same issue again without retaining the useful procedure, while indiscriminate memory capture accumulates duplicate or outdated advice.
+Some workflows also depend on context from another skill. A graph can make that connection discoverable while keeping the specific reason and direction available for inspection.
 
-Skill Harness addresses these problems with:
+Three design choices keep the prompt focused.
 
-- **On-demand discovery:** search skill metadata, bodies, and reference files before selecting a bounded set for the current task.
-- **Reusable experience:** retrieve past procedures independently of skill discovery, including standalone guidance without skill associations.
-- **Progressive loading:** inject descriptions and experience summaries; let the agent load detailed instructions when relevant.
-- **Evidence-based curation:** optionally review completed turns, check existing coverage, and create, refine, merge, or delete experience when the evidence supports a change. The same Review can create, update, or delete skill relations using exact evidence from both endpoint skills.
+- **On-demand discovery.** Search skill metadata, bodies, and reference files before selecting a bounded set for the current task.
+- **Progressive loading.** Include descriptions and relevant relation hints in the prompt. Load full documents only when the agent needs them.
+- **Evidence-based review.** Require exact evidence from both endpoint skills before accepting a proposed addition, correction, or deletion in the graph.
 
-For example, a request to diagnose a deployment can surface a relevant operations skill alongside an experience describing a previously verified diagnostic sequence. The agent loads the skill through `skill_view`, queries further experience through `skill_experience`, and applies the guidance to the current environment.
+For example, a request to diagnose a deployment readiness failure can surface an operations skill through a troubleshooting procedure in its reference files. The agent sees the skill description and any relevant graph hints, then calls `skill_view` to read the procedure.
 
 ## Research context
 
@@ -31,7 +30,7 @@ These papers provide context for the design choices and related directions. The 
 | [SkillRouter: Skill Routing for LLM Agents at Scale](https://arxiv.org/abs/2603.22455)                                         | Skill bodies contain routing evidence that names and descriptions can miss; retrieve candidates before reranking. | Searches metadata, bodies, and references, then uses one constrained Decision selection call. Uses QMD and Jev rather than SkillRouter's trained retrieval/reranking models.                                                                                    |
 | [SkillDAG: Self-Evolving Typed Skill Graphs for LLM Skill Selection at Scale](https://arxiv.org/abs/2606.03056)                | Typed directed relations add structure to skill selection, and execution can inform graph evolution.              | Uses a private relation graph with bounded candidate expansion when usable evidence exists. Optional Review maintains imported and Review-created relations using exact skill-content evidence; relations remain advisory, without hard dependency enforcement. |
 | [Compositional Skill Routing for LLM Agents: Decompose, Retrieve, and Compose (SkillWeaver)](https://arxiv.org/abs/2606.18051) | Complex tasks can require decomposition, retrieval, and dependency-aware composition of multiple skills.          | Selects multiple relevant skills; task decomposition and executable DAG planning remain related work, outside the current routing pipeline.                                                                                                                     |
-| [SkillOpt: Executive Strategy for Self-Evolving Agent Skills](https://arxiv.org/abs/2605.23904)                                | Bounded document edits can improve an agent's external state when accepted through validation.                    | Reviewer changes pass schema, content, operation, and concurrency checks. This is experience curation; it does not optimize skill files using scored rollouts or held-out performance tests.                                                                    |
+| [SkillOpt: Executive Strategy for Self-Evolving Agent Skills](https://arxiv.org/abs/2605.23904)                                | Bounded edits to external state can be checked before publication.                                                | In Skill Harness, the editable state is the relation graph. The parent validates evidence, identities and revisions before publishing changes. Skill-file optimization using scored rollouts remains a research direction.                                      |
 
 ## Architecture
 
@@ -40,42 +39,38 @@ flowchart TD
   U[Conversation turn] --> H[OpenClaw before_prompt_build]
   H --> W[Static working-set descriptions]
   H --> S[Skill candidates: name matching and QMD search]
-  H --> E[Experience candidates: QMD search]
   G[Private skill-relation graph] -.-> S
   S --> J[One constrained Decision selection call]
-  E --> J
   G -. Bounded relation relevance questions .-> J
   W --> C[Agent context]
   J --> C
   C --> A[Agent loads guidance and executes tools]
   A --> T[Session evidence and aggregate statistics]
   T -. Review enabled .-> R[Background reviewer]
-  R --> V[Validate findings and file changes]
-  V --> X[Shared runtime experiences]
+  R --> V[Validate proposed relations against both skill documents]
   V --> G
-  X --> E
 ```
 
-| Component           | Role                                                                                                                 |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Skill catalog       | Resolves the invoking agent's visible skills and provides discovery/loading tools.                                   |
-| QMD indexes         | Hybrid retrieval over skill metadata, bodies and references, and experience keywords, summaries and bodies.          |
-| Decision selector   | Evaluates the combined candidate pool against the conversation and configured relevance thresholds.                  |
-| Prompt integration  | Adds a static working set and compact, advisory dynamic context through OpenClaw hooks.                              |
-| Background reviewer | Optionally examines completed turns and proposes validated experience and skill-relation changes.                    |
-| Runtime state       | Stores experiences, session evidence, review outcomes, managed indexes, and aggregate telemetry outside the package. |
+| Component           | Role                                                                                                                   |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Skill catalog       | Resolves the invoking agent's visible skills and provides discovery/loading tools.                                     |
+| QMD skill index     | Retrieves visible skills across metadata, bodies, and references.                                                      |
+| Decision selector   | Evaluates the combined candidate pool against the conversation and configured relevance thresholds.                    |
+| Prompt integration  | Adds a static working set and compact, advisory dynamic context through OpenClaw hooks.                                |
+| Background reviewer | Inspects completed turns and skill documents and can propose graph changes.                                            |
+| Runtime state       | Holds session evidence, statistics, Review receipts, the relation graph and managed skill indexes outside the package. |
 
 ### Before a reply
 
 1. Add skill-discovery guidance and the configured static working-set descriptions. Automatic workspace/workshop additions can be controlled separately.
-2. For eligible agents and chats, search skill and experience candidates in parallel using the conversation context. Skill discovery combines typo-aware name matching with QMD retrieval.
-3. Build one deduplicated skill pool from name/QMD hits and visible skills associated with all retrieved experience candidates. When usable graph evidence exists, bounded relation expansion starts only from the original name/QMD hits. If candidates exist, make at most one unified Decision evaluation that independently scores every skill, experience and bounded relation; an empty pool skips selection.
-4. Inject only individually selected skills and experiences, subject to their separate configured limits. Selecting an experience does not automatically select its associated skills.
-5. The agent uses `skill_view` to load skill instructions and `skill_experience` to search detailed experience before applying relevant guidance.
+2. For eligible agents and chats, combine typo-aware skill name matching with QMD search over the configured conversation context.
+3. Deduplicate the retrieved skills. If the graph has usable evidence, expand one bounded hop from the original matches. A nonempty pool gets at most one Decision evaluation with a question for each skill and each eligible relation.
+4. Inject selected skill descriptions up to the configured limit. Include a relation hint only when its anchor skill was selected and the relation meets its own relevance threshold.
+5. The agent loads a skill or one of its reference files through `skill_view`.
 
-Recent conversation input is stripped of Skill Harness, Hindsight Memory and native Active Memory injection blocks before skill and experience selection. This prevents previous recommendations or recalled memories from being treated as user requests. The cleanup applies to routing input copies; it does not rewrite the session transcript or the main model's history.
+Recent conversation input is stripped of Skill Harness, Hindsight Memory and native Active Memory injection blocks before skill selection. This prevents previous recommendations or recalled memories from being treated as user requests. The cleanup applies to routing input copies; it does not rewrite the session transcript or the main model's history.
 
-Dynamic context contains optional `<matched_skills>` and standalone `<matched_experiences>` blocks. Each selected experience summary appears once: inside its highest-scored final associated skill, or standalone if no associated skill survives selection. Skills are ordered by selector score with a locale-independent name tie-break (UTF-16 string order); experience score ties use the same ordering on IDs. Experiences with no associations, invisible associations or rejected associated skills remain eligible. Placement never boosts skill scores or requires loading a skill. The context is advisory, non-user input; full documents and the entire catalog are not inserted.
+The dynamic context marks its contents as advisory and puts the selected descriptions in `<matched_skills>`. Skills are ordered by selector score, with UTF-16 name order as a stable tie-break. Each applicable relation appears under its selected anchor skill.
 
 Runtime search or selection failures let the main agent continue with available static context. Failed selection does not inject an unchecked fallback list. Invalid configuration can still prevent the plugin from loading.
 
@@ -83,19 +78,17 @@ When OpenClaw supplies a native request admission ID, prompt rebuilds for that r
 
 ### After a completed turn
 
-Review is disabled by default. When enabled, experience-health cadence, uncertain routing, or capability-fit evidence can schedule a background investigation. A trigger does not itself prove that an experience should be written.
+Review is disabled by default. When enabled, the relation-health cadence, uncertain routing, or capability-fit evidence can schedule a background investigation. A reviewer can complete the investigation with no finding.
 
 The Review execution module loads only after Review is enabled and a trigger survives evaluation. After asynchronous loading and snapshot preparation, the plugin rechecks lifecycle cancellation, scheduler disposal, host hook validity, and the originating turn before queueing work. Pipeline events remain synchronous. QMD itself remains loaded on demand.
 
-The reviewer checks existing coverage before creating an entry, prefers refining an existing procedure, and can merge overlapping experiences or remove guidance proven obsolete, useless, or superseded. A no-finding outcome is valid. Changes are checked against the declared operation, actual file changes, eligible observed skills, and concurrent updates before writeback.
+The reviewer can propose creating, updating, or deleting imported and Review-created relations. It works from bounded snapshots and must cite both endpoint skills. The parent checks the current identities, evidence and targeted revisions before publishing the graph changes and their operation history.
 
-The same Review can create, update, or delete imported and Review-created skill relations using bounded snapshots and exact evidence from both endpoint skills. The parent validates current identities, evidence and targeted revisions before publishing changes with their operation history. Graph and experience changes commit independently; a committed graph change remains recorded if later experience work fails. See [Skill relations](#skill-relations) for evidence and concurrency limits.
-
-Review operates on experience copies and staged skill snapshots in a temporary workspace. Filesystem tools are workspace-restricted; `exec` follows the host execution policy and has no additional shell sandbox supplied by this plugin. Its prompt limits commands to experience maintenance. The parent publishes validated relation proposals through the graph writer; the reviewer has no graph-writing tool. Review does not train model weights or authorize edits to skill sources.
+The reviewer works with staged snapshots in a temporary workspace. It receives read-only tools for inspecting files and visible skills. The parent owns the graph writer. [Skill relations](#skill-relations)
 
 ## Installation and setup
 
-Use OpenClaw **2026.10.9 or later**, Node.js **26.12.1 or later**, and the pnpm version declared in [`package.json`](package.json). QMD requires Node.js 26; development CI uses Node.js 26.
+Use OpenClaw **2026.11.10**, Node.js **26.12.1 or later**, and the pnpm version declared in [package.json](package.json). The manifest specifies the minimum compatible Gateway and the package pins its peer dependency to this release. Development CI uses Node.js 26.
 
 ### 1. Build and install
 
@@ -138,13 +131,22 @@ Merge this entry into your existing `openclaw.json`:
 
 Automatic selection first checks the invoking agent's host `decisionModel` string, then `agents.defaults.decisionModel`, then the plugin's endpoint object above. An explicit empty or whitespace-only agent string suppresses the global default and permits the plugin route; an absent, null, or non-string agent value inherits a nonempty global string. A host-only setup may omit plugin `decisionModel`; a plugin-only setup needs no host Decision selection. Without either route, dynamic selection is skipped. Every host call carries the owning `agentId`, including when the model is inherited globally. Once the host route is selected, unavailable providers, timeouts, malformed answers, and errors skip dynamic context without trying the plugin endpoint or conversational model.
 
-Skills, experiences, and relation questions share one full batch per eligible turn. Empty pools make no evaluation call; hook rebuilds reuse the same turn's in-flight or terminal result. Neither route retries, splits batches, nor trims candidates to fit a provider. Full-batch preflight rejects more than 256 questions, 1 MiB of JSON, 20,000 nodes, or depth 32; a provider's smaller limits may return `unsupported-input`, which skips selection. `routing.timeoutMs` defaults to 5,000 ms; host evaluation uses at most 30,000 ms. Host requests use the public Decision V1 API without model or thinking overrides. Turn deadlines and plugin shutdown cancel selection; static context remains available.
+Skill and relation questions share one full batch per eligible turn. Empty pools make no evaluation call; hook rebuilds reuse the same turn's in-flight or terminal result. Neither route retries, splits batches, nor trims candidates to fit a provider. Full-batch preflight rejects more than 256 questions, 1 MiB of JSON, 20,000 nodes, or depth 32; a provider's smaller limits may return `unsupported-input`, which skips selection. `routing.timeoutMs` defaults to 5,000 ms; host evaluation uses at most 30,000 ms. Host requests use the public Decision V1 API without model or thinking overrides. Turn deadlines and plugin shutdown cancel selection; static context remains available.
 
-Managed skill and experience searches keep `rerank: false`; query expansion continues to use `qmd.expansion`. `qmd.jev` can supply QMD's search-strategy/HyDE assistance and native reranking configuration. Omitting it does **not** disable all QMD Jev behavior: the existing Jev expansion compatibility path and native `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, and `TYPESAFE_DEFAULT_MODEL` environment sources remain. Neither plugin nor host `decisionModel` is forwarded to QMD. Changing plugin `decisionModel` does not rotate QMD stores; changing `qmd.jev` drains active operations and reopens the same database without changing the embedding fingerprint.
+Managed skill searches keep `rerank: false`; query expansion continues to use `qmd.expansion`. `qmd.jev` can supply QMD's search-strategy/HyDE assistance and native reranking configuration. Omitting it does **not** disable all QMD Jev behavior: the existing Jev expansion compatibility path and native `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, and `TYPESAFE_DEFAULT_MODEL` environment sources remain. Neither plugin nor host `decisionModel` is forwarded to QMD. Changing plugin `decisionModel` does not rotate QMD stores; changing `qmd.jev` drains active operations and reopens the same database without changing the embedding fingerprint.
+
+#### Upgrading from experience-enabled builds
+
+This release retires experience retrieval, injection, maintenance and the `skill_experience` tool. Existing experience documents and their QMD index can stay in place. The new runtime does not create, read, modify or remove `dataRoot/experiences/` or `dataRoot/qmd/experiences/`.
+
+1. Prepare the build and its matching configuration together. Remove the entire `routing.experiences` block and any `review.triggers.experienceHealthCheck` or `review.triggers.intentHealthCheck` settings. The strict schema rejects the old keys. To carry forward an intentional cadence, set `review.triggers.relationHealthCheck` with `enabled` and `everyTurns`. Remove `skill_experience` from tool allowlists and prompts.
+2. Stop the old generation and all Review writers before switching. Preserve the previous build and configuration. If an older `review.json` exists, move it to a private archive outside the active data root. The new writer starts a relation-only schema-v9 log and refuses to overwrite an unsupported existing file.
+3. Retain the skill-relation graph and its source registry, existing sessions and statistics, skill indexes, shared embedding cache, and archived experience data. The cutover does not require rebuilding the graph or clearing historical data. New routed turns record skill selections, and new counts use those selected skills.
+4. Start the matching build and configuration. Verify the three public tools, skill-only prompt output on an eligible request, and a relation Review receipt if Review is enabled. To roll back, stop the new generation, preserve its log separately, and restore the old build, configuration and compatible Review log together.
 
 #### Migrating the former root Jev setting
 
-Back up your configuration privately before upgrading. Remove the old top-level plugin `jev` object: the strict manifest rejects it, and the runtime compatibility parser ignores it without an alias. To retain its QMD use, copy the endpoint explicitly to `qmd.jev`; to retain plugin selection or manual import, separately configure `decisionModel`. Neither new field inherits the other. A configured host Decision model now takes precedence over plugin selection. Validate the new shape in an isolated profile before applying it. Configuration rollback requires restoring both the prior plugin build and its prior configuration shape; preserve runtime sessions, experiences, graph, statistics, and Review state. A QMD downgrade additionally requires the matching offline index backup described below.
+Back up your configuration privately before upgrading. Remove the old top-level plugin `jev` object: the strict manifest rejects it, and the runtime compatibility parser ignores it without an alias. To retain its QMD use, copy the endpoint explicitly to `qmd.jev`; to retain plugin selection or manual import, separately configure `decisionModel`. Neither new field inherits the other. A configured host Decision model now takes precedence over plugin selection. Validate the new shape in an isolated profile before applying it. Configuration rollback requires restoring both the prior plugin build and its prior configuration shape; preserve runtime sessions, graph, statistics, and Review state. A QMD downgrade additionally requires the matching offline index backup described below.
 
 External plugins need `hooks.allowConversationAccess: true` to register conversation hooks, including automatic prompt routing and end-of-turn Review. Keep `hooks` beside `config`, not inside it. Prompt modification is allowed by default; an explicit `hooks.allowPromptModification: false` disables the prompt hook even with conversation access. The plugin does not grant itself these permissions. See [OpenClaw hook permissions](https://docs.openclaw.ai/plugins/hooks#permissions-and-scope).
 
@@ -154,15 +156,15 @@ The bundled QMD runtime uses remote models only. BM25, document reads, Chinese s
 
 Old local QMD configurations and indexes remain readable for lexical search and diagnostics. They are not automatically adopted into a remote embedding identity. To change embedding providers or models, configure a remote provider and follow the explicit whole-database rebuild procedure below; preserve the existing collection definitions and back up the index first. The separate vector layout conversion described below does not change embedding identity. Local inference SDK entry points are breaking changes; see QMD's remote-only compatibility notes.
 
-The plugin pins the published `@wei840222/qmd` version `2026.10.25`; the lockfile records the registry artifact. Install with `pnpm install --frozen-lockfile` to reproduce that dependency. No Git checkout or unpublished QMD prerelease is required.
+The plugin pins the published `@wei840222/qmd` version `2026.11.10`; the lockfile records the registry artifact. Install with `pnpm install --frozen-lockfile` to reproduce that dependency. No Git checkout or unpublished QMD prerelease is required.
 
-Before first starting this release against existing indexes, stop all Gateway generations and other processes using those indexes, then take a complete offline backup of `dataRoot/qmd/skills/` and `dataRoot/qmd/experiences/`, including any SQLite WAL/SHM files and the associated mappings, metadata, and leases. Copying a running WAL database file by file is not a consistent backup. Keep the backup outside the repository and package.
+Before first starting this release against existing indexes, stop all Gateway generations and other processes using those indexes, then take a complete offline backup of `dataRoot/qmd/skills/`, including any SQLite WAL/SHM files and the associated mappings, metadata, and leases. Copying a running WAL database file by file is not a consistent backup. Keep the backup outside the repository and package.
 
-QMD 2026.10.25 converts the legacy vector table to collection partitions on the first writable open. Full registration owns that initialization, including reopening an unchanged experience catalog; discovery remains read-only and cannot convert an old index. The layout conversion copies usable vectors without calling a model or reembedding, but unsupported legacy tables and rows without active document/chunk metadata can be discarded; do not assume it is lossless. Allow time for conversion and its final VACUUM during startup. Do not run an older QMD build against an index being converted.
+QMD 2026.10.25 converts the legacy vector table to collection partitions on the first writable open. Full registration owns that initialization; discovery remains read-only and cannot convert an old index. The layout conversion copies usable vectors without calling a model or reembedding, but unsupported legacy tables and rows without active document/chunk metadata can be discarded; do not assume it is lossless. Allow time for conversion and its final VACUUM during startup. Do not run an older QMD build against an index being converted.
 
 Restore the complete matching offline index backup before downgrading QMD. Restoring only the old plugin build or mixing an older main database with newer WAL/SHM files is insufficient; without the backup, returning to the older vector layout requires a full paid reembedding. This is separate from changing embedding models or dimensions, which retains its explicit rebuild requirement. A read-only process can use lexical retrieval on an unconverted legacy index, but vector retrieval requires full registration to complete the conversion first.
 
-Set optional `qmd.embeddingCacheDir` to share document embeddings across skill and experience stores, agents, and processes that use the same directory. Without it, QMD uses its in-memory cache. The plugin forwards the directory unchanged after trimming whitespace; it does not append agent or generation names. QMD expands `~`; relative paths use the process working directory, **not** `dataRoot`. Prefer an absolute path on persistent disk, or tmpfs such as `/dev/shm` when RAM usage and loss on reboot are acceptable.
+Set optional `qmd.embeddingCacheDir` to share document embeddings across skill stores, agents, and processes that use the same directory. Without it, QMD uses its in-memory cache. The plugin forwards the directory unchanged after trimming whitespace; it does not append agent or generation names. QMD expands `~`; relative paths use the process working directory, **not** `dataRoot`. Prefer an absolute path on persistent disk, or tmpfs such as `/dev/shm` when RAM usage and loss on reboot are acceptable.
 
 The QMD cache retains successful document embeddings for up to two hours, bounded to 2,000 entries / 64 MiB of payload (SQLite adds overhead). Identity, credentials, and exact formatted input must match. It does not persist query embeddings or expansion results. Cache misses sharing a directory serialize while the remote request runs; waiting respects the request timeout. Cache failure falls back to ordinary embedding, so this is not a permanent exactly-once guarantee. Changing the directory reopens stores after active operations drain without changing index fingerprints or rebuilding vectors. Read-only discovery does not create the disk cache.
 
@@ -190,8 +192,8 @@ QMD `2026.10.6` uses a native Voyage identity. Existing vectors produced by the 
 
 Use a separately approved, one-time maintenance window:
 
-1. Enumerate the distinct skill databases referenced by `dataRoot/qmd/skills/agents/` mappings under `dataRoot/qmd/skills/indexes/<fingerprint>/skill-search.sqlite`, plus `dataRoot/qmd/experiences/experience-routing.sqlite`. Inspect each database with the new resolved models and `readOnly: true`; check `getStatus().diagnostics.embedding.identity.compatible`. Confirm the exact affected databases and embedding request cost before rebuilding.
-2. Stop **all** Gateway generations and other users of these databases. Back up the affected stores and managed metadata while quiescent. Preserve snapshots, mappings, leases, `gc.json`, and experience metadata; do not delete index directories or rewrite identity fields.
+1. Enumerate the distinct skill databases referenced by `dataRoot/qmd/skills/agents/` mappings under `dataRoot/qmd/skills/indexes/<fingerprint>/skill-search.sqlite`. Inspect each database with the new resolved models and `readOnly: true`; check `getStatus().diagnostics.embedding.identity.compatible`. Confirm the exact affected databases and embedding request cost before rebuilding.
+2. Stop **all** Gateway generations and other users of these databases. Back up the affected stores and managed metadata while quiescent. Preserve snapshots, mappings, leases and `gc.json`; do not delete index directories or rewrite identity fields.
 3. Open each affected database with the installed QMD SDK, its exact `dbPath`, and the complete `config: { collections, models }` using its existing managed collection definitions and the new resolved Voyage settings. Preserve collection contexts and global context if present. Supplying inline config reconciles the database collections: do not omit `collections` or replace them with an empty object. Call `await store.embed({ force: true })` once per database, with no collection restriction, and always close the store. This replaces its vectors, makes new API requests, and bypasses the document cache; do not add `force` to recurring refreshes.
 4. Require zero embedding errors, `needsEmbedding === 0`, compatible identity and ready embedding build diagnostics, then verify `searchVector()` on known indexed content. Reopen read-only and recheck before restarting the Gateway. A subsequent ordinary `embed()` should process zero unchanged documents. If any database fails, keep maintenance paused and inspect diagnostics or restore the quiescent backup; do not resume with an assumed successful rebuild.
 5. Restart with the new plugin and verify searches through each intended agent's actual Gateway tools. Check semantic diagnostics separately from lexical results. Local tests do not establish deployed readiness.
@@ -220,6 +222,8 @@ By default, startup empties native `agents.defaults.skills`, removes agent-speci
 
 Agent-specific working-set entries appear before shared defaults, followed by enabled workspace and workshop additions. Include flags affect automatic prompt additions; the agent can still discover or explicitly load visible skills through tools.
 
+If an old working set still explicitly lists the retired bundled `skill-harness` maintenance skill, remove that entry unless it selects an intentional same-name skill from another source. Changing the effective source roots may select a different skill index during the normal refresh lifecycle.
+
 ### 4. Enable and verify
 
 ```bash
@@ -238,9 +242,9 @@ After rebuilding an existing linked installation, use `openclaw plugins reload s
 
 ### Automatic routing
 
-Continue using your agent normally. By default, dynamic routing applies to agent `main` in direct chats, uses recent conversation context, and injects up to **8 skills** and **4 experiences**.
+Continue using your agent normally. By default, dynamic routing applies to agent `main` in direct chats, uses recent conversation context, and injects up to **8 skills**.
 
-Automatic skill and experience routing requires at least `routing.minTriggerChars` characters in the trimmed current request (default `5`, positive integer). Length uses JavaScript UTF-16 code units; most Chinese characters count as one. The check runs before adding conversation history, so earlier messages cannot make a short current request pass. Short requests keep static working-set guidance and access to manual skill tools. Set `routing.minTriggerChars` to `1` to allow single-character requests; blank input remains excluded.
+Automatic skill routing requires at least `routing.minTriggerChars` characters in the trimmed current request (default `5`, positive integer). Length uses JavaScript UTF-16 code units; most Chinese characters count as one. The check runs before adding conversation history, so earlier messages cannot make a short current request pass. Short requests keep static working-set guidance and access to manual skill tools. Set `routing.minTriggerChars` to `1` to allow single-character requests; blank input remains excluded.
 
 To change scope or limits, merge a routing fragment into the plugin configuration:
 
@@ -251,25 +255,23 @@ To change scope or limits, merge a routing fragment into the plugin configuratio
     scope: { agents: ["main"], chatTypes: ["direct"] },
     queryMode: "recent",
     skills: { maxInjectedSkills: 8 },
-    experiences: { maxInjectedExperiences: 4 },
   },
 }
 ```
 
-Set `maxInjectedSkills: 0` for experience-only routing; set `maxInjectedExperiences: 0` to disable automatic experience retrieval.
+Set `routing.skills.maxInjectedSkills: 0` to skip automatic skill discovery, relation scoring and dynamic injection. Static working-set guidance and the three agent tools remain available.
 
 ### Agent tools
 
 Agents can use these tools even when automatically selected guidance is insufficient:
 
-All four tools return the same JSON payload as rendered text for direct calls and as structured results for Code Mode, including tool-reported errors.
+All three tools return the same JSON payload as rendered text for direct calls and as structured results for Code Mode, including tool-reported errors.
 
-| Tool               | Inputs and purpose                                                                                                                                                                                                                      |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skill_list`       | Lists visible skills. `offset` defaults to 0; `limit` defaults to 150, maximum 500. Optional `show_stats` and `show_related` default to false. Follow pagination for larger catalogs.                                                   |
-| `skill_search`     | Requires `query`; hybrid-searches metadata, bodies and references. `limit` defaults to 20, maximum 100. `show_evidence` defaults to true; `show_stats` and `show_related` default to false. Returns `skills`, without paths.            |
-| `skill_view`       | Requires `name`; loads the skill document. Optional `file_path` loads a relative support file under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`.                                                                 |
-| `skill_experience` | Accepts mutually exclusive `id` (exact full-body read, max 64 CP) or `query` (search, max 500 CP). `limit` defaults to 5 (1–20) for search. `show_skills` defaults to true. Search tries QMD then catalog fallback without calling Jev. |
+| Tool           | Inputs and purpose                                                                                                                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skill_list`   | Lists visible skills. `offset` defaults to 0; `limit` defaults to 150, maximum 500. Optional `show_stats` and `show_related` default to false. Follow pagination for larger catalogs.                                        |
+| `skill_search` | Requires `query`; hybrid-searches metadata, bodies and references. `limit` defaults to 20, maximum 100. `show_evidence` defaults to true; `show_stats` and `show_related` default to false. Returns `skills`, without paths. |
+| `skill_view`   | Requires `name`; loads the skill document. Optional `file_path` loads a relative support file under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`.                                                      |
 
 Example tool arguments:
 
@@ -277,13 +279,11 @@ Example tool arguments:
 { "query": "diagnose a deployment readiness failure", "limit": 5 }
 ```
 
-Use those arguments with `skill_search` to find skills or `skill_experience` to find experience, or call `skill_experience` with `{ "id": "your-experience-id" }` to read a known or injected experience's full untruncated body. Load a selected skill with `skill_view`, for example `{ "name": "your-operations-skill" }`.
-
-Experiences are shared across agents. Skill visibility filters displayed associations and final injected skill names, rather than excluding experience entries. An experience can therefore be found with `skills: []` when all associated skills are invisible; `show_skills: false` omits that field. Associations are hints, not prerequisite or access-control declarations. Search responses bound bodies to 4,000 code points each and 10,000 total and report `body_truncated` per entry; exact `id` reads return the complete untruncated body (`body_truncated: false`).
+Pass those arguments to `skill_search`, then use a returned name in `skill_view`, for example `{ "name": "your-operations-skill" }`.
 
 ### Enable review
 
-Merge this into the plugin configuration to enable the optional learning loop:
+Merge this into the plugin configuration to enable background relation review.
 
 ```json5
 {
@@ -295,35 +295,9 @@ Merge this into the plugin configuration to enable the optional learning loop:
 }
 ```
 
-Remove the example `model` line to use the session/agent model. Default triggers include a health check every 10 turns, routing confidence below 0.5, and capability-fit thresholds of 5 tool calls or 2 failures, plus inventory evidence. Runs are debounced and serialized in the background; they do not change the route already used for a completed turn.
+Remove the example `model` line to use the session/agent model. Default triggers include a relation health check every 10 turns (`review.triggers.relationHealthCheck`), routing confidence below 0.5, and capability-fit thresholds of 5 tool calls or 2 failures, plus inventory evidence. Runs are debounced and serialized in the background; they do not change the route already used for a completed turn.
 
-The reviewer has `ls`, `read`, `write`, `edit`, `exec`, `skill_experience`, `skill_list`, `skill_search`, and `skill_view`. Review may incur additional model costs and may create, refine, merge, or delete runtime experiences. The same run can propose skill-relation changes; enabling Review does not add a second relation-review run.
-
-Refinement consolidates existing guidance rather than appending an incident log: read the full entry, replace superseded sections, preserve verified prerequisites and outcomes, and check Unicode limits before finishing. Summaries allow 240 code points, bodies 12,000, and keywords up to 12 entries of 64 code points each. If no useful improvement fits safely, leave the entry unchanged and return no finding. Validation remains strict; these instructions do not guarantee model compliance.
-
-### Maintain experience manually
-
-The package no longer bundles a `skill-harness` maintenance skill. For explicit manual maintenance, inspect existing coverage, read entries in full, and validate a staged tree before applying changes. The [maintenance procedure](AGENTS.md#manual-experience-maintenance) documents the steps and visibility requirements. After building from a source checkout, run:
-
-```bash
-node scripts/validate-experiences.mjs --experiences-dir /path/to/staged/experiences --visible-skills-file /path/to/private/visible-skills.json
-```
-
-The visibility file maps every configured agent ID to its complete visible skill-name list. Validation is read-only; resolve all errors before relying on the edited entries.
-
-When upgrading, remove `skill-harness` from explicit working-set lists if it referred to the retired bundled skill; another visible same-name skill can still resolve normally. If removing the package skill root changes the effective source-root set, the managed skill-index fingerprint changes and full registration builds or selects an index through the normal lifecycle. The experience index and persisted sessions/statistics/Review history need no migration for this retirement.
-
-There are no pre-seeded experiences. Each entry is a directory under the default runtime data root:
-
-```text
-~/.openclaw/plugins/skill-harness/experiences/<id>/
-  summary.md   # required; concise procedure summary, up to 240 code points
-  keywords.md  # required; up to 12 keywords, 64 code points each
-  body.md      # required; reusable steps and applicability, up to 12,000 code points
-  skills.md    # optional; associated skill names, one per line
-```
-
-One experience can relate to multiple skills, and one skill can relate to multiple experiences. Write applicability and prerequisites into the procedure itself.
+The reviewer can use `ls`, `read`, `skill_list`, `skill_search` and `skill_view`. Each run may incur model costs. Only the parent can publish a validated batch of graph operations.
 
 ### Skill relations
 
@@ -333,19 +307,19 @@ New graphs use stable skill identities, such as `github:owner/repository:skill-k
 
 Each imported relation records the content fingerprints of both endpoints. Relation hints are available only while both endpoints match that evidence; changing a node cannot refresh older relations' evidence. Back up the source registry with the graph. The stable-identity runtime format requires a coordinated plugin/graph upgrade: stage and validate the rebuilt graph first, then publish it with the compatible build. Existing v1 graphs retain their legacy identity checks; a newer graph must not be published to an older loaded plugin.
 
-When Review runs, relation inspection starts from the union of that turn's final recommended skills and successfully loaded skills, filtered to the current agent's visible winning sources. Recommendation is not counted as loading, adoption or execution. Up to four existing incident graph neighbors are prepared first, using a persisted rotation position. The reviewer then searches autonomously from the conversation, experiences and skill content, with at most four `skill_search` calls. Calling `skill_view` admits eligible full skill snapshots into this run’s evidence scope. Existing and discovered endpoints share a budget of eight distinct extra-skill attempts; failed captures also consume a slot, while repeated reads reuse the same snapshot. The parent no longer pre-searches discovery candidates. Each proposal must touch an original seed; extra skills never seed another hop. Missing source registrations skip those skills without allocating identities. Experience associations retain their existing loaded-skill eligibility.
+When Review runs, relation inspection starts from the union of that turn's final recommended skills and successfully loaded skills, filtered to the current agent's visible winning sources. Recommendation is not counted as loading, adoption or execution. Up to four existing incident graph neighbors are prepared first, using a persisted rotation position. The reviewer then searches autonomously from the conversation and skill content, with at most four `skill_search` calls. Calling `skill_view` admits eligible full skill snapshots into this run’s evidence scope. Existing and discovered endpoints share a budget of eight distinct extra-skill attempts; failed captures also consume a slot, while repeated reads reuse the same snapshot. The parent no longer pre-searches discovery candidates. Each proposal must touch an original seed; extra skills never seed another hop. Missing source registrations skip those skills without allocating identities.
 
 The parent stages full `SKILL.md` copies in the temporary Review workspace, including eligible skills requested through Review’s `skill_view`. The tool returns the same captured content, line numbers and stable identity used for validation. Support files can inform understanding but do not become formal relation evidence. Review reads do not count as skill adoption or usage. Files larger than 256 KiB are unavailable as evidence, and the complete snapshot is capped at 2 MiB. Search snippets, scores, co-recommendation and co-loading do not establish a relation. Review must cite exact line ranges and excerpts from both endpoint snapshots and explain the type, direction and reason. Clear content evidence is sufficient without an execution trial. `depends_on` requires an explicit necessary condition. Updates must identify the old error; deletion needs contradiction, duplication or supersession rather than low usage or missing search results. All six types remain advisory and have no confidence levels.
 
 Each Review may propose up to eight create/update/delete changes, including changes to imported author relations. After closing tool admission and draining accepted work, the parent verifies the accumulated evidence scope, exact excerpts, current visible winners, source bindings, content fingerprints and the latest operation revision of each target pair. A target conflict rejects the entire relation batch; unrelated graph changes do not block it. Accepted changes preserve all existing JSONL bytes and append logical operations: `relate` for create, `unrelate` plus `relate` for update, and `unrelate` for delete. The graph lock covers validation and atomic replacement of the complete file, so the new operations publish together. Operation-level `review` metadata stores batch/event/agent IDs, time, rationale, evidence digests and the previous relation. New edge properties omit `source`; historical `source: author-import` records remain readable, and imported `sourceGraphDigest` is preserved on updates.
 
-Ordinary incremental imports cannot overwrite reviewed pairs or resurrect Review deletions. The full ontology import CLI rejects a destination with Review history; complete replacement requires the explicit graph snapshot maintenance path and a backup. Review does not compact history or reset sessions/statistics. Graph and experience writes are separate domains: a committed graph batch remains recorded if later experience work conflicts, partially fails or is canceled. Additive schema-v8 Review receipts distinguish domain outcomes and actual experience deltas; relation-only changes do not rebuild the experience index. Review provides no graph-writing tool; `exec` remains governed by host policy, and filesystem `workspaceOnly` is not shell containment.
+Ordinary incremental imports cannot overwrite reviewed pairs or resurrect Review deletions. The full ontology import CLI rejects a destination with Review history; complete replacement requires the explicit graph snapshot maintenance path and a backup. Review does not compact history or reset sessions/statistics. Schema-v9 Review receipts record the number of committed graph operations, the batch ID and the outcome.
 
-Every triggered run with eligible relation seeds must return separate `relationReview.existing` and `relationReview.discovery` assessments: `changes-proposed`, `no-change`, or `not-applicable` where permitted. Experience-only output is incomplete in that case. These assessments describe model-reported inspection and proposals, not committed changes or proof of improved outcomes. `relationPreparation` records readiness, fixed skip reasons and aggregate capture counts; `relationSearchCount` records search attempts. A discovery `no-change` assessment requires at least one nonempty search attempt; an unavailable search still counts as an attempt, not a successful lookup. Existing `not-applicable` is valid only when the admitted evidence scope contains no existing relations. Historical events without these fields remain unknown. The runtime-health report separates these observations from committed relation operations.
+Every triggered run with eligible relation seeds must return separate `relationReview.existing` and `relationReview.discovery` assessments: `changes-proposed`, `no-change`, or `not-applicable` where permitted. These assessments describe model-reported inspection and proposals, not committed changes or proof of improved outcomes. `relationPreparation` records readiness, fixed skip reasons and aggregate capture counts; `relationSearchCount` records search attempts. A discovery `no-change` assessment requires at least one nonempty search attempt; an unavailable search still counts as an attempt, not a successful lookup. Existing `not-applicable` is valid only when the admitted evidence scope contains no existing relations. Historical events without these fields remain unknown. The runtime-health report separates these observations from committed relation operations.
 
 Rotation positions live in `review.json` and are capped at 256 seed groups. A stable seed group and neighbor list advance through successive batches; changing groups, catalog changes or cursor eviction can repeat earlier samples. Search is bounded exploration, not exhaustive coverage. Canceled runs with no committed work retain the existing no-record behavior.
 
-**Upgrade and rollback:** stop every old Review writer before installing this version and back up the complete `review.json`. New readers accept historical v8 records, but older strict v8 readers reject the new optional inspection fields and can reset the log. Do not run old and new writers together. Before downgrading, preserve the newer log separately and restore the compatible backup. The new writer refuses to overwrite an unreadable or unsupported existing log; investigate and recover that file rather than expecting an automatic reset.
+For Review log compatibility and rollback, follow the [upgrade procedure](#upgrading-from-experience-enabled-builds) before enabling the new writer.
 
 To customize the XML injection threshold, set:
 
@@ -355,15 +329,15 @@ To customize the XML injection threshold, set:
 }
 ```
 
-Expansion adds a bounded outgoing hop from the first eight original skill candidates: at most two new skills per seed and eight per turn, distributed round-robin. It remains one hop, and experiences do not seed expansion.
+Expansion adds a bounded outgoing hop from the first eight original skill candidates: at most two new skills per seed and eight per turn, distributed round-robin. Expanded endpoints never seed a second hop.
 
 The same Decision call also scores whether each graph relation, its reason and both endpoint descriptions offer useful reference value for the current task, independently from skill relevance. This assesses reference value rather than whether a relation is a verified or unmet prerequisite. Relation assertions remain unverified reference data, not instructions. For each skill candidate, it considers at most two incoming/outgoing relations (16 questions total), preserving their original direction. Both endpoints must be visible, identity-matching winning skills with a nonempty reason. Graph lookup, expansion deduplication and self comparisons use NFKC-normalized, trimmed, lowercase identities while displayed names retain their original spelling. The other endpoint may be outside the candidate pool: its name and description are supplied as background, without creating a candidate or using an injection slot. Reasons are bounded to 500 Unicode code points and each endpoint description to 1,000.
 
-The shared Decision state exposes `skill_candidates` with names, descriptions, discovery sources, `experience_ids` and `relation_ids`; `experience_candidates` with IDs, summaries and visible associated skill names; and `skill_relation_evidence` with stable question IDs such as `relation_0`, anchor, direction, endpoint descriptions and relation reasons. Questions point to these entries so candidate provenance and the scored relation are explicit. Background endpoints remain outside `skill_candidates` unless independently discovered.
+The shared Decision state exposes `skill_candidates` with names, descriptions, discovery sources and `relation_ids`, plus `skill_relation_evidence` with stable question IDs such as `relation_0`, anchor, direction, endpoint descriptions and relation reasons. Questions point to these entries so candidate provenance and the scored relation are explicit. Background endpoints remain outside `skill_candidates` unless independently discovered.
 
 Only relations scoring at least `routing.skills.related.relevanceThreshold` (default `0.8`, inclusive range `0`–`1`) are rendered as `<relation>` children inside the final injected anchor skill's XML. Each child preserves `from`, `to`, type and relation reason; relation payloads omit `verification_status` and XML omits the `verification` attribute. Scores stay in optional session/event diagnostics. Relation scores never change skill scores, routing confidence or injection caps. A related endpoint is not automatically loaded, and the prompt does not claim that prerequisites or execution order have been verified. All six relation types remain advisory, including dependency/conflict labels.
 
-Relation expansion and scoring have no enable switch. The threshold supports live configuration updates and applies consistently to injection diagnostics and XML rendering on subsequent turns. A threshold of `0` allows every scored relation whose anchor is selected. This is separate from skill/experience selection thresholds and the importer’s relation-type classification thresholds. Missing or invalid graphs leave ordinary routing working without relation evidence. Importing a graph remains a separate step; existing sessions and statistics are preserved without rewriting historical records.
+Relation expansion and scoring have no enable switch. The threshold supports live configuration updates and applies consistently to injection diagnostics and XML rendering on subsequent turns. A threshold of `0` allows every scored relation whose anchor is selected. This is separate from the skill selection threshold and the importer’s relation-type classification thresholds. Missing or invalid graphs leave ordinary routing working without relation evidence. Importing a graph remains a separate step; existing sessions and statistics are preserved without rewriting historical records.
 
 Before upgrading, remove the retired `routing.skills.related.enabled` field from plugin configuration (whether `true` or `false`): the strict public schema rejects it. Keep any `relevanceThreshold` value. Previously disabled deployments now use bounded expansion and relation scoring automatically; limits and skill selection rules remain unchanged. See the [staged import procedure in AGENTS.md](AGENTS.md#advanced-relation-import-procedure).
 
@@ -371,23 +345,22 @@ Before upgrading, remove the retired `routing.skills.related.enabled` field from
 
 The full accepted schema is in [`openclaw.plugin.json`](openclaw.plugin.json). Common settings below live inside the plugin's `config` object. Host `agents.*.decisionModel` strings are configured outside that object:
 
-| Setting                                                                           | Default                       | Effect                                                                                                     |
-| --------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `decisionModel`                                                                   | omitted                       | TypeSafe endpoint for plugin selection and manual relation classification; no QMD inheritance.             |
-| `qmd.jev`                                                                         | omitted                       | QMD-only endpoint; native QMD expansion/environment fallbacks still apply.                                 |
-| `routing.scope.agents` / `chatTypes`                                              | `["main"]` / `["direct"]`     | Select eligible agents and chat types. Optional allowed/denied chat-ID lists further restrict scope.       |
-| `routing.queryMode`                                                               | `"recent"`                    | Choose `message`, `recent`, or `full` query context; `routing.contextWindow` bounds recent history.        |
-| `routing.skills.search.minCandidateScore`                                         | `0.6`                         | Minimum semantic score for a skill candidate.                                                              |
-| `routing.experiences.search.minCandidateScore`                                    | `0.4`                         | Minimum semantic score for an experience candidate.                                                        |
-| `routing.skills.relevanceThreshold` / `routing.experiences.relevanceThreshold`    | `0.6` / `0.6`                 | Selection thresholds, distinct from retrieval thresholds.                                                  |
-| `routing.skills.related.relevanceThreshold`                                       | `0.8`                         | Minimum relation reference-value score for XML hints; 0–1, live-updatable, selected anchor still required. |
-| `routing.skills.maxInjectedSkills` / `routing.experiences.maxInjectedExperiences` | `8` / `4`                     | Final context limits. Zero disables the corresponding automatic discovery/injection.                       |
-| `routing.timeoutMs`                                                               | `5000`                        | Selection budget; host Decision caps it at 30,000 ms.                                                      |
-| `qmd.timeoutMs`                                                                   | `15000`                       | QMD request budget; individual skill/experience `search.timeoutMs` can override retrieval budgets.         |
-| `qmd.indexRefreshIntervalSeconds`                                                 | `300`                         | Background source-check interval; zero disables recurring checks.                                          |
-| `skills.search.collectionWeights`                                                 | meta/body/references: `3/2/1` | Relative collection weights for skill search.                                                              |
-| `review.enabled`                                                                  | `false`                       | Enable automatic experience curation and skill-relation review.                                            |
-| `review.thinking` / `timeoutSeconds`                                              | `"medium"` / `300`            | Reviewer reasoning level and run budget.                                                                   |
+| Setting                                     | Default                       | Effect                                                                                                     |
+| ------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `decisionModel`                             | omitted                       | TypeSafe endpoint for plugin selection and manual relation classification; no QMD inheritance.             |
+| `qmd.jev`                                   | omitted                       | QMD-only endpoint; native QMD expansion/environment fallbacks still apply.                                 |
+| `routing.scope.agents` / `chatTypes`        | `["main"]` / `["direct"]`     | Select eligible agents and chat types. Optional allowed/denied chat-ID lists further restrict scope.       |
+| `routing.queryMode`                         | `"recent"`                    | Choose `message`, `recent`, or `full` query context; `routing.contextWindow` bounds recent history.        |
+| `routing.skills.search.minCandidateScore`   | `0.6`                         | Minimum semantic score for a skill candidate.                                                              |
+| `routing.skills.relevanceThreshold`         | `0.6`                         | Minimum Decision score for injecting a skill.                                                              |
+| `routing.skills.related.relevanceThreshold` | `0.8`                         | Minimum relation reference-value score for XML hints; 0–1, live-updatable, selected anchor still required. |
+| `routing.skills.maxInjectedSkills`          | `8`                           | Maximum injected skills. Zero skips automatic discovery and selection.                                     |
+| `routing.timeoutMs`                         | `5000`                        | Selection budget; host Decision caps it at 30,000 ms.                                                      |
+| `qmd.timeoutMs`                             | `15000`                       | QMD request budget. `routing.skills.search.timeoutMs` can override the routing search budget.              |
+| `qmd.indexRefreshIntervalSeconds`           | `300`                         | Background source-check interval; zero disables recurring checks.                                          |
+| `skills.search.collectionWeights`           | meta/body/references: `3/2/1` | Relative collection weights for skill search.                                                              |
+| `review.enabled`                            | `false`                       | Enable automatic skill-relation review.                                                                    |
+| `review.thinking` / `timeoutSeconds`        | `"medium"` / `300`            | Reviewer reasoning level and run budget.                                                                   |
 
 ## Runtime health and troubleshooting
 
@@ -399,21 +372,21 @@ node scripts/runtime-health-audit.mjs --days 7 --output /tmp/skill-harness-runti
 
 The report separates cumulative statistics from daily and retained-session observations. Missing data is reported as unavailable. Recorded skill use is not a measure of task success, and the report does not prove that the Gateway loaded the plugin. See the [audit procedure](AGENTS.md#runtime-health-audit-procedure).
 
-Runtime state lives separately from package files under `~/.openclaw/plugins/skill-harness/`: experiences, sessions, `stats.json`, `review.json`, managed `qmd/` indexes, and optional `skill-relations/`. Keep runtime files and reports private.
+Runtime state lives separately from package files under `~/.openclaw/plugins/skill-harness/`: sessions, `stats.json`, `review.json`, managed `qmd/skills/` indexes, and optional `skill-relations/`. Keep runtime files and reports private.
 
 | Symptom                             | Check                                                                                                                                                                                                             |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Plugin fails to load                | Run `plugins doctor`; verify the build and required QMD settings and optional Decision endpoints. On older configurations, remove retired `instruction`, `rerank`, and legacy routing fields.                     |
 | No dynamic context                  | Check enabled state, agent/chat scope, index readiness, endpoints, thresholds and limits. No eligible candidates or failed selection intentionally inject no dynamic context.                                     |
-| Search is unavailable after install | Allow background indexing to complete and check model services; `skill_experience` also has catalog fallback.                                                                                                     |
-| No new experience appears           | Review is disabled by default. When enabled, a valid investigation can still conclude there is nothing durable to add.                                                                                            |
+| Search is unavailable after install | Allow background indexing to complete. Check the embedding and expansion endpoints and inspect skill-index refresh diagnostics.                                                                                   |
+| Review proposes no new edge         | Check that Review is enabled, a trigger fired, eligible seeds were captured, and both endpoint skill documents support the proposed relation. A completed review may find no change.                              |
 | Relation graph stays unchanged      | Check preparation, both relation assessments and committed operations separately. A completed `nofinding` run can be healthy; see the verification steps below.                                                   |
 | Review fails with `DataCloneError`  | Builds that put callbacks in `toolBindings` fail when the host clones them. Use a build with cloneable Review descriptors and restart the owning plugin instance through the coordinated upgrade procedure above. |
 | Duplicate skill inventories         | Check native prompt suppression and migrate static selections to `skills.workingSet`.                                                                                                                             |
 
 Skill-index refresh warnings include a JSON diagnostic suffix with the index fingerprint, failure phase, a fixed reason code, whether an existing store remains searchable, consecutive failures, retry delay, and a redacted error diagnostic (`errorName`, string `errorCode`, truncated `errorMessage`). A recovery message records the previous failure count when a later refresh and embedding check succeed. These fields survive the host's single-string logger contract. Credential assignments and `sk-` tokens are redacted; stacks, causes, raw provider bodies, queries, and credentials are excluded. Unknown failures use `operation-failed`. A refresh warning alone does not mean searches are unavailable.
 
-Inventory failures now identify the root category, operation phase and fixed error classification without exposing filesystem paths or source content. Experience-index build warnings identify the phase, fingerprint, consecutive failures and retry delay; recovery is recorded after successful publication. These diagnostics use fixed classifications rather than raw error messages.
+Inventory failure diagnostics identify the root category, operation phase and fixed error classification. Private paths and source content are excluded.
 
 An `agent_end` taking 25 seconds emits one slow warning with its current finalization, inventory, statistics or Review-preparation phase. If it later settles, a completion message records elapsed time and outcome. This observes slow work without cancelling it or extending the host timeout; an unsettled warning alone does not prove the cause of a timeout.
 
@@ -431,7 +404,7 @@ Read the following observations together in the private Review log or runtime-he
 | Both assessments report `no-change`      | The reviewer reported no justified relation change; a valid completed `nofinding` run leaves the graph unchanged.                              |
 | An assessment reports `changes-proposed` | Check publication receipts and committed findings before claiming a graph change. Validation or concurrency checks may still reject proposals. |
 
-An experience change alone does not prove that relations changed. Report committed relation create/update/delete operations separately, including graph commits preserved by a `partially-applied` event. Do not force an edge or weaken evidence requirements to make a deployment check produce a write. An observed no-change run verifies that path only; positive graph publication and improved task outcomes require their own evidence. See the [runtime-health procedure](AGENTS.md#verify-a-completed-relation-review) for bounded diagnosis.
+Use committed relation counts and batch receipts to report graph changes. A completed no-change run verifies that path only. Positive graph publication and improved task outcomes each require their own evidence. [Runtime-health procedure](AGENTS.md#verify-a-completed-relation-review)
 
 ## Contributing
 

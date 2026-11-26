@@ -6,14 +6,9 @@ export const MAX_PROMPT_HOOK_TIMEOUT_MS = 60_000 + 60_000 + PROMPT_OVERHEAD_MS;
 
 export function promptRoutingBudgetMs(routing: ResolvedRoutingConfig): number {
   return (
-    Math.max(
-      routing.skills.maxInjectedSkills > 0
-        ? routing.skills.search.timeoutMs
-        : 0,
-      routing.experiences.maxInjectedExperiences > 0
-        ? routing.experiences.search.timeoutMs
-        : 0,
-    ) +
+    (routing.skills.maxInjectedSkills > 0
+      ? routing.skills.search.timeoutMs
+      : 0) +
     routing.timeoutMs +
     PROMPT_OVERHEAD_MS
   );

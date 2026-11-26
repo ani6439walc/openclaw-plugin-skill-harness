@@ -93,7 +93,6 @@ describe("StatsAggregator", () => {
       const state = createState({
         intent: undefined,
         matchedSkills: ["git-master", "dev-lifecycle"],
-        matchedExperiences: ["git-recovery"],
         confidence: 0.8,
         inputSkillDiscovery: legacy.intent!.inputSkillDiscovery,
       });
@@ -127,7 +126,7 @@ describe("StatsAggregator", () => {
       expect(stats.daily["2026-06-11"].intents).toEqual({});
     });
 
-    it.each(["related-declared", "experience-associated"] as const)(
+    it.each(["related-declared"] as const)(
       "counts %s injection in the pool without attributing it to QMD",
       (source) => {
         const state = createState({

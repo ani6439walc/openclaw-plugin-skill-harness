@@ -7,13 +7,13 @@ describe("checkReviewTriggers", () => {
 
   it("runs the health check only at its configured cadence", () => {
     expect(checkReviewTriggers({}, 9, triggers)).not.toContain(
-      "experience-health-check",
+      "relation-health-check",
     );
     expect(checkReviewTriggers({}, 10, triggers)).toContain(
-      "experience-health-check",
+      "relation-health-check",
     );
     expect(checkReviewTriggers({}, 20, triggers)).toContain(
-      "experience-health-check",
+      "relation-health-check",
     );
   });
 
@@ -58,7 +58,7 @@ describe("checkReviewTriggers", () => {
     const custom = resolveConfig({
       review: {
         triggers: {
-          experienceHealthCheck: { everyTurns: 3 },
+          relationHealthCheck: { everyTurns: 3 },
           routingUncertainty: { confidenceBelow: 0.95 },
           capabilityFit: { toolCalls: 2, toolFailures: 1 },
         },
@@ -75,7 +75,7 @@ describe("checkReviewTriggers", () => {
         custom,
       ),
     ).toEqual([
-      "experience-health-check",
+      "relation-health-check",
       "routing-uncertainty",
       "capability-fit",
     ]);
@@ -85,7 +85,7 @@ describe("checkReviewTriggers", () => {
     const disabled = resolveConfig({
       review: {
         triggers: {
-          experienceHealthCheck: { enabled: false },
+          relationHealthCheck: { enabled: false },
           routingUncertainty: { enabled: false },
           capabilityFit: { enabled: false },
         },

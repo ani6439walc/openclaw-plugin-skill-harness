@@ -1,7 +1,7 @@
 import type { ResolvedReviewConfig } from "../types.js";
 
 export const REVIEW_TRIGGER_TYPES = [
-  "experience-health-check",
+  "relation-health-check",
   "routing-uncertainty",
   "capability-fit",
 ] as const;
@@ -16,11 +16,6 @@ type TriggerToolCall = {
 export type TriggerState = {
   toolCalls?: TriggerToolCall[];
   confidence?: number;
-  intent?:
-    | { result?: { confidence?: number; intent?: string } }
-    | { confidence?: number; intent?: string };
-  matchedSkills?: Array<{ name: string }> | string[];
-  matchedExperiences?: Array<{ id: string }> | string[];
 };
 
 export function checkReviewTriggers(
@@ -31,27 +26,19 @@ export function checkReviewTriggers(
   const matches: ReviewTrigger[] = [];
   const toolCalls = state.toolCalls ?? [];
 
-  const healthCheck = config.experienceHealthCheck ?? config.intentHealthCheck;
+  const healthCheck = config.relationHealthCheck;
   if (
     healthCheck?.enabled &&
     turnNumber > 0 &&
     turnNumber % healthCheck.everyTurns === 0
   ) {
-    matches.push("experience-health-check");
+    matches.push("relation-health-check");
   }
-
-  const legacyConfidence =
-    state.intent && "confidence" in state.intent
-      ? state.intent.confidence
-      : state.intent && "result" in state.intent
-        ? state.intent.result?.confidence
-        : undefined;
-  const confidence = state.confidence ?? legacyConfidence;
 
   if (
     config.routingUncertainty.enabled &&
-    typeof confidence === "number" &&
-    confidence < config.routingUncertainty.confidenceBelow
+    typeof state.confidence === "number" &&
+    state.confidence < config.routingUncertainty.confidenceBelow
   ) {
     matches.push("routing-uncertainty");
   }

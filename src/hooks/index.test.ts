@@ -11,9 +11,6 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { logger, setApiLogger, resetApiLogger } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import type { QMDStore } from "@wei840222/qmd";
-import { createSkillExperienceQmdIndex } from "../qmd/experience-index.js";
-import { SkillExperienceCatalog } from "../experiences/catalog.js";
-import { registerSkillTools } from "../skills/tools.js";
 import {
   createHookHandlers,
   formatConversationExpansionContext,
@@ -38,7 +35,6 @@ import {
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   ROUTING_ADVISORY_SKILLS_ONLY_HEADER,
-  ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
 } from "../constants.js";
 import type { IntentReviewLogWriter } from "../review/log-writer.js";
 
@@ -1557,7 +1553,7 @@ description: Navigate Tokyo.
       expect(scheduler.schedule).toHaveBeenCalledOnce();
       expect(module.runReviewSubagent).not.toHaveBeenCalled();
       await scheduler.flush();
-      expect(module.runReviewSubagent).toHaveBeenCalledOnce();
+      expect(module.runReviewSubagent).not.toHaveBeenCalled();
     }
   });
 
@@ -1568,6 +1564,7 @@ description: Navigate Tokyo.
       eventId: "session-1:2026-06-11T00:00:00.000Z",
       turnNumber: 10,
       current: {
+        confidence: 0.2,
         input: "不對，應該是別的做法",
         intent: {
           intent: "other",
@@ -1650,30 +1647,19 @@ description: Navigate Tokyo.
     expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
     expect(reviewer).not.toHaveBeenCalled();
     await reviewScheduler.flush();
-    expect(reviewer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        snapshot: expect.objectContaining({
-          sessionId: "session-1",
-        }),
-        triggers: [
-          "experience-health-check",
-          "routing-uncertainty",
-          "capability-fit",
-        ],
-      }),
-    );
+    expect(reviewer).not.toHaveBeenCalled();
     expect(reviewLogWriter.record).toHaveBeenCalledWith(
       snapshot.eventId,
       expect.objectContaining({ sessionId: "session-1" }),
       [],
       {
         triggers: [
-          "experience-health-check",
+          "relation-health-check",
           "routing-uncertainty",
           "capability-fit",
         ],
-        outcome: "nofinding",
-        noFindingReasonCounts: { "wrong-trigger": 1 },
+        outcome: "skipped",
+        relationSearchCount: 0,
         relationPreparation: {
           status: "skipped",
           reason: "no-seeds",
@@ -1690,93 +1676,7 @@ description: Navigate Tokyo.
     fs.rmSync(tmp, { recursive: true, force: true });
   }, 30_000);
 
-  it("rebuilds QMD only after a review changes an intent routing surface", async () => {
-    const snapshot = {
-      sessionId: "session-experience-refresh",
-      agentId: "main",
-      eventId: "session-experience-refresh:2026-06-11T00:00:00.000Z",
-      turnNumber: 10,
-      current: {
-        input: "find the deployment instructions",
-        timestamps: { start: "2026-06-11T00:00:00.000Z" },
-      },
-      recent: [],
-    };
-    const state = {
-      input: snapshot.current.input,
-      timestamps: snapshot.current.timestamps,
-    };
-    vi.spyOn(defaultTracker, "finalizeTurnFromAgentEnd").mockResolvedValue(
-      "applied",
-    );
-    vi.spyOn(defaultTracker, "getTurnState").mockReturnValue(state);
-    vi.spyOn(defaultTracker, "getReviewSnapshotForTurn").mockReturnValue(
-      snapshot as never,
-    );
-    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(true);
-    const reviewScheduler = createMockReviewScheduler();
-    const mockExperience = {
-      id: "exp-1",
-      summary: "test",
-      keywords: [],
-      body: "",
-    };
-    const experienceCatalog = {
-      listAll: vi.fn().mockReturnValue([mockExperience]),
-    };
-    const qmdExperienceIndex = {
-      schedule: vi.fn(),
-    };
-    const reviewer = vi
-      .fn()
-      .mockResolvedValueOnce({
-        findings: [],
-        outcome: "applied" as const,
-        changedExperienceIds: ["exp-1"],
-      })
-      .mockResolvedValueOnce({
-        findings: [],
-        outcome: "nofinding" as const,
-      });
-    const reviewLogWriter = { record: vi.fn(async () => true) };
-    const turnAssociations = seedAssociation(snapshot.sessionId, "run-1");
-    const handlers = createHookHandlers({
-      api: { config: {} } as OpenClawPluginApi,
-      config: () =>
-        resolveConfig({
-          review: { enabled: true, model: "google/test-review" },
-        }),
-      refreshLiveConfigFromRuntime: vi.fn(),
-      reviewScheduler,
-      reviewer,
-      reviewLogWriter,
-      experienceCatalog: experienceCatalog as never,
-      qmdExperienceIndex: qmdExperienceIndex as never,
-      dataRoot: fs.mkdtempSync(path.join(os.tmpdir(), "hook-exp-refresh-")),
-      turnAssociations,
-    });
-
-    await handlers.onAgentEnd({ messages: [], runId: "run-1" } as never, {
-      sessionId: snapshot.sessionId,
-      agentId: "main",
-    });
-    await reviewScheduler.flush(0);
-    expect(qmdExperienceIndex.schedule).toHaveBeenCalledWith([mockExperience]);
-
-    bindAssociation(turnAssociations, {
-      sessionId: snapshot.sessionId,
-      turnKey: "run-2",
-      runId: "run-2",
-    });
-    await handlers.onAgentEnd({ messages: [], runId: "run-2" } as never, {
-      sessionId: snapshot.sessionId,
-      agentId: "main",
-    });
-    await reviewScheduler.flush(1);
-    expect(qmdExperienceIndex.schedule).toHaveBeenCalledTimes(1);
-  });
-
-  it("persists v7 review records in distinct per-handler data roots", async () => {
+  it("persists relation review records in distinct per-handler data roots", async () => {
     const firstRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hook-review-a-"));
     const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hook-review-b-"));
     const snapshot = {
@@ -1826,23 +1726,7 @@ description: Navigate Tokyo.
         },
       },
     ]);
-    const reviewer = vi.fn().mockResolvedValue({
-      findings: [
-        {
-          trigger: "capability-fit" as const,
-          targetKind: "skill-experience" as const,
-          operation: "create" as const,
-          targetExperienceIds: ["analysis/corrected-workflow"],
-          dedupeKey: "analysis-corrected-workflow",
-          summary: "Record the corrected workflow",
-          evidence: ["The user corrected the earlier approach."],
-          correctionGoal: "Preserve the corrected workflow",
-          suggestedChange: "Create the corrected workflow experience.",
-        },
-      ],
-      outcome: "applied" as const,
-      changedExperienceIds: ["analysis/corrected-workflow"],
-    });
+    const reviewer = vi.fn();
     const reviewSchedulers = [
       createMockReviewScheduler(),
       createMockReviewScheduler(),
@@ -1893,10 +1777,10 @@ description: Navigate Tokyo.
           fs.readFileSync(path.join(dataRoot, "review.json"), "utf8"),
         );
         expect(persisted).toMatchObject({
-          schemaVersion: 8,
+          schemaVersion: 9,
           processedEvents: {
             [snapshot.eventId]: {
-              changedExperienceIds: ["analysis/corrected-workflow"],
+              outcome: "skipped",
             },
           },
         });
@@ -1907,7 +1791,7 @@ description: Navigate Tokyo.
     }
   });
 
-  it("constructs a fresh package-root v7 writer for each handler without a data root", async () => {
+  it("constructs a fresh package-root writer for each handler without a data root", async () => {
     const actual = await vi.importActual<
       typeof import("../review/log-writer.js")
     >("../review/log-writer.js");
@@ -2459,16 +2343,11 @@ describe("createHookHandlers topic switch flow", () => {
     api?: Partial<OpenClawPluginApi>;
     bundledSkillsDir?: string;
     getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;
-    experienceCatalog?: {
-      listForSkills?: ReturnType<typeof vi.fn>;
-      resolve?: ReturnType<typeof vi.fn>;
-    };
     qmdIntentIndex?: {
       searchIntentExamplesAndKeywords: ReturnType<typeof vi.fn>;
       searchTopicKeywords: ReturnType<typeof vi.fn>;
     };
     qmdSkillIndex?: { search: ReturnType<typeof vi.fn> };
-    qmdExperienceIndex?: { search: ReturnType<typeof vi.fn> };
     turnAssociations?: TurnAssociationRegistry;
     ensureColdStart?: ReturnType<typeof vi.fn>;
     commitPromptRecommendation?: ReturnType<typeof vi.fn>;
@@ -2487,7 +2366,6 @@ describe("createHookHandlers topic switch flow", () => {
           topicEpoch: 1,
           revision: 1,
           candidates: params.draftCandidates ?? [],
-          recommendedExperienceRefs: [],
         },
       }));
     const commitPromptRecommendation =
@@ -2529,9 +2407,6 @@ describe("createHookHandlers topic switch flow", () => {
       vi.fn().mockImplementation(async (callParams: any) => ({
         skills: (callParams?.candidateSkills ?? []).map((s: any) =>
           typeof s === "string" ? s : s.name,
-        ),
-        experiences: (callParams?.candidateExperiences ?? []).map((e: any) =>
-          typeof e === "string" ? e : e.id,
         ),
         confidence: 0.9,
         reason: "Matched candidates",
@@ -2634,9 +2509,7 @@ describe("createHookHandlers topic switch flow", () => {
       bundledSkillsDir: params.bundledSkillsDir,
       dataRoot: params.dataRoot,
       getWorkingSetSkills: params.getWorkingSetSkills,
-      experienceCatalog: params.experienceCatalog as never,
       qmdSkillIndex: params.qmdSkillIndex as never,
-      qmdExperienceIndex: params.qmdExperienceIndex as never,
     });
 
     return {
@@ -2884,8 +2757,8 @@ describe("createHookHandlers topic switch flow", () => {
       "name-match:completed",
     );
     expect(emittedPhaseStates(emitAgentEvent)).toContain("search:completed");
-    expect(emittedPhaseStates(emitAgentEvent)).toContain(
-      "experience-search:completed",
+    expect(JSON.stringify(emittedPipelineEvents(emitAgentEvent))).not.toMatch(
+      /experience/i,
     );
     expect(emittedPhaseStates(emitAgentEvent)).toContain("rerank:completed");
     expect(emittedPhaseStates(emitAgentEvent)[0]).toBe("pipeline:started");
@@ -2908,75 +2781,6 @@ describe("createHookHandlers topic switch flow", () => {
         }),
       }),
     );
-  });
-
-  it("immediately injects matched-skill experience metadata without bodies", async () => {
-    const temporarySkills = fs.mkdtempSync(
-      path.join(os.tmpdir(), "routing-experience-metadata-"),
-    );
-    const experienceCatalog = {
-      resolve: vi.fn().mockReturnValue({
-        id: "cron-registry-recovery",
-        skills: ["openclaw"],
-        summary: "Cron recovery operations.",
-        keywords: ["cron", "recovery"],
-        body: "Must not be injected.",
-        path: "/private/cron-registry-recovery.md",
-      }),
-    };
-    writeSkill(temporarySkills, "openclaw", "OpenClaw operations.");
-    try {
-      const qmdExperienceIndex = {
-        search: vi.fn().mockResolvedValue([
-          {
-            id: "cron-registry-recovery",
-            skills: ["openclaw"],
-            score: 0.95,
-            semanticScore: 0.95,
-          },
-        ]),
-      };
-      const classifier = vi.fn().mockResolvedValue({
-        skills: ["openclaw"],
-        experiences: ["cron-registry-recovery"],
-        confidence: 0.95,
-      });
-      const { handlers } = createTopicFlowHarness({
-        historicalIntents: [],
-        classifier,
-        bundledSkillsDir: temporarySkills,
-        experienceCatalog,
-        qmdExperienceIndex,
-      });
-
-      const result = await handlers.onBeforePromptBuild(
-        {
-          prompt: "recover cron registry",
-          messages: [
-            {
-              role: "user",
-              content: "recover cron registry",
-              provenance: { kind: "external_user" },
-            },
-          ],
-        } as never,
-        ctx,
-      );
-
-      expect(result?.prependContext).toContain(
-        '<experience id="cron-registry-recovery" skills="openclaw">',
-      );
-      expect(result?.prependContext).toContain("Cron recovery operations.");
-      expect(result?.prependContext).toContain('<skill name="openclaw">');
-      expect(result?.prependContext).not.toContain("Must not be injected.");
-      expect(result?.prependContext).not.toContain("<body>");
-      expect(result?.prependContext).toContain(
-        ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
-      );
-      expect(result?.prependContext).not.toContain("<intent name=");
-    } finally {
-      fs.rmSync(temporarySkills, { recursive: true, force: true });
-    }
   });
 
   it("injects guidance for name matches", async () => {
@@ -3300,7 +3104,6 @@ describe("createHookHandlers topic switch flow", () => {
           ? {
               classifier: vi.fn().mockResolvedValue({
                 skills: [],
-                experiences: [],
                 confidence: 0.1,
                 reason: "rejected",
               }),
@@ -3410,7 +3213,6 @@ describe("createHookHandlers topic switch flow", () => {
       ]);
       const classifier = vi.fn().mockImplementation(async (params) => ({
         skills: selected ? ["candidate-target"] : [],
-        experiences: [],
         confidence: 0.7,
         reason: "selected",
         relationDecisions: params.relationEvidence.map((e: object) => ({
@@ -3558,252 +3360,6 @@ describe("createHookHandlers topic switch flow", () => {
     }
   });
 
-  it("unions candidate skills from direct name match, qmd skill search, and Experience QMD index", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-union-pool-"));
-    const workspace = path.join(tmp, "workspace");
-    const state = path.join(tmp, "state");
-    writeSkill(
-      path.join(workspace, "skills"),
-      "name-skill",
-      "Matches by name.",
-    );
-    writeSkill(
-      path.join(workspace, "skills"),
-      "qmd-skill",
-      "Matches by qmd skill.",
-    );
-    writeSkill(
-      path.join(workspace, "skills"),
-      "exp-skill",
-      "Matches by experience.",
-    );
-
-    const classifier = vi.fn().mockImplementation(async (params) => {
-      return {
-        skills: ["name-skill"],
-        experiences: ["e1"],
-        confidence: 0.9,
-      };
-    });
-
-    const { handlers, emitAgentEvent } = createTopicFlowHarness({
-      historicalIntents: [],
-      classifier,
-      experienceCatalog: {
-        resolve: vi.fn().mockReturnValue({
-          id: "e1",
-          skills: ["exp-skill"],
-          summary: "Experience for exp-skill",
-          keywords: ["test"],
-          body: "Body",
-          path: "/tmp/e1",
-        }),
-      },
-      qmdSkillIndex: {
-        search: vi
-          .fn()
-          .mockResolvedValue([
-            { name: "qmd-skill", score: 0.8, semanticScore: 0.8 },
-          ]),
-      },
-      qmdExperienceIndex: {
-        search: vi.fn().mockResolvedValue([
-          {
-            id: "e1",
-            skills: ["exp-skill"],
-            score: 0.85,
-            semanticScore: 0.85,
-          },
-        ]),
-      },
-      api: {
-        runtime: {
-          state: { resolveStateDir: () => state },
-          agent: { resolveAgentWorkspaceDir: () => workspace },
-        },
-      } as unknown as Partial<OpenClawPluginApi>,
-    });
-
-    try {
-      const result = await handlers.onBeforePromptBuild(
-        {
-          prompt: "run name-skill",
-          messages: [{ role: "user", content: "run name-skill" }],
-        } as never,
-        ctx,
-      );
-
-      expect(classifier).toHaveBeenCalledOnce();
-      const passedCandidates = classifier.mock.calls[0][0].candidateSkills;
-      const candidateNames = passedCandidates.map((c: any) => c.name);
-      expect(candidateNames).toContain("name-skill");
-      expect(candidateNames).toContain("qmd-skill");
-      expect(candidateNames).toContain("exp-skill");
-      expect(classifier.mock.calls[0][0].candidateSources["exp-skill"]).toEqual(
-        ["experience-associated"],
-      );
-
-      const passedExperiences =
-        classifier.mock.calls[0][0].candidateExperiences;
-      const experienceIds = passedExperiences.map((e: any) => e.id);
-      expect(experienceIds).toContain("e1");
-
-      expect(result?.prependContext).toContain('<skill name="name-skill">');
-      expect(result?.prependContext).not.toContain('<skill name="exp-skill">');
-      expect(result?.prependContext).toContain("<matched_experiences>");
-      expect(result?.prependContext).not.toContain('<skill name="qmd-skill">');
-      const phases = emittedPipelineEvents(emitAgentEvent);
-      const phaseNames = phases.map((entry) => entry.data.phase);
-      expect(phaseNames).toHaveLength(6);
-      expect(phaseNames[0]).toBe("pipeline");
-      expect(phaseNames[1]).toBe("name-match");
-      expect(phaseNames.slice(2, 4).sort()).toEqual([
-        "experience-search",
-        "search",
-      ]);
-      expect(phaseNames.slice(4)).toEqual(["rerank", "pipeline"]);
-      const dataFor = (phase: string) =>
-        phases.find((entry) => entry.data.phase === phase)?.data;
-      expect(dataFor("name-match")).toMatchObject({
-        status: "completed",
-        result: ["name-skill"],
-        reason: expect.arrayContaining(["name", "skill"]),
-        confidence: expect.any(Number),
-        matches: [{ name: "name-skill", score: expect.any(Number) }],
-        candidateCount: 1,
-      });
-      expect(dataFor("search")).toMatchObject({
-        status: "completed",
-        result: ["qmd-skill"],
-        reason: "#1 qmd-skill · RRF 0.8000",
-        confidence: 0.8,
-        hits: [{ id: "qmd-skill", semanticScore: 0.8 }],
-        candidateCount: 1,
-      });
-      expect(dataFor("experience-search")).toMatchObject({
-        status: "completed",
-        result: ["exp-skill"],
-        reason: "#1 e1 · RRF 0.8500",
-        confidence: 0.85,
-        hits: [{ id: "e1", semanticScore: 0.85 }],
-        candidateCount: 1,
-      });
-      expect(dataFor("rerank")).toMatchObject({
-        status: "completed",
-        result: ["name-skill"],
-        reason: ["name-match"],
-        confidence: 0.9,
-        selectedSkills: ["name-skill"],
-        selectedExperiences: ["e1"],
-        injectedSkills: ["name-skill"],
-        injectedExperiences: ["e1"],
-      });
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  it.each([true, false])(
-    "scores experience-only candidate relations without using associations as expansion seeds (selected=%s)",
-    async (selected) => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-exp-only-pool-"));
-      const workspace = path.join(tmp, "workspace");
-      const root = path.join(workspace, "skills");
-      const dataRoot = path.join(tmp, "data");
-      writeSkill(root, "associated-workflow", "Associated workflow");
-      writeSkill(root, "related-background", "Background description");
-      const from = await readSkillIdentity({
-        name: "associated-workflow",
-        location: path.join(root, "associated-workflow/SKILL.md"),
-      });
-      const to = await readSkillIdentity({
-        name: "related-background",
-        location: path.join(root, "related-background/SKILL.md"),
-      });
-      await appendImportedRelations(dataRoot, [
-        {
-          from: from!,
-          to: to!,
-          type: "composes_with",
-          reason: "Author evidence",
-        },
-      ]);
-      const entry = {
-        id: "candidate-experience",
-        summary: "Reusable guidance",
-        body: "Private full body",
-        keywords: [],
-        skills: ["associated-workflow", "invisible"],
-        path: "/mock",
-      };
-      const classifier = vi.fn().mockImplementation(async (params) => ({
-        skills: selected ? ["associated-workflow"] : [],
-        experiences: [entry.id],
-        confidence: 0.9,
-        relationDecisions: params.relationEvidence.map((e: object) => ({
-          ...e,
-          score: 0.9,
-          injected: false,
-        })),
-      }));
-      const { handlers, record } = createTopicFlowHarness({
-        historicalIntents: [],
-        dataRoot,
-        classifier,
-        experienceCatalog: { resolve: () => entry },
-        qmdExperienceIndex: {
-          search: vi.fn().mockResolvedValue([
-            {
-              id: entry.id,
-              score: 0.8,
-              semanticScore: 0.8,
-              skills: entry.skills,
-            },
-          ]),
-        },
-        api: {
-          runtime: {
-            state: { resolveStateDir: () => path.join(tmp, "state") },
-            agent: { resolveAgentWorkspaceDir: () => workspace },
-          },
-        } as unknown as Partial<OpenClawPluginApi>,
-      });
-      try {
-        const result = await handlers.onBeforePromptBuild(
-          {
-            prompt: "investigate this problem",
-            messages: [{ role: "user", content: "investigate this problem" }],
-          } as never,
-          ctx,
-        );
-        const params = classifier.mock.calls[0][0];
-        expect(
-          params.candidateSkills.map((skill: { name: string }) => skill.name),
-        ).toEqual(["associated-workflow"]);
-        expect(params.relationEvidence[0]).toMatchObject({
-          to: "related-background",
-          to_description: "Background description",
-        });
-        const discovery =
-          record.mock.calls.at(-1)![1].current.inputSkillDiscovery;
-        expect(discovery.relatedCandidates).toBeUndefined();
-        expect(discovery.candidateCount).toBe(1);
-        expect(discovery.injectedSkills).toHaveLength(selected ? 1 : 0);
-        if (selected)
-          expect(discovery.injectedSkills[0]).toMatchObject({
-            source: "experience-associated",
-          });
-        expect(result?.prependContext?.includes("<matched_experiences>")).toBe(
-          !selected,
-        );
-        expect(result?.prependContext).toContain("Reusable guidance");
-        expect(result?.prependContext).not.toContain("Private full body");
-      } finally {
-        fs.rmSync(tmp, { recursive: true, force: true });
-      }
-    },
-  );
-
   it("deduplicates skills discovered across multiple sources in the candidate pool", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-dedup-pool-"));
     const workspace = path.join(tmp, "workspace");
@@ -3829,17 +3385,6 @@ describe("createHookHandlers topic switch flow", () => {
             { name: "dual-match-skill", score: 0.85, semanticScore: 0.85 },
           ]),
       },
-      qmdExperienceIndex: {
-        search: vi.fn().mockResolvedValue([
-          {
-            identity: "exp-dual",
-            skill: "dual-match-skill",
-            entryId: "e1",
-            score: 0.9,
-            semanticScore: 0.9,
-          },
-        ]),
-      },
       api: {
         runtime: {
           state: { resolveStateDir: () => state },
@@ -3863,209 +3408,6 @@ describe("createHookHandlers topic switch flow", () => {
         (c: any) => c.name === "dual-match-skill",
       );
       expect(occurrences).toHaveLength(1);
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  it("recovers experience retrieval through hooks and tools after full registration publishes an index", async () => {
-    const tmp = fs.mkdtempSync(
-      path.join(os.tmpdir(), "hook-discovery-refresh-"),
-    );
-    const dataRoot = path.join(tmp, "plugins", "skill-harness");
-    const directory = path.join(dataRoot, "experiences", "brainstorm");
-    fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(
-      path.join(directory, "summary.md"),
-      "Generate creative alternatives.",
-    );
-    fs.writeFileSync(
-      path.join(directory, "keywords.md"),
-      "- creative alternatives\n",
-    );
-    fs.writeFileSync(
-      path.join(directory, "body.md"),
-      "Try several distinct approaches.",
-    );
-    const catalog = new SkillExperienceCatalog(dataRoot);
-    const config = resolveConfig({}).qmd;
-    const stores: Array<{
-      update: ReturnType<typeof vi.fn>;
-      embed: ReturnType<typeof vi.fn>;
-    }> = [];
-    const createStore = vi.fn(
-      async (options: { dbPath: string; readOnly?: boolean }) => {
-        if (!options.readOnly) fs.writeFileSync(options.dbPath, "");
-        const store = {
-          update: vi.fn().mockResolvedValue(undefined),
-          embed: vi.fn().mockResolvedValue({ errors: 0 }),
-          getStatus: vi.fn().mockResolvedValue({ needsEmbedding: 0 }),
-          close: vi.fn().mockResolvedValue(undefined),
-          search: vi.fn().mockResolvedValue([
-            {
-              filepath: "keywords/brainstorm.md",
-              score: 0.9,
-              explain: { vectorScores: [0.9] },
-            },
-          ]),
-        };
-        stores.push(store);
-        return store as unknown as QMDStore;
-      },
-    );
-    const discovery = createSkillExperienceQmdIndex({
-      dataRoot,
-      readOnly: true,
-      config: () => config,
-      getEntries: () => catalog.listAll(),
-      createStore,
-    });
-    const full = createSkillExperienceQmdIndex({
-      dataRoot,
-      config: () => config,
-      createStore,
-    });
-    const { handlers, record } = createTopicFlowHarness({
-      historicalIntents: [],
-      configRaw: { routing: { skills: { maxInjectedSkills: 0 } } },
-      experienceCatalog: {
-        resolve: vi.fn((id: string) => catalog.resolve(id)),
-      },
-      qmdExperienceIndex: {
-        search: vi.fn((params) => discovery.search(params)),
-      },
-    });
-    const registerTool = vi.fn();
-    registerSkillTools({ registerTool } as unknown as OpenClawPluginApi, {
-      experienceCatalog: catalog,
-      qmdExperienceIndex: discovery,
-    });
-    const registration = registerTool.mock.calls.find(
-      ([, options]) => options?.name === "skill_experience",
-    );
-    const tool = registration![0].create({ agentId: "main" });
-    const toolQuery = async () => {
-      const result = await tool.execute("test", {
-        query: "unlisted paraphrase",
-        show_skills: false,
-      });
-      return JSON.parse(result.content[0].text);
-    };
-    try {
-      await handlers.onBeforePromptBuild(event, ctx);
-      expect(
-        record.mock.calls.at(-1)?.[1].current.inputSkillDiscovery
-          .experienceRetrieval.status,
-      ).toBe("unavailable");
-      expect((await toolQuery()).entries).toEqual([]);
-      full.schedule(catalog.listAll());
-      await vi.waitFor(() => expect(full.getStatus()).toBe("ready"));
-      const result = await handlers.onBeforePromptBuild(event, {
-        ...ctx,
-        runId: "run-recovered",
-      });
-      expect(
-        record.mock.calls.at(-1)?.[1].current.inputSkillDiscovery
-          .experienceRetrieval,
-      ).toMatchObject({
-        status: "completed",
-        candidateCount: 1,
-      });
-      expect(result?.prependContext).toContain('id="brainstorm"');
-      expect((await toolQuery()).entries).toEqual([
-        expect.objectContaining({ id: "brainstorm" }),
-      ]);
-      const readStoreIndex = createStore.mock.calls.findIndex(
-        ([options]) => options.readOnly === true,
-      );
-      expect(readStoreIndex).toBeGreaterThanOrEqual(0);
-      expect(stores[readStoreIndex]!.update).not.toHaveBeenCalled();
-      expect(stores[readStoreIndex]!.embed).not.toHaveBeenCalled();
-    } finally {
-      await discovery.close();
-      await full.close();
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  it("strictly mounts only experiences hit in the current turn", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-strict-exp-"));
-    const workspace = path.join(tmp, "workspace");
-    const state = path.join(tmp, "state");
-    writeSkill(
-      path.join(workspace, "skills"),
-      "exp-skill",
-      "Skill with multiple experiences.",
-    );
-
-    const experienceCatalog = {
-      resolve: vi.fn().mockImplementation((id: string) => {
-        if (id === "hit-exp") {
-          return {
-            id: "hit-exp",
-            skills: ["exp-skill"],
-            summary: "This experience was hit",
-            keywords: ["hit"],
-            body: "Strict hit body",
-            path: "/path/to/hit",
-          };
-        }
-        return {
-          id: "unhit-exp",
-          skills: ["exp-skill"],
-          summary: "This experience was NOT hit",
-          keywords: ["unhit"],
-          body: "Unhit body",
-          path: "/path/to/unhit",
-        };
-      }),
-      listForSkills: vi.fn().mockReturnValue([
-        { id: "hit-exp", skills: ["exp-skill"] },
-        { id: "unhit-exp", skills: ["exp-skill"] },
-      ]),
-    };
-
-    const classifier = vi.fn().mockResolvedValue({
-      skills: ["exp-skill"],
-      experiences: ["hit-exp"],
-      confidence: 0.95,
-    });
-
-    const { handlers } = createTopicFlowHarness({
-      historicalIntents: [],
-      classifier,
-      experienceCatalog,
-      qmdExperienceIndex: {
-        search: vi.fn().mockResolvedValue([
-          {
-            id: "hit-exp",
-            skills: ["exp-skill"],
-            score: 0.85,
-            semanticScore: 0.85,
-          },
-        ]),
-      },
-      api: {
-        runtime: {
-          state: { resolveStateDir: () => state },
-          agent: { resolveAgentWorkspaceDir: () => workspace },
-        },
-      } as unknown as Partial<OpenClawPluginApi>,
-    });
-
-    try {
-      const result = await handlers.onBeforePromptBuild(
-        {
-          prompt: "test strict hit",
-          messages: [{ role: "user", content: "test strict hit" }],
-        } as never,
-        ctx,
-      );
-
-      expect(result?.prependContext).toContain('<skill name="exp-skill">');
-      expect(result?.prependContext).not.toContain("<matched_experiences>");
-      expect(result?.prependContext).toContain('id="hit-exp"');
-      expect(result?.prependContext).not.toContain("unhit-exp");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -4925,7 +4267,6 @@ Current user request: fresh clean request with clean-skill
         expect.objectContaining({
           current: expect.objectContaining({
             matchedSkills: expect.any(Array),
-            matchedExperiences: expect.any(Array),
           }),
         }),
       );

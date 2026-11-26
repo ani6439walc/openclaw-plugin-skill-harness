@@ -61,7 +61,7 @@ describe("Decision selection runtime", () => {
           timeoutMs: 30_000,
           signal: f.signal,
           purpose: "skill-harness.unified-selection",
-          rubricVersion: "1",
+          rubricVersion: "2",
         }),
       );
       expect(f.legacy).not.toHaveBeenCalled();

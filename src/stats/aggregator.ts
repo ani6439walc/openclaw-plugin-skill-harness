@@ -1269,8 +1269,8 @@ function recordSkillDiscoveryStats(
   for (const skill of discovery.injectedSkills) {
     if (skill.source === "name-match") target.nameMatch.injectedSkills += 1;
     else if (
-      skill.source !== "related-declared" &&
-      skill.source !== "experience-associated"
+      skill.source === "direct-retrieval" ||
+      skill.source === "intent-matched"
     )
       target.qmdSearch.injectedSkills += 1;
   }
@@ -1652,10 +1652,7 @@ export class StatsAggregator {
     const start = state.timestamps?.start;
     if (
       !sessionId ||
-      (!result &&
-        !projection &&
-        state.matchedSkills === undefined &&
-        state.matchedExperiences === undefined) ||
+      (!result && !projection && state.matchedSkills === undefined) ||
       !start
     )
       return false;
@@ -1687,10 +1684,7 @@ export class StatsAggregator {
     const start = state.timestamps?.start;
     if (
       !sessionId ||
-      (!result &&
-        !projection &&
-        state.matchedSkills === undefined &&
-        state.matchedExperiences === undefined) ||
+      (!result && !projection && state.matchedSkills === undefined) ||
       !start
     )
       return false;
@@ -1708,10 +1702,7 @@ export class StatsAggregator {
       const date = eventTime.slice(0, 10);
       stats.updatedAt = eventTime;
       stats.processedEvents[eventId] = eventTime;
-      const routed =
-        Boolean(result) ||
-        state.matchedSkills !== undefined ||
-        state.matchedExperiences !== undefined;
+      const routed = Boolean(result) || state.matchedSkills !== undefined;
       const skillsUsed = routed
         ? [
             ...new Set(

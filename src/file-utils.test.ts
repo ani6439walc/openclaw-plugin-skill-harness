@@ -5,7 +5,6 @@ import * as path from "node:path";
 import {
   FileLock,
   reviewLogPath,
-  experiencesPath,
   resolvePluginDataRoot,
   resolveStateDirFromApi,
   sessionsDirPath,
@@ -175,7 +174,6 @@ describe("plugin data paths", () => {
   it("resolves runtime data files from the plugin data root", () => {
     const dataRoot = path.join("tmp", "openclaw-state", "plugins", "hint");
 
-    expect(experiencesPath(dataRoot)).toBe(path.join(dataRoot, "experiences"));
     expect(sessionsDirPath(dataRoot)).toBe(path.join(dataRoot, "sessions"));
     expect(sessionsPath("session-1.json", dataRoot)).toBe(
       path.join(dataRoot, "sessions", "session-1.json"),

@@ -49,7 +49,6 @@ async function setup(
     return result;
   });
   const record = vi.fn(async () => true);
-  const schedule = vi.fn();
   const reviewSkillResolver = vi.fn(async () => skills);
   const search = vi.fn(async () => [{ name: "extra", score: 1 }]);
   createHookHandlers({
@@ -75,8 +74,6 @@ async function setup(
     reviewSkillResolver,
     reviewer: reviewer as never,
     reviewLogWriter: { record },
-    experienceCatalog: { listAll: () => [] } as never,
-    qmdExperienceIndex: { schedule } as never,
     qmdSkillIndex: {
       search,
     } as never,
@@ -100,7 +97,7 @@ async function setup(
     },
   };
   await runner!(candidate as never, controller.signal);
-  return { reviewer, record, schedule, reviewSkillResolver, search };
+  return { reviewer, record, reviewSkillResolver, search };
 }
 it("records preparation and independent assessment without pre-searching candidates", async () => {
   const relationReview = { existing: "not-applicable", discovery: "no-change" };
@@ -126,8 +123,8 @@ it("records preparation and independent assessment without pre-searching candida
     }),
   );
 });
-it("includes recommended and loaded seeds while retaining loaded-only experience eligibility", async () => {
-  const { reviewer, schedule, record } = await setup({
+it("includes recommended and loaded seeds", async () => {
+  const { reviewer, record } = await setup({
     findings: [],
     outcome: "applied",
     changedRelationCount: 1,
@@ -135,7 +132,6 @@ it("includes recommended and loaded seeds while retaining loaded-only experience
     relationOutcome: "applied",
   });
   expect(reviewer.mock.calls[0][0]).toMatchObject({
-    allowedExperienceSkills: ["loaded"],
     relationContext: {
       seedIds: [
         "github:example/catalog:recommended",
@@ -153,19 +149,15 @@ it("includes recommended and loaded seeds while retaining loaded-only experience
       relationOutcome: "applied",
     }),
   );
-  expect(schedule).not.toHaveBeenCalled();
 });
-it("records committed receipts and refreshes actual experience deltas after abort", async () => {
-  const { record, schedule } = await setup(
+it("records committed receipts after abort", async () => {
+  const { record } = await setup(
     {
       findings: [],
-      outcome: "partially-applied",
+      outcome: "applied",
       changedRelationCount: 1,
       relationBatchId: "batch-2",
       relationOutcome: "applied",
-      changedExperienceIds: ["exp-1"],
-      partialExperienceIds: ["exp-1"],
-      experienceOutcome: "partial",
     },
     true,
   );
@@ -175,17 +167,13 @@ it("records committed receipts and refreshes actual experience deltas after abor
     [],
     expect.objectContaining({
       relationBatchId: "batch-2",
-      experienceOutcome: "partial",
-      partialExperienceIds: ["exp-1"],
     }),
   );
-  expect(schedule).toHaveBeenCalledOnce();
 });
 it("keeps canceled uncommitted results out of persistence", async () => {
-  const { record, schedule } = await setup(
+  const { record } = await setup(
     { findings: [], outcome: "subagent-error" },
     true,
   );
   expect(record).not.toHaveBeenCalled();
-  expect(schedule).not.toHaveBeenCalled();
 });

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { OpenClawPluginApi } from "../../api.js";
+import { logger, type OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import { registerRelationSource } from "../skills/relation-sources.js";
 import {
@@ -16,17 +16,11 @@ import {
   runReviewSubagent,
 } from "./subagent.js";
 import type { ReviewSnapshot, SkillRelationReviewFinding } from "./types.js";
-vi.mock("node:fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync) };
-});
-
 let root: string;
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "review-relation-run-"));
 });
 afterEach(() => {
-  vi.mocked(fs.writeFileSync).mockReset();
   vi.restoreAllMocks();
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -111,7 +105,6 @@ async function run(
   >,
   execute: (workspace: string, prompt: string) => Promise<unknown>,
   signal?: AbortSignal,
-  withDataRoot = true,
 ) {
   const runEmbeddedAgent = vi.fn(
     async (params: { workspaceDir: string; prompt: string }) =>
@@ -125,7 +118,6 @@ async function run(
     api,
     config: resolveConfig({}),
     agentId: "main",
-    dataRoot: withDataRoot ? root : undefined,
     modelRef: { provider: "test", model: "review" },
     snapshot,
     triggers: ["capability-fit"],
@@ -180,35 +172,33 @@ it("requires an independent relation assessment and checks it against proposed o
       ?.invalidRelationReview,
   ).toBe(true);
 });
-it("gives relation updates a valid format without experience-only requirements", async () => {
+it("builds a relation-only prompt with both assessment decisions", async () => {
   const { context } = await fixture();
-  const prompt = buildReviewPrompt(
-    snapshot,
-    ["capability-fit"],
-    undefined,
-    [],
-    context,
-  );
-  expect(prompt).not.toContain(
-    'A positive finding must set targetKind="skill-experience"',
-  );
-  expect(prompt).not.toContain('- targetKind must be "skill-experience".');
-  expect(prompt).toContain("Experience findings only:");
-  const example = prompt
+  const prompt = buildReviewPrompt(snapshot, ["capability-fit"], context);
+  expect(prompt).toContain('operation="create"|"update"|"delete"');
+  expect(prompt).toContain("relationEvidence");
+  expect(prompt).not.toMatch(/experience/i);
+  const updateExample = prompt
     .split("\n")
     .find(
       (line) =>
         line.startsWith('{"findings":') &&
-        line.includes('"targetKind":"skill-relation"') &&
         line.includes('"operation":"update"'),
-    );
-  expect(example).toBeDefined();
+    )!;
   expect(
-    parseReviewFindingsDetailed(example!, ["capability-fit"])?.findings[0],
+    parseReviewFindingsDetailed(updateExample, ["capability-fit"])?.findings[0],
   ).toMatchObject({ targetKind: "skill-relation", operation: "update" });
+  const example = prompt.split("No-change example: ")[1];
+  expect(
+    parseReviewFindingsDetailed(example!, ["capability-fit"], context),
+  ).toMatchObject({
+    findings: [],
+    missingRequestedTriggers: [],
+    relationReview: { existing: "not-applicable", discovery: "no-change" },
+  });
 });
 
-it("stages full content and applies relation-only changes without experience changes", async () => {
+it("stages only relation evidence and publishes a checked graph batch", async () => {
   const { context, response } = await fixture();
   const result = await run(context, async (workspace, prompt) => {
     expect(
@@ -217,6 +207,7 @@ it("stages full content and applies relation-only changes without experience cha
         "utf8",
       ),
     ).toBe(context.skills[0].content);
+    expect(fs.readdirSync(workspace)).toEqual(["relation-evidence"]);
     expect(prompt).toContain("Skill relation maintenance");
     expect(prompt).toContain("not evidence of execution");
     return response();
@@ -227,7 +218,6 @@ it("stages full content and applies relation-only changes without experience cha
     changedRelationCount: 1,
     relationBatchId: expect.any(String),
   });
-  expect(result.changedExperienceIds).toBeUndefined();
   expect((await readRelationGraph(root))?.relations).toHaveLength(1);
 });
 it("rejects the whole relation batch when one requested relation is malformed", async () => {
@@ -238,50 +228,15 @@ it("rejects the whole relation batch when one requested relation is malformed", 
   expect(result.outcome).toBe("schema-rejected");
   expect(fs.existsSync(relationGraphPath(root))).toBe(false);
 });
-it("retains a committed graph receipt when experience conflict occurs afterward", async () => {
-  const { context, response } = await fixture();
-  const exp = path.join(root, "experiences", "exp-1");
-  fs.mkdirSync(exp, { recursive: true });
-  for (const [file, content] of Object.entries({
-    "summary.md": "Original summary.",
-    "keywords.md": "data",
-    "body.md": "Original procedure.",
-  }))
-    fs.writeFileSync(path.join(exp, file), content);
-  const result = await run(context, async (workspace) => {
-    fs.writeFileSync(
-      path.join(workspace, "experiences", "exp-1", "summary.md"),
-      "Updated summary.",
-    );
-    fs.writeFileSync(path.join(exp, "summary.md"), "Concurrent update.");
-    return response([
-      {
-        trigger: "capability-fit",
-        hasFinding: true,
-        targetKind: "skill-experience",
-        operation: "refine",
-        targetExperienceIds: ["exp-1"],
-        dedupeKey: "refine-exp",
-        summary: "Refine summary",
-        evidence: ["Read procedure"],
-        correctionGoal: "Clarify",
-        suggestedChange: "Refine summary",
-      },
-    ]);
-  });
-  expect(result).toMatchObject({
-    outcome: "partially-applied",
-    relationOutcome: "applied",
-    changedRelationCount: 1,
-    experienceOutcome: "validation-failed",
-  });
-  expect(result.findings.map((finding) => finding.targetKind)).toEqual([
-    "skill-relation",
-  ]);
-  expect(fs.readFileSync(path.join(exp, "summary.md"), "utf8")).toBe(
-    "Concurrent update.",
+it("rejects retired positive findings even alongside a valid proposal", async () => {
+  const { context, response, finding } = await fixture();
+  const result = await run(context, async () =>
+    response([
+      { ...finding, hasFinding: true, targetKind: "skill-experience" },
+    ]),
   );
-  expect((await readRelationGraph(root))?.relations).toHaveLength(1);
+  expect(result.outcome).toBe("schema-rejected");
+  expect(fs.existsSync(relationGraphPath(root))).toBe(false);
 });
 it("keeps the graph receipt after cancellation immediately after publication", async () => {
   const { context, response } = await fixture();
@@ -300,102 +255,25 @@ it("keeps the graph receipt after cancellation immediately after publication", a
   expect(result.findings).toHaveLength(1);
 });
 
-it("reports actual partial experience writes without losing the committed graph", async () => {
-  const { context, response } = await fixture();
-  const exp = path.join(root, "experiences", "exp-1");
-  fs.mkdirSync(exp, { recursive: true });
-  for (const [file, content] of Object.entries({
-    "summary.md": "Original summary.",
-    "keywords.md": "data",
-    "body.md": "Original procedure.",
-  }))
-    fs.writeFileSync(path.join(exp, file), content);
-  const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
-  const write = actualFs.writeFileSync.bind(actualFs);
-  let armed = false;
-  vi.mocked(fs.writeFileSync).mockImplementation((file, content, options) => {
-    if (armed && file === path.join(exp, "summary.md"))
-      throw new Error("simulated disk failure");
-    return write(file, content, options);
-  });
-  const result = await run(context, async (workspace) => {
-    fs.writeFileSync(
-      path.join(workspace, "experiences", "exp-1", "body.md"),
-      "Updated procedure.",
-    );
-    fs.writeFileSync(
-      path.join(workspace, "experiences", "exp-1", "summary.md"),
-      "Updated summary.",
-    );
-    armed = true;
-    return response([
-      {
-        trigger: "capability-fit",
-        hasFinding: true,
-        targetKind: "skill-experience",
-        operation: "refine",
-        targetExperienceIds: ["exp-1"],
-        dedupeKey: "refine-exp",
-        summary: "Refine summary",
-        evidence: ["Read procedure"],
-        correctionGoal: "Clarify",
-        suggestedChange: "Refine summary",
-      },
-    ]);
-  });
-  expect(result).toMatchObject({
-    outcome: "partially-applied",
-    relationOutcome: "applied",
-    changedRelationCount: 1,
-    experienceOutcome: "partial",
-    changedExperienceIds: ["exp-1"],
-    partialExperienceIds: ["exp-1"],
-  });
-  expect(result.findings.map((finding) => finding.targetKind)).toEqual([
-    "skill-relation",
-  ]);
-  expect(fs.readFileSync(path.join(exp, "body.md"), "utf8")).toBe(
-    "Updated procedure.",
+it("logs validation codes and paths without rejected evidence", async () => {
+  const { finding } = await fixture();
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+  const parsed = parseReviewFindingsDetailed(
+    JSON.stringify({
+      findings: [
+        { ...finding, hasFinding: true, evidence: "PRIVATE-EVIDENCE-MARKER" },
+      ],
+    }),
+    ["capability-fit"],
   );
-  expect(fs.readFileSync(path.join(exp, "summary.md"), "utf8")).toBe(
-    "Original summary.",
-  );
-});
-
-it("rejects a missing experience destination before committing any relation", async () => {
-  const { context, response } = await fixture();
-  const result = await run(
-    context,
-    async (workspace) => {
-      const exp = path.join(workspace, "experiences", "exp-1");
-      fs.mkdirSync(exp, { recursive: true });
-      for (const [file, content] of Object.entries({
-        "summary.md": "A reusable pipeline procedure.",
-        "keywords.md": "pipeline",
-        "body.md": "Read and verify the documented pipeline.",
-      }))
-        fs.writeFileSync(path.join(exp, file), content);
-      return response([
-        {
-          trigger: "capability-fit",
-          hasFinding: true,
-          targetKind: "skill-experience",
-          operation: "create",
-          targetExperienceIds: ["exp-1"],
-          dedupeKey: "create-exp",
-          summary: "Create procedure",
-          evidence: ["Read procedure"],
-          correctionGoal: "Capture procedure",
-          suggestedChange: "Create experience",
-        },
-      ]);
-    },
-    undefined,
-    false,
-  );
-  expect(result).toMatchObject({
-    outcome: "validation-failed",
-    experienceOutcome: "validation-failed",
+  expect(parsed?.missingRequestedTriggers).toEqual(["capability-fit"]);
+  const message = warn.mock.calls.find(([entry]) =>
+    entry.startsWith("dropping invalid review finding "),
+  )?.[0];
+  expect(message).toBeDefined();
+  expect(JSON.parse(message!.slice(message!.indexOf("{")))).toMatchObject({
+    issuePaths: expect.arrayContaining(["evidence"]),
+    issueCodes: expect.arrayContaining(["invalid_type"]),
   });
-  expect(fs.existsSync(relationGraphPath(root))).toBe(false);
+  expect(message).not.toContain("PRIVATE-EVIDENCE-MARKER");
 });

@@ -1,7 +1,7 @@
 {
   "name": "skill-harness",
   "displayName": "Skill Harness",
-  "description": "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
+  "description": "Discovers relevant skills before replies and injects routing context via before_prompt_build hook.",
   "version": "2026.11.10",
   "type": "module",
   "engines": {
@@ -53,7 +53,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write '**/*.md' '**/*.json' '**/*.ts' 'scripts/*.mjs'",
     "test": "vitest run",
-    "test:maintenance": "node scripts/test-runtime-health-audit.mjs && node scripts/test-validate-experiences.mjs",
+    "test:maintenance": "node scripts/test-runtime-health-audit.mjs",
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && tsc",
     "test:plugin-loader": "node --input-type=module --eval \"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); require('./dist/index.js');\""
   },
