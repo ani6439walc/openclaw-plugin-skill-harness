@@ -136,13 +136,40 @@ interface ObservedAttempt {
 
 interface PendingNativeRun {
   owner: object;
+  request?: PromptRequestOwner<string | undefined>;
   sessionId?: string;
+  hostSessionKey?: string;
+  hostSessionKeySeq: number;
   invocations: number;
   attempts: Map<string, ObservedAttempt>;
   settlements: Map<string, AgentLifecycleEvent>;
 }
 
 const maxPendingCallbacksPerRun = 8;
+
+function getPendingHostSessionKey(
+  pending: PendingNativeRun | undefined,
+): string | undefined {
+  if (!pending) return;
+  const request = pending.request;
+  if (
+    request?.sessionKeyPriority === SESSION_KEY_PRIORITY.host &&
+    request.resolvedSessionKey &&
+    (request.sessionKeySeq ?? 0) > pending.hostSessionKeySeq
+  )
+    return request.resolvedSessionKey;
+  return pending.hostSessionKey;
+}
+
+function evictUnverifiedKey<T>(
+  callbacks: Map<string, T>,
+  hostSlot: string | undefined,
+): boolean {
+  for (const slot of callbacks.keys()) {
+    if (slot && slot !== hostSlot) return callbacks.delete(slot);
+  }
+  return false;
+}
 
 function matchPendingCallback<T>(
   callbacks: Map<string, T>,
@@ -1453,11 +1480,17 @@ export function createHookHandlers(deps: HookDeps) {
         } else if (!replay?.finalized && request?.state !== "finalized") {
           pendingNative = pendingNativeRuns.get(runId) ?? {
             owner,
+            request,
             sessionId: ownerSessionId,
+            hostSessionKeySeq: 0,
             invocations: 0,
             attempts: new Map(),
             settlements: new Map(),
           };
+          if (hostKey && invocationSeq > pendingNative.hostSessionKeySeq) {
+            pendingNative.hostSessionKey = hostKey;
+            pendingNative.hostSessionKeySeq = invocationSeq;
+          }
           pendingNative.invocations++;
           pendingNativeRuns.set(runId, pendingNative);
         }
@@ -2260,26 +2293,27 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
+    const eventRunId = normalizeTurnAssociationKey(event.runId);
+    const contextRunId = normalizeTurnAssociationKey(ctx.runId);
+    if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
+    const runId = eventRunId ?? contextRunId;
     const sessionId = normalizeTurnAssociationKey(ctx.sessionId);
+    const sessionKey = normalizeTurnAssociationKey(ctx.sessionKey);
+
     const association = resolveAssociatedTurn({
-      eventRunId: event.runId,
-      contextRunId: ctx.runId,
+      eventRunId: runId,
       sessionId,
-      sessionKey: ctx.sessionKey,
+      sessionKey,
     });
-    let pending: PendingNativeRun | undefined;
-    if (!association) {
-      const eventRunId = normalizeTurnAssociationKey(event.runId);
-      const contextRunId = normalizeTurnAssociationKey(ctx.runId);
-      if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
-      const runId = eventRunId ?? contextRunId;
-      pending = runId ? pendingNativeRuns.get(runId) : undefined;
-      if (
-        !pending ||
-        (sessionId && pending.sessionId && sessionId !== pending.sessionId)
-      )
-        return;
-    }
+    const pending =
+      !association && runId ? pendingNativeRuns.get(runId) : undefined;
+    if (
+      !association &&
+      (!pending ||
+        (sessionId && pending.sessionId && sessionId !== pending.sessionId))
+    )
+      return;
+
     const attempt: ObservedAttempt = {
       ...extractAgentEndPayload({
         messages: event.messages,
@@ -2301,28 +2335,26 @@ export function createHookHandlers(deps: HookDeps) {
       rememberObservedAttempt(association, attempt);
       await flushToolFallbacks(association);
     } else if (pending) {
-      const slot = attemptSlotKey(attempt.ctx);
+      const slot = sessionKey ? `key:${sessionKey}` : "";
       const attempts = pending.attempts;
-      if (!attempts.has(slot) && attempts.size >= maxPendingCallbacksPerRun) {
-        if (slot !== "run-only") {
-          attempts.delete("run-only");
-          if (
-            attempts.size >= maxPendingCallbacksPerRun &&
-            sessionId &&
-            sessionId === pending.sessionId
-          ) {
-            for (const [candidateSlot, candidate] of attempts) {
-              if (
-                candidateSlot.startsWith("key:") &&
-                !normalizeTurnAssociationKey(candidate.ctx.sessionId)
-              ) {
-                attempts.delete(candidateSlot);
-                break;
-              }
-            }
-          }
-        }
-        if (attempts.size >= maxPendingCallbacksPerRun) return;
+      const previous = attempts.get(slot);
+      if (
+        !slot &&
+        !sessionId &&
+        normalizeTurnAssociationKey(previous?.ctx.sessionId)
+      )
+        return;
+      if (!previous && attempts.size >= maxPendingCallbacksPerRun) {
+        const hostKey = getPendingHostSessionKey(pending);
+        const verifiedHostKey = Boolean(sessionKey && sessionKey === hostKey);
+        const verifiedIdOnly = Boolean(
+          !sessionKey && sessionId && sessionId === pending.sessionId,
+        );
+        if (
+          (!verifiedHostKey && !verifiedIdOnly) ||
+          !evictUnverifiedKey(attempts, hostKey ? `key:${hostKey}` : undefined)
+        )
+          return;
       }
       attempts.set(slot, attempt);
     }
@@ -2397,6 +2429,7 @@ export function createHookHandlers(deps: HookDeps) {
     const eventSessionId = normalizeTurnAssociationKey(event.sessionId);
     const eventSessionKey = normalizeTurnAssociationKey(event.sessionKey);
     const pending = pendingNativeRuns.get(runId);
+
     const association = resolveAssociatedTurn({
       eventRunId: runId,
       sessionId: eventSessionId,
@@ -2417,15 +2450,20 @@ export function createHookHandlers(deps: HookDeps) {
           !settlements.has(slot) &&
           settlements.size >= maxPendingCallbacksPerRun
         ) {
-          if (eventSessionId && eventSessionId === pending.sessionId) {
-            for (const [candidateSlot, candidate] of settlements) {
-              if (candidate.sessionId === undefined) {
-                settlements.delete(candidateSlot);
-                break;
-              }
-            }
-          }
-          if (settlements.size >= maxPendingCallbacksPerRun) return;
+          const hostKey = getPendingHostSessionKey(pending);
+          const verifiedHostKey = Boolean(
+            eventSessionKey && eventSessionKey === hostKey,
+          );
+          const verifiedIdOnly = Boolean(
+            !eventSessionKey &&
+            eventSessionId &&
+            eventSessionId === pending.sessionId,
+          );
+          if (
+            (!verifiedHostKey && !verifiedIdOnly) ||
+            !evictUnverifiedKey(settlements, hostKey)
+          )
+            return;
         }
         settlements.set(slot, {
           ...event,

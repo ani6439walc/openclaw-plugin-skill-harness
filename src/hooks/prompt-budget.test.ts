@@ -1144,8 +1144,12 @@ describe("native admission identity", () => {
   it.each([
     { identity: "ID-only", settlementTiming: "during lookup", runOnly: true },
     { identity: "ID-only", settlementTiming: "after lookup", runOnly: true },
-    { identity: "canonical", settlementTiming: "during lookup", runOnly: true },
-    { identity: "canonical", settlementTiming: "after lookup", runOnly: true },
+    {
+      identity: "unverified",
+      settlementTiming: "during lookup",
+      runOnly: true,
+    },
+    { identity: "unverified", settlementTiming: "after lookup", runOnly: true },
     { identity: "ID-only", settlementTiming: "during lookup", runOnly: false },
     {
       identity: "canonical",
@@ -1168,37 +1172,50 @@ describe("native admission identity", () => {
           { success: true, messages: [{ role: "assistant", content: reply }] },
           context,
         );
-      for (let index = 0; index < 7; index++) {
+      const firstKey = "agent:main:direct:nonmatching-0";
+      const bucket = await captureCallbackBucket(`key:${firstKey}`, () =>
+        observe("nonmatching reply", { runId, sessionKey: firstKey }),
+      );
+      for (let index = 1; index < 7; index++) {
         await observe("nonmatching reply", {
           runId,
           sessionKey: `agent:main:direct:nonmatching-${index}`,
         });
       }
       const lastKey = "agent:main:direct:nonmatching-7";
-      const bucket = runOnly
-        ? await captureCallbackBucket("run-only", () =>
-            observe("run-only reply", { runId }),
-          )
-        : await captureCallbackBucket(`key:${lastKey}`, () =>
-            observe("nonmatching reply", { runId, sessionKey: lastKey }),
-          );
+      if (runOnly) await observe("run-only reply", { runId });
+      else await observe("nonmatching reply", { runId, sessionKey: lastKey });
       expect(bucket.size).toBe(8);
 
-      const reply =
-        identity === "ID-only" ? "verified id reply" : "canonical key reply";
       await observe(
-        reply,
+        identity === "ID-only" ? "verified id reply" : "unverified key reply",
         identity === "ID-only"
           ? replayCtx
-          : { runId, sessionKey: match.sessionKey },
+          : {
+              runId,
+              sessionKey:
+                identity === "unverified" ? lastKey : match.sessionKey,
+            },
       );
       expect(bucket.size).toBe(8);
+      if (identity === "ID-only") {
+        const verified = bucket.get("");
+        expect(verified).toMatchObject({
+          ctx: { sessionId: replayCtx.sessionId },
+        });
+        await observe("later run-only reply", { runId });
+        expect(bucket.get("")).toBe(verified);
+      } else {
+        const rejectedKey =
+          identity === "unverified" ? lastKey : match.sessionKey;
+        expect(bucket.has(`key:${rejectedKey}`)).toBe(false);
+      }
 
       const settle = () =>
         settleRun(
           f.handlers,
           { ...replayCtx, sessionKey: match.sessionKey },
-          "terminal reply",
+          identity === "unverified" ? undefined : "terminal reply",
         );
       if (settlementTiming === "during lookup") await settle();
       expect(
@@ -1209,12 +1226,201 @@ describe("native admission identity", () => {
       if (settlementTiming === "after lookup") await settle();
 
       expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
-        result: identity === "canonical" && !runOnly ? "terminal reply" : reply,
+        result:
+          identity === "ID-only"
+            ? "verified id reply"
+            : runOnly
+              ? "run-only reply"
+              : "terminal reply",
         timestamps: { end: expect.any(String) },
       });
-      expect(bucket.has("run-only")).toBe(false);
+      expect(bucket.has("")).toBe(runOnly || identity === "ID-only");
       expect(f.turnAssociations.resolve(runId)).toBeUndefined();
       expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(newer);
+    },
+  );
+
+  it.each(["settlement", "attempt"] as const)(
+    "preserves the canonical key-only %s in a full bucket during SDK lookup",
+    async (callback) => {
+      const { f, admitted, retained, newer, replayCtx, match } =
+        await retainedReplayFixture();
+      const lookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      const pending = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+
+      const { runId, sessionId } = replayCtx;
+      const canonical = { runId, sessionKey: match.sessionKey };
+      const record = (
+        context: typeof canonical & { sessionId?: string },
+        reply: string,
+      ) =>
+        callback === "settlement"
+          ? settleRun(f.handlers, context, reply)
+          : f.handlers.onAgentEnd(
+              {
+                success: true,
+                messages: [{ role: "assistant", content: reply }],
+              },
+              context,
+            );
+      const slot = (key: string) =>
+        callback === "attempt" ? `key:${key}` : key;
+      const bucket = await captureCallbackBucket(slot(match.sessionKey), () =>
+        record(canonical, "canonical reply"),
+      );
+      for (let index = 0; index < 7; index++) {
+        await record(
+          { runId, sessionKey: `agent:main:direct:nonmatching-${index}` },
+          "nonmatching reply",
+        );
+      }
+      expect(bucket.size).toBe(8);
+      const conflictingKey = "agent:main:direct:conflicting";
+      await record(
+        { runId, sessionId, sessionKey: conflictingKey },
+        "conflicting reply",
+      );
+      if (callback === "attempt")
+        await settleRun(f.handlers, canonical, "terminal fallback");
+
+      expect(
+        f.tracker.getTurnState(sessionId, retained)?.timestamps?.end,
+      ).toBeUndefined();
+      lookup.resolve(match);
+      await pending;
+
+      expect(f.tracker.getTurnState(sessionId, retained)).toMatchObject({
+        result: "canonical reply",
+        timestamps: { end: expect.any(String) },
+      });
+      expect(bucket.size).toBe(8);
+      expect(bucket.has(slot(match.sessionKey))).toBe(true);
+      expect(bucket.has(slot(conflictingKey))).toBe(false);
+      expect(f.tracker.getCurrentState(sessionId)).toEqual(newer);
+    },
+  );
+
+  it.each(["settlement", "attempt"] as const)(
+    "preserves the canonical key-only %s in a full bucket while waiting for the working set",
+    async (callback) => {
+      const f = fixture();
+      const workingSet = deferred(["fixture"]);
+      f.getWorkingSetSkills.mockReturnValueOnce(workingSet.promise);
+      const admitted = { ...event, currentUserMessageId: "host-key" };
+      const pending = f.handlers.onBeforePromptBuild(admitted, ctx);
+      await until(() => f.getWorkingSetSkills.mock.calls.length === 1);
+
+      const { runId, sessionId, sessionKey } = ctx;
+      const canonical = { runId, sessionKey };
+      const record = (
+        context: typeof canonical & { sessionId?: string },
+        reply: string,
+      ) =>
+        callback === "settlement"
+          ? settleRun(f.handlers, context, reply)
+          : f.handlers.onAgentEnd(
+              {
+                success: true,
+                messages: [{ role: "assistant", content: reply }],
+              },
+              context,
+            );
+      const slot = callback === "attempt" ? `key:${sessionKey}` : sessionKey;
+      const bucket = await captureCallbackBucket(slot, () =>
+        record(canonical, "canonical reply"),
+      );
+      for (let index = 0; index < 7; index++) {
+        await record(
+          { runId, sessionKey: `agent:main:direct:nonmatching-${index}` },
+          "nonmatching reply",
+        );
+      }
+      expect(bucket.size).toBe(8);
+      const conflictingKey = "agent:main:direct:conflicting";
+      await record(
+        { runId, sessionId, sessionKey: conflictingKey },
+        "conflicting reply",
+      );
+      if (callback === "attempt")
+        await settleRun(f.handlers, canonical, "terminal fallback");
+
+      expect(f.tracker.getCurrentState(sessionId)).toBeUndefined();
+      workingSet.resolve(["fixture"]);
+      await pending;
+
+      expect(f.tracker.getCurrentState(sessionId)).toMatchObject({
+        result: "canonical reply",
+        timestamps: { end: expect.any(String) },
+      });
+      expect(bucket.size).toBe(8);
+      expect(bucket.has(slot)).toBe(true);
+      expect(
+        bucket.has(
+          callback === "attempt" ? `key:${conflictingKey}` : conflictingKey,
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["run-only", "ID-only"] as const)(
+    "admits a newly supplied host key to a full staged attempt bucket with a %s slot",
+    async (keyless) => {
+      const f = fixture();
+      const admitted = { ...event, currentUserMessageId: "host-key-rebuild" };
+      const lookup =
+        deferred<Awaited<ReturnType<typeof f.sessionLookup>>>(undefined);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      const first = f.handlers.onBeforePromptBuild(admitted, {
+        ...ctx,
+        sessionKey: undefined,
+      });
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+
+      const { runId, sessionId, sessionKey } = ctx;
+      const observe = (context: PluginHookAgentContext, reply: string) =>
+        f.handlers.onAgentEnd(
+          { success: true, messages: [{ role: "assistant", content: reply }] },
+          context,
+        );
+      const firstKey = "agent:main:direct:nonmatching-0";
+      const bucket = await captureCallbackBucket(`key:${firstKey}`, () =>
+        observe({ runId, sessionKey: firstKey }, "nonmatching reply"),
+      );
+      for (let index = 1; index < 7; index++) {
+        await observe(
+          { runId, sessionKey: `agent:main:direct:nonmatching-${index}` },
+          "nonmatching reply",
+        );
+      }
+      await observe(
+        keyless === "ID-only" ? { runId, sessionId } : { runId },
+        "keyless reply",
+      );
+      expect(bucket.size).toBe(8);
+
+      const workingSet = deferred(["fixture"]);
+      f.getWorkingSetSkills.mockReturnValueOnce(workingSet.promise);
+      const second = f.handlers.onBeforePromptBuild(admitted, ctx);
+      await observe({ runId, sessionKey }, "canonical reply");
+      expect(bucket.size).toBe(8);
+      expect(bucket.has("")).toBe(true);
+      expect(bucket.has(`key:${sessionKey}`)).toBe(true);
+      await until(() => f.getWorkingSetSkills.mock.calls.length === 1);
+      await settleRun(f.handlers, { runId, sessionKey }, "terminal fallback");
+
+      workingSet.resolve(["fixture"]);
+      await second;
+      lookup.resolve({
+        sessionKey: "agent:main:direct:older-sdk",
+        entry: { sessionId },
+      });
+      await first;
+      expect(f.tracker.getCurrentState(sessionId)).toMatchObject({
+        result: "canonical reply",
+        timestamps: { end: expect.any(String) },
+      });
     },
   );
 
